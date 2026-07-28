@@ -17,9 +17,9 @@
 | `device-srv` | ✅ | device-server 根地址 |
 | `voip-srv` | ✅ | voip-server 根地址 |
 | `ai-srv` | ✅ | ai-server 根地址 |
-| `call-srv` | 否 | call-server 根地址；旧部署可能不返回 |
+| `call-srv` | ✅ | call-server 根地址 |
 | `mqtt-srv` | ✅ | MQTT 地址，格式 `mqtt://host:port` 或 `mqtts://host:port` |
-| `tirtc-srv` | 否 | TiRTC SDK 服务入口；用于 `TIRTC_OPT_SERVICE_ENDPOINT` |
+| `tirtc-srv` | ✅ | TiRTC SDK 服务入口；用于 `TIRTC_OPT_SERVICE_ENDPOINT` |
 
 设备应使用服务发现返回的地址，不要将各业务服务地址或 `tirtc-srv` 固化在固件中。**「C 参考实现」**见 [`fetch_services()`](device-sim/device-sim-c/src/device_flow.c#L187)。
 
@@ -43,22 +43,20 @@
 > `code`、HTTP 状态和 JSON 字段的前提下优化。完整规则见
 > [API 错误响应规范](error-response-policy.md)。
 
-### 近期错误码迁移
+### 鉴权与业务错误
 
-本轮接口语义修正将过去混用的 `401` 拆分为明确业务码。JWT 缺失、无效、过期或
-缺少必要 claim 才继续使用 HTTP 401 + `code=401`；通过 JWT 鉴权后的客户端按下表迁移：
+JWT 缺失、无效、过期或缺少必要 claim 时返回 HTTP 401 + `code=401`。JWT
+鉴权通过后，各类业务错误按下表处理：
 
-| 服务/场景 | 旧处理 | 当前处理 | 客户端动作 |
-|---|---|---|---|
-| voip-server：微信登录状态无效/OpenID 不匹配 | `401` | HTTP 200 + `40203` | 重新完成微信登录 |
-| voip-server：微信 VoIP 授权不存在或失效 | `401` | HTTP 200 + `40205` | 刷新授权列表并引导恢复授权 |
-| voip-server：无权访问设备或资源 | `401` | HTTP 200 + `40300` | 停止当前资源操作 |
-| voip-server：设备已解绑 | `401` | HTTP 200 + `6006` | 重新走设备绑定 |
-| call-server：无权操作房间、设备或联系人 | `401` | HTTP 200 + `40300` | 停止当前资源操作 |
-| voip/call-server：内部服务凭证无效 | `401` | HTTP 200 + `40301` | 检查共享 `X-Internal-Key` |
-| ai-server：内部服务凭证无效 | `401` | HTTP 403 + `40301` | 检查共享 `X-Internal-Key` |
-
-仅 `msg` 中文化或细化（例如签名时间戳过快/过慢）不要求客户端增加业务分支。
+| 服务/场景 | 响应 | 客户端动作 |
+|---|---|---|
+| voip-server：微信登录状态无效/OpenID 不匹配 | HTTP 200 + `40203` | 重新完成微信登录 |
+| voip-server：微信 VoIP 授权不存在或失效 | HTTP 200 + `40205` | 刷新授权列表并引导恢复授权 |
+| voip-server：无权访问设备或资源 | HTTP 200 + `40300` | 停止当前资源操作 |
+| voip-server：设备已解绑 | HTTP 200 + `6006` | 重新走设备绑定 |
+| call-server：无权操作房间、设备或联系人 | HTTP 200 + `40300` | 停止当前资源操作 |
+| voip/call-server：内部服务凭证无效 | HTTP 200 + `40301` | 检查共享 `X-Internal-Key` |
+| ai-server：内部服务凭证无效 | HTTP 403 + `40301` | 检查共享 `X-Internal-Key` |
 
 ### 鉴权方式
 
@@ -173,7 +171,7 @@ voip-server / ai-server / call-server 使用相同 `jwt_secret` 验证。
 
 - **并发重复上报**：同一 MAC 几乎同时发来两笔 Report，先抢到锁的返回 200，后到的拿 409。
 - **限频窗口已过、验证码锁仍在**：当部署配置 `rate_limit_window < code_ttl` 时（默认两者相等，均为 190s），计数器先于锁过期，下一笔上报看上去像首次、不走重放，却撞上仍在的锁。
-- **签名 / 匿名上报交错**：同一 MAC 先匿名上报、再带签名上报时，签名路径会作废旧匿名码并重取锁，期间并发请求可能撞锁。
+- **签名 / 匿名上报交错**：同一 MAC 先匿名上报、再带签名上报时，签名路径会作废已有匿名码并重取锁，期间并发请求可能撞锁。
 
 收到 409 属瞬态错误，按 `Retry-After` 重试即可（重试通常会命中幂等重放，返回原码）。
 
@@ -654,8 +652,6 @@ JWT 由 register / login 返回的 `token` 提供，含 `user_id` claim。缺失
 |------|------|:--:|------|
 | device_id | string | ✅ | 设备 ID（须在 device_pool 中） |
 | mac | string | 否 | 设备 MAC。带上才启用 MAC 一致性校验（`6013`）与同账号同 MAC 查重（`6015`）；省略则沿用该 device_id 已存指纹。公开绑定 UI 通常只提交 device_id |
-| chip_uid | string | 否 | 兼容字段；与 mac 一起作为设备指纹保存 |
-| device_rand | string | 否 | 兼容字段；与 mac 一起作为设备指纹保存 |
 
 **请求示例**
 
@@ -694,7 +690,7 @@ JWT 由 register / login 返回的 `token` 提供，含 `user_id` claim。缺失
 ### `DELETE /v1/user/device/reset`
 
 解绑设备并释放配额。若设备在线，推送 `unbind` 通知并踢除 MQTT 连接。解绑同时清空
-`device_name`，并删除该设备的 VoIP 授权和 profile，避免下一个绑定用户继承旧名称。
+`device_name`，并删除该设备的 VoIP 授权和 profile，避免下一个绑定用户继承上一用户的名称。
 
 **鉴权**: ✅
 
@@ -853,7 +849,6 @@ JWT 由 register / login 返回的 `token` 提供，含 `user_id` claim。缺失
     "wx_room_id": "wxf...",
     "wx_user_openid": "o4DLd5...",
     "wx_user_remark": "客厅联系人",
-    "wx_user_nickname": "客厅联系人",
     "wx_server_token": "...",
     "wx_session_key": "...",
     "wx_call_id": "...",
@@ -875,7 +870,6 @@ JWT 由 register / login 返回的 `token` 提供，含 `user_id` claim。缺失
 | payload.wx_room_id | 微信 VoIP 房间 ID |
 | payload.wx_user_openid | 主叫用户 openid |
 | payload.wx_user_remark | 当前设备联系人列表中该微信身份的统一备注名，未设置时为空 |
-| payload.wx_user_nickname | 与 `wx_user_remark` 相同，保留用于旧设备兼容 |
 | payload.wx_server_token | 微信服务端 token（设备接听时回传） |
 | payload.wx_session_key | 微信会话密钥 |
 | payload.wx_payload | 微信原始 `Payload` 字符串（通常是 Base64 文本），始终携带；服务端不改写该值 |
@@ -919,22 +913,28 @@ JWT 由 register / login 返回的 `token` 提供，含 `user_id` claim。缺失
 | calling_timeout_sec | int | | 呼叫超时秒数 |
 
 > 请求体整体仍按自由 JSON 原样存入 `voip_device_profile` 表，最大 **512 字节**；服务端额外校验上述五个视频 UI 字段。
+>
 > 小程序应在通话开始前通过微信插件
 > [`setUIConfig`](https://developers.weixin.qq.com/miniprogram/dev/framework/device/voip-plugin/api/setUIConfig.html)
-> 配置通话页面。设备呼叫小程序时，设备是 caller，profile 的视频 UI 值会同时用于
+> 配置通话页面。
+>
+> 设备呼叫小程序时，设备是 caller，profile 的视频 UI 值会同时用于
 > caller 和 listener 通话页面，但手机 listener 的 `cameraRotation` 固定为 `0`。
 > 当 `object_fit=contain` 时，小程序按手机 `screenHeight / screenWidth` 设置两端
 > `UIConfig.aspectRatio`，避免按设备视频比例创建容器后让 `contain` 与 `fill`
 > 看起来相同。
+>
 > 小程序启动时直接使用微信 query 中的视频 UI 字段并立即调用 `setUIConfig`。
 > 如果 query 中带有 `device_id`、`deviceId` 或微信入呼参数 `callerId`，字段缺失时
 > 也可读取每次刷新设备列表时更新的本地 profile 缓存兜底。
+>
 > 小程序呼叫设备时，两路视频分别设置：小程序是 caller，
 > `callerUI.cameraRotation` 固定为 `0`；设备是 listener，`listenerUI` 使用设备
 > profile 的旋转、镜像和缩放值，避免设备配置同时影响小程序本机预览。
 > 小程序主动呼设备时，设备视频的 `objectFit` 使用 profile 的 `object_fit`。小程序按手机
 > `screenHeight / screenWidth` 计算 `UIConfig.aspectRatio`，不使用设备 profile 的
 > `aspect_ratio` 作为页面比例。设备主动呼小程序且使用 `contain` 时采用相同规则。
+>
 > 五个字段都不是必填；未上报的字段不会传给插件，由插件使用默认值：
 > `cameraRotation=0`、`aspectRatio=4/3`、`horMirror=false`、`vertMirror=false`、
 > `objectFit=fill`。
@@ -943,17 +943,35 @@ JWT 由 register / login 返回的 `token` 提供，含 `user_id` claim。缺失
 >
 > **示例 — 视频设备（仅展示一种合法格式组合，不代表客户端默认值）**
 >
-> ```json
+> 以下使用 JSONC 注释说明字段；实际请求体必须删除注释并发送合法 JSON。
+>
+> ```jsonc
 > {
->   "screen_width": 640, "screen_height": 480,
+>   // 设备自身屏幕宽度（像素），与视频素材分辨率无关
+>   "screen_width": 640,
+>   // 设备自身屏幕高度（像素），与视频素材分辨率无关
+>   "screen_height": 480,
+>   // 设备视频在微信通话 UI 中顺时针旋转 90°
 >   "camera_rotation": 90,
+>   // 设备视频宽高比，1.7777777778 表示 16:9
 >   "aspect_ratio": 1.7777777778,
+>   // 水平镜像设备视频
 >   "hor_mirror": true,
+>   // 不垂直镜像设备视频
 >   "vert_mirror": false,
+>   // 完整显示设备视频，必要时留空白边
 >   "object_fit": "contain",
->   "audio_rate": 8000, "audio_channels": 1,
->   "up_video_mt": "h264", "down_video_mt": "h264",
+>   // 设备音频采样率为 8000 Hz
+>   "audio_rate": 8000,
+>   // 设备音频为单声道
+>   "audio_channels": 1,
+>   // 设备发送给小程序的视频使用 H.264 编码
+>   "up_video_mt": "h264",
+>   // 小程序发送给设备的视频使用 H.264 编码
+>   "down_video_mt": "h264",
+>   // 小程序发送给设备的音频使用 AMR 编码
 >   "down_audio_mt": "amr",
+>   // 呼叫等待 30 秒后超时
 >   "calling_timeout_sec": 30
 > }
 > ```
@@ -1015,9 +1033,6 @@ JWT 由 register / login 返回的 `token` 提供，含 `user_id` claim。缺失
 }
 ```
 
-旧地址 `GET /v1/voip/device/callers` 暂时保留兼容，返回字段仍为
-`data.list`；新客户端应使用本接口。
-
 **错误码**
 
 | code | HTTP | 含义 |
@@ -1046,7 +1061,6 @@ JWT 由 register / login 返回的 `token` 提供，含 `user_id` claim。缺失
 |------|------|:--:|------|
 | device_id | string | ✅ | 主叫设备 ID |
 | wx_user_openid | string | ✅ | 被叫用户 openid |
-| wx_model_id | string | | 兼容旧设备保留；服务端使用有效授权记录中的型号 ID，不信任请求值 |
 | wx_room_type | string | ✅ | `voice` 或 `video` |
 | wx_app_id | string | | 微信 AppID，不传则用默认；必须与有效授权记录一致 |
 | wx_version_type | int | | 版本类型：`0`=正式版、`1`=开发版、`2`=体验版 |
@@ -1066,11 +1080,11 @@ JWT 由 register / login 返回的 `token` 提供，含 `user_id` claim。缺失
 
 请求未传 `payload` 时，服务端自动生成包含 `id`（等于成功响应中的 `call_id`）、
 `from`、`to`、`room_type` 的 JSON，用于回调关联和防重状态提前释放。显式传入自定义
-`payload` 时保持原值，不改变旧设备的透传语义；需要精确回铃关联的自定义 payload
+`payload` 时保持原值；需要精确回铃关联的自定义 payload
 应自行携带上述字段。
 
 服务端会校验设备仍处于绑定状态、联系人授权为 `active`，并从授权记录读取
-`wx_app_id` 和 `wx_model_id`。设备请求中的同名字段继续兼容，但不能覆盖服务端记录。
+`wx_model_id`；`wx_app_id` 用于选择小程序和匹配授权记录，不传时使用默认 AppID。
 同一设备或联系人 30 秒内的重复发起会被拒绝；微信房间通知成功发布到在线设备的 MQTT
 topic 后会提前释放防重状态，因此正常接通、挂断后可以立即重新呼叫。
 
@@ -1207,8 +1221,8 @@ H5 查询指定设备的小程序 VoIP 联系人。此接口与设备接口分�
 
 ### `GET /v1/voip/user/auth-list`
 
-查询当前微信用户在当前账号名下设备上的 VoIP 授权记录。保留此接口供授权管理和旧版
-小程序兼容；只读取统一联系人名称时使用 `GET /v1/voip/user/contact-remark`。
+查询当前微信用户在当前账号名下设备上的 VoIP 授权记录。只读取统一联系人名称时使用
+`GET /v1/voip/user/contact-remark`。
 
 **鉴权**: ✅ `Authorization: Bearer <user_jwt>`（JWT 需含 `user_id` claim）
 
@@ -1351,13 +1365,13 @@ H5 查询指定设备的小程序 VoIP 联系人。此接口与设备接口分�
 | wx_app_id | string | | 微信 AppID，不传则用默认 |
 | wx_model_id | string | | 型号 ID，不传则用 App 配置的默认 model_id |
 | remark | string | | 当前 OpenID 的统一联系人名称，去除首尾空格后最多 64 个字符；非空值会同步到该 OpenID 的所有设备；未传或空值沿用已保存名称；不是设备名称 |
-| device_name | string | | 本次微信授权使用的设备名称，最多 13 个 Unicode 字符；旧客户端未传时兼容回退为 device_id |
+| device_name | string | `authorization_created=true` | 本次微信授权使用的设备名称，最多 13 个 Unicode 字符；必须与当前绑定名称一致 |
 | authorization_created | bool | | 本次是否新建了微信授权；新授权为 `true`，微信已授权或状态恢复上报为 `false` |
 
 `remark` 属于 `wx_open_id + wx_app_id`，不是某一台设备。小程序可通过本接口或
 `PUT /v1/voip/user/contact-remark` 修改，设备端和 H5 也可通过 call-server 的联系人
-备注接口修改；所有入口采用最后一次成功写入生效。为兼容旧客户端，本接口未传或传入
-空 `remark` 时沿用已保存名称。
+备注接口修改；所有入口采用最后一次成功写入生效。本接口未传或传入空 `remark` 时
+沿用已保存名称。
 
 **请求示例**
 
@@ -1443,8 +1457,8 @@ H5 查询指定设备的小程序 VoIP 联系人。此接口与设备接口分�
 
 ### `POST /v1/voip/user/sn-ticket`
 
-获取 SN ticket。`device_id` 必须属于当前用户。未设置设备名称时，服务端使用
-`device_id` 作为兼容名称返回，因此旧版小程序仍可继续授权。
+获取 SN ticket。`device_id` 必须属于当前用户。响应中的 `device_name` 为设备绑定名称；
+未设置名称时返回 `device_id`。
 
 **鉴权**: ✅ `Authorization: Bearer <user_jwt>`（JWT 需含 `user_id` claim）
 
@@ -2409,7 +2423,7 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 
 ### `POST /v1/call/device/info`
 
-接听来电（`purpose=call`）。原设计为 GET，因有 SETNX/DEL/MQTT 副作用改为 POST。
+接听来电（`purpose=call`）。该操作会执行 SETNX/DEL 并发送 MQTT 通知，因此使用 POST。
 
 **鉴权**: ✅ `Authorization: Bearer <mqtt_token>`（设备 JWT）
 
@@ -2447,7 +2461,7 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 | 40300 | 200 | 调用者不是该房间的合法 caller/target |
 | 40400 | 200 | 房间不存在（已取消或已过期） |
 
-> 若接听者当前锁定在另一个房间，会自动释放旧房间（`room_cancel{reason:"caller_left"}` 通知旧房间对方）再接听新来电——没有"忙"分支，不想切换应调 `/v1/call/reject` 拒接。
+> 若接听者当前锁定在另一个房间，会自动释放原房间（`room_cancel{reason:"caller_left"}` 通知原房间对方）再接听新来电——没有"忙"分支，不想切换应调 `/v1/call/reject` 拒接。
 
 ---
 
@@ -2590,7 +2604,7 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 }
 ```
 
-目标设备收到后应提示联系人申请，并重新拉取联系人和 pending 列表。旧设备可以忽略新增的 payload 字段，继续按通用刷新事件处理。
+目标设备收到后应提示联系人申请，并重新拉取联系人和 pending 列表。
 
 **错误码**: `40000`（缺参数/呼叫自己）、`40400`（target 不存在）、`40206`（已是联系人）、`40207`（已有待处理申请）、`40209`（超过 `max_contacts_per_device`）
 
@@ -2686,7 +2700,7 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 ## 错误码汇总
 
 同一个业务码在不同服务中可能具有不同 HTTP 状态或语义，客户端应先按服务和接口判断，
-不要只建立一张跨服务的全局映射。下表列出各服务当前实际使用或明确预留的返回码；
+不要只建立一张跨服务的全局映射。下表列出各服务实际使用的返回码；
 单个接口只会返回其接口章节列出的子集。
 
 ### device-server / user-server / ai-server（HTTP 状态型响应）
@@ -2739,7 +2753,6 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 | 50000 | 200 | 内部服务器错误 |
 | 50001 | 200 | 微信 App 配置错误 |
 | 50002 | 200 | 微信 API 调用失败 |
-| 50003 | 200 | TiRTC 服务 API 调用失败（预留；当前微信通知链路失败使用回调 `errcode=10`） |
 | 6006 | 200 | 设备已解绑，需要重新绑定 |
 
 ### call-server
@@ -2754,7 +2767,6 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 | 40205 | 200 | 联系人不存在（或非已接受状态） |
 | 40206 | 200 | 联系人已存在 |
 | 40207 | 200 | 已有待处理的联系人申请 |
-| 40208 | 200 | （预留，当前代码未触发）联系人已删除 |
 | 40209 | 200 | 联系人数量达上限 |
 | 40210 | 200 | 房间已被抢接 |
 | 40211 | 200 | 同账号自动联系人受保护，不允许删除 |
