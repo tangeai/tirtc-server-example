@@ -1,0 +1,6 @@
+# Commits that should be skipped by `git blame` (pure formatting/noise).
+# Use: git blame --ignore-revs-file .git-blame-ignore-revs <file>
+# Git >= 2.23 also reads this automatically when blame.ignoreRevsFile is set.
+
+# Renormalized all line endings to LF via .gitattributes (78 files, CRLF->LF)
+7c374ad3a824da8bb4c676c201a96e26904d9054

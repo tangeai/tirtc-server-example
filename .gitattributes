@@ -1,0 +1,18 @@
+# Normalize line endings: repo stores LF; force LF on checkout for ALL platforms.
+# Fixes CRLF thrash when the same /mnt/d worktree is shared by Windows Git
+# (core.autocrlf=true) and WSL2 (LF).
+* text=auto eol=lf
+
+# Binaries — never normalize
+*.a       binary
+*.dll     binary
+*.so      binary
+*.dylib   binary
+*.lib     binary
+*.zip     binary
+*.jpg     binary
+*.png     binary
+*.pcm     binary
+*.h264    binary
+*.g711a   binary
+*.wasm    binary

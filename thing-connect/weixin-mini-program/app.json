@@ -1,0 +1,26 @@
+{
+  "pages": [
+    "pages/login/index",
+    "pages/devices/index",
+    "pages/bind/index",
+    "pages/call-box/index"
+  ],
+  "window": {
+    "navigationBarBackgroundColor": "#07c160",
+    "navigationBarTitleText": "ThingConnect",
+    "navigationBarTextStyle": "white",
+    "backgroundTextStyle": "light"
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json",
+  "plugins": {
+    "wmpf-voip": {
+      "version": "latest",
+      "provider": "wxf830863afde621eb"
+    },
+    "captcha": {
+      "version": "1.4.1",
+      "provider": "wxb7c8f9ea9ceb4663"
+    }
+  }
+}

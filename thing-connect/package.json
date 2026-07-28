@@ -1,0 +1,15 @@
+{
+  "name": "thing-connect-ui",
+  "private": true,
+  "scripts": {
+    "build:css": "tailwindcss -i ./user-server/static/tailwind-input.css -o ./user-server/static/css/tailwind.css --minify",
+    "watch:css": "tailwindcss -i ./user-server/static/tailwind-input.css -o ./user-server/static/css/tailwind.css --watch"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.0"
+  },
+  "dependencies": {
+    "baseline-browser-mapping": "^2.10.43",
+    "caniuse-lite": "^1.0.30001805"
+  }
+}

@@ -1,0 +1,1574 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>智能体配置 — ThingConnect</title>
+  <link rel="stylesheet" href="/static/css/tailwind.css">
+  <style>
+    .thin-scroll::-webkit-scrollbar { width: 4px; }
+    .thin-scroll::-webkit-scrollbar-track { background: transparent; }
+    .thin-scroll::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 2px; }
+    .thin-scroll::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen font-sans">
+
+<!-- TOPBAR -->
+<header class="sticky top-0 z-50 flex items-center justify-between h-[56px] px-4 sm:px-8 bg-white border-b border-gray-200 max-sm:h-[50px] max-sm:px-3.5">
+  <div class="flex items-center gap-2 sm:gap-3">
+    <a href="/devices" class="flex items-center gap-1 text-sm text-gray-400 hover:text-gray-600 transition-colors max-sm:text-xs">
+      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+      <span class="max-sm:hidden">返回</span>
+    </a>
+    <span class="w-px h-5 bg-gray-200 max-sm:hidden"></span>
+    <div class="flex items-center gap-1.5 sm:gap-2">
+      <span class="text-xs text-gray-400">设备</span>
+      <span class="font-mono text-xs sm:text-sm font-medium text-gray-900 truncate max-w-[120px] sm:max-w-none" id="header-device-id">—</span>
+    </div>
+  </div>
+  <div class="flex items-center gap-1.5 sm:gap-2" id="header-current-role">
+    <span class="w-[6px] h-[6px] sm:w-[7px] sm:h-[7px] rounded-full bg-emerald-500"></span>
+    <span class="text-[11px] sm:text-xs text-gray-400 max-sm:hidden">当前角色</span>
+    <span class="text-xs sm:text-sm font-medium text-emerald-600 truncate max-w-[80px] sm:max-w-none" id="header-role-name">未绑定</span>
+  </div>
+</header>
+
+<!-- MAIN -->
+<main id="main-layout" class="flex h-[calc(100vh-56px)] max-sm:h-[calc(100vh-50px)] max-sm:flex-col overflow-hidden">
+
+  <!-- LEFT PANEL — Agent List -->
+  <aside id="list-panel" class="w-[340px] flex-shrink-0 border-r border-gray-200 bg-white flex flex-col max-sm:w-full max-sm:border-r-0">
+    <!-- Search -->
+    <div class="px-3 sm:px-4 pt-3 sm:pt-4 pb-2 sm:pb-3">
+      <div class="relative">
+        <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+        <input type="text" id="search-input" placeholder="搜索智能体…" oninput="filterAgents()"
+          class="w-full bg-gray-50 border border-gray-200 rounded-lg pl-9 pr-3 py-2 sm:py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400">
+      </div>
+    </div>
+
+    <!-- Agent list -->
+    <div class="flex-1 overflow-y-auto thin-scroll px-2 sm:px-3 pb-2" id="agent-list">
+      <!-- JS populated -->
+    </div>
+
+    <!-- New agent button -->
+    <div class="px-2 sm:px-3 pb-3 sm:pb-4 pt-2 border-t border-gray-100">
+      <button onclick="newAgent()"
+        class="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg border border-dashed border-emerald-300 text-sm text-emerald-600 hover:bg-emerald-50 hover:border-emerald-400 transition-all">
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        新建智能体
+      </button>
+    </div>
+  </aside>
+
+  <!-- RIGHT PANEL — Editor -->
+  <section id="editor-panel" class="flex-1 overflow-y-auto thin-scroll max-sm:hidden">
+
+    <!-- Mobile back button -->
+    <div class="hidden max-sm:flex items-center gap-1.5 px-3.5 py-2.5 border-b border-gray-100 bg-white sticky top-0 z-10" id="mobile-back">
+      <button onclick="showList()" class="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700">
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+        返回列表
+      </button>
+    </div>
+
+    <!-- Empty state -->
+    <div id="editor-empty" class="flex flex-col items-center justify-center h-full text-center px-8">
+      <div class="w-16 sm:w-20 h-16 sm:h-20 mb-4 sm:mb-5 rounded-2xl bg-emerald-50 border border-dashed border-emerald-200 flex items-center justify-center">
+        <svg class="w-7 sm:w-9 h-7 sm:h-9 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+          <circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
+        </svg>
+      </div>
+      <p class="text-base font-semibold text-gray-800 mb-1.5">选择或新建智能体</p>
+      <p class="text-sm text-gray-400 max-w-[280px] leading-relaxed">从左侧列表选择一个智能体进行编辑，或点击"新建智能体"创建角色</p>
+    </div>
+
+    <!-- Editor form -->
+    <div id="editor-form" class="hidden max-w-[640px] mx-auto px-3 sm:px-8 py-4 sm:py-8">
+      <!-- Default role banner -->
+      <div id="default-banner" class="hidden mb-4 px-4 py-2.5 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
+        ⚠️ 这是系统默认角色，不可编辑。如需自定义，请新建角色后绑定到设备。
+      </div>
+      <div class="bg-white border border-gray-200 rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-sm">
+        <!-- Avatar -->
+        <div class="mb-5 sm:mb-6">
+          <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1.5 sm:mb-2 tracking-wide">头像</label>
+          <div class="flex items-center gap-3 sm:gap-4">
+            <div id="avatar-preview" class="w-14 h-14 sm:w-[72px] sm:h-[72px] rounded-xl sm:rounded-2xl bg-gradient-to-br from-emerald-100 to-emerald-200 border border-emerald-300 flex items-center justify-center text-2xl sm:text-3xl overflow-hidden flex-shrink-0">
+              🤖
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <button class="px-3 sm:px-3.5 py-1.5 text-[11px] sm:text-xs font-medium rounded-md border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">上传图片</button>
+              <span class="text-[10px] sm:text-[11px] text-gray-400">支持 PNG/JPG，建议 1:1</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Name -->
+        <div class="mb-4 sm:mb-5">
+          <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1 sm:mb-1.5 tracking-wide">智能体名称 <span class="text-red-400">*</span></label>
+          <input type="text" id="field-name" placeholder="给智能体起个名字"
+            class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 sm:px-3.5 py-2 sm:py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400">
+        </div>
+
+        <!-- Description -->
+        <div class="mb-4 sm:mb-5">
+          <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1 sm:mb-1.5 tracking-wide">智能体描述</label>
+          <input type="text" id="field-desc" placeholder="一句话描述智能体的特点和用途"
+            class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 sm:px-3.5 py-2 sm:py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400">
+        </div>
+
+        <!-- System Prompt -->
+        <div class="mb-4 sm:mb-5">
+          <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1 sm:mb-1.5 tracking-wide">角色设定 <span class="text-red-400">*</span></label>
+          <textarea id="field-prompt" rows="3" sm:rows="4" placeholder="设定智能体的人设、语气、知识范围和行为规则…"
+            class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 sm:px-3.5 py-2 sm:py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400 resize-none"></textarea>
+        </div>
+
+        <!-- Welcome Text -->
+        <div class="mb-4 sm:mb-5">
+          <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1 sm:mb-1.5 tracking-wide">开场白</label>
+          <input type="text" id="field-welcome" placeholder="用户连接时智能体说的第一句话"
+            class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 sm:px-3.5 py-2 sm:py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400">
+        </div>
+
+        <!-- Voice Selector -->
+        <div class="mb-4 sm:mb-5">
+          <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1 sm:mb-1.5 tracking-wide">语音</label>
+          <!-- Language filter -->
+          <div class="flex gap-1.5 mb-2" id="voice-lang-filter">
+            <button onclick="filterVoiceLang('')" data-lang="" class="px-2.5 py-1 text-[11px] rounded-full border bg-emerald-50 border-emerald-300 text-emerald-700 font-medium transition-colors">全部</button>
+            <button onclick="filterVoiceLang('zh')" data-lang="zh" class="px-2.5 py-1 text-[11px] rounded-full border bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100 transition-colors">中文</button>
+            <button onclick="filterVoiceLang('en')" data-lang="en" class="px-2.5 py-1 text-[11px] rounded-full border bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100 transition-colors">英文（试听同中文）</button>
+            <button onclick="filterVoiceLang('ja')" data-lang="ja" class="px-2.5 py-1 text-[11px] rounded-full border bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100 transition-colors">日文</button>
+            <button onclick="filterVoiceLang('ko')" data-lang="ko" class="px-2.5 py-1 text-[11px] rounded-full border bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100 transition-colors">韩文</button>
+          </div>
+          <div class="flex gap-2">
+            <select id="field-voice" onchange="onVoiceChange()"
+              class="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-3 sm:px-3.5 py-2 sm:py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 cursor-pointer transition-all appearance-none"
+              style="background-image: url('data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2712%27 height=%2712%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%239CA3AF%27 stroke-width=%272%27%3E%3Cpath d=%27M6 9l6 6 6-6%27/%3E%3C/svg%3E'); background-repeat: no-repeat; background-position: right 12px center;">
+              <option value="">-请选择-</option>
+            </select>
+            <button id="btn-voice-play" onclick="toggleVoicePreview()"
+              class="flex-shrink-0 w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-lg border border-gray-200 text-gray-400 bg-gray-50 hover:bg-emerald-50 hover:border-emerald-300 hover:text-emerald-500 transition-all hidden"
+              title="试听">
+              <svg id="icon-voice-play" class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+              <svg id="icon-voice-pause" class="w-4 h-4 hidden" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+            </button>
+          </div>
+          <audio id="voice-audio" class="hidden" onended="onVoicePreviewEnded()" onerror="onVoicePreviewEnded()"></audio>
+          <!-- Rate & Pitch -->
+          <div class="grid grid-cols-2 gap-x-4 sm:gap-x-6 gap-y-2 mt-3">
+            <div>
+              <div class="flex items-center justify-between mb-0.5">
+                <label class="text-[11px] font-medium text-gray-500">语速</label>
+                <span class="text-[11px] text-gray-400 tabular-nums" id="label-rate">1.0</span>
+              </div>
+              <input type="range" id="field-rate" min="0.5" max="2.0" step="0.1" value="1.0"
+                oninput="$('label-rate').textContent = this.value"
+                class="w-full h-1.5 rounded-full appearance-none bg-gray-200 cursor-pointer accent-emerald-500">
+            </div>
+            <div>
+              <div class="flex items-center justify-between mb-0.5">
+                <label class="text-[11px] font-medium text-gray-500">音调</label>
+                <span class="text-[11px] text-gray-400 tabular-nums" id="label-pitch">1.0</span>
+              </div>
+              <input type="range" id="field-pitch" min="0.5" max="2.0" step="0.1" value="1.0"
+                oninput="$('label-pitch').textContent = this.value"
+                class="w-full h-1.5 rounded-full appearance-none bg-gray-200 cursor-pointer accent-emerald-500">
+            </div>
+          </div>
+        </div>
+
+        <!-- Service Config -->
+        <div class="mb-4 sm:mb-5">
+          <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1 sm:mb-1.5 tracking-wide">模型</label>
+          <select id="field-model"
+            class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 sm:px-3.5 py-2 sm:py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 cursor-pointer transition-all appearance-none"
+            style="background-image: url('data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2712%27 height=%2712%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%239CA3AF%27 stroke-width=%272%27%3E%3Cpath d=%27M6 9l6 6 6-6%27/%3E%3C/svg%3E'); background-repeat: no-repeat; background-position: right 12px center;">
+            <option value="qwen3.5-flash">qwen3.5-flash</option>
+            <option value="qwen3.7-plus">qwen3.7-plus</option>
+          </select>
+        </div>
+
+        <!-- Knowledge Base -->
+        <div class="mb-4 sm:mb-5">
+          <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1 sm:mb-1.5 tracking-wide">知识库</label>
+          <div class="flex gap-2 mb-2">
+            <select id="field-knowledge-index" onchange="onKnowledgeIndexChange()"
+              class="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 sm:py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 cursor-pointer transition-all appearance-none"
+              style="background-image: url('data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2712%27 height=%2712%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%239CA3AF%27 stroke-width=%272%27%3E%3Cpath d=%27M6 9l6 6 6-6%27/%3E%3C/svg%3E'); background-repeat: no-repeat; background-position: right 12px center;">
+              <option value="">无</option>
+            </select>
+            <button onclick="editKnowledgeIndex()" id="btn-knowledge-edit" disabled title="编辑知识库"
+              class="flex-shrink-0 w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-lg border border-gray-200 text-gray-400 bg-gray-50 hover:bg-emerald-50 hover:border-emerald-300 hover:text-emerald-500 transition-all opacity-40 cursor-not-allowed">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+            </button>
+            <button onclick="deleteKnowledgeIndexBtn()" id="btn-knowledge-delete" disabled title="删除知识库"
+              class="flex-shrink-0 w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-lg border border-gray-200 text-gray-400 bg-gray-50 hover:bg-red-50 hover:border-red-300 hover:text-red-500 transition-all opacity-40 cursor-not-allowed">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+            </button>
+            <button onclick="openKnowledgeModalForCreate()" id="btn-knowledge-new"
+              class="flex-shrink-0 px-3 py-2 text-[11px] font-medium rounded-lg border border-dashed border-gray-300 text-gray-500 hover:border-emerald-300 hover:text-emerald-600 transition-colors">
+              + 新建
+            </button>
+          </div>
+          <!-- File upload area (shown when index selected) -->
+          <div id="knowledge-files-area" class="hidden">
+            <div class="flex gap-2 mb-2">
+              <input type="file" id="knowledge-file-input" accept=".txt,.pdf,.doc,.docx,.md,.json"
+                class="flex-1 text-[11px] text-gray-500 file:mr-2 file:py-1 file:px-2 file:rounded-md file:border-0 file:text-[11px] file:font-medium file:bg-emerald-50 file:text-emerald-600 hover:file:bg-emerald-100">
+              <button onclick="uploadKnowledgeFile()"
+                class="flex-shrink-0 px-3 py-1.5 text-[11px] font-medium rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 transition-colors">
+                上传
+              </button>
+            </div>
+            <div id="knowledge-files-list" class="max-h-[120px] overflow-y-auto thin-scroll space-y-1">
+              <!-- JS populated -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Divider -->
+        <div class="border-t border-gray-100 my-4 sm:my-6"></div>
+
+        <!-- 长期记忆 -->
+        <div class="flex items-center gap-2 mb-4 sm:mb-5">
+          <span class="text-[11px] sm:text-xs font-medium text-gray-500">长期记忆</span>
+          <label class="relative w-9 h-5 rounded-full bg-gray-200 transition-colors has-[:checked]:bg-emerald-500 cursor-pointer">
+            <input type="checkbox" id="field-memory" class="sr-only peer">
+            <div class="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform peer-checked:translate-x-4"></div>
+          </label>
+        </div>
+
+        <!-- MCP 工具 & 设备插件 -->
+        <div class="grid grid-cols-2 gap-x-6 sm:gap-x-8 gap-y-4 sm:gap-y-5">
+          <div class="flex flex-col gap-1.5">
+            <span class="text-[11px] sm:text-xs font-medium text-gray-500">MCP 工具</span>
+            <div id="mcp-tools-list" class="flex flex-col gap-1.5">
+              <!-- JS populated -->
+            </div>
+          </div>
+          <div class="flex flex-col gap-1.5">
+            <span class="text-[11px] sm:text-xs font-medium text-gray-500">设备插件</span>
+            <div id="plugin-tools-list" class="flex flex-col gap-1.5">
+              <!-- JS populated -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Action buttons -->
+        <div class="flex gap-3 mt-6 sm:mt-8 pt-4 sm:pt-6 border-t border-gray-100">
+          <button onclick="saveAgent()"
+            class="flex-1 py-2.5 rounded-lg bg-emerald-500 text-white text-sm font-bold hover:bg-emerald-600 active:scale-[0.99] transition-all tracking-wide">
+            保存
+          </button>
+          <button onclick="deleteAgent()" id="btn-delete"
+            class="px-4 sm:px-5 py-2.5 rounded-lg border border-red-200 text-red-500 text-sm font-medium hover:bg-red-50 hover:border-red-300 active:scale-[0.99] transition-all">
+            删除
+          </button>
+        </div>
+
+        <!-- Bind to device -->
+        <button onclick="bindToDevice()" id="btn-bind"
+          class="w-full mt-3 sm:mt-4 py-2.5 rounded-lg border border-emerald-300 text-emerald-600 text-sm font-medium hover:bg-emerald-50 hover:border-emerald-400 active:scale-[0.99] transition-all">
+          绑定到此设备
+        </button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- MCP TOOL MODAL -->
+<div id="mcp-tool-modal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-[200] items-center justify-center p-4">
+  <div class="bg-white rounded-2xl w-full max-w-[560px] max-sm:max-w-[calc(100vw-32px)] max-h-[90vh] overflow-y-auto thin-scroll shadow-xl">
+    <div class="p-5 sm:p-6">
+      <h2 class="text-base sm:text-lg font-bold text-gray-900 mb-4" id="mcp-tool-modal-title">新增 MCP 工具</h2>
+
+      <div class="mb-4">
+        <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1.5">工具名称 <span class="text-red-400">*</span></label>
+        <input type="text" id="mcp-modal-name" placeholder="请输入工具名称，确保名称含义清晰"
+          class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400">
+      </div>
+
+      <div class="mb-4">
+        <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1.5">描述</label>
+        <textarea id="mcp-modal-desc" rows="3" placeholder="请描述工具的主要功能和使用场景"
+          class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400 resize-none"></textarea>
+      </div>
+
+      <div class="mb-4">
+        <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1.5">MCP 服务 URL <span class="text-red-400">*</span></label>
+        <input type="text" id="mcp-modal-url" placeholder="https://..."
+          class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400">
+      </div>
+
+      <div class="grid grid-cols-2 gap-3 mb-4">
+        <div>
+          <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1.5">鉴权方式</label>
+          <select id="mcp-modal-auth-type" onchange="onMcpAuthTypeChange()"
+            class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 cursor-pointer transition-all appearance-none"
+            style="background-image: url('data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2712%27 height=%2712%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%239CA3AF%27 stroke-width=%272%27%3E%3Cpath d=%27M6 9l6 6 6-6%27/%3E%3C/svg%3E'); background-repeat: no-repeat; background-position: right 12px center;">
+            <option value="">无</option>
+            <option value="bearer">Bearer Token</option>
+          </select>
+        </div>
+        <label class="flex items-center justify-between cursor-pointer self-end pb-2.5">
+          <span class="text-[11px] sm:text-xs font-medium text-gray-500">启用</span>
+          <div class="relative w-9 h-5 rounded-full bg-gray-200 transition-colors has-[:checked]:bg-emerald-500" onclick="this.querySelector('input').click()">
+            <input type="checkbox" id="mcp-modal-enabled" class="sr-only peer" checked>
+            <div class="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform peer-checked:translate-x-4"></div>
+          </div>
+        </label>
+      </div>
+
+      <div id="mcp-modal-bearer-field" class="mb-4 hidden">
+        <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1.5">Bearer Token</label>
+        <input type="text" id="mcp-modal-bearer-token" placeholder="请输入 Bearer Token"
+          class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400">
+      </div>
+
+      <div class="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
+        <button onclick="closeMcpToolModal()" class="px-4 py-2.5 text-sm font-medium text-gray-600 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 transition-colors">取消</button>
+        <button onclick="saveMcpToolModal()" class="px-5 py-2.5 text-sm font-bold text-white bg-emerald-500 rounded-lg hover:bg-emerald-600 transition-colors" id="mcp-modal-submit-btn">确认创建</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- DEVICE PLUGIN MODAL -->
+<div id="plugin-modal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-[200] items-center justify-center p-4">
+  <div class="bg-white rounded-2xl w-full max-w-[720px] max-sm:max-w-[calc(100vw-32px)] max-h-[90vh] overflow-y-auto thin-scroll shadow-xl">
+    <div class="p-5 sm:p-6">
+      <h2 class="text-base sm:text-lg font-bold text-gray-900 mb-4" id="plugin-modal-title">新增设备端插件</h2>
+
+      <div class="mb-4">
+        <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1.5">插件名称 <span class="text-red-400">*</span></label>
+        <input type="text" id="plugin-modal-name" placeholder="请输入工具名称，确保名称含义清晰"
+          class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400">
+      </div>
+
+      <div class="mb-4">
+        <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1.5">描述</label>
+        <textarea id="plugin-modal-desc" rows="3" placeholder="请描述工具的主要功能和使用场景，确保内容含义清晰且符合平台规范"
+          class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400 resize-none"></textarea>
+      </div>
+
+      <div class="mb-5">
+        <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1.5">功能标识（Action） <span class="text-red-400">*</span></label>
+        <input type="text" id="plugin-modal-action" placeholder="请输入工具函数名"
+          class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400">
+      </div>
+
+      <!-- Input params -->
+      <div class="mb-5">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-sm font-semibold text-gray-800">输入参数</span>
+          <button onclick="addParamRow('input')" class="text-[11px] font-medium text-emerald-600 hover:text-emerald-700">+ 添加</button>
+        </div>
+        <div class="overflow-x-auto border border-gray-200 rounded-lg">
+          <table class="w-full text-[11px] min-w-[560px]">
+            <thead>
+              <tr class="bg-gray-50 text-gray-500">
+                <th class="text-left font-medium px-2 py-2 w-[22%]">参数名</th>
+                <th class="text-left font-medium px-2 py-2 w-[14%]">类型</th>
+                <th class="text-left font-medium px-2 py-2 w-[28%]">描述</th>
+                <th class="text-left font-medium px-2 py-2 w-[18%]">默认值</th>
+                <th class="text-center font-medium px-2 py-2 w-[8%]">必填</th>
+                <th class="w-[6%]"></th>
+              </tr>
+            </thead>
+            <tbody id="plugin-modal-input-params"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Return params -->
+      <div class="mb-2">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-sm font-semibold text-gray-800">返回参数</span>
+          <button onclick="addParamRow('return')" class="text-[11px] font-medium text-emerald-600 hover:text-emerald-700">+ 添加</button>
+        </div>
+        <div class="overflow-x-auto border border-gray-200 rounded-lg">
+          <table class="w-full text-[11px] min-w-[480px]">
+            <thead>
+              <tr class="bg-gray-50 text-gray-500">
+                <th class="text-left font-medium px-2 py-2 w-[24%]">参数名</th>
+                <th class="text-left font-medium px-2 py-2 w-[16%]">类型</th>
+                <th class="text-left font-medium px-2 py-2 w-[38%]">描述</th>
+                <th class="text-left font-medium px-2 py-2 w-[18%]">默认值</th>
+                <th class="w-[4%]"></th>
+              </tr>
+            </thead>
+            <tbody id="plugin-modal-return-params"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
+        <button onclick="closePluginModal()" class="px-4 py-2.5 text-sm font-medium text-gray-600 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 transition-colors">取消</button>
+        <button onclick="savePluginModal()" class="px-5 py-2.5 text-sm font-bold text-white bg-emerald-500 rounded-lg hover:bg-emerald-600 transition-colors" id="plugin-modal-submit-btn">确认创建</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- KNOWLEDGE INDEX MODAL -->
+<div id="knowledge-modal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-[200] items-center justify-center p-4">
+  <div class="bg-white rounded-2xl w-full max-w-[520px] max-sm:max-w-[calc(100vw-32px)] max-h-[90vh] overflow-y-auto thin-scroll shadow-xl">
+    <div class="p-5 sm:p-6">
+      <h2 class="text-base sm:text-lg font-bold text-gray-900 mb-4" id="knowledge-modal-title">创建知识库</h2>
+
+      <div class="mb-4">
+        <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1.5">知识库名称 <span class="text-red-400">*</span></label>
+        <input type="text" id="knowledge-modal-name" placeholder="输入知识库名称"
+          class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400">
+      </div>
+
+      <div class="mb-4">
+        <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1.5">描述 <span class="text-red-400">*</span></label>
+        <textarea id="knowledge-modal-desc" rows="3" placeholder="知识库描述用于帮助智能体判断是否需要检索该知识库，请准确描述知识库的内容范围和用途"
+          class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400 resize-none"></textarea>
+      </div>
+
+      <div id="knowledge-modal-files-section" class="mb-4 hidden">
+        <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1.5">关联文件</label>
+        <div id="knowledge-modal-files-list" class="max-h-[160px] overflow-y-auto thin-scroll space-y-1 mb-2"></div>
+        <div class="flex items-center gap-2">
+          <input type="file" id="knowledge-modal-file-input" class="text-[11px] text-gray-600 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:bg-gray-100 file:text-gray-700 flex-1 min-w-0">
+          <button onclick="uploadKnowledgeModalFile()" class="px-3 py-1.5 text-[11px] font-medium text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition-colors flex-shrink-0">上传</button>
+        </div>
+      </div>
+
+      <div class="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
+        <button onclick="closeKnowledgeModal()" class="px-4 py-2.5 text-sm font-medium text-gray-600 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 transition-colors">取消</button>
+        <button onclick="saveKnowledgeModal()" class="px-5 py-2.5 text-sm font-bold text-white bg-emerald-500 rounded-lg hover:bg-emerald-600 transition-colors" id="knowledge-modal-submit-btn">确认创建</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div id="toast" class="fixed bottom-6 sm:bottom-8 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-xs sm:text-sm px-4 sm:px-5 py-2.5 rounded-full pointer-events-none whitespace-nowrap z-[300] opacity-0 transition-opacity duration-200 border border-transparent"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const token = localStorage.getItem('token');
+if (!token) location.href = '/';
+
+// ── State ──
+let agents = [];
+let currentAgentId = null;
+let boundRoleId = null;
+let deviceId = '';
+let defaultRoleId = '';
+let defaultRole = null;
+let isEditingDefault = false;
+let voices = [];
+let voiceLang = '';
+let knowledgeIndexes = [];
+let knowledgeFiles = [];
+let mcpTools = [];
+let selectedMcpTools = [];
+let pluginTools = [];
+let selectedPlugins = [];
+
+// ── Modal editing state ──
+let editingMcpToolId = null;
+let editingPluginId = null;
+let pluginModalInputParams = [];
+let pluginModalReturnParams = [];
+let editingKnowledgeIndexId = null;
+
+// ── Mobile detection ──
+function isMobile() { return window.innerWidth < 640; }
+
+// ── API ──
+async function api(path, opts = {}) {
+  const res = await fetch(path, {
+    ...opts,
+    headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json', ...(opts.headers || {}) },
+  });
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { code: res.status, msg: text.slice(0, 200) };
+  }
+}
+
+// ── Toast ──
+function toast(msg, error = false) {
+  const el = $('toast');
+  el.textContent = msg;
+  el.style.borderColor = error ? 'rgba(239,68,68,0.4)' : 'rgba(16,185,129,0.4)';
+  el.classList.add('!opacity-100');
+  setTimeout(() => el.classList.remove('!opacity-100'), 2400);
+}
+
+// ── Init ──
+async function init() {
+  const params = new URLSearchParams(location.search);
+  deviceId = params.get('device_id') || '';
+  if (!deviceId) {
+    $('header-device-id').textContent = '未指定设备';
+    return;
+  }
+  $('header-device-id').textContent = deviceId;
+
+  // Load bound role (also reveals default_role_id)
+  const bindData = await api('/v1/ai/device/' + deviceId + '/role');
+  if (bindData.code === 200) {
+    if (bindData.data?.role_id) boundRoleId = bindData.data.role_id;
+    defaultRoleId = bindData.data?.default_role_id || '';
+  }
+
+  // Fetch default role (with fallback if cloud API is unreachable)
+  if (defaultRoleId) {
+    const defData = await api('/v1/ai/roles/default');
+    if (defData.code === 200 && defData.data) {
+      defaultRole = defData.data;
+    } else {
+      // API unreachable — show placeholder until cloud API is available
+      defaultRole = { id: defaultRoleId, name: '默认智能体', agent_config: { prompt: '系统预置的默认 AI 角色' }, user_params: { description: '系统默认', interrupt_mode: 'auto' } };
+    }
+  }
+
+  // Load agent list, voices, knowledge indexes, and MCP tools in parallel
+  await Promise.all([loadAgents(), loadVoices(), loadKnowledgeIndexes(), loadMcpTools(), loadPlugins()]);
+
+  // Auto-select bound role or default role on page load
+  const targetId = boundRoleId || defaultRoleId;
+  if (targetId && agents.find(a => a.id === targetId)) {
+    selectAgent(targetId);
+  }
+}
+
+function isDefaultRole(id) { return defaultRole && id === defaultRole.id; }
+
+async function loadAgents() {
+  const data = await api('/v1/ai/roles');
+  if (data.code === 200 && data.data?.items) {
+    agents = data.data.items;
+  } else {
+    agents = [];
+  }
+  // Always prepend default role if it exists
+  if (defaultRole) {
+    agents = agents.filter(a => a.id !== defaultRole.id);
+    agents.unshift(defaultRole);
+  }
+  renderAgentList();
+  updateHeaderBinding();
+}
+
+// ── Mobile: show editor panel ──
+function showEditor() {
+  $('list-panel').classList.add('max-sm:hidden');
+  $('editor-panel').classList.remove('max-sm:hidden');
+  $('mobile-back').classList.add('max-sm:flex');
+  $('mobile-back').classList.remove('hidden');
+}
+
+function showList() {
+  $('editor-panel').classList.add('max-sm:hidden');
+  $('list-panel').classList.remove('max-sm:hidden');
+  $('mobile-back').classList.remove('max-sm:flex');
+  $('mobile-back').classList.add('hidden');
+}
+
+// ── Render ──
+function renderAgentList() {
+  const query = ($('search-input').value || '').toLowerCase();
+  const filtered = agents.filter(a =>
+    !query || a.name.toLowerCase().includes(query) || (a.user_params?.description || '').toLowerCase().includes(query)
+  );
+
+  const container = $('agent-list');
+  if (!filtered.length) {
+    container.innerHTML = '<p class="text-center text-xs text-gray-400 py-12">没有匹配的智能体</p>';
+    return;
+  }
+
+  container.innerHTML = filtered.map(a => `
+    <div class="group flex items-start gap-2.5 sm:gap-3 px-2.5 sm:px-3 py-2.5 sm:py-3 rounded-lg cursor-pointer mb-1 transition-all
+      ${currentAgentId === a.id ? 'bg-emerald-50 border border-emerald-200' : 'border border-transparent hover:bg-gray-50 hover:border-gray-200'}"
+      onclick="selectAgent('${a.id}')">
+      <div class="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-emerald-100 to-emerald-200 border border-emerald-300 flex items-center justify-center text-lg sm:text-xl flex-shrink-0">
+        ${a.avatar || '🤖'}
+      </div>
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-1.5 sm:gap-2">
+          <span class="text-[13px] sm:text-sm font-medium text-gray-800 truncate">${a.name}</span>
+          ${isDefaultRole(a.id) ? '<span class="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-200">默认</span>' : ''}
+          ${a.id === boundRoleId ? '<span class="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-200">已绑定</span>' : ''}
+        </div>
+        <p class="text-[11px] sm:text-xs text-gray-400 mt-0.5 truncate">${a.user_params?.description || a.agent_config?.prompt?.slice(0, 40) || '暂无描述'}</p>
+      </div>
+    </div>
+  `).join('');
+}
+
+function setFieldsReadonly(readonly) {
+  ['field-name','field-desc','field-prompt','field-welcome','field-voice','field-model','field-rate','field-pitch','field-knowledge-index','field-memory'].forEach(id => {
+    const el = $(id);
+    if (!el) return;
+    if (el.type === 'checkbox' || el.type === 'range') {
+      if (readonly) el.setAttribute('disabled', '');
+      else el.removeAttribute('disabled');
+    } else {
+      el.readOnly = readonly;
+      if (readonly) el.classList.add('opacity-60', 'cursor-not-allowed');
+      else el.classList.remove('opacity-60', 'cursor-not-allowed');
+    }
+  });
+  // Voice lang filter and play button
+  $('voice-lang-filter').querySelectorAll('button').forEach(b => {
+    if (readonly) { b.setAttribute('disabled', ''); b.classList.add('opacity-60'); }
+    else { b.removeAttribute('disabled'); b.classList.remove('opacity-60'); }
+  });
+  $('btn-voice-play').classList.toggle('hidden', readonly);
+  // Knowledge base upload area — hide when readonly
+  if (readonly) $('knowledge-files-area').classList.add('hidden');
+  $('btn-knowledge-new').classList.toggle('hidden', readonly);
+  onKnowledgeIndexChange();
+}
+
+function selectAgent(id) {
+  currentAgentId = id;
+  const a = agents.find(x => x.id === id);
+  if (!a) return;
+  isEditingDefault = isDefaultRole(id);
+
+  // Reset language filter so the agent's voice is always visible
+  if (voiceLang) filterVoiceLang('');
+
+  $('editor-empty').classList.add('hidden');
+  $('editor-form').classList.remove('hidden');
+  if (isEditingDefault) {
+    $('default-banner').classList.remove('hidden');
+    $('btn-delete').classList.add('hidden');
+  } else {
+    $('default-banner').classList.add('hidden');
+    $('btn-delete').classList.remove('hidden');
+  }
+  updateBindButton();
+  if (isMobile()) showEditor();
+
+  $('field-name').value = a.name || '';
+  $('field-desc').value = a.user_params?.description || '';
+  $('field-prompt').value = a.agent_config?.prompt || '';
+  $('field-welcome').value = a.agent_config?.welcome_text || '';
+  $('field-voice').value = a.service_config?.config?.tts?.provider_params?.voice || a.user_params?.voice || '';
+  const modelName = a.service_config?.config?.llm?.provider_params?.model || '';
+  if (modelName && [...$('field-model').options].some(o => o.value === modelName)) {
+    $('field-model').value = modelName;
+  }
+  // TTS params
+  const tts = a.service_config?.config?.tts?.provider_params;
+  $('field-rate').value = tts?.rate ?? 1.0;
+  $('label-rate').textContent = $('field-rate').value;
+  $('field-pitch').value = tts?.pitch ?? 1.0;
+  $('label-pitch').textContent = $('field-pitch').value;
+  // Knowledge base
+  const ragIdxId = a.agent_config?.ali_rag?.index_id || '';
+  if (ragIdxId && [...$('field-knowledge-index').options].some(o => o.value === ragIdxId)) {
+    $('field-knowledge-index').value = ragIdxId;
+  } else {
+    $('field-knowledge-index').value = '';
+  }
+  onKnowledgeIndexChange();
+  // MCP tools & device plugins
+  selectedMcpTools = a.agent_config?.mcp_tools || [];
+  renderMcpTools();
+  selectedPlugins = a.agent_config?.device_plugins || [];
+  renderPlugins();
+  $('field-memory').checked = a.agent_config?.ali_memory?.enable === true;
+
+  if (a.avatar && a.avatar.startsWith('http')) {
+    $('avatar-preview').innerHTML = `<img src="${a.avatar}" class="w-full h-full object-cover rounded-xl sm:rounded-2xl">`;
+  } else {
+    $('avatar-preview').textContent = a.avatar || '🤖';
+  }
+
+  setFieldsReadonly(isEditingDefault);
+  renderAgentList();
+}
+
+function newAgent() {
+  currentAgentId = null;
+  isEditingDefault = false;
+  $('editor-empty').classList.add('hidden');
+  $('editor-form').classList.remove('hidden');
+  $('default-banner').classList.add('hidden');
+  $('btn-delete').classList.add('hidden');
+  updateBindButton();
+  if (isMobile()) showEditor();
+
+  $('field-name').value = '';
+  $('field-desc').value = '';
+  $('field-prompt').value = '';
+  $('field-welcome').value = '';
+  $('field-voice').value = '';
+  filterVoiceLang(''); // reset language filter
+  $('field-model').value = 'qwen3.5-flash';
+  $('field-rate').value = 1.0; $('label-rate').textContent = '1.0';
+  $('field-pitch').value = 1.0; $('label-pitch').textContent = '1.0';
+  $('field-knowledge-index').value = '';
+  knowledgeFiles = [];
+  onKnowledgeIndexChange();
+  selectedMcpTools = []; renderMcpTools();
+  selectedPlugins = []; renderPlugins();
+  $('field-memory').checked = false;
+  $('avatar-preview').textContent = '🤖';
+
+  setFieldsReadonly(false);
+  renderAgentList();
+}
+
+async function loadVoices() {
+  const data = await api('/v1/ai/voices');
+  if (data.code === 200 && data.data?.items?.length) {
+    voices = data.data.items;
+  } else {
+    // Fallback to hardcoded voices if API is unreachable
+    voices = [
+      { id: 'xiaona', name: '小娜 · 清晰温柔', languages: ['zh'] },
+      { id: 'xiaofeng', name: '小峰 · 成熟稳重', languages: ['zh'] },
+      { id: 'xiaomei', name: '小美 · 活泼甜美', languages: ['zh'] },
+      { id: 'longxiaochun', name: '龙小纯 · 自然亲切', languages: ['zh'] },
+    ];
+  }
+  renderVoiceOptions();
+}
+
+function renderVoiceOptions() {
+  const sel = $('field-voice');
+  const currentVal = sel.value;
+  // Keep the first "未选择" option, clear the rest
+  while (sel.options.length > 1) sel.remove(1);
+  const filtered = voiceLang
+    ? voices.filter(v => v.languages && v.languages.includes(voiceLang))
+    : voices;
+  filtered.forEach(v => {
+    const opt = document.createElement('option');
+    opt.value = v.id;
+    opt.textContent = v.name;
+    sel.appendChild(opt);
+  });
+  // Restore previous selection if still available
+  if (currentVal && [...sel.options].some(o => o.value === currentVal)) {
+    sel.value = currentVal;
+  }
+  updateVoicePlayButton();
+}
+
+function filterVoiceLang(lang) {
+  voiceLang = lang;
+  // Update button styles
+  document.querySelectorAll('#voice-lang-filter button').forEach(btn => {
+    const isActive = btn.dataset.lang === lang;
+    btn.className = isActive
+      ? 'px-2.5 py-1 text-[11px] rounded-full border bg-emerald-50 border-emerald-300 text-emerald-700 font-medium transition-colors'
+      : 'px-2.5 py-1 text-[11px] rounded-full border bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100 transition-colors';
+  });
+  renderVoiceOptions();
+}
+
+function onVoiceChange() {
+  stopVoicePreview();
+  updateVoicePlayButton();
+}
+
+function updateVoicePlayButton() {
+  const btn = $('btn-voice-play');
+  const sel = $('field-voice');
+  const voice = voices.find(v => v.id === sel.value);
+  if (voice && voice.sample_url) {
+    btn.classList.remove('hidden');
+  } else {
+    btn.classList.add('hidden');
+    stopVoicePreview();
+  }
+}
+
+function toggleVoicePreview() {
+  const sel = $('field-voice');
+  const voice = voices.find(v => v.id === sel.value);
+  if (!voice || !voice.sample_url) return;
+  const audio = $('voice-audio');
+  const playIcon = $('icon-voice-play');
+  const pauseIcon = $('icon-voice-pause');
+  if (!audio.paused) {
+    stopVoicePreview();
+  } else {
+    audio.src = voice.sample_url;
+    audio.play().catch(() => {});
+    playIcon.classList.add('hidden');
+    pauseIcon.classList.remove('hidden');
+  }
+}
+
+function stopVoicePreview() {
+  const audio = $('voice-audio');
+  audio.pause();
+  audio.currentTime = 0;
+  $('icon-voice-play').classList.remove('hidden');
+  $('icon-voice-pause').classList.add('hidden');
+}
+
+function onVoicePreviewEnded() {
+  stopVoicePreview();
+}
+
+// ── Knowledge Base ──
+
+async function loadKnowledgeIndexes() {
+  const data = await api('/v1/ai/knowledge/indexes?page_size=100');
+  if (data.code === 200 && data.data?.items) {
+    knowledgeIndexes = data.data.items;
+  } else {
+    knowledgeIndexes = [];
+  }
+  renderKnowledgeIndexOptions();
+}
+
+function renderKnowledgeIndexOptions() {
+  const sel = $('field-knowledge-index');
+  while (sel.options.length > 1) sel.remove(1);
+  knowledgeIndexes.forEach(idx => {
+    const opt = document.createElement('option');
+    opt.value = idx.id;
+    opt.textContent = idx.name;
+    sel.appendChild(opt);
+  });
+}
+
+function onKnowledgeIndexChange() {
+  const idxId = $('field-knowledge-index').value;
+  const readonly = isEditingDefault;
+  ['btn-knowledge-edit', 'btn-knowledge-delete'].forEach(id => {
+    const btn = $(id);
+    const enabled = !!idxId && !readonly;
+    btn.disabled = !enabled;
+    btn.classList.toggle('opacity-40', !enabled);
+    btn.classList.toggle('cursor-not-allowed', !enabled);
+  });
+  if (idxId) {
+    $('knowledge-files-area').classList.remove('hidden');
+    loadKnowledgeFiles();
+  } else {
+    $('knowledge-files-area').classList.add('hidden');
+    knowledgeFiles = [];
+  }
+}
+
+// ── Knowledge Index Modal ──
+
+function openKnowledgeModalForCreate() {
+  editingKnowledgeIndexId = null;
+  $('knowledge-modal-title').textContent = '创建知识库';
+  $('knowledge-modal-submit-btn').textContent = '确认创建';
+  $('knowledge-modal-name').value = '';
+  $('knowledge-modal-desc').value = '';
+  $('knowledge-modal-files-section').classList.add('hidden');
+  $('knowledge-modal').classList.remove('hidden');
+  $('knowledge-modal').classList.add('flex');
+}
+
+async function editKnowledgeIndex() {
+  const idxId = $('field-knowledge-index').value;
+  if (!idxId) return;
+  // List only carries {id,name}; fetch full detail (description, etc.) on demand.
+  const res = await api('/v1/ai/knowledge/indexes/' + idxId);
+  const idx = (res.code === 200 && res.data) ? res.data : null;
+  if (!idx) { toast(res.msg || '加载失败', true); return; }
+  editingKnowledgeIndexId = idxId;
+  $('knowledge-modal-title').textContent = '编辑知识库';
+  $('knowledge-modal-submit-btn').textContent = '确认修改';
+  $('knowledge-modal-name').value = idx.name || '';
+  $('knowledge-modal-desc').value = idx.description || '';
+  $('knowledge-modal-files-section').classList.remove('hidden');
+  $('knowledge-modal').classList.remove('hidden');
+  $('knowledge-modal').classList.add('flex');
+  loadKnowledgeModalFiles();
+}
+
+function closeKnowledgeModal() {
+  $('knowledge-modal').classList.add('hidden');
+  $('knowledge-modal').classList.remove('flex');
+  editingKnowledgeIndexId = null;
+}
+
+async function saveKnowledgeModal() {
+  const name = $('knowledge-modal-name').value.trim();
+  const description = $('knowledge-modal-desc').value.trim();
+  if (!name) { toast('请输入知识库名称', true); return; }
+  if (!description) { toast('请输入知识库描述', true); return; }
+
+  if (editingKnowledgeIndexId) {
+    const res = await api('/v1/ai/knowledge/indexes/' + editingKnowledgeIndexId, {
+      method: 'PUT',
+      body: JSON.stringify({ name, description }),
+    });
+    if (res.code === 200) {
+      await loadKnowledgeIndexes();
+      $('field-knowledge-index').value = editingKnowledgeIndexId;
+      closeKnowledgeModal();
+      toast('知识库已更新');
+    } else {
+      toast(res.msg || '更新失败', true);
+    }
+  } else {
+    const res = await api('/v1/ai/knowledge/indexes', {
+      method: 'POST',
+      body: JSON.stringify({ name, description }),
+    });
+    if (res.code === 200 && res.data) {
+      await loadKnowledgeIndexes();
+      $('field-knowledge-index').value = res.data.index_id;
+      onKnowledgeIndexChange();
+      closeKnowledgeModal();
+      toast('知识库已创建');
+    } else {
+      toast(res.msg || '创建失败', true);
+    }
+  }
+}
+
+async function deleteKnowledgeIndexBtn() {
+  const idxId = $('field-knowledge-index').value;
+  if (!idxId) return;
+  if (!confirm('确定删除该知识库？已绑定此知识库的智能体将失去检索能力。')) return;
+  const res = await api('/v1/ai/knowledge/indexes/' + idxId, { method: 'DELETE' });
+  if (res.code === 200) {
+    await loadKnowledgeIndexes();
+    $('field-knowledge-index').value = '';
+    onKnowledgeIndexChange();
+    toast('已删除');
+  } else {
+    toast(res.msg || '删除失败', true);
+  }
+}
+
+async function loadKnowledgeFiles() {
+  const idxId = $('field-knowledge-index').value;
+  if (!idxId) return;
+  const data = await api('/v1/ai/knowledge/indexes/' + idxId + '/documents?page_size=100');
+  if (data.code === 200 && data.data?.items) {
+    knowledgeFiles = data.data.items;
+  } else {
+    knowledgeFiles = [];
+  }
+  renderKnowledgeFiles();
+}
+
+function renderKnowledgeFiles() {
+  const container = $('knowledge-files-list');
+  if (!knowledgeFiles.length) {
+    container.innerHTML = '<p class="text-[11px] text-gray-400 py-2">暂无文件，上传文件到知识库</p>';
+    return;
+  }
+  container.innerHTML = knowledgeFiles.map(f => `
+    <div class="flex items-center justify-between py-1 px-2 rounded bg-gray-50 text-[11px]">
+      <span class="text-gray-700 truncate flex-1">${f.name}</span>
+      <span class="text-gray-400 mx-2 flex-shrink-0">${formatFileSize(f.size)}</span>
+      <button onclick="deleteKnowledgeFile('${f.document_id}')" class="text-red-400 hover:text-red-600 flex-shrink-0" title="删除">&times;</button>
+    </div>
+  `).join('');
+}
+
+function formatFileSize(bytes) {
+  if (!bytes) return '';
+  if (bytes < 1024) return bytes + 'B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + 'KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + 'MB';
+}
+
+async function uploadKnowledgeFile() {
+  const input = $('knowledge-file-input');
+  const file = input.files[0];
+  if (!file) { toast('请选择文件', true); return; }
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await fetch('/v1/ai/knowledge/files', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + token },
+    body: formData,
+  });
+  const data = await res.json();
+  if (data.code === 200) {
+    toast('上传成功');
+    input.value = '';
+    loadKnowledgeFiles();
+  } else {
+    toast(data.msg || '上传失败', true);
+  }
+}
+
+async function deleteKnowledgeFile(docId) {
+  if (!confirm('确定删除该文件？')) return;
+  const data = await api('/v1/ai/knowledge/files/' + docId, { method: 'DELETE' });
+  if (data.code === 200) {
+    knowledgeFiles = knowledgeFiles.filter(f => f.document_id !== docId);
+    renderKnowledgeFiles();
+    toast('已删除');
+  } else {
+    toast(data.msg || '删除失败', true);
+  }
+}
+
+// ── Knowledge modal: associated files (shown only when editing an index) ──
+
+let knowledgeModalFiles = [];
+
+async function loadKnowledgeModalFiles() {
+  if (!editingKnowledgeIndexId) { knowledgeModalFiles = []; renderKnowledgeModalFiles(); return; }
+  const data = await api('/v1/ai/knowledge/indexes/' + editingKnowledgeIndexId + '/documents?page_size=100');
+  knowledgeModalFiles = (data.code === 200 && data.data?.items) ? data.data.items : [];
+  renderKnowledgeModalFiles();
+}
+
+function renderKnowledgeModalFiles() {
+  const container = $('knowledge-modal-files-list');
+  if (!knowledgeModalFiles.length) {
+    container.innerHTML = '<p class="text-[11px] text-gray-400 py-2">暂无关联文件</p>';
+    return;
+  }
+  container.innerHTML = knowledgeModalFiles.map(f => `
+    <div class="flex items-center justify-between py-1 px-2 rounded bg-gray-50 text-[11px]">
+      <span class="text-gray-700 truncate flex-1">${f.name}</span>
+      <span class="text-gray-400 mx-2 flex-shrink-0">${formatFileSize(f.size)}</span>
+      <button onclick="deleteKnowledgeModalFile('${f.document_id}')" class="text-red-400 hover:text-red-600 flex-shrink-0" title="删除">&times;</button>
+    </div>
+  `).join('');
+}
+
+// bindDocumentToIndex adds docId to the editing index's document_ids. The cloud
+// upload API does NOT auto-bind a file to an index — you must PUT document_ids.
+// (apifox: 上传文件 → file_id → 更新索引关联 document_ids.)
+async function bindDocumentToIndex(docId) {
+  const idxRes = await api('/v1/ai/knowledge/indexes/' + editingKnowledgeIndexId);
+  if (idxRes.code !== 200 || !idxRes.data) {
+    toast('关联失败：读取知识库失败', true);
+    return false;
+  }
+  const docIds = idxRes.data.document_ids || [];
+  if (docIds.includes(docId)) return true;
+  docIds.push(docId);
+  const putRes = await api('/v1/ai/knowledge/indexes/' + editingKnowledgeIndexId, {
+    method: 'PUT',
+    body: JSON.stringify({ document_ids: docIds }),
+  });
+  if (putRes.code !== 200) {
+    toast(putRes.msg || '关联失败', true);
+    return false;
+  }
+  return true;
+}
+
+async function uploadKnowledgeModalFile() {
+  const input = $('knowledge-modal-file-input');
+  const file = input.files[0];
+  if (!file) { toast('请选择文件', true); return; }
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await fetch('/v1/ai/knowledge/files', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + token },
+    body: formData,
+  });
+  const data = await res.json();
+  if (data.code !== 200 || !data.data?.file_id) {
+    toast(data.msg || '上传失败', true);
+    return;
+  }
+  // file_id IS the document_id (confirmed); upload only pools the file, so bind
+  // it to this index next via PUT document_ids.
+  if (!await bindDocumentToIndex(data.data.file_id)) return;
+  toast('已上传并关联');
+  input.value = '';
+  loadKnowledgeModalFiles();
+}
+
+async function deleteKnowledgeModalFile(docId) {
+  if (!confirm('确定从该知识库移除该文件？文件本身保留在文件池。')) return;
+  // Unbind = remove from document_ids (PUT full list). The file is not deleted.
+  const idxRes = await api('/v1/ai/knowledge/indexes/' + editingKnowledgeIndexId);
+  if (idxRes.code !== 200 || !idxRes.data) { toast('读取失败', true); return; }
+  const docIds = (idxRes.data.document_ids || []).filter(id => id !== docId);
+  const putRes = await api('/v1/ai/knowledge/indexes/' + editingKnowledgeIndexId, {
+    method: 'PUT',
+    body: JSON.stringify({ document_ids: docIds }),
+  });
+  if (putRes.code === 200) {
+    knowledgeModalFiles = knowledgeModalFiles.filter(f => f.document_id !== docId);
+    renderKnowledgeModalFiles();
+    toast('已移除');
+  } else {
+    toast(putRes.msg || '移除失败', true);
+  }
+}
+
+// ── MCP Tools ──
+
+async function loadMcpTools() {
+  const [globalRes, appRes] = await Promise.all([
+    api('/v1/ai/mcp/tools'),
+    api('/v1/ai/mcp/app-tools'),
+  ]);
+  mcpTools = [];
+  if (globalRes.code === 200 && globalRes.data?.items) {
+    mcpTools.push(...globalRes.data.items.map(t => ({ ...t, source: 'global' })));
+  }
+  if (appRes.code === 200 && appRes.data?.items) {
+    mcpTools.push(...appRes.data.items.map(t => ({ id: t.id, name: t.name, source: 'app' })));
+  }
+  renderMcpTools();
+}
+
+function renderMcpTools() {
+  const container = $('mcp-tools-list');
+  const readonly = isEditingDefault;
+  if (!mcpTools.length) {
+    container.innerHTML = '<span class="text-[11px] text-gray-400">暂无可用工具</span>';
+  } else {
+    container.innerHTML = mcpTools.map(t => {
+      const checked = selectedMcpTools.includes(t.id);
+      const bg = checked ? 'bg-emerald-500' : 'bg-gray-200';
+      const dot = checked ? 'translate-x-3.5' : '';
+      const canToggle = !readonly;
+      const op = canToggle ? 'cursor-pointer' : 'opacity-60 cursor-not-allowed';
+      const label = t.name;
+      const editBtns = (!readonly && t.source === 'app') ? `
+        <button onclick="event.stopPropagation(); openMcpToolModal('${t.id}')" class="text-[10px] text-gray-400 hover:text-emerald-500 flex-shrink-0 ml-1" title="编辑">✎</button>
+        <button onclick="event.stopPropagation(); deleteMcpTool('${t.id}')" class="text-[10px] text-red-400 hover:text-red-600 flex-shrink-0 ml-1" title="删除">&times;</button>
+      ` : '';
+      return `
+      <div class="flex items-center ${op}" onclick="${canToggle ? `toggleMcp('${t.id}')` : ''}">
+        <span class="text-[11px] text-gray-600 truncate flex-1 mr-2" title="${t.name || ''}">${label}</span>
+        <div class="relative w-8 h-[18px] rounded-full transition-colors flex-shrink-0 ${bg}">
+          <div class="absolute top-0.5 left-0.5 w-3.5 h-3.5 rounded-full bg-white shadow-sm transition-transform ${dot}"></div>
+        </div>
+        ${editBtns}
+      </div>`;
+    }).join('');
+  }
+  if (!readonly) {
+    container.insertAdjacentHTML('beforeend', `<button onclick="openMcpToolModal()" class="text-[11px] text-emerald-600 hover:text-emerald-700 text-left mt-1 w-full">+ 新建 MCP 工具</button>`);
+  }
+}
+
+function toggleMcp(toolId) {
+  if (isEditingDefault) return;
+  const tool = mcpTools.find(t => t.id === toolId);
+  if (tool && tool.source === 'app' && tool.enabled === false) return;
+  const idx = selectedMcpTools.indexOf(toolId);
+  if (idx >= 0) selectedMcpTools.splice(idx, 1);
+  else selectedMcpTools.push(toolId);
+  renderMcpTools();
+}
+
+// ── App MCP Tool Modal ──
+
+function onMcpAuthTypeChange() {
+  $('mcp-modal-bearer-field').classList.toggle('hidden', $('mcp-modal-auth-type').value !== 'bearer');
+}
+
+async function openMcpToolModal(id) {
+  editingMcpToolId = id || null;
+  // List only carries {id,name}; fetch full config on demand when editing.
+  let tool = null;
+  if (id) {
+    const res = await api('/v1/ai/mcp/app-tools/' + id);
+    if (res.code === 200 && res.data) tool = res.data;
+  }
+  $('mcp-tool-modal-title').textContent = tool ? '编辑 MCP 工具' : '新增 MCP 工具';
+  $('mcp-modal-submit-btn').textContent = tool ? '确认修改' : '确认创建';
+  $('mcp-modal-name').value = tool?.config?.name || '';
+  $('mcp-modal-desc').value = tool?.config?.description || '';
+  $('mcp-modal-url').value = tool?.config?.url || '';
+  $('mcp-modal-auth-type').value = tool?.config?.authentication?.type || '';
+  $('mcp-modal-bearer-token').value = tool?.config?.authentication?.bearer_token || '';
+  $('mcp-modal-enabled').checked = tool ? !!tool.enabled : true;
+  onMcpAuthTypeChange();
+  $('mcp-tool-modal').classList.remove('hidden');
+  $('mcp-tool-modal').classList.add('flex');
+}
+
+function closeMcpToolModal() {
+  $('mcp-tool-modal').classList.add('hidden');
+  $('mcp-tool-modal').classList.remove('flex');
+  editingMcpToolId = null;
+}
+
+async function saveMcpToolModal() {
+  const name = $('mcp-modal-name').value.trim();
+  const url = $('mcp-modal-url').value.trim();
+  if (!name) { toast('请输入工具名称', true); return; }
+  if (!url) { toast('请输入 MCP 服务 URL', true); return; }
+
+  const authType = $('mcp-modal-auth-type').value;
+  const config = {
+    name,
+    description: $('mcp-modal-desc').value.trim(),
+    url,
+    authentication: authType ? { type: authType, bearer_token: $('mcp-modal-bearer-token').value.trim() } : null,
+  };
+  const enabled = $('mcp-modal-enabled').checked;
+
+  const res = editingMcpToolId
+    ? await api('/v1/ai/mcp/app-tools/' + editingMcpToolId, { method: 'PUT', body: JSON.stringify({ config, enabled }) })
+    : await api('/v1/ai/mcp/app-tools', { method: 'POST', body: JSON.stringify({ config, enabled }) });
+
+  if (res.code === 200 && res.data) {
+    closeMcpToolModal();
+    await loadMcpTools();
+    toast(editingMcpToolId ? '工具已更新' : '工具已创建');
+  } else {
+    toast(res.msg || (editingMcpToolId ? '更新失败' : '创建失败'), true);
+  }
+}
+
+async function deleteMcpTool(id) {
+  if (!confirm('确定删除该 MCP 工具？')) return;
+  const res = await api('/v1/ai/mcp/app-tools/' + id, { method: 'DELETE' });
+  if (res.code === 200) {
+    mcpTools = mcpTools.filter(t => t.id !== id);
+    selectedMcpTools = selectedMcpTools.filter(x => x !== id);
+    renderMcpTools();
+    toast('已删除');
+  } else {
+    toast(res.msg || '删除失败', true);
+  }
+}
+
+// ── Device Plugins ──
+
+async function loadPlugins() {
+  const data = await api('/v1/ai/plugins');
+  if (data.code === 200 && data.data?.items) {
+    pluginTools = data.data.items;
+  } else {
+    pluginTools = [];
+  }
+  renderPlugins();
+}
+
+function renderPlugins() {
+  const container = $('plugin-tools-list');
+  if (!pluginTools.length) {
+    container.innerHTML = '<span class="text-[11px] text-gray-400">暂无设备插件，点击下方新建</span>';
+  } else {
+    const readonly = isEditingDefault;
+    container.innerHTML = pluginTools.map(p => {
+      const checked = selectedPlugins.includes(p.id);
+      const bg = checked ? 'bg-emerald-500' : 'bg-gray-200';
+      const dot = checked ? 'translate-x-3.5' : '';
+      const op = readonly ? 'opacity-60' : 'cursor-pointer';
+      return `
+      <div class="flex items-center gap-1.5">
+        <div class="flex items-center justify-between flex-1 ${op}" onclick="${readonly ? '' : `togglePlugin('${p.id}')`}">
+          <span class="text-[11px] text-gray-600 truncate flex-1 mr-1" title="${p.name}">${p.name}</span>
+          <div class="relative w-8 h-[18px] rounded-full transition-colors flex-shrink-0 ${bg}">
+            <div class="absolute top-0.5 left-0.5 w-3.5 h-3.5 rounded-full bg-white shadow-sm transition-transform ${dot}"></div>
+          </div>
+        </div>
+        ${readonly ? '' : `
+        <button onclick="openPluginModal('${p.id}')" class="text-[10px] text-gray-400 hover:text-emerald-500 flex-shrink-0" title="编辑">✎</button>
+        <button onclick="deletePlugin('${p.id}')" class="text-[10px] text-red-400 hover:text-red-600 flex-shrink-0" title="删除">&times;</button>
+        `}
+      </div>`;
+    }).join('');
+  }
+  // "+ 新建" button always visible (unless readonly)
+  if (!isEditingDefault) {
+    container.insertAdjacentHTML('beforeend', `<button onclick="openPluginModal()" class="text-[11px] text-emerald-600 hover:text-emerald-700 text-left mt-1 w-full">+ 新建设备插件</button>`);
+  }
+}
+
+function togglePlugin(pluginId) {
+  if (isEditingDefault) return;
+  const idx = selectedPlugins.indexOf(pluginId);
+  if (idx >= 0) selectedPlugins.splice(idx, 1);
+  else selectedPlugins.push(pluginId);
+  renderPlugins();
+}
+
+// ── Device Plugin Modal ──
+
+const PARAM_TYPES = ['string', 'number', 'boolean', 'array', 'object'];
+
+function paramRowsOf(tableId) {
+  return tableId === 'input' ? pluginModalInputParams : pluginModalReturnParams;
+}
+
+function renderParamTable(tableId) {
+  const rows = paramRowsOf(tableId);
+  const tbody = $(`plugin-modal-${tableId}-params`);
+  const showRequired = tableId === 'input';
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="${showRequired ? 6 : 5}" class="text-center text-gray-400 py-3">暂无参数</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = rows.map((p, i) => `
+    <tr class="border-t border-gray-100">
+      <td class="p-1"><input type="text" value="${p.name || ''}" oninput="updateParamField('${tableId}', ${i}, 'name', this.value)" placeholder="仅字母、数字、下划线"
+        class="w-full bg-gray-50 border border-gray-200 rounded px-2 py-1.5 text-[11px] outline-none focus:border-emerald-400"></td>
+      <td class="p-1">
+        <select onchange="updateParamField('${tableId}', ${i}, 'type', this.value)" class="w-full bg-gray-50 border border-gray-200 rounded px-1.5 py-1.5 text-[11px] outline-none focus:border-emerald-400 cursor-pointer">
+          ${PARAM_TYPES.map(t => `<option value="${t}" ${p.type === t ? 'selected' : ''}>${t}</option>`).join('')}
+        </select>
+      </td>
+      <td class="p-1"><input type="text" value="${p.description || ''}" oninput="updateParamField('${tableId}', ${i}, 'description', this.value)" placeholder="参数说明"
+        class="w-full bg-gray-50 border border-gray-200 rounded px-2 py-1.5 text-[11px] outline-none focus:border-emerald-400"></td>
+      <td class="p-1"><input type="text" value="${p.default_value || ''}" oninput="updateParamField('${tableId}', ${i}, 'default_value', this.value)" placeholder="请输入"
+        class="w-full bg-gray-50 border border-gray-200 rounded px-2 py-1.5 text-[11px] outline-none focus:border-emerald-400"></td>
+      ${showRequired ? `<td class="p-1 text-center"><input type="checkbox" ${p.required ? 'checked' : ''} onchange="updateParamField('${tableId}', ${i}, 'required', this.checked)"></td>` : ''}
+      <td class="p-1 text-center"><button onclick="removeParamRow('${tableId}', ${i})" class="text-red-400 hover:text-red-600" title="删除">&times;</button></td>
+    </tr>
+  `).join('');
+}
+
+function updateParamField(tableId, index, field, value) {
+  paramRowsOf(tableId)[index][field] = value;
+}
+
+function addParamRow(tableId) {
+  paramRowsOf(tableId).push({ name: '', type: 'string', description: '', default_value: '', required: false });
+  renderParamTable(tableId);
+}
+
+function removeParamRow(tableId, index) {
+  paramRowsOf(tableId).splice(index, 1);
+  renderParamTable(tableId);
+}
+
+async function openPluginModal(id) {
+  editingPluginId = id || null;
+  // List only carries {id,name}; fetch full detail (action, params, etc.) on demand.
+  let p = null;
+  if (id) {
+    const res = await api('/v1/ai/plugins/' + id);
+    if (res.code === 200 && res.data) p = res.data;
+  }
+  $('plugin-modal-title').textContent = p ? '编辑设备端插件' : '新增设备端插件';
+  $('plugin-modal-submit-btn').textContent = p ? '确认修改' : '确认创建';
+  $('plugin-modal-name').value = p?.name || '';
+  $('plugin-modal-desc').value = p?.description || '';
+  $('plugin-modal-action').value = p?.action || '';
+  pluginModalInputParams = p?.input_params ? p.input_params.map(x => ({ ...x })) : [];
+  pluginModalReturnParams = p?.return_params ? p.return_params.map(x => ({ ...x })) : [];
+  renderParamTable('input');
+  renderParamTable('return');
+  $('plugin-modal').classList.remove('hidden');
+  $('plugin-modal').classList.add('flex');
+}
+
+function closePluginModal() {
+  $('plugin-modal').classList.add('hidden');
+  $('plugin-modal').classList.remove('flex');
+  editingPluginId = null;
+}
+
+function cleanParams(rows) {
+  return rows.filter(p => (p.name || '').trim()).map(p => ({
+    name: p.name.trim(),
+    type: p.type || 'string',
+    description: (p.description || '').trim(),
+    default_value: (p.default_value || '').trim(),
+    required: !!p.required,
+  }));
+}
+
+async function savePluginModal() {
+  const name = $('plugin-modal-name').value.trim();
+  const action = $('plugin-modal-action').value.trim();
+  if (!name) { toast('请输入插件名称', true); return; }
+  if (!action) { toast('请输入功能标识（Action）', true); return; }
+
+  const payload = {
+    name,
+    action,
+    description: $('plugin-modal-desc').value.trim(),
+    input_params: cleanParams(pluginModalInputParams),
+    return_params: cleanParams(pluginModalReturnParams),
+  };
+
+  const res = editingPluginId
+    ? await api('/v1/ai/plugins/' + editingPluginId, { method: 'PUT', body: JSON.stringify(payload) })
+    : await api('/v1/ai/plugins', { method: 'POST', body: JSON.stringify(payload) });
+
+  if (res.code === 200 && res.data) {
+    closePluginModal();
+    await loadPlugins();
+    toast(editingPluginId ? '插件已更新' : '插件已创建');
+  } else {
+    toast(res.msg || (editingPluginId ? '更新失败' : '创建失败'), true);
+  }
+}
+
+async function deletePlugin(id) {
+  if (!confirm('确定删除该插件？')) return;
+  const data = await api('/v1/ai/plugins/' + id, { method: 'DELETE' });
+  if (data.code === 200) {
+    pluginTools = pluginTools.filter(p => p.id !== id);
+    selectedPlugins = selectedPlugins.filter(x => x !== id);
+    renderPlugins();
+    toast('已删除');
+  } else {
+    toast(data.msg || '删除失败', true);
+  }
+}
+
+function filterAgents() { renderAgentList(); }
+
+// ── Bind button state ──
+function updateBindButton() {
+  const btn = $('btn-bind');
+  if (!currentAgentId) {
+    btn.textContent = '保存后再绑定';
+    btn.classList.add('opacity-50', 'pointer-events-none');
+  } else if (currentAgentId === boundRoleId) {
+    btn.textContent = '✓ 已绑定到此设备';
+    btn.classList.remove('opacity-50', 'pointer-events-none');
+    btn.classList.add('!border-emerald-400', '!text-emerald-600');
+  } else {
+    btn.textContent = '绑定到此设备';
+    btn.classList.remove('opacity-50', 'pointer-events-none', '!border-emerald-400');
+  }
+}
+
+function updateHeaderBinding() {
+  if (boundRoleId) {
+    const a = agents.find(x => x.id === boundRoleId);
+    $('header-role-name').textContent = a ? a.name : boundRoleId;
+  }
+}
+
+// ── Actions ──
+async function saveAgent() {
+  if (isEditingDefault) { toast('默认角色不可修改', true); return; }
+  const name = $('field-name').value.trim();
+  if (!name) { toast('请输入智能体名称', true); return; }
+  const promptText = $('field-prompt').value.trim();
+  if (!promptText) { toast('请输入角色设定', true); return; }
+
+  const payload = {
+    name,
+    avatar: '',
+    agent_config: {
+      prompt: promptText,
+      welcome_text: $('field-welcome').value.trim(),
+      ali_memory: { enable: $('field-memory').checked },
+      mcp_tools: selectedMcpTools,
+      device_plugins: selectedPlugins,
+    },
+    service_config: {
+      name: name,
+      type: 'custom-compose',
+      config: {
+        llm: {
+          provider: 'ali-llm',
+          provider_params: { model: $('field-model').value },
+        },
+        tts: {
+          provider: 'ali-tts',
+          provider_params: {
+            voice: $('field-voice').value || undefined,
+            rate: parseFloat($('field-rate').value),
+            pitch: parseFloat($('field-pitch').value),
+          },
+        },
+      },
+    },
+    user_params: {
+      description: $('field-desc').value.trim(),
+      voice: $('field-voice').value || undefined,
+    },
+  };
+
+  const ragIdx = $('field-knowledge-index').value;
+  payload.agent_config.ali_rag = ragIdx ? { index_id: ragIdx } : null;
+
+  if (currentAgentId) {
+    const res = await api('/v1/ai/roles/' + currentAgentId, { method: 'PUT', body: JSON.stringify(payload) });
+    if (res.code === 200) {
+      const updated = res.data;
+      const idx = agents.findIndex(a => a.id === currentAgentId);
+      if (idx >= 0 && updated) agents[idx] = { ...agents[idx], ...updated };
+      toast('保存成功');
+    } else {
+      toast(res.msg || '保存失败', true);
+      return;
+    }
+  } else {
+    const res = await api('/v1/ai/roles', { method: 'POST', body: JSON.stringify(payload) });
+    if (res.code === 200 && res.data) {
+      currentAgentId = res.data.id;
+      agents.push(res.data);
+      toast('创建成功');
+    } else {
+      toast(res.msg || '创建失败', true);
+      return;
+    }
+  }
+
+  renderAgentList();
+  $('btn-delete').classList.remove('hidden');
+  updateBindButton();
+}
+
+async function deleteAgent() {
+  if (!currentAgentId) return;
+  if (isEditingDefault) { toast('默认角色不可删除', true); return; }
+  if (!confirm('确定要删除这个智能体吗？已绑定此角色的设备将恢复默认角色。')) return;
+
+  const res = await api('/v1/ai/roles/' + currentAgentId, { method: 'DELETE' });
+  if (res.code === 200) {
+    agents = agents.filter(a => a.id !== currentAgentId);
+    if (boundRoleId === currentAgentId) {
+      if (deviceId) await api('/v1/ai/device/' + deviceId + '/role', { method: 'DELETE' });
+      boundRoleId = null;
+    }
+    currentAgentId = null;
+    renderAgentList();
+    updateHeaderBinding();
+    newAgent();
+    $('editor-form').classList.add('hidden');
+    $('editor-empty').classList.remove('hidden');
+    if (isMobile()) showList();
+    toast('已删除');
+  } else {
+    toast(res.msg || '删除失败', true);
+  }
+}
+
+async function bindToDevice() {
+  if (!currentAgentId || currentAgentId === boundRoleId) return;
+  if (!deviceId) { toast('未指定设备', true); return; }
+
+  const res = await api('/v1/ai/device/' + deviceId + '/role', {
+    method: 'PUT',
+    body: JSON.stringify({ role_id: currentAgentId }),
+  });
+  if (res.code === 200) {
+    boundRoleId = currentAgentId;
+    updateHeaderBinding();
+    renderAgentList();
+    updateBindButton();
+    toast('绑定成功');
+  } else {
+    toast(res.msg || '绑定失败', true);
+  }
+}
+
+init().catch(err => {
+  console.error('init failed:', err);
+  $('agent-list').innerHTML = '<p class="text-center text-xs text-red-400 py-12">加载失败，请刷新页面重试</p>';
+});
+</script>
+</body>
+</html>

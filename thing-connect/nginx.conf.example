@@ -1,0 +1,45 @@
+# thing-connect 反向代理示例 —— 把 user-server、ai-server 和 call-server
+# 统一到同一个域名下，浏览器（H5 页面）全程同源访问。
+#
+# 部署时把下面三个 upstream 地址换成实际部署地址，域名换成自己的，然后：
+#   nginx -c /path/to/nginx.conf.example -t   # 先测语法
+#   把这段 server{} 合并进正式的 nginx 配置里
+
+upstream user_server {
+    server 127.0.0.1:9002;
+}
+
+upstream ai_server {
+    server 127.0.0.1:9004;
+}
+
+upstream call_server {
+    server 127.0.0.1:9005;
+}
+
+server {
+    listen 80;
+    server_name your-domain.example.com;
+
+    # call-server 的所有对外接口均位于 /v1/call/ 下，
+    # 包括接听接口 /v1/call/device/info。
+    location /v1/call/ {
+        proxy_pass http://call_server;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    # 智能体管理页面及其 API。
+    location /v1/ai/ {
+        proxy_pass http://ai_server;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    # 剩下全部走 user-server：H5 静态页面和 /v1/user/*、/v1/config/*。
+    location / {
+        proxy_pass http://user_server;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}

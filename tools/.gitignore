@@ -1,0 +1,20 @@
+# C binaries (Makefile output)
+tirtc-device-token/c/test_tirtc_signing
+
+# Build artifacts
+*.o
+*.out
+*.exe
+
+# Rust
+target/
+
+# Python
+__pycache__/
+*.pyc
+
+# Java
+*.class
+
+# Node
+node_modules/

@@ -1,0 +1,164 @@
+{
+  "vectors": [
+    {
+      "description": "POST /v1/token/wxvoip (文档接口)",
+      "accessKey": "test-access-key-123",
+      "accessSecret": "test-secret-456",
+      "appId": "app-789",
+      "method": "POST",
+      "uriPath": "/v1/token/wxvoip",
+      "body": "{\"device_id\":\"TESTDEVICE01\",\"wx_session_key\":\"test-key\",\"wx_room_id\":\"room-1\",\"wx_session_token\":\"token-1\",\"wx_app_id\":\"wxapp\",\"wx_model_id\":\"model-1\",\"audio_rate\":8000,\"audio_channels\":1}",
+      "rawQuery": "",
+      "signingTime": "2024-01-15T12:00:00Z",
+      "expected": {
+        "Authorization": "TGV1-HMAC-SHA256 Credential=test-access-key-123/20240122/tgv1_request, SignedHeaders=content-length;content-type;x-tg-algorithm;x-tg-app-id;x-tg-content-sha256;x-tg-date, Signature=1a1ab70f9e3b7e847738bf741fdc44d9a991e21a145536bd7d93d89d59ba4ca1",
+        "Content-Length": "188",
+        "Content-Type": "application/json",
+        "X-Tg-Algorithm": "TGV1-HMAC-SHA256",
+        "X-Tg-App-Id": "app-789",
+        "X-Tg-Content-Sha256": "b953c579ce8e6b9bd78395c0719967b395fdf150f56ab04e575b7f16a5164784",
+        "X-Tg-Date": "20240115T120000Z",
+        "X-Tg-Signed-Headers": "content-length;content-type;x-tg-algorithm;x-tg-app-id;x-tg-content-sha256;x-tg-date"
+      }
+    },
+    {
+      "description": "POST empty body",
+      "accessKey": "test-access-key-123",
+      "accessSecret": "test-secret-456",
+      "appId": "app-789",
+      "method": "POST",
+      "uriPath": "/v2/user/login",
+      "body": "",
+      "rawQuery": "",
+      "signingTime": "2024-01-15T12:00:00Z",
+      "expected": {
+        "Authorization": "TGV1-HMAC-SHA256 Credential=test-access-key-123/20240122/tgv1_request, SignedHeaders=content-length;content-type;x-tg-algorithm;x-tg-app-id;x-tg-content-sha256;x-tg-date, Signature=b8b9c4f602e9e30bf4eced29ba6bdea6a7c66393f46b03eb6a2d27b3a7c200f7",
+        "Content-Length": "0",
+        "Content-Type": "application/json",
+        "X-Tg-Algorithm": "TGV1-HMAC-SHA256",
+        "X-Tg-App-Id": "app-789",
+        "X-Tg-Content-Sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "X-Tg-Date": "20240115T120000Z",
+        "X-Tg-Signed-Headers": "content-length;content-type;x-tg-algorithm;x-tg-app-id;x-tg-content-sha256;x-tg-date"
+      }
+    },
+    {
+      "description": "GET with query params",
+      "accessKey": "test-access-key-123",
+      "accessSecret": "test-secret-456",
+      "appId": "app-789",
+      "method": "GET",
+      "uriPath": "/v2/device/server/connection",
+      "body": "",
+      "rawQuery": "device_id=TESTDEVICE01\u0026platform=web",
+      "signingTime": "2024-01-15T12:00:00Z",
+      "expected": {
+        "Authorization": "TGV1-HMAC-SHA256 Credential=test-access-key-123/20240122/tgv1_request, SignedHeaders=x-tg-algorithm;x-tg-app-id;x-tg-content-sha256;x-tg-date, Signature=b8e12cc829768a466a1e6820099a7b1172357327e6c2a7c692c3f78a1c1a057f",
+        "X-Tg-Algorithm": "TGV1-HMAC-SHA256",
+        "X-Tg-App-Id": "app-789",
+        "X-Tg-Content-Sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "X-Tg-Date": "20240115T120000Z",
+        "X-Tg-Signed-Headers": "x-tg-algorithm;x-tg-app-id;x-tg-content-sha256;x-tg-date"
+      }
+    },
+    {
+      "description": "GET with plus-in-query (replaced with %20)",
+      "accessKey": "test-access-key-123",
+      "accessSecret": "test-secret-456",
+      "appId": "app-789",
+      "method": "GET",
+      "uriPath": "/v2/search",
+      "body": "",
+      "rawQuery": "q=hello+world",
+      "signingTime": "2024-01-15T12:00:00Z",
+      "expected": {
+        "Authorization": "TGV1-HMAC-SHA256 Credential=test-access-key-123/20240122/tgv1_request, SignedHeaders=x-tg-algorithm;x-tg-app-id;x-tg-content-sha256;x-tg-date, Signature=faf82b0dec7a2430b99b568192a53d042f66febf49a0f29d2244132c4dae4258",
+        "X-Tg-Algorithm": "TGV1-HMAC-SHA256",
+        "X-Tg-App-Id": "app-789",
+        "X-Tg-Content-Sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "X-Tg-Date": "20240115T120000Z",
+        "X-Tg-Signed-Headers": "x-tg-algorithm;x-tg-app-id;x-tg-content-sha256;x-tg-date"
+      }
+    },
+    {
+      "description": "PUT with body",
+      "accessKey": "test-access-key-123",
+      "accessSecret": "test-secret-456",
+      "appId": "app-789",
+      "method": "PUT",
+      "uriPath": "/v2/device/attrs",
+      "body": "{\"attrs\":{\"wakeup\":\"on\"}}",
+      "rawQuery": "",
+      "signingTime": "2024-01-15T12:00:00Z",
+      "expected": {
+        "Authorization": "TGV1-HMAC-SHA256 Credential=test-access-key-123/20240122/tgv1_request, SignedHeaders=content-length;content-type;x-tg-algorithm;x-tg-app-id;x-tg-content-sha256;x-tg-date, Signature=56090deedb1ffc6db164a21d4e75a383e1c3f1a55cd273a852167c0e282e96a1",
+        "Content-Length": "25",
+        "Content-Type": "application/json",
+        "X-Tg-Algorithm": "TGV1-HMAC-SHA256",
+        "X-Tg-App-Id": "app-789",
+        "X-Tg-Content-Sha256": "e404b959f8173b9a773e13a2792d2b039f26307c1305ab75d2453f20c328153f",
+        "X-Tg-Date": "20240115T120000Z",
+        "X-Tg-Signed-Headers": "content-length;content-type;x-tg-algorithm;x-tg-app-id;x-tg-content-sha256;x-tg-date"
+      }
+    },
+    {
+      "description": "DELETE without body",
+      "accessKey": "test-access-key-123",
+      "accessSecret": "test-secret-456",
+      "appId": "app-789",
+      "method": "DELETE",
+      "uriPath": "/v2/user/12345",
+      "body": "",
+      "rawQuery": "",
+      "signingTime": "2024-01-15T12:00:00Z",
+      "expected": {
+        "Authorization": "TGV1-HMAC-SHA256 Credential=test-access-key-123/20240122/tgv1_request, SignedHeaders=x-tg-algorithm;x-tg-app-id;x-tg-content-sha256;x-tg-date, Signature=62e5e2d93d5f61b880c7bea4eb5a3931f0ed465b069382ff31fe4eef82677d5a",
+        "X-Tg-Algorithm": "TGV1-HMAC-SHA256",
+        "X-Tg-App-Id": "app-789",
+        "X-Tg-Content-Sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "X-Tg-Date": "20240115T120000Z",
+        "X-Tg-Signed-Headers": "x-tg-algorithm;x-tg-app-id;x-tg-content-sha256;x-tg-date"
+      }
+    },
+    {
+      "description": "URI with trailing slash normalized",
+      "accessKey": "test-access-key-123",
+      "accessSecret": "test-secret-456",
+      "appId": "app-789",
+      "method": "POST",
+      "uriPath": "/v1/token/wxvoip/",
+      "body": "{\"device_id\":\"TESTDEVICE01\",\"wx_session_key\":\"test-key\",\"wx_room_id\":\"room-1\",\"wx_session_token\":\"token-1\",\"wx_app_id\":\"wxapp\",\"wx_model_id\":\"model-1\",\"audio_rate\":8000,\"audio_channels\":1}",
+      "rawQuery": "",
+      "signingTime": "2024-01-15T12:00:00Z",
+      "expected": {
+        "Authorization": "TGV1-HMAC-SHA256 Credential=test-access-key-123/20240122/tgv1_request, SignedHeaders=content-length;content-type;x-tg-algorithm;x-tg-app-id;x-tg-content-sha256;x-tg-date, Signature=1a1ab70f9e3b7e847738bf741fdc44d9a991e21a145536bd7d93d89d59ba4ca1",
+        "Content-Length": "188",
+        "Content-Type": "application/json",
+        "X-Tg-Algorithm": "TGV1-HMAC-SHA256",
+        "X-Tg-App-Id": "app-789",
+        "X-Tg-Content-Sha256": "b953c579ce8e6b9bd78395c0719967b395fdf150f56ab04e575b7f16a5164784",
+        "X-Tg-Date": "20240115T120000Z",
+        "X-Tg-Signed-Headers": "content-length;content-type;x-tg-algorithm;x-tg-app-id;x-tg-content-sha256;x-tg-date"
+      }
+    },
+    {
+      "description": "root path /",
+      "accessKey": "test-access-key-123",
+      "accessSecret": "test-secret-456",
+      "appId": "app-789",
+      "method": "GET",
+      "uriPath": "/",
+      "body": "",
+      "rawQuery": "action=ping",
+      "signingTime": "2024-01-15T12:00:00Z",
+      "expected": {
+        "Authorization": "TGV1-HMAC-SHA256 Credential=test-access-key-123/20240122/tgv1_request, SignedHeaders=x-tg-algorithm;x-tg-app-id;x-tg-content-sha256;x-tg-date, Signature=67a9a490b68813c8df7a743325ae5336fbbd979a3fafa929620a34da7861f218",
+        "X-Tg-Algorithm": "TGV1-HMAC-SHA256",
+        "X-Tg-App-Id": "app-789",
+        "X-Tg-Content-Sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "X-Tg-Date": "20240115T120000Z",
+        "X-Tg-Signed-Headers": "x-tg-algorithm;x-tg-app-id;x-tg-content-sha256;x-tg-date"
+      }
+    }
+  ]
+}

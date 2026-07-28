@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>实时监控</title>
+  <link rel="stylesheet" href="/static/css/tailwind.css">
+  <style>
+    html, body { margin: 0; padding: 0; background: #000; color: #fff; height: 100%; overflow: hidden; }
+    #video-wrap { position: relative; width: 100%; background: #000; }
+    #canvas { display: block; width: 100%; height: 100%; object-fit: contain; }
+    #talk-btn {
+      transition: background 0.15s, transform 0.1s;
+      -webkit-user-select: none; user-select: none;
+    }
+    #talk-btn.active {
+      background: #ef4444 !important;
+      transform: scale(0.97);
+    }
+    @media (min-width: 900px) {
+      body { background: #111; }
+      #video-wrap { max-width: 1100px; margin: 0 auto; border-radius: 12px; overflow: hidden; }
+    }
+  </style>
+</head>
+<body>
+<!-- TOPBAR (mobile only) -->
+<div id="topbar" class="flex items-center gap-3 px-4 py-3 bg-[#111] border-b border-white/10 md:hidden">
+  <button onclick="history.back()" class="p-1 text-white/60 hover:text-white">
+    <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+      <path d="M15 18l-6-6 6-6"/>
+    </svg>
+  </button>
+  <span id="page-title" class="text-sm font-medium truncate flex-1 text-white/90"></span>
+  <div id="status-dot" class="w-2 h-2 rounded-full bg-gray-500 flex-shrink-0"></div>
+</div>
+
+<div id="layout">
+  <!-- VIDEO -->
+  <div id="video-wrap">
+    <!-- PC topbar inside video area -->
+    <div class="hidden md:flex items-center gap-3 px-4 py-3 bg-[#1a1a1a]">
+      <button onclick="history.back()" class="p-1 text-white/50 hover:text-white transition-colors">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+          <path d="M15 18l-6-6 6-6"/>
+        </svg>
+      </button>
+      <span id="page-title-pc" class="text-sm font-medium text-white/80 flex-1 truncate"></span>
+      <div id="status-dot-pc" class="w-2 h-2 rounded-full bg-gray-500"></div>
+      <span id="status-text-pc" class="text-xs text-white/40">连接中…</span>
+    </div>
+    <div style="position:relative;">
+      <canvas id="canvas" style="aspect-ratio: 16/9; background:#000; display:block; width:100%;"></canvas>
+      <div id="audio-unlock" style="display:none; position:absolute; inset:0; background:rgba(0,0,0,0.5); pointer-events:none; align-items:center; justify-content:center; flex-direction:column; gap:8px;">
+        <svg style="width:40px;height:40px;opacity:0.9" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round">
+          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+          <path d="M15.54 8.46a5 5 0 0 1 0 7.07M19.07 4.93a10 10 0 0 1 0 14.14"/>
+        </svg>
+        <span style="color:white;font-size:13px;opacity:0.85">点击开启声音</span>
+      </div>
+    </div>
+
+    <!-- Bottom bar: quality + talk + mute -->
+    <div class="flex items-center gap-2 px-3 py-2 bg-[#111]">
+      <div class="flex-1"></div>
+      <button id="talk-btn"
+        class="flex items-center gap-1.5 px-4 py-2 rounded-full bg-white/10 border border-white/15 text-xs font-medium text-white/80 transition-all"
+        onmousedown="startTalk()" onmouseup="stopTalk()"
+        ontouchstart="startTalk(event)" ontouchend="stopTalk(event)">
+        <span id="talk-dot" class="w-1.5 h-1.5 rounded-full bg-white/30"></span>
+        <span id="talk-label">按住说话</span>
+      </button>
+      <button id="btn-mute" onclick="toggleMute()"
+        class="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center transition-all">
+        <svg id="icon-sound" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+          <path d="M15.54 8.46a5 5 0 0 1 0 7.07M19.07 4.93a10 10 0 0 1 0 14.14"/>
+        </svg>
+        <svg id="icon-mute" class="w-5 h-5 hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+          <line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { TiRtc, TiRtcInitOptions, TiRtcConn, TiRtcVideoOutput, TiRtcAudioOutput, TiRtcAudioInput } from '/static/js/tirtc.es.min.js';
+
+const $ = id => document.getElementById(id);
+
+const jwtToken = localStorage.getItem('token');
+if (!jwtToken) { location.href = '/'; }
+
+const params   = new URLSearchParams(location.search);
+const deviceID = params.get('device_id') || '';
+
+const STREAM_AUDIO     = 10;
+const STREAM_VIDEO     = 11;
+
+// ── Page title ────────────────────────────────────────────────────────────
+const titleText = deviceID ? `${deviceID} 实时监控` : '实时监控';
+document.title = titleText;
+['page-title','page-title-pc'].forEach(id => {
+  const el = $(id);
+  if (el) el.textContent = titleText;
+});
+
+function setStatus(online) {
+  const color = online ? '#10b981' : '#6b7280';
+  ['status-dot','status-dot-pc'].forEach(id => {
+    const el = $(id);
+    if (el) el.style.background = color;
+  });
+  const st = $('status-text-pc');
+  if (st) st.textContent = online ? '已连接' : '连接中…';
+}
+
+// ── Fetch RTC token ───────────────────────────────────────────────────────
+async function fetchRtcToken() {
+  const res = await fetch(`/v1/user/device/rtc-token?device_id=${encodeURIComponent(deviceID)}`, {
+    headers: { 'Authorization': 'Bearer ' + jwtToken },
+  });
+  const d = await res.json();
+  if (d.code !== 200) throw new Error(d.msg || 'fetch token failed');
+  return { rtcToken: d.data.token, appId: d.data.app_id, endpoint: d.data.endpoint };
+}
+
+// ── Player ────────────────────────────────────────────────────────────────
+let connection      = null;
+let audioOutput     = null;
+let videoOutput     = null;
+let audioInput      = null;
+let muted           = false;  // default muted, user clicks speaker to unmute
+let talking         = false;  // prevent double-start
+
+async function start() {
+  try {
+    const { rtcToken, appId } = await fetchRtcToken();
+
+    TiRtc.initialize(TiRtcInitOptions({ appId:appId }));
+
+    // Wait for wasm to load
+    await TiRtc.videoOutputReady();
+
+    connection  = new TiRtcConn();
+    audioOutput = TiRtcAudioOutput({ connection, streamId: STREAM_AUDIO });
+    videoOutput = TiRtcVideoOutput({ connection, streamId: STREAM_VIDEO });
+    audioInput  = new TiRtcAudioInput({ connection, streamId: 14 });
+    audioInput.setOptions({ sampleRate: 8000 });
+
+    connection.connect({ deviceId: deviceID, token: rtcToken })
+      .then(() => {
+        setStatus(true);
+        videoOutput.attach();
+        audioOutput.attach();
+        connection.subscribeVideo({ streamId: STREAM_VIDEO });
+        connection.subscribeAudio({ streamId: STREAM_AUDIO });
+        updateMuteUI();
+      })
+      .catch(err => { console.error('connect failed', err); setStatus(false); });
+
+  } catch(e) {
+    console.error('rtc start failed', e);
+    setStatus(false);
+  }
+}
+
+function updateMuteUI() {
+  $('icon-sound').classList.toggle('hidden', muted);
+  $('icon-mute').classList.toggle('hidden', !muted);
+  $('btn-mute').classList.toggle('bg-red-500/60', muted);
+}
+
+
+// ── Mute ─────────────────────────────────────────────────────────────────
+window.toggleMute = function() {
+  muted = !muted;
+  if (audioOutput) muted ? audioOutput.detach() : audioOutput.attach();
+  updateMuteUI();
+};
+
+// ── Talk ─────────────────────────────────────────────────────────────────
+window.startTalk = function(e) {
+  if (e) e.preventDefault();
+  if (!audioInput || talking) return;
+  talking = true;
+  $('talk-btn').classList.add('active');
+  $('talk-dot').style.background = '#ef4444';
+  $('talk-label').textContent = '说话中…';
+  audioInput.start().then(() => audioInput.attach()).catch(err => {
+    console.warn('talk error', err);
+    talking = false;
+    $('talk-btn').classList.remove('active');
+    $('talk-dot').style.background = 'rgba(255,255,255,0.3)';
+    $('talk-label').textContent = '麦克风失败';
+  });
+};
+
+window.stopTalk = function(e) {
+  if (e) e.preventDefault();
+  if (!talking) return;
+  talking = false;
+  $('talk-btn').classList.remove('active');
+  $('talk-dot').style.background = 'rgba(255,255,255,0.3)';
+  $('talk-label').textContent = '按住说话';
+  if (audioInput) audioInput.stop();
+};
+
+window.addEventListener('beforeunload', () => {
+  if (connection)  connection.disconnect();
+  if (audioOutput) audioOutput.detach();
+  if (videoOutput) videoOutput.detach();
+  if (audioInput)  audioInput.stop();
+});
+
+start();
+</script>
+</body>
+</html>

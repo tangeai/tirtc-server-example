@@ -1,0 +1,47 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - govet
+    - staticcheck
+    - errcheck
+    - nilnil
+    - unused
+    - ineffassign
+    - bodyclose
+    - copyloopvar
+    - errorlint
+
+  settings:
+    errcheck:
+      exclude-functions:
+        - (*database/sql.Tx).Rollback
+        - (*database/sql.Rows).Close
+        - (io.Closer).Close
+    staticcheck:
+      checks: ["all", "-SA4000"]
+
+  exclusions:
+    generated: lax
+    paths:
+      - device-sim
+      - weixin-mini-program
+      - node_modules
+      - vendor
+    rules:
+      - linters: [unused]
+        path: _test\.go$
+      - linters: [errcheck]
+        path: _test\.go$
+      - text: "SA1019"
+        linters: [staticcheck]
+      - text: "SA9003"
+        linters: [staticcheck]
+
+formatters:
+  enable:
+    - gofmt
+
+run:
+  timeout: 2m

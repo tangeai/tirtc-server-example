@@ -1,0 +1,39 @@
+*.db
+.claude
+.superpowers
+superpowers
+*.test
+*.yaml
+*.log
+*.class
+*.mp4
+bin
+build
+dist
+local
+docs
+target
+received
+CLAUDE.md
+constitution.md
+# Node.js
+node_modules/
+# Python     
+__pycache__/
+*.pyc
+*.pyo
+AGENTS.md
+obj
+thing-connect/device-sim/sdk/macos-arm64/lib/libTiRTC.dylib
+thing-connect/device-sim/.venv-macos-build/
+device_creds.json
+# 生成的测试素材（gen_assets.sh 产生）
+thing-connect/device-sim/assets/number.*
+thing-connect/device-sim/assets/numbers_chinese_*
+thing-connect/device-sim/scripts/numbers_chinese_*
+
+# Local development deployment script (environment-specific, not open source).
+thing-connect/local-deploy.sh
+/.codex_tmp
+/thing-connect/device-sim/assets/*.mjpeg
+/thing-connect/device-sim/assets/video_h264_annexb_*.h264

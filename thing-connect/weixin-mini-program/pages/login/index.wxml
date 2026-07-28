@@ -1,0 +1,81 @@
+<!-- thing-connect/weixin-mini-program/pages/login/index.wxml -->
+<view class="page">
+  <!-- 顶部装饰区 -->
+  <view class="hero">
+    <view class="hero-circle"></view>
+    <view class="hero-text">
+      <text class="hero-title">ThingConnect</text>
+      <text class="hero-sub">Connect the Things, Build the Future. @tang.ai</text>
+    </view>
+  </view>
+
+  <!-- 表单卡片 -->
+  <view class="card">
+    <!-- Tab 切换 -->
+    <view class="tabs">
+      <view class="tab {{activeTab === 'login' ? 'tab-active' : ''}}" bindtap="switchTab" data-tab="login">登录</view>
+      <view class="tab {{activeTab === 'register' ? 'tab-active' : ''}}" bindtap="switchTab" data-tab="register">注册</view>
+    </view>
+
+    <!-- 登录表单 -->
+    <view wx:if="{{activeTab === 'login'}}" class="form">
+      <view class="field">
+        <text class="label">邮箱</text>
+        <input class="input" type="email" placeholder="your@email.com" placeholder-class="ph" value="{{loginEmail}}" bindinput="onLoginEmailInput" />
+      </view>
+      <view class="field">
+        <text class="label">密码</text>
+        <view class="input-wrap">
+          <input class="input input-pwd" type="text" password="{{!showLoginPwd}}" placeholder="输入密码" placeholder-class="ph" value="{{loginPassword}}" bindinput="onLoginPasswordInput" />
+          <view class="eye-btn" bindtap="toggleLoginPwd">
+            <view wx:if="{{showLoginPwd}}" class="eye-icon eye-open"></view>
+            <view wx:else class="eye-icon eye-close"></view>
+          </view>
+        </view>
+      </view>
+      <ne-captcha wx:if="{{captchaId}}" id="captcha-login" captcha-id="{{captchaId}}" width="630rpx" bindverify="onLoginCaptchaVerify"></ne-captcha>
+      <button class="btn-primary" bindtap="doLogin" disabled="{{loginLoading}}">{{loginLoading ? '登录中...' : '登录'}}</button>
+    </view>
+
+    <!-- 注册表单 -->
+    <view wx:if="{{activeTab === 'register'}}" class="form">
+      <view class="field">
+        <text class="label">邮箱</text>
+        <input class="input" type="email" placeholder="your@email.com" placeholder-class="ph" value="{{regEmail}}" bindinput="onRegEmailInput" />
+      </view>
+      <view class="field">
+        <text class="label">验证码</text>
+        <view class="code-row">
+          <input class="input input-code" type="number" placeholder="6 位验证码" placeholder-class="ph" maxlength="6" value="{{regCode}}" bindinput="onRegCodeInput" />
+          <button class="btn-code" bindtap="doSendCode" disabled="{{codeCooldown > 0 || codeLoading}}">
+            {{codeLoading ? '发送中' : codeCooldown > 0 ? codeCooldown + 's' : '获取验证码'}}
+          </button>
+        </view>
+      </view>
+      <ne-captcha wx:if="{{captchaId}}" id="captcha-reg" captcha-id="{{captchaId}}" width="630rpx" bindverify="onRegCaptchaVerify"></ne-captcha>
+      <view class="field">
+        <text class="label">密码</text>
+        <view class="input-wrap">
+          <input class="input input-pwd" type="text" password="{{!showRegPwd}}" placeholder="至少 6 位" placeholder-class="ph" value="{{regPassword}}" bindinput="onRegPasswordInput" />
+          <view class="eye-btn" bindtap="toggleRegPwd">
+            <view wx:if="{{showRegPwd}}" class="eye-icon eye-open"></view>
+            <view wx:else class="eye-icon eye-close"></view>
+          </view>
+        </view>
+      </view>
+      <view class="field">
+        <text class="label">确认密码</text>
+        <view class="input-wrap">
+          <input class="input input-pwd" type="text" password="{{!showRegPwd2}}" placeholder="再次输入密码" placeholder-class="ph" value="{{regPassword2}}" bindinput="onRegPassword2Input" />
+          <view class="eye-btn" bindtap="toggleRegPwd2">
+            <view wx:if="{{showRegPwd2}}" class="eye-icon eye-open"></view>
+            <view wx:else class="eye-icon eye-close"></view>
+          </view>
+        </view>
+      </view>
+      <button class="btn-primary" bindtap="doRegister" disabled="{{regLoading}}">{{regLoading ? '注册中...' : '注册'}}</button>
+    </view>
+
+    <text wx:if="{{errMsg}}" class="err-msg">{{errMsg}}</text>
+  </view>
+</view>

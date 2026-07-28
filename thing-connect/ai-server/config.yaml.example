@@ -1,0 +1,36 @@
+server:
+  http_port: 9004
+
+log:
+  level: info  # debug|info|warn|error
+  format: text  # text|json
+
+database:
+  dsn: "root:111111@tcp(windows.hosts:3306)/tirtc_thing_connect?parseTime=true&charset=utf8mb4&loc=Local"
+
+jwt_secret: "replace-with-same-secret-as-device-server"
+
+# 服务间解绑清理接口鉴权；须与 user/voip/call-server 一致
+call:
+  internal_key: "your-internal-service-key"
+
+tirtc:
+  app_id: "your-app-id"
+  access_key_id: "your-access-key-id"
+  secret_key_id: "your-secret-key-id"
+
+tirtc_aichat:
+  base_url: "https://api-tirtc.tange365.com"
+  base_role_url: "https://openapi-cn01.tange365.com"
+  default_role_id: "fin63bby1og0"
+  # Per-user creation limits for cloud resources tracked locally.
+  resource_quota:
+    mcp: 4
+    device_plugin: 20
+    kb: 5
+  # Resources visible to every user on top of their own (id+name pairs, written
+  # back from the tange cloud). Leave a type empty if it has no defaults.
+  default_resources:
+    mcp: []
+    device_plugin: []
+    kb: []

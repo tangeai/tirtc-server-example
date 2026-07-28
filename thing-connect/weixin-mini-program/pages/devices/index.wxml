@@ -1,0 +1,161 @@
+<!-- thing-connect/weixin-mini-program/pages/devices/index.wxml -->
+<view class="page" bindtap="onPageTap">
+  <!-- 顶部导航栏 -->
+  <view class="navbar">
+    <text class="navbar-title">我的设备</text>
+    <view class="navbar-actions">
+      <view class="icon-btn" bindtap="onEditContactRemark" bindlongpress="onCopyOpenId" aria-label="微信 OpenID 与联系人名称">
+        <view class="icon-openid"></view>
+      </view>
+      <view class="icon-btn" bindtap="logout">
+        <view class="icon-logout"></view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 添加设备按钮 -->
+  <view class="add-bar" bindtap="goAdd">
+    <view class="add-bar-left">
+      <view class="add-icon"></view>
+      <text class="add-text">添加设备</text>
+    </view>
+    <view class="add-arrow"></view>
+  </view>
+
+  <!-- 列表区域 -->
+  <view class="list">
+    <!-- 首屏加载 -->
+    <view wx:if="{{loading && !initialized}}" class="loading-wrap">
+      <text class="loading-text">加载中...</text>
+    </view>
+
+    <!-- 空状态 -->
+    <view wx:elif="{{initialized && deviceList.length === 0}}" class="empty">
+      <view class="empty-img"></view>
+      <text class="empty-text">暂无设备</text>
+      <text class="empty-sub">点击上方「添加设备」开始绑定</text>
+    </view>
+
+    <!-- 设备列表 -->
+    <view wx:else class="list-inner">
+      <view wx:if="{{loading}}" class="refresh-bar">
+        <view class="refresh-indicator">
+          <view class="refresh-spinner"></view>
+          <text class="refresh-text">加载中...</text>
+        </view>
+      </view>
+      <view wx:for="{{deviceList}}" wx:key="device_id" class="swipe-wrap">
+        <view class="swipe-delete-btn" data-id="{{item.device_id}}" bindtap="onUnbind">解绑</view>
+        <view
+          class="card"
+          style="transform: translateX({{item.slideX || 0}}px); transition: transform 0.22s ease;"
+          data-id="{{item.device_id}}"
+          data-index="{{index}}"
+          catchtap="noop"
+          bindtouchstart="onSwipeStart"
+          bindtouchend="onSwipeEnd"
+          bindtouchcancel="onSwipeEnd"
+        >
+          <view class="card-inner">
+            <view class="card-top">
+              <view class="card-title-row">
+                <view class="card-id-row">
+                  <view class="device-name-row">
+                    <text class="device-name">{{item.device_name || '未命名设备'}}</text>
+                    <text class="device-name-edit" data-id="{{item.device_id}}" bindtap="onEditDeviceName">修改</text>
+                  </view>
+                </view>
+                <text class="card-device-id">{{item.device_id}}</text>
+              </view>
+              <view class="card-badges">
+                <view wx:if="{{item.status === 1}}" class="badge-online-wrap">
+                  <view class="dot {{item.online ? 'dot-on' : 'dot-off'}}"></view>
+                  <text class="badge-online-text {{item.online ? 'text-on' : 'text-off'}}">{{item.online ? '在线' : '离线'}}</text>
+                </view>
+                <text wx:if="{{item.voipAuthed}}" class="badge badge-authed">已授权</text>
+                <text wx:elif="{{item.voipAuthState === 'disabled'}}" class="badge badge-auth-disabled">授权已关闭</text>
+                <text wx:elif="{{item.voipAuthState === 'unknown'}}" class="badge badge-auth-unknown">授权未知</text>
+                <text wx:if="{{item.deviceNamePending}}" class="badge badge-name-pending" bindtap="onDeviceNamePendingHelp">名称待重新授权</text>
+                <text wx:if="{{item.hasCamera}}" class="badge badge-video-in">摄像头</text>
+                <text wx:if="{{item.hasScreen}}" class="badge badge-video-out">带屏</text>
+              </view>
+            </view>
+            <view wx:if="{{item.mac}}" class="card-meta">
+              <text class="meta-key">MAC</text>
+              <text class="meta-val">{{item.mac}}</text>
+            </view>
+            <view wx:if="{{item.mediaSummary}}" class="card-meta">
+              <text class="meta-key">媒体</text>
+              <text class="meta-val">{{item.mediaSummary}}</text>
+            </view>
+            <view class="card-actions">
+              <block wx:if="{{!item.voipAuthed}}">
+                <button class="btn-action btn-auth" data-id="{{item.device_id}}" bindtap="onAuthorize">{{item.voipAuthState === 'disabled' ? '查看授权设置' : (item.voipAuthState === 'unknown' ? '刷新授权状态' : '授权呼叫')}}</button>
+              </block>
+              <block wx:else>
+                <button class="btn-action btn-call" data-id="{{item.device_id}}" bindtap="onCall">{{item.callButtonText}}</button>
+              </block>
+            </view>
+          </view>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view wx:if="{{authNameModalVisible}}" class="auth-name-mask" catchtap="noop" catchtouchmove="noop">
+    <view class="auth-name-dialog">
+      <text class="auth-name-title">{{authNameMode === 'profile' ? '我的微信身份' : '设置联系人名称'}}</text>
+      <view wx:if="{{authNameMode === 'profile'}}" class="profile-openid-card">
+        <view class="profile-openid-header">
+          <text class="profile-openid-label">微信 OpenID</text>
+          <text class="profile-openid-copy" bindtap="onCopyProfileOpenId">复制</text>
+        </view>
+        <text class="profile-openid-value" selectable>{{profileOpenId || '正在获取...'}}</text>
+      </view>
+      <text class="auth-name-subtitle">这是当前小程序 OpenID 的联系人名称，所有已授权设备都会显示该名称。</text>
+      <input
+        class="auth-name-input"
+        value="{{authName}}"
+        maxlength="64"
+        focus="{{authNameModalVisible}}"
+        placeholder="请输入联系人名称"
+        bindinput="onAuthNameInput"
+      />
+      <view class="auth-name-suggestions">
+        <text class="auth-name-suggestions-label">随机昵称</text>
+        <view class="auth-name-tags">
+          <view
+            wx:for="{{authNameSuggestions}}"
+            wx:key="*this"
+            class="auth-name-tag {{authName === item ? 'auth-name-tag-active' : ''}}"
+            data-name="{{item}}"
+            bindtap="onSelectAuthName"
+          >{{item}}</view>
+        </view>
+      </view>
+      <view class="auth-name-actions">
+        <button class="auth-name-button auth-name-cancel" bindtap="onCancelAuthName">取消</button>
+        <button class="auth-name-button auth-name-confirm" bindtap="onConfirmAuthName">{{authNameMode === 'profile' ? '保存名称' : '确认并授权'}}</button>
+      </view>
+    </view>
+  </view>
+
+  <view wx:if="{{deviceNameModalVisible}}" class="auth-name-mask" catchtap="noop" catchtouchmove="noop">
+    <view class="auth-name-dialog">
+      <text class="auth-name-title">设置设备名称</text>
+      <text class="auth-name-subtitle">该名称会用于微信授权和手机端设备来电显示，最多 13 个字符。</text>
+      <input
+        class="auth-name-input"
+        value="{{editingDeviceName}}"
+        maxlength="13"
+        focus="{{deviceNameModalVisible}}"
+        placeholder="例如：客厅学习机"
+        bindinput="onDeviceNameInput"
+      />
+      <view class="auth-name-actions">
+        <button class="auth-name-button auth-name-cancel" bindtap="onCancelDeviceName">取消</button>
+        <button class="auth-name-button auth-name-confirm" bindtap="onConfirmDeviceName">{{continueAuthorizeAfterName ? '保存并继续授权' : '保存名称'}}</button>
+      </view>
+    </view>
+  </view>
+</view>

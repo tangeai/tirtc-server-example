@@ -1,0 +1,10 @@
+{
+  "name": "tirtc-token-signing-js",
+  "version": "1.0.0",
+  "description": "TiRTC TGV1-HMAC-SHA256 token signing — JavaScript",
+  "main": "tirtc_signing.js",
+  "scripts": {
+    "test": "node tirtc_signing.test.js"
+  },
+  "license": "MIT"
+}

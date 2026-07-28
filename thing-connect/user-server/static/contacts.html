@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ThingConnect — 联系人管理</title>
+  <link rel="stylesheet" href="/static/css/tailwind.css">
+</head>
+<body class="bg-gray-50 min-h-screen font-sans">
+
+<!-- TOPBAR -->
+<header class="sticky top-0 z-50 flex items-center justify-between h-[60px] px-8 bg-white border-b border-gray-200">
+  <div class="flex items-center gap-3">
+    <button onclick="location.href='/devices'" class="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 transition-colors">
+      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+        <path d="M15 18l-6-6 6-6"/>
+      </svg>
+      <span>设备</span>
+    </button>
+    <span class="text-base font-bold tracking-tight text-gray-900">联系人管理</span>
+  </div>
+  <button onclick="logout()" class="text-xs text-gray-400 hover:text-gray-600 transition-colors px-2 py-1">退出</button>
+</header>
+
+<!-- MAIN -->
+<main class="relative max-w-[720px] mx-auto px-8 pt-9 pb-24 max-sm:px-3.5 max-sm:pt-5 max-sm:pb-32">
+
+  <!-- device picker -->
+  <div class="mb-7">
+    <label class="text-xs font-medium text-gray-400 mb-1.5 block">当前设备</label>
+    <select id="device-select" onchange="onDeviceChange()" class="w-full font-mono text-sm bg-white border border-gray-200 rounded-lg px-3.5 py-2.5 text-gray-800 focus:outline-none focus:border-emerald-400"></select>
+  </div>
+
+  <!-- add contact -->
+  <div class="bg-white border border-gray-200 rounded-2xl p-5 mb-7">
+    <h2 class="text-sm font-bold text-gray-900 mb-3">添加联系人</h2>
+    <div class="flex gap-2">
+      <input id="add-target" type="text" placeholder="对方设备 ID" class="flex-1 font-mono text-sm bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-2.5 focus:outline-none focus:border-emerald-400">
+      <button onclick="addContact()" class="px-5 py-2.5 bg-emerald-500 text-white text-sm font-semibold rounded-lg hover:bg-emerald-600 transition-colors whitespace-nowrap">发起申请</button>
+    </div>
+    <p class="text-xs text-gray-400 mt-2">同账号下的设备会自动互相关联，不需要手动申请</p>
+  </div>
+
+  <!-- pending -->
+  <div class="mb-7">
+    <h2 class="text-sm font-bold text-gray-900 mb-3">待审批 <span id="pending-count" class="text-xs font-normal text-gray-400"></span></h2>
+    <div id="pending-list" class="space-y-2"></div>
+  </div>
+
+  <!-- contacts -->
+  <div>
+    <h2 class="text-sm font-bold text-gray-900 mb-3">我的联系人 <span id="contact-count" class="text-xs font-normal text-gray-400"></span></h2>
+    <div id="contact-list" class="space-y-2"></div>
+  </div>
+</main>
+
+<!-- REMARK MODAL -->
+<div id="remark-modal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-[200] items-center justify-center">
+  <div class="bg-white border border-gray-200 rounded-2xl p-7 w-[360px] max-w-[calc(100vw-48px)] shadow-xl">
+    <h2 class="text-[17px] font-bold text-gray-900 mb-4">修改备注</h2>
+    <input id="remark-input" type="text" placeholder="备注名称" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-2.5 mb-6 focus:outline-none focus:border-emerald-400">
+    <div class="flex gap-2.5">
+      <button onclick="closeRemarkModal()" class="flex-1 py-2.5 text-sm text-gray-500 bg-gray-50 border border-gray-200 rounded-lg hover:border-gray-300 transition-colors">取消</button>
+      <button onclick="saveRemark()" class="flex-1 py-2.5 text-sm font-semibold text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition-colors">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- DELETE MODAL -->
+<div id="delete-modal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-[200] items-center justify-center">
+  <div class="bg-white border border-gray-200 rounded-2xl p-7 w-[360px] max-w-[calc(100vw-48px)] shadow-xl">
+    <h2 class="text-[17px] font-bold text-gray-900 mb-2">删除该联系人？</h2>
+    <p class="text-sm text-gray-500 leading-relaxed mb-6">删除后对方将不再出现在联系人列表中，需要重新发起申请才能恢复。</p>
+    <div class="flex gap-2.5">
+      <button onclick="closeDeleteModal()" class="flex-1 py-2.5 text-sm text-gray-500 bg-gray-50 border border-gray-200 rounded-lg hover:border-gray-300 transition-colors">取消</button>
+      <button onclick="doDelete()" class="flex-1 py-2.5 text-sm font-semibold text-red-600 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 transition-colors">确认删除</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div id="toast" class="fixed bottom-[100px] left-1/2 bg-gray-900 text-white text-sm px-5 py-2.5 rounded-full pointer-events-none whitespace-nowrap z-[300] border border-transparent"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const token = localStorage.getItem('token');
+if (!token) location.href = '/';
+
+let devices = [];
+let currentDeviceId = new URLSearchParams(location.search).get('device_id') || '';
+let lastContacts = [];
+let lastPending = [];
+let remarkTarget = null;
+let deleteTarget = null;
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, {
+    ...opts,
+    headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json', ...(opts.headers || {}) },
+  });
+  return res.json();
+}
+
+function toast(msg, error = false) {
+  const el = $('toast');
+  el.textContent = msg;
+  el.style.borderColor = error ? 'rgba(239,68,68,0.4)' : 'rgba(16,185,129,0.4)';
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2600);
+}
+
+function logout() {
+  localStorage.clear();
+  sessionStorage.clear();
+  location.href = '/';
+}
+
+async function loadDevices() {
+  const res = await api('/v1/user/device/list');
+  if (res.code !== 200) { toast(res.msg || '加载设备失败', true); return; }
+  devices = (res.data || []).filter(d => d.status === 1);
+  const sel = $('device-select');
+  if (!devices.length) {
+    sel.innerHTML = '<option value="">（还没有已绑定设备）</option>';
+    return;
+  }
+  if (!currentDeviceId || !devices.some(d => d.device_id === currentDeviceId)) {
+    currentDeviceId = devices[0].device_id;
+  }
+  sel.innerHTML = devices.map(d =>
+    `<option value="${d.device_id}" ${d.device_id === currentDeviceId ? 'selected' : ''}>${d.device_id}</option>`
+  ).join('');
+  loadContacts();
+}
+
+function onDeviceChange() {
+  currentDeviceId = $('device-select').value;
+  loadContacts();
+}
+
+async function loadContacts() {
+  if (!currentDeviceId) return;
+  const res = await api('/v1/call/user/contacts?device_id=' + encodeURIComponent(currentDeviceId));
+  const list = $('contact-list');
+  if (res.code !== 200) {
+    list.innerHTML = `<p class="text-sm text-gray-400 py-6 text-center">加载失败：${escapeHtml(res.msg || '')}</p>`;
+    $('contact-count').textContent = '';
+    return;
+  }
+  const contacts = res.data.contacts || [];
+  lastContacts = contacts;
+  $('contact-count').textContent = contacts.length ? `(${contacts.length})` : '';
+  if (!contacts.length) {
+    list.innerHTML = '<p class="text-sm text-gray-400 py-6 text-center">还没有联系人</p>';
+    return;
+  }
+  list.innerHTML = contacts.map((c, index) => {
+    const isVoip = c.type === "voip";
+    if (isVoip) {
+      return `
+        <div class="bg-white border border-blue-200 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-2">
+              <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-200 flex-shrink-0 font-medium">VoIP</span>
+              <span class="font-mono text-[13px] font-medium text-gray-900 truncate">${escapeHtml(c.device_id)}</span>
+            </div>
+            <div class="text-xs text-gray-400 mt-1 truncate">${escapeHtml(c.remark) || '小程序授权 · ' + escapeHtml(c.wx_app_id || '未知应用')}</div>
+          </div>
+          <div class="flex gap-1.5 flex-shrink-0">
+            <button onclick="askRemark(${index})" class="text-[11px] font-medium px-2.5 py-1 rounded-md border border-gray-200 text-gray-500 hover:border-gray-300 hover:text-gray-700 transition-all">改备注</button>
+            <span class="text-[11px] text-gray-400 self-center">自动</span>
+          </div>
+        </div>`;
+    }
+    return `
+      <div class="bg-white border border-gray-200 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center gap-2">
+            <span class="w-[7px] h-[7px] rounded-full flex-shrink-0 ${c.online ? 'bg-emerald-500 animate-pulse-dot' : 'bg-gray-300'}" title="${c.online ? '在线' : '离线'}"></span>
+            <span class="font-mono text-[13px] font-medium text-gray-900 truncate">${escapeHtml(c.device_id)}</span>
+            ${c.source === 'auto' ? '<span class="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-50 text-violet-600 border border-violet-200 flex-shrink-0">同账号</span>' : ''}
+          </div>
+          <div class="text-xs text-gray-400 mt-1 truncate">${escapeHtml(c.remark) || '（无备注）'}</div>
+        </div>
+        <div class="flex gap-1.5 flex-shrink-0">
+          <button onclick="askRemark(${index})" class="text-[11px] font-medium px-2.5 py-1 rounded-md border border-gray-200 text-gray-500 hover:border-gray-300 hover:text-gray-700 transition-all">改备注</button>
+          ${c.source === 'manual' ? `<button onclick="askDelete(${index})" class="text-[11px] font-medium px-2.5 py-1 rounded-md border border-gray-200 text-gray-400 hover:border-red-200 hover:text-red-500 hover:bg-red-50 transition-all">删除</button>` : ''}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+async function loadPending() {
+  const res = await api('/v1/call/user/contacts/pending');
+  const list = $('pending-list');
+  if (res.code !== 200) {
+    list.innerHTML = `<p class="text-sm text-gray-400 py-4 text-center">加载失败：${escapeHtml(res.msg || '')}</p>`;
+    $('pending-count').textContent = '';
+    return;
+  }
+  const pending = res.data.pending || [];
+  lastPending = pending;
+  $('pending-count').textContent = pending.length ? `(${pending.length})` : '';
+  if (!pending.length) {
+    list.innerHTML = '<p class="text-sm text-gray-400 py-4 text-center">没有待审批的申请</p>';
+    return;
+  }
+  list.innerHTML = pending.map((p, index) => `
+    <div class="bg-white border border-amber-200 bg-amber-50/40 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
+      <div class="min-w-0 flex-1">
+        <div class="font-mono text-[13px] font-medium text-gray-900 truncate">${escapeHtml(p.initiator_device)}</div>
+        <div class="text-xs text-gray-400 mt-0.5">申请添加 ${escapeHtml(p.target_device)} 为联系人</div>
+      </div>
+      <div class="flex gap-1.5 flex-shrink-0">
+        <button onclick="respond(${index}, 'accept')" class="text-[11px] font-medium px-2.5 py-1 rounded-md border border-emerald-200 text-emerald-600 bg-emerald-50 hover:bg-emerald-100 transition-all">同意</button>
+        <button onclick="respond(${index}, 'reject')" class="text-[11px] font-medium px-2.5 py-1 rounded-md border border-gray-200 text-gray-400 hover:border-red-200 hover:text-red-500 transition-all">拒绝</button>
+      </div>
+    </div>`).join('');
+}
+
+async function addContact() {
+  const target = $('add-target').value.trim();
+  if (!target) { toast('请输入对方设备 ID', true); return; }
+  if (target === currentDeviceId) { toast('不能添加自己为联系人', true); return; }
+  const res = await api('/v1/call/user/contacts/request', {
+    method: 'POST',
+    body: JSON.stringify({ device_id: currentDeviceId, target_device_id: target }),
+  });
+  if (res.code === 200) {
+    $('add-target').value = '';
+    toast(res.data.status === 'accepted' ? '已自动关联（同账号）' : '申请已发送');
+    loadContacts();
+  } else {
+    toast(res.msg || '发起申请失败', true);
+  }
+}
+
+async function respond(index, action) {
+  const pending = lastPending[index];
+  if (!pending) return;
+  const res = await api('/v1/call/user/contacts/respond', {
+    method: 'POST',
+    body: JSON.stringify({ id: pending.id, action }),
+  });
+  if (res.code === 200) {
+    toast(action === 'accept' ? '已同意' : '已拒绝');
+    loadPending();
+    loadContacts();
+  } else {
+    toast(res.msg || '操作失败', true);
+  }
+}
+
+function askRemark(index) {
+  remarkTarget = lastContacts[index] || null;
+  const contact = remarkTarget;
+  $('remark-input').value = contact ? contact.remark || '' : '';
+  const modal = $('remark-modal');
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+}
+
+function closeRemarkModal() {
+  remarkTarget = null;
+  const modal = $('remark-modal');
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+}
+
+async function saveRemark() {
+  const contact = remarkTarget;
+  const remark = $('remark-input').value.trim();
+  closeRemarkModal();
+  if (!contact) return;
+  const res = await api('/v1/call/user/contacts/remark', {
+    method: 'PUT',
+    body: JSON.stringify({ device_id: currentDeviceId, peer_id: contact.device_id, remark }),
+  });
+  if (res.code === 200) { toast('备注已更新'); loadContacts(); }
+  else toast(res.msg || '修改失败', true);
+}
+
+function askDelete(index) {
+  deleteTarget = lastContacts[index] || null;
+  const modal = $('delete-modal');
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+}
+
+function closeDeleteModal() {
+  deleteTarget = null;
+  const modal = $('delete-modal');
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+}
+
+async function doDelete() {
+  const contact = deleteTarget;
+  closeDeleteModal();
+  if (!contact) return;
+  const path = '/v1/call/user/contacts/' + encodeURIComponent(contact.id);
+  const res = await api(path, { method: 'DELETE' });
+  if (res.code === 200) { toast('已删除'); loadContacts(); }
+  else toast(res.msg || '删除失败', true);
+}
+
+loadDevices();
+loadPending();
+</script>
+</body>
+</html>

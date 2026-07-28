@@ -1,0 +1,34 @@
+server:
+  http_port: 9005
+
+log:
+  level: info  # debug|info|warn|error
+  format: text  # text|json
+
+database:
+  dsn: "user:password@tcp(127.0.0.1:3306)/tirtc_thing_connect?parseTime=true"
+
+redis:
+  addr: "127.0.0.1:6379"
+  password: ""
+  db: 0
+
+mqtt:
+  broker: "mqtts://mqtt-open.tangeopen.com:8883"
+  client_id: "callsrv_main"
+  password: "your-mqtt-password"
+
+jwt_secret: "your-jwt-secret-shared-with-device-server"
+
+tirtc:
+  app_id: "your-tirtc-app-id"
+  access_key_id: "your-access-key-id"
+  secret_key_id: "your-secret-key-id"
+  endpoint: "https://your-tirtc-endpoint"
+
+service:
+  max_contacts_per_device: 200
+  room_ttl_hours: 12
+
+call:
+  internal_key: "your-internal-service-key"  # 须与 user/ai/voip-server 一致

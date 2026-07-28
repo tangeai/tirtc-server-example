@@ -1,0 +1,37 @@
+server:
+  http_port: 9001
+
+log:
+  level: info  # debug|info|warn|error
+  format: text  # text|json
+
+database:
+  dsn: "root:password@tcp(127.0.0.1:3306)/thing_connect?parseTime=true&charset=utf8mb4&loc=Local"
+
+redis:
+  addr: "127.0.0.1:6379"
+  password: ""
+  db: 0
+
+mqtt:
+  broker: "mqtts://mqtt-open.tangeopen.com:8883"
+  # 二选一，不要同时填：
+  # clientid 认证模式（单实例，ClientID 固定，在 EMQX 内置数据库注册对应 ClientID）
+  client_id: "devicesrv"
+  # username 认证模式（多实例，实际 ClientID 自动加 hostname 后缀，在 EMQX 注册对应 username）
+  # username: "devicesrv"
+  password: "replace-with-mqtt-password"
+
+jwt_secret: "replace-with-a-strong-random-secret"
+
+# 业务参数（全部可选，缺省使用括号内默认值）
+service:
+  quota_per_user: 10                 # 兼容字段；当前注册不读取，配额来自 users.bind_quota 默认值
+  code_ttl: 190s                     # 验证码有效期（默认 190s）
+  rate_limit_window: 190s            # L3 指纹请求计数窗口（默认 190s）
+  rate_limit_max_hits: 10            # 单指纹窗口内最大请求数（默认 10）
+  ip_rate_limit_window: 60s          # L2 IP 指纹计数窗口（默认 60s）
+  ip_rate_limit_max_fingerprints: 50 # 单 IP 窗口内最多不同指纹数（默认 50）
+  global_max_pending_codes: 10000    # 全局同时最多未使用验证码（默认 10000）
+  token_expiry: 168h                 # JWT 有效期（默认 7 天）
+  mqtt_ack_timeout: 5s               # MQTT 下发等待 ACK 超时（默认 5s）

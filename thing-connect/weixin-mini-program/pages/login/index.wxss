@@ -1,0 +1,212 @@
+/* thing-connect/weixin-mini-program/pages/login/index.wxss */
+.page {
+  min-height: 100vh;
+  background: #EDEDED;
+}
+
+/* ── 顶部装饰 ── */
+.hero {
+  position: relative;
+  height: 280rpx;
+  background: #07C160;
+  display: flex;
+  align-items: flex-end;
+  padding: 0 48rpx 40rpx;
+  overflow: hidden;
+}
+
+.hero-circle {
+  position: absolute;
+  width: 480rpx;
+  height: 480rpx;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.12);
+  top: -200rpx;
+  right: -120rpx;
+}
+
+.hero-text {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+  position: relative;
+}
+
+.hero-title {
+  font-size: 48rpx;
+  font-weight: bold;
+  color: #fff;
+  letter-spacing: 2rpx;
+}
+
+.hero-sub {
+  font-size: 24rpx;
+  color: rgba(255,255,255,0.75);
+}
+
+/* ── 表单卡片 ── */
+.card {
+  background: #fff;
+  border-radius: 24rpx 24rpx 0 0;
+  margin-top: -24rpx;
+  padding: 48rpx 40rpx 60rpx;
+  min-height: calc(100vh - 256rpx);
+}
+
+/* ── Tab ── */
+.tabs {
+  display: flex;
+  background: #F5F5F5;
+  border-radius: 14rpx;
+  padding: 4rpx;
+  margin-bottom: 44rpx;
+}
+
+.tab {
+  flex: 1;
+  text-align: center;
+  padding: 18rpx 0;
+  font-size: 28rpx;
+  color: #999;
+  border-radius: 10rpx;
+}
+
+.tab-active {
+  background: #fff;
+  color: #07C160;
+  font-weight: 600;
+  box-shadow: 0 2rpx 12rpx rgba(0,0,0,0.08);
+}
+
+/* ── 表单 ── */
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 32rpx;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 10rpx;
+}
+
+.label {
+  font-size: 26rpx;
+  color: #333;
+  font-weight: 500;
+}
+
+.input {
+  background: #F5F5F5;
+  border-radius: 12rpx;
+  padding: 26rpx 28rpx;
+  font-size: 28rpx;
+  color: #1A1A1A;
+  border: none;
+}
+
+.ph {
+  color: #BDBDBD;
+}
+
+/* ── 验证码行 ── */
+.code-row {
+  display: flex;
+  gap: 16rpx;
+}
+
+.input-code {
+  flex: 1;
+}
+
+.btn-code {
+  width: 220rpx;
+  height: 88rpx;
+  background: #E8F8EF;
+  color: #07C160;
+  border: none;
+  border-radius: 12rpx;
+  font-size: 26rpx;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  line-height: normal;
+  flex-shrink: 0;
+}
+
+.btn-code[disabled] {
+  color: #BDBDBD;
+  background: #F5F5F5;
+}
+
+/* ── 密码眼睛 ── */
+.input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input-pwd {
+  flex: 1;
+  padding-right: 80rpx;
+}
+
+.eye-btn {
+  position: absolute;
+  right: 20rpx;
+  width: 52rpx;
+  height: 52rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.eye-icon {
+  width: 40rpx;
+  height: 40rpx;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+.eye-open {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23BDBDBD' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z'/%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3C/svg%3E");
+}
+
+.eye-close {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23BDBDBD' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24'/%3E%3Cline x1='1' y1='1' x2='23' y2='23'/%3E%3C/svg%3E");
+}
+
+/* ── 主按钮 ── */
+.btn-primary {
+  width: 100%;
+  height: 96rpx;
+  background: #07C160;
+  color: #fff;
+  border-radius: 48rpx;
+  font-size: 32rpx;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  line-height: normal;
+  margin-top: 8rpx;
+  border: none;
+}
+
+.btn-primary[disabled] {
+  opacity: 0.5;
+}
+
+/* ── 错误提示 ── */
+.err-msg {
+  display: block;
+  text-align: center;
+  color: #FA5151;
+  font-size: 26rpx;
+  margin-top: 8rpx;
+}
