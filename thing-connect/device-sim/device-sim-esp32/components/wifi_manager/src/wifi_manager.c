@@ -327,10 +327,18 @@ esp_err_t wifi_manager_start(void)
         ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
     }
     err = esp_wifi_start();
-    if (err == ESP_OK) {
-        s_started = true;
+    if (err != ESP_OK) {
+        return err;
     }
-    return err;
+    err = esp_wifi_set_ps(WIFI_PS_NONE);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "cannot disable Wi-Fi power save: %s",
+                 esp_err_to_name(err));
+        return err;
+    }
+    ESP_LOGI(TAG, "Wi-Fi power save disabled for real-time media");
+    s_started = true;
+    return ESP_OK;
 }
 
 bool wifi_manager_connected(void)

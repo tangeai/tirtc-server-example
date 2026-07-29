@@ -2,25 +2,28 @@
 
 ESP32-S3 TiRTC 设备参考实现，目标硬件为 ESP32-S3 N16R8（16 MB Flash、8 MB
 octal PSRAM），使用 ESP-IDF 5.5.x 和 TiRTC SDK 2.2.1。默认 Demo 不依赖 TF 卡，
-不保存下行媒体。
+H5 实时、AI 对讲、VoIP 和设备互呼均为纯音频，不保存下行音频。
 
 需求与跨芯片边界见 [ESP32S3_REFERENCE.md](../ESP32S3_REFERENCE.md)。
 
 ## 已实现
 
 - TiRTC SDK 外部目录选择和构建契约校验。
-- SPIFFS 媒体分区、`media_profile.json`、素材启动校验和音视频按 PTS 循环发送。
-- G711A 固定包、AMR-NB/AMR-WB 标准文件帧、Opus 包容器、MJPEG 和 H264 Annex-B
-  读取器。
+- SPIFFS 媒体分区、`media_profile.json`、音频素材启动校验和按 PTS 循环发送。
+- TiRTC 上行音频流 ID 为 10；入站连接等待对端订阅，外连等待业务确认后才开始发送。
+- G711A 8 kHz 单声道固定包读取器。
 - Wi-Fi NVS 持久化、串口修改、无配置/连接失败时的 SoftAP 配网页面。
+- STA 关闭 Wi-Fi 省电模式，避免实时 KCP 音频因休眠产生排队和抖动。
 - 首次验证码绑定、临时 MQTT `auth_grant`/ACK、设备凭证 NVS 持久化和解绑重绑。
 - 服务发现、SNTP、HMAC-SHA256 设备登录、业务 HTTP、永久 MQTT、ACK 和心跳。
 - H5 入站推流、AI PTT、VoIP、设备互呼的统一会话状态和串口交互。
-- 下行媒体不落盘：无喇叭/屏幕时输出限频元数据日志，并保留产品接入 TODO。
-- H5 和 AI 拒绝下行视频；VoIP/设备互呼按设备唯一媒体配置决定是否接收视频。
+- TiRTC SDK 启动后常驻，四类业务共用同一回调表；业务切换只切换连接，不反复停启 SDK。
+- 会话和连接 generation 隔离迟到的连接结果、命令和 HTTP 响应。
+- 下行音频不落盘：无喇叭时输出限频元数据日志，并保留产品接入 TODO。
+- 纯音频能力由运行时代码强制校验；视频订阅固定拒绝，不打包视频素材，也不创建视频发送任务。
 
-当前仓库已完成主机单元测试以及 MJPEG、H264、纯音频三种 ESP-IDF 固件构建。真实账号、
-MQTT 信令、P2P/WHIP 媒体互通仍须在 ESP32-S3 实机和对应服务环境上联调。
+当前仓库已完成主机单元测试和 ESP32-S3 纯音频固件构建。真实账号、MQTT 信令及
+P2P/WHIP 音频互通仍须在 ESP32-S3 实机和对应服务环境上联调。
 
 ## 目录
 
@@ -34,8 +37,7 @@ device-sim-esp32/
 │   ├── wifi_manager/      # NVS、STA、SoftAP 配网页面
 │   ├── runtime_config/    # 设备凭证 NVS
 │   └── device_console/    # 串口命令
-├── media/                 # 默认 MJPEG 配置，只烧录这一套
-├── media-profiles/        # 可选 H264、audio-only 配置，不参与默认烧录
+├── media/                 # 默认纯音频配置和 G711A 素材
 └── partitions.csv         # 4 MiB app + 1.5 MiB media
 ```
 
@@ -60,40 +62,19 @@ idf.py -DTIRTC_SDK_DIR=/absolute/path/to/espressif-esp32s3/2.2.1 build
 
 ## 构建与烧录
 
-默认 MJPEG 640×480、8 fps、10 秒：
+默认配置使用 `number.alaw_8khz`：G711A 8 kHz 单声道数字语音，按 40 ms/包发送。
+所有业务均为纯音频：
 
 ```bash
 idf.py set-target esp32s3
 idf.py build
-idf.py -p /dev/ttyUSB0 flash monitor
+idf.py -p /dev/ttyACM0 flash monitor
 ```
 
 `flash` 会同时烧录应用和 `media.bin`。默认素材是：
 
 ```text
-audio_g711a_8khz_mono_20ms_10s_500packets.g711a
-video_mjpeg_640x480_8fps_10s_80frames.mjpeg
-```
-
-构建 H264 640×480、15 fps、10 秒版本时使用独立构建目录：
-
-```bash
-idf.py -B build-h264 \
-  -DDEVICE_MEDIA_DIR="$PWD/media-profiles/h264" \
-  build
-idf.py -B build-h264 -p /dev/ttyUSB0 flash monitor
-```
-
-H264 目录只含 G711A 和
-`video_h264_annexb_640x480_15fps_10s_150frames.h264`。两种视频不会同时进入同一个
-Flash 镜像。
-
-纯音频设备可选择不含视频文件、也不分配视频帧缓冲的配置：
-
-```bash
-idf.py -B build-audio-only \
-  -DDEVICE_MEDIA_DIR="$PWD/media-profiles/audio-only" \
-  build
+number.alaw_8khz
 ```
 
 ## 首次配置
@@ -133,9 +114,12 @@ tirtc-clear  # 清除绑定凭证，重启后重新显示验证码
 
 ## 串口交互
 
+默认主控制台使用 ESP32-S3 原生 USB Serial/JTAG，对应 Linux/WSL 中的
+`/dev/ttyACM*`。日志输出和 `tirtc>` 命令输入使用同一个端口。
+
 ```text
 status          查看 Wi-Fi、平台、MQTT、TiRTC、会话和媒体配置
-ai-press        模拟按住 AI 键，建连后持续循环发送配置的音频/可选视频
+ai-press        模拟按住 AI 键，建连后持续循环发送音频
 ai-release      模拟松开 AI 键，结束 AI 会话
 voip-call       呼叫第一个授权 VoIP 联系人
 contacts        查看设备互呼联系人
@@ -155,24 +139,19 @@ restart         重启
 
 ## 媒体配置
 
-一台设备只读取一份 `media_profile.json`，所有业务共用同一音频、视频编码和上下行视频开关。
+一台设备只读取一份 `media_profile.json`，所有业务共用同一音频配置。
 
-- G711A：裸数据，20 ms 固定包；8 kHz 每包 160 字节，16 kHz 每包 320 字节。
-- AMR-NB：标准 `#!AMR\n` 文件；AMR-WB：标准 `#!AMR-WB\n` 文件；按 TOC 保留帧边界。
-- Opus：Demo 容器以 `TIRTCOPUS1\n` 开头，每包为 2 字节大端长度加 Opus payload。
-- MJPEG：按 JPEG SOI/EOI 拆帧，每帧作为关键帧。
-- H264：裸 Annex-B，按访问单元拆帧并识别 IDR。
+- G711A：默认素材为 `number.alaw_8khz`，8 kHz 单声道，40 ms 每包 320 字节，
+  共 546 包、21.84 秒。
+- `video.file` 为空，`uplink_enabled=false`，`downlink_enabled=false`。
+- H5 实时、AI 对讲、VoIP、设备互呼都只发送和接收音频。
 
-裸 MJPEG 连续流没有帧率元数据，分析工具可能显示推测帧率；本 Demo 始终按配置中的
-`fps=8` 和 PTS 节拍发送。
-
-AMR/Opus 配置也要求 10 秒、20 ms/包、共 500 包。启动校验不通过时不会启动媒体发送。
+启动时会校验音频时长、包数和文件内容大小是否一致；校验不通过时不会启动媒体发送。
 
 ## 下行接入点
 
 当前下行回调只统计并限频打印，不写 Flash：
 
 - 有喇叭：在 `tirtc_adapter.c` 的 `TODO(product-audio)` 后投递到独立播放任务。
-- 有屏：在 `TODO(product-video)` 后投递到独立显示任务。
 
-不要在 TiRTC SDK 回调线程中同步解码、播放、渲染或逐帧打印。
+不要在 TiRTC SDK 回调线程中同步解码、播放或逐帧打印。

@@ -29,6 +29,8 @@ static int command_status(int argc, char **argv)
     printf("\nTiRTC: state=%d connection=%s\n",
            (int)tirtc_adapter_state(),
            tirtc_adapter_has_connection() ? "active" : "none");
+    printf("       audio subscription=%s; video=unsupported\n",
+           tirtc_adapter_audio_subscribed() ? "active" : "inactive");
     printf("Platform: api=%s mqtt=%s\n",
            platform_client_ready() ? "ready" : "offline",
            platform_client_mqtt_connected() ? "connected" : "disconnected");
@@ -46,14 +48,7 @@ static int command_status(int argc, char **argv)
                device_audio_codec_name(media->audio.codec),
                (unsigned long)media->audio.sample_rate_hz,
                media->audio.asset_path);
-        printf("       video=%s %ux%u@%u file=%s up=%d down=%d\n",
-               device_video_codec_name(media->video.codec),
-               media->video.width,
-               media->video.height,
-               media->video.fps,
-               media->video.asset_path,
-               media->video.uplink_enabled,
-               media->video.downlink_enabled);
+        printf("       video=unsupported\n");
     }
     return 0;
 }

@@ -66,6 +66,12 @@ esp_err_t platform_client_request(platform_service_t service,
                                   const char *json_body,
                                   platform_response_callback_t callback,
                                   void *user_data);
+esp_err_t platform_client_request_timeout(platform_service_t service,
+                                          const char *path,
+                                          const char *json_body,
+                                          unsigned timeout_ms,
+                                          platform_response_callback_t callback,
+                                          void *user_data);
 
 void platform_client_set_signal_handler(platform_signal_callback_t callback,
                                         void *user_data);

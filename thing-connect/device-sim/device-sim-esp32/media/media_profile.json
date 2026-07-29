@@ -1,27 +1,26 @@
 {
   "audio": {
-    "file": "number.amr_wb",
-    "codec": "amr",
-    "sample_rate_hz": 16000,
+    "file": "number.alaw_8khz",
+    "codec": "g711a",
+    "sample_rate_hz": 8000,
     "channels": 1,
-    "packet_ms": 20,
-    "duration_ms": 10000,
-    "packet_count": 500
+    "packet_ms": 40,
+    "duration_ms": 21840,
+    "packet_count": 546
   },
   "video": {
-    "file": "video_mjpeg_240x320_8fps_10s_80frames.mjpeg",
+    "file": "",
     "codec": "mjpeg",
-    "width": 240,
-    "height": 320,
-    "camera_rotation": 270,
+    "width": 0,
+    "height": 0,
+    "camera_rotation": 0,
     "aspect_ratio": 1.3333333333,
-    "object_fit": "contain",
     "hor_mirror": false,
     "vert_mirror": false,
-    "fps": 8,
-    "duration_ms": 10000,
-    "frame_count": 80,
-    "uplink_enabled": true,
-    "downlink_enabled": true
+    "fps": 0,
+    "duration_ms": 0,
+    "frame_count": 0,
+    "uplink_enabled": false,
+    "downlink_enabled": false
   }
 }

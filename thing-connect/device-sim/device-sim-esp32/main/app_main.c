@@ -21,6 +21,8 @@
 static const char *TAG = "device_main";
 static runtime_tirtc_config_t s_tirtc_config;
 
+#define START_RETRY_DELAY_MS 5000U
+
 static void station_identity(char mac_address[18], char client_id[65])
 {
     uint8_t mac[6];
@@ -117,37 +119,71 @@ static void tirtc_start_task(void *argument)
         .client_id = s_tirtc_config.client_id,
         .mac_address = mac_address,
     };
-    esp_err_t platform_result = platform_client_start(&platform);
-    if (platform_result == ESP_ERR_NOT_FOUND) {
-        ESP_LOGW(TAG,
-                 "stored device was unbound; starting signed verification rebind");
-        platform_result = provision_and_save(mac_address, true);
-        if (platform_result == ESP_OK) {
-            platform_result = platform_client_start(&platform);
+    bool rebind_attempted = false;
+    bool tirtc_submitted = false;
+    for (;;) {
+        while (!wifi_manager_connected()) {
+            vTaskDelay(pdMS_TO_TICKS(250));
         }
-    }
-    if (platform_result != ESP_OK) {
-        ESP_LOGE(TAG,
-                 "platform signaling unavailable: %s; H5 can still use TiRTC when an endpoint is configured",
-                 esp_err_to_name(platform_result));
-    }
 
-    const char *endpoint = s_tirtc_config.service_endpoint;
-    if (endpoint[0] == '\0' && platform_client_ready()) {
-        endpoint = platform_client_tirtc_endpoint();
-    }
-    const tirtc_adapter_config_t adapter = {
-        .device_id = s_tirtc_config.device_id,
-        .device_secret = s_tirtc_config.device_secret,
-        .client_id = s_tirtc_config.client_id,
-        .service_endpoint = endpoint,
-        .max_send_buffer_bytes = 256U * 1024U,
-        .max_connections = 1,
-        .log_level = 3,
-    };
-    int rc = tirtc_adapter_start(&adapter);
-    if (rc != 0) {
-        ESP_LOGE(TAG, "TiRTC start failed rc=%d", rc);
+        if (!platform_client_ready()) {
+            esp_err_t platform_result = platform_client_start(&platform);
+            if (platform_result == ESP_ERR_NOT_FOUND && !rebind_attempted) {
+                rebind_attempted = true;
+                ESP_LOGW(TAG,
+                         "stored device was unbound; starting signed verification rebind");
+                platform_result = provision_and_save(mac_address, true);
+                if (platform_result == ESP_OK) {
+                    platform_result = platform_client_start(&platform);
+                }
+            }
+            if (platform_result != ESP_OK) {
+                ESP_LOGE(TAG,
+                         "platform signaling unavailable: %s",
+                         esp_err_to_name(platform_result));
+            }
+        }
+
+        if (!tirtc_submitted) {
+            const char *endpoint = s_tirtc_config.service_endpoint;
+            if (endpoint[0] == '\0' && platform_client_ready()) {
+                endpoint = platform_client_tirtc_endpoint();
+            }
+            if (endpoint[0] != '\0') {
+                if (tirtc_adapter_state() == TIRTC_ADAPTER_ERROR) {
+                    (void)tirtc_adapter_deinit();
+                }
+                const tirtc_adapter_config_t adapter = {
+                    .device_id = s_tirtc_config.device_id,
+                    .device_secret = s_tirtc_config.device_secret,
+                    .client_id = s_tirtc_config.client_id,
+                    .service_endpoint = endpoint,
+                    .max_send_buffer_bytes = 256U * 1024U,
+                    .max_connections = 1,
+                    .log_level = 3,
+                };
+                int rc = tirtc_adapter_start(&adapter);
+                if (rc == 0) {
+                    tirtc_submitted = true;
+                } else {
+                    ESP_LOGE(TAG, "TiRTC start failed rc=%d", rc);
+                    if (tirtc_adapter_state() == TIRTC_ADAPTER_ERROR) {
+                        (void)tirtc_adapter_deinit();
+                    }
+                }
+            } else {
+                ESP_LOGW(TAG,
+                         "TiRTC endpoint unavailable until service discovery succeeds");
+            }
+        }
+
+        if (platform_client_ready() && tirtc_submitted) {
+            break;
+        }
+        ESP_LOGW(TAG,
+                 "startup incomplete; retrying platform/TiRTC in %u ms",
+                 START_RETRY_DELAY_MS);
+        vTaskDelay(pdMS_TO_TICKS(START_RETRY_DELAY_MS));
     }
     vTaskDelete(NULL);
 }

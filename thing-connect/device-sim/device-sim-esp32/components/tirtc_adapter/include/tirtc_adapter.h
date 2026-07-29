@@ -2,6 +2,7 @@
 #define TIRTC_ADAPTER_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "device/device_media.h"
@@ -30,10 +31,15 @@ typedef struct {
 } tirtc_adapter_config_t;
 
 typedef struct {
-    void (*on_connection_changed)(bool connected, bool incoming, void *user_data);
+    void (*on_connection_changed)(bool connected,
+                                  bool incoming,
+                                  uint32_t connection_generation,
+                                  uint32_t request_tag,
+                                  void *user_data);
     void (*on_command)(uint32_t command,
                        const void *data,
                        uint32_t length,
+                       uint32_t connection_generation,
                        void *user_data);
     void *user_data;
 } tirtc_adapter_event_handlers_t;
@@ -53,9 +59,13 @@ int tirtc_adapter_deinit(void);
 
 bool tirtc_adapter_has_connection(void);
 uint32_t tirtc_adapter_connection_generation(void);
-int tirtc_adapter_connect(const char *remote_id, const char *token);
+int tirtc_adapter_connect(const char *remote_id,
+                          const char *token,
+                          uint32_t request_tag);
 int tirtc_adapter_disconnect(void);
-int tirtc_adapter_whip_connect(const char *service_description, const char *token);
+int tirtc_adapter_whip_connect(const char *service_description,
+                               const char *token,
+                               uint32_t request_tag);
 int tirtc_adapter_send_command(uint32_t command,
                                const void *data,
                                uint32_t length);
@@ -64,16 +74,13 @@ int tirtc_adapter_service_request(const char *path,
                                   const char *token,
                                   tirtc_adapter_service_callback_t callback,
                                   void *user_data);
-void tirtc_adapter_set_downlink_video_enabled(bool enabled);
+bool tirtc_adapter_audio_subscribed(void);
+bool tirtc_adapter_audio_uplink_ready(void);
+size_t tirtc_adapter_send_buffer_used(void);
 void tirtc_adapter_set_event_handlers(const tirtc_adapter_event_handlers_t *handlers);
 
 int tirtc_adapter_send_audio(const device_audio_config_t *config,
                              uint32_t timestamp_ms,
-                             const void *data,
-                             uint32_t length);
-int tirtc_adapter_send_video(const device_video_config_t *config,
-                             uint32_t timestamp_ms,
-                             bool key_frame,
                              const void *data,
                              uint32_t length);
 

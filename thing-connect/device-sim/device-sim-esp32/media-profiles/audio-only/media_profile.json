@@ -1,12 +1,12 @@
 {
   "audio": {
-    "file": "audio_g711a_8khz_mono_20ms_10s_500packets.g711a",
+    "file": "number.alaw_8khz",
     "codec": "g711a",
     "sample_rate_hz": 8000,
     "channels": 1,
-    "packet_ms": 20,
-    "duration_ms": 10000,
-    "packet_count": 500
+    "packet_ms": 40,
+    "duration_ms": 21840,
+    "packet_count": 546
   },
   "video": {
     "file": "",

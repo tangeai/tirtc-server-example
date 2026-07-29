@@ -2,13 +2,13 @@
 
 #include <errno.h>
 #include <stdio.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 
 #include "cJSON.h"
 #include "device/device_media_file.h"
-#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_spiffs.h"
 #include "esp_timer.h"
@@ -20,7 +20,6 @@
 #define MEDIA_PROFILE_PATH MEDIA_MOUNT_POINT "/media_profile.json"
 #define MEDIA_JSON_MAX_BYTES 8192U
 #define MEDIA_AUDIO_BUFFER_BYTES 1500U
-#define MEDIA_VIDEO_BUFFER_BYTES (256U * 1024U)
 
 typedef struct {
     device_g711_file_t g711;
@@ -31,9 +30,9 @@ typedef struct {
 static const char *TAG = "media_runtime";
 static device_media_config_t s_config;
 static bool s_ready;
-static volatile bool s_task_running;
-static volatile bool s_uplink_active;
-static TaskHandle_t s_task;
+static atomic_bool s_tasks_running;
+static atomic_bool s_uplink_active;
+static TaskHandle_t s_audio_task;
 
 static bool json_u32(const cJSON *object, const char *name, uint32_t *value)
 {
@@ -285,6 +284,11 @@ static esp_err_t load_profile(device_media_config_t *config)
                  ok ? validation_error : "missing or invalid field");
         return ESP_ERR_INVALID_ARG;
     }
+    if (config->video.uplink_enabled || config->video.downlink_enabled) {
+        ESP_LOGE(TAG,
+                 "invalid media profile: ESP32-S3 target is audio-only");
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     if (strchr(config->audio.asset_path, '/') != NULL ||
         strchr(config->video.asset_path, '/') != NULL) {
         ESP_LOGE(TAG, "asset paths must be file names in %s", MEDIA_MOUNT_POINT);
@@ -296,16 +300,6 @@ static esp_err_t load_profile(device_media_config_t *config)
 static void asset_path(char *path, size_t path_size, const char *file_name)
 {
     (void)snprintf(path, path_size, MEDIA_MOUNT_POINT "/%s", file_name);
-}
-
-static uint8_t *allocate_video_buffer(void)
-{
-    uint8_t *buffer = heap_caps_malloc(MEDIA_VIDEO_BUFFER_BYTES,
-                                       MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (buffer == NULL) {
-        buffer = heap_caps_malloc(MEDIA_VIDEO_BUFFER_BYTES, MALLOC_CAP_8BIT);
-    }
-    return buffer;
 }
 
 static device_media_file_result_t open_audio_source(audio_source_t *source,
@@ -363,49 +357,10 @@ static void close_audio_source(audio_source_t *source)
     device_opus_packet_file_close(&source->opus);
 }
 
-static device_media_file_result_t open_video_source(device_mjpeg_file_t *mjpeg,
-                                                    device_h264_file_t *h264,
-                                                    const char *path)
-{
-    if (s_config.video.codec == DEVICE_VIDEO_CODEC_MJPEG) {
-        return device_mjpeg_file_open(mjpeg, path);
-    }
-    if (s_config.video.codec == DEVICE_VIDEO_CODEC_H264) {
-        return device_h264_file_open(h264, path);
-    }
-    return DEVICE_MEDIA_FILE_INVALID;
-}
-
-static device_media_file_result_t next_video_frame(device_mjpeg_file_t *mjpeg,
-                                                   device_h264_file_t *h264,
-                                                   uint8_t *buffer,
-                                                   size_t capacity,
-                                                   size_t *size,
-                                                   bool *key_frame,
-                                                   bool loop)
-{
-    if (s_config.video.codec == DEVICE_VIDEO_CODEC_MJPEG) {
-        *key_frame = true;
-        return device_mjpeg_file_next(mjpeg, buffer, capacity, size, loop);
-    }
-    if (s_config.video.codec == DEVICE_VIDEO_CODEC_H264) {
-        return device_h264_file_next(h264, buffer, capacity, size, key_frame, loop);
-    }
-    return DEVICE_MEDIA_FILE_INVALID;
-}
-
-static void close_video_source(device_mjpeg_file_t *mjpeg, device_h264_file_t *h264)
-{
-    device_mjpeg_file_close(mjpeg);
-    device_h264_file_close(h264);
-}
-
 static esp_err_t validate_assets(void)
 {
     char audio_path[DEVICE_MEDIA_ASSET_PATH_MAX + sizeof(MEDIA_MOUNT_POINT)];
-    char video_path[DEVICE_MEDIA_ASSET_PATH_MAX + sizeof(MEDIA_MOUNT_POINT)];
     asset_path(audio_path, sizeof(audio_path), s_config.audio.asset_path);
-    asset_path(video_path, sizeof(video_path), s_config.video.asset_path);
 
     struct stat info;
     uint32_t audio_packet_bytes =
@@ -446,6 +401,9 @@ static esp_err_t validate_assets(void)
                 if (packet_size > largest_packet) {
                     largest_packet = packet_size;
                 }
+                if ((packet_count & 0x0fU) == 0U) {
+                    vTaskDelay(1);
+                }
             }
         }
         close_audio_source(&source);
@@ -463,202 +421,119 @@ static esp_err_t validate_assets(void)
                  (unsigned long)packet_count, (unsigned)largest_packet);
     }
 
-    if (!s_config.video.uplink_enabled) {
-        ESP_LOGI(TAG,
-                 "assets verified: audio=%lu packets, uplink video=disabled",
-                 (unsigned long)s_config.audio.packet_count);
-        return ESP_OK;
-    }
-    uint8_t *frame = allocate_video_buffer();
-    if (frame == NULL) {
-        return ESP_ERR_NO_MEM;
-    }
-    device_mjpeg_file_t mjpeg = {0};
-    device_h264_file_t h264 = {0};
-    device_media_file_result_t result = open_video_source(&mjpeg, &h264, video_path);
-    uint32_t count = 0;
-    size_t largest = 0;
-    bool first_frame = true;
-    if (result == DEVICE_MEDIA_FILE_OK) {
-        for (;;) {
-            size_t size = 0;
-            bool key_frame = false;
-            result = next_video_frame(&mjpeg,
-                                      &h264,
-                                      frame,
-                                      MEDIA_VIDEO_BUFFER_BYTES,
-                                      &size,
-                                      &key_frame,
-                                      false);
-            if (result == DEVICE_MEDIA_FILE_EOF) {
-                break;
-            }
-            if (result != DEVICE_MEDIA_FILE_OK) {
-                break;
-            }
-            if (first_frame && !key_frame) {
-                result = DEVICE_MEDIA_FILE_INVALID;
-                break;
-            }
-            first_frame = false;
-            count++;
-            if (size > largest) {
-                largest = size;
-            }
-        }
-        close_video_source(&mjpeg, &h264);
-    }
-    free(frame);
-
-    if (result != DEVICE_MEDIA_FILE_EOF || count != s_config.video.frame_count) {
-        ESP_LOGE(TAG,
-                 "video asset mismatch: %s expected=%lu frames actual=%lu result=%s",
-                 video_path,
-                 (unsigned long)s_config.video.frame_count,
-                 (unsigned long)count,
-                 device_media_file_result_name(result));
-        return ESP_ERR_INVALID_SIZE;
-    }
     ESP_LOGI(TAG,
-             "assets verified: audio=%lu packets, video=%lu frames, max-frame=%u bytes",
-             (unsigned long)s_config.audio.packet_count,
-             (unsigned long)count,
-             (unsigned)largest);
+             "assets verified: audio=%lu packets; video unsupported",
+             (unsigned long)s_config.audio.packet_count);
     return ESP_OK;
 }
 
-static bool open_sources(audio_source_t *audio,
-                         device_mjpeg_file_t *mjpeg,
-                         device_h264_file_t *h264)
+static bool open_audio_asset(audio_source_t *audio)
 {
     char audio_path[DEVICE_MEDIA_ASSET_PATH_MAX + sizeof(MEDIA_MOUNT_POINT)];
-    char video_path[DEVICE_MEDIA_ASSET_PATH_MAX + sizeof(MEDIA_MOUNT_POINT)];
     asset_path(audio_path, sizeof(audio_path), s_config.audio.asset_path);
-    asset_path(video_path, sizeof(video_path), s_config.video.asset_path);
-
-    if (open_audio_source(audio, audio_path) != DEVICE_MEDIA_FILE_OK) {
-        return false;
-    }
-    if (s_config.video.uplink_enabled &&
-        open_video_source(mjpeg, h264, video_path) != DEVICE_MEDIA_FILE_OK) {
-        close_audio_source(audio);
-        return false;
-    }
-    return true;
+    return open_audio_source(audio, audio_path) == DEVICE_MEDIA_FILE_OK;
 }
 
-static void sender_task(void *argument)
+static void audio_sender_task(void *argument)
 {
     (void)argument;
     uint8_t audio_packet[MEDIA_AUDIO_BUFFER_BYTES];
-    uint8_t *video_frame = s_config.video.uplink_enabled
-                               ? allocate_video_buffer()
-                               : NULL;
     audio_source_t audio = {0};
-    device_mjpeg_file_t mjpeg = {0};
-    device_h264_file_t h264 = {0};
     uint32_t generation = UINT32_MAX;
     uint64_t audio_index = 0;
-    uint64_t video_index = 0;
     int64_t wall_start_ms = 0;
+    uint32_t audio_send_failures = 0;
+    uint32_t audio_clock_resyncs = 0;
+    bool audio_send_confirmed = false;
 
-    if (s_config.video.uplink_enabled && video_frame == NULL) {
-        ESP_LOGE(TAG, "cannot allocate %u-byte video frame buffer", MEDIA_VIDEO_BUFFER_BYTES);
-        s_task_running = false;
-        s_task = NULL;
-        vTaskDelete(NULL);
-        return;
-    }
-
-    while (s_task_running) {
+    while (atomic_load_explicit(&s_tasks_running, memory_order_acquire)) {
         uint32_t current_generation = tirtc_adapter_connection_generation();
-        if (!tirtc_adapter_has_connection() || !s_uplink_active) {
+        if (!tirtc_adapter_has_connection() ||
+            !atomic_load_explicit(&s_uplink_active, memory_order_acquire) ||
+            !tirtc_adapter_audio_uplink_ready()) {
             if (audio_source_is_open(&audio)) {
                 close_audio_source(&audio);
-                close_video_source(&mjpeg, &h264);
             }
             generation = current_generation;
-            vTaskDelay(pdMS_TO_TICKS(50));
+            vTaskDelay(pdMS_TO_TICKS(20));
             continue;
         }
 
         if (!audio_source_is_open(&audio) || generation != current_generation) {
             close_audio_source(&audio);
-            close_video_source(&mjpeg, &h264);
-            if (!open_sources(&audio, &mjpeg, &h264)) {
-                ESP_LOGE(TAG, "cannot open configured media assets");
+            if (!open_audio_asset(&audio)) {
+                ESP_LOGE(TAG, "cannot open configured audio asset");
                 vTaskDelay(pdMS_TO_TICKS(500));
                 continue;
             }
             generation = current_generation;
             audio_index = 0;
-            video_index = 0;
             wall_start_ms = esp_timer_get_time() / 1000;
-            ESP_LOGI(TAG, "media sender started for connection generation=%lu",
+            audio_send_failures = 0;
+            audio_clock_resyncs = 0;
+            audio_send_confirmed = false;
+            ESP_LOGI(TAG,
+                     "audio sender started after transport readiness for connection generation=%lu",
                      (unsigned long)generation);
         }
 
-        uint64_t audio_pts = audio_index * s_config.audio.packet_ms;
-        uint64_t video_pts = s_config.video.uplink_enabled
-                                 ? video_index * 1000U / s_config.video.fps
-                                 : UINT64_MAX;
-        uint64_t target_pts = audio_pts < video_pts ? audio_pts : video_pts;
         int64_t elapsed = esp_timer_get_time() / 1000 - wall_start_ms;
-        if ((int64_t)target_pts > elapsed + 1) {
-            uint64_t wait_ms = target_pts - (uint64_t)elapsed;
+        uint64_t audio_pts = audio_index * s_config.audio.packet_ms;
+        if (elapsed > (int64_t)(audio_pts + s_config.audio.packet_ms * 2U)) {
+            int64_t lateness = elapsed - (int64_t)audio_pts;
+            wall_start_ms += lateness;
+            elapsed -= lateness;
+            audio_clock_resyncs++;
+            if (audio_clock_resyncs == 1U ||
+                audio_clock_resyncs % 20U == 0U) {
+                ESP_LOGW(TAG,
+                         "audio pacing resynchronized count=%lu lateness=%lld ms",
+                         (unsigned long)audio_clock_resyncs,
+                         (long long)lateness);
+            }
+        }
+        if ((int64_t)audio_pts > elapsed + 1) {
+            uint64_t wait_ms = audio_pts - (uint64_t)elapsed;
             vTaskDelay(pdMS_TO_TICKS(wait_ms > 20U ? 20U : wait_ms));
             continue;
         }
 
-        if (audio_pts <= video_pts) {
-            size_t size = 0;
-            device_media_file_result_t result = next_audio_packet(
-                &audio, audio_packet, sizeof(audio_packet), &size, true);
-            if (result != DEVICE_MEDIA_FILE_OK) {
-                ESP_LOGE(TAG, "audio read failed: %s", device_media_file_result_name(result));
-                (void)tirtc_adapter_disconnect();
-                continue;
-            }
-            int rc = tirtc_adapter_send_audio(&s_config.audio,
-                                               (uint32_t)audio_pts,
-                                               audio_packet,
-                                               (uint32_t)size);
-            if (rc < 0) {
-                ESP_LOGW(TAG, "audio send failed rc=%d", rc);
-            }
-            audio_index++;
-        } else {
-            size_t size = 0;
-            bool key_frame = false;
-            device_media_file_result_t result = next_video_frame(
-                &mjpeg,
-                &h264,
-                video_frame,
-                MEDIA_VIDEO_BUFFER_BYTES,
-                &size,
-                &key_frame,
-                true);
-            if (result != DEVICE_MEDIA_FILE_OK) {
-                ESP_LOGE(TAG, "video read failed: %s", device_media_file_result_name(result));
-                (void)tirtc_adapter_disconnect();
-                continue;
-            }
-            int rc = tirtc_adapter_send_video(&s_config.video,
-                                               (uint32_t)video_pts,
-                                               key_frame,
-                                               video_frame,
-                                               (uint32_t)size);
-            if (rc < 0) {
-                ESP_LOGW(TAG, "video send failed rc=%d", rc);
-            }
-            video_index++;
+        size_t size = 0;
+        device_media_file_result_t result = next_audio_packet(
+            &audio, audio_packet, sizeof(audio_packet), &size, true);
+        if (result != DEVICE_MEDIA_FILE_OK) {
+            ESP_LOGE(TAG, "audio read failed: %s",
+                     device_media_file_result_name(result));
+            (void)tirtc_adapter_disconnect();
+            continue;
         }
+        int rc = tirtc_adapter_send_audio(&s_config.audio,
+                                           (uint32_t)audio_pts,
+                                           audio_packet,
+                                           (uint32_t)size);
+        if (rc < 0) {
+            audio_send_failures++;
+            if (audio_send_failures == 1U ||
+                audio_send_failures % 50U == 0U) {
+                ESP_LOGW(TAG,
+                         "audio send failed rc=%d count=%lu send-buffer=%u",
+                         rc,
+                         (unsigned long)audio_send_failures,
+                         (unsigned)tirtc_adapter_send_buffer_used());
+            }
+        } else if (!audio_send_confirmed) {
+            audio_send_confirmed = true;
+            ESP_LOGI(TAG,
+                     "audio uplink confirmed codec=%s packet=%u bytes duration=%lu ms",
+                     device_audio_codec_name(s_config.audio.codec),
+                     (unsigned)size,
+                     (unsigned long)s_config.audio.packet_ms);
+        }
+        audio_index++;
     }
 
     close_audio_source(&audio);
-    close_video_source(&mjpeg, &h264);
-    free(video_frame);
-    s_task = NULL;
+    s_audio_task = NULL;
     vTaskDelete(NULL);
 }
 
@@ -688,12 +563,8 @@ esp_err_t media_runtime_init(void)
     }
     s_ready = true;
     ESP_LOGI(TAG,
-             "profile loaded: audio=%s video=%s %ux%u@%u",
-             s_config.audio.asset_path,
-             s_config.video.asset_path,
-             s_config.video.width,
-             s_config.video.height,
-             s_config.video.fps);
+             "profile loaded: audio=%s; ESP32-S3 video=unsupported",
+             s_config.audio.asset_path);
     return ESP_OK;
 }
 
@@ -702,27 +573,28 @@ esp_err_t media_runtime_start(void)
     if (!s_ready) {
         return ESP_ERR_INVALID_STATE;
     }
-    if (s_task_running) {
+    if (atomic_load_explicit(&s_tasks_running, memory_order_acquire)) {
         return ESP_OK;
     }
-    s_task_running = true;
-    BaseType_t created = xTaskCreate(sender_task,
-                                     "media_sender",
-                                     6144,
-                                     NULL,
-                                     5,
-                                     &s_task);
-    if (created != pdPASS) {
-        s_task_running = false;
-        s_task = NULL;
+    atomic_store_explicit(&s_tasks_running, true, memory_order_release);
+    BaseType_t audio_created = xTaskCreate(audio_sender_task,
+                                           "audio_sender",
+                                           6144,
+                                           NULL,
+                                           7,
+                                           &s_audio_task);
+    if (audio_created != pdPASS) {
+        atomic_store_explicit(&s_tasks_running, false, memory_order_release);
+        s_audio_task = NULL;
         return ESP_ERR_NO_MEM;
     }
+
     return ESP_OK;
 }
 
 void media_runtime_stop(void)
 {
-    s_task_running = false;
+    atomic_store_explicit(&s_tasks_running, false, memory_order_release);
 }
 
 bool media_runtime_ready(void)
@@ -737,10 +609,10 @@ const device_media_config_t *media_runtime_config(void)
 
 void media_runtime_set_uplink_active(bool active)
 {
-    s_uplink_active = active;
+    atomic_store_explicit(&s_uplink_active, active, memory_order_release);
 }
 
 bool media_runtime_uplink_active(void)
 {
-    return s_uplink_active;
+    return atomic_load_explicit(&s_uplink_active, memory_order_acquire);
 }

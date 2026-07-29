@@ -144,8 +144,13 @@ int main(void)
     assert(device_media_config_validate(&media, error, sizeof(error)));
     assert(media.audio.codec == DEVICE_AUDIO_CODEC_G711A);
     assert(media.audio.sample_rate_hz == 8000);
+    assert(media.audio.packet_ms == 20);
+    assert(media.audio.duration_ms == 10000);
     assert(media.audio.packet_count == 500);
     assert(media.video.codec == DEVICE_VIDEO_CODEC_MJPEG);
+    assert(media.video.asset_path[0] != '\0');
+    assert(media.video.width == 640);
+    assert(media.video.height == 480);
     assert(media.video.fps == 8);
     assert(media.video.frame_count == 80);
     assert(media.video.camera_rotation == 0);
@@ -153,6 +158,21 @@ int main(void)
     assert(media.video.object_fit[0] == '\0');
     assert(!media.video.hor_mirror);
     assert(!media.video.vert_mirror);
+    assert(media.video.uplink_enabled);
+    assert(media.video.downlink_enabled);
+
+    media.video.width = 240;
+    media.video.height = 320;
+    media.video.camera_rotation = 270;
+    media.video.fps = 8;
+    media.video.duration_ms = 10000;
+    media.video.frame_count = 80;
+    assert(device_media_config_validate(&media, error, sizeof(error)));
+    media.video.width = 320;
+    media.video.height = 240;
+    assert(!device_media_config_validate(&media, error, sizeof(error)));
+    media.video.width = 640;
+    media.video.height = 480;
     media.video.camera_rotation = 90;
     assert(device_media_config_validate(&media, error, sizeof(error)));
     media.video.camera_rotation = 45;
@@ -178,6 +198,14 @@ int main(void)
                    "%s",
                    "contain");
 
+    media.audio.packet_ms = 40;
+    media.audio.duration_ms = 21840;
+    media.audio.packet_count = 546;
+    assert(device_media_config_validate(&media, error, sizeof(error)));
+    media.audio.packet_ms = 20;
+    media.audio.duration_ms = 10000;
+    media.audio.packet_count = 500;
+
     assert(device_session_video_enabled(&media, DEVICE_SERVICE_H5, DEVICE_MEDIA_UPLINK));
     assert(!device_session_video_enabled(&media, DEVICE_SERVICE_H5, DEVICE_MEDIA_DOWNLINK));
     assert(!device_session_video_enabled(&media, DEVICE_SERVICE_AI, DEVICE_MEDIA_DOWNLINK));
@@ -186,9 +214,24 @@ int main(void)
 
     media.video.uplink_enabled = false;
     media.video.downlink_enabled = false;
+    media.video.asset_path[0] = '\0';
+    media.video.width = 0;
+    media.video.height = 0;
+    media.video.fps = 0;
+    media.video.duration_ms = 0;
+    media.video.frame_count = 0;
     assert(device_media_config_validate(&media, error, sizeof(error)));
     assert(!device_session_video_enabled(&media, DEVICE_SERVICE_VOIP, DEVICE_MEDIA_UPLINK));
     assert(!device_session_video_enabled(&media, DEVICE_SERVICE_VOIP, DEVICE_MEDIA_DOWNLINK));
+
+    (void)snprintf(media.audio.asset_path,
+                   sizeof(media.audio.asset_path),
+                   "%s",
+                   "number.alaw_8khz");
+    media.audio.packet_ms = 40;
+    media.audio.duration_ms = 21840;
+    media.audio.packet_count = 546;
+    assert(device_media_config_validate(&media, error, sizeof(error)));
 
     media.audio.codec = DEVICE_AUDIO_CODEC_AMR_WB;
     media.audio.sample_rate_hz = 8000;
@@ -199,6 +242,13 @@ int main(void)
 
     media.video.uplink_enabled = true;
     media.video.codec = DEVICE_VIDEO_CODEC_H264;
+    (void)snprintf(media.video.asset_path,
+                   sizeof(media.video.asset_path),
+                   "%s",
+                   "video.h264");
+    media.video.width = 640;
+    media.video.height = 480;
+    media.video.duration_ms = 10000;
     assert(!device_media_config_validate(&media, error, sizeof(error)));
     media.video.fps = 15;
     media.video.frame_count = 150;

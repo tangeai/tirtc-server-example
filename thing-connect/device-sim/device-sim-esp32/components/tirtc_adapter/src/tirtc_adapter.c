@@ -23,14 +23,48 @@ static atomic_uint_fast32_t s_audio_rx_frames;
 static atomic_uint_fast32_t s_video_rx_frames;
 static atomic_uintptr_t s_active_connection;
 static atomic_uint_fast32_t s_connection_generation;
+static atomic_uint_fast32_t s_active_connection_generation;
+static atomic_uint_fast32_t s_active_connection_request_tag;
 static atomic_bool s_connection_incoming;
 static atomic_uint_fast32_t s_connect_request_generation;
+static atomic_uint_fast32_t s_connect_request_tag;
 static atomic_bool s_connect_request_pending;
-static atomic_bool s_downlink_video_enabled;
+static atomic_bool s_audio_subscribed;
 static tirtc_adapter_event_handlers_t s_event_handlers;
 
-#define STREAM_ID_AUDIO 0U
-#define STREAM_ID_VIDEO 1U
+#define STREAM_ID_AUDIO 10U
+
+static void clear_media_subscriptions(void)
+{
+    atomic_store_explicit(&s_audio_subscribed, false, memory_order_release);
+}
+
+static bool is_active_connection(tirtc_conn_t connection)
+{
+    return atomic_load_explicit(&s_active_connection, memory_order_acquire) ==
+           (uintptr_t)connection;
+}
+
+static uint32_t next_connection_generation(void)
+{
+    return (uint32_t)atomic_fetch_add_explicit(
+               &s_connection_generation, 1, memory_order_acq_rel) +
+           1U;
+}
+
+static void notify_connection_changed(bool connected,
+                                      bool incoming,
+                                      uint32_t connection_generation,
+                                      uint32_t request_tag)
+{
+    if (s_event_handlers.on_connection_changed != NULL) {
+        s_event_handlers.on_connection_changed(connected,
+                                               incoming,
+                                               connection_generation,
+                                               request_tag,
+                                               s_event_handlers.user_data);
+    }
+}
 
 static const char *media_name(uint8_t media)
 {
@@ -86,12 +120,15 @@ static void on_conn_accepted(tirtc_conn_t connection)
         (void)TiRtcDisconnect(connection);
         return;
     }
+    clear_media_subscriptions();
     atomic_store_explicit(&s_connection_incoming, true, memory_order_release);
-    (void)atomic_fetch_add_explicit(&s_connection_generation, 1, memory_order_release);
+    uint32_t generation = next_connection_generation();
+    atomic_store_explicit(&s_active_connection_generation,
+                          generation,
+                          memory_order_release);
+    atomic_store_explicit(&s_active_connection_request_tag, 0, memory_order_release);
     ESP_LOGI(TAG, "incoming connection accepted handle=%p", (void *)connection);
-    if (s_event_handlers.on_connection_changed != NULL) {
-        s_event_handlers.on_connection_changed(true, true, s_event_handlers.user_data);
-    }
+    notify_connection_changed(true, true, generation, 0);
 }
 
 static void on_conn_error(tirtc_conn_t connection, int error)
@@ -103,11 +140,14 @@ static void on_conn_error(tirtc_conn_t connection, int error)
                                                 0,
                                                 memory_order_acq_rel,
                                                 memory_order_acquire)) {
-        (void)atomic_fetch_add_explicit(&s_connection_generation, 1, memory_order_release);
-        if (s_event_handlers.on_connection_changed != NULL) {
-            bool incoming = atomic_load_explicit(&s_connection_incoming, memory_order_acquire);
-            s_event_handlers.on_connection_changed(false, incoming, s_event_handlers.user_data);
-        }
+        uint32_t generation = (uint32_t)atomic_exchange_explicit(
+            &s_active_connection_generation, 0, memory_order_acq_rel);
+        uint32_t request_tag = (uint32_t)atomic_exchange_explicit(
+            &s_active_connection_request_tag, 0, memory_order_acq_rel);
+        clear_media_subscriptions();
+        bool incoming =
+            atomic_load_explicit(&s_connection_incoming, memory_order_acquire);
+        notify_connection_changed(false, incoming, generation, request_tag);
     }
     if (connection != NULL) {
         (void)TiRtcDisconnect(connection);
@@ -122,11 +162,14 @@ static void on_disconnected(tirtc_conn_t connection)
                                                 0,
                                                 memory_order_acq_rel,
                                                 memory_order_acquire)) {
-        (void)atomic_fetch_add_explicit(&s_connection_generation, 1, memory_order_release);
-        if (s_event_handlers.on_connection_changed != NULL) {
-            bool incoming = atomic_load_explicit(&s_connection_incoming, memory_order_acquire);
-            s_event_handlers.on_connection_changed(false, incoming, s_event_handlers.user_data);
-        }
+        uint32_t generation = (uint32_t)atomic_exchange_explicit(
+            &s_active_connection_generation, 0, memory_order_acq_rel);
+        uint32_t request_tag = (uint32_t)atomic_exchange_explicit(
+            &s_active_connection_request_tag, 0, memory_order_acq_rel);
+        clear_media_subscriptions();
+        bool incoming =
+            atomic_load_explicit(&s_connection_incoming, memory_order_acquire);
+        notify_connection_changed(false, incoming, generation, request_tag);
     }
     ESP_LOGI(TAG, "connection disconnected handle=%p", (void *)connection);
 }
@@ -149,10 +192,10 @@ static void on_connect_result(int error, tirtc_conn_t connection, void *user_dat
 
     if (error != 0 || connection == NULL) {
         atomic_store_explicit(&s_connect_request_pending, false, memory_order_release);
+        uint32_t request_tag = (uint32_t)atomic_load_explicit(
+            &s_connect_request_tag, memory_order_acquire);
         ESP_LOGE(TAG, "outgoing connection failed: %d (%s)", error, TiRtcGetErrorStr(error));
-        if (s_event_handlers.on_connection_changed != NULL) {
-            s_event_handlers.on_connection_changed(false, false, s_event_handlers.user_data);
-        }
+        notify_connection_changed(false, false, 0, request_tag);
         return;
     }
 
@@ -181,12 +224,19 @@ static void on_connect_result(int error, tirtc_conn_t connection, void *user_dat
         return;
     }
     atomic_store_explicit(&s_connect_request_pending, false, memory_order_release);
+    clear_media_subscriptions();
     atomic_store_explicit(&s_connection_incoming, false, memory_order_release);
-    (void)atomic_fetch_add_explicit(&s_connection_generation, 1, memory_order_release);
+    uint32_t generation = next_connection_generation();
+    uint32_t request_tag = (uint32_t)atomic_load_explicit(
+        &s_connect_request_tag, memory_order_acquire);
+    atomic_store_explicit(&s_active_connection_generation,
+                          generation,
+                          memory_order_release);
+    atomic_store_explicit(&s_active_connection_request_tag,
+                          request_tag,
+                          memory_order_release);
     ESP_LOGI(TAG, "outgoing connection established handle=%p", (void *)connection);
-    if (s_event_handlers.on_connection_changed != NULL) {
-        s_event_handlers.on_connection_changed(true, false, s_event_handlers.user_data);
-    }
+    notify_connection_changed(true, false, generation, request_tag);
 }
 
 static void on_command(tirtc_conn_t connection,
@@ -194,11 +244,14 @@ static void on_command(tirtc_conn_t connection,
                        const void *data,
                        uint32_t length)
 {
-    (void)connection;
-    if (s_event_handlers.on_command != NULL) {
+    if (is_active_connection(connection) &&
+        s_event_handlers.on_command != NULL) {
+        uint32_t generation = (uint32_t)atomic_load_explicit(
+            &s_active_connection_generation, memory_order_acquire);
         s_event_handlers.on_command(command,
                                     data,
                                     length,
+                                    generation,
                                     s_event_handlers.user_data);
     }
 }
@@ -212,32 +265,39 @@ static void on_request_key_frame(tirtc_conn_t connection, uint8_t stream_id)
 static int on_subscribe_video(tirtc_conn_t connection, uint8_t stream_id)
 {
     (void)connection;
-    bool enabled = atomic_load_explicit(&s_downlink_video_enabled,
-                                        memory_order_acquire);
-    ESP_LOGI(TAG, "video subscription stream=%u %s",
-             stream_id,
-             enabled ? "accepted" : "rejected by product/session policy");
-    return enabled && stream_id == STREAM_ID_VIDEO ? 0 : -1;
+    ESP_LOGI(TAG,
+             "video subscription stream=%u rejected: ESP32-S3 target is audio-only",
+             stream_id);
+    return -1;
 }
 
 static int on_subscribe_audio(tirtc_conn_t connection, uint8_t stream_id)
 {
-    (void)connection;
-    ESP_LOGI(TAG, "audio subscribed stream=%u", stream_id);
-    return stream_id == STREAM_ID_AUDIO ? 0 : -1;
+    bool active = is_active_connection(connection);
+    bool accepted = active && stream_id == STREAM_ID_AUDIO;
+    if (active) {
+        atomic_store_explicit(&s_audio_subscribed, accepted, memory_order_release);
+    }
+    ESP_LOGI(TAG, "audio subscription stream=%u %s",
+             stream_id,
+             accepted ? "accepted" : "rejected by stream id");
+    return accepted ? 0 : -1;
 }
 
 static void on_unsubscribe(tirtc_conn_t connection, uint8_t stream_id)
 {
-    (void)connection;
+    if (is_active_connection(connection)) {
+        if (stream_id == STREAM_ID_AUDIO) {
+            atomic_store_explicit(&s_audio_subscribed, false, memory_order_release);
+        }
+    }
     ESP_LOGI(TAG, "media unsubscribed stream=%u", stream_id);
 }
 
 static void on_audio(tirtc_conn_t connection, const TIRTCFRAMEINFO *frame, void *data)
 {
-    (void)connection;
     (void)data;
-    if (frame == NULL) {
+    if (frame == NULL || !is_active_connection(connection)) {
         return;
     }
 
@@ -259,9 +319,8 @@ static void on_audio(tirtc_conn_t connection, const TIRTCFRAMEINFO *frame, void 
 
 static void on_video(tirtc_conn_t connection, const TIRTCFRAMEINFO *frame, void *data)
 {
-    (void)connection;
     (void)data;
-    if (frame == NULL) {
+    if (frame == NULL || !is_active_connection(connection)) {
         return;
     }
 
@@ -278,8 +337,7 @@ static void on_video(tirtc_conn_t connection, const TIRTCFRAMEINFO *frame, void 
                  (frame->flags & TIRTC_FRAME_FLAG_KEY_FRAME) != 0);
     }
 
-    /* TODO(product-video): copy/enqueue the encoded frame to a non-blocking
-     * decoder/display task when the product has a screen. */
+    /* This target is audio-only. Unexpected downlink video is discarded. */
 }
 
 /* The callback table must outlive TiRtcStart/TiRtcStop. */
@@ -331,7 +389,11 @@ int tirtc_adapter_start(const tirtc_adapter_config_t *config)
         return TIRTC_E_BUSY;
     }
     atomic_store_explicit(&s_active_connection, 0, memory_order_release);
+    atomic_store_explicit(&s_active_connection_generation, 0, memory_order_release);
+    atomic_store_explicit(&s_active_connection_request_tag, 0, memory_order_release);
     atomic_store_explicit(&s_connect_request_pending, false, memory_order_release);
+    atomic_store_explicit(&s_connect_request_tag, 0, memory_order_release);
+    clear_media_subscriptions();
     (void)atomic_fetch_add_explicit(
         &s_connect_request_generation, 1, memory_order_release);
 
@@ -433,7 +495,9 @@ uint32_t tirtc_adapter_connection_generation(void)
     return (uint32_t)atomic_load_explicit(&s_connection_generation, memory_order_acquire);
 }
 
-int tirtc_adapter_connect(const char *remote_id, const char *token)
+int tirtc_adapter_connect(const char *remote_id,
+                          const char *token,
+                          uint32_t request_tag)
 {
     if (s_state != TIRTC_ADAPTER_RUNNING || remote_id == NULL || remote_id[0] == '\0') {
         return TIRTC_E_INVALID_PARAMETER;
@@ -452,6 +516,7 @@ int tirtc_adapter_connect(const char *remote_id, const char *token)
                                       1,
                                       memory_order_acq_rel) +
                                   1U;
+    atomic_store_explicit(&s_connect_request_tag, request_tag, memory_order_release);
     int rc = TiRtcConnect(remote_id,
                           token,
                           on_connect_result,
@@ -474,18 +539,25 @@ int tirtc_adapter_disconnect(void)
     if (connection == NULL) {
         return TIRTC_E_INVALID_HANDLE;
     }
-    bool incoming = atomic_load_explicit(&s_connection_incoming, memory_order_acquire);
-    (void)atomic_fetch_add_explicit(&s_connection_generation, 1, memory_order_release);
-    if (s_event_handlers.on_connection_changed != NULL) {
-        s_event_handlers.on_connection_changed(false, incoming, s_event_handlers.user_data);
-    }
+    clear_media_subscriptions();
+    atomic_store_explicit(&s_active_connection_generation, 0, memory_order_release);
+    atomic_store_explicit(&s_active_connection_request_tag, 0, memory_order_release);
     return TiRtcDisconnect(connection);
 }
 
-int tirtc_adapter_whip_connect(const char *service_description, const char *token)
+int tirtc_adapter_whip_connect(const char *service_description,
+                               const char *token,
+                               uint32_t request_tag)
 {
     if (s_state != TIRTC_ADAPTER_RUNNING || service_description == NULL ||
         service_description[0] == '\0' || token == NULL || token[0] == '\0') {
+        ESP_LOGE(TAG,
+                 "WHIP connect rejected before SDK: adapter-state=%d description=%s token=%s",
+                 (int)s_state,
+                 service_description != NULL && service_description[0] != '\0'
+                     ? "present"
+                     : "missing",
+                 token != NULL && token[0] != '\0' ? "present" : "missing");
         return TIRTC_E_INVALID_PARAMETER;
     }
     bool expected_pending = false;
@@ -495,13 +567,22 @@ int tirtc_adapter_whip_connect(const char *service_description, const char *toke
                                                   true,
                                                   memory_order_acq_rel,
                                                   memory_order_acquire)) {
+        ESP_LOGE(TAG,
+                 "WHIP connect rejected before SDK: connection=%s request-pending=%s",
+                 tirtc_adapter_has_connection() ? "active" : "none",
+                 expected_pending ? "yes" : "no");
         return TIRTC_E_BUSY;
     }
+    ESP_LOGI(TAG,
+             "submitting WHIP connect description-length=%u token-length=%u",
+             (unsigned)strlen(service_description),
+             (unsigned)strlen(token));
     uint32_t request_generation = (uint32_t)atomic_fetch_add_explicit(
                                       &s_connect_request_generation,
                                       1,
                                       memory_order_acq_rel) +
                                   1U;
+    atomic_store_explicit(&s_connect_request_tag, request_tag, memory_order_release);
     int rc = TiRtcWhipConnect(service_description,
                               token,
                               on_connect_result,
@@ -510,6 +591,14 @@ int tirtc_adapter_whip_connect(const char *service_description, const char *toke
         request_generation ==
             atomic_load_explicit(&s_connect_request_generation, memory_order_acquire)) {
         atomic_store_explicit(&s_connect_request_pending, false, memory_order_release);
+    }
+    if (rc != 0) {
+        ESP_LOGE(TAG,
+                 "WHIP connect submission failed: %d (%s)",
+                 rc,
+                 TiRtcGetErrorStr(rc));
+    } else {
+        ESP_LOGI(TAG, "WHIP connect request submitted");
     }
     return rc;
 }
@@ -542,9 +631,26 @@ int tirtc_adapter_service_request(const char *path,
                                user_data);
 }
 
-void tirtc_adapter_set_downlink_video_enabled(bool enabled)
+bool tirtc_adapter_audio_subscribed(void)
 {
-    atomic_store_explicit(&s_downlink_video_enabled, enabled, memory_order_release);
+    return atomic_load_explicit(&s_audio_subscribed, memory_order_acquire);
+}
+
+bool tirtc_adapter_audio_uplink_ready(void)
+{
+    if (!tirtc_adapter_has_connection()) {
+        return false;
+    }
+    bool incoming =
+        atomic_load_explicit(&s_connection_incoming, memory_order_acquire);
+    return !incoming || tirtc_adapter_audio_subscribed();
+}
+
+size_t tirtc_adapter_send_buffer_used(void)
+{
+    tirtc_conn_t connection = (tirtc_conn_t)atomic_load_explicit(
+        &s_active_connection, memory_order_acquire);
+    return connection != NULL ? TiRtcGetSendBufferUsed(connection) : 0;
 }
 
 void tirtc_adapter_set_event_handlers(const tirtc_adapter_event_handlers_t *handlers)
@@ -598,37 +704,4 @@ int tirtc_adapter_send_audio(const device_audio_config_t *config,
         .length = length,
     };
     return TiRtcSendAudioStream(connection, &frame, data);
-}
-
-int tirtc_adapter_send_video(const device_video_config_t *config,
-                             uint32_t timestamp_ms,
-                             bool key_frame,
-                             const void *data,
-                             uint32_t length)
-{
-    tirtc_conn_t connection = (tirtc_conn_t)atomic_load_explicit(
-        &s_active_connection, memory_order_acquire);
-    if (connection == NULL) {
-        return TIRTC_E_INVALID_HANDLE;
-    }
-    if (config == NULL || data == NULL || length == 0) {
-        return TIRTC_E_INVALID_PARAMETER;
-    }
-
-    uint8_t media;
-    switch (config->codec) {
-    case DEVICE_VIDEO_CODEC_MJPEG: media = TIRTC_VIDEO_JPEG; break;
-    case DEVICE_VIDEO_CODEC_H264: media = TIRTC_VIDEO_H264; break;
-    default: return TIRTC_E_INVALID_PARAMETER;
-    }
-
-    TIRTCFRAMEINFO frame = {
-        .stream_id = STREAM_ID_VIDEO,
-        .media = media,
-        .flags = key_frame ? TIRTC_FRAME_FLAG_KEY_FRAME : 0,
-        .reserved = 0,
-        .ts = timestamp_ms,
-        .length = length,
-    };
-    return TiRtcSendVideoStream(connection, &frame, data);
 }

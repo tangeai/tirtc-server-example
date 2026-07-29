@@ -65,11 +65,12 @@ bool device_media_config_validate(const device_media_config_t *config,
     if (config->audio.channels != 1) {
         return fail(error, error_size, "the reference profile currently requires mono audio");
     }
-    if (config->audio.packet_ms != 20) {
-        return fail(error, error_size, "the reference file source currently requires 20 ms audio packets");
+    if (config->audio.packet_ms != 20 && config->audio.packet_ms != 40) {
+        return fail(error, error_size, "the file source supports 20 ms or 40 ms audio packets");
     }
-    if (config->audio.duration_ms != DEVICE_MEDIA_REFERENCE_DURATION_MS) {
-        return fail(error, error_size, "the reference audio asset must be 10 seconds");
+    if (config->audio.duration_ms == 0 ||
+        config->audio.duration_ms % config->audio.packet_ms != 0) {
+        return fail(error, error_size, "audio duration must contain complete packets");
     }
     if (config->audio.packet_count !=
         config->audio.duration_ms / config->audio.packet_ms) {
@@ -103,8 +104,11 @@ bool device_media_config_validate(const device_media_config_t *config,
             return fail(error, error_size, "uplink video asset path is empty");
         }
         if (!((config->video.width == 640 && config->video.height == 480) ||
-              (config->video.width == 640 && config->video.height == 360))) {
-            return fail(error, error_size, "video resolution must be 640x480 or 640x360");
+              (config->video.width == 640 && config->video.height == 360) ||
+              (config->video.width == 240 && config->video.height == 320))) {
+            return fail(error,
+                        error_size,
+                        "video resolution must be 640x480, 640x360, or 240x320");
         }
         if (config->video.duration_ms != DEVICE_MEDIA_REFERENCE_DURATION_MS) {
             return fail(error, error_size, "the reference video asset must be 10 seconds");

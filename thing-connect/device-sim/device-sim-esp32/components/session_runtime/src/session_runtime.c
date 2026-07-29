@@ -1,6 +1,7 @@
 #include "session_runtime.h"
 
 #include <stdio.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -17,7 +18,7 @@
 #include "runtime_config.h"
 #include "tirtc_adapter.h"
 
-#define SESSION_QUEUE_DEPTH 4
+#define SESSION_QUEUE_DEPTH 8
 #define SESSION_ARGUMENT_MAX 1024
 #define SESSION_PAYLOAD_MAX 4096
 #define CMD_VOIP_ACCEPT 0x2000U
@@ -54,10 +55,17 @@ typedef struct {
     bool incoming;
     uint32_t command;
     uint32_t length;
-    char first[SESSION_ARGUMENT_MAX];
-    char second[SESSION_ARGUMENT_MAX];
-    char payload[SESSION_PAYLOAD_MAX];
+    uint32_t connection_generation;
+    uint32_t session_generation;
+    char *first;
+    char *second;
+    char *payload;
 } session_event_t;
+
+typedef struct {
+    session_event_type_t type;
+    uint32_t session_generation;
+} session_request_context_t;
 
 static const char *TAG = "session_runtime";
 static QueueHandle_t s_queue;
@@ -69,10 +77,11 @@ static char s_ai_role_id[65];
 static char s_call_room_id[129];
 static char s_call_peer_id[65];
 static bool s_call_after_contacts;
-static bool s_room_request_pending;
-static bool s_ignore_next_disconnect;
+static atomic_bool s_room_request_pending;
 static int64_t s_next_room_poll_ms;
 static int64_t s_call_timeout_at_ms;
+static uint32_t s_session_generation = 1;
+static uint32_t s_bound_connection_generation;
 static bool s_voip_profile_submitted;
 static char s_voip_peer_id[SESSION_ARGUMENT_MAX];
 static char s_voip_token[SESSION_ARGUMENT_MAX];
@@ -92,113 +101,138 @@ static int64_t now_ms(void)
     return esp_timer_get_time() / 1000;
 }
 
-static bool queue_event(session_event_t *event)
+static void release_event(session_event_t *event)
 {
-    return s_queue != NULL && xQueueSend(s_queue, &event, 0) == pdTRUE;
-}
-
-static void adapter_connection_changed(bool connected, bool incoming, void *user_data)
-{
-    (void)user_data;
-    session_event_t *event = calloc(1, sizeof(*event));
     if (event == NULL) {
-        ESP_LOGW(TAG, "cannot allocate connection event");
         return;
     }
-    event->type = EVENT_CONNECTION;
-    event->connected = connected;
-    event->incoming = incoming;
-    if (!queue_event(event)) {
+    free(event->first);
+    free(event->second);
+    free(event->payload);
+    memset(event, 0, sizeof(*event));
+}
+
+static bool copy_event_text(char **destination,
+                            uint32_t *copied_length,
+                            const void *source,
+                            size_t length,
+                            size_t maximum)
+{
+    if (source == NULL || length == 0) {
+        return true;
+    }
+    size_t count = length < maximum - 1U ? length : maximum - 1U;
+    char *text = malloc(count + 1U);
+    if (text == NULL) {
+        return false;
+    }
+    memcpy(text, source, count);
+    text[count] = '\0';
+    *destination = text;
+    if (copied_length != NULL) {
+        *copied_length = (uint32_t)count;
+    }
+    return true;
+}
+
+static bool queue_event(const session_event_t *event)
+{
+    return s_queue != NULL && xQueueSend(s_queue, event, 0) == pdTRUE;
+}
+
+static void adapter_connection_changed(bool connected,
+                                       bool incoming,
+                                       uint32_t connection_generation,
+                                       uint32_t request_tag,
+                                       void *user_data)
+{
+    (void)user_data;
+    session_event_t event = {
+        .type = EVENT_CONNECTION,
+        .connected = connected,
+        .incoming = incoming,
+        .connection_generation = connection_generation,
+        .session_generation = request_tag,
+    };
+    if (!queue_event(&event)) {
         ESP_LOGW(TAG, "dropping connection event because session queue is full");
-        free(event);
     }
 }
 
 static void adapter_command(uint32_t command,
                             const void *data,
                             uint32_t length,
+                            uint32_t connection_generation,
                             void *user_data)
 {
     (void)user_data;
-    session_event_t *event = calloc(1, sizeof(*event));
-    if (event == NULL) {
-        ESP_LOGW(TAG, "cannot allocate command event");
+    session_event_t event = {
+        .type = EVENT_COMMAND,
+        .command = command,
+        .connection_generation = connection_generation,
+    };
+    if (!copy_event_text(&event.payload,
+                         &event.length,
+                         data,
+                         length,
+                         SESSION_PAYLOAD_MAX)) {
+        ESP_LOGW(TAG, "cannot allocate command payload");
         return;
     }
-    event->type = EVENT_COMMAND;
-    event->command = command;
-    if (data != NULL && length > 0) {
-        event->length = length < sizeof(event->payload) - 1U
-                            ? length
-                            : sizeof(event->payload) - 1U;
-        memcpy(event->payload, data, event->length);
-        event->payload[event->length] = '\0';
-    }
-    if (!queue_event(event)) {
+    if (!queue_event(&event)) {
         ESP_LOGW(TAG, "dropping command event because session queue is full");
-        free(event);
+        release_event(&event);
     }
 }
 
 static void platform_signal(const char *json, size_t length, void *user_data)
 {
     (void)user_data;
-    session_event_t *event = calloc(1, sizeof(*event));
-    if (event == NULL) {
-        ESP_LOGW(TAG, "cannot allocate platform signal event");
+    session_event_t event = {
+        .type = EVENT_PLATFORM_SIGNAL,
+    };
+    if (!copy_event_text(&event.payload,
+                         &event.length,
+                         json,
+                         length,
+                         SESSION_PAYLOAD_MAX)) {
+        ESP_LOGW(TAG, "cannot allocate platform signal payload");
         return;
     }
-    event->type = EVENT_PLATFORM_SIGNAL;
-    if (json != NULL && length > 0) {
-        event->length = length < sizeof(event->payload) - 1U
-                            ? (uint32_t)length
-                            : sizeof(event->payload) - 1U;
-        memcpy(event->payload, json, event->length);
-        event->payload[event->length] = '\0';
-    }
-    if (!queue_event(event)) {
+    if (!queue_event(&event)) {
         ESP_LOGW(TAG, "dropping platform signal because session queue is full");
-        free(event);
-    }
-}
-
-static void ai_token_response(const char *body, void *user_data)
-{
-    (void)user_data;
-    session_event_t *event = calloc(1, sizeof(*event));
-    if (event == NULL) {
-        ESP_LOGW(TAG, "cannot allocate AI token event");
-        return;
-    }
-    event->type = EVENT_AI_TOKEN;
-    if (body != NULL) {
-        (void)snprintf(event->payload, sizeof(event->payload), "%s", body);
-    }
-    if (!queue_event(event)) {
-        ESP_LOGW(TAG, "dropping AI token response because session queue is full");
-        free(event);
+        release_event(&event);
     }
 }
 
 static void service_event_response(const char *body, void *user_data)
 {
-    session_event_type_t type = (session_event_type_t)(uintptr_t)user_data;
-    if (type == EVENT_ROOM_RESPONSE) {
-        s_room_request_pending = false;
-    }
-    session_event_t *event = calloc(1, sizeof(*event));
-    if (event == NULL) {
-        ESP_LOGW(TAG, "cannot allocate service response event");
+    session_request_context_t *context = user_data;
+    if (context == NULL) {
         return;
     }
-    event->type = type;
-    if (body != NULL) {
-        (void)snprintf(event->payload, sizeof(event->payload), "%s", body);
+    if (context->type == EVENT_ROOM_RESPONSE) {
+        atomic_store_explicit(&s_room_request_pending, false, memory_order_release);
     }
-    if (!queue_event(event)) {
+    session_event_t event = {
+        .type = context->type,
+        .session_generation = context->session_generation,
+    };
+    if (body != NULL &&
+        !copy_event_text(&event.payload,
+                         &event.length,
+                         body,
+                         strlen(body),
+                         SESSION_PAYLOAD_MAX)) {
+        ESP_LOGW(TAG, "cannot allocate service response payload");
+        free(context);
+        return;
+    }
+    if (!queue_event(&event)) {
         ESP_LOGW(TAG, "dropping service response because session queue is full");
-        free(event);
+        release_event(&event);
     }
+    free(context);
 }
 
 static void service_log_response(const char *body, void *user_data)
@@ -231,16 +265,40 @@ static bool response_data(const char *body, cJSON **root_out, const cJSON **data
     return true;
 }
 
+static int submit_service_event_timeout(session_event_type_t response_event,
+                                        platform_service_t service,
+                                        const char *path,
+                                        const char *json_body,
+                                        unsigned timeout_ms)
+{
+    session_request_context_t *context = malloc(sizeof(*context));
+    if (context == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+    context->type = response_event;
+    context->session_generation = s_session_generation;
+    int rc = platform_client_request_timeout(service,
+                                             path,
+                                             json_body,
+                                             timeout_ms,
+                                             service_event_response,
+                                             context);
+    if (rc != ESP_OK) {
+        free(context);
+    }
+    return rc;
+}
+
 static int submit_service_event(session_event_type_t response_event,
                                 platform_service_t service,
                                 const char *path,
                                 const char *json_body)
 {
-    return platform_client_request(service,
-                                   path,
-                                   json_body,
-                                   service_event_response,
-                                   (void *)(uintptr_t)response_event);
+    return submit_service_event_timeout(response_event,
+                                        service,
+                                        path,
+                                        json_body,
+                                        15000U);
 }
 
 static int submit_room_action_for(const char *path,
@@ -284,19 +342,30 @@ static void set_state(device_session_state_t state, device_service_t service)
              device_service_name(service));
     s_state = state;
     s_service = service;
-    const device_media_config_t *media = media_runtime_config();
-    const bool call_video = media != NULL && media->video.downlink_enabled &&
-                            (service == DEVICE_SERVICE_VOIP ||
-                             service == DEVICE_SERVICE_CALL);
-    tirtc_adapter_set_downlink_video_enabled(call_video);
+}
+
+static void advance_session_generation(void)
+{
+    s_session_generation++;
+    if (s_session_generation == 0) {
+        s_session_generation = 1;
+    }
+    s_bound_connection_generation = 0;
+}
+
+static void begin_session(device_session_state_t state, device_service_t service)
+{
+    advance_session_generation();
+    set_state(state, service);
 }
 
 static void finish_session(void)
 {
     media_runtime_set_uplink_active(false);
-    // disconnect also invalidates a WHIP/P2P connection request whose callback
-    // has not arrived yet, preventing a cancelled room from being resurrected.
+    /* Disconnect also invalidates a pending WHIP/P2P request. The adapter does
+     * not echo a local disconnect event back into this state machine. */
     (void)tirtc_adapter_disconnect();
+    advance_session_generation();
     s_ai_start_at_ms = 0;
     s_call_timeout_at_ms = 0;
     s_call_room_id[0] = '\0';
@@ -415,12 +484,11 @@ static void handle_platform_signal(const session_event_t *event)
                       s_state == DEVICE_SESSION_H5_STREAMING)) {
             if (tirtc_adapter_has_connection()) {
                 media_runtime_set_uplink_active(false);
-                s_ignore_next_disconnect = true;
                 (void)tirtc_adapter_disconnect();
             }
             (void)snprintf(s_call_room_id, sizeof(s_call_room_id), "%s", room_id);
             (void)snprintf(s_call_peer_id, sizeof(s_call_peer_id), "%s", caller_id);
-            set_state(DEVICE_SESSION_RINGING, DEVICE_SERVICE_CALL);
+            begin_session(DEVICE_SESSION_RINGING, DEVICE_SERVICE_CALL);
             ESP_LOGI(TAG, "incoming device call from=%s room=%s; use accept or reject",
                      caller_id, room_id);
         } else if (valid) {
@@ -498,27 +566,27 @@ static void handle_platform_signal(const session_event_t *event)
         } else if (outgoing || recover_outgoing) {
             if (recover_outgoing && tirtc_adapter_has_connection()) {
                 media_runtime_set_uplink_active(false);
-                s_ignore_next_disconnect = true;
                 (void)tirtc_adapter_disconnect();
             }
             if (recover_outgoing) {
-                set_state(DEVICE_SESSION_CALLING, DEVICE_SERVICE_VOIP);
+                begin_session(DEVICE_SESSION_CALLING, DEVICE_SERVICE_VOIP);
                 ESP_LOGI(TAG,
                          "recovering VoIP outgoing call after HTTP response loss");
             } else {
                 ESP_LOGI(TAG, "VoIP callee answered; establishing WHIP connection");
             }
-            if (tirtc_adapter_whip_connect(s_voip_peer_id, s_voip_token) != 0) {
+            if (tirtc_adapter_whip_connect(s_voip_peer_id,
+                                           s_voip_token,
+                                           s_session_generation) != 0) {
                 finish_session();
             }
         } else if (s_state == DEVICE_SESSION_IDLE ||
                    s_state == DEVICE_SESSION_H5_STREAMING) {
             if (tirtc_adapter_has_connection()) {
                 media_runtime_set_uplink_active(false);
-                s_ignore_next_disconnect = true;
                 (void)tirtc_adapter_disconnect();
             }
-            set_state(DEVICE_SESSION_RINGING, DEVICE_SERVICE_VOIP);
+            begin_session(DEVICE_SESSION_RINGING, DEVICE_SERVICE_VOIP);
             ESP_LOGI(TAG, "incoming VoIP call room=%s; use accept or reject",
                      s_voip_room_id);
         } else {
@@ -562,9 +630,6 @@ static void request_contacts(bool call_first)
 
 static void request_device_call(const char *target_id)
 {
-    const device_media_config_t *media = media_runtime_config();
-    const bool video = media != NULL &&
-                       (media->video.uplink_enabled || media->video.downlink_enabled);
     cJSON *root = cJSON_CreateObject();
     cJSON *targets = cJSON_CreateArray();
     cJSON *target = cJSON_CreateString(target_id);
@@ -577,7 +642,7 @@ static void request_device_call(const char *target_id)
     }
     cJSON_AddItemToArray(targets, target);
     cJSON_AddItemToObject(root, "targets", targets);
-    bool ok = cJSON_AddStringToObject(root, "call_type", video ? "video" : "audio");
+    bool ok = cJSON_AddStringToObject(root, "call_type", "audio");
     char *body = ok ? cJSON_PrintUnformatted(root) : NULL;
     cJSON_Delete(root);
     if (body == NULL) {
@@ -587,11 +652,10 @@ static void request_device_call(const char *target_id)
 
     if (tirtc_adapter_has_connection()) {
         media_runtime_set_uplink_active(false);
-        s_ignore_next_disconnect = true;
         (void)tirtc_adapter_disconnect();
     }
     (void)snprintf(s_call_peer_id, sizeof(s_call_peer_id), "%s", target_id);
-    set_state(DEVICE_SESSION_CALLING, DEVICE_SERVICE_CALL);
+    begin_session(DEVICE_SESSION_CALLING, DEVICE_SERVICE_CALL);
     int rc = submit_service_event(EVENT_CALL_REQUEST_RESPONSE,
                                   PLATFORM_SERVICE_CALL,
                                   "/v1/call/request",
@@ -714,12 +778,11 @@ static void handle_room_response(const char *body)
         (s_state == DEVICE_SESSION_IDLE || s_state == DEVICE_SESSION_H5_STREAMING)) {
         if (tirtc_adapter_has_connection()) {
             media_runtime_set_uplink_active(false);
-            s_ignore_next_disconnect = true;
             (void)tirtc_adapter_disconnect();
         }
         (void)snprintf(s_call_room_id, sizeof(s_call_room_id), "%s", room_id);
         (void)snprintf(s_call_peer_id, sizeof(s_call_peer_id), "%s", caller_id);
-        set_state(DEVICE_SESSION_RINGING, DEVICE_SERVICE_CALL);
+        begin_session(DEVICE_SESSION_RINGING, DEVICE_SERVICE_CALL);
         ESP_LOGI(TAG, "incoming device call from=%s room=%s; use accept or reject",
                  s_call_peer_id,
                  s_call_room_id);
@@ -766,7 +829,9 @@ static void handle_accept_response(const char *body)
         finish_session();
         return;
     }
-    int rc = tirtc_adapter_connect(s_call_peer_id, token);
+    int rc = tirtc_adapter_connect(s_call_peer_id,
+                                   token,
+                                   s_session_generation);
     if (rc != 0) {
         ESP_LOGE(TAG, "device call P2P connection submission failed rc=%d", rc);
         finish_session();
@@ -791,10 +856,14 @@ static void submit_voip_profile(void)
         return;
     }
     cJSON *root = cJSON_CreateObject();
-    bool no_video = !media->video.uplink_enabled && !media->video.downlink_enabled;
+    const bool no_video = true;
+    const int screen_width = 1;
+    const int screen_height = 1;
+    const char *up_video_mt = "";
+    const char *down_video_mt = "";
     bool ok = root != NULL &&
-              cJSON_AddNumberToObject(root, "screen_width", media->video.width) &&
-              cJSON_AddNumberToObject(root, "screen_height", media->video.height) &&
+              cJSON_AddNumberToObject(root, "screen_width", screen_width) &&
+              cJSON_AddNumberToObject(root, "screen_height", screen_height) &&
               cJSON_AddNumberToObject(root, "camera_rotation",
                                      media->video.camera_rotation) &&
               cJSON_AddNumberToObject(root, "aspect_ratio",
@@ -808,10 +877,8 @@ static void submit_voip_profile(void)
                                    media->video.vert_mirror) &&
               cJSON_AddNumberToObject(root, "audio_rate", media->audio.sample_rate_hz) &&
               cJSON_AddNumberToObject(root, "audio_channels", media->audio.channels) &&
-              cJSON_AddStringToObject(root, "up_video_mt",
-                                     device_video_codec_name(media->video.codec)) &&
-              cJSON_AddStringToObject(root, "down_video_mt",
-                                     device_video_codec_name(media->video.codec)) &&
+              cJSON_AddStringToObject(root, "up_video_mt", up_video_mt) &&
+              cJSON_AddStringToObject(root, "down_video_mt", down_video_mt) &&
               cJSON_AddStringToObject(root, "down_audio_mt",
                                      platform_audio_codec(media->audio.codec)) &&
               cJSON_AddBoolToObject(root, "no_video", no_video) &&
@@ -822,6 +889,17 @@ static void submit_voip_profile(void)
         ESP_LOGW(TAG, "cannot build VoIP device profile");
         return;
     }
+    ESP_LOGI(TAG,
+             "submitting VoIP profile screen=%dx%d audio=%s/%d/%d "
+             "up-video=%s down-video=%s no-video=%s",
+             screen_width,
+             screen_height,
+             platform_audio_codec(media->audio.codec),
+             media->audio.sample_rate_hz,
+             media->audio.channels,
+             up_video_mt[0] == '\0' ? "none" : up_video_mt,
+             down_video_mt[0] == '\0' ? "none" : down_video_mt,
+             no_video ? "yes" : "no");
     esp_err_t err = platform_client_request(PLATFORM_SERVICE_VOIP,
                                             "/v1/voip/device/profile",
                                             body,
@@ -901,11 +979,10 @@ static void handle_voip_callers_response(const char *body)
     s_voip_cancelled_call_id[0] = '\0';
     s_voip_cancelled_until_ms = 0;
     (void)snprintf(s_voip_open_id, sizeof(s_voip_open_id), "%s", open_id);
-    esp_err_t err = platform_client_request(PLATFORM_SERVICE_VOIP,
-                                            "/v1/voip/device/call",
-                                            request_body,
-                                            service_event_response,
-                                            (void *)(uintptr_t)EVENT_VOIP_DIAL_RESPONSE);
+    esp_err_t err = submit_service_event(EVENT_VOIP_DIAL_RESPONSE,
+                                         PLATFORM_SERVICE_VOIP,
+                                         "/v1/voip/device/call",
+                                         request_body);
     free(request_body);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "VoIP dial request submission failed: %s", esp_err_to_name(err));
@@ -983,7 +1060,9 @@ static void handle_ai_token(const char *body)
         finish_session();
         return;
     }
-    int rc = tirtc_adapter_whip_connect(peer_id, token);
+    int rc = tirtc_adapter_whip_connect(peer_id,
+                                        token,
+                                        s_session_generation);
     if (rc != 0) {
         ESP_LOGE(TAG, "AI WHIP connect submission failed rc=%d", rc);
         finish_session();
@@ -1046,14 +1125,19 @@ static void send_ai_start(void)
     }
 }
 
-static void handle_connection(bool connected, bool incoming)
+static void handle_connection(const session_event_t *event)
 {
-    if (!connected) {
-        media_runtime_set_uplink_active(false);
-        if (s_ignore_next_disconnect) {
-            s_ignore_next_disconnect = false;
+    if (!event->connected) {
+        if (event->connection_generation != 0 &&
+            event->connection_generation != s_bound_connection_generation) {
+            ESP_LOGI(TAG,
+                     "ignoring stale disconnect generation=%lu active=%lu",
+                     (unsigned long)event->connection_generation,
+                     (unsigned long)s_bound_connection_generation);
             return;
         }
+        s_bound_connection_generation = 0;
+        media_runtime_set_uplink_active(false);
         if (s_service == DEVICE_SERVICE_CALL && s_call_room_id[0] != '\0' &&
             (s_state == DEVICE_SESSION_CALLING || s_state == DEVICE_SESSION_IN_CALL)) {
             (void)submit_room_action("/v1/call/hangup", "connection_error");
@@ -1064,15 +1148,18 @@ static void handle_connection(bool connected, bool incoming)
         return;
     }
 
-    if (incoming) {
+    if (event->incoming) {
         if (s_state == DEVICE_SESSION_IDLE) {
-            set_state(DEVICE_SESSION_H5_STREAMING, DEVICE_SERVICE_H5);
+            begin_session(DEVICE_SESSION_H5_STREAMING, DEVICE_SERVICE_H5);
+            s_bound_connection_generation = event->connection_generation;
             media_runtime_set_uplink_active(true);
         } else if (s_state == DEVICE_SESSION_RINGING) {
-            set_state(DEVICE_SESSION_IN_CALL, s_service);
-            media_runtime_set_uplink_active(true);
+            ESP_LOGW(TAG,
+                     "rejecting media connection while ringing; accept signaling first");
+            (void)tirtc_adapter_disconnect();
         } else if (s_state == DEVICE_SESSION_CALLING &&
                    s_service == DEVICE_SERVICE_CALL) {
+            s_bound_connection_generation = event->connection_generation;
             ESP_LOGI(TAG, "callee P2P connected; waiting for room confirmation command");
         } else {
             ESP_LOGW(TAG, "unexpected incoming connection while %s; closing",
@@ -1082,24 +1169,28 @@ static void handle_connection(bool connected, bool incoming)
         return;
     }
 
+    s_bound_connection_generation = event->connection_generation;
     if (s_service == DEVICE_SERVICE_AI && s_state == DEVICE_SESSION_AI_CONNECTING) {
         s_ai_start_at_ms = esp_timer_get_time() / 1000 + 300;
-    } else if ((s_service == DEVICE_SERVICE_VOIP || s_service == DEVICE_SERVICE_CALL) &&
+    } else if (s_service == DEVICE_SERVICE_VOIP &&
+               s_state == DEVICE_SESSION_CALLING) {
+        s_call_timeout_at_ms = now_ms() + 10000;
+        ESP_LOGI(TAG,
+                 "VoIP WHIP connected; waiting for 0x2000 confirmation");
+    } else if (s_service == DEVICE_SERVICE_CALL &&
                s_state == DEVICE_SESSION_CALLING) {
         set_state(DEVICE_SESSION_IN_CALL, s_service);
         s_call_timeout_at_ms = 0;
         media_runtime_set_uplink_active(true);
-        if (s_service == DEVICE_SERVICE_CALL) {
-            char room[192];
-            int length = snprintf(room,
-                                  sizeof(room),
-                                  "{\"room_id\":\"%s\"}",
-                                  s_call_room_id[0] == '\0' ? "direct-demo" : s_call_room_id);
-            if (length > 0 && (size_t)length < sizeof(room)) {
-                (void)tirtc_adapter_send_command(CMD_VOIP_ACCEPT,
-                                                 room,
-                                                 (uint32_t)length);
-            }
+        char room[192];
+        int length = snprintf(room,
+                              sizeof(room),
+                              "{\"room_id\":\"%s\"}",
+                              s_call_room_id[0] == '\0' ? "direct-demo" : s_call_room_id);
+        if (length > 0 && (size_t)length < sizeof(room)) {
+            (void)tirtc_adapter_send_command(CMD_VOIP_ACCEPT,
+                                             room,
+                                             (uint32_t)length);
         }
     } else {
         ESP_LOGW(TAG, "outgoing connection completed after its session ended; closing");
@@ -1109,6 +1200,15 @@ static void handle_connection(bool connected, bool incoming)
 
 static void handle_command(const session_event_t *event)
 {
+    if (event->connection_generation == 0 ||
+        event->connection_generation != s_bound_connection_generation) {
+        ESP_LOGI(TAG,
+                 "ignoring stale command=0x%lx generation=%lu active=%lu",
+                 (unsigned long)event->command,
+                 (unsigned long)event->connection_generation,
+                 (unsigned long)s_bound_connection_generation);
+        return;
+    }
     if (event->command == CMD_AI && s_service == DEVICE_SERVICE_AI) {
         cJSON *root = cJSON_ParseWithLength(event->payload, event->length);
         bool error = root != NULL && cJSON_GetObjectItemCaseSensitive(root, "error") != NULL;
@@ -1149,9 +1249,19 @@ static void handle_command(const session_event_t *event)
 
 static void handle_event(const session_event_t *event)
 {
+    if (event->session_generation != 0 &&
+        event->session_generation != s_session_generation) {
+        ESP_LOGI(TAG,
+                 "ignoring stale event=%d session=%lu active=%lu",
+                 (int)event->type,
+                 (unsigned long)event->session_generation,
+                 (unsigned long)s_session_generation);
+        return;
+    }
+
     switch (event->type) {
     case EVENT_CONNECTION:
-        handle_connection(event->connected, event->incoming);
+        handle_connection(event);
         break;
     case EVENT_COMMAND:
         handle_command(event);
@@ -1170,10 +1280,9 @@ static void handle_event(const session_event_t *event)
         }
         if (tirtc_adapter_has_connection()) {
             media_runtime_set_uplink_active(false);
-            s_ignore_next_disconnect = true;
             (void)tirtc_adapter_disconnect();
         }
-        set_state(DEVICE_SESSION_CALLING, DEVICE_SERVICE_VOIP);
+        begin_session(DEVICE_SESSION_CALLING, DEVICE_SERVICE_VOIP);
         request_voip_callers();
         break;
     case EVENT_VOIP_CALLERS_RESPONSE:
@@ -1207,15 +1316,13 @@ static void handle_event(const session_event_t *event)
         }
         if (tirtc_adapter_has_connection()) {
             media_runtime_set_uplink_active(false);
-            s_ignore_next_disconnect = true;
             (void)tirtc_adapter_disconnect();
         }
-        set_state(DEVICE_SESSION_AI_CONNECTING, DEVICE_SERVICE_AI);
-        if (platform_client_request(PLATFORM_SERVICE_AI,
-                                    "/v1/ai/token",
-                                    NULL,
-                                    ai_token_response,
-                                    NULL) != ESP_OK) {
+        begin_session(DEVICE_SESSION_AI_CONNECTING, DEVICE_SERVICE_AI);
+        if (submit_service_event(EVENT_AI_TOKEN,
+                                 PLATFORM_SERVICE_AI,
+                                 "/v1/ai/token",
+                                 NULL) != ESP_OK) {
             ESP_LOGE(TAG, "AI token request submission failed");
             finish_session();
         }
@@ -1239,16 +1346,19 @@ static void handle_event(const session_event_t *event)
         }
         if (tirtc_adapter_has_connection()) {
             media_runtime_set_uplink_active(false);
-            s_ignore_next_disconnect = true;
             (void)tirtc_adapter_disconnect();
         }
-        s_service = event->type == EVENT_VOIP_CONNECT
-                        ? DEVICE_SERVICE_VOIP
-                        : DEVICE_SERVICE_CALL;
-        set_state(DEVICE_SESSION_CALLING, s_service);
+        device_service_t service = event->type == EVENT_VOIP_CONNECT
+                                       ? DEVICE_SERVICE_VOIP
+                                       : DEVICE_SERVICE_CALL;
+        begin_session(DEVICE_SESSION_CALLING, service);
         int rc = event->type == EVENT_VOIP_CONNECT
-                     ? tirtc_adapter_whip_connect(event->first, event->second)
-                     : tirtc_adapter_connect(event->first, event->second);
+                     ? tirtc_adapter_whip_connect(event->first,
+                                                  event->second,
+                                                  s_session_generation)
+                     : tirtc_adapter_connect(event->first,
+                                             event->second,
+                                             s_session_generation);
         if (rc != 0) {
             ESP_LOGE(TAG, "call connection submission failed rc=%d", rc);
             finish_session();
@@ -1302,7 +1412,9 @@ static void handle_event(const session_event_t *event)
                 accept_device_call();
             } else if (s_service == DEVICE_SERVICE_VOIP) {
                 set_state(DEVICE_SESSION_CALLING, DEVICE_SERVICE_VOIP);
-                if (tirtc_adapter_whip_connect(s_voip_peer_id, s_voip_token) != 0) {
+                if (tirtc_adapter_whip_connect(s_voip_peer_id,
+                                               s_voip_token,
+                                               s_session_generation) != 0) {
                     finish_session();
                 }
             } else {
@@ -1331,11 +1443,10 @@ static void session_task(void *argument)
     set_state(DEVICE_SESSION_IDLE, DEVICE_SERVICE_H5);
     s_next_room_poll_ms = now_ms() + 1000;
     for (;;) {
-        session_event_t *event = NULL;
-        if (xQueueReceive(s_queue, &event, pdMS_TO_TICKS(50)) == pdTRUE &&
-            event != NULL) {
-            handle_event(event);
-            free(event);
+        session_event_t event = {0};
+        if (xQueueReceive(s_queue, &event, pdMS_TO_TICKS(50)) == pdTRUE) {
+            handle_event(&event);
+            release_event(&event);
         }
         const int64_t current_ms = now_ms();
         if (s_ai_start_at_ms != 0 && current_ms >= s_ai_start_at_ms) {
@@ -1367,15 +1478,21 @@ static void session_task(void *argument)
             platform_client_ready() &&
             tirtc_adapter_state() == TIRTC_ADAPTER_RUNNING &&
             s_service != DEVICE_SERVICE_AI && s_service != DEVICE_SERVICE_VOIP;
-        if (room_poll_allowed && !s_room_request_pending &&
+        if (room_poll_allowed &&
+            !atomic_load_explicit(&s_room_request_pending, memory_order_acquire) &&
             current_ms >= s_next_room_poll_ms) {
-            s_room_request_pending = true;
+            atomic_store_explicit(&s_room_request_pending,
+                                  true,
+                                  memory_order_release);
             s_next_room_poll_ms = current_ms + 2000;
-            if (submit_service_event(EVENT_ROOM_RESPONSE,
-                                     PLATFORM_SERVICE_CALL,
-                                     "/v1/call/room",
-                                     NULL) != ESP_OK) {
-                s_room_request_pending = false;
+            if (submit_service_event_timeout(EVENT_ROOM_RESPONSE,
+                                             PLATFORM_SERVICE_CALL,
+                                             "/v1/call/room",
+                                             NULL,
+                                             2500U) != ESP_OK) {
+                atomic_store_explicit(&s_room_request_pending,
+                                      false,
+                                      memory_order_release);
                 ESP_LOGW(TAG, "room status request submission failed");
             }
         }
@@ -1384,15 +1501,10 @@ static void session_task(void *argument)
 
 static esp_err_t enqueue_simple(session_event_type_t type)
 {
-    session_event_t *event = calloc(1, sizeof(*event));
-    if (event == NULL) {
-        return ESP_ERR_NO_MEM;
-    }
-    event->type = type;
-    bool queued = queue_event(event);
-    if (!queued) {
-        free(event);
-    }
+    const session_event_t event = {
+        .type = type,
+    };
+    bool queued = queue_event(&event);
     return queued ? ESP_OK : ESP_ERR_TIMEOUT;
 }
 
@@ -1402,16 +1514,25 @@ static esp_err_t enqueue_pair(session_event_type_t type, const char *first, cons
         strlen(first) >= SESSION_ARGUMENT_MAX || strlen(second) >= SESSION_ARGUMENT_MAX) {
         return ESP_ERR_INVALID_ARG;
     }
-    session_event_t *event = calloc(1, sizeof(*event));
-    if (event == NULL) {
+    session_event_t event = {
+        .type = type,
+    };
+    if (!copy_event_text(&event.first,
+                         NULL,
+                         first,
+                         strlen(first),
+                         SESSION_ARGUMENT_MAX) ||
+        !copy_event_text(&event.second,
+                         NULL,
+                         second,
+                         strlen(second),
+                         SESSION_ARGUMENT_MAX)) {
+        release_event(&event);
         return ESP_ERR_NO_MEM;
     }
-    event->type = type;
-    (void)snprintf(event->first, sizeof(event->first), "%s", first);
-    (void)snprintf(event->second, sizeof(event->second), "%s", second);
-    bool queued = queue_event(event);
+    bool queued = queue_event(&event);
     if (!queued) {
-        free(event);
+        release_event(&event);
     }
     return queued ? ESP_OK : ESP_ERR_TIMEOUT;
 }
@@ -1421,7 +1542,7 @@ esp_err_t session_runtime_start(void)
     if (s_task != NULL) {
         return ESP_OK;
     }
-    s_queue = xQueueCreate(SESSION_QUEUE_DEPTH, sizeof(session_event_t *));
+    s_queue = xQueueCreate(SESSION_QUEUE_DEPTH, sizeof(session_event_t));
     if (s_queue == NULL) {
         return ESP_ERR_NO_MEM;
     }

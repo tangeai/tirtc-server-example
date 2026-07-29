@@ -25,6 +25,7 @@
 #define PLATFORM_REQUEST_PATH_MAX 128
 #define PLATFORM_REQUEST_BODY_MAX 2048
 #define PLATFORM_SIGNAL_MAX 4096
+#define PLATFORM_DEFAULT_HTTP_TIMEOUT_MS 15000U
 #define PLATFORM_DEFAULT_DISCOVERY "https://ep-open.tangeopen.com/services"
 #define PLATFORM_DEFAULT_PROVISION_TIMEOUT_SECONDS 190U
 #define PROVISION_DONE_BIT BIT0
@@ -51,6 +52,7 @@ typedef struct {
     char path[PLATFORM_REQUEST_PATH_MAX];
     bool post;
     char body[PLATFORM_REQUEST_BODY_MAX];
+    unsigned timeout_ms;
     platform_response_callback_t callback;
     void *user_data;
 } platform_request_t;
@@ -116,6 +118,7 @@ static esp_err_t http_request(const char *url,
                               size_t header_count,
                               char *response,
                               size_t response_size,
+                              unsigned timeout_ms,
                               int *status)
 {
     http_output_t output = {
@@ -127,7 +130,9 @@ static esp_err_t http_request(const char *url,
         .url = url,
         .event_handler = http_event,
         .user_data = &output,
-        .timeout_ms = 15000,
+        .timeout_ms = (int)(timeout_ms == 0
+                                ? PLATFORM_DEFAULT_HTTP_TIMEOUT_MS
+                                : timeout_ms),
         .crt_bundle_attach = esp_crt_bundle_attach,
         .disable_auto_redirect = false,
     };
@@ -183,7 +188,8 @@ static esp_err_t discover_services(const char *url)
     char response[PLATFORM_HTTP_BODY_MAX];
     int status = 0;
     esp_err_t err = http_request(url, NULL, NULL, NULL, NULL, 0,
-                                 response, sizeof(response), &status);
+                                 response, sizeof(response),
+                                 PLATFORM_DEFAULT_HTTP_TIMEOUT_MS, &status);
     if (err != ESP_OK || status != 200) {
         ESP_LOGE(TAG, "service discovery failed: %s HTTP=%d",
                  esp_err_to_name(err), status);
@@ -278,7 +284,8 @@ static esp_err_t obtain_mqtt_token(void)
     char response[PLATFORM_HTTP_BODY_MAX];
     int status = 0;
     esp_err_t err = http_request(url, "", NULL, names, values, 5,
-                                 response, sizeof(response), &status);
+                                 response, sizeof(response),
+                                 PLATFORM_DEFAULT_HTTP_TIMEOUT_MS, &status);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "设备 token HTTP 请求失败: %s",
                  esp_err_to_name(err));
@@ -340,6 +347,7 @@ static void process_request(const platform_request_t *request)
                                        0,
                                        response,
                                        sizeof(response),
+                                       request->timeout_ms,
                                        &status);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "platform request %s failed: %s HTTP=%d",
@@ -486,11 +494,18 @@ static esp_err_t start_mqtt(void)
     if (s_mqtt == NULL) {
         return ESP_ERR_NO_MEM;
     }
-    ESP_ERROR_CHECK(esp_mqtt_client_register_event(s_mqtt,
-                                                    ESP_EVENT_ANY_ID,
-                                                    mqtt_event,
-                                                    NULL));
-    return esp_mqtt_client_start(s_mqtt);
+    esp_err_t err = esp_mqtt_client_register_event(s_mqtt,
+                                                   ESP_EVENT_ANY_ID,
+                                                   mqtt_event,
+                                                   NULL);
+    if (err == ESP_OK) {
+        err = esp_mqtt_client_start(s_mqtt);
+    }
+    if (err != ESP_OK) {
+        (void)esp_mqtt_client_destroy(s_mqtt);
+        s_mqtt = NULL;
+    }
+    return err;
 }
 
 static esp_err_t sync_clock(void)
@@ -591,6 +606,7 @@ static esp_err_t report_for_provision(const platform_provision_config_t *config,
                                        header_count,
                                        response,
                                        sizeof(response),
+                                       PLATFORM_DEFAULT_HTTP_TIMEOUT_MS,
                                        &status);
     free(body);
     if (err != ESP_OK || status != 200) {
@@ -950,6 +966,14 @@ esp_err_t platform_client_start(const platform_client_config_t *config)
     err = start_mqtt();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "MQTT start failed: %s", esp_err_to_name(err));
+        if (s_request_task != NULL) {
+            vTaskDelete(s_request_task);
+            s_request_task = NULL;
+        }
+        if (s_request_queue != NULL) {
+            vQueueDelete(s_request_queue);
+            s_request_queue = NULL;
+        }
         return err;
     }
     s_ready = true;
@@ -987,17 +1011,34 @@ esp_err_t platform_client_request(platform_service_t service,
                                   platform_response_callback_t callback,
                                   void *user_data)
 {
+    return platform_client_request_timeout(service,
+                                           path,
+                                           json_body,
+                                           PLATFORM_DEFAULT_HTTP_TIMEOUT_MS,
+                                           callback,
+                                           user_data);
+}
+
+esp_err_t platform_client_request_timeout(platform_service_t service,
+                                          const char *path,
+                                          const char *json_body,
+                                          unsigned timeout_ms,
+                                          platform_response_callback_t callback,
+                                          void *user_data)
+{
     if (!s_ready || s_request_queue == NULL) {
         return ESP_ERR_INVALID_STATE;
     }
     if (service_base(service) == NULL || path == NULL || path[0] != '/' ||
         strlen(path) >= PLATFORM_REQUEST_PATH_MAX ||
-        (json_body != NULL && strlen(json_body) >= PLATFORM_REQUEST_BODY_MAX)) {
+        (json_body != NULL && strlen(json_body) >= PLATFORM_REQUEST_BODY_MAX) ||
+        timeout_ms == 0 || timeout_ms > 60000U) {
         return ESP_ERR_INVALID_ARG;
     }
     platform_request_t request = {
         .service = service,
         .post = json_body != NULL,
+        .timeout_ms = timeout_ms,
         .callback = callback,
         .user_data = user_data,
     };
