@@ -686,7 +686,7 @@ int main(int argc, char *argv[]) {
     const char *device_key  = "";
     const char *mac         = "AA:BB:CC:DD:EE:FF";
     int         timeout     = 190;
-    const char *services_base = "https://ep-open.tangeopen.com"; /* service discovery entry */
+    const char *services_base = "http://ep-open.tangeopen.com"; /* service discovery entry */
     const char *log_level   = "debug";
     const char *creds_file  = "device_creds.json";
     const char *ca_cert     = "../assets/ca-certificates.crt";

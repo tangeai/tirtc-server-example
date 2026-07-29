@@ -217,7 +217,7 @@ int fetch_services(DeviceServices *svc, const char *base_url) {
     if (base_url && base_url[0]) {
         snprintf(url, sizeof(url), "%s/services", base_url);
     } else {
-        snprintf(url, sizeof(url), "https://ep-open.tangeopen.com/services");
+        snprintf(url, sizeof(url), "http://ep-open.tangeopen.com/services");
     }
     LOG_D("fetch_services  GET %s", url);
 

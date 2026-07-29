@@ -67,7 +67,7 @@ void set_mqtt_insecure(int insecure);
 /* ── Service discovery ──────────────────────────────────────────────────── */
 
 /** Fetch service endpoints from the registry.
- *  base_url: service discovery entry point (e.g. "https://ep-open.tangeopen.com").
+ *  base_url: service discovery entry point (e.g. "http://ep-open.tangeopen.com").
  *  If empty, uses the built-in default.
  *  Returns 0 on success, -1 on failure. */
 int fetch_services(DeviceServices *svc, const char *base_url);

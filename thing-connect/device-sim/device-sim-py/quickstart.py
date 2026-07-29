@@ -18,7 +18,7 @@ DEVICE_KEY  = os.getenv("DEVICE_KEY",    "your-key")
 
 # 步骤 0：从服务发现接口获取各服务地址
 #   GET {SERVICES_BASE_URL}/services
-SERVICES_BASE_URL = os.getenv("SERVICES_BASE_URL", "https://ep-open.tangeopen.com")
+SERVICES_BASE_URL = os.getenv("SERVICES_BASE_URL", "http://ep-open.tangeopen.com")
 _svc        = fetch_services(base_url=SERVICES_BASE_URL)
 SERVER      = _svc["device_server"]
 BROKER      = _svc["mqtt_host"]

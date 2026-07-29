@@ -230,7 +230,7 @@ python3 device_sim_main.py --device-id DEV000001 --device-key your-key \
 | `--device-id` | `$DEVICE_ID` | 已绑定设备 ID |
 | `--device-key` | `$DEVICE_KEY` | 设备密钥 |
 | `--mac` | `AA:BB:CC:DD:EE:FF` | 设备 MAC（未绑定流程） |
-| `--endpoint` | `https://ep-open.tangeopen.com` | 服务发现入口 |
+| `--endpoint` | `http://ep-open.tangeopen.com` | 服务发现入口 |
 | `--with-mic` | — | Windows 下使用 PC 麦克风/扬声器；上下行须同时为 `alaw_8khz` 或 `alaw_16khz` |
 | `--up-audio-format` | `alaw_8khz` | 上行音频格式，使用标准称谓；旧值如 `g711a_8k` 仍兼容 |
 | `--down-audio-format` | `alaw_8khz` | 下行音频格式，使用标准称谓；旧值如 `g711a_8k` 仍兼容 |
@@ -533,7 +533,7 @@ device-sim-py/
 from device_flow import fetch_services, report_device, connect_temp_mqtt, get_mqtt_token, connect_mqtt_blocking, DeviceResetError
 
 # 1. 服务发现
-svc = fetch_services(base_url="https://ep-open.tangeopen.com")
+svc = fetch_services(base_url="http://ep-open.tangeopen.com")
 # svc: { device_server, voip_server, ai_server, call_server,
 #        mqtt_host, mqtt_port, mqtt_tls, tirtc_endpoint }
 

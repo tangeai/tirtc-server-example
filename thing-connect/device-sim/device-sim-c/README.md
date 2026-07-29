@@ -60,7 +60,7 @@ bash ../scripts/gen_assets.sh
 | `--device-id` | `$DEVICE_ID` | 已绑定设备 ID |
 | `--device-key` | `$DEVICE_KEY` | 设备密钥 |
 | `--mac` | `AA:BB:CC:DD:EE:FF` | 设备 MAC（未绑定流程） |
-| `--endpoint` | `https://ep-open.tangeopen.com` | 服务发现入口 |
+| `--endpoint` | `http://ep-open.tangeopen.com` | 服务发现入口 |
 | `--log-level` | `debug` | `debug` / `info` / `warn` / `error` |
 | `--up-audio-file` | `../assets/audio.g711a` | 推流、VoIP、设备互呼共用的编码音频文件（环境变量 `UP_AUDIO_FILE`） |
 | `--up-audio-format` | `alaw_8khz` | 上述文件格式（环境变量 `UP_AUDIO_FORMAT`） |

@@ -38,7 +38,7 @@ import requests
 import paho.mqtt.client as mqtt
 import http_trace
 
-SERVICES_URL = "https://ep-open.tangeopen.com/services"
+SERVICES_URL = "http://ep-open.tangeopen.com/services"
 
 # ── 日志 ──────────────────────────────────────────────────────────────────
 _LOG_LEVEL = 10

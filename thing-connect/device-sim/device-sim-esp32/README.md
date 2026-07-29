@@ -110,7 +110,7 @@ tirtc-set <device_id> <device_key> <client_id> <可选TiRTC端点>
 tirtc-clear  # 清除绑定凭证，重启后重新显示验证码
 ```
 
-端点留空时通过 `https://ep-open.tangeopen.com/services` 做服务发现。
+端点留空时通过 `http://ep-open.tangeopen.com/services` 做服务发现。
 
 ## 串口交互
 

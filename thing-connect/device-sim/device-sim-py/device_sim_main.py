@@ -267,7 +267,7 @@ def main():
     media.add_argument("--down-media-dir", default=os.getenv("DOWN_MEDIA_DIR",
                        os.path.join(os.path.dirname(__file__), "received")),
                        help="下行音视频保存目录（默认 ./received）")
-    parser.add_argument("--endpoint",   default=os.getenv("SERVICES_BASE_URL", "https://ep-open.tangeopen.com"),
+    parser.add_argument("--endpoint",   default=os.getenv("SERVICES_BASE_URL", "http://ep-open.tangeopen.com"),
                         help="服务发现入口地址（GET {endpoint}/services）")
     parser.add_argument("--log-level",  default=os.getenv("LOG_LEVEL", "debug"),
                         dest="log_level", choices=["debug", "info", "warn", "error"],

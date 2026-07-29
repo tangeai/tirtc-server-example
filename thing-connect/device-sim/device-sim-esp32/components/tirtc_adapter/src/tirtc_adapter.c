@@ -364,6 +364,38 @@ static int set_string_option(TIRTCOPTION option, const char *value)
     return TiRtcSetOption(option, value, (uint32_t)strlen(value));
 }
 
+static int normalize_service_endpoint(const char *source,
+                                      char *destination,
+                                      size_t destination_size)
+{
+    if (source == NULL || destination == NULL || destination_size == 0) {
+        return TIRTC_E_INVALID_PARAMETER;
+    }
+
+    while (*source == ' ' || *source == '\t') {
+        source++;
+    }
+    if (strncmp(source, "https://", 8) == 0) {
+        source += 8;
+    } else if (strncmp(source, "http://", 7) == 0) {
+        source += 7;
+    } else if (strstr(source, "://") != NULL) {
+        return TIRTC_E_INVALID_PARAMETER;
+    }
+
+    size_t length = strcspn(source, "/?# \t\r\n");
+    while (length > 0 && source[length - 1U] == '/') {
+        length--;
+    }
+    if (length == 0 || length >= destination_size) {
+        return TIRTC_E_INVALID_PARAMETER;
+    }
+
+    memcpy(destination, source, length);
+    destination[length] = '\0';
+    return 0;
+}
+
 const char *tirtc_adapter_version(void)
 {
     return TiRtcGetVersion();
@@ -400,11 +432,21 @@ int tirtc_adapter_start(const tirtc_adapter_config_t *config)
     TiRtcLogSetCallback(sdk_log);
     TiRtcLogSetLevel(config->log_level > 0 ? config->log_level : 3);
 
-    int rc = set_string_option(TIRTC_OPT_DEVICE_SECRET_KEY, config->device_secret);
+    char service_endpoint[256];
+    int rc = normalize_service_endpoint(config->service_endpoint,
+                                        service_endpoint,
+                                        sizeof(service_endpoint));
+    if (rc != 0) {
+        ESP_LOGE(TAG, "invalid TiRTC service endpoint");
+        goto fail;
+    }
+    ESP_LOGI(TAG, "using TiRTC service endpoint=%s", service_endpoint);
+
+    rc = set_string_option(TIRTC_OPT_DEVICE_SECRET_KEY, config->device_secret);
     if (rc != 0) {
         goto fail;
     }
-    rc = set_string_option(TIRTC_OPT_SERVICE_ENDPOINT, config->service_endpoint);
+    rc = set_string_option(TIRTC_OPT_SERVICE_ENDPOINT, service_endpoint);
     if (rc != 0) {
         goto fail;
     }

@@ -230,7 +230,7 @@ static int init_sdk(const char *endpoint, const char *device_key,
     rc = TiRtcInit();
     if (rc != 0) return rc;
 
-    /* endpoint：推荐取 GET https://ep-open.tangeopen.com/services 的 tirtc-srv。
+    /* endpoint：推荐取 GET http://ep-open.tangeopen.com/services 的 tirtc-srv。
        endpoint 为空时不设置此 option；随附 SDK 2.2.1 默认 https://ep-tirtc.tange365.com。 */
     if (endpoint && endpoint[0]) {
         rc = TiRtcSetOption(TIRTC_OPT_SERVICE_ENDPOINT, endpoint, (uint32_t)strlen(endpoint));
@@ -308,7 +308,7 @@ TiRtcSendVideoStream(hconn, &video, video_frame);
 #include "device_flow.h"
 
 DeviceServices svc;
-fetch_services(&svc, "https://ep-open.tangeopen.com");   /* 阶段 0：服务发现，拿到各 server 地址 + tirtc_endpoint */
+fetch_services(&svc, "http://ep-open.tangeopen.com");   /* 阶段 0：服务发现，拿到各 server 地址 + tirtc_endpoint */
 
 /* 阶段 1：未绑定设备 → report 拿 6 位验证码 → 临时 MQTT 等用户在 H5 输码绑定 */
 ReportResult rep;

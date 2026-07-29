@@ -6,7 +6,7 @@
 
 ## 服务发现
 
-### `GET https://ep-open.tangeopen.com/services`
+### `GET http://ep-open.tangeopen.com/services`
 
 设备启动时获取各业务服务与 TiRTC 的当前入口地址。无需鉴权。若部署私有环境，向 `fetch_services()` 传入私有服务发现根地址；**「C 参考实现」**会请求该根地址加 `/services`。
 
