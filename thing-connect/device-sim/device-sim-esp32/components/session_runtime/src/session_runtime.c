@@ -1476,6 +1476,7 @@ static void session_task(void *argument)
         }
         const bool room_poll_allowed =
             platform_client_ready() &&
+            !platform_client_mqtt_connected() &&
             tirtc_adapter_state() == TIRTC_ADAPTER_RUNNING &&
             s_service != DEVICE_SERVICE_AI && s_service != DEVICE_SERVICE_VOIP;
         if (room_poll_allowed &&
