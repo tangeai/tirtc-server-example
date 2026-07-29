@@ -133,11 +133,14 @@ reject
 hangup
 wifi-set <ssid> <password>
 wifi-clear
-tirtc-set <device_id> <device_key> [client_id] [endpoint]  # 仅预烧/联调
-tirtc-clear                                                # 清除后重新验证码绑定
+tirtc-set <device_id> <device_key> [client_id]  # 仅预烧/联调
+tirtc-clear                                     # 清除后重新验证码绑定
 ```
 
 产品可增加三键、LCD、LED、提示音或本地网页。GPIO 只在板级配置中定义，业务代码只接收抽象动作。
+
+ESP32-S3 固件不设置 `TIRTC_OPT_SERVICE_ENDPOINT`，TiRTC SDK 使用内置默认入口；
+`tirtc-srv` 仍由服务发现返回，但该字段供支持自定义入口的其他客户端使用。
 
 ## 7. 会话模型
 

@@ -769,8 +769,8 @@ static void provision_mqtt_event(void *handler_args,
         ESP_LOGI(TAG, "binding ACK delivered");
         xEventGroupSetBits(context->events, PROVISION_DONE_BIT);
     } else if (event_id == MQTT_EVENT_ERROR) {
-        ESP_LOGE(TAG, "temporary MQTT transport/authentication error");
-        provision_finish_with_error(context);
+        ESP_LOGW(TAG,
+                 "temporary MQTT transport error; waiting for automatic reconnect");
     }
 }
 
@@ -998,11 +998,6 @@ bool platform_client_provisioning(void)
 const char *platform_client_verification_code(void)
 {
     return s_verification_code;
-}
-
-const char *platform_client_tirtc_endpoint(void)
-{
-    return s_services.tirtc;
 }
 
 esp_err_t platform_client_request(platform_service_t service,

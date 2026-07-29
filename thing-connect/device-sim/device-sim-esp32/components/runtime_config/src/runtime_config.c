@@ -37,20 +37,6 @@ bool runtime_config_tirtc_valid(const runtime_tirtc_config_t *config,
     return true;
 }
 
-static esp_err_t get_optional_string(nvs_handle_t nvs,
-                                     const char *key,
-                                     char *value,
-                                     size_t value_size)
-{
-    size_t size = value_size;
-    esp_err_t err = nvs_get_str(nvs, key, value, &size);
-    if (err == ESP_ERR_NVS_NOT_FOUND) {
-        value[0] = '\0';
-        return ESP_OK;
-    }
-    return err;
-}
-
 esp_err_t runtime_config_load_tirtc(runtime_tirtc_config_t *config)
 {
     if (config == NULL) {
@@ -69,12 +55,12 @@ esp_err_t runtime_config_load_tirtc(runtime_tirtc_config_t *config)
         err = nvs_get_str(nvs, "secret", config->device_secret, &size);
     }
     if (err == ESP_OK) {
-        err = get_optional_string(nvs, "client_id", config->client_id,
-                                  sizeof(config->client_id));
-    }
-    if (err == ESP_OK) {
-        err = get_optional_string(nvs, "endpoint", config->service_endpoint,
-                                  sizeof(config->service_endpoint));
+        size = sizeof(config->client_id);
+        err = nvs_get_str(nvs, "client_id", config->client_id, &size);
+        if (err == ESP_ERR_NVS_NOT_FOUND) {
+            config->client_id[0] = '\0';
+            err = ESP_OK;
+        }
     }
     nvs_close(nvs);
     if (err != ESP_OK) {
@@ -93,7 +79,12 @@ esp_err_t runtime_config_save_tirtc(const runtime_tirtc_config_t *config)
     if (err == ESP_OK) err = nvs_set_str(nvs, "device_id", config->device_id);
     if (err == ESP_OK) err = nvs_set_str(nvs, "secret", config->device_secret);
     if (err == ESP_OK) err = nvs_set_str(nvs, "client_id", config->client_id);
-    if (err == ESP_OK) err = nvs_set_str(nvs, "endpoint", config->service_endpoint);
+    if (err == ESP_OK) {
+        esp_err_t erase_err = nvs_erase_key(nvs, "endpoint");
+        if (erase_err != ESP_OK && erase_err != ESP_ERR_NVS_NOT_FOUND) {
+            err = erase_err;
+        }
+    }
     if (err == ESP_OK) err = nvs_commit(nvs);
     if (nvs != 0) nvs_close(nvs);
     return err;

@@ -57,7 +57,6 @@ bool platform_client_ready(void);
 bool platform_client_mqtt_connected(void);
 bool platform_client_provisioning(void);
 const char *platform_client_verification_code(void);
-const char *platform_client_tirtc_endpoint(void);
 
 /* GET when json_body is NULL, POST otherwise. The callback runs in the
  * platform request task; response text is only valid during the callback. */

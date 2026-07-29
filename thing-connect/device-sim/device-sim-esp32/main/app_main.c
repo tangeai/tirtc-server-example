@@ -145,35 +145,25 @@ static void tirtc_start_task(void *argument)
         }
 
         if (!tirtc_submitted) {
-            const char *endpoint = s_tirtc_config.service_endpoint;
-            if (endpoint[0] == '\0' && platform_client_ready()) {
-                endpoint = platform_client_tirtc_endpoint();
+            if (tirtc_adapter_state() == TIRTC_ADAPTER_ERROR) {
+                (void)tirtc_adapter_deinit();
             }
-            if (endpoint[0] != '\0') {
+            const tirtc_adapter_config_t adapter = {
+                .device_id = s_tirtc_config.device_id,
+                .device_secret = s_tirtc_config.device_secret,
+                .client_id = s_tirtc_config.client_id,
+                .max_send_buffer_bytes = 256U * 1024U,
+                .max_connections = 1,
+                .log_level = 3,
+            };
+            int rc = tirtc_adapter_start(&adapter);
+            if (rc == 0) {
+                tirtc_submitted = true;
+            } else {
+                ESP_LOGE(TAG, "TiRTC start failed rc=%d", rc);
                 if (tirtc_adapter_state() == TIRTC_ADAPTER_ERROR) {
                     (void)tirtc_adapter_deinit();
                 }
-                const tirtc_adapter_config_t adapter = {
-                    .device_id = s_tirtc_config.device_id,
-                    .device_secret = s_tirtc_config.device_secret,
-                    .client_id = s_tirtc_config.client_id,
-                    .service_endpoint = endpoint,
-                    .max_send_buffer_bytes = 256U * 1024U,
-                    .max_connections = 1,
-                    .log_level = 3,
-                };
-                int rc = tirtc_adapter_start(&adapter);
-                if (rc == 0) {
-                    tirtc_submitted = true;
-                } else {
-                    ESP_LOGE(TAG, "TiRTC start failed rc=%d", rc);
-                    if (tirtc_adapter_state() == TIRTC_ADAPTER_ERROR) {
-                        (void)tirtc_adapter_deinit();
-                    }
-                }
-            } else {
-                ESP_LOGW(TAG,
-                         "TiRTC endpoint unavailable until service discovery succeeds");
             }
         }
 

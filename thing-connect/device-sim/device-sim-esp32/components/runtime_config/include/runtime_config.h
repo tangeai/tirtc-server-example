@@ -14,7 +14,6 @@ typedef struct {
     char device_id[65];
     char device_secret[257];
     char client_id[65];
-    char service_endpoint[256];
 } runtime_tirtc_config_t;
 
 esp_err_t runtime_config_load_tirtc(runtime_tirtc_config_t *config);

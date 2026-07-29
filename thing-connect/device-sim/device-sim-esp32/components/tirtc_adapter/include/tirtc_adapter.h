@@ -24,7 +24,6 @@ typedef struct {
     const char *device_id;
     const char *device_secret;
     const char *client_id;
-    const char *service_endpoint;
     uint32_t max_send_buffer_bytes;
     int max_connections;
     int log_level;

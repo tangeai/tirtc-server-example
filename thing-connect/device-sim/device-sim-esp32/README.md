@@ -106,11 +106,12 @@ Wi-Fi 连通后，如果 NVS 中没有设备凭证，设备会自动：
 
 ```text
 tirtc-set <device_id> <device_key>
-tirtc-set <device_id> <device_key> <client_id> <可选TiRTC端点>
+tirtc-set <device_id> <device_key> <client_id>
 tirtc-clear  # 清除绑定凭证，重启后重新显示验证码
 ```
 
-端点留空时通过 `http://ep-open.tangeopen.com/services` 做服务发现。
+平台服务默认通过 `http://ep-open.tangeopen.com/services` 发现。ESP32-S3 不设置
+`TIRTC_OPT_SERVICE_ENDPOINT`，TiRTC SDK 使用其内置默认入口。
 
 ## 串口交互
 

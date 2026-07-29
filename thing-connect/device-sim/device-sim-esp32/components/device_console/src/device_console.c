@@ -92,24 +92,20 @@ static int command_wifi_clear(int argc, char **argv)
 
 static int command_tirtc_set(int argc, char **argv)
 {
-    if (argc < 3 || argc > 5) {
-        printf("usage: tirtc-set <device_id> <device_secret> [client_id] [endpoint]\n");
+    if (argc < 3 || argc > 4) {
+        printf("usage: tirtc-set <device_id> <device_secret> [client_id]\n");
         return 1;
     }
     runtime_tirtc_config_t config = {0};
     if (strlen(argv[1]) >= sizeof(config.device_id) ||
         strlen(argv[2]) >= sizeof(config.device_secret) ||
-        (argc >= 4 && strlen(argv[3]) >= sizeof(config.client_id)) ||
-        (argc >= 5 && strlen(argv[4]) >= sizeof(config.service_endpoint))) {
+        (argc >= 4 && strlen(argv[3]) >= sizeof(config.client_id))) {
         printf("one or more arguments are too long\n");
         return 1;
     }
     (void)snprintf(config.device_id, sizeof(config.device_id), "%s", argv[1]);
     (void)snprintf(config.device_secret, sizeof(config.device_secret), "%s", argv[2]);
     if (argc >= 4) (void)snprintf(config.client_id, sizeof(config.client_id), "%s", argv[3]);
-    if (argc >= 5) {
-        (void)snprintf(config.service_endpoint, sizeof(config.service_endpoint), "%s", argv[4]);
-    }
     esp_err_t err = runtime_config_save_tirtc(&config);
     if (err != ESP_OK) {
         printf("save failed: %s\n", esp_err_to_name(err));

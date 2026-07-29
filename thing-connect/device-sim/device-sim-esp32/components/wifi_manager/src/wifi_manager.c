@@ -163,13 +163,31 @@ static esp_err_t wifi_config_post(httpd_req_t *request)
         return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "invalid request size");
     }
     char body[513];
-    int received = httpd_req_recv(request, body, request->content_len);
-    if (received <= 0) {
-        return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "cannot read request");
+    size_t total = 0;
+    unsigned receive_timeouts = 0;
+    while (total < (size_t)request->content_len) {
+        int received = httpd_req_recv(request,
+                                      body + total,
+                                      (size_t)request->content_len - total);
+        if (received == HTTPD_SOCK_ERR_TIMEOUT) {
+            if (++receive_timeouts >= 3U) {
+                return httpd_resp_send_err(request,
+                                           HTTPD_408_REQ_TIMEOUT,
+                                           "request body timed out");
+            }
+            continue;
+        }
+        if (received <= 0) {
+            return httpd_resp_send_err(request,
+                                       HTTPD_400_BAD_REQUEST,
+                                       "cannot read request");
+        }
+        receive_timeouts = 0;
+        total += (size_t)received;
     }
-    body[received] = '\0';
+    body[total] = '\0';
 
-    cJSON *root = cJSON_ParseWithLength(body, (size_t)received);
+    cJSON *root = cJSON_ParseWithLength(body, total);
     const cJSON *ssid = root == NULL ? NULL :
         cJSON_GetObjectItemCaseSensitive(root, "ssid");
     const cJSON *password = root == NULL ? NULL :

@@ -18,9 +18,18 @@
 #include "runtime_config.h"
 #include "tirtc_adapter.h"
 
-#define SESSION_QUEUE_DEPTH 8
+#define SESSION_QUEUE_DEPTH 16
 #define SESSION_ARGUMENT_MAX 1024
 #define SESSION_PAYLOAD_MAX 4096
+#define SESSION_CONNECT_TIMEOUT_MS 12000
+#define SESSION_REQUEST_TIMEOUT_MS 17000
+#define SESSION_RINGING_TIMEOUT_MS 45000
+#define SESSION_CALLING_TIMEOUT_MS 30000
+#define SESSION_AI_RESPONSE_TIMEOUT_MS 10000
+#define SESSION_CONFIRM_TIMEOUT_MS 10000
+#define VOIP_PROFILE_RETRY_MS 5000
+#define VOIP_CANCEL_CACHE_MS 60000
+#define ROOM_MISSING_CONFIRMATIONS 3U
 #define CMD_VOIP_ACCEPT 0x2000U
 #define CMD_VOIP_HANGUP 0x2001U
 #define CMD_AI 0x2100U
@@ -67,6 +76,19 @@ typedef struct {
     uint32_t session_generation;
 } session_request_context_t;
 
+typedef struct {
+    char peer_id[SESSION_ARGUMENT_MAX];
+    char token[SESSION_ARGUMENT_MAX];
+    char room_id[129];
+    char open_id[129];
+    char call_id[65];
+    char app_id[65];
+    char model_id[65];
+    char session_token[257];
+    char payload[513];
+    char from_device_id[65];
+} voip_signal_t;
+
 static const char *TAG = "session_runtime";
 static QueueHandle_t s_queue;
 static TaskHandle_t s_task;
@@ -77,12 +99,18 @@ static char s_ai_role_id[65];
 static char s_call_room_id[129];
 static char s_call_peer_id[65];
 static bool s_call_after_contacts;
+static bool s_call_outgoing;
 static atomic_bool s_room_request_pending;
 static int64_t s_next_room_poll_ms;
-static int64_t s_call_timeout_at_ms;
+static unsigned s_room_missing_count;
+static int64_t s_session_deadline_ms;
 static uint32_t s_session_generation = 1;
 static uint32_t s_bound_connection_generation;
-static bool s_voip_profile_submitted;
+static atomic_bool s_voip_profile_submitted;
+static atomic_bool s_voip_profile_pending;
+static atomic_int_fast64_t s_voip_profile_retry_at_ms;
+static bool s_voip_outgoing;
+static bool s_voip_connect_submitted;
 static char s_voip_peer_id[SESSION_ARGUMENT_MAX];
 static char s_voip_token[SESSION_ARGUMENT_MAX];
 static char s_voip_room_id[129];
@@ -95,6 +123,8 @@ static char s_voip_payload[513];
 static char s_voip_cancelled_open_id[129];
 static char s_voip_cancelled_call_id[65];
 static int64_t s_voip_cancelled_until_ms;
+
+static void remember_cancelled_voip(void);
 
 static int64_t now_ms(void)
 {
@@ -356,20 +386,33 @@ static void advance_session_generation(void)
 static void begin_session(device_session_state_t state, device_service_t service)
 {
     advance_session_generation();
+    s_session_deadline_ms = 0;
+    s_room_missing_count = 0;
     set_state(state, service);
 }
 
 static void finish_session(void)
 {
+    if (s_service == DEVICE_SERVICE_VOIP &&
+        (s_voip_call_id[0] != '\0' ||
+         (s_voip_outgoing && s_voip_open_id[0] != '\0'))) {
+        remember_cancelled_voip();
+    }
     media_runtime_set_uplink_active(false);
     /* Disconnect also invalidates a pending WHIP/P2P request. The adapter does
      * not echo a local disconnect event back into this state machine. */
     (void)tirtc_adapter_disconnect();
     advance_session_generation();
     s_ai_start_at_ms = 0;
-    s_call_timeout_at_ms = 0;
+    s_ai_role_id[0] = '\0';
+    s_session_deadline_ms = 0;
     s_call_room_id[0] = '\0';
     s_call_peer_id[0] = '\0';
+    s_call_after_contacts = false;
+    s_call_outgoing = false;
+    s_room_missing_count = 0;
+    s_voip_outgoing = false;
+    s_voip_connect_submitted = false;
     s_voip_peer_id[0] = '\0';
     s_voip_token[0] = '\0';
     s_voip_room_id[0] = '\0';
@@ -409,19 +452,97 @@ static void copy_optional_json_string(const cJSON *object,
     }
 }
 
-static void reject_voip_signal(int reason)
+static bool parse_voip_signal(const cJSON *payload, voip_signal_t *signal)
 {
-    if (s_voip_app_id[0] == '\0' || s_voip_model_id[0] == '\0' ||
-        s_voip_room_id[0] == '\0') {
+    if (!cJSON_IsObject(payload) || signal == NULL) {
+        return false;
+    }
+    memset(signal, 0, sizeof(*signal));
+    bool valid = copy_json_string(payload,
+                                  "peer_id",
+                                  signal->peer_id,
+                                  sizeof(signal->peer_id)) &&
+                 copy_json_string(payload,
+                                  "token",
+                                  signal->token,
+                                  sizeof(signal->token));
+    copy_optional_json_string(payload,
+                              "wx_room_id",
+                              signal->room_id,
+                              sizeof(signal->room_id));
+    copy_optional_json_string(payload,
+                              "wx_user_openid",
+                              signal->open_id,
+                              sizeof(signal->open_id));
+    copy_optional_json_string(payload,
+                              "wx_call_id",
+                              signal->call_id,
+                              sizeof(signal->call_id));
+    copy_optional_json_string(payload,
+                              "wx_app_id",
+                              signal->app_id,
+                              sizeof(signal->app_id));
+    copy_optional_json_string(payload,
+                              "wx_model_id",
+                              signal->model_id,
+                              sizeof(signal->model_id));
+    copy_optional_json_string(payload,
+                              "wx_server_token",
+                              signal->session_token,
+                              sizeof(signal->session_token));
+    copy_optional_json_string(payload,
+                              "wx_payload",
+                              signal->payload,
+                              sizeof(signal->payload));
+    copy_optional_json_string(payload,
+                              "wx_from",
+                              signal->from_device_id,
+                              sizeof(signal->from_device_id));
+    return valid && signal->room_id[0] != '\0';
+}
+
+static void store_voip_signal(const voip_signal_t *signal)
+{
+    if (signal == NULL) {
+        return;
+    }
+    (void)snprintf(s_voip_peer_id, sizeof(s_voip_peer_id), "%s", signal->peer_id);
+    (void)snprintf(s_voip_token, sizeof(s_voip_token), "%s", signal->token);
+    (void)snprintf(s_voip_room_id, sizeof(s_voip_room_id), "%s", signal->room_id);
+    (void)snprintf(s_voip_open_id, sizeof(s_voip_open_id), "%s", signal->open_id);
+    (void)snprintf(s_voip_call_id, sizeof(s_voip_call_id), "%s", signal->call_id);
+    (void)snprintf(s_voip_app_id, sizeof(s_voip_app_id), "%s", signal->app_id);
+    (void)snprintf(s_voip_model_id, sizeof(s_voip_model_id), "%s", signal->model_id);
+    (void)snprintf(s_voip_session_token,
+                   sizeof(s_voip_session_token),
+                   "%s",
+                   signal->session_token);
+    (void)snprintf(s_voip_payload, sizeof(s_voip_payload), "%s", signal->payload);
+}
+
+static void reject_voip_values(const char *app_id,
+                               const char *model_id,
+                               const char *session_token,
+                               const char *room_id,
+                               const char *payload,
+                               int reason)
+{
+    if (app_id == NULL || app_id[0] == '\0' ||
+        model_id == NULL || model_id[0] == '\0' ||
+        room_id == NULL || room_id[0] == '\0') {
         return;
     }
     cJSON *root = cJSON_CreateObject();
     bool ok = root != NULL &&
-              cJSON_AddStringToObject(root, "wx_app_id", s_voip_app_id) &&
-              cJSON_AddStringToObject(root, "wx_model_id", s_voip_model_id) &&
-              cJSON_AddStringToObject(root, "wx_session_token", s_voip_session_token) &&
-              cJSON_AddStringToObject(root, "wx_room_id", s_voip_room_id) &&
-              cJSON_AddStringToObject(root, "wx_payload", s_voip_payload) &&
+              cJSON_AddStringToObject(root, "wx_app_id", app_id) &&
+              cJSON_AddStringToObject(root, "wx_model_id", model_id) &&
+              cJSON_AddStringToObject(root,
+                                     "wx_session_token",
+                                     session_token == NULL ? "" : session_token) &&
+              cJSON_AddStringToObject(root, "wx_room_id", room_id) &&
+              cJSON_AddStringToObject(root,
+                                     "wx_payload",
+                                     payload == NULL ? "" : payload) &&
               cJSON_AddNumberToObject(root, "hangup_reason", reason);
     char *body = ok ? cJSON_PrintUnformatted(root) : NULL;
     cJSON_Delete(root);
@@ -438,6 +559,42 @@ static void reject_voip_signal(int reason)
     if (rc != 0) {
         ESP_LOGW(TAG, "VoIP reject submission failed rc=%d", rc);
     }
+}
+
+static void reject_voip_signal(int reason)
+{
+    reject_voip_values(s_voip_app_id,
+                       s_voip_model_id,
+                       s_voip_session_token,
+                       s_voip_room_id,
+                       s_voip_payload,
+                       reason);
+}
+
+static void reject_voip_message(const voip_signal_t *signal, int reason)
+{
+    if (signal == NULL) {
+        return;
+    }
+    reject_voip_values(signal->app_id,
+                       signal->model_id,
+                       signal->session_token,
+                       signal->room_id,
+                       signal->payload,
+                       reason);
+}
+
+static void remember_cancelled_voip(void)
+{
+    (void)snprintf(s_voip_cancelled_open_id,
+                   sizeof(s_voip_cancelled_open_id),
+                   "%s",
+                   s_voip_open_id);
+    (void)snprintf(s_voip_cancelled_call_id,
+                   sizeof(s_voip_cancelled_call_id),
+                   "%s",
+                   s_voip_call_id);
+    s_voip_cancelled_until_ms = now_ms() + VOIP_CANCEL_CACHE_MS;
 }
 
 static void handle_platform_signal(const session_event_t *event)
@@ -480,8 +637,13 @@ static void handle_platform_signal(const session_event_t *event)
         bool valid = copy_json_string(payload, "room_id", room_id, sizeof(room_id)) &&
                      copy_json_string(payload, "caller_id", caller_id,
                                       sizeof(caller_id));
-        if (valid && (s_state == DEVICE_SESSION_IDLE ||
-                      s_state == DEVICE_SESSION_H5_STREAMING)) {
+        bool duplicate = valid && s_service == DEVICE_SERVICE_CALL &&
+                         s_call_room_id[0] != '\0' &&
+                         strcmp(room_id, s_call_room_id) == 0;
+        if (duplicate) {
+            ESP_LOGI(TAG, "ignoring duplicate device call signal room=%s", room_id);
+        } else if (valid && (s_state == DEVICE_SESSION_IDLE ||
+                            s_state == DEVICE_SESSION_H5_STREAMING)) {
             if (tirtc_adapter_has_connection()) {
                 media_runtime_set_uplink_active(false);
                 (void)tirtc_adapter_disconnect();
@@ -489,6 +651,8 @@ static void handle_platform_signal(const session_event_t *event)
             (void)snprintf(s_call_room_id, sizeof(s_call_room_id), "%s", room_id);
             (void)snprintf(s_call_peer_id, sizeof(s_call_peer_id), "%s", caller_id);
             begin_session(DEVICE_SESSION_RINGING, DEVICE_SERVICE_CALL);
+            s_call_outgoing = false;
+            s_session_deadline_ms = now_ms() + SESSION_RINGING_TIMEOUT_MS;
             ESP_LOGI(TAG, "incoming device call from=%s room=%s; use accept or reject",
                      caller_id, room_id);
         } else if (valid) {
@@ -505,71 +669,86 @@ static void handle_platform_signal(const session_event_t *event)
             ESP_LOGI(TAG, "device call ended by platform signal room=%s", room_id);
             finish_session();
         }
+    } else if (strcmp(channel_name, "device") == 0 &&
+               strcmp(type_name, "callee_answered") == 0) {
+        char room_id[sizeof(s_call_room_id)] = {0};
+        char callee_id[sizeof(s_call_peer_id)] = {0};
+        (void)copy_json_string(payload, "room_id", room_id, sizeof(room_id));
+        (void)copy_json_string(payload, "callee_id", callee_id, sizeof(callee_id));
+        if (s_service == DEVICE_SERVICE_CALL && s_call_outgoing &&
+            s_state == DEVICE_SESSION_CALLING &&
+            s_call_room_id[0] != '\0' &&
+            strcmp(room_id, s_call_room_id) == 0) {
+            ESP_LOGI(TAG,
+                     "callee answered device call callee=%s room=%s; waiting for P2P",
+                     callee_id[0] == '\0' ? s_call_peer_id : callee_id,
+                     room_id);
+            s_session_deadline_ms = now_ms() + SESSION_CONNECT_TIMEOUT_MS;
+        }
     } else if (strcmp(channel_name, "wx") == 0 &&
                strcmp(type_name, "call_incoming") == 0) {
-        char peer_id[sizeof(s_voip_peer_id)] = {0};
-        char token[sizeof(s_voip_token)] = {0};
-        char open_id[sizeof(s_voip_open_id)] = {0};
-        char call_id[sizeof(s_voip_call_id)] = {0};
-        char wx_from[65] = {0};
-        bool valid = copy_json_string(payload, "peer_id", peer_id, sizeof(peer_id)) &&
-                     copy_json_string(payload, "token", token, sizeof(token));
-        copy_optional_json_string(payload, "wx_user_openid", open_id, sizeof(open_id));
-        copy_optional_json_string(payload, "wx_call_id", call_id, sizeof(call_id));
-        copy_optional_json_string(payload, "wx_from", wx_from, sizeof(wx_from));
-
-        bool cancelled = now_ms() < s_voip_cancelled_until_ms &&
-                         (s_voip_cancelled_call_id[0] != '\0'
-                              ? (call_id[0] != '\0' &&
-                                 strcmp(call_id, s_voip_cancelled_call_id) == 0)
-                              : (s_voip_cancelled_open_id[0] != '\0' &&
-                                 strcmp(open_id, s_voip_cancelled_open_id) == 0));
-        bool open_id_matches = open_id[0] == '\0' ||
-                               strcmp(open_id, s_voip_open_id) == 0;
+        voip_signal_t signal;
+        bool valid = parse_voip_signal(payload, &signal);
+        bool open_id_matches = signal.open_id[0] == '\0' ||
+                               strcmp(signal.open_id, s_voip_open_id) == 0;
         runtime_tirtc_config_t runtime = {0};
         bool from_this_device =
-            wx_from[0] != '\0' &&
+            signal.from_device_id[0] != '\0' &&
             runtime_config_load_tirtc(&runtime) == ESP_OK &&
-            strcmp(wx_from, runtime.device_id) == 0;
-        bool outgoing = s_service == DEVICE_SERVICE_VOIP &&
+            strcmp(signal.from_device_id, runtime.device_id) == 0;
+        bool cancelled = false;
+        if (now_ms() < s_voip_cancelled_until_ms) {
+            if (s_voip_cancelled_call_id[0] != '\0') {
+                cancelled = signal.call_id[0] != '\0' &&
+                            strcmp(signal.call_id,
+                                   s_voip_cancelled_call_id) == 0;
+            } else if (s_voip_cancelled_open_id[0] != '\0') {
+                cancelled =
+                    from_this_device &&
+                    (signal.open_id[0] == '\0' ||
+                     strcmp(signal.open_id,
+                            s_voip_cancelled_open_id) == 0);
+            }
+        }
+        bool outgoing = valid && s_service == DEVICE_SERVICE_VOIP &&
                         s_state == DEVICE_SESSION_CALLING &&
                         (s_voip_call_id[0] != '\0'
-                             ? (call_id[0] != '\0' &&
-                                strcmp(call_id, s_voip_call_id) == 0 &&
+                             ? (signal.call_id[0] != '\0' &&
+                                strcmp(signal.call_id, s_voip_call_id) == 0 &&
                                 open_id_matches)
-                             : (call_id[0] != '\0'
+                             : (signal.call_id[0] != '\0'
                                     ? (from_this_device && open_id_matches)
                                     : open_id_matches));
         bool recover_outgoing =
+            valid &&
             (s_state == DEVICE_SESSION_IDLE ||
              s_state == DEVICE_SESSION_H5_STREAMING) &&
-            call_id[0] != '\0' && from_this_device;
-        (void)snprintf(s_voip_peer_id, sizeof(s_voip_peer_id), "%s", peer_id);
-        (void)snprintf(s_voip_token, sizeof(s_voip_token), "%s", token);
-        (void)snprintf(s_voip_open_id, sizeof(s_voip_open_id), "%s", open_id);
-        copy_optional_json_string(payload, "wx_room_id", s_voip_room_id,
-                                  sizeof(s_voip_room_id));
-        copy_optional_json_string(payload, "wx_app_id", s_voip_app_id,
-                                  sizeof(s_voip_app_id));
-        copy_optional_json_string(payload, "wx_model_id", s_voip_model_id,
-                                  sizeof(s_voip_model_id));
-        copy_optional_json_string(payload, "wx_server_token", s_voip_session_token,
-                                  sizeof(s_voip_session_token));
-        copy_optional_json_string(payload, "wx_payload", s_voip_payload,
-                                  sizeof(s_voip_payload));
+            signal.call_id[0] != '\0' && from_this_device;
+        bool duplicate = valid && s_service == DEVICE_SERVICE_VOIP &&
+                         s_voip_room_id[0] != '\0' &&
+                         strcmp(signal.room_id, s_voip_room_id) == 0 &&
+                         (s_state == DEVICE_SESSION_RINGING ||
+                          s_state == DEVICE_SESSION_CALLING ||
+                          s_state == DEVICE_SESSION_IN_CALL);
 
-        if (!valid || cancelled) {
-            if (cancelled) {
-                ESP_LOGI(TAG, "rejecting callback for a locally cancelled VoIP call");
-                reject_voip_signal(7);
-            }
+        if (!valid) {
+            ESP_LOGW(TAG, "ignoring malformed VoIP call signal");
+            reject_voip_message(&signal, 7);
+        } else if (cancelled) {
+            ESP_LOGI(TAG, "rejecting callback for a locally cancelled VoIP call");
+            reject_voip_message(&signal, 7);
+        } else if (duplicate) {
+            ESP_LOGI(TAG, "ignoring duplicate VoIP call signal room=%s",
+                     signal.room_id);
         } else if (outgoing || recover_outgoing) {
+            store_voip_signal(&signal);
             if (recover_outgoing && tirtc_adapter_has_connection()) {
                 media_runtime_set_uplink_active(false);
                 (void)tirtc_adapter_disconnect();
             }
             if (recover_outgoing) {
                 begin_session(DEVICE_SESSION_CALLING, DEVICE_SERVICE_VOIP);
+                s_voip_outgoing = true;
                 ESP_LOGI(TAG,
                          "recovering VoIP outgoing call after HTTP response loss");
             } else {
@@ -579,6 +758,9 @@ static void handle_platform_signal(const session_event_t *event)
                                            s_voip_token,
                                            s_session_generation) != 0) {
                 finish_session();
+            } else {
+                s_voip_connect_submitted = true;
+                s_session_deadline_ms = now_ms() + SESSION_CONNECT_TIMEOUT_MS;
             }
         } else if (s_state == DEVICE_SESSION_IDLE ||
                    s_state == DEVICE_SESSION_H5_STREAMING) {
@@ -586,12 +768,15 @@ static void handle_platform_signal(const session_event_t *event)
                 media_runtime_set_uplink_active(false);
                 (void)tirtc_adapter_disconnect();
             }
+            store_voip_signal(&signal);
             begin_session(DEVICE_SESSION_RINGING, DEVICE_SERVICE_VOIP);
+            s_voip_outgoing = false;
+            s_session_deadline_ms = now_ms() + SESSION_RINGING_TIMEOUT_MS;
             ESP_LOGI(TAG, "incoming VoIP call room=%s; use accept or reject",
                      s_voip_room_id);
         } else {
             ESP_LOGW(TAG, "VoIP call arrived while busy; rejecting");
-            reject_voip_signal(5);
+            reject_voip_message(&signal, 5);
         }
     } else if (strcmp(channel_name, "wx") == 0 &&
                strcmp(type_name, "call_cancel") == 0 &&
@@ -614,6 +799,10 @@ static void handle_platform_signal(const session_event_t *event)
 
 static void request_contacts(bool call_first)
 {
+    if (!platform_client_ready()) {
+        ESP_LOGW(TAG, "contacts unavailable while platform signaling is offline");
+        return;
+    }
     if (tirtc_adapter_state() != TIRTC_ADAPTER_RUNNING) {
         ESP_LOGW(TAG, "contacts unavailable before TiRTC is running");
         return;
@@ -656,6 +845,8 @@ static void request_device_call(const char *target_id)
     }
     (void)snprintf(s_call_peer_id, sizeof(s_call_peer_id), "%s", target_id);
     begin_session(DEVICE_SESSION_CALLING, DEVICE_SERVICE_CALL);
+    s_call_outgoing = true;
+    s_session_deadline_ms = now_ms() + SESSION_REQUEST_TIMEOUT_MS;
     int rc = submit_service_event(EVENT_CALL_REQUEST_RESPONSE,
                                   PLATFORM_SERVICE_CALL,
                                   "/v1/call/request",
@@ -718,7 +909,9 @@ static void handle_contacts_response(const char *body)
 
 static void handle_call_request_response(const char *body)
 {
-    if (s_state != DEVICE_SESSION_CALLING || s_service != DEVICE_SERVICE_CALL) {
+    if ((s_state != DEVICE_SESSION_CALLING &&
+         s_state != DEVICE_SESSION_IN_CALL) ||
+        s_service != DEVICE_SERVICE_CALL || !s_call_outgoing) {
         return;
     }
     cJSON *root = NULL;
@@ -730,14 +923,26 @@ static void handle_call_request_response(const char *body)
                                sizeof(s_call_room_id));
     cJSON_Delete(root);
     if (!ok) {
+        if (s_state == DEVICE_SESSION_IN_CALL) {
+            ESP_LOGW(TAG,
+                     "ignoring failed device call response because media is already connected");
+            return;
+        }
         ESP_LOGE(TAG, "device call request was rejected");
         finish_session();
         return;
     }
-    s_call_timeout_at_ms = now_ms() + 30000;
+    if (s_state == DEVICE_SESSION_CALLING) {
+        s_session_deadline_ms = now_ms() + SESSION_CALLING_TIMEOUT_MS;
+    }
     s_next_room_poll_ms = now_ms();
-    ESP_LOGI(TAG, "calling room=%s; cancel automatically after 30 seconds",
-             s_call_room_id);
+    if (s_state == DEVICE_SESSION_CALLING) {
+        ESP_LOGI(TAG, "calling room=%s; cancel automatically after 30 seconds",
+                 s_call_room_id);
+    } else {
+        ESP_LOGI(TAG, "device call response synchronized room=%s",
+                 s_call_room_id);
+    }
 }
 
 static void handle_room_response(const char *body)
@@ -753,11 +958,22 @@ static void handle_room_response(const char *body)
         if (s_service == DEVICE_SERVICE_CALL &&
             (s_state == DEVICE_SESSION_RINGING || s_state == DEVICE_SESSION_IN_CALL ||
              (s_state == DEVICE_SESSION_CALLING && s_call_room_id[0] != '\0'))) {
-            ESP_LOGI(TAG, "call room closed by remote");
-            finish_session();
+            s_room_missing_count++;
+            if (s_room_missing_count >= ROOM_MISSING_CONFIRMATIONS) {
+                ESP_LOGI(TAG,
+                         "call room absent in %u consecutive fallback queries; closing",
+                         s_room_missing_count);
+                finish_session();
+            } else {
+                ESP_LOGW(TAG,
+                         "call room temporarily absent in fallback query %u/%u",
+                         s_room_missing_count,
+                         ROOM_MISSING_CONFIRMATIONS);
+            }
         }
         return;
     }
+    s_room_missing_count = 0;
 
     char room_id[sizeof(s_call_room_id)] = {0};
     char caller_id[sizeof(s_call_peer_id)] = {0};
@@ -783,6 +999,8 @@ static void handle_room_response(const char *body)
         (void)snprintf(s_call_room_id, sizeof(s_call_room_id), "%s", room_id);
         (void)snprintf(s_call_peer_id, sizeof(s_call_peer_id), "%s", caller_id);
         begin_session(DEVICE_SESSION_RINGING, DEVICE_SERVICE_CALL);
+        s_call_outgoing = false;
+        s_session_deadline_ms = now_ms() + SESSION_RINGING_TIMEOUT_MS;
         ESP_LOGI(TAG, "incoming device call from=%s room=%s; use accept or reject",
                  s_call_peer_id,
                  s_call_room_id);
@@ -805,6 +1023,7 @@ static void accept_device_call(void)
         return;
     }
     set_state(DEVICE_SESSION_CALLING, DEVICE_SERVICE_CALL);
+    s_session_deadline_ms = now_ms() + SESSION_REQUEST_TIMEOUT_MS;
     int rc = submit_service_event(EVENT_ACCEPT_RESPONSE,
                                   PLATFORM_SERVICE_CALL,
                                   "/v1/call/device/info",
@@ -835,6 +1054,8 @@ static void handle_accept_response(const char *body)
     if (rc != 0) {
         ESP_LOGE(TAG, "device call P2P connection submission failed rc=%d", rc);
         finish_session();
+    } else {
+        s_session_deadline_ms = now_ms() + SESSION_CONNECT_TIMEOUT_MS;
     }
 }
 
@@ -849,12 +1070,47 @@ static const char *platform_audio_codec(device_audio_codec_t codec)
     }
 }
 
+static void voip_profile_response(const char *body, void *user_data)
+{
+    (void)user_data;
+    cJSON *root = body == NULL ? NULL : cJSON_Parse(body);
+    const cJSON *code = root == NULL
+                            ? NULL
+                            : cJSON_GetObjectItemCaseSensitive(root, "code");
+    bool accepted = cJSON_IsNumber(code) &&
+                    (code->valueint == 0 || code->valueint == 200);
+    cJSON_Delete(root);
+
+    atomic_store_explicit(&s_voip_profile_pending, false, memory_order_release);
+    atomic_store_explicit(&s_voip_profile_submitted,
+                          accepted,
+                          memory_order_release);
+    if (accepted) {
+        atomic_store_explicit(&s_voip_profile_retry_at_ms, 0, memory_order_release);
+        ESP_LOGI(TAG, "VoIP audio-only profile accepted");
+    } else {
+        atomic_store_explicit(&s_voip_profile_retry_at_ms,
+                              now_ms() + VOIP_PROFILE_RETRY_MS,
+                              memory_order_release);
+        ESP_LOGW(TAG, "VoIP profile failed; retrying in %u ms",
+                 VOIP_PROFILE_RETRY_MS);
+    }
+}
+
 static void submit_voip_profile(void)
 {
     const device_media_config_t *media = media_runtime_config();
     if (media == NULL || !platform_client_ready()) {
         return;
     }
+    if (atomic_load_explicit(&s_voip_profile_submitted, memory_order_acquire) ||
+        atomic_load_explicit(&s_voip_profile_pending, memory_order_acquire) ||
+        now_ms() < atomic_load_explicit(&s_voip_profile_retry_at_ms,
+                                        memory_order_acquire)) {
+        return;
+    }
+    atomic_store_explicit(&s_voip_profile_pending, true, memory_order_release);
+
     cJSON *root = cJSON_CreateObject();
     const bool no_video = true;
     const int screen_width = 1;
@@ -886,6 +1142,10 @@ static void submit_voip_profile(void)
     char *body = ok ? cJSON_PrintUnformatted(root) : NULL;
     cJSON_Delete(root);
     if (body == NULL) {
+        atomic_store_explicit(&s_voip_profile_pending, false, memory_order_release);
+        atomic_store_explicit(&s_voip_profile_retry_at_ms,
+                              now_ms() + VOIP_PROFILE_RETRY_MS,
+                              memory_order_release);
         ESP_LOGW(TAG, "cannot build VoIP device profile");
         return;
     }
@@ -903,19 +1163,21 @@ static void submit_voip_profile(void)
     esp_err_t err = platform_client_request(PLATFORM_SERVICE_VOIP,
                                             "/v1/voip/device/profile",
                                             body,
-                                            service_log_response,
-                                            (void *)"voip profile");
+                                            voip_profile_response,
+                                            NULL);
     free(body);
-    if (err == ESP_OK) {
-        s_voip_profile_submitted = true;
-    } else {
+    if (err != ESP_OK) {
+        atomic_store_explicit(&s_voip_profile_pending, false, memory_order_release);
+        atomic_store_explicit(&s_voip_profile_retry_at_ms,
+                              now_ms() + VOIP_PROFILE_RETRY_MS,
+                              memory_order_release);
         ESP_LOGW(TAG, "VoIP profile submission failed: %s", esp_err_to_name(err));
     }
 }
 
 static void request_voip_callers(void)
 {
-    if (!s_voip_profile_submitted) {
+    if (!atomic_load_explicit(&s_voip_profile_submitted, memory_order_acquire)) {
         submit_voip_profile();
     }
     if (submit_service_event(EVENT_VOIP_CALLERS_RESPONSE,
@@ -1006,6 +1268,11 @@ static void handle_voip_dial_response(const char *body)
     }
     cJSON_Delete(root);
     if (!ok) {
+        if (s_voip_connect_submitted) {
+            ESP_LOGW(TAG,
+                     "ignoring failed VoIP dial response because WHIP setup is already in progress");
+            return;
+        }
         cJSON *error_root = body == NULL ? NULL : cJSON_Parse(body);
         const cJSON *code = error_root == NULL ? NULL :
             cJSON_GetObjectItemCaseSensitive(error_root, "code");
@@ -1022,7 +1289,9 @@ static void handle_voip_dial_response(const char *body)
         finish_session();
         return;
     }
-    s_call_timeout_at_ms = now_ms() + 30000;
+    if (!s_voip_connect_submitted) {
+        s_session_deadline_ms = now_ms() + SESSION_CALLING_TIMEOUT_MS;
+    }
     ESP_LOGI(TAG, "VoIP calling first authorized contact; cancel after 30 seconds if unanswered");
 }
 
@@ -1066,6 +1335,8 @@ static void handle_ai_token(const char *body)
     if (rc != 0) {
         ESP_LOGE(TAG, "AI WHIP connect submission failed rc=%d", rc);
         finish_session();
+    } else {
+        s_session_deadline_ms = now_ms() + SESSION_CONNECT_TIMEOUT_MS;
     }
 }
 
@@ -1121,6 +1392,7 @@ static void send_ai_start(void)
         ESP_LOGE(TAG, "AI start_session send failed rc=%d", rc);
         finish_session();
     } else {
+        s_session_deadline_ms = now_ms() + SESSION_AI_RESPONSE_TIMEOUT_MS;
         ESP_LOGI(TAG, "AI start_session sent; waiting for response");
     }
 }
@@ -1172,15 +1444,16 @@ static void handle_connection(const session_event_t *event)
     s_bound_connection_generation = event->connection_generation;
     if (s_service == DEVICE_SERVICE_AI && s_state == DEVICE_SESSION_AI_CONNECTING) {
         s_ai_start_at_ms = esp_timer_get_time() / 1000 + 300;
+        s_session_deadline_ms = now_ms() + SESSION_AI_RESPONSE_TIMEOUT_MS;
     } else if (s_service == DEVICE_SERVICE_VOIP &&
                s_state == DEVICE_SESSION_CALLING) {
-        s_call_timeout_at_ms = now_ms() + 10000;
+        s_session_deadline_ms = now_ms() + SESSION_CONFIRM_TIMEOUT_MS;
         ESP_LOGI(TAG,
                  "VoIP WHIP connected; waiting for 0x2000 confirmation");
     } else if (s_service == DEVICE_SERVICE_CALL &&
                s_state == DEVICE_SESSION_CALLING) {
         set_state(DEVICE_SESSION_IN_CALL, s_service);
-        s_call_timeout_at_ms = 0;
+        s_session_deadline_ms = 0;
         media_runtime_set_uplink_active(true);
         char room[192];
         int length = snprintf(room,
@@ -1220,6 +1493,7 @@ static void handle_command(const session_event_t *event)
             finish_session();
         } else if (response && s_state == DEVICE_SESSION_AI_CONNECTING) {
             set_state(DEVICE_SESSION_AI_ACTIVE, DEVICE_SERVICE_AI);
+            s_session_deadline_ms = 0;
             media_runtime_set_uplink_active(true);
         }
     } else if (event->command == CMD_VOIP_HANGUP) {
@@ -1241,7 +1515,7 @@ static void handle_command(const session_event_t *event)
                 return;
             }
         }
-        s_call_timeout_at_ms = 0;
+        s_session_deadline_ms = 0;
         set_state(DEVICE_SESSION_IN_CALL, s_service);
         media_runtime_set_uplink_active(true);
     }
@@ -1274,8 +1548,12 @@ static void handle_event(const session_event_t *event)
             ESP_LOGW(TAG, "VoIP call ignored while %s", device_session_state_name(s_state));
             break;
         }
-        if (!platform_client_ready()) {
-            ESP_LOGW(TAG, "VoIP call unavailable while platform signaling is offline");
+        if (!platform_client_ready() ||
+            tirtc_adapter_state() != TIRTC_ADAPTER_RUNNING) {
+            ESP_LOGW(TAG,
+                     "VoIP call unavailable: platform=%s TiRTC=%d",
+                     platform_client_ready() ? "ready" : "offline",
+                     (int)tirtc_adapter_state());
             break;
         }
         if (tirtc_adapter_has_connection()) {
@@ -1283,6 +1561,9 @@ static void handle_event(const session_event_t *event)
             (void)tirtc_adapter_disconnect();
         }
         begin_session(DEVICE_SESSION_CALLING, DEVICE_SERVICE_VOIP);
+        s_voip_outgoing = true;
+        s_voip_connect_submitted = false;
+        s_session_deadline_ms = now_ms() + SESSION_REQUEST_TIMEOUT_MS;
         request_voip_callers();
         break;
     case EVENT_VOIP_CALLERS_RESPONSE:
@@ -1314,11 +1595,20 @@ static void handle_event(const session_event_t *event)
             ESP_LOGW(TAG, "AI press ignored while %s", device_session_state_name(s_state));
             break;
         }
+        if (!platform_client_ready() ||
+            tirtc_adapter_state() != TIRTC_ADAPTER_RUNNING) {
+            ESP_LOGW(TAG,
+                     "AI unavailable: platform=%s TiRTC=%d",
+                     platform_client_ready() ? "ready" : "offline",
+                     (int)tirtc_adapter_state());
+            break;
+        }
         if (tirtc_adapter_has_connection()) {
             media_runtime_set_uplink_active(false);
             (void)tirtc_adapter_disconnect();
         }
         begin_session(DEVICE_SESSION_AI_CONNECTING, DEVICE_SERVICE_AI);
+        s_session_deadline_ms = now_ms() + SESSION_REQUEST_TIMEOUT_MS;
         if (submit_service_event(EVENT_AI_TOKEN,
                                  PLATFORM_SERVICE_AI,
                                  "/v1/ai/token",
@@ -1344,6 +1634,11 @@ static void handle_event(const session_event_t *event)
             ESP_LOGW(TAG, "call ignored while %s", device_session_state_name(s_state));
             break;
         }
+        if (tirtc_adapter_state() != TIRTC_ADAPTER_RUNNING) {
+            ESP_LOGW(TAG,
+                     "direct connection unavailable before TiRTC is running");
+            break;
+        }
         if (tirtc_adapter_has_connection()) {
             media_runtime_set_uplink_active(false);
             (void)tirtc_adapter_disconnect();
@@ -1352,6 +1647,9 @@ static void handle_event(const session_event_t *event)
                                        ? DEVICE_SERVICE_VOIP
                                        : DEVICE_SERVICE_CALL;
         begin_session(DEVICE_SESSION_CALLING, service);
+        s_call_outgoing = service == DEVICE_SERVICE_CALL;
+        s_voip_outgoing = service == DEVICE_SERVICE_VOIP;
+        s_voip_connect_submitted = false;
         int rc = event->type == EVENT_VOIP_CONNECT
                      ? tirtc_adapter_whip_connect(event->first,
                                                   event->second,
@@ -1362,6 +1660,9 @@ static void handle_event(const session_event_t *event)
         if (rc != 0) {
             ESP_LOGE(TAG, "call connection submission failed rc=%d", rc);
             finish_session();
+        } else {
+            s_voip_connect_submitted = service == DEVICE_SERVICE_VOIP;
+            s_session_deadline_ms = now_ms() + SESSION_CONNECT_TIMEOUT_MS;
         }
         break;
     case EVENT_CALL_DEFAULT:
@@ -1374,19 +1675,21 @@ static void handle_event(const session_event_t *event)
     case EVENT_CANCEL:
         if (s_state == DEVICE_SESSION_CALLING || s_state == DEVICE_SESSION_AI_CONNECTING) {
             if (s_service == DEVICE_SERVICE_CALL && s_call_room_id[0] != '\0') {
-                (void)submit_room_action("/v1/call/cancel", NULL);
+                (void)submit_room_action(s_call_outgoing
+                                             ? "/v1/call/cancel"
+                                             : "/v1/call/hangup",
+                                         s_call_outgoing ? NULL : "cancelled");
             } else if (s_service == DEVICE_SERVICE_VOIP && s_voip_open_id[0] != '\0') {
-                (void)snprintf(s_voip_cancelled_open_id,
-                               sizeof(s_voip_cancelled_open_id),
-                               "%s",
-                               s_voip_open_id);
-                (void)snprintf(s_voip_cancelled_call_id,
-                               sizeof(s_voip_cancelled_call_id),
-                               "%s",
-                               s_voip_call_id);
-                s_voip_cancelled_until_ms = now_ms() + 60000;
+                if (s_voip_outgoing) {
+                    remember_cancelled_voip();
+                } else {
+                    reject_voip_signal(7);
+                }
             }
             finish_session();
+        } else {
+            ESP_LOGW(TAG, "cancel ignored while %s",
+                     device_session_state_name(s_state));
         }
         break;
     case EVENT_HANGUP:
@@ -1404,22 +1707,36 @@ static void handle_event(const session_event_t *event)
                 (void)submit_room_action("/v1/call/hangup", "hangup");
             }
             finish_session();
+        } else {
+            ESP_LOGW(TAG, "hangup ignored while %s",
+                     device_session_state_name(s_state));
         }
         break;
     case EVENT_ACCEPT:
         if (s_state == DEVICE_SESSION_RINGING) {
+            if (tirtc_adapter_state() != TIRTC_ADAPTER_RUNNING) {
+                ESP_LOGW(TAG,
+                         "accept unavailable before TiRTC is running; call remains ringing");
+                break;
+            }
             if (s_service == DEVICE_SERVICE_CALL) {
                 accept_device_call();
             } else if (s_service == DEVICE_SERVICE_VOIP) {
                 set_state(DEVICE_SESSION_CALLING, DEVICE_SERVICE_VOIP);
+                s_session_deadline_ms = now_ms() + SESSION_CONNECT_TIMEOUT_MS;
                 if (tirtc_adapter_whip_connect(s_voip_peer_id,
                                                s_voip_token,
                                                s_session_generation) != 0) {
                     finish_session();
+                } else {
+                    s_voip_connect_submitted = true;
                 }
             } else {
                 set_state(DEVICE_SESSION_CALLING, s_service);
             }
+        } else {
+            ESP_LOGW(TAG, "accept ignored while %s",
+                     device_session_state_name(s_state));
         }
         break;
     case EVENT_REJECT:
@@ -1430,11 +1747,74 @@ static void handle_event(const session_event_t *event)
                 reject_voip_signal(7);
             }
             finish_session();
+        } else {
+            ESP_LOGW(TAG, "reject ignored while %s",
+                     device_session_state_name(s_state));
         }
         break;
     default:
         break;
     }
+}
+
+static void handle_session_deadline(void)
+{
+    const device_session_state_t expired_state = s_state;
+    const device_service_t expired_service = s_service;
+    s_session_deadline_ms = 0;
+
+    if (expired_state == DEVICE_SESSION_RINGING) {
+        if (expired_service == DEVICE_SERVICE_CALL &&
+            s_call_room_id[0] != '\0') {
+            ESP_LOGW(TAG,
+                     "incoming device call timed out; rejecting room=%s",
+                     s_call_room_id);
+            (void)submit_room_action("/v1/call/reject", "timeout");
+        } else if (expired_service == DEVICE_SERVICE_VOIP) {
+            ESP_LOGW(TAG,
+                     "incoming VoIP call timed out; rejecting room=%s",
+                     s_voip_room_id);
+            reject_voip_signal(7);
+        }
+        finish_session();
+        return;
+    }
+
+    if (expired_state == DEVICE_SESSION_AI_CONNECTING) {
+        ESP_LOGW(TAG, "AI session setup timed out");
+        finish_session();
+        return;
+    }
+
+    if (expired_state != DEVICE_SESSION_CALLING) {
+        return;
+    }
+
+    if (expired_service == DEVICE_SERVICE_CALL) {
+        ESP_LOGW(TAG,
+                 "%s device call timed out room=%s",
+                 s_call_outgoing ? "outgoing" : "incoming",
+                 s_call_room_id);
+        if (s_call_room_id[0] != '\0') {
+            (void)submit_room_action(s_call_outgoing
+                                         ? "/v1/call/cancel"
+                                         : "/v1/call/hangup",
+                                     s_call_outgoing
+                                         ? NULL
+                                         : "connection_timeout");
+        }
+    } else if (expired_service == DEVICE_SERVICE_VOIP) {
+        ESP_LOGW(TAG,
+                 "%s VoIP call setup timed out room=%s",
+                 s_voip_outgoing ? "outgoing" : "incoming",
+                 s_voip_room_id);
+        if (s_voip_outgoing) {
+            remember_cancelled_voip();
+        } else {
+            reject_voip_signal(7);
+        }
+    }
+    finish_session();
 }
 
 static void session_task(void *argument)
@@ -1452,26 +1832,13 @@ static void session_task(void *argument)
         if (s_ai_start_at_ms != 0 && current_ms >= s_ai_start_at_ms) {
             send_ai_start();
         }
-        if (s_call_timeout_at_ms != 0 && current_ms >= s_call_timeout_at_ms &&
-            s_state == DEVICE_SESSION_CALLING) {
-            if (s_service == DEVICE_SERVICE_CALL) {
-                ESP_LOGW(TAG, "device call timed out; cancelling room=%s", s_call_room_id);
-                (void)submit_room_action("/v1/call/cancel", NULL);
-            } else if (s_service == DEVICE_SERVICE_VOIP) {
-                ESP_LOGW(TAG, "VoIP call timed out; cancelling locally");
-                (void)snprintf(s_voip_cancelled_open_id,
-                               sizeof(s_voip_cancelled_open_id),
-                               "%s",
-                               s_voip_open_id);
-                (void)snprintf(s_voip_cancelled_call_id,
-                               sizeof(s_voip_cancelled_call_id),
-                               "%s",
-                               s_voip_call_id);
-                s_voip_cancelled_until_ms = current_ms + 60000;
-            }
-            finish_session();
+        if (s_session_deadline_ms != 0 &&
+            current_ms >= s_session_deadline_ms) {
+            handle_session_deadline();
         }
-        if (!s_voip_profile_submitted && platform_client_ready()) {
+        if (!atomic_load_explicit(&s_voip_profile_submitted,
+                                  memory_order_acquire) &&
+            platform_client_ready()) {
             submit_voip_profile();
         }
         const bool room_poll_allowed =
