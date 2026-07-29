@@ -10,6 +10,7 @@
 
 #include "file_media_source.h"
 #include "media_format.h"
+#include "media_subscription_policy.h"
 #include "sdk_callback_guard.h"
 #include "session_arbiter.h"
 #include "session_coordinator.h"
@@ -39,6 +40,25 @@ static void test_format_tables(void) {
     assert(video_format_find("h265"));
     assert(video_format_find("mjpeg"));
     assert(!video_format_find("vp9"));
+}
+
+static void test_media_subscription_policy(void) {
+    MediaSubscriptionPolicy policy = {0};
+
+    media_subscription_policy_prepare(&policy, 0);
+    assert(!media_subscription_policy_video_enabled(&policy));
+    assert(!media_subscription_policy_subscribe_video(&policy));
+
+    media_subscription_policy_prepare(&policy, 1);
+    assert(media_subscription_policy_video_enabled(&policy));
+    media_subscription_policy_unsubscribe_video(&policy);
+    assert(!media_subscription_policy_video_enabled(&policy));
+    assert(media_subscription_policy_subscribe_video(&policy));
+    assert(media_subscription_policy_video_enabled(&policy));
+
+    media_subscription_policy_reset(&policy);
+    assert(!media_subscription_policy_video_enabled(&policy));
+    assert(!media_subscription_policy_subscribe_video(&policy));
 }
 
 static void test_fixed_audio_and_mjpeg(void) {
@@ -558,6 +578,7 @@ static void test_ai_connect_timeout(void) {
 
 int main(void) {
     test_format_tables();
+    test_media_subscription_policy();
     test_fixed_audio_and_mjpeg();
     test_invalid_amr();
     test_encoded_audio_containers();

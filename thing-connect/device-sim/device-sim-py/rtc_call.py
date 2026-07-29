@@ -80,6 +80,7 @@ _connect_cb_ref: "ConnectCB | None" = None  # 防止 GC
 _connect_cb_refs: "list[ConnectCB]" = []    # SDK 反初始化前保活超时重试的旧回调
 
 _expected_room_id: "str | None" = None
+_session_call_type = "video"
 _on_p2p_connected_cb: "Callable[[str], None] | None" = None
 _on_connect_failed_cb: "Callable[[], None] | None" = None
 _session_end_callback = None
@@ -162,6 +163,22 @@ def clear_expected_room() -> None:
     with _state_lock:
         _expected_room_id = None
 
+def set_call_type(call_type: str) -> None:
+    """Set media policy before either side can establish the P2P connection."""
+    global _session_call_type
+    normalized = (call_type or "video").lower()
+    if normalized not in ("audio", "video"):
+        raise ValueError("call_type must be audio or video")
+    with _state_lock:
+        _session_call_type = normalized
+    _media.prepare_session(normalized == "video")
+
+def clear_call_type() -> None:
+    global _session_call_type
+    with _state_lock:
+        _session_call_type = "video"
+    _media.reset_session()
+
 def register_p2p_connected_cb(cb) -> None:
     global _on_p2p_connected_cb
     _on_p2p_connected_cb = cb
@@ -186,6 +203,7 @@ def _handle_disconnect(hconn_val: int):
         _active_hconn  = None
     _media.stop()
     _media.set_hconn(None)
+    clear_call_type()
     with _state_lock:
         if _session_state == "DISCONNECTING":
             _session_state = "IDLE"
@@ -230,6 +248,43 @@ def _disconnect_stale_handle_after_callback(hconn_val: int) -> None:
         name="call-stale-disconnect",
     ).start()
 
+def _is_audio_call() -> bool:
+    with _state_lock:
+        return _session_call_type == "audio"
+
+
+def _apply_video_downlink_policy(hconn_val: int) -> None:
+    if not _is_audio_call():
+        return
+    rc = sdk.TiRtcUnsubscribeVideo(
+        ctypes.c_void_p(hconn_val), sdk.VIDEO_STREAM_ID)
+    if rc == 0:
+        _info(
+            f"纯音频设备通话已退订下行视频 "
+            f"stream={sdk.VIDEO_STREAM_ID}"
+        )
+    else:
+        _warn(
+            f"退订下行视频失败 stream={sdk.VIDEO_STREAM_ID} "
+            f"rc={rc} ({sdk.TiRtcGetErrorStr(rc).decode()})"
+        )
+
+
+def _schedule_video_downlink_policy_after_callback(hconn_val: int) -> None:
+    """Return from the ctypes callback before calling back into the SDK."""
+    def apply_policy():
+        _callback_guard.wait_for_idle()
+        with _state_lock:
+            active = _active_hconn == hconn_val
+        if active:
+            _apply_video_downlink_policy(hconn_val)
+
+    threading.Thread(
+        target=apply_policy,
+        daemon=True,
+        name="call-video-downlink-policy",
+    ).start()
+
 
 # ── SDK 回调构建 ──────────────────────────────────────────────────────────────
 
@@ -250,6 +305,7 @@ def _build_callbacks() -> TIRTCCALLBACKS:
             _active_hconn  = hval
         _media.set_hconn(hval)
         _info(f"收到入站 P2P 连接 hconn={hval:#x}（对方已接听，等待 0x2000 接通确认）")
+        _schedule_video_downlink_policy_after_callback(hval)
 
     def on_conn_error(hconn, error):
         hval = ctypes.cast(hconn, ctypes.c_void_p).value
@@ -307,9 +363,31 @@ def _build_callbacks() -> TIRTCCALLBACKS:
             if _on_p2p_connected_cb:
                 _on_p2p_connected_cb(received_room)
 
-    def on_request_key_frame(hconn, stream_id): pass
-    def on_subscribe_video(hconn, stream_id): return 0
-    def on_unsubscribe_video(hconn, stream_id): pass
+    def on_request_key_frame(hconn, stream_id):
+        hval = ctypes.cast(hconn, ctypes.c_void_p).value
+        with _state_lock:
+            active = _active_hconn == hval
+        if active:
+            _media.request_video_key_frame(stream_id)
+
+    def on_subscribe_video(hconn, stream_id):
+        hval = ctypes.cast(hconn, ctypes.c_void_p).value
+        with _state_lock:
+            active = _active_hconn == hval
+        accepted = active and _media.subscribe_video(stream_id)
+        _info(
+            f"设备通话视频订阅 stream={stream_id} "
+            f"{'已接受' if accepted else '已拒绝'}"
+        )
+        return 0 if accepted else -1
+
+    def on_unsubscribe_video(hconn, stream_id):
+        hval = ctypes.cast(hconn, ctypes.c_void_p).value
+        with _state_lock:
+            active = _active_hconn == hval
+        if active and _media.unsubscribe_video(stream_id):
+            _info(f"对端已退订设备通话视频 stream={stream_id}；音频继续发送")
+
     def on_subscribe_audio(hconn, stream_id): return 0
     def on_unsubscribe_audio(hconn, stream_id): pass
 
@@ -341,9 +419,13 @@ def _build_callbacks() -> TIRTCCALLBACKS:
 # ── 连接管理 ──────────────────────────────────────────────────────────────────
 
 def connect_to(remote_device_id: str, token: str, room_id: str,
-               max_retries: int = 3, timeout_s: float = 10.0) -> None:
+               max_retries: int = 3, timeout_s: float = 10.0,
+               call_type: "str | None" = None) -> None:
     """被叫侧：重试连接主叫，全部失败后触发 _on_connect_failed_cb。"""
     global _session_state, _active_hconn, _connect_cb_ref
+
+    if call_type is not None:
+        set_call_type(call_type)
 
     with _state_lock:
         if _session_state != "IDLE":
@@ -406,6 +488,7 @@ def connect_to(remote_device_id: str, token: str, room_id: str,
             _session_state = "IN_CALL"
             _active_hconn  = hconn_val
         _media.set_hconn(hconn_val)
+        _apply_video_downlink_policy(hconn_val)
         _info(f"P2P 连接成功 hconn={hconn_val:#x}，发送 0x2000 room_id={room_id}")
         body = json.dumps({"room_id": room_id}).encode()
         sdk.TiRtcSendCommand(hconn, 0x2000, body, len(body))
@@ -419,6 +502,7 @@ def connect_to(remote_device_id: str, token: str, room_id: str,
         _session_state = "IDLE"
         _active_hconn  = None
     _media.set_hconn(None)
+    clear_call_type()
     if _on_connect_failed_cb:
         _on_connect_failed_cb()
 
@@ -438,11 +522,13 @@ def hangup() -> None:
             _active_hconn = None
 
     if state == "IDLE":
+        clear_call_type()
         _log("hangup: 已是 IDLE，忽略")
         return
 
     _media.stop()
     _media.set_hconn(None)
+    clear_call_type()
 
     if hconn_val is not None:
         sdk.TiRtcDisconnect(ctypes.c_void_p(hconn_val))

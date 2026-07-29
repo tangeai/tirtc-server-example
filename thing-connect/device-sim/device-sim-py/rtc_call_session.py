@@ -54,6 +54,7 @@ class CallState:
         self._incoming_generation = 0
         self._room_id       = None   # 当前所在房间（主叫或被叫都用这个字段）
         self._role           = None  # "caller" | "callee"
+        self._call_type      = None  # "video" | "audio"
         self._lock = threading.Lock()
         self._cancel_timer: "threading.Timer | None" = None
         self._contact_list: list = []
@@ -126,11 +127,14 @@ class CallState:
                 return
             self._room_id = None
             self._role    = None
+            self._call_type = None
             self._incoming_generation += 1
         self._cancel_ring_timer()
         _warn(f"通话已结束 room_id={room_id} reason={reason}")
         if rtc_call.is_active():
             rtc_call.hangup()
+        else:
+            rtc_call.clear_call_type()
         self._after_stop()
 
     def on_device_call_reject(self, p: dict) -> None:
@@ -141,10 +145,12 @@ class CallState:
             if is_current:
                 self._room_id = None
                 self._role = None
+                self._call_type = None
                 self._incoming_generation += 1
         if is_current:
             self._cancel_ring_timer()
             rtc_call.clear_expected_room()
+            rtc_call.clear_call_type()
             self._after_stop()
 
     def on_device_callers_update(self, payload: dict | None = None) -> None:
@@ -192,11 +198,16 @@ class CallState:
     # ── HTTP 调用 ─────────────────────────────────────────────────────────────
 
     def do_call(self, target_id: str, call_type: str = "video") -> None:
+        call_type = (call_type or "video").lower()
+        if call_type not in ("audio", "video"):
+            _warn("设备通话类型必须是 video 或 audio")
+            return
         with self._lock:
             if self._room_id:
                 _warn(f"已在房间 {self._room_id} 中，不能发起新呼叫")
                 return
         self._before_start(lambda: None)
+        rtc_call.set_call_type(call_type)
         url = f"{self._call_server}/v1/call/request"
         payload = {"targets": [target_id], "call_type": call_type}
         headers = self._headers()
@@ -205,10 +216,12 @@ class CallState:
             resp = r.json()
         except (requests.RequestException, ValueError) as e:
             _warn(f"发起呼叫异常: {e}")
+            rtc_call.clear_call_type()
             self._after_stop()
             return
         if not isinstance(resp, dict):
             _warn("发起呼叫失败：响应不是 JSON 对象")
+            rtc_call.clear_call_type()
             self._after_stop()
             return
         if resp.get("code") == 200:
@@ -217,16 +230,19 @@ class CallState:
                 data.get("room_id", "") if isinstance(data, dict) else "")
             if not room_id:
                 _warn("发起呼叫失败：成功响应缺少 data.room_id")
+                rtc_call.clear_call_type()
                 self._after_stop()
                 return
             with self._lock:
                 self._room_id = room_id
                 self._role    = "caller"
+                self._call_type = call_type
             rtc_call.set_expected_room(room_id)
             _ok(f"已发起呼叫 room_id={room_id}，等待接听（30s 超时）")
             self._start_ring_timer(room_id)
         else:
             _warn(f"发起呼叫失败（code={resp.get('code')}）: {resp.get('msg')}")
+            rtc_call.clear_call_type()
             self._after_stop()
 
     def do_accept(self) -> None:
@@ -261,10 +277,14 @@ class CallState:
             self._pending_call = None
             self._room_id = pc["room_id"]
             self._role    = "callee"
+            accepted_call_type = (
+                "audio" if pc.get("call_type") == "audio" else "video")
+            self._call_type = accepted_call_type
         _ok(f"接听成功，正在建立 P2P 连接 room_id={pc['room_id']}")
         try:
             action = lambda: rtc_call.connect_to(
-                pc["caller_id"], token, pc["room_id"])
+                pc["caller_id"], token, pc["room_id"],
+                call_type=accepted_call_type)
             if self._before_accept_ticket:
                 self._before_accept_ticket(action, pc["room_id"])
             else:
@@ -274,9 +294,11 @@ class CallState:
                 if self._room_id == pc["room_id"]:
                     self._room_id = None
                     self._role = None
+                    self._call_type = None
                     if (self._incoming_generation == pc.get("generation")
                             and self._pending_call is None):
                         self._pending_call = pc
+            rtc_call.clear_call_type()
             raise
 
     def reject_incoming(self, payload: dict, reason: str = "busy") -> None:
@@ -330,6 +352,7 @@ class CallState:
         with self._lock:
             self._room_id = None
             self._role    = None
+            self._call_type = None
         _ok("挂断完成")
         self._after_stop()
 
@@ -352,10 +375,12 @@ class CallState:
                 if self._room_id == room_id:
                     self._room_id = None
                     self._role    = None
+                    self._call_type = None
                     ended = True
                 else:
                     ended = False
             if ended:
+                rtc_call.clear_call_type()
                 self._after_stop()
         with self._lock:
             self._cancel_timer = threading.Timer(30.0, _timeout)
@@ -397,7 +422,9 @@ class CallState:
         with self._lock:
             self._room_id = None
             self._role    = None
+            self._call_type = None
         rtc_call.clear_expected_room()
+        rtc_call.clear_call_type()
         self._after_stop()
 
     def do_list_contacts(self) -> list:
@@ -564,16 +591,22 @@ class CallState:
             with self._lock:
                 self._room_id = None
                 self._role    = None
+                self._call_type = None
+            rtc_call.clear_call_type()
             _ok("当前不在任何房间")
         else:
             # 服务端有房间但本地状态丢失（进程重启后常见），自动同步
             room_id = data['room_id']
             role    = data['role']
+            call_type = (
+                "audio" if data.get("call_type") == "audio" else "video")
             with self._lock:
                 if self._room_id != room_id:
                     _ok(f"同步房间状态: room_id={room_id} role={role}")
                 self._room_id = room_id
                 self._role    = role
+                self._call_type = call_type
+            rtc_call.set_call_type(call_type)
             _ok(f"当前房间: room_id={data['room_id']} status={data['status']} "
                 f"role={data['role']} caller={data['caller']} type={data['call_type']}")
 

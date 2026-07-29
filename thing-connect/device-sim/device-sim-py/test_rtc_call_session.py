@@ -283,6 +283,36 @@ class CallLifecycleRaceTests(unittest.TestCase):
             state._before_accept_ticket.assert_not_called()
             rtc_call.connect_to.assert_not_called()
 
+    def test_accept_audio_call_passes_type_to_media_connection(self):
+        with mock.patch("rtc_call_session.rtc_call") as rtc_call:
+            rtc_call._LOG_LEVEL = 40
+            state = CallState(
+                "https://call.example", "dev-1", "mqtt-token",
+                before_accept=lambda action: action(),
+            )
+            state.on_device_call_incoming({
+                "room_id": "room-audio",
+                "caller_id": "caller-1",
+                "caller_name": "主叫",
+                "call_type": "audio",
+            })
+            response = mock.Mock()
+            response.json.return_value = {
+                "code": 200, "data": {"token": "token-1"}}
+
+            with mock.patch(
+                    "rtc_call_session.http_trace.request",
+                    return_value=response):
+                state.do_accept()
+
+            rtc_call.connect_to.assert_called_once_with(
+                "caller-1",
+                "token-1",
+                "room-audio",
+                call_type="audio",
+            )
+            self.assertEqual(state._call_type, "audio")
+
 
 if __name__ == "__main__":
     unittest.main()

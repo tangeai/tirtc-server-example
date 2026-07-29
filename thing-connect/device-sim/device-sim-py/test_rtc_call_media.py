@@ -32,6 +32,9 @@ _STATE_FIELDS = {
     "hw_mic_device": "_hw_mic_device",
     "hw_spk": "_hw_spk",
     "play_queue": "_play_queue",
+    "session_video_capable": "_session_video_capable",
+    "video_enabled": "_video_enabled",
+    "video_generation": "_video_generation",
 }
 
 
@@ -102,6 +105,65 @@ class RtcCallMediaTests(unittest.TestCase):
             finally:
                 rtc_call_media.threading.Thread = original_thread
                 rtc_call_media.stop()
+
+    def test_audio_call_does_not_start_configured_video(self):
+        with tempfile.TemporaryDirectory() as root:
+            audio_path = os.path.join(root, "audio.g711a")
+            video_path = os.path.join(root, "video.h264")
+            with open(audio_path, "wb") as target:
+                target.write(b"\xd5" * 320)
+            with open(video_path, "wb") as target:
+                target.write(b"\x00\x00\x00\x01\x65\x80")
+
+            rtc_call_media.configure(
+                "DEV000001",
+                audio_path,
+                video_path,
+                root,
+                audio_fmt="alaw_8khz",
+                up_video_fmt="h264",
+                down_video_fmt="h264",
+            )
+            rtc_call_media.prepare_session(False)
+            rtc_call_media.set_hconn(0x1234)
+            rtc_call_media._hw_audio = False
+            rtc_call_media._stream_thread = None
+
+            with mock.patch.object(
+                    rtc_call_media.threading, "Thread",
+                    side_effect=_FakeThread):
+                rtc_call_media.start()
+
+            self.assertIsNotNone(rtc_call_media._stream_thread)
+            self.assertIsNone(rtc_call_media._video_thread)
+            self.assertIsNone(rtc_call_media._recv_vf)
+            self.assertEqual(rtc_call_media._recv_video_path, "")
+            rtc_call_media.stop()
+
+    def test_video_subscription_cannot_override_audio_call(self):
+        rtc_call_media._send_video_path = "video.h264"
+
+        rtc_call_media.prepare_session(False)
+        self.assertFalse(
+            rtc_call_media.subscribe_video(rtc_call_media.VIDEO_STREAM_ID))
+        self.assertEqual(
+            rtc_call_media._video_state()[:2], (False, False))
+
+        rtc_call_media.prepare_session(True)
+        self.assertEqual(
+            rtc_call_media._video_state()[:2], (True, True))
+        self.assertTrue(
+            rtc_call_media.unsubscribe_video(rtc_call_media.VIDEO_STREAM_ID))
+        self.assertEqual(
+            rtc_call_media._video_state()[:2], (True, False))
+        self.assertFalse(
+            rtc_call_media.request_video_key_frame(
+                rtc_call_media.VIDEO_STREAM_ID))
+        self.assertTrue(
+            rtc_call_media.subscribe_video(rtc_call_media.VIDEO_STREAM_ID))
+        self.assertTrue(
+            rtc_call_media.request_video_key_frame(
+                rtc_call_media.VIDEO_STREAM_ID))
 
     def test_start_without_file_audio_skips_output_initialization(self):
         with tempfile.TemporaryDirectory() as root:

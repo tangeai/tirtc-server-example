@@ -217,6 +217,10 @@ TiRtcConnect         = _bind("TiRtcConnect",       ctypes.c_int,
 TiRtcSendCommand     = _bind("TiRtcSendCommand",   ctypes.c_int,
                                ctypes.c_void_p, ctypes.c_uint32,
                                ctypes.c_void_p, ctypes.c_uint32)
+TiRtcSubscribeVideo  = _bind("TiRtcSubscribeVideo", ctypes.c_int,
+                               ctypes.c_void_p, ctypes.c_uint8)
+TiRtcUnsubscribeVideo = _bind("TiRtcUnsubscribeVideo", ctypes.c_int,
+                                ctypes.c_void_p, ctypes.c_uint8)
 LogCB                = ctypes.CFUNCTYPE(None, ctypes.c_char_p)
 TiRtcLogSetCallback  = _bind("TiRtcLogSetCallback", None, LogCB)
 TiRtcServiceRequest  = _bind("TiRtcServiceRequest", ctypes.c_int,

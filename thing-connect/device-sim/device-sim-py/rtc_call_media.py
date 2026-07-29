@@ -108,6 +108,13 @@ _video_thread: "threading.Thread | None" = None
 # 当前连接的 handle（由 rtc_call.py 通过 set_hconn 更新）
 _hconn: "ctypes.c_void_p | None" = None
 
+# 当前设备通话的视频策略。call_type 决定 capability，SDK 的
+# subscribe/unsubscribe 回调只在 capability 范围内动态启停视频。
+_video_state_lock = threading.Lock()
+_session_video_capable = False
+_video_enabled = False
+_video_generation = 0
+
 # 回声门控（替代 AEC，远端有声时衰减近端麦克风）
 _echo_gate = None
 
@@ -133,6 +140,72 @@ def configure(device_id: str, send_audio: str, send_video: str, recv_dir: str,
     _send_audio_fmt = normalize_audio_format(audio_fmt)
     _send_video_fmt = up_video_fmt
     _recv_video_fmt = down_video_fmt
+    # Preserve the standalone rtc_call_media API default: configured video is
+    # enabled until the call session explicitly prepares an audio-only call.
+    prepare_session(bool(send_video))
+
+
+def prepare_session(with_video: bool) -> None:
+    """Prepare media policy before P2P connection establishment."""
+    global _session_video_capable, _video_enabled, _video_generation
+    capable = bool(with_video and _send_video_path)
+    with _video_state_lock:
+        _session_video_capable = capable
+        _video_enabled = capable
+        _video_generation += 1
+
+
+def reset_session() -> None:
+    global _session_video_capable, _video_enabled, _video_generation
+    with _video_state_lock:
+        _session_video_capable = False
+        _video_enabled = False
+        _video_generation += 1
+
+
+def subscribe_video(stream_id: int) -> bool:
+    """Enable video only when this is a configured video call."""
+    global _video_enabled, _video_generation
+    with _video_state_lock:
+        if stream_id != VIDEO_STREAM_ID or not _session_video_capable:
+            return False
+        _video_enabled = True
+        _video_generation += 1
+        return True
+
+
+def unsubscribe_video(stream_id: int) -> bool:
+    """Stop video without affecting the audio sender."""
+    global _video_enabled, _video_generation
+    with _video_state_lock:
+        if stream_id != VIDEO_STREAM_ID:
+            return False
+        _video_enabled = False
+        _video_generation += 1
+        return True
+
+
+def request_video_key_frame(stream_id: int) -> bool:
+    """Force the next enabled video frame to come from a real key frame."""
+    global _video_generation
+    with _video_state_lock:
+        if (
+            stream_id != VIDEO_STREAM_ID
+            or not _session_video_capable
+            or not _video_enabled
+        ):
+            return False
+        _video_generation += 1
+        return True
+
+
+def _video_state() -> tuple[bool, bool, int]:
+    with _video_state_lock:
+        return (
+            _session_video_capable,
+            _video_enabled,
+            _video_generation,
+        )
 
 
 def configure_hardware_audio(enable: bool, fmt: str = "alaw_8khz",
@@ -229,7 +302,8 @@ def start() -> None:
     try:
         _recv_recorder = AudioRecorder(_recv_dir, _device_id, info=_info, warn=_warn)
         _recv_recorder.open()
-        if _send_video_path:
+        video_capable, _, _ = _video_state()
+        if video_capable:
             _recv_video_path = os.path.join(
                 out_dir, f"received_video.{video_file_extension(_recv_video_fmt)}")
             _recv_vf = open(_recv_video_path, "wb")
@@ -266,7 +340,7 @@ def start() -> None:
             target=_speaker_worker, daemon=True, name="call-speaker")
         _mic_thread.start()
         _speaker_thread.start()
-        if _send_video_path:
+        if video_capable:
             _video_thread = threading.Thread(
                 target=_video_only_worker, daemon=True, name="call-video")
             _video_thread.start()
@@ -284,7 +358,7 @@ def start() -> None:
             target=_media_worker, args=(hconn_val,), daemon=True, name="call-media",
         )
         _stream_thread.start()
-        if _send_video_path:
+        if video_capable:
             _info("媒体流已启动（文件音频 + 文件视频）")
         else:
             _info("媒体流已启动（文件音频，无视频）")
@@ -319,6 +393,7 @@ def stop() -> None:
 
     _play_queue = None
     _close_receive_outputs(convert_video=True)
+    reset_session()
     _log("媒体流已停止")
 
 
@@ -513,11 +588,20 @@ def _video_only_worker() -> None:
     video_pts_ms = 0
     first_video = True
     wall_start_ms = _now_ms()
+    seen_generation = -1
 
     try:
         reader = VideoFileReader(_send_video_path, _send_video_fmt)
         while not _stream_stop.is_set():
-            result = reader.next_frame()
+            _, video_enabled, generation = _video_state()
+            if not video_enabled:
+                time.sleep(0.02)
+                continue
+            if generation != seen_generation:
+                video_pts_ms = max(0, _now_ms() - wall_start_ms)
+                first_video = True
+                seen_generation = generation
+            result = reader.next_frame(force_key=first_video)
             if result is None:
                 break
             frame_data, is_key = result
@@ -560,7 +644,7 @@ def _media_worker(hconn_val: int) -> None:
     """媒体推流线程：循环读取音视频文件发送。"""
     hconn = ctypes.c_void_p(hconn_val)
     audio_spec = AUDIO_FORMATS[_send_audio_fmt]
-    has_video = bool(_send_video_path)
+    has_video, _, _ = _video_state()
     video_spec = VIDEO_FORMATS[_send_video_fmt] if has_video else None
     audio_reader = AudioFileReader(_send_audio_path, _send_audio_fmt, AUDIO_PKT_MS)
     video_reader = VideoFileReader(_send_video_path, _send_video_fmt) if has_video else None
@@ -569,6 +653,7 @@ def _media_worker(hconn_val: int) -> None:
     video_pts_ms  = 0.0 if has_video else float("inf")
     first_video   = True
     wall_start_ms = _now_ms()
+    seen_video_generation = -1
 
     def _send_audio_pkt() -> bool:
         nonlocal audio_pts_ms
@@ -596,7 +681,7 @@ def _media_worker(hconn_val: int) -> None:
         nonlocal video_pts_ms, first_video
         if video_reader is None or video_spec is None:
             return False
-        result = video_reader.next_frame()
+        result = video_reader.next_frame(force_key=first_video)
         if result is None:
             return False
         frame_data, is_key = result
@@ -619,14 +704,24 @@ def _media_worker(hconn_val: int) -> None:
 
     try:
         while not _stream_stop.is_set():
-            target_pts = audio_pts_ms if not has_video else min(audio_pts_ms, video_pts_ms)
+            _, video_enabled, video_generation = _video_state()
+            video_enabled = bool(has_video and video_enabled)
+            if video_enabled and video_generation != seen_video_generation:
+                video_pts_ms = float(audio_pts_ms)
+                first_video = True
+                seen_video_generation = video_generation
+            target_pts = (
+                audio_pts_ms
+                if not video_enabled
+                else min(audio_pts_ms, video_pts_ms)
+            )
             elapsed    = _now_ms() - wall_start_ms
             wait_ms    = target_pts - elapsed
             if wait_ms > 2:
                 time.sleep(wait_ms / 1000.0)
                 continue
 
-            if not has_video or audio_pts_ms <= video_pts_ms:
+            if not video_enabled or audio_pts_ms <= video_pts_ms:
                 if not _send_audio_pkt():
                     break
             else:
