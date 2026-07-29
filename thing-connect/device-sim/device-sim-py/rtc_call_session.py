@@ -17,6 +17,7 @@ import threading
 import requests
 import rtc_call
 import http_trace
+from call_type_policy import CallTypeError, resolve_call_type
 from terminal_ui import print_box
 
 
@@ -50,6 +51,7 @@ class CallState:
         self._before_accept_ticket = before_accept_ticket
         self._before_continue = before_continue or self._before_start
         self._after_stop = after_stop or (lambda: None)
+        self._video_capable = bool(send_video)
         self._pending_call = None   # {"room_id","caller_id","caller_name","call_type"}
         self._incoming_generation = 0
         self._room_id       = None   # 当前所在房间（主叫或被叫都用这个字段）
@@ -197,10 +199,13 @@ class CallState:
 
     # ── HTTP 调用 ─────────────────────────────────────────────────────────────
 
-    def do_call(self, target_id: str, call_type: str = "video") -> None:
-        call_type = (call_type or "video").lower()
-        if call_type not in ("audio", "video"):
-            _warn("设备通话类型必须是 video 或 audio")
+    def do_call(self, target_id: str, call_type: str | None = None) -> None:
+        try:
+            call_type = resolve_call_type(
+                call_type, getattr(self, "_video_capable", True),
+                subject="设备通话")
+        except CallTypeError as exc:
+            _warn(str(exc))
             return
         with self._lock:
             if self._room_id:
@@ -651,12 +656,12 @@ class CallState:
                             _warn("无效输入")
                             continue
                         if 0 <= idx < len(contacts):
-                            self.do_call(contacts[idx]["device_id"], "video")
+                            self.do_call(contacts[idx]["device_id"])
                         else:
                             _warn(f"下标超出范围 [0-{len(contacts)-1}]")
                 elif len(parts) >= 2:
                     arg = parts[1]
-                    call_type = parts[2].lower() if len(parts) >= 3 else "video"
+                    call_type = parts[2] if len(parts) >= 3 else None
                     if arg.isdigit():
                         # 数字下标
                         idx = int(arg)

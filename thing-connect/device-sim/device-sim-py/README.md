@@ -288,6 +288,8 @@ Python 与 C 模拟器统一通过 `SessionArbiter` 仲裁 MQTT、终端和 SDK 
 - `accept / reject [reason] / cancel / hangup` 处理当前通话
 - `contacts / room / help / exit`
 
+`call` 和 `wxcall` 未指定通话类型时，有上行视频素材则使用 `video`，未配置上行视频素材则使用 `audio`。显式指定 `video` 时必须已经配置上行视频素材。
+
 常用首字母缩写：
 
 - `w` = `wxcall`

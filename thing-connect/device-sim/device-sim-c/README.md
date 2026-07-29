@@ -88,6 +88,8 @@ bash ../scripts/gen_assets.sh
 - `ct list|pending|add|accept|reject|del|remark`：联系人查询和维护。
 - `room`、`help`、`exit`；常用缩写为 `w/a/r/h/e`。
 
+`call` 和 `wxcall` 未指定通话类型时，有上行视频素材则使用 `video`，未配置上行视频素材则使用 `audio`。显式指定 `video` 时必须已经配置上行视频素材。
+
 音频呼叫只读取并发送上行音频文件；视频呼叫才会同时读取上行视频文件。
 
 ### 会话冲突与竞态规则

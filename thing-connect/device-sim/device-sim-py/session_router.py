@@ -4,6 +4,7 @@
 from concurrent.futures import ThreadPoolExecutor, wait
 import threading
 
+from call_type_policy import CallTypeError, resolve_call_type
 from session_arbiter import IncomingDecision
 from session_coordinator import SessionKind
 from terminal_ui import print_box
@@ -160,11 +161,12 @@ class TerminalController:
         "ct": "contact",
     }
 
-    def __init__(self, arbiter, voip, ai, call):
+    def __init__(self, arbiter, voip, ai, call, video_capable: bool = True):
         self.arbiter = arbiter
         self.voip = voip
         self.ai = ai
         self.call = call
+        self._video_capable = bool(video_capable)
         self._pending_selection = None
 
     def run_cmd_loop(self, stop_event) -> None:
@@ -181,6 +183,13 @@ class TerminalController:
                     print(f"[terminal] 命令执行失败: {exc}", flush=True)
 
     def execute(self, line: str, stop_event) -> None:
+        try:
+            self._execute(line, stop_event)
+        except CallTypeError as exc:
+            self._pending_selection = None
+            print(f"[terminal] {exc}", flush=True)
+
+    def _execute(self, line: str, stop_event) -> None:
         parts = line.split()
         command = self._COMMAND_ALIASES.get(parts[0].lower(), parts[0].lower())
         if self._pending_selection:
@@ -265,7 +274,7 @@ class TerminalController:
         else:
             self.call.do_delete_contact(peer_id)
 
-    def _dial_wxcall(self, index_text: str, call_type: str = "video") -> None:
+    def _dial_wxcall(self, index_text: str, call_type: str) -> None:
         callers = self.voip.list_callers()
         self.voip.do_call(callers[int(index_text)], call_type)
         self._pending_selection = None
@@ -377,11 +386,9 @@ class TerminalController:
         self.call.do_call(contact.get("device_id", ""), call_type)
         return True
 
-    @staticmethod
-    def _parse_call_type(call_type: str | None) -> str:
-        if not call_type:
-            return "video"
-        return "audio" if call_type.lower() == "audio" else "video"
+    def _parse_call_type(self, call_type: str | None) -> str:
+        return resolve_call_type(
+            call_type, self._video_capable, subject="通话")
 
     def _accept(self) -> None:
         if self.arbiter.has_pending(SessionKind.CALL):

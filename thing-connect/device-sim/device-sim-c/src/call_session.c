@@ -314,7 +314,8 @@ void call_session_on_connect_failed(void *user) {
 
 int call_session_do_call(CallState *cs, const char *target_id, const char *call_type) {
     if (!cs || !target_id) return -1;
-    const char *normalized_type = call_type ? call_type : "video";
+    const char *normalized_type =
+        call_type ? call_type : (cs->send_video[0] ? "video" : "audio");
     if (strcmp(normalized_type, "video") != 0 &&
         strcmp(normalized_type, "audio") != 0) {
         LOG_W("设备通话类型必须是 video 或 audio");
@@ -1200,7 +1201,7 @@ void call_session_dispatch(CallState *cs, const char *line) {
                     int idx = atoi(idx_buf);
                     if (idx >= 0 && idx < cs->contact_count) {
                         const char *did = cs->contact_device_ids[idx];
-                        if (did) call_session_do_call(cs, did, "video");
+                        if (did) call_session_do_call(cs, did, NULL);
                     } else {
                         LOG_W("下标超出范围 [0-%d]", cs->contact_count - 1);
                     }
@@ -1210,7 +1211,7 @@ void call_session_dispatch(CallState *cs, const char *line) {
             /* arg1 may be numeric index or device_id */
             const char *target = _resolve_peer(cs, arg1);
             if (target) {
-                const char *ct = arg2[0] ? arg2 : "video";
+                const char *ct = arg2[0] ? arg2 : NULL;
                 call_session_do_call(cs, target, ct);
             }
         }

@@ -17,6 +17,7 @@ import time
 import requests
 import rtc_voip
 import http_trace
+from call_type_policy import CallTypeError, resolve_call_type
 from terminal_ui import print_box
 
 OUTGOING_CANCEL_ROOM_WAIT_SEC = 10.0
@@ -88,7 +89,8 @@ class VoipCallState:
     def __init__(self, voip_server: str, device_id: str,
                  mqtt_token: str, voip_audio: str, auth_list: list = None,
                  before_start=None, after_stop=None, before_accept=None,
-                 before_continue=None, before_accept_ticket=None):
+                 before_continue=None, before_accept_ticket=None,
+                 video_capable: bool | None = None):
         self._voip_server  = voip_server
         self._device_id    = device_id
         self._mqtt_token   = mqtt_token
@@ -100,6 +102,9 @@ class VoipCallState:
         self._before_accept_ticket = before_accept_ticket
         self._before_continue = before_continue or self._before_start
         self._after_stop   = after_stop or (lambda: None)
+        self._video_capable = (
+            rtc_voip.has_video()
+            if video_capable is None else bool(video_capable))
         self._pending_call    = {}
         self._incoming_generation = 0
         self._outgoing_call   = False
@@ -614,10 +619,12 @@ class VoipCallState:
             _ok("外呼已结束，清理本地等待状态")
             self._after_stop()
 
-    def do_call(self, target: dict, call_type: str = "video") -> None:
-        call_type = (call_type or "video").lower()
-        if call_type not in ("video", "audio"):
-            _warn("VoIP 呼叫类型仅支持 video 或 audio")
+    def do_call(self, target: dict, call_type: str | None = None) -> None:
+        try:
+            call_type = resolve_call_type(
+                call_type, self._video_capable, subject="VoIP 呼叫")
+        except CallTypeError as exc:
+            _warn(str(exc))
             return
         with self._lock:
             if self._outgoing_call:

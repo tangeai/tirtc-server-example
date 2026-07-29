@@ -229,6 +229,44 @@ class TerminalControllerTests(unittest.TestCase):
         terminal.execute("0", mock.Mock())
         voip.do_call.assert_called_once_with({"wx_open_id": "openid-1"}, "video")
 
+    def test_audio_only_default_dials_audio(self):
+        coordinator = mock.Mock(current=SessionKind.STREAM)
+        voip, ai, call = mock.Mock(), mock.Mock(), mock.Mock()
+        voip.list_callers.return_value = [{"wx_open_id": "openid-1"}]
+        call.get_cached_contacts.return_value = []
+        terminal = TerminalController(
+            coordinator, voip, ai, call, video_capable=False)
+
+        terminal.execute("wxcall 0", mock.Mock())
+
+        voip.do_call.assert_called_once_with(
+            {"wx_open_id": "openid-1"}, "audio")
+
+    def test_audio_only_rejects_explicit_video(self):
+        coordinator = mock.Mock(current=SessionKind.STREAM)
+        voip, ai, call = mock.Mock(), mock.Mock(), mock.Mock()
+        terminal = TerminalController(
+            coordinator, voip, ai, call, video_capable=False)
+
+        with redirect_stdout(io.StringIO()) as output:
+            terminal.execute("call peer-device video", mock.Mock())
+
+        self.assertIn("未配置上行视频文件", output.getvalue())
+        voip.do_call.assert_not_called()
+        call.do_call.assert_not_called()
+
+    def test_invalid_call_type_is_not_silently_treated_as_video(self):
+        coordinator = mock.Mock(current=SessionKind.STREAM)
+        voip, ai, call = mock.Mock(), mock.Mock(), mock.Mock()
+        terminal = TerminalController(coordinator, voip, ai, call)
+
+        with redirect_stdout(io.StringIO()) as output:
+            terminal.execute("call peer-device voice", mock.Mock())
+
+        self.assertIn("仅支持 video 或 audio", output.getvalue())
+        voip.do_call.assert_not_called()
+        call.do_call.assert_not_called()
+
     def test_wxcall_selection_is_cleared_by_other_command(self):
         coordinator = mock.Mock(current=SessionKind.STREAM)
         voip, ai, call = mock.Mock(), mock.Mock(), mock.Mock()

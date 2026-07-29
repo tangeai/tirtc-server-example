@@ -82,6 +82,7 @@ class DeviceRtcRuntime:
             before_continue=lambda action: self._continue(
                 SessionKind.VOIP, action),
             after_stop=lambda: self._finish_async(SessionKind.VOIP),
+            video_capable=bool(config.up_video_file),
         )
         voip.set_session_end_callback(self.voip.on_session_end)
         self.ai = AiCallState(
@@ -111,7 +112,8 @@ class DeviceRtcRuntime:
         self.message_handler = SessionMessageRouter(
             self.arbiter, self.voip, self.call)
         self.terminal = TerminalController(
-            self.arbiter, self.voip, self.ai, self.call)
+            self.arbiter, self.voip, self.ai, self.call,
+            video_capable=bool(config.up_video_file))
 
     def start(self) -> None:
         self._print_media_config()

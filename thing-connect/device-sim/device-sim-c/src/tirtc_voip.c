@@ -1260,7 +1260,7 @@ int voip_dial_authorized_ex(VoipState *vs, int index,
 }
 
 int voip_dial_authorized(VoipState *vs, int index) {
-    return voip_dial_authorized_ex(vs, index, "video");
+    return voip_dial_authorized_ex(vs, index, NULL);
 }
 
 int voip_list_authorized(VoipState *vs) {
@@ -1362,7 +1362,9 @@ int voip_do_outgoing_call_ex(VoipState *vs, const cJSON *caller,
         LOG_W("微信通话类型必须是 video 或 audio");
         return -1;
     }
-    int video_call = !call_type || strcmp(call_type, "video") == 0;
+    int video_call = call_type
+                         ? strcmp(call_type, "video") == 0
+                         : (vs->voip_video[0] && vs->up_video_format);
     if (video_call && (!vs->voip_video[0] || !vs->up_video_format)) {
         LOG_W("未配置上行视频文件，不能发起视频微信通话");
         return -1;
@@ -1466,7 +1468,7 @@ int voip_do_outgoing_call_ex(VoipState *vs, const cJSON *caller,
 }
 
 int voip_do_outgoing_call(VoipState *vs, const cJSON *caller) {
-    return voip_do_outgoing_call_ex(vs, caller, "video");
+    return voip_do_outgoing_call_ex(vs, caller, NULL);
 }
 
 /* ── MQTT message handlers ───────────────────────────────────────────────── */

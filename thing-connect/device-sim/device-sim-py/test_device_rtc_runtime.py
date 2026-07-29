@@ -91,6 +91,9 @@ class DeviceRtcRuntimeTests(unittest.TestCase):
                 stream, voip_module, ai_module, call_module,
             )
 
+            self.assertFalse(runtime.terminal._video_capable)
+            self.assertFalse(runtime.voip._video_capable)
+            self.assertFalse(runtime.call._video_capable)
             runtime.start()
 
             media_factory = stream.start.call_args.args[2]

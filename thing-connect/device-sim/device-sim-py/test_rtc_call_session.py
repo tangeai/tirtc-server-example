@@ -189,6 +189,37 @@ class ContactHTTPTests(unittest.TestCase):
         )
         self.assertTrue(any("secret-token" in call.args[0] for call in trace.call_args_list))
 
+    def test_omitted_call_type_defaults_to_audio_without_video(self):
+        self.state._video_capable = False
+        response = mock.Mock(status_code=200)
+        response.json.return_value = {
+            "code": 40201,
+            "msg": "all targets offline",
+        }
+
+        with mock.patch(
+                "rtc_call_session.requests.post",
+                return_value=response) as post:
+            self.state.do_call("peer-device")
+
+        post.assert_called_once_with(
+            "https://call.example/v1/call/request",
+            json={"targets": ["peer-device"], "call_type": "audio"},
+            headers={
+                "Authorization": "Bearer secret-token",
+                "Content-Type": "application/json",
+            },
+            timeout=10,
+        )
+
+    def test_explicit_video_is_rejected_without_video(self):
+        self.state._video_capable = False
+
+        with mock.patch("rtc_call_session.requests.post") as post:
+            self.state.do_call("peer-device", "video")
+
+        post.assert_not_called()
+
     def test_call_success_without_room_releases_runtime_owner(self):
         response = mock.Mock(status_code=200)
         response.json.return_value = {"code": 200, "data": {}}

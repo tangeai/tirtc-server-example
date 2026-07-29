@@ -35,6 +35,29 @@ class _ImmediateThread:
 
 
 class VoipCallStateTests(unittest.TestCase):
+    def test_explicit_video_is_rejected_without_video(self):
+        target = {
+            "wx_open_id": "openid-1",
+            "wx_app_id": "app-1",
+            "wx_model_id": "model-1",
+        }
+        with mock.patch("rtc_voip_session.rtc_voip") as rtc_voip, \
+                mock.patch("rtc_voip_session.http_trace.request") as request:
+            rtc_voip._LOG_LEVEL = 40
+            state = VoipCallState(
+                "https://voip.example.com",
+                "dev-1",
+                "mqtt-token",
+                "audio.g711a",
+                auth_list=[target],
+                video_capable=False,
+            )
+
+            state.do_call(target, "video")
+
+            rtc_voip.report_profile.assert_not_called()
+            request.assert_not_called()
+
     def test_failed_accept_restores_local_pending_call(self):
         with mock.patch("rtc_voip_session.rtc_voip") as rtc_voip:
             rtc_voip._LOG_LEVEL = 40
