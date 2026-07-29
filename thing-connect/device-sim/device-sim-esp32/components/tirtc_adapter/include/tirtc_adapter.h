@@ -68,6 +68,8 @@ int tirtc_adapter_whip_connect(const char *service_description,
 int tirtc_adapter_send_command(uint32_t command,
                                const void *data,
                                uint32_t length);
+/* The ESP32-S3 target has no video sink. Ask the peer to stop stream 11. */
+int tirtc_adapter_disable_video_downlink(void);
 int tirtc_adapter_service_request(const char *path,
                                   const char *json_body,
                                   const char *token,

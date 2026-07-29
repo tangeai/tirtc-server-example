@@ -33,6 +33,7 @@ static atomic_bool s_audio_subscribed;
 static tirtc_adapter_event_handlers_t s_event_handlers;
 
 #define STREAM_ID_AUDIO 10U
+#define STREAM_ID_VIDEO 11U
 
 static void clear_media_subscriptions(void)
 {
@@ -609,6 +610,29 @@ int tirtc_adapter_send_command(uint32_t command,
         return TIRTC_E_INVALID_HANDLE;
     }
     return TiRtcSendCommand(connection, command, data, length);
+}
+
+int tirtc_adapter_disable_video_downlink(void)
+{
+    tirtc_conn_t connection = (tirtc_conn_t)atomic_load_explicit(
+        &s_active_connection, memory_order_acquire);
+    if (connection == NULL) {
+        return TIRTC_E_INVALID_HANDLE;
+    }
+
+    int rc = TiRtcUnsubscribeVideo(connection, STREAM_ID_VIDEO);
+    if (rc == 0) {
+        ESP_LOGI(TAG,
+                 "video downlink stream=%u unsubscribed: ESP32-S3 target is audio-only",
+                 STREAM_ID_VIDEO);
+    } else {
+        ESP_LOGW(TAG,
+                 "video downlink unsubscribe stream=%u failed rc=%d (%s)",
+                 STREAM_ID_VIDEO,
+                 rc,
+                 TiRtcGetErrorStr(rc));
+    }
+    return rc;
 }
 
 int tirtc_adapter_service_request(const char *path,

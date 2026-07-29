@@ -1420,6 +1420,13 @@ static void handle_connection(const session_event_t *event)
         return;
     }
 
+    /*
+     * The target is audio-only for every service. Rejecting
+     * on_subscribe_video protects our uplink; this explicit unsubscribe is
+     * the independent downlink direction and asks the peer to stop stream 11.
+     */
+    (void)tirtc_adapter_disable_video_downlink();
+
     if (event->incoming) {
         if (s_state == DEVICE_SESSION_IDLE) {
             begin_session(DEVICE_SESSION_H5_STREAMING, DEVICE_SERVICE_H5);
