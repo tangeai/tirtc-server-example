@@ -1373,8 +1373,8 @@
         <div class="terminal reveal" aria-label="模拟器运行效果">
           <div class="terminal-bar">
             <div class="terminal-dots"><i></i><i></i><i></i></div>
-            <span>Windows — Git Bash</span>
-            <button class="terminal-copy" type="button" aria-label="复制 Git Bash 运行命令">
+            <span>Windows — PowerShell</span>
+            <button class="terminal-copy" type="button" aria-label="复制 PowerShell 运行命令">
               <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true">
                 <rect x="6.5" y="6.5" width="9" height="9" rx="1.5"/>
                 <path d="M4.5 13.5h-1a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v1"/>
@@ -1383,15 +1383,14 @@
             </button>
           </div>
           <div class="terminal-body">
-            <div class="terminal-line terminal-success terminal-command"><span class="terminal-prompt">$ </span>winget install -e --id Python.Python.3.12</div>
+            <div class="terminal-line terminal-success terminal-command"><span class="terminal-prompt">PS&gt; </span>winget install -e --id Python.Python.3.12</div>
             <div class="terminal-line terminal-success terminal-command">git clone https://github.com/tangeai/tirtc-server-example</div>
             <div class="terminal-line terminal-success terminal-command">cd tirtc-server-example</div>
             <div class="terminal-line terminal-success terminal-command">cd thing-connect/device-sim/device-sim-py</div>
             <div class="terminal-line terminal-success terminal-command">py -3.12 -m venv .venv</div>
-            <div class="terminal-line terminal-success terminal-command">source .venv/Scripts/activate</div>
-            <div class="terminal-line terminal-success terminal-command">python -m pip install --upgrade pip</div>
-            <div class="terminal-line terminal-success terminal-command">python -m pip install -r requirements.txt</div>
-            <div class="terminal-line terminal-success terminal-command">python device_sim_main.py --mac AA:BB:CC:DD:EE:FF</div>
+            <div class="terminal-line terminal-success terminal-command">.\.venv\Scripts\python.exe -m pip install --upgrade pip</div>
+            <div class="terminal-line terminal-success terminal-command">.\.venv\Scripts\python.exe -m pip install -r requirements.txt</div>
+            <div class="terminal-line terminal-success terminal-command">.\.venv\Scripts\python.exe device_sim_main.py --mac AA:BB:CC:DD:EE:FF</div>
             <div class="terminal-divider"></div>
             <div class="terminal-line terminal-muted">命令运行后，在浏览器打开：</div>
             <div class="terminal-line">
@@ -1405,7 +1404,7 @@
               <span class="live-badge"><i></i> ONLINE</span>
             </div>
             <div class="terminal-ready" aria-label="终端等待输入">
-              <span class="terminal-prompt">$</span>
+              <span class="terminal-prompt">PS&gt;</span>
               <span class="terminal-cursor" aria-hidden="true"></span>
             </div>
           </div>
@@ -1625,7 +1624,7 @@
     const copyButton = document.querySelector(".terminal-copy");
     const copyButtonLabel = copyButton.querySelector("span");
     const terminalCommands = Array.from(document.querySelectorAll(".terminal-command"))
-      .map((line) => line.textContent.replace(/^\$\s*/, "").trim())
+      .map((line) => line.textContent.replace(/^(?:\$|PS>)\s*/, "").trim())
       .join("\n");
 
     copyButton.addEventListener("click", async () => {
@@ -1647,7 +1646,7 @@
       window.setTimeout(() => {
         copyButtonLabel.textContent = "复制命令";
         copyButton.classList.remove("copied");
-        copyButton.setAttribute("aria-label", "复制 Git Bash 运行命令");
+        copyButton.setAttribute("aria-label", "复制 PowerShell 运行命令");
       }, 1800);
     });
 
