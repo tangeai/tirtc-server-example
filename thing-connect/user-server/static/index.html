@@ -843,7 +843,7 @@
     }
 
     .final-cta-heading {
-      max-width: 760px;
+      max-width: 940px;
       margin: 0 auto 42px;
       text-align: center;
     }
@@ -856,7 +856,7 @@
     }
 
     .final-cta p {
-      max-width: 610px;
+      max-width: 880px;
       margin: 0 auto;
       color: var(--muted);
       font-size: 17px;
@@ -865,16 +865,51 @@
 
     .product-path {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 16px;
       text-align: left;
     }
 
+    .sdk-panel {
+      display: grid;
+      grid-template-columns: minmax(230px, 0.72fr) minmax(0, 1.5fr);
+      align-items: center;
+      gap: 38px;
+      margin-bottom: 16px;
+      padding: 28px;
+      border: 1px solid rgba(15, 118, 110, 0.25);
+      border-radius: var(--radius);
+      background: linear-gradient(115deg, #eff9f6 0%, #ffffff 58%);
+      box-shadow: 0 14px 36px rgba(21, 32, 31, 0.045);
+      text-align: left;
+    }
+
+    .sdk-panel-kicker {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.1em;
+    }
+
+    .sdk-panel h3 {
+      margin-bottom: 9px;
+      font-size: 23px;
+      letter-spacing: -0.025em;
+    }
+
+    .sdk-panel p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.7;
+    }
+
     .product-step {
-      min-height: 430px;
       display: flex;
       flex-direction: column;
-      padding: 26px;
+      padding: 28px;
       border: 1px solid var(--line);
       border-radius: var(--radius);
       background: var(--white);
@@ -882,8 +917,7 @@
     }
 
     .product-step:first-child {
-      border-color: rgba(15, 118, 110, 0.3);
-      background: linear-gradient(180deg, #eff9f6 0%, #ffffff 58%);
+      border-color: rgba(15, 118, 110, 0.22);
     }
 
     .product-step-number {
@@ -891,7 +925,7 @@
       height: 36px;
       display: grid;
       place-items: center;
-      margin-bottom: 26px;
+      margin-bottom: 20px;
       border: 1px solid rgba(15, 118, 110, 0.24);
       border-radius: 50%;
       color: var(--accent);
@@ -907,7 +941,7 @@
     }
 
     .product-step p {
-      margin: 0 0 25px;
+      margin: 0 0 12px;
       color: var(--muted);
       font-size: 14px;
       line-height: 1.7;
@@ -929,8 +963,9 @@
 
     .sdk-options {
       display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 10px;
-      margin: 18px 0 14px;
+      margin: 0 0 14px;
     }
 
     .sdk-option {
@@ -956,7 +991,7 @@
     }
 
     .sdk-option strong {
-      margin-bottom: 3px;
+      margin-bottom: 5px;
       font-size: 14px;
     }
 
@@ -985,7 +1020,7 @@
     }
 
     .sdk-quick-label {
-      margin: 2px 0 9px;
+      margin: 0 0 9px;
       color: var(--muted);
       font-size: 12px;
       font-weight: 700;
@@ -1009,8 +1044,8 @@
     .product-resource-links {
       display: grid;
       gap: 9px;
-      margin-top: auto;
-      padding-top: 18px;
+      margin-top: 4px;
+      padding-top: 0;
     }
 
     .product-resource-links a {
@@ -1129,8 +1164,9 @@
         grid-template-columns: 1fr;
       }
 
-      .product-step {
-        min-height: 0;
+      .sdk-panel {
+        grid-template-columns: 1fr;
+        gap: 22px;
       }
 
       .sdk-option {
@@ -1291,6 +1327,10 @@
       .sdk-option {
         grid-template-columns: 1fr;
         gap: 7px;
+      }
+
+      .sdk-options {
+        grid-template-columns: 1fr;
       }
 
       .video-frame {
@@ -1527,17 +1567,18 @@
     <section class="final-cta">
       <div class="final-cta-inner shell reveal">
         <div class="final-cta-heading">
-          <div class="section-kicker">设备端开发</div>
-          <h2>先跑通设备端示例，<br>再移植到产品工程</h2>
-          <p>按设备平台下载 TiRTC SDK，在开发板或嵌入式设备上验证音视频链路，然后接入实际产品。</p>
+          <h2>跑通设备示例，接入产品工程</h2>
+          <p>选择与设备平台匹配的 TiRTC SDK 或固件，在开发板或嵌入式设备上跑通音视频，再接入自己的产品。</p>
         </div>
 
-        <div class="product-path">
-          <article class="product-step">
-            <span class="product-step-number">01</span>
-            <h3>下载对应平台 SDK</h3>
-            <p>按操作系统、芯片和工具链选择 SDK。Linux、RTOS 及不同芯片平台的 SDK 不能混用。</p>
+        <div class="sdk-panel">
+          <div>
+            <span class="sdk-panel-kicker">选择设备平台</span>
+            <h3>下载匹配设备的 SDK</h3>
+            <p>SDK 与操作系统、芯片和工具链对应，请按实际硬件选择。</p>
+          </div>
 
+          <div>
             <div class="sdk-options">
               <a class="sdk-option" href="https://docs.tange.ai/products/tirtc/download.html" target="_blank" rel="noreferrer">
                 <span>
@@ -1562,12 +1603,14 @@
               <a class="sdk-chip" href="https://docs.tange.ai/products/tirtc/download.html" target="_blank" rel="noreferrer">君正系列</a>
               <a class="sdk-chip" href="https://docs.tange.ai/products/tirtc/download.html" target="_blank" rel="noreferrer">更多芯片</a>
             </div>
-          </article>
+          </div>
+        </div>
 
+        <div class="product-path">
           <article class="product-step">
-            <span class="product-step-number">02</span>
-            <h3>跑通板端示例</h3>
-            <p>有预编译固件就直接烧录；没有的话，用对应 SDK 编译示例工程。先确认设备能上线、绑定并正常收发音视频。</p>
+            <span class="product-step-number">01</span>
+            <h3>在真实设备上跑通示例</h3>
+            <p>有预编译固件就直接烧录；没有的话，用对应 SDK 编译示例工程。先确认设备能够上线、绑定并正常收发音视频。</p>
             <div class="product-resource-links">
               <a href="https://github.com/tangeai/tirtc-server-example/releases" target="_blank" rel="noreferrer">预编译固件与发布包 <span>→</span></a>
               <a href="https://github.com/tangeai/tirtc-server-example/tree/main/thing-connect/device-sim/device-sim-esp32" target="_blank" rel="noreferrer">ESP32-S3 示例工程 <span>→</span></a>
@@ -1576,9 +1619,9 @@
           </article>
 
           <article class="product-step">
-            <span class="product-step-number">03</span>
-            <h3>移植到产品代码</h3>
-            <p>参考 C 示例和移植文档，替换摄像头、麦克风、网络、存储等硬件接口，接入现有产品工程。</p>
+            <span class="product-step-number">02</span>
+            <h3>接入产品工程</h3>
+            <p>参考 C 示例和移植文档，接入摄像头、麦克风、网络、存储等设备接口，把已经验证的链路用到自己的产品中。</p>
             <div class="product-resource-links">
               <a href="https://github.com/tangeai/tirtc-server-example/tree/main/thing-connect/device-sim/device-sim-c" target="_blank" rel="noreferrer">Linux C 参考实现 <span>→</span></a>
               <a href="https://github.com/tangeai/tirtc-server-example/blob/main/thing-connect/device-porting.md" target="_blank" rel="noreferrer">设备端移植指南 <span>→</span></a>
