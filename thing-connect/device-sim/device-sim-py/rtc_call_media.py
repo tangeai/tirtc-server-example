@@ -238,7 +238,7 @@ def configure_hardware_audio(enable: bool, fmt: str = "alaw_8khz",
     mic_dev = mic_device if mic_device is not None else select_mic()
     spk_dev = spk_device if spk_device is not None else select_speaker()
     _info(f"硬件音频: fmt={fmt} mic_dev={mic_dev} spk_dev={spk_dev}")
-    _warn("⚠ 建议将电脑音量调至 15% 左右，防止扬声器回声")
+    _warn("建议将电脑音量调至 15% 左右，防止扬声器回声")
     _hw_mic_device = mic_dev
     _hw_spk_device = spk_dev
 

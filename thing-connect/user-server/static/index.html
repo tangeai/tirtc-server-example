@@ -1,13 +1,356 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ThingConnect</title>
-  <link rel="stylesheet" href="/static/css/tailwind.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="登录 TiRTC 体验平台，添加模拟器或真实设备，验证设备音视频能力。">
+  <title>登录 · TiRTC 体验平台</title>
   <!-- 网易易盾验证码 SDK（配置了 captcha_id 时生效） -->
   <script src="https://cstaticdun.126.net/load.min.js"></script>
   <style>
+    :root {
+      --ink: #172026;
+      --muted: #687279;
+      --line: #dfe4e2;
+      --paper: #fbfcfa;
+      --white: #ffffff;
+      --accent: #0f766e;
+      --accent-dark: #0b5d57;
+      --accent-soft: #e9f6f2;
+      --danger: #c43d3d;
+      --shadow: 0 24px 70px rgba(21, 32, 31, 0.11);
+      --max-width: 1120px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    [hidden],
+    .hidden {
+      display: none !important;
+    }
+
+    html,
+    body {
+      min-height: 100%;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--paper);
+      font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    button,
+    input {
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.58;
+    }
+
+    .shell {
+      width: min(calc(100% - 48px), var(--max-width));
+      margin: 0 auto;
+    }
+
+    .site-header {
+      position: relative;
+      z-index: 2;
+      border-bottom: 1px solid rgba(223, 228, 226, 0.9);
+      background: rgba(251, 252, 250, 0.9);
+      backdrop-filter: blur(16px);
+    }
+
+    .nav {
+      min-height: 72px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 11px;
+      font-size: 17px;
+      font-weight: 750;
+      letter-spacing: -0.02em;
+      white-space: nowrap;
+    }
+
+    .brand-mark {
+      position: relative;
+      width: 31px;
+      height: 31px;
+      flex: 0 0 auto;
+      overflow: hidden;
+      border-radius: 9px;
+      background: var(--ink);
+    }
+
+    .brand-mark::before,
+    .brand-mark::after {
+      position: absolute;
+      content: "";
+      border: 2px solid #79d2c4;
+      border-radius: 50%;
+    }
+
+    .brand-mark::before {
+      width: 16px;
+      height: 16px;
+      top: 6px;
+      left: 6px;
+    }
+
+    .brand-mark::after {
+      width: 4px;
+      height: 4px;
+      top: 12px;
+      left: 12px;
+      background: #79d2c4;
+    }
+
+    .back-home {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      color: #4e595f;
+      font-size: 14px;
+      font-weight: 600;
+      transition: color 160ms ease;
+    }
+
+    .back-home:hover {
+      color: var(--accent);
+    }
+
+    .back-home svg {
+      width: 16px;
+      height: 16px;
+    }
+
+    .auth-main {
+      position: relative;
+      min-height: calc(100vh - 73px);
+      overflow: hidden;
+    }
+
+    .auth-main::before {
+      position: absolute;
+      width: 520px;
+      height: 520px;
+      top: -355px;
+      left: 42%;
+      content: "";
+      border-radius: 50%;
+      background: rgba(111, 201, 188, 0.13);
+      pointer-events: none;
+    }
+
+    .auth-main::after {
+      position: absolute;
+      width: 360px;
+      height: 360px;
+      right: -250px;
+      bottom: -250px;
+      content: "";
+      border-radius: 50%;
+      background: rgba(23, 32, 38, 0.045);
+      pointer-events: none;
+    }
+
+    .auth-layout {
+      position: relative;
+      z-index: 1;
+      min-height: calc(100vh - 73px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding-top: 56px;
+      padding-bottom: 56px;
+    }
+
+    .auth-card {
+      width: min(100%, 430px);
+      padding: 34px;
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      background: var(--white);
+      box-shadow: var(--shadow);
+    }
+
+    .mobile-brand {
+      display: none;
+    }
+
+    .card-heading {
+      margin-bottom: 27px;
+    }
+
+    .card-heading h2 {
+      margin: 0 0 8px;
+      font-size: 27px;
+      line-height: 1.25;
+      letter-spacing: -0.035em;
+    }
+
+    .card-heading p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.65;
+    }
+
+    .auth-tabs {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 4px;
+      margin-bottom: 25px;
+      padding: 4px;
+      border-radius: 11px;
+      background: #f1f3f2;
+    }
+
+    .auth-tab {
+      min-height: 40px;
+      padding: 8px 12px;
+      border: 0;
+      border-radius: 8px;
+      color: var(--muted);
+      background: transparent;
+      font-size: 14px;
+      font-weight: 700;
+      transition: color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+    }
+
+    .auth-tab:hover {
+      color: var(--ink);
+    }
+
+    .auth-tab.active {
+      color: var(--ink);
+      background: var(--white);
+      box-shadow: 0 2px 8px rgba(21, 32, 31, 0.08);
+    }
+
+    .field {
+      margin-bottom: 18px;
+    }
+
+    .field label {
+      display: block;
+      margin-bottom: 8px;
+      color: #455057;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .field input {
+      width: 100%;
+      height: 48px;
+      padding: 0 14px;
+      border: 1px solid #d7ddda;
+      border-radius: 10px;
+      outline: none;
+      color: var(--ink);
+      background: var(--white);
+      font-size: 15px;
+      transition: border 160ms ease, box-shadow 160ms ease, background 160ms ease;
+    }
+
+    .field input::placeholder {
+      color: #a1aaa7;
+    }
+
+    .field input:hover {
+      border-color: #bbc7c3;
+    }
+
+    .field input:focus {
+      border-color: var(--accent);
+      background: #fcfffe;
+      box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.1);
+    }
+
+    .code-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 9px;
+    }
+
+    .send-code {
+      min-width: 112px;
+      height: 48px;
+      padding: 0 14px;
+      border: 1px solid #cbd4d1;
+      border-radius: 10px;
+      color: var(--accent);
+      background: var(--white);
+      font-size: 13px;
+      font-weight: 750;
+      white-space: nowrap;
+      transition: border 160ms ease, background 160ms ease;
+    }
+
+    .send-code:hover:not(:disabled) {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+    }
+
+    .primary-button {
+      width: 100%;
+      min-height: 49px;
+      margin-top: 4px;
+      padding: 12px 18px;
+      border: 1px solid var(--ink);
+      border-radius: 10px;
+      color: var(--white);
+      background: var(--ink);
+      font-size: 15px;
+      font-weight: 750;
+      transition: transform 160ms ease, background 160ms ease;
+    }
+
+    .primary-button:hover:not(:disabled) {
+      transform: translateY(-1px);
+      background: #2a353a;
+    }
+
+    .form-note {
+      min-height: 20px;
+      margin: 14px 0 0;
+      color: var(--danger);
+      font-size: 13px;
+      line-height: 1.5;
+      text-align: center;
+    }
+
+    .card-footnote {
+      margin: 7px 0 0;
+      color: #8a9491;
+      font-size: 12px;
+      line-height: 1.6;
+      text-align: center;
+    }
+
     /* 易盾 popup 弹层修复：挂载点放在 fixed 层，但 SDK 容器宽高为 0 导致遮罩失效。
        强制 popup 容器和遮罩层撑满视口，确保弹窗正常显示并拦截背景点击。 */
     .yidun_popup {
@@ -29,379 +372,177 @@
       width: 100vw !important;
       height: 100vh !important;
     }
+
+    @media (max-width: 760px) {
+      .shell {
+        width: min(calc(100% - 32px), var(--max-width));
+      }
+
+      .nav {
+        min-height: 64px;
+      }
+
+      .brand {
+        font-size: 15px;
+      }
+
+      .auth-main {
+        min-height: calc(100vh - 65px);
+      }
+
+      .auth-layout {
+        min-height: calc(100vh - 65px);
+        padding-top: 30px;
+        padding-bottom: 40px;
+      }
+
+      .auth-card {
+        max-width: 450px;
+        padding: 27px 22px 24px;
+        border-radius: 17px;
+      }
+
+      .mobile-brand {
+        display: block;
+        margin: 0 0 18px;
+        color: var(--accent);
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.11em;
+        text-transform: uppercase;
+      }
+
+      .card-heading {
+        margin-bottom: 23px;
+      }
+
+      .card-heading h2 {
+        font-size: 24px;
+      }
+    }
+
+    @media (max-width: 420px) {
+      .shell {
+        width: min(calc(100% - 24px), var(--max-width));
+      }
+
+      .brand span:last-child {
+        max-width: 184px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .back-home span {
+        display: none;
+      }
+
+      .auth-card {
+        padding-right: 18px;
+        padding-left: 18px;
+      }
+
+      .field input {
+        font-size: 16px;
+      }
+
+      .send-code {
+        min-width: 104px;
+        padding: 0 10px;
+      }
+    }
   </style>
 </head>
-<body class="w-full h-full bg-[#070B14] text-[#F0F4FF] overflow-hidden font-sans" style="height:100vh">
-
-<canvas id="canvas" class="fixed inset-0 w-full h-full z-0"></canvas>
-
-<div class="relative z-10 h-screen max-[900px]:block max-[900px]:overflow-auto flex justify-center">
-<div class="grid h-screen w-full max-[900px]:block max-[900px]:overflow-auto" style="max-width:1400px; grid-template-columns: 1fr minmax(400px, 480px)">
-
-  <!-- LEFT -->
-  <div class="flex flex-col justify-between px-14 py-12 pointer-events-none max-[900px]:hidden">
-    <!-- Brand -->
-    <div class="flex items-center gap-3">
-      <div class="w-[38px] h-[38px] bg-gradient-to-br from-[#00D4AA] to-[#3B82F6] rounded-[10px] flex items-center justify-center">
-        <svg class="w-[22px] h-[22px]" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round">
-          <circle cx="12" cy="12" r="3"/>
-          <path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>
-          <path d="M5.64 5.64l1.77 1.77M16.6 16.6l1.76 1.76M5.64 18.36l1.77-1.77M16.6 7.4l1.76-1.76"/>
+<body>
+  <header class="site-header">
+    <nav class="nav shell" aria-label="登录页导航">
+      <a class="brand" href="/" aria-label="返回 TiRTC 开源示例首页">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span>TiRTC · OPEN EXAMPLES</span>
+      </a>
+      <a class="back-home" href="/">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M16 10H4M9 5l-5 5 5 5"/>
         </svg>
-      </div>
-      <span class="text-xl font-bold tracking-tight">ThingConnect</span>
-    </div>
+        <span>返回示例首页</span>
+      </a>
+    </nav>
+  </header>
 
-    <!-- Hero -->
-    <div class="max-w-[480px]">
-      <p class="font-mono text-[11px] tracking-[0.14em] uppercase text-[#00D4AA] mb-[18px] flex items-center gap-2.5 before:content-[''] before:block before:w-6 before:h-px before:bg-[#00D4AA]">
-        Open Source · IoT × AI × RTC
-      </p>
-      <h1 class="text-[52px] font-bold leading-[1.08] tracking-[-0.04em] mb-5">
-        添加设备<br>
-        <span class="bg-gradient-to-r from-[#00D4AA] to-[#3B82F6] bg-clip-text text-transparent">即获 AI 音视频</span>
-      </h1>
-      <p class="text-[15px] text-[#8896B3] leading-7 max-w-[380px]">
-        基于 TiRTC 实时音视频能力，让你的硬件设备具备远程监控、AI 对讲、微信 VoIP 呼叫能力。<br>开源可商用，跳过底层搭建，专注你的产品。
-      </p>
-    </div>
+  <main class="auth-main">
+    <div class="auth-layout shell">
+      <section class="auth-card" aria-labelledby="card-title">
+        <p class="mobile-brand">TiRTC Experience Platform</p>
+        <div class="card-heading">
+          <h2 id="card-title">登录体验平台</h2>
+          <p id="card-sub">继续管理和调试你的 TiRTC 设备</p>
+        </div>
 
-    <!-- Feature list -->
-    <div class="flex flex-col gap-4">
-      <div class="flex items-start gap-3.5 px-4 py-3.5 border border-white/[0.08] rounded-[10px] bg-white/[0.02] hover:border-[rgba(0,212,170,0.25)] hover:bg-[rgba(0,212,170,0.04)] transition-all pointer-events-auto">
-        <div class="w-9 h-9 rounded-lg bg-[rgba(0,212,170,0.1)] flex items-center justify-center text-[#00D4AA] flex-shrink-0">
-          <svg class="w-[18px] h-[18px]" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
-            <rect x="2" y="5" width="13" height="10" rx="2"/><path d="M15 8l3-2v8l-3-2"/>
-          </svg>
+        <div class="auth-tabs" role="tablist" aria-label="账号操作">
+          <button class="auth-tab active" id="tab-login" type="button" role="tab" aria-selected="true" onclick="switchTab('login')">登录</button>
+          <button class="auth-tab" id="tab-register" type="button" role="tab" aria-selected="false" onclick="switchTab('register')">免费注册</button>
         </div>
-        <div>
-          <div class="text-[13px] font-semibold text-[#F0F4FF] mb-0.5">远程实时音视频</div>
-          <div class="text-xs text-[#8896B3] leading-relaxed">像 IPC 一样远程查看，低延迟实时传输</div>
-        </div>
-      </div>
 
-      <div class="flex items-start gap-3.5 px-4 py-3.5 border border-white/[0.08] rounded-[10px] bg-white/[0.02] hover:border-[rgba(0,212,170,0.25)] hover:bg-[rgba(0,212,170,0.04)] transition-all pointer-events-auto">
-        <div class="w-9 h-9 rounded-lg bg-[rgba(0,212,170,0.1)] flex items-center justify-center text-[#818CF8] flex-shrink-0">
-          <svg class="w-[18px] h-[18px]" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
-            <circle cx="10" cy="10" r="8"/><path d="M7 10c0-1.66 1.34-3 3-3s3 1.34 3 3"/>
-            <circle cx="10" cy="13" r="1" fill="currentColor"/><path d="M6 16c.5-1.5 2-2.5 4-2.5s3.5 1 4 2.5"/>
-          </svg>
-        </div>
-        <div>
-          <div class="text-[13px] font-semibold text-[#F0F4FF] mb-0.5">AI 对讲 · AI 视频分析</div>
-          <div class="text-xs text-[#8896B3] leading-relaxed">接入大模型，实现智能对话与实时视觉理解</div>
-        </div>
-      </div>
-
-      <div class="flex items-start gap-3.5 px-4 py-3.5 border border-white/[0.08] rounded-[10px] bg-white/[0.02] hover:border-[rgba(0,212,170,0.25)] hover:bg-[rgba(0,212,170,0.04)] transition-all pointer-events-auto">
-        <div class="w-9 h-9 rounded-lg bg-[rgba(0,212,170,0.1)] flex items-center justify-center text-[#34D399] flex-shrink-0">
-          <svg class="w-[18px] h-[18px]" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
-            <path d="M6.5 3.5C5 5 4 7 4 10s1 5 2.5 6.5"/><path d="M13.5 3.5C15 5 16 7 16 10s-1 5-2.5 6.5"/>
-            <circle cx="10" cy="10" r="2.5"/>
-          </svg>
-        </div>
-        <div>
-          <div class="text-[13px] font-semibold text-[#F0F4FF] mb-0.5">微信 VoIP 呼叫</div>
-          <div class="text-xs text-[#8896B3] leading-relaxed">门铃 · 门锁 · 门禁 · 穿戴设备一键呼叫</div>
-        </div>
-      </div>
-
-      <div class="flex items-start gap-3.5 px-4 py-3.5 border border-dashed border-[rgba(245,158,11,0.25)] rounded-[10px] bg-[rgba(245,158,11,0.03)] hover:border-[rgba(245,158,11,0.4)] hover:bg-[rgba(245,158,11,0.06)] transition-all pointer-events-auto">
-        <div class="w-9 h-9 rounded-lg bg-[rgba(245,158,11,0.1)] flex items-center justify-center text-[#F59E0B] flex-shrink-0">
-          <svg class="w-[18px] h-[18px]" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
-            <path d="M10 2l2.4 4.8 5.3.8-3.8 3.7.9 5.3L10 14l-4.8 2.6.9-5.3L2.3 7.6l5.3-.8z"/>
-          </svg>
-        </div>
-        <div>
-          <div class="text-[13px] font-semibold text-[#FCD34D] mb-0.5">你的下一个场景</div>
-          <div class="text-xs text-[#8896B3] leading-relaxed">这只是起点。开源意味着可能性由你定义 —— 欢迎 PR。</div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- RIGHT — glass login card -->
-  <div class="flex items-center justify-center px-12 py-10 max-[900px]:px-5 max-[900px]:py-6">
-    <div class="w-full bg-[rgba(12,18,35,0.75)] backdrop-blur-2xl border border-white/[0.08] rounded-2xl p-10 max-[900px]:p-8">
-      <h2 class="text-2xl font-bold tracking-tight mb-1" id="card-title">欢迎回来</h2>
-      <p class="text-[13px] text-[#8896B3] mb-8" id="card-sub">登录后开始管理你的设备</p>
-
-      <!-- Tabs -->
-      <div class="flex bg-white/[0.04] border border-white/[0.08] rounded-[10px] p-[3px] mb-7 gap-[3px]">
-        <button id="tab-login" onclick="switchTab('login')"
-          class="flex-1 py-2 text-[13px] font-medium rounded-[7px] cursor-pointer border border-transparent bg-[rgba(0,212,170,0.15)] text-[#00D4AA] border-[rgba(0,212,170,0.3)] transition-all">
-          登录
-        </button>
-        <button id="tab-register" onclick="switchTab('register')"
-          class="flex-1 py-2 text-[13px] font-medium rounded-[7px] cursor-pointer border border-transparent text-[#8896B3] hover:text-[#F0F4FF] transition-all">
-          注册
-        </button>
-      </div>
-
-      <!-- Login form -->
-      <form id="form-login" onsubmit="doLogin(event)">
-        <div class="mb-4">
-          <label class="block text-xs font-medium text-[#8896B3] mb-1.5 tracking-wide">邮箱</label>
-          <input type="email" id="login-email" placeholder="your@email.com" required autocomplete="email"
-            class="w-full bg-white/[0.05] border border-white/[0.12] rounded-[9px] px-3.5 py-[11px] text-sm text-[#F0F4FF] outline-none focus:border-[#00D4AA] focus:bg-[rgba(0,212,170,0.05)] focus:ring-2 focus:ring-[rgba(0,212,170,0.12)] transition-all placeholder:text-[rgba(136,150,179,0.5)]">
-        </div>
-        <div class="mb-4">
-          <label class="block text-xs font-medium text-[#8896B3] mb-1.5 tracking-wide">密码</label>
-          <input type="password" id="login-password" placeholder="输入密码" required autocomplete="current-password"
-            class="w-full bg-white/[0.05] border border-white/[0.12] rounded-[9px] px-3.5 py-[11px] text-sm text-[#F0F4FF] outline-none focus:border-[#00D4AA] focus:bg-[rgba(0,212,170,0.05)] focus:ring-2 focus:ring-[rgba(0,212,170,0.12)] transition-all placeholder:text-[rgba(136,150,179,0.5)]">
-        </div>
-        <button type="submit" id="btn-login-submit"
-          class="w-full bg-[#00D4AA] text-[#04120E] font-bold py-3 rounded-[9px] mt-2 hover:opacity-90 active:scale-[0.99] transition-all tracking-wide">
-          登录
-        </button>
-      </form>
-
-      <!-- Register form — single screen -->
-      <div id="form-register" class="hidden">
-        <div class="mb-4">
-          <label class="block text-xs font-medium text-[#8896B3] mb-1.5 tracking-wide">邮箱</label>
-          <input type="email" id="reg-email" placeholder="your@email.com" required autocomplete="email"
-            class="w-full bg-white/[0.05] border border-white/[0.12] rounded-[9px] px-3.5 py-[11px] text-sm text-[#F0F4FF] outline-none focus:border-[#00D4AA] focus:bg-[rgba(0,212,170,0.05)] focus:ring-2 focus:ring-[rgba(0,212,170,0.12)] transition-all placeholder:text-[rgba(136,150,179,0.5)]">
-        </div>
-        <div class="mb-4">
-          <label class="block text-xs font-medium text-[#8896B3] mb-1.5 tracking-wide">验证码</label>
-          <div class="flex gap-2">
-            <input type="text" id="reg-code" placeholder="6位验证码" maxlength="6"
-              class="flex-1 bg-white/[0.05] border border-white/[0.12] rounded-[9px] px-3.5 py-[11px] text-sm text-[#F0F4FF] outline-none focus:border-[#00D4AA] focus:bg-[rgba(0,212,170,0.05)] focus:ring-2 focus:ring-[rgba(0,212,170,0.12)] transition-all placeholder:text-[rgba(136,150,179,0.5)] tracking-[0.2em]">
-            <button onclick="doSendCode()" id="btn-send-code"
-              class="px-4 py-2 text-sm text-[#F0F4FF] border border-white/[0.12] rounded-[9px] hover:bg-white/[0.08] active:scale-[0.99] transition-all whitespace-nowrap">
-              获取验证码
-            </button>
+        <form id="form-login" onsubmit="doLogin(event)">
+          <div class="field">
+            <label for="login-email">邮箱</label>
+            <input type="email" id="login-email" placeholder="请输入邮箱地址" required autocomplete="email">
           </div>
-        </div>
-        <div class="mb-4">
-          <label class="block text-xs font-medium text-[#8896B3] mb-1.5 tracking-wide">密码</label>
-          <input type="password" id="reg-password" placeholder="至少 6 位" minlength="6" required autocomplete="new-password"
-            class="w-full bg-white/[0.05] border border-white/[0.12] rounded-[9px] px-3.5 py-[11px] text-sm text-[#F0F4FF] outline-none focus:border-[#00D4AA] focus:bg-[rgba(0,212,170,0.05)] focus:ring-2 focus:ring-[rgba(0,212,170,0.12)] transition-all placeholder:text-[rgba(136,150,179,0.5)]">
-        </div>
-        <div class="mb-4">
-          <label class="block text-xs font-medium text-[#8896B3] mb-1.5 tracking-wide">确认密码</label>
-          <input type="password" id="reg-password2" placeholder="再次输入密码" required autocomplete="new-password"
-            class="w-full bg-white/[0.05] border border-white/[0.12] rounded-[9px] px-3.5 py-[11px] text-sm text-[#F0F4FF] outline-none focus:border-[#00D4AA] focus:bg-[rgba(0,212,170,0.05)] focus:ring-2 focus:ring-[rgba(0,212,170,0.12)] transition-all placeholder:text-[rgba(136,150,179,0.5)]">
-        </div>
-        <button onclick="doRegister()" id="btn-register"
-          class="w-full bg-[#00D4AA] text-[#04120E] font-bold py-3 rounded-[9px] mt-2 hover:opacity-90 active:scale-[0.99] transition-all tracking-wide">
-          注册
-        </button>
-      </div>
+          <div class="field">
+            <label for="login-password">密码</label>
+            <input type="password" id="login-password" placeholder="请输入密码" required autocomplete="current-password">
+          </div>
+          <button class="primary-button" type="submit" id="btn-login-submit">登录</button>
+        </form>
 
-      <p class="mt-3 text-xs text-red-400 text-center min-h-[16px]" id="err-msg"></p>
+        <form id="form-register" class="hidden" onsubmit="doRegister(event)">
+          <div class="field">
+            <label for="reg-email">邮箱</label>
+            <input type="email" id="reg-email" placeholder="请输入邮箱地址" required autocomplete="email">
+          </div>
+          <div class="field">
+            <label for="reg-code">邮箱验证码</label>
+            <div class="code-row">
+              <input type="text" id="reg-code" placeholder="6 位验证码" maxlength="6" pattern="[0-9]{6}" inputmode="numeric" required autocomplete="one-time-code">
+              <button class="send-code" type="button" onclick="doSendCode()" id="btn-send-code">获取验证码</button>
+            </div>
+          </div>
+          <div class="field">
+            <label for="reg-password">设置密码</label>
+            <input type="password" id="reg-password" placeholder="至少 6 位" minlength="6" required autocomplete="new-password">
+          </div>
+          <div class="field">
+            <label for="reg-password2">确认密码</label>
+            <input type="password" id="reg-password2" placeholder="再次输入密码" minlength="6" required autocomplete="new-password">
+          </div>
+          <button class="primary-button" type="submit" id="btn-register">创建账号并进入平台</button>
+        </form>
+
+        <p class="form-note" id="err-msg" role="alert" aria-live="polite"></p>
+        <p class="card-footnote">账号用于登录 TiRTC 体验平台和管理测试设备</p>
+      </section>
     </div>
-  </div>
-</div>
-</div>
+  </main>
 
 <script>
 const $ = id => document.getElementById(id);
-// ── Canvas node animation ─────────────────────────────────────────────────
-const canvas = $('canvas');
-const ctx = canvas.getContext('2d');
-
-function resize() {
-  canvas.width  = window.innerWidth;
-  canvas.height = window.innerHeight;
-}
-resize();
-window.addEventListener('resize', resize);
-
-const NODE_COUNT = 38;
-const nodes = [];
-
-function randBetween(a, b) { return a + Math.random() * (b - a); }
-
-for (let i = 0; i < NODE_COUNT; i++) {
-  const type = i < 4 ? 2 : i < 12 ? 1 : 0;
-  const xBase = i < NODE_COUNT * 0.6 ? randBetween(0.04, 0.62) : randBetween(0.04, 0.55);
-  nodes.push({
-    x: xBase * window.innerWidth,
-    y: randBetween(0.05, 0.95) * window.innerHeight,
-    vx: randBetween(-0.18, 0.18),
-    vy: randBetween(-0.12, 0.12),
-    r: type === 2 ? 5 : type === 1 ? 3.5 : 2,
-    type,
-    pulse: Math.random() * Math.PI * 2,
-    pulseSpeed: randBetween(0.02, 0.05),
-  });
-}
-
-const HUB_X = 0.44;
-const hubs = [
-  { x: HUB_X * window.innerWidth, y: 0.38 * window.innerHeight, r: 7, label: 'MQTT' },
-  { x: (HUB_X - 0.08) * window.innerWidth, y: 0.58 * window.innerHeight, r: 5, label: 'Redis' },
-  { x: (HUB_X + 0.05) * window.innerWidth, y: 0.64 * window.innerHeight, r: 5, label: 'DB' },
-];
-
-const ACCENT  = '#00D4AA';
-const ACCENT2 = '#3B82F6';
-const MAX_DIST = 160;
-
-let frame = 0;
-
-function draw() {
-  frame++;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-  nodes.forEach(n => {
-    n.x += n.vx;
-    n.y += n.vy;
-    n.pulse += n.pulseSpeed;
-    if (n.x < 0 || n.x > canvas.width  * 0.65) n.vx *= -1;
-    if (n.y < 0 || n.y > canvas.height) n.vy *= -1;
-  });
-
-  for (let i = 0; i < nodes.length; i++) {
-    for (let j = i + 1; j < nodes.length; j++) {
-      const dx = nodes[i].x - nodes[j].x;
-      const dy = nodes[i].y - nodes[j].y;
-      const d  = Math.sqrt(dx * dx + dy * dy);
-      if (d < MAX_DIST) {
-        const alpha = (1 - d / MAX_DIST) * 0.25;
-        ctx.beginPath();
-        ctx.moveTo(nodes[i].x, nodes[i].y);
-        ctx.lineTo(nodes[j].x, nodes[j].y);
-        ctx.strokeStyle = `rgba(0,212,170,${alpha})`;
-        ctx.lineWidth = 0.8;
-        ctx.stroke();
-      }
-    }
-  }
-
-  hubs.forEach(hub => {
-    nodes.forEach(n => {
-      const dx = n.x - hub.x;
-      const dy = n.y - hub.y;
-      const d  = Math.sqrt(dx * dx + dy * dy);
-      if (d < MAX_DIST * 1.4) {
-        const alpha = (1 - d / (MAX_DIST * 1.4)) * 0.35;
-        ctx.beginPath();
-        ctx.moveTo(n.x, n.y);
-        ctx.lineTo(hub.x, hub.y);
-        ctx.strokeStyle = `rgba(59,130,246,${alpha})`;
-        ctx.lineWidth = 0.8;
-        ctx.stroke();
-      }
-    });
-  });
-
-  nodes.forEach(n => {
-    const pulse = (Math.sin(n.pulse) + 1) / 2;
-    const alpha = 0.4 + pulse * 0.5;
-
-    if (n.type >= 1) {
-      const ringR = n.r + 4 + pulse * 6;
-      ctx.beginPath();
-      ctx.arc(n.x, n.y, ringR, 0, Math.PI * 2);
-      ctx.strokeStyle = `rgba(0,212,170,${0.08 + pulse * 0.08})`;
-      ctx.lineWidth = 1;
-      ctx.stroke();
-    }
-
-    ctx.beginPath();
-    ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
-
-    if (n.type === 2) {
-      const g = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, n.r);
-      g.addColorStop(0, `rgba(0,212,170,${alpha})`);
-      g.addColorStop(1, `rgba(0,212,170,0)`);
-      ctx.fillStyle = g;
-    } else if (n.type === 1) {
-      ctx.fillStyle = `rgba(0,212,170,${alpha * 0.8})`;
-    } else {
-      ctx.fillStyle = `rgba(136,180,220,${alpha * 0.6})`;
-    }
-    ctx.fill();
-  });
-
-  hubs.forEach((hub, i) => {
-    const pulseA = (Math.sin(frame * 0.025 + i * 1.1) + 1) / 2;
-
-    const ringR = hub.r + 6 + pulseA * 10;
-    ctx.beginPath();
-    ctx.arc(hub.x, hub.y, ringR, 0, Math.PI * 2);
-    ctx.strokeStyle = `rgba(0,212,170,${0.06 + pulseA * 0.1})`;
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-
-    ctx.beginPath();
-    ctx.arc(hub.x, hub.y, hub.r + 4, 0, Math.PI * 2);
-    ctx.strokeStyle = `rgba(0,212,170,0.25)`;
-    ctx.lineWidth = 1;
-    ctx.stroke();
-
-    const g = ctx.createRadialGradient(hub.x, hub.y, 0, hub.x, hub.y, hub.r);
-    g.addColorStop(0, '#00D4AA');
-    g.addColorStop(1, 'rgba(0,212,170,0.2)');
-    ctx.beginPath();
-    ctx.arc(hub.x, hub.y, hub.r, 0, Math.PI * 2);
-    ctx.fillStyle = g;
-    ctx.fill();
-
-    const lw = hub.label.length * 7.5 + 16;
-    const lx = hub.x + hub.r + 8;
-    const ly = hub.y - 10;
-    ctx.fillStyle = 'rgba(0,20,16,0.75)';
-    roundRect(ctx, lx, ly, lw, 20, 4);
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(0,212,170,0.4)';
-    ctx.lineWidth = 0.8;
-    roundRect(ctx, lx, ly, lw, 20, 4);
-    ctx.stroke();
-    ctx.fillStyle = ACCENT;
-    ctx.font = '500 11px JetBrains Mono, monospace';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(hub.label, lx + 8, ly + 10);
-  });
-
-  if (frame % 3 === 0) {
-    const src = nodes[Math.floor(Math.random() * nodes.length)];
-    const dst = hubs[Math.floor(Math.random() * hubs.length)];
-    const t = (frame % 120) / 120;
-    const px = src.x + (dst.x - src.x) * t;
-    const py = src.y + (dst.y - src.y) * t;
-    ctx.beginPath();
-    ctx.arc(px, py, 2, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(0,212,170,0.7)';
-    ctx.fill();
-  }
-
-  requestAnimationFrame(draw);
-}
-
-function roundRect(ctx, x, y, w, h, r) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.lineTo(x + w - r, y);
-  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-  ctx.lineTo(x + w, y + h - r);
-  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-  ctx.lineTo(x + r, y + h);
-  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-  ctx.lineTo(x, y + r);
-  ctx.quadraticCurveTo(x, y, x + r, y);
-  ctx.closePath();
-}
-
-draw();
-
 // ── Captcha (网易易盾) ────────────────────────────────────────────────────
 // CAPTCHA_ID 从后端 /v1/config/captcha 获取，未配置时为空字符串走 dev 模式
-let CAPTCHA_ID = '90d9c7ccb6d34236ad03fddf48011322';
+let CAPTCHA_ID = '';
 let loginCaptchaToken = null;   // { captcha_id, validate, user }
 let regCaptchaToken   = null;
+let captchaInitPromise = null;
 
 async function initCaptchaId() {
   try {
     const res = await fetch('/v1/config/captcha');
-    if (!res.ok) return;
+    if (!res.ok) throw new Error('captcha config request failed');
     const d = await res.json();
-    if (d.data && d.data.captcha_id) CAPTCHA_ID = d.data.captcha_id;
-  } catch (_) {}
-  if (CAPTCHA_ID) setupCaptcha();
+    CAPTCHA_ID = d.data && d.data.captcha_id ? d.data.captcha_id : '';
+    if (CAPTCHA_ID) setupCaptcha();
+    return true;
+  } catch (_) {
+    return false;
+  }
 }
 
 let loginCaptchaIns = null;
@@ -431,7 +572,7 @@ function initCaptchaInstance(elementId, onVerified, onInstance) {
 
 function setupLoginCaptcha() {
   if (loginCaptchaInited) return;
-  if (!window.initNECaptcha) { setTimeout(setupLoginCaptcha, 100); return; }
+  if (!window.initNECaptcha) return;
   loginCaptchaInited = true;
   initCaptchaInstance('login-captcha-wrap',
     tok => {
@@ -444,7 +585,7 @@ function setupLoginCaptcha() {
 
 function setupRegCaptcha() {
   if (regCaptchaInited) return;
-  if (!window.initNECaptcha) { setTimeout(setupRegCaptcha, 100); return; }
+  if (!window.initNECaptcha) return;
   regCaptchaInited = true;
   initCaptchaInstance('reg-captcha-wrap',
     tok => {
@@ -457,24 +598,32 @@ function setupRegCaptcha() {
 
 function setupCaptcha() {
   setupLoginCaptcha();
-  // 注册验证码在切 tab 时初始化
+  if (!$('form-register').classList.contains('hidden')) setupRegCaptcha();
 }
 
-// Returns { captcha_id, validate, user } — empty strings when running in dev mode
-function getCaptchaToken(which) {
-  if (!CAPTCHA_ID) return { captcha_id: '', validate: '', user: '' };
-  return which === 'login' ? (loginCaptchaToken || null) : (regCaptchaToken || null);
+async function waitForCaptcha(getInstance, setupInstance) {
+  for (let i = 0; i < 80; i++) {
+    setupInstance();
+    const instance = getInstance();
+    if (instance) return instance;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  throw new Error('captcha load timeout');
 }
 
 // ── Auth logic ────────────────────────────────────────────────────────────
-function switchTab(tab) {
+function switchTab(tab, updateUrl = true) {
   const isLogin = tab === 'login';
   $('form-login').classList.toggle('hidden', !isLogin);
   $('form-register').classList.toggle('hidden', isLogin);
-  $('tab-login').className    = 'flex-1 py-2 text-[13px] font-medium rounded-[7px] cursor-pointer border transition-all ' + (isLogin ? 'bg-[rgba(0,212,170,0.15)] text-[#00D4AA] border-[rgba(0,212,170,0.3)]' : 'border-transparent text-[#8896B3] hover:text-[#F0F4FF]');
-  $('tab-register').className = 'flex-1 py-2 text-[13px] font-medium rounded-[7px] cursor-pointer border transition-all ' + (!isLogin ? 'bg-[rgba(0,212,170,0.15)] text-[#00D4AA] border-[rgba(0,212,170,0.3)]' : 'border-transparent text-[#8896B3] hover:text-[#F0F4FF]');
-  $('card-title').textContent = isLogin ? '欢迎回来' : '开始使用';
-  $('card-sub').textContent   = isLogin ? '登录后开始管理你的设备' : '注册账号，添加设备，AI 能力即刻就绪';
+  $('tab-login').classList.toggle('active', isLogin);
+  $('tab-register').classList.toggle('active', !isLogin);
+  $('tab-login').setAttribute('aria-selected', String(isLogin));
+  $('tab-register').setAttribute('aria-selected', String(!isLogin));
+  $('card-title').textContent = isLogin ? '登录体验平台' : '创建体验账号';
+  $('card-sub').textContent   = isLogin ? '继续管理和调试你的 TiRTC 设备' : '注册后即可添加模拟器或真实设备';
+  document.title = isLogin ? '登录 · TiRTC 体验平台' : '注册 · TiRTC 体验平台';
+  if (updateUrl) history.replaceState(null, '', isLogin ? '/login' : '/register');
   showErr('');
   if (!isLogin && CAPTCHA_ID) setupRegCaptcha();
 }
@@ -489,15 +638,18 @@ function setBtn(id, text, disabled) {
 async function doLogin(e) {
   e.preventDefault();
   showErr('');
+  if (captchaInitPromise && !(await captchaInitPromise)) {
+    showErr('页面配置加载失败，请刷新后重试');
+    return;
+  }
   if (CAPTCHA_ID) {
     loginCaptchaToken = null;
-    const trigger = () => { loginCaptchaIns.refresh(); loginCaptchaIns.verify(); };
-    if (loginCaptchaIns) {
-      trigger();
-    } else {
-      const wait = setInterval(() => {
-        if (loginCaptchaIns) { clearInterval(wait); trigger(); }
-      }, 100);
+    try {
+      const instance = await waitForCaptcha(() => loginCaptchaIns, setupLoginCaptcha);
+      instance.refresh();
+      instance.verify();
+    } catch (_) {
+      showErr('人机验证加载失败，请刷新页面重试');
     }
     return;
   }
@@ -526,6 +678,8 @@ async function _submitLoginWithToken(tok) {
     } else {
       showErr(data.code === 401 ? '邮箱或密码错误' : data.code === 40012 ? '人机验证失败，请重试' : (data.msg || '登录失败'));
     }
+  } catch (_) {
+    showErr('网络连接失败，请稍后重试');
   } finally {
     loginCaptchaToken = null;
     setBtn('btn-login-submit', '登录', false);
@@ -534,19 +688,25 @@ async function _submitLoginWithToken(tok) {
 
 // 点"获取验证码"：弹人机验证，通过后发送邮件验证码
 async function doSendCode() {
-  const email = $('reg-email').value.trim();
+  const emailInput = $('reg-email');
+  const email = emailInput.value.trim();
   if (!email) { showErr('请输入邮箱地址'); return; }
+  if (!emailInput.checkValidity()) { showErr('请输入正确的邮箱地址'); return; }
   showErr('');
+  if (captchaInitPromise && !(await captchaInitPromise)) {
+    showErr('页面配置加载失败，请刷新后重试');
+    return;
+  }
   if (CAPTCHA_ID) {
     regCaptchaToken = null;
     _regSendAfterVerify = (tok) => _submitSendCode(email, tok);
-    const trigger = () => { regCaptchaIns.refresh(); regCaptchaIns.verify(); };
-    if (regCaptchaIns) {
-      trigger();
-    } else {
-      const wait = setInterval(() => {
-        if (regCaptchaIns) { clearInterval(wait); trigger(); }
-      }, 100);
+    try {
+      const instance = await waitForCaptcha(() => regCaptchaIns, setupRegCaptcha);
+      instance.refresh();
+      instance.verify();
+    } catch (_) {
+      _regSendAfterVerify = null;
+      showErr('人机验证加载失败，请刷新页面重试');
     }
   } else {
     await _submitSendCode(email, null);
@@ -573,6 +733,9 @@ async function _submitSendCode(email, tok) {
       showErr(data.code === 40012 ? '人机验证失败，请重试' : (data.msg || '发送失败'));
       setBtn('btn-send-code', '获取验证码', false);
     }
+  } catch (_) {
+    showErr('网络连接失败，请稍后重试');
+    setBtn('btn-send-code', '获取验证码', false);
   } finally {
     regCaptchaToken = null;
   }
@@ -595,7 +758,8 @@ function startSendCodeCooldown() {
   }, 1000);
 }
 
-async function doRegister() {
+async function doRegister(e) {
+  if (e) e.preventDefault();
   const email = $('reg-email').value.trim();
   const code  = $('reg-code').value.trim();
   const pwd   = $('reg-password').value;
@@ -614,11 +778,21 @@ async function doRegister() {
     const data = await res.json();
     if (data.code === 200) { localStorage.clear(); sessionStorage.clear(); localStorage.setItem('token', data.data.token); location.href = '/devices'; }
     else showErr(data.code === 40013 ? '验证码错误或已过期' : (data.msg || '注册失败'));
-  } finally { setBtn('btn-register', '注册', false); }
+  } catch (_) {
+    showErr('网络连接失败，请稍后重试');
+  } finally { setBtn('btn-register', '创建账号并进入平台', false); }
 }
 
-if (localStorage.getItem('token')) location.href = '/devices';
-initCaptchaId();
+if (localStorage.getItem('token')) {
+  location.href = '/devices';
+} else {
+  const requestedTab = location.pathname === '/register'
+    || new URLSearchParams(location.search).get('tab') === 'register'
+    ? 'register'
+    : 'login';
+  switchTab(requestedTab, false);
+  captchaInitPromise = initCaptchaId();
+}
 </script>
 
 <!-- 易盾人机验证挂载点 — 放在 body 直属层，脱离 backdrop-blur card 的 containing block -->

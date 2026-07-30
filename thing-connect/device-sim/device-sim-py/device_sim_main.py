@@ -43,7 +43,7 @@ _MISSING_DEPS = _find_missing_deps([
     ("requests", "requests"),
 ])
 if _MISSING_DEPS:
-    print("\033[1;33m⚠ 缺少依赖:\033[0m")
+    print("\033[1;33m[warn] 缺少依赖:\033[0m")
     for _mod, _pip in _MISSING_DEPS:
         print(f"  pip install {_pip}")
     print("")

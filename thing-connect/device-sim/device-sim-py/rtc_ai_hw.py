@@ -34,7 +34,7 @@ from sdk_callback_guard import SdkCallbackGuard, join_worker_before_uninit
 try:
     import sounddevice as sd
 except ImportError:
-    print("\033[1;33m⚠ sounddevice 未安装，无法使用硬件音频。请安装:\033[0m")
+    print("\033[1;33m[warn] sounddevice 未安装，无法使用硬件音频。请安装:\033[0m")
     print("  pip install sounddevice numpy soxr")
     raise
 
@@ -142,7 +142,7 @@ def _select_audio_devices() -> None:
     _info(f"扬声器: [{_spk_device}]" if _spk_device is not None else "扬声器: 系统默认")
     gate_status = "回声门控已启用" if (_ECHO_GATE_AVAILABLE and _ECHO_GATE_ACTIVE) else "回声门控已禁用"
     _info(f"音频模式: 全双工 + {gate_status}")
-    _warn("⚠ 建议将电脑音量调至 15% 左右，防止扬声器回声")
+    _warn("建议将电脑音量调至 15% 左右，防止扬声器回声")
 
 
 # ── 模块状态 ──────────────────────────────────────────────────────────────

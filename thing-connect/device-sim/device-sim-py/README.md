@@ -1,86 +1,96 @@
-# device-sim-py — Python 设备端模拟器
+# TiRTC Python 设备模拟器
 
-基于 TiRTC SDK 的 IoT 设备端 Python 模拟器，面向验证协议、调试集成的开发者。四个业务场景：**VoIP 对讲 / AI 对话 / 音视频推流 / 设备间通话**。
+不用开发板，直接在电脑上模拟一台 TiRTC 音视频设备，体验：
 
-> TiRTC SDK C API 文档：[docs.tange.ai](https://docs.tange.ai/products/tirtc/api-reference/c.html)
+- 远程查看设备实时音视频
+- AI 语音对讲
+- 设备与设备音视频对讲
+- 设备呼微信小程序 VoIP
 
-## 文档分工
+模拟器默认读取仓库自带的音视频素材，不会使用电脑的摄像头、麦克风或扬声器。
 
-- 本文档：如何在 **macOS / Linux / Windows** 上把 Python 模拟器跑起来，包含依赖安装、测试素材生成、启动方式、启动后如何操作。
-- 仓库总览与整体对接流程：[`thing-connect/README.md`](../../README.md)
-- 设备上线流程与 MQTT 规范：[`thing-connect/device-integration.md`](../../device-integration.md)
-- 完整接口定义与错误码：[`thing-connect/api-reference.md`](../../api-reference.md)
+## 快速开始
 
-如果你是第一次接入，建议按这个顺序看：
+### 1. 准备运行环境
 
-1. 先看 [`thing-connect/README.md`](../../README.md) 里的“voip-server”、“ai-server”、“call-server”章节和 [`thing-connect/device-integration.md`](../../device-integration.md)，理解整条链路。
-2. 再看本文档，把 Python 模拟器在你的系统上跑起来。
-3. 需要确认某个 HTTP / MQTT / 业务接口字段时，再查 [`thing-connect/api-reference.md`](../../api-reference.md)。
+- Windows 10/11 x64、Ubuntu x64 或 macOS Apple 芯片
+- Python **3.10–3.12**
+- 仓库已包含模拟器所需的 TiRTC SDK **2.2.1** 和默认音视频素材
 
-## 快速启动
+克隆仓库后无需另外下载模拟器 SDK。以 Windows 为例，仓库中应能看到：
 
-如果你只想先把模拟器跑起来，不想先看完整说明，按下面做：
-
-Python 模拟器支持 **Python 3.10–3.12**；启动入口会拒绝其他版本，避免依赖和语法兼容问题。
-
-默认 SDK 版本是 `2.2.1`。下面所有命令如果不显式传 `--sdk-version`，都会按 `2.2.1` 加载 `device-sim/sdk/<platform>/2.2.1/` 下的动态库。
-
-### macOS
-
-```bash
-chmod +x ../scripts/setup_mac.sh
-../scripts/setup_mac.sh
-source ../venv/bin/activate
-python3 device_sim_main.py --device-id DEV000001 --device-key your-key
+```text
+thing-connect/device-sim/sdk/windows-x86_64/2.2.1/lib/libTiRTC.dll
 ```
 
-### Linux
+Ubuntu 和 macOS 对应目录分别为 `linux-x86_64` 和 `macos-arm64`。
+
+### 2. 安装依赖并启动
+
+#### Windows（PowerShell）
+
+```powershell
+winget install -e --id Python.Python.3.12
+# 首次安装 Python 后，请重新打开 PowerShell
+
+cd thing-connect\device-sim\device-sim-py
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe device_sim_main.py
+```
+
+#### Ubuntu
 
 ```bash
-sudo apt install python3 python3-venv
+cd thing-connect/device-sim/device-sim-py
+sudo apt install -y python3 python3-venv
 python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-python device_sim_main.py --device-id DEV000001 --device-key your-key
+./.venv/bin/python -m pip install -r requirements.txt
+./.venv/bin/python device_sim_main.py
 ```
 
-### Windows
+#### macOS
 
 ```bash
-# 在 Git Bash 中执行；需预先安装 Python 并加入 PATH
-python -m venv .venv
-source .venv/Scripts/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-python device_sim_main.py --device-id DEV000001 --device-key your-key
+cd thing-connect/device-sim/device-sim-py
+python3 -m venv .venv
+./.venv/bin/python -m pip install -r requirements.txt
+./.venv/bin/python device_sim_main.py
 ```
 
-### 跑通后的预期结果
+### 3. 首次绑定
 
-启动成功后你应该看到这几类现象：
+首次启动不需要填写 `device_id` 或 `device_key`。终端会显示六位验证码和体验平台地址：
 
-- 设备完成服务发现、拿到 `mqtt_token`、建立正式 MQTT 长连接。
-- 实时流业务启动并等待 H5 连接；连接建立后循环发送 `../assets/` 下的测试媒体。
-- 终端进入交互模式，可以输入 `help`、`wxcall`、`aicall`、`call`、`accept`、`hangup` 等命令。
-- 下行音视频会保存到 `--down-media-dir/<device_id>/`。
+1. 打开终端提示的地址并登录。
+2. 输入六位验证码绑定模拟设备。
+3. 绑定成功后，模拟器自动上线并开始发送默认音视频。
 
-如果这里已经能跑通，再继续看下面的详细说明。
+设备凭证会保存到本地，之后执行同一条启动命令即可直接上线。
 
-## 快速上手细节
+### 4. 验证是否跑通
 
-建议第一次按下面顺序做：
+看到“实时流业务已就绪”并进入命令行，表示模拟器已经运行。此时可以：
 
-1. 安装系统依赖和 Python 依赖。
-2. 直接使用仓库随附的默认音视频素材；需要验证其他编码格式时，再生成扩展素材到 `device-sim/assets/`。
-3. 准备设备身份：
-   已绑定设备：直接使用 `device_id` + `device_key` 启动。
-   未绑定设备：只传 `--mac`，按终端提示走绑定流程。
-4. 启动模拟器。
-5. 启动后在终端里用 `wxcall`、`aicall`、`call`、`accept`、`hangup` 等命令验证各业务。
-6. 去 `received/` 目录检查接收到的音频、视频文件。
+| 操作 | 用法 |
+|------|------|
+| 查看实时音视频 | 在体验平台中打开当前设备 |
+| AI 语音对讲 | 输入 `aicall` |
+| 呼叫微信小程序 | 输入 `wxcall` 查看联系人，再输入 `wxcall N` |
+| 呼叫另一台设备 | 输入 `call <device_id> video` |
+| 接听 / 拒接 / 挂断 | 输入 `accept` / `reject` / `hangup` |
+| 查看全部命令 | 输入 `help` |
 
-## 环境搭建
+接收到的音视频保存在 `received/<device_id>/`。先跑通默认配置，再按需阅读下面的详细说明。
+
+## 相关文档
+
+- [示例系统总览](../../README.md)
+- [设备接入与 MQTT 规范](../../device-integration.md)
+- [HTTP / MQTT 接口参考](../../api-reference.md)
+- [TiRTC C API](https://docs.tange.ai/products/tirtc/api-reference/c.html)
+
+## 详细说明：环境搭建
 
 ### macOS
 

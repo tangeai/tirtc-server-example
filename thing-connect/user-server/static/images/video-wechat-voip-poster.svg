@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-labelledby="title desc">
+  <title id="title">设备呼微信小程序 VoIP 功能演示</title>
+  <desc id="desc">设备通过 TiRTC P2P 云服务呼叫微信小程序的流程示意图</desc>
+  <defs>
+    <linearGradient id="page" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fbfdfc"/>
+      <stop offset="1" stop-color="#e9f7f4"/>
+    </linearGradient>
+    <linearGradient id="device" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#192928"/>
+      <stop offset="1" stop-color="#0f1919"/>
+    </linearGradient>
+    <linearGradient id="phone" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f8fffd"/>
+      <stop offset="1" stop-color="#ddf5ed"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="18" stdDeviation="24" flood-color="#183532" flood-opacity=".14"/>
+    </filter>
+    <filter id="soft" x="-100%" y="-100%" width="300%" height="300%">
+      <feGaussianBlur stdDeviation="22"/>
+    </filter>
+  </defs>
+
+  <rect width="1280" height="720" fill="url(#page)"/>
+  <circle cx="1055" cy="90" r="155" fill="#bcece4" opacity=".32" filter="url(#soft)"/>
+  <circle cx="160" cy="650" r="145" fill="#c9eee8" opacity=".28" filter="url(#soft)"/>
+
+  <g transform="translate(56 38)">
+    <rect width="32" height="32" rx="9" fill="#172326"/>
+    <circle cx="16" cy="16" r="9" fill="none" stroke="#6fd1c5" stroke-width="3"/>
+    <circle cx="16" cy="16" r="3.5" fill="#6fd1c5"/>
+    <text x="44" y="23" fill="#172326" font-family="Arial, 'Microsoft YaHei', sans-serif" font-size="19" font-weight="700">TiRTC · OPEN EXAMPLES</text>
+  </g>
+  <g transform="translate(1090 42)">
+    <rect width="132" height="34" rx="17" fill="#e0f3ef"/>
+    <text x="66" y="22" text-anchor="middle" fill="#187f75" font-family="Arial, 'Microsoft YaHei', sans-serif" font-size="14" font-weight="700">小程序流程示意</text>
+  </g>
+
+  <text x="640" y="130" text-anchor="middle" fill="#142125" font-family="Arial, 'Microsoft YaHei', sans-serif" font-size="42" font-weight="800">设备呼微信小程序 VoIP</text>
+  <text x="640" y="170" text-anchor="middle" fill="#657375" font-family="Arial, 'Microsoft YaHei', sans-serif" font-size="19">设备发起呼叫，小程序接听后进行双向音视频对讲</text>
+
+  <g transform="translate(84 228)" filter="url(#shadow)">
+    <rect width="344" height="364" rx="28" fill="url(#device)"/>
+    <rect x="24" y="24" width="296" height="40" rx="12" fill="#213431"/>
+    <circle cx="47" cy="44" r="5" fill="#55d59d"/>
+    <text x="64" y="50" fill="#dff4ef" font-family="Arial, 'Microsoft YaHei', sans-serif" font-size="15" font-weight="700">嵌入式设备 · ONLINE</text>
+    <rect x="24" y="84" width="296" height="156" rx="18" fill="#10201f" stroke="#31504c"/>
+    <circle cx="172" cy="151" r="45" fill="#183f3a"/>
+    <path d="M151 161v-20c0-12 9-21 21-21s21 9 21 21v20c0 12-9 21-21 21s-21-9-21-21Z" fill="none" stroke="#72d8cb" stroke-width="7"/>
+    <path d="M136 159c0 20 16 36 36 36s36-16 36-36M172 195v17M151 212h42" fill="none" stroke="#72d8cb" stroke-width="7" stroke-linecap="round"/>
+    <text x="44" y="280" fill="#7fa29d" font-family="Consolas, monospace" font-size="14">&gt; call wechat_voip</text>
+    <text x="44" y="310" fill="#8ce2b1" font-family="Consolas, monospace" font-size="14">[rtc] invite sent</text>
+    <rect x="24" y="326" width="296" height="16" rx="8" fill="#263b38"/>
+    <rect x="24" y="326" width="218" height="16" rx="8" fill="#2aa895"/>
+  </g>
+
+  <g transform="translate(466 312)">
+    <circle cx="170" cy="94" r="75" fill="#fff" stroke="#cce8e3" stroke-width="2" filter="url(#shadow)"/>
+    <path d="M130 100c0-18 14-32 32-32 8-20 26-32 48-32 30 0 54 23 55 52 18 3 31 18 31 37 0 21-17 38-38 38H146c-23 0-42-19-42-42 0-10 4-19 10-27 5-6 10-9 16-12" transform="translate(-36 -30) scale(.83)" fill="#e8f7f4" stroke="#219989" stroke-width="5"/>
+    <text x="170" y="90" text-anchor="middle" fill="#167e72" font-family="Arial, 'Microsoft YaHei', sans-serif" font-size="18" font-weight="800">TiRTC P2P</text>
+    <text x="170" y="116" text-anchor="middle" fill="#6b7d7a" font-family="Arial, 'Microsoft YaHei', sans-serif" font-size="14">实时音视频服务</text>
+    <path d="M-14 94H78M262 94h92" stroke="#249c8d" stroke-width="4" stroke-linecap="round" stroke-dasharray="8 10"/>
+    <path d="m68 83 14 11-14 11M344 83l14 11-14 11" fill="none" stroke="#249c8d" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="102" y="194" width="136" height="34" rx="17" fill="#dff3ef"/>
+    <text x="170" y="216" text-anchor="middle" fill="#237f74" font-family="Arial, 'Microsoft YaHei', sans-serif" font-size="14" font-weight="700">低延迟双向通话</text>
+  </g>
+
+  <g transform="translate(872 204)" filter="url(#shadow)">
+    <rect width="294" height="422" rx="44" fill="#152321"/>
+    <rect x="14" y="14" width="266" height="394" rx="34" fill="url(#phone)"/>
+    <rect x="105" y="26" width="84" height="7" rx="4" fill="#b5cdc8"/>
+    <text x="147" y="72" text-anchor="middle" fill="#536663" font-family="Arial, 'Microsoft YaHei', sans-serif" font-size="15">微信小程序</text>
+    <circle cx="147" cy="145" r="50" fill="#2ab57f"/>
+    <path d="M126 143c0-11 9-20 20-20s20 9 20 20v14c0 11-9 20-20 20s-20-9-20-20v-14Z" fill="none" stroke="#fff" stroke-width="6"/>
+    <path d="M114 155c0 18 14 32 32 32s32-14 32-32M146 187v15M129 202h34" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round"/>
+    <text x="147" y="229" text-anchor="middle" fill="#172624" font-family="Arial, 'Microsoft YaHei', sans-serif" font-size="22" font-weight="800">设备来电</text>
+    <text x="147" y="258" text-anchor="middle" fill="#70817e" font-family="Arial, 'Microsoft YaHei', sans-serif" font-size="14">客厅设备正在呼叫</text>
+    <g transform="translate(53 298)">
+      <circle cx="36" cy="36" r="36" fill="#ef6b6b"/>
+      <path d="M20 28c11 10 21 20 32 32M52 28 20 60" stroke="#fff" stroke-width="6" stroke-linecap="round"/>
+      <text x="36" y="91" text-anchor="middle" fill="#74837f" font-family="Arial, 'Microsoft YaHei', sans-serif" font-size="13">拒绝</text>
+    </g>
+    <g transform="translate(169 298)">
+      <circle cx="36" cy="36" r="36" fill="#28b77b"/>
+      <path d="M22 43c8 8 19 8 27 0l6-6c3-3 8-3 11 0l4 4c3 3 3 8 0 11l-5 5c-14 14-38 14-52 0S-1 19 13 5l5-5c3-3 8-3 11 0l4 4c3 3 3 8 0 11l-6 6c-8 8-8 19 0 27" transform="translate(5 5) scale(.55)" fill="#fff"/>
+      <text x="36" y="91" text-anchor="middle" fill="#74837f" font-family="Arial, 'Microsoft YaHei', sans-serif" font-size="13">接听</text>
+    </g>
+  </g>
+
+  <g transform="translate(72 652)">
+    <circle cx="8" cy="8" r="7" fill="#28b77b"/>
+    <path d="m5 8 2 2 4-5" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="28" y="14" fill="#647674" font-family="Arial, 'Microsoft YaHei', sans-serif" font-size="15">设备发起 · 微信接听 · P2P 双向音视频</text>
+  </g>
+</svg>

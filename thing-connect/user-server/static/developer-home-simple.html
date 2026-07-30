@@ -1,0 +1,1672 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="基于 TiRTC 的开源设备音视频示例系统，帮助嵌入式开发者快速实现远程实时查看、AI 音视频对讲、设备间音视频对讲和设备呼微信小程序 VoIP 对讲。">
+  <title>TiRTC 开源示例 · 快速开发设备音视频产品</title>
+  <script>document.documentElement.classList.add("js");</script>
+  <style>
+    :root {
+      --ink: #172026;
+      --muted: #687279;
+      --line: #dfe4e2;
+      --soft-line: #edf0ef;
+      --paper: #fbfcfa;
+      --white: #ffffff;
+      --accent: #0f766e;
+      --accent-dark: #0b5d57;
+      --accent-soft: #e9f6f2;
+      --warm: #f5f3ee;
+      --code: #15201f;
+      --shadow: 0 20px 55px rgba(21, 32, 31, 0.1);
+      --radius: 18px;
+      --max-width: 1120px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    [hidden] {
+      display: none !important;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--paper);
+      font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    button {
+      font: inherit;
+    }
+
+    .shell {
+      width: min(calc(100% - 48px), var(--max-width));
+      margin: 0 auto;
+    }
+
+    .site-header {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      border-bottom: 1px solid rgba(223, 228, 226, 0.85);
+      background: rgba(251, 252, 250, 0.88);
+      backdrop-filter: blur(16px);
+    }
+
+    .nav {
+      min-height: 72px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 32px;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 11px;
+      font-size: 17px;
+      font-weight: 750;
+      letter-spacing: -0.02em;
+      white-space: nowrap;
+    }
+
+    .brand-mark {
+      position: relative;
+      width: 31px;
+      height: 31px;
+      border-radius: 9px;
+      background: var(--ink);
+      overflow: hidden;
+    }
+
+    .brand-mark::before,
+    .brand-mark::after {
+      content: "";
+      position: absolute;
+      border-radius: 50%;
+      border: 2px solid #79d2c4;
+    }
+
+    .brand-mark::before {
+      width: 16px;
+      height: 16px;
+      top: 6px;
+      left: 6px;
+    }
+
+    .brand-mark::after {
+      width: 4px;
+      height: 4px;
+      top: 12px;
+      left: 12px;
+      background: #79d2c4;
+    }
+
+    .nav-links,
+    .nav-actions {
+      display: flex;
+      align-items: center;
+      gap: 28px;
+    }
+
+    .nav-links {
+      margin-left: auto;
+      font-size: 14px;
+      color: #505b61;
+    }
+
+    .nav-links a:hover {
+      color: var(--ink);
+    }
+
+    .mobile-only {
+      display: none;
+    }
+
+    .nav-actions {
+      gap: 10px;
+    }
+
+    .nav-github {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 10px 12px;
+      font-size: 14px;
+      color: #3d474c;
+    }
+
+    .nav-github svg {
+      width: 17px;
+      height: 17px;
+    }
+
+    .nav-login {
+      padding: 10px 9px;
+      color: #3d474c;
+      font-size: 14px;
+      font-weight: 650;
+    }
+
+    .nav-login:hover {
+      color: var(--accent);
+    }
+
+    .console-link {
+      padding: 10px 16px;
+      border: 1px solid var(--ink);
+      border-radius: 9px;
+      color: var(--white);
+      background: var(--ink);
+      font-size: 14px;
+      font-weight: 650;
+      transition: transform 160ms ease, background 160ms ease;
+    }
+
+    .console-link:hover {
+      transform: translateY(-1px);
+      background: #2a353a;
+    }
+
+    .menu-button {
+      display: none;
+      width: 42px;
+      height: 42px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--white);
+      cursor: pointer;
+    }
+
+    .menu-button span {
+      display: block;
+      width: 18px;
+      height: 1.5px;
+      margin: 4px auto;
+      background: var(--ink);
+    }
+
+    .hero {
+      position: relative;
+      padding: 94px 0 88px;
+      overflow: hidden;
+    }
+
+    .hero::before {
+      content: "";
+      position: absolute;
+      width: 500px;
+      height: 500px;
+      top: -290px;
+      left: 50%;
+      border-radius: 50%;
+      background: rgba(111, 201, 188, 0.12);
+      filter: blur(4px);
+      pointer-events: none;
+    }
+
+    .hero-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(400px, 0.9fr);
+      align-items: center;
+      gap: 64px;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      margin-bottom: 24px;
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 750;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 0 5px var(--accent-soft);
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin-top: 0;
+    }
+
+    h1 {
+      max-width: 760px;
+      margin-bottom: 24px;
+      font-size: clamp(44px, 5vw, 64px);
+      line-height: 1.05;
+      letter-spacing: -0.045em;
+      font-weight: 760;
+    }
+
+    h1 em {
+      color: var(--accent);
+      font-style: normal;
+    }
+
+    .hero-copy {
+      max-width: 680px;
+      margin-bottom: 34px;
+      color: var(--muted);
+      font-size: 18px;
+      line-height: 1.75;
+    }
+
+    .hero-actions {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .button {
+      min-height: 48px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 9px;
+      padding: 0 20px;
+      border: 1px solid transparent;
+      border-radius: 11px;
+      font-size: 15px;
+      font-weight: 680;
+      transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+    }
+
+    .button:hover {
+      transform: translateY(-2px);
+    }
+
+    .button-primary {
+      color: var(--white);
+      background: var(--accent);
+      box-shadow: 0 10px 24px rgba(15, 118, 110, 0.2);
+    }
+
+    .button-primary:hover {
+      background: var(--accent-dark);
+    }
+
+    .button-secondary {
+      border-color: var(--line);
+      background: var(--white);
+    }
+
+    .button-secondary:hover {
+      border-color: #b9c2bf;
+    }
+
+    .arrow {
+      font-size: 17px;
+      line-height: 1;
+    }
+
+    .hero-note {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 20px;
+      color: #7a858a;
+      font-size: 13px;
+    }
+
+    .hero-note svg {
+      width: 16px;
+      height: 16px;
+      color: var(--accent);
+    }
+
+    .hero-mirror {
+      width: fit-content;
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin-top: 10px;
+      padding: 8px 11px;
+      border: 1px solid var(--soft-line);
+      border-radius: 9px;
+      color: #69757a;
+      background: rgba(255, 255, 255, 0.72);
+      font-size: 12px;
+    }
+
+    .hero-mirror a {
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .hero-mirror a:hover {
+      text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+
+    .hero-mirror small {
+      color: #8b9599;
+      font-size: inherit;
+    }
+
+    .terminal {
+      position: relative;
+      min-width: 0;
+      border: 1px solid rgba(35, 53, 52, 0.12);
+      border-radius: 20px;
+      background: var(--code);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      transform: rotate(1deg);
+    }
+
+    .terminal::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(125deg, rgba(255, 255, 255, 0.045), transparent 42%);
+      pointer-events: none;
+    }
+
+    .terminal-bar {
+      height: 48px;
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      align-items: center;
+      gap: 12px;
+      padding: 0 16px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      color: #92a09e;
+      font-size: 12px;
+    }
+
+    .terminal-dots {
+      display: flex;
+      gap: 7px;
+    }
+
+    .terminal-dots i {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #52605e;
+    }
+
+    .terminal-dots i:first-child {
+      background: #df7a70;
+    }
+
+    .terminal-dots i:nth-child(2) {
+      background: #d9b967;
+    }
+
+    .terminal-dots i:nth-child(3) {
+      background: #6aba87;
+    }
+
+    .terminal-copy {
+      position: relative;
+      z-index: 1;
+      justify-self: end;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 9px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 7px;
+      color: #aab6b4;
+      background: rgba(255, 255, 255, 0.04);
+      font-size: 11px;
+      cursor: pointer;
+      transition: color 160ms ease, border-color 160ms ease, background 160ms ease;
+    }
+
+    .terminal-copy:hover {
+      color: #dce5e3;
+      border-color: rgba(121, 210, 196, 0.35);
+      background: rgba(121, 210, 196, 0.08);
+    }
+
+    .terminal-copy.copied {
+      color: #86d49e;
+      border-color: rgba(134, 212, 158, 0.38);
+      background: rgba(134, 212, 158, 0.09);
+    }
+
+    .terminal-copy svg {
+      width: 13px;
+      height: 13px;
+    }
+
+    .terminal-body {
+      min-height: 302px;
+      padding: 28px 26px 24px;
+      color: #d4dedc;
+      font: 13px/1.85 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .terminal-line {
+      margin-bottom: 4px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .terminal-prompt {
+      color: #79d2c4;
+    }
+
+    .terminal-muted {
+      color: #778986;
+    }
+
+    .terminal-success {
+      color: #86d49e;
+    }
+
+    .terminal-link {
+      color: #9bc5ff;
+    }
+
+    a.terminal-link:hover {
+      text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+
+    .terminal-ready {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      height: 22px;
+      margin-top: 13px;
+    }
+
+    .terminal-cursor {
+      width: 7px;
+      height: 14px;
+      background: #79d2c4;
+      box-shadow: 0 0 8px rgba(121, 210, 196, 0.42);
+      animation: terminal-cursor-blink 1.05s steps(1, end) infinite;
+    }
+
+    @keyframes terminal-cursor-blink {
+      0%,
+      46% {
+        opacity: 1;
+      }
+
+      47%,
+      100% {
+        opacity: 0;
+      }
+    }
+
+    .terminal-divider {
+      height: 1px;
+      margin: 20px 0;
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .live-status {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-top: 23px;
+      padding: 15px 16px;
+      border: 1px solid rgba(121, 210, 196, 0.16);
+      border-radius: 11px;
+      background: rgba(121, 210, 196, 0.06);
+    }
+
+    .live-status strong {
+      display: block;
+      margin-bottom: 2px;
+      color: #dbe8e5;
+      font-family: Inter, ui-sans-serif, sans-serif;
+      font-size: 13px;
+    }
+
+    .live-status small {
+      color: #849592;
+    }
+
+    .live-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      color: #88db9f;
+      font-family: Inter, ui-sans-serif, sans-serif;
+      font-size: 11px;
+      font-weight: 750;
+      letter-spacing: 0.08em;
+    }
+
+    .live-badge i {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #70d48d;
+      box-shadow: 0 0 0 5px rgba(112, 212, 141, 0.1);
+    }
+
+    .trust-bar {
+      border-top: 1px solid var(--soft-line);
+      border-bottom: 1px solid var(--soft-line);
+      background: var(--white);
+    }
+
+    .trust-items {
+      min-height: 84px;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      align-items: center;
+    }
+
+    .trust-item {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 9px;
+      color: #647075;
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .trust-item + .trust-item {
+      border-left: 1px solid var(--soft-line);
+    }
+
+    .trust-item svg {
+      width: 18px;
+      height: 18px;
+      color: var(--accent);
+    }
+
+    .routes {
+      padding: 112px 0 118px;
+    }
+
+    .section-heading {
+      max-width: 690px;
+      margin-bottom: 48px;
+    }
+
+    .section-kicker {
+      margin-bottom: 13px;
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 750;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .section-heading h2 {
+      margin-bottom: 14px;
+      font-size: clamp(34px, 4vw, 48px);
+      line-height: 1.14;
+      letter-spacing: -0.04em;
+    }
+
+    .section-heading p {
+      margin-bottom: 0;
+      color: var(--muted);
+      font-size: 17px;
+      line-height: 1.7;
+    }
+
+    .setup-step {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) minmax(280px, 0.72fr) auto;
+      align-items: center;
+      gap: 28px;
+      padding: 25px 28px;
+      border: 1px solid rgba(15, 118, 110, 0.3);
+      border-radius: var(--radius);
+      background: linear-gradient(100deg, #eff9f6 0%, #ffffff 48%);
+    }
+
+    .setup-number {
+      width: 40px;
+      height: 40px;
+      display: grid;
+      place-items: center;
+      border: 1px solid rgba(15, 118, 110, 0.24);
+      border-radius: 50%;
+      color: var(--accent);
+      background: var(--white);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .setup-copy h3 {
+      margin-bottom: 7px;
+      font-size: 20px;
+      letter-spacing: -0.025em;
+    }
+
+    .setup-copy p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .setup-requirements {
+      display: grid;
+      gap: 7px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      color: #556166;
+      font-size: 12px;
+    }
+
+    .setup-requirements li {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .setup-requirements li::before {
+      content: "✓";
+      color: var(--accent);
+      font-weight: 800;
+    }
+
+    .setup-link {
+      min-height: 44px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 0 17px;
+      border-radius: 10px;
+      color: var(--white);
+      background: var(--accent);
+      font-size: 13px;
+      font-weight: 720;
+      white-space: nowrap;
+    }
+
+    .setup-link:hover {
+      background: var(--accent-dark);
+    }
+
+    .video-step {
+      margin-top: 30px;
+      padding: 38px;
+      border-radius: 22px;
+      background: var(--warm);
+    }
+
+    .video-step-heading {
+      display: flex;
+      align-items: flex-start;
+      gap: 17px;
+      max-width: 780px;
+      margin-bottom: 30px;
+    }
+
+    .video-step-heading .setup-number {
+      flex: 0 0 auto;
+    }
+
+    .video-step-heading h3 {
+      margin-bottom: 8px;
+      font-size: 25px;
+      letter-spacing: -0.03em;
+    }
+
+    .video-step-heading p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.65;
+    }
+
+    .video-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 24px 20px;
+    }
+
+    .video-card h3 {
+      margin: 18px 2px 7px;
+      font-size: 18px;
+      letter-spacing: -0.02em;
+    }
+
+    .video-card > p {
+      margin: 0 2px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.65;
+    }
+
+    .video-frame {
+      position: relative;
+      border: 8px solid var(--white);
+      border-radius: 20px;
+      background: #101a1a;
+      box-shadow: 0 22px 55px rgba(21, 32, 31, 0.13);
+      overflow: hidden;
+    }
+
+    .video-card .video-frame {
+      border-width: 5px;
+      border-radius: 16px;
+      box-shadow: 0 16px 38px rgba(21, 32, 31, 0.11);
+    }
+
+    .video-frame video {
+      width: 100%;
+      aspect-ratio: 16 / 10;
+      display: block;
+      object-fit: cover;
+      background: #101a1a;
+    }
+
+    .video-label {
+      position: absolute;
+      top: 22px;
+      left: 22px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 11px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 8px;
+      color: rgba(255, 255, 255, 0.8);
+      background: rgba(15, 23, 23, 0.72);
+      backdrop-filter: blur(8px);
+      font-size: 11px;
+      font-weight: 700;
+      pointer-events: none;
+    }
+
+    .video-label i {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #6dd889;
+    }
+
+    .video-pending {
+      position: absolute;
+      right: 16px;
+      bottom: 14px;
+      padding: 7px 9px;
+      border-radius: 7px;
+      color: rgba(255, 255, 255, 0.68);
+      background: rgba(15, 23, 23, 0.72);
+      font-size: 10px;
+      pointer-events: none;
+    }
+
+    .final-cta {
+      padding: 112px 0;
+    }
+
+    .final-cta-inner {
+      max-width: 1120px;
+      margin: 0 auto;
+    }
+
+    .final-cta-heading {
+      max-width: 760px;
+      margin: 0 auto 42px;
+      text-align: center;
+    }
+
+    .final-cta h2 {
+      margin-bottom: 17px;
+      font-size: clamp(37px, 4.6vw, 56px);
+      line-height: 1.1;
+      letter-spacing: -0.05em;
+    }
+
+    .final-cta p {
+      max-width: 610px;
+      margin: 0 auto;
+      color: var(--muted);
+      font-size: 17px;
+      line-height: 1.7;
+    }
+
+    .product-path {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+      text-align: left;
+    }
+
+    .product-step {
+      min-height: 430px;
+      display: flex;
+      flex-direction: column;
+      padding: 26px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--white);
+      box-shadow: 0 14px 36px rgba(21, 32, 31, 0.055);
+    }
+
+    .product-step:first-child {
+      border-color: rgba(15, 118, 110, 0.3);
+      background: linear-gradient(180deg, #eff9f6 0%, #ffffff 58%);
+    }
+
+    .product-step-number {
+      width: 36px;
+      height: 36px;
+      display: grid;
+      place-items: center;
+      margin-bottom: 26px;
+      border: 1px solid rgba(15, 118, 110, 0.24);
+      border-radius: 50%;
+      color: var(--accent);
+      background: var(--white);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .product-step h3 {
+      margin-bottom: 10px;
+      font-size: 21px;
+      letter-spacing: -0.025em;
+    }
+
+    .product-step p {
+      margin: 0 0 25px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.7;
+    }
+
+    .product-step-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: auto;
+      color: var(--ink);
+      font-size: 14px;
+      font-weight: 720;
+    }
+
+    .product-step-link:hover {
+      color: var(--accent);
+    }
+
+    .sdk-options {
+      display: grid;
+      gap: 10px;
+      margin: 18px 0 14px;
+    }
+
+    .sdk-option {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 18px;
+      padding: 14px 15px;
+      border: 1px solid rgba(15, 118, 110, 0.15);
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.76);
+      color: var(--ink);
+    }
+
+    .sdk-option:hover {
+      border-color: rgba(15, 118, 110, 0.4);
+      background: var(--white);
+    }
+
+    .sdk-option strong,
+    .sdk-option small {
+      display: block;
+    }
+
+    .sdk-option strong {
+      margin-bottom: 3px;
+      font-size: 14px;
+    }
+
+    .sdk-option small {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .sdk-option > span:first-child {
+      min-width: 0;
+    }
+
+    .sdk-option > span:last-child {
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 750;
+      white-space: nowrap;
+    }
+
+    .sdk-quick-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 2px;
+    }
+
+    .sdk-quick-label {
+      margin: 2px 0 9px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .sdk-chip {
+      padding: 7px 10px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--white);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .sdk-chip:hover {
+      border-color: rgba(15, 118, 110, 0.35);
+      color: var(--accent);
+    }
+
+    .product-resource-links {
+      display: grid;
+      gap: 9px;
+      margin-top: auto;
+      padding-top: 18px;
+    }
+
+    .product-resource-links a {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--line);
+      color: var(--ink);
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .product-resource-links a:hover {
+      color: var(--accent);
+    }
+
+    .product-resource-links span {
+      color: var(--accent);
+    }
+
+    .site-footer {
+      border-top: 1px solid var(--line);
+      background: var(--white);
+    }
+
+    .footer-inner {
+      min-height: 92px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 28px;
+      color: #778187;
+      font-size: 12px;
+    }
+
+    .footer-links {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+    }
+
+    .footer-links a:hover {
+      color: var(--ink);
+    }
+
+    .reveal {
+      opacity: 1;
+      transform: none;
+    }
+
+    .js .reveal {
+      opacity: 0;
+      transform: translateY(18px);
+      transition: opacity 600ms ease, transform 600ms ease;
+    }
+
+    .js .reveal.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html {
+        scroll-behavior: auto;
+      }
+
+      *,
+      *::before,
+      *::after {
+        scroll-behavior: auto !important;
+        animation-duration: 0.01ms !important;
+        transition-duration: 0.01ms !important;
+      }
+
+      .terminal {
+        transform: none;
+      }
+
+      .terminal-cursor {
+        animation: none;
+      }
+    }
+
+    @media (max-width: 980px) {
+      .hero-grid {
+        grid-template-columns: 1fr;
+        gap: 58px;
+      }
+
+      .hero-copy {
+        max-width: 720px;
+      }
+
+      .terminal {
+        width: min(100%, 660px);
+        transform: none;
+      }
+
+      .setup-step {
+        grid-template-columns: auto minmax(0, 1fr);
+        align-items: start;
+      }
+
+      .setup-requirements,
+      .setup-link {
+        grid-column: 2;
+      }
+
+      .setup-link {
+        justify-self: start;
+      }
+
+      .product-path {
+        grid-template-columns: 1fr;
+      }
+
+      .product-step {
+        min-height: 0;
+      }
+
+      .sdk-option {
+        grid-template-columns: minmax(0, 1fr) auto;
+      }
+
+    }
+
+    @media (max-width: 1080px) {
+      .nav-links,
+      .nav-actions {
+        display: none;
+      }
+
+      .menu-button {
+        display: block;
+        margin-left: auto;
+      }
+
+      .nav.menu-open {
+        position: relative;
+      }
+
+      .nav.menu-open .nav-links {
+        position: absolute;
+        top: 63px;
+        right: 0;
+        width: min(300px, calc(100vw - 48px));
+        display: grid;
+        gap: 0;
+        margin: 0;
+        padding: 8px;
+        border: 1px solid var(--line);
+        border-radius: 13px;
+        background: var(--white);
+        box-shadow: var(--shadow);
+      }
+
+      .nav.menu-open .nav-links a {
+        padding: 13px 12px;
+        border-radius: 8px;
+      }
+
+      .nav.menu-open .nav-links a:hover {
+        background: var(--warm);
+      }
+
+      .nav.menu-open .nav-links .mobile-only {
+        display: block;
+      }
+    }
+
+    @media (max-width: 820px) {
+      .trust-items {
+        grid-template-columns: repeat(3, 1fr);
+        padding: 16px 0;
+        row-gap: 16px;
+      }
+
+      .trust-item + .trust-item {
+        border-left: 0;
+      }
+    }
+
+    @media (max-width: 620px) {
+      .shell {
+        width: min(calc(100% - 30px), var(--max-width));
+      }
+
+      .nav {
+        min-height: 64px;
+      }
+
+      .hero {
+        padding: 64px 0 70px;
+      }
+
+      .hero-grid {
+        gap: 45px;
+      }
+
+      h1 {
+        font-size: clamp(42px, 13vw, 58px);
+      }
+
+      .hero-copy {
+        font-size: 16px;
+      }
+
+      .hero-actions .button {
+        width: 100%;
+      }
+
+      .terminal-body {
+        min-height: 275px;
+        padding: 23px 18px;
+        font-size: 11px;
+      }
+
+      .terminal-copy span {
+        display: none;
+      }
+
+      .live-status {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .trust-items {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .trust-item {
+        justify-content: flex-start;
+        padding-left: 8px;
+        font-size: 12px;
+      }
+
+      .routes,
+      .final-cta {
+        padding: 78px 0;
+      }
+
+      .section-heading {
+        margin-bottom: 34px;
+      }
+
+      .setup-step {
+        grid-template-columns: 1fr;
+        gap: 20px;
+        padding: 22px;
+      }
+
+      .setup-requirements,
+      .setup-link {
+        grid-column: auto;
+      }
+
+      .setup-link {
+        width: 100%;
+      }
+
+      .video-step {
+        margin-top: 22px;
+        padding: 24px 18px;
+        border-radius: 17px;
+      }
+
+      .video-step-heading h3 {
+        font-size: 21px;
+      }
+
+      .video-grid {
+        grid-template-columns: 1fr;
+        gap: 34px;
+      }
+
+      .sdk-option {
+        grid-template-columns: 1fr;
+        gap: 7px;
+      }
+
+      .video-frame {
+        border-width: 5px;
+        border-radius: 15px;
+      }
+
+      .video-pending {
+        display: none;
+      }
+
+      .footer-inner {
+        min-height: 120px;
+        align-items: flex-start;
+        justify-content: center;
+        flex-direction: column;
+        padding: 24px 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <nav class="nav shell" aria-label="主导航">
+      <a class="brand" href="#top" aria-label="TiRTC 开源示例首页">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span>TiRTC · OPEN EXAMPLES</span>
+      </a>
+
+      <div class="nav-links" id="nav-links">
+        <a href="#routes">快速入门</a>
+        <a href="#demo">功能示例</a>
+        <a href="https://docs.tange.ai/products/tirtc/download.html" target="_blank" rel="noreferrer">设备端 SDK 下载</a>
+        <a href="https://github.com/tangeai/tirtc-server-example/blob/main/thing-connect/device-porting.md" target="_blank" rel="noreferrer">移植指南</a>
+        <a class="mobile-only" href="https://github.com/tangeai/tirtc-server-example" target="_blank" rel="noreferrer">GitHub</a>
+        <a class="mobile-only" data-auth-guest href="/login">登录</a>
+        <a class="mobile-only" data-auth-guest href="/register">免费注册</a>
+        <a class="mobile-only" data-auth-user href="/devices" hidden>进入控制台</a>
+      </div>
+
+      <div class="nav-actions">
+        <a class="nav-github" href="https://github.com/tangeai/tirtc-server-example" target="_blank" rel="noreferrer">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M12 .7a11.5 11.5 0 0 0-3.64 22.4c.58.1.79-.25.79-.56v-2.23c-3.22.7-3.9-1.37-3.9-1.37-.53-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.7.08-.7 1.17.08 1.78 1.2 1.78 1.2 1.03 1.77 2.7 1.26 3.36.97.1-.75.4-1.26.73-1.55-2.57-.29-5.27-1.28-5.27-5.69 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.16 1.18A10.9 10.9 0 0 1 12 6.12c.98 0 1.95.13 2.87.39 2.2-1.49 3.16-1.18 3.16-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.42-2.71 5.39-5.29 5.68.42.36.79 1.07.79 2.16v3.22c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .7Z"/>
+          </svg>
+          GitHub
+        </a>
+        <a class="nav-login" data-auth-guest href="/login">登录</a>
+        <a class="console-link" data-auth-guest href="/register">免费注册</a>
+        <a class="console-link" data-auth-user href="/devices" hidden>进入控制台</a>
+      </div>
+
+      <button class="menu-button" type="button" aria-label="打开导航" aria-controls="nav-links" aria-expanded="false">
+        <span></span>
+        <span></span>
+      </button>
+    </nav>
+  </header>
+
+  <main id="top">
+    <section class="hero">
+      <div class="hero-grid shell">
+        <div class="reveal">
+          <div class="eyebrow"><span class="eyebrow-dot"></span>OPEN-SOURCE TIRTC EXAMPLES FOR DEVICES</div>
+          <h1>用 TiRTC<br><em>快速开发音视频设备</em></h1>
+          <p class="hero-copy">
+            一套基于 TiRTC P2P 实时音视频 SDK 的开源示例系统，提供设备模拟器、服务端、Web/H5 和设备端参考实现，帮助嵌入式开发者快速跑通完整业务链路。
+          </p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="https://github.com/tangeai/tirtc-server-example/blob/main/thing-connect/device-sim/device-sim-py/README.md" target="_blank" rel="noreferrer">开始模拟器教程 <span class="arrow">→</span></a>
+            <a class="button button-secondary" href="#demo">观看功能示例</a>
+          </div>
+          <div class="hero-note">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+              <path d="M12 3 4 7v5c0 4.6 3.1 7.7 8 9 4.9-1.3 8-4.4 8-9V7l-8-4Z"/>
+              <path d="m9 12 2 2 4-4"/>
+            </svg>
+            无需开发板 · 支持三大桌面系统
+          </div>
+          <div class="hero-mirror">
+            <span>GitHub 下载较慢？</span>
+            <a href="https://gitee.com/tange-ai/tirtc-server-example" target="_blank" rel="noreferrer">使用 Gitee 国内镜像</a>
+            <small>（同步可能稍有延迟）</small>
+          </div>
+        </div>
+
+        <div class="terminal reveal" aria-label="模拟器运行效果">
+          <div class="terminal-bar">
+            <div class="terminal-dots"><i></i><i></i><i></i></div>
+            <span>Windows — Git Bash</span>
+            <button class="terminal-copy" type="button" aria-label="复制 Git Bash 运行命令">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true">
+                <rect x="6.5" y="6.5" width="9" height="9" rx="1.5"/>
+                <path d="M4.5 13.5h-1a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v1"/>
+              </svg>
+              <span>复制命令</span>
+            </button>
+          </div>
+          <div class="terminal-body">
+            <div class="terminal-line terminal-success terminal-command"><span class="terminal-prompt">$ </span>winget install -e --id Python.Python.3.12</div>
+            <div class="terminal-line terminal-success terminal-command">git clone https://github.com/tangeai/tirtc-server-example</div>
+            <div class="terminal-line terminal-success terminal-command">cd tirtc-server-example</div>
+            <div class="terminal-line terminal-success terminal-command">cd thing-connect/device-sim/device-sim-py</div>
+            <div class="terminal-line terminal-success terminal-command">py -3.12 -m venv .venv</div>
+            <div class="terminal-line terminal-success terminal-command">source .venv/Scripts/activate</div>
+            <div class="terminal-line terminal-success terminal-command">python -m pip install --upgrade pip</div>
+            <div class="terminal-line terminal-success terminal-command">python -m pip install -r requirements.txt</div>
+            <div class="terminal-line terminal-success terminal-command">python device_sim_main.py --mac AA:BB:CC:DD:EE:FF</div>
+            <div class="terminal-divider"></div>
+            <div class="terminal-line terminal-muted">命令运行后，在浏览器打开：</div>
+            <div class="terminal-line">
+              <a class="terminal-link" href="https://demo-open.tange-ai.com/" target="_blank" rel="noreferrer">https://demo-open.tange-ai.com/</a>
+            </div>
+            <div class="live-status">
+              <div>
+                <strong>TiRTC 设备示例已连接</strong>
+                <small>可以开始验证四项产品功能</small>
+              </div>
+              <span class="live-badge"><i></i> ONLINE</span>
+            </div>
+            <div class="terminal-ready" aria-label="终端等待输入">
+              <span class="terminal-prompt">$</span>
+              <span class="terminal-cursor" aria-hidden="true"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="trust-bar" aria-label="TiRTC 示例功能">
+      <div class="trust-items shell">
+        <div class="trust-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="m9 9 6 3-6 3V9Z"/></svg>
+          远程查看实时音视频
+        </div>
+        <div class="trust-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M12 3a7 7 0 0 0-4 12.74V21l4-2 4 2v-5.26A7 7 0 0 0 12 3Z"/><path d="m9.5 10.5 1.5 1.5 3.5-3.5"/></svg>
+          AI 音视频对讲
+        </div>
+        <div class="trust-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M7 11a5 5 0 0 1 10 0v2a5 5 0 0 1-10 0v-2Z"/><path d="M4 12v1a8 8 0 0 0 16 0v-1M12 21v-3"/></svg>
+          设备间音视频对讲
+        </div>
+        <div class="trust-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M8 3h8a5 5 0 0 1 5 5v4a5 5 0 0 1-5 5h-3l-5 4v-4a5 5 0 0 1-5-5V8a5 5 0 0 1 5-5Z"/></svg>
+          设备呼微信小程序 VoIP 对讲
+        </div>
+      </div>
+    </section>
+
+    <section class="routes" id="routes">
+      <div class="shell">
+        <div class="section-heading reveal">
+          <div class="section-kicker">Learn TiRTC by example</div>
+          <h2>先跑通示例，再开发自己的产品</h2>
+          <p>第一步运行开源设备模拟器；第二步跟随功能视频，了解如何用 TiRTC 实现四类常见业务。</p>
+        </div>
+
+        <article class="setup-step reveal">
+          <span class="setup-number">01</span>
+          <div class="setup-copy">
+            <h3>下载并运行 TiRTC 设备模拟器</h3>
+            <p>安装 Python 3.10–3.12，在电脑上完成设备上线、绑定和音视频验证。</p>
+          </div>
+          <ul class="setup-requirements">
+            <li>Windows / Ubuntu x86_64</li>
+            <li>macOS Apple Silicon</li>
+            <li>无需开发板</li>
+          </ul>
+          <a class="setup-link" href="https://github.com/tangeai/tirtc-server-example/blob/main/thing-connect/device-sim/device-sim-py/README.md" target="_blank" rel="noreferrer">查看模拟器教程 <span>→</span></a>
+        </article>
+
+        <div class="video-step" id="demo">
+          <div class="video-step-heading reveal">
+            <span class="setup-number">02</span>
+            <div>
+              <h3>直接观看四个功能演示</h3>
+              <p>先了解 TiRTC 能实现什么；模拟器成功上线并绑定后，再跟随视频逐项操作。</p>
+            </div>
+          </div>
+
+          <div class="video-grid">
+            <article class="video-card reveal">
+              <div class="video-frame">
+                <video controls preload="metadata" poster="images/video-live-view-poster.jpg">
+                  <source src="https://demo-open.tange-ai.com/download/videos/simulator-live-view.mp4" type="video/mp4">
+                  当前浏览器不支持视频播放。
+                </video>
+                <span class="video-label"><i></i> 功能 01</span>
+              </div>
+              <h3>设备远程查看实时音视频</h3>
+              <p>演示设备如何通过 TiRTC 推送音视频，并在 Web 体验平台（H5）中完成远程实时查看。</p>
+            </article>
+
+            <article class="video-card reveal">
+              <div class="video-frame">
+                <video controls preload="metadata" poster="images/video-ai-intercom-poster.jpg">
+                  <source src="https://demo-open.tange-ai.com/download/videos/simulator-ai-intercom.mp4" type="video/mp4">
+                  当前浏览器不支持视频播放。
+                </video>
+                <span class="video-label"><i></i> 功能 02</span>
+              </div>
+              <h3>AI 语音对讲</h3>
+              <p>当前开源模拟器的 AI 示例演示如何建立会话，并完成双向实时语音交互。</p>
+            </article>
+
+            <article class="video-card reveal">
+              <div class="video-frame">
+                <video controls preload="metadata" poster="images/video-device-call-poster.jpg">
+                  <source src="https://demo-open.tange-ai.com/download/videos/simulator-device-call.mp4" type="video/mp4">
+                  当前浏览器不支持视频播放。
+                </video>
+                <span class="video-label"><i></i> 功能 03</span>
+              </div>
+              <h3>设备间音视频对讲</h3>
+              <p>演示两台设备如何通过 TiRTC 建立呼叫并进行实时音视频对讲。</p>
+            </article>
+
+            <article class="video-card reveal">
+              <div class="video-frame">
+                <video controls preload="metadata" poster="images/video-wechat-voip-poster.svg">
+                  <source src="https://demo-open.tange-ai.com/download/videos/simulator-wechat-voip.mp4" type="video/mp4">
+                  当前浏览器不支持视频播放。
+                </video>
+                <span class="video-label"><i></i> 功能 04</span>
+                <span class="video-pending">视频待上传</span>
+              </div>
+              <h3>设备呼微信小程序 VoIP 对讲</h3>
+              <p>演示设备如何发起呼叫，并在微信小程序中接听和进行实时音视频对讲。</p>
+            </article>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="final-cta">
+      <div class="final-cta-inner shell reveal">
+        <div class="final-cta-heading">
+          <div class="section-kicker">设备端开发</div>
+          <h2>先跑通设备端示例，<br>再移植到产品工程</h2>
+          <p>按设备平台下载 TiRTC SDK，在开发板或嵌入式设备上验证音视频链路，然后接入实际产品。</p>
+        </div>
+
+        <div class="product-path">
+          <article class="product-step">
+            <span class="product-step-number">01</span>
+            <h3>下载对应平台 SDK</h3>
+            <p>按操作系统、芯片和工具链选择 SDK。Linux、RTOS 及不同芯片平台的 SDK 不能混用。</p>
+
+            <div class="sdk-options">
+              <a class="sdk-option" href="https://docs.tange.ai/products/tirtc/download.html" target="_blank" rel="noreferrer">
+                <span>
+                  <strong>Linux / 嵌入式 Linux</strong>
+                  <small>x86_64、ARM、MIPS 等，按工具链和 ABI 选择</small>
+                </span>
+                <span>查看 SDK →</span>
+              </a>
+              <a class="sdk-option" href="https://docs.tange.ai/products/tirtc/download.html" target="_blank" rel="noreferrer">
+                <span>
+                  <strong>RTOS / 芯片平台</strong>
+                  <small>FreeRTOS、LiteOS 等，下载芯片专用 SDK</small>
+                </span>
+                <span>查看 SDK →</span>
+              </a>
+            </div>
+
+            <div class="sdk-quick-label">常用芯片平台</div>
+            <div class="sdk-quick-links" aria-label="常用芯片 SDK 快捷入口">
+              <a class="sdk-chip" href="https://repo-sdk.tange-ai.com/service/rest/repository/browse/tirtc-sdks/releases/espressif_esp32s3/" target="_blank" rel="noreferrer">ESP32-S3</a>
+              <a class="sdk-chip" href="https://repo-sdk.tange-ai.com/service/rest/repository/browse/tirtc-sdks/releases/espressif_esp32p4/" target="_blank" rel="noreferrer">ESP32-P4</a>
+              <a class="sdk-chip" href="https://docs.tange.ai/products/tirtc/download.html" target="_blank" rel="noreferrer">君正系列</a>
+              <a class="sdk-chip" href="https://docs.tange.ai/products/tirtc/download.html" target="_blank" rel="noreferrer">更多芯片</a>
+            </div>
+          </article>
+
+          <article class="product-step">
+            <span class="product-step-number">02</span>
+            <h3>跑通板端示例</h3>
+            <p>有预编译固件就直接烧录；没有的话，用对应 SDK 编译示例工程。先确认设备能上线、绑定并正常收发音视频。</p>
+            <div class="product-resource-links">
+              <a href="https://github.com/tangeai/tirtc-server-example/releases" target="_blank" rel="noreferrer">预编译固件与发布包 <span>→</span></a>
+              <a href="https://github.com/tangeai/tirtc-server-example/tree/main/thing-connect/device-sim/device-sim-esp32" target="_blank" rel="noreferrer">ESP32-S3 示例工程 <span>→</span></a>
+              <a href="https://github.com/tangeai/tirtc-server-example/tree/main/thing-connect/device-sim" target="_blank" rel="noreferrer">查看全部设备示例 <span>→</span></a>
+            </div>
+          </article>
+
+          <article class="product-step">
+            <span class="product-step-number">03</span>
+            <h3>移植到产品代码</h3>
+            <p>参考 C 示例和移植文档，替换摄像头、麦克风、网络、存储等硬件接口，接入现有产品工程。</p>
+            <div class="product-resource-links">
+              <a href="https://github.com/tangeai/tirtc-server-example/tree/main/thing-connect/device-sim/device-sim-c" target="_blank" rel="noreferrer">Linux C 参考实现 <span>→</span></a>
+              <a href="https://github.com/tangeai/tirtc-server-example/blob/main/thing-connect/device-porting.md" target="_blank" rel="noreferrer">设备端移植指南 <span>→</span></a>
+              <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html" target="_blank" rel="noreferrer">TiRTC C API <span>→</span></a>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner shell">
+      <span>© <span id="year"></span> TANGE AI · TiRTC 开源示例</span>
+      <div class="footer-links">
+        <a href="https://github.com/tangeai/tirtc-server-example" target="_blank" rel="noreferrer">GitHub</a>
+        <a href="https://github.com/tangeai/tirtc-server-example/blob/main/thing-connect/device-porting.md" target="_blank" rel="noreferrer">移植指南</a>
+        <a href="/login">登录控制台</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    const nav = document.querySelector(".nav");
+    const menuButton = document.querySelector(".menu-button");
+
+    menuButton.addEventListener("click", () => {
+      const isOpen = nav.classList.toggle("menu-open");
+      menuButton.setAttribute("aria-expanded", String(isOpen));
+      menuButton.setAttribute("aria-label", isOpen ? "关闭导航" : "打开导航");
+    });
+
+    document.querySelectorAll(".nav-links a").forEach((link) => {
+      link.addEventListener("click", () => {
+        nav.classList.remove("menu-open");
+        menuButton.setAttribute("aria-expanded", "false");
+        menuButton.setAttribute("aria-label", "打开导航");
+      });
+    });
+
+    const hasLoginToken = Boolean(localStorage.getItem("token"));
+    document.querySelectorAll("[data-auth-guest]").forEach((item) => {
+      item.hidden = hasLoginToken;
+    });
+    document.querySelectorAll("[data-auth-user]").forEach((item) => {
+      item.hidden = !hasLoginToken;
+    });
+
+    const copyButton = document.querySelector(".terminal-copy");
+    const copyButtonLabel = copyButton.querySelector("span");
+    const terminalCommands = Array.from(document.querySelectorAll(".terminal-command"))
+      .map((line) => line.textContent.replace(/^\$\s*/, "").trim())
+      .join("\n");
+
+    copyButton.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(terminalCommands);
+      } catch (_) {
+        const textArea = document.createElement("textarea");
+        textArea.value = terminalCommands;
+        textArea.style.position = "fixed";
+        textArea.style.opacity = "0";
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand("copy");
+        textArea.remove();
+      }
+      copyButtonLabel.textContent = "已复制";
+      copyButton.classList.add("copied");
+      copyButton.setAttribute("aria-label", "运行命令已复制");
+      window.setTimeout(() => {
+        copyButtonLabel.textContent = "复制命令";
+        copyButton.classList.remove("copied");
+        copyButton.setAttribute("aria-label", "复制 Git Bash 运行命令");
+      }, 1800);
+    });
+
+    const revealItems = document.querySelectorAll(".reveal");
+    if ("IntersectionObserver" in window) {
+      const observer = new IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add("visible");
+            observer.unobserve(entry.target);
+          }
+        });
+      }, { threshold: 0.12 });
+      revealItems.forEach((item) => observer.observe(item));
+    } else {
+      revealItems.forEach((item) => item.classList.add("visible"));
+    }
+
+    document.getElementById("year").textContent = new Date().getFullYear();
+  </script>
+</body>
+</html>
