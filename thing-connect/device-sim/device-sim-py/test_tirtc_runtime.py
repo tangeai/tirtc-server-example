@@ -62,6 +62,8 @@ class TiRtcRuntimeTests(unittest.TestCase):
 
     def test_generation_dispatch_drops_every_stale_callback(self):
         runtime = TiRtcRuntime()
+        runtime._callback_guard.start()
+        self.addCleanup(runtime.stop)
         stream_counts = {
             "accepted": 0, "disconnected": 0, "audio": 0, "command": 0}
         voip_counts = {

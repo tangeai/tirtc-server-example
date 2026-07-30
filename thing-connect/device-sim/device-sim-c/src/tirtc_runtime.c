@@ -49,6 +49,118 @@ static TirtcRuntime s_runtime = {
     .sdk_log_guard = SDK_CALLBACK_GUARD_INITIALIZER,
 };
 
+#ifdef DEVICE_SIM_TESTING
+typedef struct {
+    pthread_mutex_t lock;
+    int set_option_rc;
+    int init_rc;
+    int start_rc;
+    int stop_rc;
+    int emit_started;
+    int emit_stopped;
+    TirtcRuntimeTestSdkStats stats;
+    TIRTCCALLBACKS callbacks;
+} TestSdkRuntime;
+
+static TestSdkRuntime s_test_sdk = {
+    .lock = PTHREAD_MUTEX_INITIALIZER,
+    .emit_started = 1,
+    .emit_stopped = 1,
+};
+
+static int _test_sdk_set_option(TIRTCOPTION option, const void *data,
+                                uint32_t length) {
+    (void)option;
+    (void)data;
+    (void)length;
+    pthread_mutex_lock(&s_test_sdk.lock);
+    s_test_sdk.stats.set_option_calls++;
+    int rc = s_test_sdk.set_option_rc;
+    pthread_mutex_unlock(&s_test_sdk.lock);
+    return rc;
+}
+
+static int _test_sdk_init(void) {
+    pthread_mutex_lock(&s_test_sdk.lock);
+    s_test_sdk.stats.init_calls++;
+    int rc = s_test_sdk.init_rc;
+    pthread_mutex_unlock(&s_test_sdk.lock);
+    return rc;
+}
+
+static int _test_sdk_start(const char *device_id,
+                           const TIRTCCALLBACKS *callbacks) {
+    (void)device_id;
+    TIRTCCALLBACKS copied = {0};
+    pthread_mutex_lock(&s_test_sdk.lock);
+    s_test_sdk.stats.start_calls++;
+    if (callbacks) {
+        s_test_sdk.callbacks = *callbacks;
+        copied = *callbacks;
+    }
+    int rc = s_test_sdk.start_rc;
+    int emit_started = s_test_sdk.emit_started;
+    pthread_mutex_unlock(&s_test_sdk.lock);
+    if (rc == 0 && emit_started && copied.on_event)
+        copied.on_event(TIRTC_EVENT_SYS_STARTED, NULL, 0);
+    return rc;
+}
+
+static int _test_sdk_stop(void) {
+    TIRTCCALLBACKS copied;
+    pthread_mutex_lock(&s_test_sdk.lock);
+    s_test_sdk.stats.stop_calls++;
+    copied = s_test_sdk.callbacks;
+    int rc = s_test_sdk.stop_rc;
+    int emit_stopped = s_test_sdk.emit_stopped;
+    pthread_mutex_unlock(&s_test_sdk.lock);
+    if (emit_stopped && copied.on_event)
+        copied.on_event(TIRTC_EVENT_SYS_STOPPED, NULL, 0);
+    return rc;
+}
+
+static void _test_sdk_uninit(void) {
+    pthread_mutex_lock(&s_test_sdk.lock);
+    s_test_sdk.stats.uninit_calls++;
+    pthread_mutex_unlock(&s_test_sdk.lock);
+}
+
+static const char *_test_sdk_error_string(int error) {
+    (void)error;
+    return "test-sdk-error";
+}
+
+static const char *_test_sdk_version(void) {
+    return "test-sdk";
+}
+
+static void _test_sdk_log_config(int output_to_console, const char *path,
+                                 uint32_t size) {
+    (void)output_to_console;
+    (void)path;
+    (void)size;
+}
+
+static void _test_sdk_log_level(int level) {
+    (void)level;
+}
+
+static void _test_sdk_log_callback(TIRTCLOGCALLBACK callback) {
+    (void)callback;
+}
+
+#define TiRtcSetOption      _test_sdk_set_option
+#define TiRtcInit           _test_sdk_init
+#define TiRtcStart          _test_sdk_start
+#define TiRtcStop           _test_sdk_stop
+#define TiRtcUninit         _test_sdk_uninit
+#define TiRtcGetErrorStr    _test_sdk_error_string
+#define TiRtcGetVersion     _test_sdk_version
+#define TiRtcLogConfig      _test_sdk_log_config
+#define TiRtcLogSetLevel    _test_sdk_log_level
+#define TiRtcLogSetCallback _test_sdk_log_callback
+#endif
+
 static int _valid_service(TirtcService service) {
     return service > TIRTC_SERVICE_NONE && service < TIRTC_SERVICE_COUNT;
 }
@@ -601,19 +713,59 @@ int tirtc_runtime_bind_active_connection(TirtcService service,
 }
 
 #ifdef DEVICE_SIM_TESTING
-void tirtc_runtime_test_reset(void) {
+void tirtc_runtime_test_sdk_configure(int set_option_rc, int init_rc,
+                                      int start_rc, int stop_rc,
+                                      int emit_started, int emit_stopped) {
+    pthread_mutex_lock(&s_test_sdk.lock);
+    s_test_sdk.set_option_rc = set_option_rc;
+    s_test_sdk.init_rc = init_rc;
+    s_test_sdk.start_rc = start_rc;
+    s_test_sdk.stop_rc = stop_rc;
+    s_test_sdk.emit_started = emit_started;
+    s_test_sdk.emit_stopped = emit_stopped;
+    pthread_mutex_unlock(&s_test_sdk.lock);
+}
+
+void tirtc_runtime_test_sdk_get_stats(TirtcRuntimeTestSdkStats *stats) {
+    if (!stats) return;
+    pthread_mutex_lock(&s_test_sdk.lock);
+    *stats = s_test_sdk.stats;
+    pthread_mutex_unlock(&s_test_sdk.lock);
+}
+
+void tirtc_runtime_test_prepare_lifecycle(void) {
+    tirtc_runtime_stop();
     pthread_mutex_lock(&s_runtime.lock);
     memset(s_runtime.handlers, 0, sizeof(s_runtime.handlers));
     memset(s_runtime.service_guards, 0, sizeof(s_runtime.service_guards));
     memset(s_runtime.registered, 0, sizeof(s_runtime.registered));
     memset(s_runtime.connections, 0, sizeof(s_runtime.connections));
+    memset(&s_runtime.sdk_callbacks, 0, sizeof(s_runtime.sdk_callbacks));
     s_runtime.initialized = 0;
     s_runtime.start_submitted = 0;
-    s_runtime.started = 1;
+    s_runtime.started = 0;
     s_runtime.stopped = 0;
     s_runtime.active_service = TIRTC_SERVICE_NONE;
     s_runtime.active_generation = 0;
     s_runtime.next_generation = 0;
+    pthread_mutex_unlock(&s_runtime.lock);
+
+    pthread_mutex_lock(&s_test_sdk.lock);
+    memset(&s_test_sdk.stats, 0, sizeof(s_test_sdk.stats));
+    memset(&s_test_sdk.callbacks, 0, sizeof(s_test_sdk.callbacks));
+    s_test_sdk.set_option_rc = 0;
+    s_test_sdk.init_rc = 0;
+    s_test_sdk.start_rc = 0;
+    s_test_sdk.stop_rc = 0;
+    s_test_sdk.emit_started = 1;
+    s_test_sdk.emit_stopped = 1;
+    pthread_mutex_unlock(&s_test_sdk.lock);
+}
+
+void tirtc_runtime_test_reset(void) {
+    tirtc_runtime_test_prepare_lifecycle();
+    pthread_mutex_lock(&s_runtime.lock);
+    s_runtime.started = 1;
     pthread_mutex_unlock(&s_runtime.lock);
 }
 

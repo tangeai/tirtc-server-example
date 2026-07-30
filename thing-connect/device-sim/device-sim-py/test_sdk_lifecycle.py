@@ -47,8 +47,14 @@ class SdkLifecycleTests(unittest.TestCase):
         self.assertEqual(guard.active_count, 0)
         guard.close()
 
+    def test_callback_guard_constructor_does_not_start_a_worker(self):
+        guard = SdkCallbackGuard()
+        self.assertIsNone(guard._work._thread)
+        guard.close()
+
     def test_callback_guard_control_queue_waits_and_preserves_order(self):
         guard = SdkCallbackGuard()
+        guard.start()
         order = []
         entered = threading.Event()
         release = threading.Event()
@@ -100,6 +106,7 @@ class SdkLifecycleTests(unittest.TestCase):
     def test_runtime_stop_drains_service_deferred_tasks_before_sdk_stop(self):
         runtime = TiRtcRuntime()
         service_guard = SdkCallbackGuard()
+        service_guard.start()
         runtime.register_service(
             ServiceKind.AI,
             TIRTCCALLBACKS(),

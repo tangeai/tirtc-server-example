@@ -54,7 +54,7 @@ class _FakeThread:
         return self.started
 
     def join(self, timeout=None):
-        return None
+        self.started = False
 
 
 class _FakeTimer:
@@ -80,6 +80,7 @@ class _FakeTimer:
 
 class RtcVoipTests(unittest.TestCase):
     def setUp(self):
+        rtc_voip._callback_guard.start()
         self._saved = {
             name: getattr(rtc_voip, attr_name)
             for name, attr_name in _STATE_FIELDS.items()
@@ -96,7 +97,7 @@ class RtcVoipTests(unittest.TestCase):
         rtc_voip._stream_stop.clear()
 
     def tearDown(self):
-        rtc_voip._callback_guard.wait_for_all()
+        rtc_voip._callback_guard.close()
         for handle_name in ("_recv_file", "_recv_video_file"):
             handle = getattr(rtc_voip, handle_name)
             if handle is not None:

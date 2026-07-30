@@ -2,6 +2,8 @@ import unittest
 from unittest import mock
 import os
 import tempfile
+import threading
+import time
 
 os.environ.setdefault("TIRTC_SDK_VERSION", "2.2.1")
 from device_rtc_runtime import DeviceRtcRuntime, RuntimeConfig
@@ -12,6 +14,7 @@ class _FakeSdkRuntime:
         self.registered = {}
         self.started = False
         self.stopped = False
+        self.start_calls = 0
         self.stop_calls = 0
         self.generation = 0
         self.active = None
@@ -27,12 +30,26 @@ class _FakeSdkRuntime:
 
     def start(self, device_id, device_key, client_id, endpoint):
         self.start_args = (device_id, device_key, client_id, endpoint)
+        self.start_calls += 1
         self.started = True
+        for _, _, guard in self.registered.values():
+            start = getattr(guard, "start", None)
+            if callable(start):
+                start()
 
     def stop(self):
         self.stop_calls += 1
         self.stopped = True
         self.started = False
+        self.active = None
+        closed = set()
+        for _, _, guard in self.registered.values():
+            if id(guard) in closed:
+                continue
+            closed.add(id(guard))
+            close = getattr(guard, "close", None)
+            if callable(close):
+                close()
 
     def activate(self, service):
         if self.active is not None:
@@ -228,6 +245,95 @@ class DeviceRtcRuntimeTests(unittest.TestCase):
             finally:
                 source.close()
             runtime.shutdown()
+
+    def test_real_modules_switch_repeatedly_without_sdk_restart_or_thread_leak(self):
+        import rtc_ai
+        import rtc_call
+        import rtc_stream
+        import rtc_voip
+        from session_coordinator import SessionKind
+        from tirtc_runtime import ServiceKind
+
+        baseline_threads = {
+            thread.ident for thread in threading.enumerate()
+            if thread.ident is not None
+        }
+        sdk_runtime = _FakeSdkRuntime()
+        runtime = None
+        with tempfile.TemporaryDirectory() as root:
+            audio_path = os.path.join(root, "audio.g711a")
+            with open(audio_path, "wb") as target:
+                target.write(b"\xd5" * 320)
+            config = RuntimeConfig(
+                device_id="dev-1",
+                device_key="key-1",
+                client_id="client-1",
+                mqtt_token="mqtt-token",
+                tirtc_endpoint="http://rtc.example.com",
+                voip_server="https://voip.example.com",
+                ai_server="https://ai.example.com",
+                call_server="https://call.example.com",
+                up_audio_file=audio_path,
+                up_video_file="",
+                down_media_dir=root,
+                log_level="error",
+            )
+
+            try:
+                with mock.patch.object(
+                    rtc_voip, "report_profile", return_value=[]
+                ):
+                    runtime = DeviceRtcRuntime(
+                        config,
+                        rtc_stream,
+                        rtc_voip,
+                        rtc_ai,
+                        rtc_call,
+                        sdk_runtime=sdk_runtime,
+                    )
+                    runtime.start()
+
+                    service_by_session = {
+                        SessionKind.VOIP: ServiceKind.VOIP,
+                        SessionKind.AI: ServiceKind.AI,
+                        SessionKind.CALL: ServiceKind.CALL,
+                    }
+                    for _ in range(20):
+                        for kind, service in service_by_session.items():
+                            lease = runtime._begin(kind, lambda: None)
+                            self.assertEqual(runtime.coordinator.current, kind)
+                            self.assertEqual(
+                                sdk_runtime.active[0], service)
+                            runtime.arbiter.finish(kind, lease.generation)
+                            self.assertEqual(
+                                runtime.coordinator.current,
+                                SessionKind.STREAM,
+                            )
+                            self.assertEqual(
+                                sdk_runtime.active[0],
+                                ServiceKind.STREAM,
+                            )
+
+                    self.assertEqual(sdk_runtime.start_calls, 1)
+                    self.assertEqual(sdk_runtime.stop_calls, 0)
+            finally:
+                if runtime is not None:
+                    runtime.shutdown()
+                rtc_ai.set_session_end_callback(None)
+                rtc_call.set_session_end_callback(None)
+
+        self.assertEqual(sdk_runtime.start_calls, 1)
+        self.assertEqual(sdk_runtime.stop_calls, 1)
+        time.sleep(0.05)
+        leaked = [
+            thread.name for thread in threading.enumerate()
+            if (
+                thread.ident is not None
+                and thread.ident not in baseline_threads
+                and thread.is_alive()
+            )
+        ]
+        self.assertEqual(leaked, [])
 
 
 if __name__ == "__main__":

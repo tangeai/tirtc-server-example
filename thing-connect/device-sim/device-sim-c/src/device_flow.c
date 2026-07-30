@@ -210,48 +210,23 @@ int hmac_sha256_b64(const char *key, const char *data,
  *  Service discovery
  * ========================================================================= */
 
-int fetch_services(DeviceServices *svc, const char *base_url) {
-    if (!svc) return -1;
+int device_services_parse_json(DeviceServices *svc, const char *json) {
+    if (!svc || !json) return -1;
     memset(svc, 0, sizeof(*svc));
-    char url[512];
-    if (base_url && base_url[0]) {
-        size_t base_length = strlen(base_url);
-        int written = snprintf(
-            url, sizeof(url), "%s%sservices", base_url,
-            base_url[base_length - 1] == '/' ? "" : "/");
-        if (written < 0 || (size_t)written >= sizeof(url)) {
-            LOG_E("服务发现入口地址过长");
-            return -1;
-        }
-    } else {
-        snprintf(url, sizeof(url), "http://ep-open.tangeopen.com/services");
-    }
-    LOG_D("fetch_services  GET %s", url);
-
-    char body_buf[4096];
-    StrBuf body;
-    sb_init(&body, body_buf, sizeof(body_buf));
-
-    long http_code = 0;
-    if (http_get(url, &body, &http_code) != 0 || http_code != 200) {
-        LOG_E("服务发现失败 HTTP %ld", http_code);
+    cJSON *root = cJSON_ParseWithOpts(json, NULL, 1);
+    if (!root || !cJSON_IsObject(root)) {
+        LOG_E("服务发现响应非有效 JSON 对象");
+        cJSON_Delete(root);
         return -1;
     }
 
-    cJSON *root = cJSON_Parse(body.buf);
-    if (!root) {
-        LOG_E("服务发现响应非有效 JSON");
-        return -1;
-    }
-
-    /* Extract each field */
     const char *fields[] = {
         "device-srv", "voip-srv", "ai-srv", "call-srv",
         "mqtt-srv", "tirtc-srv"
     };
     for (int i = 0; i < 6; i++) {
-        cJSON *item = cJSON_GetObjectItem(root, fields[i]);
-        if (!item || !cJSON_IsString(item) || !item->valuestring[0]) {
+        cJSON *item = cJSON_GetObjectItemCaseSensitive(root, fields[i]);
+        if (!cJSON_IsString(item) || !item->valuestring[0]) {
             LOG_E("服务发现缺失字段: %s", fields[i]);
             cJSON_Delete(root);
             return -1;
@@ -284,12 +259,14 @@ int fetch_services(DeviceServices *svc, const char *base_url) {
             str_copy(destination, capacity, val);
         }
         if (i == 4) {
-            /* Parse mqtt[s]://host:port */
             const char *hp = val;
             int is_tls = 0;
-            if (strncmp(hp, "mqtts://", 8) == 0) { hp += 8; is_tls = 1; }
-            else if (strncmp(hp, "mqtt://", 7) == 0) { hp += 7; is_tls = 0; }
-            else {
+            if (strncmp(hp, "mqtts://", 8) == 0) {
+                hp += 8;
+                is_tls = 1;
+            } else if (strncmp(hp, "mqtt://", 7) == 0) {
+                hp += 7;
+            } else {
                 LOG_E("mqtt-srv scheme 异常: %s", val);
                 cJSON_Delete(root);
                 return -1;
@@ -318,11 +295,44 @@ int fetch_services(DeviceServices *svc, const char *base_url) {
                 return -1;
             }
             svc->mqtt_port = (int)parsed_port;
-            svc->mqtt_tls  = is_tls;
+            svc->mqtt_tls = is_tls;
         }
     }
 
     cJSON_Delete(root);
+    return 0;
+}
+
+int fetch_services(DeviceServices *svc, const char *base_url) {
+    if (!svc) return -1;
+    memset(svc, 0, sizeof(*svc));
+    char url[512];
+    if (base_url && base_url[0]) {
+        size_t base_length = strlen(base_url);
+        int written = snprintf(
+            url, sizeof(url), "%s%sservices", base_url,
+            base_url[base_length - 1] == '/' ? "" : "/");
+        if (written < 0 || (size_t)written >= sizeof(url)) {
+            LOG_E("服务发现入口地址过长");
+            return -1;
+        }
+    } else {
+        snprintf(url, sizeof(url), "http://ep-open.tangeopen.com/services");
+    }
+    LOG_D("fetch_services  GET %s", url);
+
+    char body_buf[4096];
+    StrBuf body;
+    sb_init(&body, body_buf, sizeof(body_buf));
+
+    long http_code = 0;
+    if (http_get(url, &body, &http_code) != 0 || http_code != 200) {
+        LOG_E("服务发现失败 HTTP %ld", http_code);
+        return -1;
+    }
+
+    if (device_services_parse_json(svc, body.buf) != 0)
+        return -1;
 
     LOG_I("服务发现完成: device=%s mqtt=%s:%d tirtc=%s",
           svc->device_server, svc->mqtt_host, svc->mqtt_port,

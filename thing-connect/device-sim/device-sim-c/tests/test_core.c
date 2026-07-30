@@ -8,6 +8,7 @@
 #include <string.h>
 #include <sys/stat.h>
 
+#include "device_flow.h"
 #include "file_media_source.h"
 #include "media_format.h"
 #include "media_subscription_policy.h"
@@ -61,6 +62,64 @@ static void test_media_subscription_policy(void) {
     media_subscription_policy_reset(&policy);
     assert(!media_subscription_policy_video_enabled(&policy));
     assert(!media_subscription_policy_subscribe_video(&policy));
+}
+
+static void test_service_discovery_parser(void) {
+    static const char valid[] =
+        "{"
+        "\"device-srv\":\"https://device.example\","
+        "\"voip-srv\":\"https://voip.example\","
+        "\"ai-srv\":\"https://ai.example\","
+        "\"call-srv\":\"https://call.example\","
+        "\"mqtt-srv\":\"mqtts://mqtt.example:8883\","
+        "\"tirtc-srv\":\"http://rtc.example\""
+        "}";
+    DeviceServices services;
+    assert(device_services_parse_json(&services, valid) == 0);
+    assert(strcmp(services.device_server, "https://device.example") == 0);
+    assert(strcmp(services.voip_server, "https://voip.example") == 0);
+    assert(strcmp(services.ai_server, "https://ai.example") == 0);
+    assert(strcmp(services.call_server, "https://call.example") == 0);
+    assert(strcmp(services.mqtt_host, "mqtt.example") == 0);
+    assert(services.mqtt_port == 8883);
+    assert(services.mqtt_tls == 1);
+    assert(strcmp(services.tirtc_endpoint, "http://rtc.example") == 0);
+
+    assert(device_services_parse_json(
+               &services,
+               "{\"device-srv\":\"d\",\"voip-srv\":\"v\","
+               "\"ai-srv\":\"a\",\"mqtt-srv\":\"mqtt://m:1883\","
+               "\"tirtc-srv\":\"r\"}") != 0);
+    assert(device_services_parse_json(
+               &services,
+               "{\"device-srv\":\"d\",\"voip-srv\":\"v\","
+               "\"ai-srv\":\"a\",\"call-srv\":\"c\","
+               "\"mqtt-srv\":\"mqtt://m:1883\"}") != 0);
+    assert(device_services_parse_json(
+               &services,
+               "{\"device-srv\":\"d\",\"voip-srv\":\"v\","
+               "\"ai-srv\":\"a\",\"call-srv\":\"c\","
+               "\"mqtt-srv\":\"http://m:1883\","
+               "\"tirtc-srv\":\"r\"}") != 0);
+    assert(device_services_parse_json(
+               &services,
+               "{\"device-srv\":\"d\",\"voip-srv\":\"v\","
+               "\"ai-srv\":\"a\",\"call-srv\":\"c\","
+               "\"mqtt-srv\":\"mqtt://m:0\","
+               "\"tirtc-srv\":\"r\"}") != 0);
+    assert(device_services_parse_json(
+               &services,
+               "{\"device-srv\":\"d\",\"voip-srv\":\"v\","
+               "\"ai-srv\":\"a\",\"call-srv\":\"c\","
+               "\"mqtt-srv\":\"mqtt://m:1883junk\","
+               "\"tirtc-srv\":\"r\"}") != 0);
+    assert(device_services_parse_json(
+               &services,
+               "{\"device-srv\":\"d\",\"voip-srv\":\"v\","
+               "\"ai-srv\":\"a\",\"call-srv\":\"c\","
+               "\"mqtt-srv\":\"mqtt://m:1883\","
+               "\"tirtc-srv\":\"r\"} trailing") != 0);
+    assert(device_services_parse_json(&services, "[]") != 0);
 }
 
 static void test_fixed_audio_and_mjpeg(void) {
@@ -642,6 +701,8 @@ typedef struct {
 
 static RuntimeCallbackCounts runtime_stream_counts;
 static RuntimeCallbackCounts runtime_voip_counts;
+static SdkCallbackGuard runtime_service_guard =
+    SDK_CALLBACK_GUARD_INITIALIZER;
 
 static void runtime_stream_accepted(tirtc_conn_t hconn) {
     assert(hconn);
@@ -669,6 +730,160 @@ static void runtime_voip_audio(tirtc_conn_t hconn,
                                const TIRTCFRAMEINFO *frame, void *data) {
     assert(hconn && frame && data);
     runtime_voip_counts.audio++;
+}
+
+static void test_process_runtime_single_sdk_lifecycle(void) {
+    tirtc_runtime_test_prepare_lifecycle();
+
+    TIRTCCALLBACKS stream = {0};
+    TIRTCCALLBACKS ai = {0};
+    assert(tirtc_runtime_register_service(
+               TIRTC_SERVICE_STREAM, &stream, NULL) == 0);
+    assert(tirtc_runtime_register_service(
+               TIRTC_SERVICE_AI, &ai, NULL) == 0);
+    assert(tirtc_runtime_start(
+               "device-1", "secret-1", "client-1",
+               "http://rtc.example") == 0);
+
+    TirtcRuntimeTestSdkStats stats = {0};
+    tirtc_runtime_test_sdk_get_stats(&stats);
+    assert(stats.set_option_calls == 4);
+    assert(stats.init_calls == 1);
+    assert(stats.start_calls == 1);
+    assert(stats.stop_calls == 0);
+    assert(stats.uninit_calls == 0);
+
+    for (int i = 0; i < 100; ++i) {
+        uint64_t stream_generation =
+            tirtc_runtime_activate(TIRTC_SERVICE_STREAM);
+        assert(stream_generation != 0);
+        assert(tirtc_runtime_deactivate(
+                   TIRTC_SERVICE_STREAM, stream_generation) == 0);
+        uint64_t ai_generation =
+            tirtc_runtime_activate(TIRTC_SERVICE_AI);
+        assert(ai_generation > stream_generation);
+        assert(tirtc_runtime_deactivate(
+                   TIRTC_SERVICE_AI, ai_generation) == 0);
+    }
+
+    tirtc_runtime_test_sdk_get_stats(&stats);
+    assert(stats.init_calls == 1);
+    assert(stats.start_calls == 1);
+    assert(stats.stop_calls == 0);
+    assert(stats.uninit_calls == 0);
+
+    tirtc_runtime_stop();
+    tirtc_runtime_test_sdk_get_stats(&stats);
+    assert(stats.init_calls == 1);
+    assert(stats.start_calls == 1);
+    assert(stats.stop_calls == 1);
+    assert(stats.uninit_calls == 1);
+    assert(!tirtc_runtime_is_started());
+
+    /* Process shutdown is idempotent. */
+    tirtc_runtime_stop();
+    tirtc_runtime_test_sdk_get_stats(&stats);
+    assert(stats.stop_calls == 1);
+    assert(stats.uninit_calls == 1);
+}
+
+static void test_process_runtime_start_failure_cleanup(void) {
+    tirtc_runtime_test_prepare_lifecycle();
+    TIRTCCALLBACKS stream = {0};
+    assert(tirtc_runtime_register_service(
+               TIRTC_SERVICE_STREAM, &stream, NULL) == 0);
+    tirtc_runtime_test_sdk_configure(0, 0, -40003, 0, 1, 1);
+
+    assert(tirtc_runtime_start(
+               "device-1", "secret-1", "client-1", NULL) != 0);
+    TirtcRuntimeTestSdkStats stats = {0};
+    tirtc_runtime_test_sdk_get_stats(&stats);
+    assert(stats.init_calls == 1);
+    assert(stats.start_calls == 1);
+    assert(stats.stop_calls == 0);
+    assert(stats.uninit_calls == 1);
+    assert(!tirtc_runtime_is_started());
+
+    /* The same process can retry after a native SDK start failure. */
+    tirtc_runtime_test_sdk_configure(0, 0, 0, 0, 1, 1);
+    assert(tirtc_runtime_start(
+               "device-1", "secret-1", "client-1", NULL) == 0);
+    tirtc_runtime_stop();
+    tirtc_runtime_test_sdk_get_stats(&stats);
+    assert(stats.init_calls == 2);
+    assert(stats.start_calls == 2);
+    assert(stats.stop_calls == 1);
+    assert(stats.uninit_calls == 2);
+}
+
+typedef struct {
+    pthread_mutex_t lock;
+    pthread_cond_t ready;
+    int entered;
+    int release;
+} RuntimeDeferredBlock;
+
+static void runtime_blocking_deferred(void *opaque) {
+    RuntimeDeferredBlock *block = opaque;
+    pthread_mutex_lock(&block->lock);
+    block->entered = 1;
+    pthread_cond_broadcast(&block->ready);
+    while (!block->release)
+        pthread_cond_wait(&block->ready, &block->lock);
+    pthread_mutex_unlock(&block->lock);
+}
+
+static void *runtime_stop_worker(void *opaque) {
+    (void)opaque;
+    tirtc_runtime_stop();
+    return NULL;
+}
+
+static void test_process_runtime_stop_drains_service_work(void) {
+    tirtc_runtime_test_prepare_lifecycle();
+    TIRTCCALLBACKS stream = {0};
+    assert(tirtc_runtime_register_service(
+               TIRTC_SERVICE_STREAM, &stream,
+               &runtime_service_guard) == 0);
+    assert(tirtc_runtime_start(
+               "device-1", "secret-1", "client-1", NULL) == 0);
+
+    RuntimeDeferredBlock block = {
+        .lock = PTHREAD_MUTEX_INITIALIZER,
+        .ready = PTHREAD_COND_INITIALIZER,
+    };
+    assert(sdk_defer_action(
+               &runtime_service_guard, runtime_blocking_deferred,
+               &block) == 0);
+    pthread_mutex_lock(&block.lock);
+    while (!block.entered)
+        pthread_cond_wait(&block.ready, &block.lock);
+    pthread_mutex_unlock(&block.lock);
+
+    pthread_t stop_thread;
+    assert(pthread_create(
+               &stop_thread, NULL, runtime_stop_worker, NULL) == 0);
+    sleep_ms(50);
+    TirtcRuntimeTestSdkStats stats = {0};
+    tirtc_runtime_test_sdk_get_stats(&stats);
+    assert(stats.stop_calls == 0);
+    assert(stats.uninit_calls == 0);
+
+    pthread_mutex_lock(&block.lock);
+    block.release = 1;
+    pthread_cond_broadcast(&block.ready);
+    pthread_mutex_unlock(&block.lock);
+    pthread_join(stop_thread, NULL);
+
+    tirtc_runtime_test_sdk_get_stats(&stats);
+    assert(stats.stop_calls == 1);
+    assert(stats.uninit_calls == 1);
+    assert(sdk_defer_action(
+               &runtime_service_guard, runtime_blocking_deferred,
+               &block) != 0);
+    pthread_cond_destroy(&block.ready);
+    pthread_mutex_destroy(&block.lock);
+    tirtc_runtime_test_prepare_lifecycle();
 }
 
 static void test_process_runtime_generation_dispatch(void) {
@@ -766,6 +981,7 @@ static void test_process_runtime_generation_dispatch(void) {
 int main(void) {
     test_format_tables();
     test_media_subscription_policy();
+    test_service_discovery_parser();
     test_fixed_audio_and_mjpeg();
     test_invalid_amr();
     test_encoded_audio_containers();
@@ -777,6 +993,9 @@ int main(void) {
     test_voip_malformed_cancel_and_failed_recovery();
     test_audio_only_call_downgrades_incoming_video();
     test_ai_connect_timeout();
+    test_process_runtime_single_sdk_lifecycle();
+    test_process_runtime_start_failure_cleanup();
+    test_process_runtime_stop_drains_service_work();
     test_process_runtime_generation_dispatch();
     puts("device-sim-c core tests passed");
     return 0;

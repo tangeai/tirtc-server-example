@@ -8,6 +8,7 @@ import rtc_call
 
 class RtcCallVideoPolicyTests(unittest.TestCase):
     def setUp(self):
+        rtc_call._callback_guard.start()
         self._call_type = rtc_call._session_call_type
         self._service_active = rtc_call._service_active
         self._session_state = rtc_call._session_state
@@ -15,6 +16,7 @@ class RtcCallVideoPolicyTests(unittest.TestCase):
         self._expected_room_id = rtc_call._expected_room_id
 
     def tearDown(self):
+        rtc_call._callback_guard.close()
         rtc_call._session_call_type = self._call_type
         rtc_call._service_active = self._service_active
         rtc_call._session_state = self._session_state

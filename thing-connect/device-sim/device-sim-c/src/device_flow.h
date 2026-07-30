@@ -72,6 +72,11 @@ void set_mqtt_insecure(int insecure);
  *  Returns 0 on success, -1 on failure. */
 int fetch_services(DeviceServices *svc, const char *base_url);
 
+/** Parse a service-discovery JSON object.
+ *  All six current service fields are required and mqtt-srv must be a valid
+ *  mqtt:// or mqtts:// address with an explicit port. */
+int device_services_parse_json(DeviceServices *svc, const char *json);
+
 /* ── Device report (phase 1 – unbound flow) ────────────────────────────── */
 
 /** POST /v1/device/report — register fingerprint, get temp credentials.

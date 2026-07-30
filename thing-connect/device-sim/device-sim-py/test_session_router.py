@@ -9,12 +9,17 @@ from session_router import SessionMessageRouter, TerminalController
 
 
 class SessionMessageRouterTests(unittest.TestCase):
+    def _router(self, arbiter, voip, call):
+        router = SessionMessageRouter(arbiter, voip, call)
+        self.addCleanup(router.shutdown)
+        return router
+
     def test_current_voip_ringback_is_routed_to_voip_state(self):
         arbiter = mock.Mock(current=SessionKind.VOIP)
         arbiter.admit_incoming.return_value = IncomingDecision.CURRENT
         voip, call = mock.Mock(), mock.Mock()
         voip.is_active.return_value = True
-        router = SessionMessageRouter(arbiter, voip, call)
+        router = self._router(arbiter, voip, call)
         payload = {"wx_room_id": "own-outgoing-room"}
 
         router.on_call_incoming(payload)
@@ -28,7 +33,7 @@ class SessionMessageRouterTests(unittest.TestCase):
         voip, call = mock.Mock(), mock.Mock()
         voip.has_pending.return_value = False
         voip.is_outgoing.return_value = False
-        router = SessionMessageRouter(arbiter, voip, call)
+        router = self._router(arbiter, voip, call)
         payload = {"room_id": "room-1"}
         router.on_device_call_incoming(payload)
         router.wait_for_idle()
@@ -42,7 +47,7 @@ class SessionMessageRouterTests(unittest.TestCase):
         voip, call = mock.Mock(), mock.Mock()
         call.has_pending.return_value = False
         call.is_outgoing.return_value = False
-        router = SessionMessageRouter(arbiter, voip, call)
+        router = self._router(arbiter, voip, call)
         payload = {"wx_room_id": "room-1"}
         router.on_call_incoming(payload)
         router.wait_for_idle()
@@ -56,7 +61,7 @@ class SessionMessageRouterTests(unittest.TestCase):
         voip, call = mock.Mock(), mock.Mock()
         call.has_pending.return_value = False
         call.is_outgoing.return_value = True
-        router = SessionMessageRouter(arbiter, voip, call)
+        router = self._router(arbiter, voip, call)
 
         router.on_call_incoming({"wx_room_id": "wx-room"})
         router.wait_for_idle()
@@ -70,7 +75,7 @@ class SessionMessageRouterTests(unittest.TestCase):
         arbiter.admit_incoming.return_value = IncomingDecision.PENDING
         voip, call = mock.Mock(), mock.Mock()
         voip.has_pending.return_value = True
-        router = SessionMessageRouter(arbiter, voip, call)
+        router = self._router(arbiter, voip, call)
         payload = {
             "wx_room_id": "new-room",
             "peer_id": "peer-1",
@@ -89,7 +94,7 @@ class SessionMessageRouterTests(unittest.TestCase):
         voip, call = mock.Mock(), mock.Mock()
         voip.has_pending.return_value = False
         voip.is_outgoing.return_value = True
-        router = SessionMessageRouter(arbiter, voip, call)
+        router = self._router(arbiter, voip, call)
 
         router.on_device_call_incoming({"room_id": "device-room"})
         router.wait_for_idle()
@@ -102,7 +107,7 @@ class SessionMessageRouterTests(unittest.TestCase):
     def test_contact_update_keeps_legacy_and_payload_callbacks(self):
         coordinator = mock.Mock(current=SessionKind.STREAM)
         voip, call = mock.Mock(), mock.Mock()
-        router = SessionMessageRouter(coordinator, voip, call)
+        router = self._router(coordinator, voip, call)
         payload = {"action": "request", "contact_type": "device", "peer_id": "dev-peer"}
 
         router.on_device_callers_update()
@@ -126,7 +131,7 @@ class SessionMessageRouterTests(unittest.TestCase):
             release.wait(timeout=1)
 
         call.reject_incoming.side_effect = slow_reject
-        router = SessionMessageRouter(arbiter, voip, call)
+        router = self._router(arbiter, voip, call)
         router.on_device_call_incoming({
             "room_id": "room-async", "caller_id": "caller-1"})
 
@@ -150,7 +155,7 @@ class SessionMessageRouterTests(unittest.TestCase):
             release.wait(timeout=1)
 
         voip.reject_incoming.side_effect = slow_reject
-        router = SessionMessageRouter(arbiter, voip, call)
+        router = self._router(arbiter, voip, call)
         router.on_call_incoming({"wx_room_id": "wx-async"})
 
         self.assertTrue(started.wait(timeout=1))
@@ -163,7 +168,7 @@ class SessionMessageRouterTests(unittest.TestCase):
         arbiter = mock.Mock(current=None)
         voip, call = mock.Mock(), mock.Mock()
         call.has_pending.return_value = False
-        router = SessionMessageRouter(arbiter, voip, call)
+        router = self._router(arbiter, voip, call)
 
         router.on_room_cancel({"room_id": "stale-room"})
 

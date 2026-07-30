@@ -43,6 +43,19 @@ int tirtc_runtime_bind_active_connection(TirtcService service,
 const char *tirtc_runtime_service_name(TirtcService service);
 
 #ifdef DEVICE_SIM_TESTING
+typedef struct {
+    unsigned int set_option_calls;
+    unsigned int init_calls;
+    unsigned int start_calls;
+    unsigned int stop_calls;
+    unsigned int uninit_calls;
+} TirtcRuntimeTestSdkStats;
+
+void tirtc_runtime_test_prepare_lifecycle(void);
+void tirtc_runtime_test_sdk_configure(int set_option_rc, int init_rc,
+                                      int start_rc, int stop_rc,
+                                      int emit_started, int emit_stopped);
+void tirtc_runtime_test_sdk_get_stats(TirtcRuntimeTestSdkStats *stats);
 void tirtc_runtime_test_reset(void);
 void tirtc_runtime_test_on_conn_accepted(tirtc_conn_t hconn);
 void tirtc_runtime_test_on_conn_error(tirtc_conn_t hconn, int error);

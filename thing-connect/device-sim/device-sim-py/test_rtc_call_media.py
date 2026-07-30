@@ -3,6 +3,7 @@
 import ctypes
 import os
 import tempfile
+import threading
 import unittest
 from unittest import mock
 
@@ -30,8 +31,11 @@ _STATE_FIELDS = {
     "hw_audio": "_hw_audio",
     "hw_audio_fmt": "_hw_audio_fmt",
     "hw_mic_device": "_hw_mic_device",
+    "hw_spk_device": "_hw_spk_device",
     "hw_spk": "_hw_spk",
     "play_queue": "_play_queue",
+    "receive_work": "_receive_work",
+    "echo_gate": "_echo_gate",
     "session_video_capable": "_session_video_capable",
     "video_enabled": "_video_enabled",
     "video_generation": "_video_generation",
@@ -53,7 +57,7 @@ class _FakeThread:
         return self.started
 
     def join(self, timeout=None):
-        return None
+        self.started = False
 
 
 class RtcCallMediaTests(unittest.TestCase):
@@ -241,6 +245,52 @@ class RtcCallMediaTests(unittest.TestCase):
                 rtc_call_media.start()
                 recorder_cls.assert_not_called()
                 self.assertEqual(thread_ctor.call_count, 0)
+
+    def test_real_file_media_worker_sends_and_stops_cleanly(self):
+        with tempfile.TemporaryDirectory() as root:
+            audio_path = os.path.join(root, "audio.g711a")
+            with open(audio_path, "wb") as target:
+                target.write(b"\xd5" * 320)
+
+            rtc_call_media.configure(
+                "DEV000001",
+                audio_path,
+                "",
+                root,
+                audio_fmt="alaw_8khz",
+                up_video_fmt="h264",
+                down_video_fmt="h264",
+            )
+            rtc_call_media.prepare_session(False)
+            rtc_call_media.set_hconn(0x1234)
+            rtc_call_media._hw_audio = False
+            rtc_call_media._stream_thread = None
+            sent = threading.Event()
+
+            def send_audio(_hconn, _frame, _buffer):
+                sent.set()
+                return 0
+
+            with mock.patch.object(
+                    rtc_call_media.sdk,
+                    "TiRtcSendAudioStream",
+                    side_effect=send_audio), \
+                    mock.patch.object(rtc_call_media, "_warn") as warn:
+                rtc_call_media.start()
+                worker = rtc_call_media._stream_thread
+                try:
+                    self.assertIsNotNone(worker)
+                    self.assertTrue(sent.wait(timeout=1.0))
+                finally:
+                    rtc_call_media.stop()
+
+                self.assertFalse(worker.is_alive())
+                self.assertFalse(
+                    any(
+                        "内未退出" in str(call)
+                        for call in warn.call_args_list
+                    )
+                )
 
 
 if __name__ == "__main__":

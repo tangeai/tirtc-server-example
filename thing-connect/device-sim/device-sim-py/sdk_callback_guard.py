@@ -20,7 +20,6 @@ class SdkCallbackGuard:
             lambda _message: None,
             maxsize=256,
         )
-        self._work.start()
 
     def start(self) -> None:
         """Start or restart the process-lifetime control worker."""

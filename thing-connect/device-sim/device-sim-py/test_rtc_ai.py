@@ -59,6 +59,7 @@ class _ImmediateThread:
 
 class RtcAiLifecycleTests(unittest.TestCase):
     def setUp(self):
+        rtc_ai._callback_guard.start()
         self.ended = []
         _FakeRecorder.instances.clear()
         _FakeTimer.instances.clear()
@@ -90,7 +91,7 @@ class RtcAiLifecycleTests(unittest.TestCase):
 
     def tearDown(self):
         rtc_ai.stop_session()
-        rtc_ai._callback_guard.wait_for_all()
+        rtc_ai._callback_guard.close()
         rtc_ai.set_session_end_callback(None)
         for patcher in reversed(self.patches):
             patcher.stop()
