@@ -495,17 +495,24 @@
       text-underline-offset: 3px;
     }
 
-    .terminal-ready {
+    .terminal-running {
       display: flex;
       align-items: center;
-      gap: 7px;
-      height: 22px;
-      margin-top: 13px;
+    }
+
+    .terminal-running .terminal-command-text {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .terminal-cursor {
+      display: inline-block;
+      flex: 0 0 auto;
       width: 7px;
       height: 14px;
+      margin-left: 7px;
       background: #79d2c4;
       box-shadow: 0 0 8px rgba(121, 210, 196, 0.42);
       animation: terminal-cursor-blink 1.05s steps(1, end) infinite;
@@ -1390,7 +1397,10 @@
             <div class="terminal-line terminal-success terminal-command">py -3.12 -m venv .venv</div>
             <div class="terminal-line terminal-success terminal-command">.\.venv\Scripts\python.exe -m pip install --upgrade pip</div>
             <div class="terminal-line terminal-success terminal-command">.\.venv\Scripts\python.exe -m pip install -r requirements.txt</div>
-            <div class="terminal-line terminal-success terminal-command">.\.venv\Scripts\python.exe device_sim_main.py --mac AA:BB:CC:DD:EE:FF</div>
+            <div class="terminal-line terminal-success terminal-command terminal-running">
+              <span class="terminal-command-text">.\.venv\Scripts\python.exe device_sim_main.py --mac AA:BB:CC:DD:EE:FF</span>
+              <span class="terminal-cursor" aria-hidden="true"></span>
+            </div>
             <div class="terminal-divider"></div>
             <div class="terminal-line terminal-muted">命令运行后，在浏览器打开：</div>
             <div class="terminal-line">
@@ -1402,10 +1412,6 @@
                 <small>可以开始验证四项产品功能</small>
               </div>
               <span class="live-badge"><i></i> ONLINE</span>
-            </div>
-            <div class="terminal-ready" aria-label="终端等待输入">
-              <span class="terminal-prompt">PS&gt;</span>
-              <span class="terminal-cursor" aria-hidden="true"></span>
             </div>
           </div>
         </div>
