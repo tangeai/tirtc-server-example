@@ -2,7 +2,7 @@
 
 基于 TiRTC SDK 的 IoT 设备端 「C 参考实现」，可编译运行在 Linux 嵌入式设备上，用于验证设备上线、鉴权、MQTT 信令、RTC 建连和媒体收发的完整流程。它从本地文件读取上行音视频，不启用摄像头、麦克风或扬声器。Linux 代码中的协议、状态机和 TiRTC 调用顺序可作为产品参考；RTOS 平台必须重写网络、任务、存储和媒体适配层，不能直接编译本目录源码。
 
-**定位：Linux 文件级模拟。** 从文件读取音视频发送；所有 RTC 场景收到的下行音视频仅限频记录日志，随后立即丢弃。程序没有接收文件、接收目录或播放路径，也不适配真实摄像头、麦克风和扬声器。这是嵌入式设备端的协议与 TiRTC 调用参考；产品移植边界、Linux 交叉编译和 RTOS 模块拆分见 [从 「C 参考实现」移植到嵌入式设备](../../device-porting.md)。
+**定位：Linux 文件级模拟。** 从文件读取音视频发送；AI 下行音频保存到统一接收目录，G.711A/PCM 同时生成可播放 WAV，其他下行媒体限频记录日志后丢弃。程序不适配真实摄像头、麦克风和扬声器。这是嵌入式设备端的协议与 TiRTC 调用参考；产品移植边界、Linux 交叉编译和 RTOS 模块拆分见 [从 「C 参考实现」移植到嵌入式设备](../../device-porting.md)。
 
 **统一运行时：** 进程启动时初始化并启动一次 TiRTC SDK，退出时才停止和释放。实时流、VoIP、AI 对讲和设备互呼共享这一实例；Coordinator 只切换当前业务和媒体连接，会话结束后自动恢复实时流。四项业务由同一个 MQTT 长连接和终端命令入口处理。
 
@@ -64,10 +64,11 @@ bash ../scripts/gen_assets.sh
 | `--log-level` | `debug` | `debug` / `info` / `warn` / `error` |
 | `--up-audio-file` | `../assets/number.alaw_8khz` | 推流、VoIP、AI 和设备互呼共用的 G.711A 8 kHz 数字语音文件（环境变量 `UP_AUDIO_FILE`） |
 | `--up-audio-format` | `alaw_8khz` | 上述文件格式（环境变量 `UP_AUDIO_FORMAT`） |
-| `--down-audio-format` | `alaw_8khz` | 下行协商格式；接收数据仍会丢弃（环境变量 `DOWN_AUDIO_FORMAT`） |
+| `--down-audio-format` | `alaw_8khz` | 下行协商格式（环境变量 `DOWN_AUDIO_FORMAT`） |
 | `--up-video-file` | `../assets/video.h264` | 推流、VoIP、设备互呼共用的编码视频文件；空路径表示纯音频（环境变量 `UP_VIDEO_FILE`） |
 | `--up-video-format` | `h264` | 上述文件格式（环境变量 `UP_VIDEO_FORMAT`） |
 | `--down-video-format` | `h264` | 下行协商格式；接收数据仍会丢弃（环境变量 `DOWN_VIDEO_FORMAT`） |
+| `--down-media-dir` | `received` | AI 下行音频保存根目录；实际写入 `<目录>/<device_id>/`（环境变量 `DOWN_MEDIA_DIR`） |
 | `--ai-audio-file` | 与 `--up-audio-file` 相同 | AI 请求上行音频文件（环境变量 `AI_AUDIO_FILE`） |
 | `--ai-up-audio-format` | 与 `--up-audio-format` 相同 | AI 请求音频格式（环境变量 `AI_UP_AUDIO_FORMAT`） |
 | `VOIP_SCREEN_WIDTH`（环境变量） | `1280` | 设备自身屏幕宽度（像素），与上行视频素材分辨率无关 |
@@ -114,7 +115,7 @@ bash ../scripts/gen_assets.sh
 - 音频：A-law 8/16 kHz、AMR-NB/WB、Ogg Opus 8/16 kHz、PCM S16LE 8/16 kHz、AAC ADTS 8/16 kHz。
 - 视频：H.264/H.265 Annex-B、MJPEG。
 
-启动时会按声明的格式完整校验文件并分帧，声明和内容不匹配会直接退出。下行格式只参与协商和日志；回调不保存、不解码、不播放收到的数据。
+AI 会话格式支持 G.711A、PCM、AMR、Opus，不支持 AAC。启动时会按声明的格式完整校验文件并分帧，声明和内容不匹配会直接退出。下行格式参与协商和日志；AI 音频回调异步保存文件，其他下行媒体不保存、不解码、不播放。
 
 ## 日志
 
@@ -138,6 +139,7 @@ src/
 ├── session_arbiter.h/c    # 竞态策略：待接槽、独占所有权、代次隔离
 ├── session_coordinator.h/c # 业务会话切换：通话结束恢复推流
 ├── common.h               # 公共定义
+├── audio_recorder.h/c     # AI 下行异步录音、格式元数据与 PCM WAV
 ├── file_media_source.h/c  # 多格式编码媒体文件分帧器
 ├── media_rx_log.h/c       # 下行音视频限频日志与丢弃
 ├── sdk_callback_guard.h/c # SDK 回调屏障与常驻有界控制队列
@@ -328,10 +330,18 @@ call_destroy(cs);
 
 ```json
 {"jsonrpc":"2.0","id":"uuid","method":"start_session",
- "params":{"device_id":"DEV001","role_id":"...","input_audio":{"sample_rate":8000,"channels":1},"output_audio":{"sample_rate":8000,"channels":1}}}
+ "params":{"device_id":"DEV001","role_id":"...","input_audio":{"codec":"g711a","sample_rate":8000,"channels":1},"output_audio":{"codec":"g711a","sample_rate":8000,"channels":1}}}
 ```
 
 WHIP 连接后等 ~300ms KCP 握手再发送。
+
+AI 会话期间，下行音频通过独立有界队列写盘，不在 SDK 回调线程执行磁盘 I/O。默认输出：
+
+```text
+received/<device_id>/ai_<timestamp>.raw
+received/<device_id>/ai_<timestamp>.fmt.json
+received/<device_id>/ai_<timestamp>.wav   # G.711A/PCM
+```
 
 ## 文件媒体节奏
 
@@ -425,6 +435,6 @@ LDFLAGS += -lTiRTC
 5. **AI WHIP 后等 ~300ms**：KCP 握手完成前发命令会丢失
 6. **AI 文件发完即停止上行**：连接保持到服务端返回 `end_session`
 7. **H.264/H.265 文件必须是 Annex-B**：MP4 中的长度前缀 NAL 不能直接作为输入
-8. **下行媒体没有文件输出开关**：接收回调固定为限频日志后丢弃
+8. **仅 AI 下行音频保存文件**：通过 `--down-media-dir` 配置；VoIP、设备通话、实时流下行与所有下行视频仍是限频日志后丢弃
 9. **默认命令从 `device-sim-c/` 目录运行**：媒体和 CA 默认位于 `../assets/`；部署到板端时用 `--up-*-file`、`--ca-cert` 传入实际路径
 10. **`ca-certificates.crt` 有过期时间**：最早 2026-11-28，发版前刷新

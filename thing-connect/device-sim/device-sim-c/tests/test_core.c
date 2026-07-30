@@ -8,6 +8,7 @@
 #include <string.h>
 #include <sys/stat.h>
 
+#include "audio_recorder.h"
 #include "device_flow.h"
 #include "file_media_source.h"
 #include "media_format.h"
@@ -39,10 +40,116 @@ static void test_format_tables(void) {
     assert(audio_format_find("pcm_16k") ==
            audio_format_find("pcm_s16le_16khz"));
     assert(!audio_format_find("mp3"));
+    assert(strcmp(
+               audio_format_ai_codec(audio_format_find("alaw_8khz")),
+               "g711a") == 0);
+    assert(strcmp(
+               audio_format_ai_codec(audio_format_find("pcm_s16le_16khz")),
+               "pcm") == 0);
+    assert(audio_format_ai_codec(audio_format_find("aac_adts_16khz")) ==
+           NULL);
     assert(video_format_find("h264"));
     assert(video_format_find("h265"));
     assert(video_format_find("mjpeg"));
     assert(!video_format_find("vp9"));
+}
+
+static void *close_audio_recorder(void *opaque) {
+    audio_recorder_close(opaque);
+    return NULL;
+}
+
+static void test_audio_recorder_files(void) {
+    char root[] = "/tmp/tirtc-c-recorder-XXXXXX";
+    assert(mkdtemp(root) != NULL);
+
+    AudioRecorder recorder;
+    assert(audio_recorder_init(&recorder) == 0);
+    assert(audio_recorder_open(
+               &recorder, root, "DEV001", "ai_test.raw") == 0);
+
+    TIRTCFRAMEINFO frame;
+    memset(&frame, 0, sizeof(frame));
+    frame.stream_id = STREAM_ID_AI;
+    frame.media = TIRTC_AUDIO_ALAW;
+    frame.flags = TIRTC_AUDIOSAMPLE_8K16B1C;
+    static const unsigned char payload[] = {0xd5, 0xd5, 0xd5, 0xd5};
+    frame.length = sizeof(payload);
+    assert(audio_recorder_submit(&recorder, &frame, payload) == 0);
+    assert(audio_recorder_submit(&recorder, &frame, payload) == 0);
+    pthread_t first_close;
+    pthread_t second_close;
+    assert(pthread_create(
+               &first_close, NULL, close_audio_recorder, &recorder) == 0);
+    assert(pthread_create(
+               &second_close, NULL, close_audio_recorder, &recorder) == 0);
+    assert(pthread_join(first_close, NULL) == 0);
+    assert(pthread_join(second_close, NULL) == 0);
+
+    assert(audio_recorder_frame_count(&recorder) == 2);
+    assert(audio_recorder_dropped_frames(&recorder) == 0);
+
+    struct stat info;
+    const char *raw_path = audio_recorder_raw_path(&recorder);
+    const char *wav_path = audio_recorder_wav_path(&recorder);
+    assert(stat(raw_path, &info) == 0);
+    assert(info.st_size == 8);
+    assert(stat(wav_path, &info) == 0);
+    assert(info.st_size == 44 + 16);
+
+    FILE *wav = fopen(wav_path, "rb");
+    assert(wav != NULL);
+    unsigned char header[12];
+    assert(fread(header, 1, sizeof(header), wav) == sizeof(header));
+    fclose(wav);
+    assert(memcmp(header, "RIFF", 4) == 0);
+    assert(memcmp(header + 8, "WAVE", 4) == 0);
+
+    char fmt_path[1024];
+    snprintf(fmt_path, sizeof(fmt_path), "%s/DEV001/ai_test.fmt.json",
+             root);
+    FILE *fmt = fopen(fmt_path, "r");
+    assert(fmt != NULL);
+    char metadata[512];
+    size_t metadata_length =
+        fread(metadata, 1, sizeof(metadata) - 1, fmt);
+    fclose(fmt);
+    metadata[metadata_length] = '\0';
+    assert(strstr(metadata, "\"encoding\":\"alaw\"") != NULL);
+    assert(strstr(metadata, "\"sample_rate\":8000") != NULL);
+    assert(strstr(metadata, "\"frames\":2") != NULL);
+
+    assert(unlink(raw_path) == 0);
+    assert(unlink(wav_path) == 0);
+    assert(unlink(fmt_path) == 0);
+    char device_dir[1024];
+    snprintf(device_dir, sizeof(device_dir), "%s/DEV001", root);
+    assert(rmdir(device_dir) == 0);
+    assert(rmdir(root) == 0);
+    audio_recorder_destroy(&recorder);
+}
+
+static void test_ai_start_session_json_declares_codecs(void) {
+    AiState *ai = ai_create_ex(
+        "https://ai.example", "DEV001", "token", "audio.g711a",
+        "alaw_8khz", "opus_16khz");
+    assert(ai != NULL);
+    char *json = ai_test_build_start_session_json(ai, "request-1");
+    assert(json != NULL);
+    assert(strstr(
+               json,
+               "\"input_audio\":{\"codec\":\"g711a\","
+               "\"sample_rate\":8000,\"channels\":1}") != NULL);
+    assert(strstr(
+               json,
+               "\"output_audio\":{\"codec\":\"opus\","
+               "\"sample_rate\":16000,\"channels\":1}") != NULL);
+    free(json);
+    ai_destroy(ai);
+
+    assert(ai_create_ex(
+               "https://ai.example", "DEV001", "token", "audio.aac",
+               "aac_adts_16khz", "alaw_8khz") == NULL);
 }
 
 static void test_media_subscription_policy(void) {
@@ -980,6 +1087,8 @@ static void test_process_runtime_generation_dispatch(void) {
 
 int main(void) {
     test_format_tables();
+    test_audio_recorder_files();
+    test_ai_start_session_json_declares_codecs();
     test_media_subscription_policy();
     test_service_discovery_parser();
     test_fixed_audio_and_mjpeg();

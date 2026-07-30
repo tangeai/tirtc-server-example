@@ -22,6 +22,7 @@ typedef struct {
 
 const AudioFormat *audio_format_find(const char *name);
 const char *audio_format_choices(void);
+const char *audio_format_ai_codec(const AudioFormat *format);
 const VideoFormat *video_format_find(const char *name);
 const char *video_format_choices(void);
 

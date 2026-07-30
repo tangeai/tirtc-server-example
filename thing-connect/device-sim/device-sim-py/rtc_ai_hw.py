@@ -901,7 +901,7 @@ def start_session(peer_id: str, token: str, audio_file: str = "", device_id: str
             msg = json.dumps(envelope).encode()
             rc = sdk.TiRtcSendCommand(
                 ctypes.c_void_p(hconn_val), AI_CMD, msg, len(msg))
-            if rc != 0:
+            if rc < 0:
                 _fail_current_session(
                     generation,
                     f"发送 AI start_session 失败 rc={rc}，已结束会话",

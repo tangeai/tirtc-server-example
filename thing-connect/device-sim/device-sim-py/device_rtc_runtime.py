@@ -71,6 +71,9 @@ class DeviceRtcRuntime:
         voip.configure_media_formats(
             config.up_audio_format, config.down_audio_format,
             config.up_video_format, config.down_video_format)
+        configure_ai_receive_dir = getattr(ai, "configure_receive_dir", None)
+        if callable(configure_ai_receive_dir):
+            configure_ai_receive_dir(config.down_media_dir)
         self._ai_audio_file, self._ai_up_audio_format, self._ai_down_audio_format = \
             self._resolve_ai_defaults(config)
         self.sdk_runtime.set_log_level(config.log_level)

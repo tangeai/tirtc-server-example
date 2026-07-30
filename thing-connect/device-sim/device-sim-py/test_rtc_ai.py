@@ -10,6 +10,8 @@ class _FakeRecorder:
     instances = []
 
     def __init__(self, *args, **kwargs):
+        self.args = args
+        self.kwargs = kwargs
         self.closed = False
         self.is_open = False
         self.frame_count = 0
@@ -60,6 +62,7 @@ class _ImmediateThread:
 class RtcAiLifecycleTests(unittest.TestCase):
     def setUp(self):
         rtc_ai._callback_guard.start()
+        rtc_ai.configure_receive_dir()
         self.ended = []
         _FakeRecorder.instances.clear()
         _FakeTimer.instances.clear()
@@ -165,7 +168,18 @@ class RtcAiLifecycleTests(unittest.TestCase):
         disconnected = rtc_ai.sdk.TiRtcDisconnect.call_args.args[0]
         self.assertEqual(disconnected.value, 0x4567)
 
-    def test_start_session_declares_g711a_8khz_in_both_directions(self):
+    def test_start_session_uses_configured_receive_dir_and_device_subdir(self):
+        rtc_ai.configure_receive_dir("/configured/received")
+        with mock.patch.object(
+                rtc_ai.sdk, "TiRtcWhipConnect", return_value=0):
+            rtc_ai.start_session("peer", "token", "audio.pcm", "dev-1")
+
+        recorder = _FakeRecorder.instances[-1]
+        self.assertEqual(recorder.args[0], "/configured/received")
+        self.assertEqual(recorder.args[1], "dev-1")
+        self.assertRegex(recorder.args[2], r"^ai_\d+\.raw$")
+
+    def test_start_session_accepts_positive_send_count_and_declares_g711a(self):
         callbacks = []
 
         def remember_callback(peer, token, callback, user):
@@ -177,7 +191,7 @@ class RtcAiLifecycleTests(unittest.TestCase):
                 rtc_ai.sdk, "TiRtcWhipConnect",
                 side_effect=remember_callback), \
                 mock.patch.object(
-                    rtc_ai.sdk, "TiRtcSendCommand", return_value=0
+                    rtc_ai.sdk, "TiRtcSendCommand", return_value=302
                 ) as send_command, \
                 mock.patch.object(rtc_ai.threading, "Thread", _ImmediateThread), \
                 mock.patch.object(rtc_ai.time, "sleep"):
@@ -195,6 +209,8 @@ class RtcAiLifecycleTests(unittest.TestCase):
             expected = {"codec": "g711a", "sample_rate": 8000, "channels": 1}
             self.assertEqual(message["params"]["input_audio"], expected)
             self.assertEqual(message["params"]["output_audio"], expected)
+            self.assertEqual(rtc_ai.get_state(), "CONNECTING")
+            self.assertIsNotNone(rtc_ai._start_response_timer)
             rtc_ai.stop_session()
 
 

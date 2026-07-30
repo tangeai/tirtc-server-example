@@ -448,7 +448,7 @@ python3 device_sim_main.py --device-id DEV000001 --device-key your-key \
 预期结果：
 
 - 设备能建立 AI 会话。
-- `received/` 下能看到 AI 下行音频文件。
+- `--down-media-dir/<device_id>/` 下能看到 AI 下行音频文件。
 
 ### 6. 验证设备呼设备
 

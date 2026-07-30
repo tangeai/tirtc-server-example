@@ -231,6 +231,7 @@ class DeviceRtcRuntimeTests(unittest.TestCase):
                 sdk_runtime=sdk_runtime,
             )
 
+            ai_module.configure_receive_dir.assert_called_once_with(root)
             self.assertFalse(runtime.terminal._video_capable)
             self.assertFalse(runtime.voip._video_capable)
             self.assertFalse(runtime.call._video_capable)

@@ -78,7 +78,8 @@ clean:
 	rm -rf $(OBJDIR) $(TARGET)
 
 TEST_TARGET := $(OBJDIR)/test-core
-TEST_SRCS := tests/test_core.c $(SRCDIR)/common.c $(SRCDIR)/media_format.c \
+TEST_SRCS := tests/test_core.c $(SRCDIR)/common.c $(SRCDIR)/audio_recorder.c \
+	$(SRCDIR)/media_format.c \
 	$(SRCDIR)/file_media_source.c $(SRCDIR)/sdk_callback_guard.c \
 	$(SRCDIR)/media_subscription_policy.c \
 	$(SRCDIR)/session_coordinator.c $(SRCDIR)/session_arbiter.c \

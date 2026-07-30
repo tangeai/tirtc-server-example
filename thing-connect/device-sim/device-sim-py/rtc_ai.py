@@ -61,6 +61,15 @@ AI_START_RESPONSE_TIMEOUT_SEC = 10.0
 _LOG_LEVEL = 10
 _up_audio_format = "alaw_8khz"
 _down_audio_format = "alaw_8khz"
+_default_receive_dir = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "received")
+_receive_dir = _default_receive_dir
+
+
+def configure_receive_dir(recv_dir: str = "") -> None:
+    """设置 AI 下行音频目录，实际文件放在 recv_dir/device_id/ 下。"""
+    global _receive_dir
+    _receive_dir = recv_dir or _default_receive_dir
 
 def configure_audio_formats(up_format: str = "alaw_8khz",
                             down_format: str = "alaw_8khz") -> None:
@@ -642,10 +651,9 @@ def start_session(peer_id: str, token: str, audio_file: str, device_id: str = ""
         _session_state   = "CONNECTING"
         _audio_file_path = audio_file
 
-    _DIR = os.path.dirname(os.path.abspath(__file__))
-    recv_dir = os.path.join(_DIR, "received")
     ts = int(time.time())
-    recorder = AudioRecorder(recv_dir, "", f"ai_{ts}.raw", _info, _warn)
+    recorder = AudioRecorder(
+        _receive_dir, device_id, f"ai_{ts}.raw", _info, _warn)
     try:
         recv_path = recorder.open()
     except OSError as e:
@@ -739,7 +747,7 @@ def start_session(peer_id: str, token: str, audio_file: str, device_id: str = ""
             _log(f"发送 start_session device_id={device_id} role_id={role_id}")
             rc = sdk.TiRtcSendCommand(
                 ctypes.c_void_p(hconn_val), AI_CMD, msg, len(msg))
-            if rc != 0:
+            if rc < 0:
                 _fail_current_session(
                     generation,
                     f"发送 AI start_session 失败 rc={rc}，已结束会话",

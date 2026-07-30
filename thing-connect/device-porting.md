@@ -34,7 +34,7 @@
 | device_flow.c | 请求顺序、HMAC 签名串、HTTP/MQTT 消息格式、Topic、ACK 规则 | libcurl、libmosquitto、文件 CA 证书、pthread 心跳 |
 | tirtc_runtime.c / sdk_callback_guard.c | 进程级 TiRtcInit / SetOption / Start / Stop / Uninit、统一回调表、连接与业务代次分发、常驻有界控制队列 | pthread 锁/条件变量/工作线程，替换为 RTOS mutex、事件组和固定任务/固定队列 |
 | tirtc_stream.c | H5 入站连接状态、TIRTCFRAMEINFO 字段、实时媒体发送 | H.264/G.711A 文件读取器、pthread 推流任务 |
-| tirtc_ai.c | 获取 token、WHIP、0x2100 JSON-RPC、300ms 延迟、会话状态 | curl、PCM 文件读取、pthread、下行日志/丢弃 |
+| tirtc_ai.c / audio_recorder.c | 获取 token、WHIP、0x2100 JSON-RPC、300ms 延迟、会话状态、回调外异步录音模式 | curl、文件读取、pthread、Linux 文件录音器 |
 | tirtc_voip.c | profile、MQTT 来电字段、WHIP、0x2001 挂断 | curl、G.711A/H.264 文件读取、扬声器适配 |
 | tirtc_call.c / call_session.c | 建房、接听、TiRtcConnect、0x2000 接通确认、房间状态 | curl、pthread、文件媒体 |
 | session_arbiter.c / session_coordinator.c | pending ticket、generation lease、deadline、STREAM / VOIP / AI / CALL 的独占与恢复规则 | pthread mutex/condition，替换为单 session task、RTOS mutex/固定队列/事件组；详见 [竞态仲裁参考](device-session-arbiter.md) |
@@ -120,7 +120,7 @@ device_identity、device_http、device_mqtt 的字段和状态转移以 [device-
 | device_identity | device_flow.c（凭证读写） | NVS：`nvs_open` + `nvs_get_str`/`nvs_set_str` | key 名 `device_id`/`device_key` 不变（同 `device_creds.json`）；预烧设备直接读 NVS 跳过验证码 |
 | device_http | device_flow.c（Report/Token）、tirtc_ai.c、tirtc_voip.c、call_session.c | `esp_http_client` + mbedtls HMAC | Report 4 签名 header / Token 5 签名 header，签名串 `device_id+timestamp+nonce` |
 | device_mqtt | device_flow.c（临时/正式连接、ack、心跳） | `esp_mqtt_client`（`MQTT_OVER_SSL`） | `.cert_pem` 嵌入 PEM；`/cmd` 必须 ack；30s 心跳 |
-| device_media | tirtc_stream.c（H264FileSource）、各 tirtc_*.c 下行日志/丢弃 | `esp_camera` + I2S/codec + 环形缓冲 | 上行替换为真实采集/编码；下行替换为扬声器缓冲/显示队列（Linux C 示例只记录元数据后丢弃） |
+| device_media | tirtc_stream.c（H264FileSource）、audio_recorder.c、各 tirtc_*.c 下行处理 | `esp_camera` + I2S/codec + 环形缓冲 | 上行替换为真实采集/编码；AI 异步文件录音替换为扬声器缓冲，其他下行日志替换为显示/播放队列 |
 | device_session | session_arbiter.c / session_coordinator.c（pthread mutex/cond） | FreeRTOS `xSemaphoreCreateMutex` / 固定队列 / event group | Arbiter 负责准入、pending 与 generation；Coordinator 只切换 STREAM/VOIP/AI/CALL 业务会话，进程级 SDK 保持运行 |
 | device_tirtc | 各 tirtc_*.c | TiRTC C API（不变） | 仅日志 sink、时间源、随机源适配（见下表） |
 
@@ -316,7 +316,7 @@ void on_audio(tirtc_conn_t hconn, const TIRTCFRAMEINFO *fi, void *data) {
 }
 ~~~
 
-> ⚠️ **ESP32 媒体现实：** ESP32-CAM 普遍输出 **MJPEG**，但当前 H5 页面只接受 **H.264**（见 [device-h5-live.md](device-h5-live.md#媒体格式与默认约定)）。ESP32 没有硬件 H.264 编码器，需软件编码或外置编码芯片，否则要同时改前端和设备实现。下行音视频在 Linux 「C 参考实现」里只限频记录元数据后丢弃；产品要把回调数据复制到扬声器缓冲和显示队列——不要在 TiRTC 回调里直接解码或播放。
+> ⚠️ **ESP32 媒体现实：** ESP32-CAM 普遍输出 **MJPEG**，但当前 H5 页面只接受 **H.264**（见 [device-h5-live.md](device-h5-live.md#媒体格式与默认约定)）。ESP32 没有硬件 H.264 编码器，需软件编码或外置编码芯片，否则要同时改前端和设备实现。Linux 「C 参考实现」将 AI 下行音频复制到独立录音队列，其他下行媒体仅记录元数据后丢弃；产品应把同一回调外队列模式替换为扬声器缓冲和显示队列——不要在 TiRTC 回调里直接解码、播放或写文件。
 
 完整 TiRTC 初始化、全部回调和停止顺序见 [H5 实时查看与按住说话](device-h5-live.md)。
 

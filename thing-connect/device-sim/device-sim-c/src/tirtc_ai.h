@@ -22,6 +22,7 @@ AiState *ai_create_ex(const char *ai_server, const char *device_id,
                       const char *mqtt_token, const char *ai_audio,
                       const char *up_audio_format,
                       const char *down_audio_format);
+void ai_configure_receive_dir(AiState *as, const char *receive_dir);
 void ai_destroy(AiState *as);
 
 typedef void (*ai_session_end_cb)(void *user);
@@ -53,6 +54,7 @@ void ai_poll(AiState *as);
 
 #ifdef DEVICE_SIM_TESTING
 void ai_test_force_connect_timeout(AiState *as);
+char *ai_test_build_start_session_json(AiState *as, const char *request_id);
 #endif
 
 #ifdef __cplusplus

@@ -730,9 +730,10 @@ static void _usage(const char *prog) {
     printf("  --up-video-format FMT     Its format: %s (default: h264)\n", video_format_choices());
     printf("  --down-audio-format FMT   Downlink negotiation format (default: alaw_8khz)\n");
     printf("  --down-video-format FMT   Downlink negotiation format (default: h264)\n");
+    printf("  --down-media-dir PATH     AI downlink recording root (default: received)\n");
     printf("  --ai-audio-file PATH      AI request audio file (default: --up-audio-file)\n");
     printf("  --ai-up-audio-format FMT  AI request audio format (default: --up-audio-format)\n");
-    printf("  Received audio/video is rate-limited in logs and discarded; it is never saved or played.\n\n");
+    printf("  AI audio is saved under --down-media-dir/<device_id>/; other downlink media is discarded.\n\n");
     printf("Other:\n");
     printf("  --endpoint     URL      service discovery entry (default: http://ep-open.tangeopen.com)\n");
     printf("  --log-level    LEVEL    debug|info|warn|error (default: debug)\n");
@@ -762,6 +763,7 @@ int main(int argc, char *argv[]) {
     const char *up_video_format = "h264";
     const char *down_video_format = "h264";
     const char *ai_up_audio_format = NULL;
+    const char *down_media_dir = "received";
     int insecure = 0;
 
     /* Media paths */
@@ -789,6 +791,7 @@ int main(int argc, char *argv[]) {
     if ((env = getenv("UP_AUDIO_FORMAT"))) up_audio_format = env;
     if ((env = getenv("UP_VIDEO_FORMAT"))) up_video_format = env;
     if ((env = getenv("DOWN_VIDEO_FORMAT"))) down_video_format = env;
+    if ((env = getenv("DOWN_MEDIA_DIR"))) down_media_dir = env;
     if ((env = getenv("AI_UP_AUDIO_FORMAT"))) ai_up_audio_format = env;
     if ((env = getenv("TIRTC_INSECURE")))
         insecure = strcmp(env, "1") == 0 || strcasecmp(env, "true") == 0;
@@ -805,6 +808,7 @@ int main(int argc, char *argv[]) {
         {"up-video-format", required_argument, 0, 'V'},
         {"down-audio-format", required_argument, 0, 'd'},
         {"down-video-format", required_argument, 0, 'D'},
+        {"down-media-dir", required_argument, 0, 'r'},
         {"ai-audio-file", required_argument, 0, 'p'},
         {"ai-up-audio-format", required_argument, 0, 'P'},
         {"endpoint",    required_argument, 0, 'e'},
@@ -817,7 +821,7 @@ int main(int argc, char *argv[]) {
     };
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "i:k:m:t:v:a:A:V:d:D:p:P:e:l:f:c:xh", long_opts, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "i:k:m:t:v:a:A:V:d:D:r:p:P:e:l:f:c:xh", long_opts, NULL)) != -1) {
         switch (opt) {
             case 'i': device_id   = optarg; break;
             case 'k': device_key  = optarg; break;
@@ -829,6 +833,7 @@ int main(int argc, char *argv[]) {
             case 'V': up_video_format = optarg; break;
             case 'd': down_audio_format = optarg; break;
             case 'D': down_video_format = optarg; break;
+            case 'r': down_media_dir = optarg; break;
             case 'p': snprintf(ai_audio_path, sizeof(ai_audio_path), "%s", optarg); break;
             case 'P': ai_up_audio_format = optarg; break;
             case 'e': services_base = optarg; break;
@@ -868,6 +873,11 @@ int main(int argc, char *argv[]) {
     if (!down_audio_spec) {
         LOG_E("不支持的 --down-audio-format: %s（可选: %s）",
               down_audio_format, audio_format_choices());
+        return 1;
+    }
+    if (!audio_format_ai_codec(ai_up_audio_spec) ||
+        !audio_format_ai_codec(down_audio_spec)) {
+        LOG_E("AI 音频格式仅支持 G.711A、PCM、AMR、Opus");
         return 1;
     }
     if (!up_video_spec || !down_video_spec) {
@@ -1003,6 +1013,7 @@ int main(int argc, char *argv[]) {
         call_destroy(rt.call);
         return 1;
     }
+    ai_configure_receive_dir(rt.ai, down_media_dir);
     if (voip_configure_media(rt.voip, audio_path, up_audio_spec->name,
                              video_path, up_video_spec->name) != 0) {
         LOG_E("配置 VoIP 文件媒体失败");

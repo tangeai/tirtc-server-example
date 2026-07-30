@@ -59,6 +59,16 @@ const char *audio_format_choices(void) {
            "pcm_s16le_8khz|pcm_s16le_16khz|aac_adts_8khz|aac_adts_16khz";
 }
 
+const char *audio_format_ai_codec(const AudioFormat *format) {
+    if (!format || !format->codec) return NULL;
+    if (strcmp(format->codec, "alaw") == 0) return "g711a";
+    if (strcmp(format->codec, "pcm") == 0 ||
+        strcmp(format->codec, "amr") == 0 ||
+        strcmp(format->codec, "opus") == 0)
+        return format->codec;
+    return NULL;
+}
+
 const VideoFormat *video_format_find(const char *name) {
     if (!name) return NULL;
     for (size_t i = 0; i < sizeof(k_video_formats) / sizeof(k_video_formats[0]); ++i)
