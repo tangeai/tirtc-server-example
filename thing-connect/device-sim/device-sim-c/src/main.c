@@ -39,6 +39,7 @@
 #include "session_arbiter.h"
 #include "session_coordinator.h"
 
+#define DEFAULT_AUDIO_PATH "../assets/audio.g711a"
 #define EXPERIENCE_PLATFORM_URL "https://demo-open.tange-ai.com"
 
 /* Globals */
@@ -775,7 +776,7 @@ int main(int argc, char *argv[]) {
 
     /* Set defaults relative to binary location */
     snprintf(video_path,     sizeof(video_path),     "../assets/video.h264");
-    snprintf(audio_path,     sizeof(audio_path),     "../assets/number.alaw_8khz");
+    snprintf(audio_path,     sizeof(audio_path),     DEFAULT_AUDIO_PATH);
     ai_audio_path[0] = '\0';
 
     /* Parse env vars */

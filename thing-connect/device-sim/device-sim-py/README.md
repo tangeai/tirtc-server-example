@@ -150,7 +150,7 @@ Windows 也可使用文件模式；只有显式传入 `--with-mic` 时，VoIP、
 
 ### 生成扩展测试素材
 
-仓库已随附首次启动所需的 `number.alaw_8khz` 与 `video.h264`，脚本不会覆盖它们。需要测试其他音视频编码格式时，再安装 `ffmpeg`、`espeak-ng` 并执行：
+仓库已随附首次启动所需的 `audio.g711a` 与 `video.h264`，脚本不会覆盖它们。需要测试其他音视频编码格式时，再安装 `ffmpeg`、`espeak-ng` 并执行：
 
 ```bash
 bash ../scripts/gen_assets.sh
@@ -165,7 +165,7 @@ bash ../scripts/gen_assets.sh
 - 视频裸流：H264 仅生成 `1280x720`、15fps、10 秒；MJPEG 仅生成 `240x320`、`320x240`、`640x480`、`480x640`，均为 8fps、10 秒。模拟器会循环读取文件。
 - 每份视频裸流同时生成一个 `preview_*.mp4` 预览文件；预览文件只用于查看画面，不作为模拟器输入。
 - 视频文件名统一包含编码格式、分辨率、帧率、时长和总帧数，例如 `video_mjpeg_640x480_8fps_10s_80frames.mjpeg`。
-- 默认素材：`number.alaw_8khz`、`video.h264` 随仓库提供，可直接给模拟器默认参数使用；音频循环播报数字，适合检查声音内容与连续性。
+- 默认素材：`audio.g711a`、`video.h264` 随仓库提供，可直接给模拟器默认参数使用。
 - 组合测试素材：供 VoIP / AI / 推流 / 呼设备几条链路复用
 
 可通过环境变量选择语音引擎：
@@ -204,14 +204,14 @@ bash ../scripts/gen_assets.sh
 ```bash
 # 已绑定设备：启动实时推流，同时监听三类通话
 python3 device_sim_main.py --device-id DEV000001 --device-key your-key \
-  --up-audio-file ../assets/number.alaw_8khz
+  --up-audio-file ../assets/audio.g711a
 
 # 首次上线（未绑定）
 python3 device_sim_main.py --mac AA:BB:CC:DD:EE:FF
 
 # 文件媒体模式
 python3 device_sim_main.py --device-id DEV000001 --device-key your-key \
-  --up-audio-file ../assets/number.alaw_8khz \
+  --up-audio-file ../assets/audio.g711a \
   --up-video-file ../assets/video.h264 --down-media-dir ./received
 
 # Windows PC 音频：麦克风上行 + 扬声器下行；视频仍读取本地文件
@@ -232,7 +232,7 @@ python3 device_sim_main.py --mac AA:BB:CC:DD:EE:FF
 
 # 2. 已绑定设备，使用默认素材启动
 python3 device_sim_main.py --device-id DEV000001 --device-key your-key \
-  --up-audio-file ../assets/number.alaw_8khz --up-video-file ../assets/video.h264
+  --up-audio-file ../assets/audio.g711a --up-video-file ../assets/video.h264
 ```
 
 | 参数 | 默认值 | 说明 |
@@ -244,7 +244,7 @@ python3 device_sim_main.py --device-id DEV000001 --device-key your-key \
 | `--with-mic` | — | Windows 下使用 PC 麦克风/扬声器；上下行须同时为 `alaw_8khz` 或 `alaw_16khz` |
 | `--up-audio-format` | `alaw_8khz` | 上行音频格式 |
 | `--down-audio-format` | `alaw_8khz` | 下行音频格式 |
-| `--up-audio-file` | `../assets/number.alaw_8khz` | 各媒体模式通用的 G.711A 8 kHz 数字语音文件 |
+| `--up-audio-file` | `../assets/audio.g711a` | 各媒体模式通用的 G.711A 8 kHz 单声道音频文件 |
 | `--up-video-file` | `../assets/video.h264` | 各媒体模式通用的上行视频文件；空值或 `audio-only` 表示纯音频 |
 | `--up-video-format` | `h264` | 上行视频格式，支持 `h264/h265/mjpeg` |
 | `--down-video-format` | `h264` | 下行视频保存格式后缀，支持 `h264/h265/mjpeg` |
@@ -337,7 +337,7 @@ Python 与 C 模拟器统一通过 `SessionArbiter` 仲裁 MQTT、终端和 SDK 
 
 ```bash
 python3 device_sim_main.py --device-id DEV000001 --device-key your-key \
-  --up-audio-file ../assets/number.alaw_8khz \
+  --up-audio-file ../assets/audio.g711a \
   --up-video-file ../assets/video.h264 \
   --up-video-format h264
 ```
@@ -362,7 +362,7 @@ python3 device_sim_main.py --device-id DEV000001 --device-key your-key \
 
 ```bash
 python3 device_sim_main.py --device-id DEV000001 --device-key your-key \
-  --up-audio-file ../assets/number.alaw_8khz \
+  --up-audio-file ../assets/audio.g711a \
   --up-audio-format alaw_8khz \
   --up-video-file audio-only
 ```
@@ -386,7 +386,7 @@ python3 device_sim_main.py --device-id DEV000001 --device-key your-key \
 
 ```bash
 python3 device_sim_main.py --device-id DEV000001 --device-key your-key \
-  --up-audio-file ../assets/number.alaw_8khz \
+  --up-audio-file ../assets/audio.g711a \
   --up-audio-format alaw_8khz \
   --up-video-file ../assets/video.h264 \
   --up-video-format h264
@@ -442,7 +442,7 @@ python3 device_sim_main.py --device-id DEV000001 --device-key your-key \
 
 ```bash
 python3 device_sim_main.py --device-id DEV000001 --device-key your-key \
-  --up-audio-file ../assets/number.alaw_8khz \
+  --up-audio-file ../assets/audio.g711a \
   --up-audio-format alaw_8khz \
   --down-audio-format alaw_8khz \
   --up-video-file ""
@@ -651,7 +651,7 @@ config = RuntimeConfig(
     voip_server=svc["voip_server"],
     ai_server=svc["ai_server"],
     call_server=svc["call_server"],
-    up_audio_file="assets/number.alaw_8khz",
+    up_audio_file="assets/audio.g711a",
     up_video_file="assets/video.h264",  # 空字符串表示设备无视频能力
     down_media_dir="./received",
 )

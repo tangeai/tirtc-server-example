@@ -37,7 +37,7 @@ cd device-sim-c && make
 
 持续集成或交付前使用 `make WERROR=1` 将编译警告视为错误，并用 `make WERROR=1 test` 运行文件分帧与 SDK 回调屏障测试。
 
-仓库已内置默认的 `../assets/video.h264` 和 `../assets/number.alaw_8khz`，可直接启动。需要额外格式素材时再生成：
+仓库已内置默认的 `../assets/video.h264` 和 `../assets/audio.g711a`，可直接启动。需要额外格式素材时再生成：
 ```bash
 bash ../scripts/gen_assets.sh
 ```
@@ -62,7 +62,7 @@ bash ../scripts/gen_assets.sh
 | `--mac` | `AA:BB:CC:DD:EE:FF` | 设备 MAC（未绑定流程） |
 | `--endpoint` | `http://ep-open.tangeopen.com` | 服务发现入口 |
 | `--log-level` | `debug` | `debug` / `info` / `warn` / `error` |
-| `--up-audio-file` | `../assets/number.alaw_8khz` | 推流、VoIP、AI 和设备互呼共用的 G.711A 8 kHz 数字语音文件（环境变量 `UP_AUDIO_FILE`） |
+| `--up-audio-file` | `../assets/audio.g711a` | 推流、VoIP、AI 和设备互呼共用的 G.711A 8 kHz 单声道音频文件（环境变量 `UP_AUDIO_FILE`） |
 | `--up-audio-format` | `alaw_8khz` | 上述文件格式（环境变量 `UP_AUDIO_FORMAT`） |
 | `--down-audio-format` | `alaw_8khz` | 下行协商格式（环境变量 `DOWN_AUDIO_FORMAT`） |
 | `--up-video-file` | `../assets/video.h264` | 推流、VoIP、设备互呼共用的编码视频文件；空路径表示纯音频（环境变量 `UP_VIDEO_FILE`） |
@@ -241,12 +241,12 @@ SDK 的初始化与回调注册、WHIP/P2P 连接、媒体帧 `TIRTCFRAMEINFO`�
 ```c
 // ── 进程初始化 ──
 VoipState *vs = voip_create(svc.voip_server, did, mqtt_token,
-                            "../assets/number.alaw_8khz");
+                            "../assets/audio.g711a");
 AiState *as = ai_create_ex(svc.ai_server, did, mqtt_token,
-                           "../assets/number.alaw_8khz",
+                           "../assets/audio.g711a",
                            "alaw_8khz", "alaw_8khz");
 CallState *cs = call_create_ex(svc.call_server, did, mqtt_token,
-                               "../assets/number.alaw_8khz", "alaw_8khz",
+                               "../assets/audio.g711a", "alaw_8khz",
                                "../assets/video.h264", "h264");
 
 stream_service_register();
@@ -256,7 +256,7 @@ call_service_register();
 tirtc_runtime_start(did, dkey, client_id, svc.tirtc_endpoint);
 
 // Coordinator 激活实时流业务后：
-stream_service_start("../assets/video.h264", "../assets/number.alaw_8khz",
+stream_service_start("../assets/video.h264", "../assets/audio.g711a",
                      "alaw_8khz", "h264");
 
 // ── VoIP 业务 ──
@@ -272,7 +272,7 @@ ai_service_start(as);
 ai_get_token(svc.ai_server, mqtt_token, did,
              peer_id, sizeof(peer_id), token, sizeof(token),
              role_id, sizeof(role_id));
-ai_start_session(as, peer_id, token, "../assets/number.alaw_8khz", did, role_id);
+ai_start_session(as, peer_id, token, "../assets/audio.g711a", did, role_id);
 // 结束业务：ai_service_stop(as)
 
 // ── 设备互呼业务 ──

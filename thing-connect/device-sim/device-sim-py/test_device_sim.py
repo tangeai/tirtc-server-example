@@ -34,6 +34,9 @@ class JsonResponse:
 
 
 class DeviceSimulatorTests(unittest.TestCase):
+    def test_default_audio_is_bundled_g711a_file(self):
+        self.assertEqual(device_sim_main.DEFAULT_AUDIO_FILENAME, "audio.g711a")
+
     def test_bind_guide_uses_fixed_experience_platform(self):
         output = io.StringIO()
         with redirect_stdout(output):

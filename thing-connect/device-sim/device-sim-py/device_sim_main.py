@@ -20,6 +20,7 @@ import sys
 import threading
 
 DEFAULT_SDK_VERSION = "2.2.1"
+DEFAULT_AUDIO_FILENAME = "audio.g711a"
 EXPERIENCE_PLATFORM_URL = "https://demo-open.tange-ai.com"
 
 if not ((3, 10) <= sys.version_info[:2] <= (3, 12)):
@@ -245,7 +246,7 @@ def main():
                              "alaw_8khz 或 alaw_16khz")
     _base = getattr(sys, "_MEIPASS", None) or os.path.join(os.path.dirname(__file__), "..")
     _assets = os.path.join(_base, "assets")
-    _default_audio_file = os.path.join(_assets, "number.alaw_8khz")
+    _default_audio_file = os.path.join(_assets, DEFAULT_AUDIO_FILENAME)
     _default_video_file = os.path.join(_assets, "video.h264")
     media = parser.add_argument_group("通用媒体参数")
     media.add_argument("--up-audio-format", default=os.getenv("UP_AUDIO_FORMAT", "alaw_8khz"),
@@ -255,7 +256,7 @@ def main():
                        type=normalize_audio_format, choices=AUDIO_FORMAT_CHOICES,
                        help="下行音频格式（默认 alaw_8khz）")
     media.add_argument("--up-audio-file", default=os.getenv("UP_AUDIO_FILE", _default_audio_file),
-                       help="上行音频文件路径（默认 ../assets/number.alaw_8khz）")
+                       help="上行音频文件路径（默认 ../assets/audio.g711a）")
     media.add_argument("--up-video-file", default=os.getenv("UP_VIDEO_FILE", _default_video_file),
                        help="上行视频文件路径（默认 ../assets/video.h264）；空值表示纯音频")
     media.add_argument("--up-video-format", default=os.getenv("UP_VIDEO_FORMAT", "h264"),

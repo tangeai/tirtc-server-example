@@ -32,7 +32,7 @@ ENDPOINT    = os.getenv("TIRTC_ENDPOINT") or _svc["tirtc_endpoint"]
 VOIP_AUDIO  = os.getenv(
     "VOIP_AUDIO",
     os.path.join(
-        os.path.dirname(__file__), "..", "assets", "number.alaw_8khz"),
+        os.path.dirname(__file__), "..", "assets", "audio.g711a"),
 )
 
 # 步骤 1：用 HMAC-SHA256 签名换取 mqtt_token
