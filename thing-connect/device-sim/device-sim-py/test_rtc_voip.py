@@ -33,7 +33,7 @@ _STATE_FIELDS = {
     "whip_connect_timer": "_whip_connect_timer",
     "connect_timer": "_connect_timer",
     "session_generation": "_session_generation",
-    "sdk_running": "_sdk_running",
+    "service_active": "_service_active",
     "speaker": "_speaker",
     "mic_capture": "_mic_capture",
 }
@@ -84,10 +84,19 @@ class RtcVoipTests(unittest.TestCase):
             name: getattr(rtc_voip, attr_name)
             for name, attr_name in _STATE_FIELDS.items()
         }
-        self._sdk_stopped_was_set = rtc_voip._sdk_stopped.is_set()
+        self._bind_runtime = mock.patch.object(
+            rtc_voip.process_tirtc_runtime,
+            "bind_active_connection",
+            return_value=True,
+        )
+        self._bind_runtime.start()
+        self._safe_disconnect = mock.patch.object(
+            rtc_voip.sdk, "TiRtcDisconnect", return_value=0)
+        self._safe_disconnect.start()
         rtc_voip._stream_stop.clear()
 
     def tearDown(self):
+        rtc_voip._callback_guard.wait_for_all()
         for handle_name in ("_recv_file", "_recv_video_file"):
             handle = getattr(rtc_voip, handle_name)
             if handle is not None:
@@ -95,10 +104,8 @@ class RtcVoipTests(unittest.TestCase):
                 setattr(rtc_voip, handle_name, None)
         for name, attr_name in _STATE_FIELDS.items():
             setattr(rtc_voip, attr_name, self._saved[name])
-        if self._sdk_stopped_was_set:
-            rtc_voip._sdk_stopped.set()
-        else:
-            rtc_voip._sdk_stopped.clear()
+        self._safe_disconnect.stop()
+        self._bind_runtime.stop()
         rtc_voip._stream_stop.set()
 
     def test_report_profile_includes_camera_rotation(self):
@@ -301,6 +308,7 @@ class RtcVoipTests(unittest.TestCase):
                 self.assertEqual(rtc_voip._session_state, "IDLE")
 
                 captured["callback"](0, ctypes.c_void_p(0x4321), None)
+                rtc_voip._callback_guard.wait_for_all()
                 self.assertEqual(rtc_voip._session_state, "IDLE")
                 self.assertIsNone(rtc_voip._active_hconn)
                 disconnect.assert_called_once()
@@ -350,16 +358,9 @@ class RtcVoipTests(unittest.TestCase):
             rtc_voip._recv_root = root
             rtc_voip._video_file_path = ""
             rtc_voip._device_id = "DEV000001"
-            threads = []
-
             def whip_connect(_peer_id, _token, callback, _user_data):
                 callback(0, ctypes.c_void_p(0x1234), None)
                 return 0
-
-            def make_thread(*args, **kwargs):
-                thread = _FakeThread(*args, **kwargs)
-                threads.append(thread)
-                return thread
 
             session_end = mock.Mock()
             old_callback = rtc_voip._session_end_callback
@@ -369,8 +370,7 @@ class RtcVoipTests(unittest.TestCase):
                         mock.patch.object(rtc_voip, "convert_audio_to_wav"), \
                         mock.patch.object(rtc_voip.sdk, "TiRtcWhipConnect", side_effect=whip_connect), \
                         mock.patch.object(rtc_voip.sdk, "TiRtcSendCommand"), \
-                        mock.patch.object(rtc_voip.sdk, "TiRtcDisconnect"), \
-                        mock.patch.object(rtc_voip.threading, "Thread", side_effect=make_thread):
+                        mock.patch.object(rtc_voip.sdk, "TiRtcDisconnect"):
                     rtc_voip.start_session(
                         "whips://peer",
                         "token",
@@ -378,15 +378,14 @@ class RtcVoipTests(unittest.TestCase):
                         with_video=False,
                         cancel_on_connect=True,
                     )
-                    self.assertEqual(len(threads), 1)
-                    threads[0].target(*threads[0].args)
+                    rtc_voip._callback_guard.wait_for_all()
             finally:
                 rtc_voip.set_session_end_callback(old_callback)
 
             self.assertEqual(rtc_voip._session_state, "IDLE")
             session_end.assert_called_once_with()
 
-    def test_uninit_sdk_stops_session_before_uninit(self):
+    def test_stop_service_stops_session_without_stopping_sdk(self):
         class _Closable:
             def __init__(self):
                 self.closed = False
@@ -396,26 +395,25 @@ class RtcVoipTests(unittest.TestCase):
 
         speaker = _Closable()
         mic = _Closable()
-        rtc_voip._sdk_running = True
+        rtc_voip._service_active = True
         rtc_voip._speaker = speaker
         rtc_voip._mic_capture = mic
-        rtc_voip._sdk_stopped.set()
 
         with mock.patch.object(rtc_voip, "stop_session") as stop_session, \
                 mock.patch.object(rtc_voip.sdk, "TiRtcStop") as sdk_stop, \
                 mock.patch.object(rtc_voip.sdk, "TiRtcUninit") as sdk_uninit:
-            rtc_voip.uninit_sdk()
+            rtc_voip.stop_service()
 
         stop_session.assert_called_once_with()
-        sdk_stop.assert_called_once_with()
-        sdk_uninit.assert_called_once_with()
-        self.assertFalse(rtc_voip._sdk_running)
+        sdk_stop.assert_not_called()
+        sdk_uninit.assert_not_called()
+        self.assertFalse(rtc_voip._service_active)
         self.assertTrue(speaker.closed)
         self.assertTrue(mic.closed)
         self.assertIsNone(rtc_voip._speaker)
         self.assertIsNone(rtc_voip._mic_capture)
 
-    def test_uninit_sdk_waits_until_active_sdk_callback_returns(self):
+    def test_stop_service_waits_until_active_sdk_callback_returns(self):
         callback_entered = threading.Event()
         release_callback = threading.Event()
 
@@ -428,47 +426,33 @@ class RtcVoipTests(unittest.TestCase):
         callback_thread.start()
         self.assertTrue(callback_entered.wait(timeout=1.0))
 
-        rtc_voip._sdk_running = True
-        rtc_voip._sdk_stopped.set()
+        rtc_voip._service_active = True
         with mock.patch.object(rtc_voip, "stop_session"), \
                 mock.patch.object(rtc_voip.sdk, "TiRtcStop") as sdk_stop, \
                 mock.patch.object(rtc_voip.sdk, "TiRtcUninit") as sdk_uninit:
-            uninit_thread = threading.Thread(target=rtc_voip.uninit_sdk)
-            uninit_thread.start()
+            stop_thread = threading.Thread(target=rtc_voip.stop_service)
+            stop_thread.start()
             time.sleep(0.05)
             sdk_stop.assert_not_called()
             sdk_uninit.assert_not_called()
 
             release_callback.set()
             callback_thread.join(timeout=1.0)
-            uninit_thread.join(timeout=1.0)
+            stop_thread.join(timeout=1.0)
 
-        self.assertFalse(uninit_thread.is_alive())
-        sdk_stop.assert_called_once_with()
-        sdk_uninit.assert_called_once_with()
+        self.assertFalse(stop_thread.is_alive())
+        sdk_stop.assert_not_called()
+        sdk_uninit.assert_not_called()
 
     def test_remote_hangup_disconnects_only_after_command_callback_returns(self):
-        threads = []
-
-        def make_thread(*args, **kwargs):
-            thread = _FakeThread(*args, **kwargs)
-            threads.append(thread)
-            return thread
-
         rtc_voip._session_state = "IN_CALL"
         rtc_voip._active_hconn = 0x1234
         callbacks = rtc_voip._build_callbacks()
 
         with mock.patch.object(
-                rtc_voip.threading, "Thread", side_effect=make_thread), \
-                mock.patch.object(
-                    rtc_voip.sdk, "TiRtcDisconnect", return_value=0) as disconnect:
+                rtc_voip.sdk, "TiRtcDisconnect", return_value=0) as disconnect:
             callbacks.on_command(ctypes.c_void_p(0x1234), 0x2001, None, 0)
-            disconnect.assert_not_called()
-            self.assertEqual(len(threads), 1)
-            self.assertTrue(threads[0].started)
-
-            threads[0].target(*threads[0].args)
+            rtc_voip._callback_guard.wait_for_all()
 
         disconnect.assert_called_once()
         self.assertEqual(disconnect.call_args.args[0].value, 0x1234)

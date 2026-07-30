@@ -97,11 +97,16 @@ class VoipCallState:
         self._voip_audio   = voip_audio
         self._auth_list    = auth_list or []
         self._callers_refreshing = False
+        self._callers_refresh_submitter = None
         self._before_start = before_start or (lambda action: action())
         self._before_accept = before_accept or self._before_start
         self._before_accept_ticket = before_accept_ticket
         self._before_continue = before_continue or self._before_start
         self._after_stop   = after_stop or (lambda: None)
+        self._reject_submitter = (
+            lambda payload, reason:
+                self.reject_incoming(payload, reason)
+        )
         self._video_capable = (
             rtc_voip.has_video()
             if video_capable is None else bool(video_capable))
@@ -118,6 +123,17 @@ class VoipCallState:
         self._ended_outgoing_calls = {}
         self._active_room_id  = ""
         self._lock = threading.Lock()
+
+    def set_reject_submitter(self, submitter) -> None:
+        """Inject the MQTT-safe background submitter owned by the router."""
+        self._reject_submitter = submitter
+
+    def set_callers_refresh_submitter(self, submitter) -> None:
+        """Inject the process-owned background executor for contact refresh."""
+        self._callers_refresh_submitter = submitter
+
+    def _reject_later(self, payload: dict, reason: int) -> None:
+        self._reject_submitter(dict(payload), reason)
 
     def _cancel_outgoing_ring_timer_locked(self) -> None:
         timer, self._outgoing_ring_timer = self._outgoing_ring_timer, None
@@ -273,8 +289,7 @@ class VoipCallState:
         if ended_outgoing:
             _warn(f"忽略已经取消或超时的外呼回铃 call_id={wx_call_id} room={wx_room_id}")
             if wx_app_id and wx_model_id:
-                rtc_voip.reject_session(wx_app_id, wx_model_id,
-                                        wx_server_token, wx_room_id, wx_payload_str, 7)
+                self._reject_later(p, 7)
             return
 
         matches_outgoing = False
@@ -288,10 +303,10 @@ class VoipCallState:
                 )
             elif wx_call_id:
                 # 请求响应可能晚于 MQTT 房间通知。此时本地还没有 call_id，
-                # 但新版服务端的 from 可以证明它属于本设备刚发起的外呼。
+                # wx_from 可证明它属于本设备刚发起的外呼。
                 matches_outgoing = wx_from == self._device_id and openid_matches
             else:
-                # 兼容未返回 call_id 的旧服务端，只能退回到 OpenID 判断。
+                # 未携带 call_id 时按当前外呼目标 OpenID 判断。
                 matches_outgoing = openid_matches
 
         if is_outgoing and not matches_outgoing:
@@ -300,15 +315,13 @@ class VoipCallState:
                 f"call_id={wx_call_id or '-'}"
             )
             if wx_app_id and wx_model_id:
-                rtc_voip.reject_session(wx_app_id, wx_model_id,
-                                        wx_server_token, wx_room_id, wx_payload_str, 5)
+                self._reject_later(p, 5)
             return
 
         if rtc_voip.is_active() or has_pending:
             _warn(f"{'已在对讲中' if rtc_voip.is_active() else '已有待确认来电'}，自动拒接")
             if wx_app_id and wx_model_id:
-                rtc_voip.reject_session(wx_app_id, wx_model_id,
-                                        wx_server_token, wx_room_id, wx_payload_str, 7)
+                self._reject_later(p, 7)
             return
 
         own_outgoing_recovery = bool(
@@ -370,8 +383,7 @@ class VoipCallState:
         if not peer_id or not token:
             _warn(f"来电缺少 peer_id/token，无法接听 room={wx_room_id}")
             if wx_app_id and wx_model_id:
-                rtc_voip.reject_session(wx_app_id, wx_model_id,
-                                        wx_server_token, wx_room_id, wx_payload_str, 7)
+                self._reject_later(p, 7)
             return
 
         with self._lock:
@@ -434,17 +446,18 @@ class VoipCallState:
                 with self._lock:
                     self._callers_refreshing = False
 
-        thread = threading.Thread(
-            target=refresh,
-            daemon=True,
-            name="voip-callers-refresh",
-        )
         try:
-            thread.start()
-        except RuntimeError as exc:
+            submitted = (
+                self._callers_refresh_submitter is not None
+                and self._callers_refresh_submitter(refresh)
+            )
+        except BaseException as exc:
+            submitted = False
+            _warn(f"授权列表刷新任务提交失败: {exc}")
+        if not submitted:
             with self._lock:
                 self._callers_refreshing = False
-            _warn(f"无法启动授权列表刷新线程: {exc}")
+            _warn("授权列表刷新执行器不可用")
 
     def list_callers(self) -> list:
         """返回授权呼叫对象；列表为空时通过 HTTP 刷新。"""
@@ -690,7 +703,7 @@ class VoipCallState:
                                    json=body, headers=headers, timeout=10)
             resp = r.json() if r.headers.get("Content-Type", "").startswith("application/json") else {}
             code = resp.get("code", -1)
-            msg  = resp.get("msg", r.text)
+            msg  = resp.get("msg") or "<响应体已省略>"
             if r.status_code == 200 and code == 0:
                 _ok(
                     f"已发起{'视频' if call_type == 'video' else '语音'}呼叫 → "

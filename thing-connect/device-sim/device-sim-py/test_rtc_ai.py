@@ -79,12 +79,18 @@ class RtcAiLifecycleTests(unittest.TestCase):
             mock.patch.object(
                 rtc_ai.sdk, "TiRtcGetErrorStr", return_value=b"test error"),
             mock.patch.object(rtc_ai.sdk, "TiRtcDisconnect", return_value=0),
+            mock.patch.object(
+                rtc_ai.process_tirtc_runtime,
+                "bind_active_connection",
+                return_value=True,
+            ),
         ]
         for patcher in self.patches:
             patcher.start()
 
     def tearDown(self):
         rtc_ai.stop_session()
+        rtc_ai._callback_guard.wait_for_all()
         rtc_ai.set_session_end_callback(None)
         for patcher in reversed(self.patches):
             patcher.stop()
@@ -128,7 +134,10 @@ class RtcAiLifecycleTests(unittest.TestCase):
             rtc_ai.start_session("new-peer", "token", "new.pcm", "dev")
             second_generation = rtc_ai._session_generation
 
-        callbacks[0](0, ctypes.c_void_p(0x1234), None)
+        with mock.patch.object(
+                rtc_ai.threading, "Thread", _ImmediateThread):
+            callbacks[0](0, ctypes.c_void_p(0x1234), None)
+        rtc_ai._callback_guard.wait_for_all()
 
         self.assertNotEqual(first_generation, second_generation)
         self.assertEqual(rtc_ai.get_state(), "CONNECTING")
@@ -178,6 +187,7 @@ class RtcAiLifecycleTests(unittest.TestCase):
                 "dev",
             )
             callbacks[0](0, ctypes.c_void_p(0x1234), None)
+            rtc_ai._callback_guard.wait_for_all()
 
             raw_message = send_command.call_args.args[2]
             message = json.loads(raw_message.decode())

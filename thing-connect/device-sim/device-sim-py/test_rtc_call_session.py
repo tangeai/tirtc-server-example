@@ -34,8 +34,9 @@ class DeleteContactTests(unittest.TestCase):
             "https://call.example/v1/call/device/contacts?peer_id=peer+device"
         )
         trace.assert_any_call(
-            '请求头: {"Authorization":"Bearer secret-token","Content-Type":"application/json"}'
+            '请求头: {"Authorization":"<redacted>","Content-Type":"application/json"}'
         )
+        self.assertFalse(any("secret-token" in call.args[0] for call in trace.call_args_list))
 
     def test_remark_contact_sends_peer_id_and_full_remark(self):
         state = CallState.__new__(CallState)
@@ -58,7 +59,7 @@ class DeleteContactTests(unittest.TestCase):
             timeout=10,
         )
         trace.assert_any_call('请求体: {"peer_id":"peer-device","remark":"客厅 的 设备"}')
-        self.assertTrue(any("secret-token" in call.args[0] for call in trace.call_args_list))
+        self.assertFalse(any("secret-token" in call.args[0] for call in trace.call_args_list))
 
 
 class ContactHTTPTests(unittest.TestCase):
@@ -179,7 +180,7 @@ class ContactHTTPTests(unittest.TestCase):
         )
         trace.assert_any_call("请求: POST https://call.example/v1/call/request")
         trace.assert_any_call(
-            '请求头: {"Authorization":"Bearer secret-token","Content-Type":"application/json"}'
+            '请求头: {"Authorization":"<redacted>","Content-Type":"application/json"}'
         )
         trace.assert_any_call(
             '请求体: {"targets":["TG3883MDUMN6"],"call_type":"video"}'
@@ -187,7 +188,7 @@ class ContactHTTPTests(unittest.TestCase):
         trace.assert_any_call(
             '响应: HTTP 200 body={"code":40201,"msg":"all targets offline"}'
         )
-        self.assertTrue(any("secret-token" in call.args[0] for call in trace.call_args_list))
+        self.assertFalse(any("secret-token" in call.args[0] for call in trace.call_args_list))
 
     def test_omitted_call_type_defaults_to_audio_without_video(self):
         self.state._video_capable = False
@@ -343,6 +344,18 @@ class CallLifecycleRaceTests(unittest.TestCase):
                 call_type="audio",
             )
             self.assertEqual(state._call_type, "audio")
+
+    def test_incoming_video_is_audio_when_device_has_no_video(self):
+        state = CallState(
+            "https://call.example", "dev-1", "mqtt-token",
+            send_video="",
+        )
+        state.on_device_call_incoming({
+            "room_id": "room-video",
+            "caller_id": "caller-1",
+            "call_type": "video",
+        })
+        self.assertEqual(state._pending_call["call_type"], "audio")
 
 
 if __name__ == "__main__":

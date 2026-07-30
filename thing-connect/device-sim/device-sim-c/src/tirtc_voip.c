@@ -31,6 +31,7 @@
 #include "media_format.h"
 #include "media_rx_log.h"
 #include "sdk_callback_guard.h"
+#include "tirtc_runtime.h"
 
 extern volatile sig_atomic_t g_stop;
 
@@ -64,6 +65,7 @@ static int voip_env_positive_int(const char *name, int default_value) {
 
 #define VOIP_CONNECT_TIMEOUT_MS 10000
 #define VOIP_ACCEPT_TIMEOUT_MS  10000
+#define VOIP_REJECT_QUEUE_CAPACITY 16
 
 struct VoipState {
     char voip_server[256];
@@ -100,8 +102,31 @@ struct VoipState {
 
     /* Authorized callers list (JSON array) */
     cJSON          *auth_list;
+    pthread_t       callers_refresh_thread;
+    int             callers_refresh_thread_started;
+    int             callers_refresh_stop;
+    int             callers_refresh_requested;
     int             callers_refresh_running;
     pthread_cond_t  callers_refresh_cond;
+
+    /* HTTP rejects submitted by MQTT callbacks. */
+    pthread_mutex_t reject_lock;
+    pthread_cond_t  reject_ready;
+    pthread_cond_t  reject_idle;
+    pthread_t       reject_thread;
+    int             reject_thread_started;
+    int             reject_stop;
+    int             reject_active;
+    size_t          reject_head;
+    size_t          reject_count;
+    struct {
+        char app_id[64];
+        char model_id[64];
+        char session_token[256];
+        char room_id[128];
+        char payload[512];
+        int reason;
+    } reject_queue[VOIP_REJECT_QUEUE_CAPACITY];
 
     /* SDK session */
     SessionState    session_state;
@@ -129,9 +154,48 @@ struct VoipState {
     void            *before_recovered_start_user;
 };
 
-/* Only one VoIP module owns the process-global TiRTC callback table. */
+/* Active VoIP business state selected by the process runtime. */
 static VoipState *s_active_vs = NULL;
 static pthread_mutex_t s_vs_mtx = PTHREAD_MUTEX_INITIALIZER;
+
+static void *voip_refresh_callers_worker(void *opaque);
+
+static void *_voip_reject_worker(void *opaque) {
+    VoipState *vs = opaque;
+    pthread_mutex_lock(&vs->reject_lock);
+    for (;;) {
+        while (!vs->reject_stop && vs->reject_count == 0)
+            pthread_cond_wait(&vs->reject_ready, &vs->reject_lock);
+        if (vs->reject_stop && vs->reject_count == 0)
+            break;
+
+        size_t slot = vs->reject_head;
+        char app_id[64], model_id[64], session_token[256];
+        char room_id[128], payload[512];
+        int reason = vs->reject_queue[slot].reason;
+        STR_COPY(app_id, vs->reject_queue[slot].app_id);
+        STR_COPY(model_id, vs->reject_queue[slot].model_id);
+        STR_COPY(session_token, vs->reject_queue[slot].session_token);
+        STR_COPY(room_id, vs->reject_queue[slot].room_id);
+        STR_COPY(payload, vs->reject_queue[slot].payload);
+        vs->reject_head =
+            (vs->reject_head + 1) % VOIP_REJECT_QUEUE_CAPACITY;
+        vs->reject_count--;
+        vs->reject_active = 1;
+        pthread_mutex_unlock(&vs->reject_lock);
+
+        (void)voip_reject_session(app_id, model_id, session_token,
+                                  room_id, payload, reason);
+
+        pthread_mutex_lock(&vs->reject_lock);
+        vs->reject_active = 0;
+        if (vs->reject_count == 0)
+            pthread_cond_broadcast(&vs->reject_idle);
+    }
+    pthread_cond_broadcast(&vs->reject_idle);
+    pthread_mutex_unlock(&vs->reject_lock);
+    return NULL;
+}
 
 VoipState *voip_create(const char *voip_server, const char *device_id,
                        const char *mqtt_token, const char *voip_audio) {
@@ -143,11 +207,47 @@ VoipState *voip_create(const char *voip_server, const char *device_id,
     pthread_mutex_init(&vs->lock, NULL);
     pthread_mutex_init(&vs->control_lock, NULL);
     pthread_cond_init(&vs->callers_refresh_cond, NULL);
+    pthread_mutex_init(&vs->reject_lock, NULL);
+    pthread_cond_init(&vs->reject_ready, NULL);
+    pthread_cond_init(&vs->reject_idle, NULL);
     pthread_mutex_init(&vs->rx_log.lock, NULL);
     vs->session_state = SESS_IDLE;
     vs->up_audio_format = audio_format_find("alaw_8khz");
     vs->up_video_format = video_format_find("h264");
     vs->auth_list = NULL;
+    if (pthread_create(&vs->reject_thread, NULL,
+                       _voip_reject_worker, vs) != 0) {
+        LOG_E("无法创建 VoIP 忙线拒接工作线程");
+        pthread_mutex_destroy(&vs->rx_log.lock);
+        pthread_cond_destroy(&vs->reject_idle);
+        pthread_cond_destroy(&vs->reject_ready);
+        pthread_mutex_destroy(&vs->reject_lock);
+        pthread_cond_destroy(&vs->callers_refresh_cond);
+        pthread_mutex_destroy(&vs->control_lock);
+        pthread_mutex_destroy(&vs->lock);
+        free(vs);
+        return NULL;
+    }
+    vs->reject_thread_started = 1;
+    if (pthread_create(&vs->callers_refresh_thread, NULL,
+                       voip_refresh_callers_worker, vs) != 0) {
+        LOG_E("无法创建 VoIP 授权列表刷新工作线程");
+        pthread_mutex_lock(&vs->reject_lock);
+        vs->reject_stop = 1;
+        pthread_cond_broadcast(&vs->reject_ready);
+        pthread_mutex_unlock(&vs->reject_lock);
+        pthread_join(vs->reject_thread, NULL);
+        pthread_mutex_destroy(&vs->rx_log.lock);
+        pthread_cond_destroy(&vs->reject_idle);
+        pthread_cond_destroy(&vs->reject_ready);
+        pthread_mutex_destroy(&vs->reject_lock);
+        pthread_cond_destroy(&vs->callers_refresh_cond);
+        pthread_mutex_destroy(&vs->control_lock);
+        pthread_mutex_destroy(&vs->lock);
+        free(vs);
+        return NULL;
+    }
+    vs->callers_refresh_thread_started = 1;
     return vs;
 }
 
@@ -177,13 +277,38 @@ void voip_destroy(VoipState *vs) {
     pthread_mutex_lock(&s_vs_mtx);
     if (s_active_vs == vs) s_active_vs = NULL;
     pthread_mutex_unlock(&s_vs_mtx);
+
     pthread_mutex_lock(&vs->lock);
-    while (vs->callers_refresh_running)
-        pthread_cond_wait(&vs->callers_refresh_cond, &vs->lock);
+    vs->callers_refresh_stop = 1;
+    vs->callers_refresh_requested = 0;
+    pthread_cond_broadcast(&vs->callers_refresh_cond);
+    int callers_refresh_started = vs->callers_refresh_thread_started;
+    pthread_t callers_refresh_thread = vs->callers_refresh_thread;
+    pthread_mutex_unlock(&vs->lock);
+    if (callers_refresh_started &&
+        !pthread_equal(pthread_self(), callers_refresh_thread))
+        pthread_join(callers_refresh_thread, NULL);
+
+    pthread_mutex_lock(&vs->lock);
     cJSON *auth_list = vs->auth_list;
     vs->auth_list = NULL;
     pthread_mutex_unlock(&vs->lock);
     if (auth_list) cJSON_Delete(auth_list);
+
+    pthread_mutex_lock(&vs->reject_lock);
+    vs->reject_stop = 1;
+    pthread_cond_broadcast(&vs->reject_ready);
+    while (vs->reject_count != 0 || vs->reject_active)
+        pthread_cond_wait(&vs->reject_idle, &vs->reject_lock);
+    int reject_started = vs->reject_thread_started;
+    pthread_t reject_thread = vs->reject_thread;
+    pthread_mutex_unlock(&vs->reject_lock);
+    if (reject_started && !pthread_equal(pthread_self(), reject_thread))
+        pthread_join(reject_thread, NULL);
+
+    pthread_cond_destroy(&vs->reject_idle);
+    pthread_cond_destroy(&vs->reject_ready);
+    pthread_mutex_destroy(&vs->reject_lock);
     pthread_cond_destroy(&vs->callers_refresh_cond);
     pthread_mutex_destroy(&vs->rx_log.lock);
     pthread_mutex_destroy(&vs->control_lock);
@@ -395,8 +520,8 @@ int voip_report_profile(const char *voip_server, const char *mqtt_token,
              hor_mirror ? "true" : "false",
              vert_mirror ? "true" : "false",
              down->sample_rate,
-             s_voip_has_video ? up_video->codec : "",
-             s_voip_has_video ? down_video->codec : "",
+             s_voip_has_video ? up_video->codec : "none",
+             s_voip_has_video ? down_video->codec : "none",
              down->codec, s_voip_has_video ? "false" : "true");
 
     char body_buf[4096];
@@ -405,7 +530,7 @@ int voip_report_profile(const char *voip_server, const char *mqtt_token,
         cJSON *r = cJSON_Parse(body_buf);
         cJSON *code = r ? cJSON_GetObjectItem(r, "code") : NULL;
         int cv = (code && cJSON_IsNumber(code)) ? code->valueint : -1;
-        LOG_D("POST %s -> HTTP %ld body: %s", url, http_code, body_buf);
+        LOG_D("POST %s -> HTTP %ld code=%d", url, http_code, cv);
         if (http_code == 200 && cv == 0)
             LOG_I("VoIP profile 上报成功: up_audio=%s video=%s",
                   up->name, s_voip_has_video ? up_video->name : "关闭");
@@ -426,7 +551,6 @@ int voip_report_profile(const char *voip_server, const char *mqtt_token,
             if (http_code == 200 && code && cJSON_IsNumber(code) && code->valueint == 0) {
                 cJSON *data = cJSON_GetObjectItem(r, "data");
                 cJSON *list = data ? cJSON_GetObjectItem(data, "contacts") : NULL;
-                LOG_D("GET %s -> HTTP %ld body: %s", url, http_code, body_buf);
                 if (list && cJSON_IsArray(list)) {
                     *auth_list_out = cJSON_Duplicate(list, 1);
                     if (*auth_list_out) {
@@ -434,6 +558,9 @@ int voip_report_profile(const char *voip_server, const char *mqtt_token,
                         LOG_I("授权呼叫方: %d 个", cJSON_GetArraySize(list));
                     }
                 }
+                LOG_D("GET %s -> HTTP %ld contacts=%d",
+                      url, http_code,
+                      list && cJSON_IsArray(list) ? cJSON_GetArraySize(list) : 0);
             }
             cJSON_Delete(r);
         }
@@ -441,41 +568,9 @@ int voip_report_profile(const char *voip_server, const char *mqtt_token,
     return contacts_ok ? 0 : -1;
 }
 
-/* ── SDK lifecycle ───────────────────────────────────────────────────────── */
+/* ── Process-runtime callbacks ───────────────────────────────────────────── */
 
-static int              s_voip_sdk_running = 0;
-static int              s_voip_sdk_started = 0;
-static int              s_voip_sdk_stopped = 0;
-static pthread_mutex_t  s_voip_state_mtx   = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t   s_voip_started_cond= PTHREAD_COND_INITIALIZER;
-static pthread_cond_t   s_voip_stopped_cond= PTHREAD_COND_INITIALIZER;
 static SdkCallbackGuard s_voip_callback_guard = SDK_CALLBACK_GUARD_INITIALIZER;
-
-/* SDK 内部日志回调（debug 级别启用） */
-static void _voip_sdk_log_cb(const char *log, uint32_t length) {
-    sdk_callback_enter(&s_voip_callback_guard);
-    LOG_SDK(log, length);
-    sdk_callback_leave(&s_voip_callback_guard);
-}
-
-static void _von_event(int event, const void *data, int len) {
-    sdk_callback_enter(&s_voip_callback_guard);
-    (void)data;(void)len;
-    if (event == TIRTC_EVENT_SYS_STARTED) {
-        pthread_mutex_lock(&s_voip_state_mtx);
-        s_voip_sdk_started = 1;
-        pthread_cond_signal(&s_voip_started_cond);
-        pthread_mutex_unlock(&s_voip_state_mtx);
-        LOG_I("SYS_STARTED");
-    } else if (event == TIRTC_EVENT_SYS_STOPPED) {
-        pthread_mutex_lock(&s_voip_state_mtx);
-        s_voip_sdk_stopped = 1;
-        pthread_cond_signal(&s_voip_stopped_cond);
-        pthread_mutex_unlock(&s_voip_state_mtx);
-        LOG_I("SYS_STOPPED");
-    }
-    sdk_callback_leave(&s_voip_callback_guard);
-}
 
 /* Forward declaration of the call state machine callbacks */
 static void _voip_handle_disconnect(VoipState *vs);
@@ -565,8 +660,12 @@ static void _von_disconnected(tirtc_conn_t hconn) {
 static void _von_audio(tirtc_conn_t hconn, const TIRTCFRAMEINFO *pFi, void *data) {
     sdk_callback_enter(&s_voip_callback_guard);
     VoipState *vs = _active_voip();
-    if (_voip_hconn_matches(vs, hconn))
-        media_rx_log_audio(&vs->rx_log, "VoIP", pFi);
+    MediaRxNotice notice;
+    if (_voip_hconn_matches(vs, hconn) &&
+        media_rx_log_note_audio(&vs->rx_log, "VoIP", pFi, &notice))
+        (void)sdk_defer_copy_action(
+            &s_voip_callback_guard, media_rx_log_emit, NULL,
+            &notice, sizeof(notice));
     (void)data;
     sdk_callback_leave(&s_voip_callback_guard);
 }
@@ -574,8 +673,12 @@ static void _von_audio(tirtc_conn_t hconn, const TIRTCFRAMEINFO *pFi, void *data
 static void _von_video(tirtc_conn_t hconn, const TIRTCFRAMEINFO *pFi, void *data) {
     sdk_callback_enter(&s_voip_callback_guard);
     VoipState *vs = _active_voip();
-    if (_voip_hconn_matches(vs, hconn))
-        media_rx_log_video(&vs->rx_log, "VoIP", pFi);
+    MediaRxNotice notice;
+    if (_voip_hconn_matches(vs, hconn) &&
+        media_rx_log_note_video(&vs->rx_log, "VoIP", pFi, &notice))
+        (void)sdk_defer_copy_action(
+            &s_voip_callback_guard, media_rx_log_emit, NULL,
+            &notice, sizeof(notice));
     (void)data;
     sdk_callback_leave(&s_voip_callback_guard);
 }
@@ -611,12 +714,7 @@ static void _von_command(tirtc_conn_t hconn, uint32_t cmdw, const void *data, ui
     sdk_callback_leave(&s_voip_callback_guard);
 }
 
-/* NOP callbacks for unused */
-static void _v_nop_1(tirtc_conn_t h) {
-    sdk_callback_enter(&s_voip_callback_guard);
-    (void)h;
-    sdk_callback_leave(&s_voip_callback_guard);
-}
+/* Callbacks for supported media events. */
 static void _v_nop_4(tirtc_conn_t h, const TIRTCFRAMEINFO *f, void *d) {
     sdk_callback_enter(&s_voip_callback_guard);
     (void)h;(void)f;(void)d;
@@ -645,41 +743,9 @@ static int _v_ret0(tirtc_conn_t h, uint8_t s) {
     return 0;
 }
 
-int voip_init_sdk(const char *device_id, const char *secret_key, const char *client_id, const char *endpoint) {
-    if (s_voip_sdk_running) return 0;
-
-    pthread_mutex_lock(&s_voip_state_mtx);
-    s_voip_sdk_started = 0;
-    s_voip_sdk_stopped = 0;
-    pthread_mutex_unlock(&s_voip_state_mtx);
-
-    uint32_t buf_size = 1024 * 1024;
-    TiRtcSetOption(TIRTC_OPT_MAX_SEND_BUFFER, &buf_size, sizeof(buf_size));
-
-    int rc = TiRtcInit();
-    if (rc != 0) { LOG_E("TiRtcInit: %s", TiRtcGetErrorStr(rc)); return -1; }
-
-    TiRtcLogConfig(0, NULL, 0);
-    TiRtcLogSetLevel(3);
-
-    /* Debug 级别：打开 SDK 内部日志 */
-    if (g_log_level <= LOG_DEBUG) {
-        TiRtcLogSetCallback(_voip_sdk_log_cb);
-        TiRtcLogSetLevel(8);
-    }
-
-    if (endpoint && endpoint[0]) {
-        TiRtcSetOption(TIRTC_OPT_SERVICE_ENDPOINT, endpoint, (uint32_t)strlen(endpoint));
-    }
-    rc = TiRtcSetOption(TIRTC_OPT_DEVICE_SECRET_KEY, secret_key, (uint32_t)strlen(secret_key));
-    if (rc != 0) { LOG_E("TiRtcSetOption(SECRET_KEY): %s", TiRtcGetErrorStr(rc)); TiRtcUninit(); return -1; }
-    rc = TiRtcSetOption(TIRTC_OPT_CLIENT_ID, client_id, (uint32_t)strlen(client_id));
-    if (rc != 0) { LOG_E("TiRtcSetOption(CLIENT_ID): %s", TiRtcGetErrorStr(rc)); TiRtcUninit(); return -1; }
-
-    static TIRTCCALLBACKS cbs;
+int voip_service_register(void) {
+    TIRTCCALLBACKS cbs;
     memset(&cbs, 0, sizeof(cbs));
-    cbs.on_event             = _von_event;
-    cbs.on_conn_accepted     = _v_nop_1;
     cbs.on_conn_error        = _von_conn_error;
     cbs.on_disconnected      = _von_disconnected;
     cbs.on_audio             = _von_audio;
@@ -691,55 +757,27 @@ int voip_init_sdk(const char *device_id, const char *secret_key, const char *cli
     cbs.on_unsubscribe_video = _v_nop_unsub;
     cbs.on_subscribe_audio   = _v_ret0;
     cbs.on_unsubscribe_audio = _v_nop_unsub;
+    return tirtc_runtime_register_service(
+        TIRTC_SERVICE_VOIP, &cbs, &s_voip_callback_guard);
+}
 
-    rc = TiRtcStart(device_id, &cbs);
-    if (rc != 0) { LOG_E("TiRtcStart: %s", TiRtcGetErrorStr(rc)); TiRtcUninit(); return -1; }
-
-    s_voip_sdk_running = 1;
-    LOG_I("TiRTC %s 启动中，等待 SYS_STARTED…", TiRtcGetVersion());
-
-    pthread_mutex_lock(&s_voip_state_mtx);
-    struct timespec dl; clock_gettime(CLOCK_REALTIME, &dl); dl.tv_sec += 10;
-    while (!s_voip_sdk_started && !g_stop)
-        if (pthread_cond_timedwait(&s_voip_started_cond, &s_voip_state_mtx, &dl) == ETIMEDOUT) break;
-    pthread_mutex_unlock(&s_voip_state_mtx);
-
-    if (!s_voip_sdk_started) {
-        LOG_E("等待 SYS_STARTED %s", g_stop ? "已取消" : "超时");
-        s_voip_sdk_running = 0;
-        sdk_callback_wait_all(&s_voip_callback_guard);
-        TiRtcStop();
-        pthread_mutex_lock(&s_voip_state_mtx);
-        clock_gettime(CLOCK_REALTIME, &dl);
-        dl.tv_sec += 8;
-        while (!s_voip_sdk_stopped)
-            if (pthread_cond_timedwait(&s_voip_stopped_cond,
-                                       &s_voip_state_mtx, &dl) == ETIMEDOUT)
-                break;
-        pthread_mutex_unlock(&s_voip_state_mtx);
-        sdk_callback_wait_all(&s_voip_callback_guard);
-        TiRtcUninit();
-        return -1;
-    }
-    LOG_I("TiRTC SDK 已就绪");
+int voip_service_start(VoipState *vs) {
+    if (!vs) return -1;
+    pthread_mutex_lock(&s_vs_mtx);
+    s_active_vs = vs;
+    pthread_mutex_unlock(&s_vs_mtx);
+    LOG_I("VoIP 业务已就绪");
     return 0;
 }
 
-void voip_uninit_sdk(void) {
-    if (!s_voip_sdk_running) return;
-    s_voip_sdk_running = 0;
+void voip_service_stop(VoipState *vs) {
+    if (!vs) return;
+    voip_stop_session(vs);
     sdk_callback_wait_all(&s_voip_callback_guard);
-    TiRtcStop();
-
-    pthread_mutex_lock(&s_voip_state_mtx);
-    struct timespec dl; clock_gettime(CLOCK_REALTIME, &dl); dl.tv_sec += 8;
-    while (!s_voip_sdk_stopped)
-        if (pthread_cond_timedwait(&s_voip_stopped_cond, &s_voip_state_mtx, &dl) == ETIMEDOUT) break;
-    pthread_mutex_unlock(&s_voip_state_mtx);
-
-    sdk_callback_wait_all(&s_voip_callback_guard);
-    TiRtcUninit();
-    LOG_I("TiRTC SDK 已停止");
+    pthread_mutex_lock(&s_vs_mtx);
+    if (s_active_vs == vs) s_active_vs = NULL;
+    pthread_mutex_unlock(&s_vs_mtx);
+    LOG_I("VoIP 业务已停止");
 }
 
 /* ── Audio push thread ───────────────────────────────────────────────────── */
@@ -931,6 +969,22 @@ static void _voip_connect_cb(int error, tirtc_conn_t hconn, void *user_data) {
             sdk_defer_action(&s_voip_callback_guard, vs->on_session_end,
                              vs->on_session_end_user) != 0)
             LOG_E("无法延后通知 VoIP 连接失败");
+        sdk_callback_leave(&s_voip_callback_guard);
+        return;
+    }
+    if (tirtc_runtime_bind_active_connection(TIRTC_SERVICE_VOIP, hconn) != 0) {
+        vs->active_hconn_set = 0;
+        vs->session_with_video = 0;
+        vs->session_state = SESS_IDLE;
+        vs->accept_deadline_ms = 0;
+        pthread_mutex_unlock(&vs->lock);
+        LOG_W("WHIP 连接完成时 VoIP 会话已切换，丢弃连接");
+        if (sdk_defer_disconnect(&s_voip_callback_guard, hconn) != 0)
+            LOG_E("无法延后断开失效 VoIP 连接");
+        if (vs->on_session_end &&
+            sdk_defer_action(&s_voip_callback_guard, vs->on_session_end,
+                             vs->on_session_end_user) != 0)
+            LOG_E("无法延后通知 VoIP runtime 代次失效");
         sdk_callback_leave(&s_voip_callback_guard);
         return;
     }
@@ -1308,7 +1362,7 @@ cJSON *voip_find_authorized(VoipState *vs, const char *wx_open_id) {
 /* ── Reject session ──────────────────────────────────────────────────────── */
 
 static void _reject_cb(const char *body, void *user_data) {
-    if (body) LOG_D("Reject 响应: %s", body);
+    LOG_D("Reject 响应已收到%s", body ? "" : "（无响应体）");
     (void)user_data;
 }
 
@@ -1550,7 +1604,7 @@ void voip_on_call_incoming(void *ctx, const struct cJSON *payload) {
     if (ignored) {
         LOG_W("忽略已经取消或超时的外呼回铃 call_id=%s room=%s", call_id, room_id);
         if (app_id[0] && model_id[0])
-            voip_reject_session(app_id, model_id, sess_tok, room_id, wx_pay, 7);
+            (void)voip_reject_incoming_payload_async(vs, payload, 7);
         return;
     }
 
@@ -1566,7 +1620,7 @@ void voip_on_call_incoming(void *ctx, const struct cJSON *payload) {
     if (is_outgoing && !matches_outgoing) {
         LOG_W("外呼进行中，自动拒接不匹配来电 room=%s call_id=%s", room_id, call_id);
         if (app_id[0] && model_id[0])
-            voip_reject_session(app_id, model_id, sess_tok, room_id, wx_pay, 5);
+            (void)voip_reject_incoming_payload_async(vs, payload, 5);
         return;
     }
 
@@ -1574,7 +1628,7 @@ void voip_on_call_incoming(void *ctx, const struct cJSON *payload) {
     if (is_active || has_pending) {
         LOG_W("%s，自动拒接", is_active ? "已在通话中" : "有待处理来电");
         if (app_id[0] && model_id[0])
-            voip_reject_session(app_id, model_id, sess_tok, room_id, wx_pay, 7);
+            (void)voip_reject_incoming_payload_async(vs, payload, 7);
         return;
     }
 
@@ -1586,8 +1640,7 @@ void voip_on_call_incoming(void *ctx, const struct cJSON *payload) {
             vs->before_recovered_start(vs->before_recovered_start_user) != 0) {
             LOG_W("恢复本设备外呼时协调器忙，拒绝 room=%s", room_id);
             if (app_id[0] && model_id[0])
-                voip_reject_session(app_id, model_id, sess_tok, room_id,
-                                    wx_pay, 5);
+                (void)voip_reject_incoming_payload_async(vs, payload, 5);
             return;
         }
         if (!peer_id[0] || !token[0]) {
@@ -1662,16 +1715,64 @@ int voip_reject_incoming_payload(const cJSON *payload, int reason) {
                                wx_payload, reason);
 }
 
-static void *voip_refresh_callers_thread(void *arg) {
-    VoipState *vs = (VoipState *)arg;
-    cJSON *new_auth_list = NULL;
-    if (voip_report_profile(vs->voip_server, vs->mqtt_token, &new_auth_list) == 0) {
-        voip_set_auth_list(vs, new_auth_list);
-    } else {
-        cJSON_Delete(new_auth_list);
-        LOG_W("授权列表刷新失败，保留上一次联系人列表");
+int voip_reject_incoming_payload_async(VoipState *vs,
+                                       const cJSON *payload, int reason) {
+    if (!vs || !payload) return -1;
+    const char *app_id = json_string_or_empty(payload, "wx_app_id");
+    const char *model_id = json_string_or_empty(payload, "wx_model_id");
+    if (!app_id[0] || !model_id[0]) return -1;
+
+    pthread_mutex_lock(&vs->reject_lock);
+    if (vs->reject_stop ||
+        vs->reject_count == VOIP_REJECT_QUEUE_CAPACITY) {
+        pthread_mutex_unlock(&vs->reject_lock);
+        LOG_W("VoIP 忙线拒接队列已停止或已满");
+        return -1;
     }
+    size_t tail =
+        (vs->reject_head + vs->reject_count) % VOIP_REJECT_QUEUE_CAPACITY;
+    STR_COPY(vs->reject_queue[tail].app_id, app_id);
+    STR_COPY(vs->reject_queue[tail].model_id, model_id);
+    STR_COPY(vs->reject_queue[tail].session_token,
+             json_string_or_empty(payload, "wx_server_token"));
+    STR_COPY(vs->reject_queue[tail].room_id,
+             json_string_or_empty(payload, "wx_room_id"));
+    STR_COPY(vs->reject_queue[tail].payload,
+             json_string_or_empty(payload, "wx_payload"));
+    vs->reject_queue[tail].reason = reason;
+    vs->reject_count++;
+    pthread_cond_signal(&vs->reject_ready);
+    pthread_mutex_unlock(&vs->reject_lock);
+    return 0;
+}
+
+static void *voip_refresh_callers_worker(void *opaque) {
+    VoipState *vs = opaque;
     pthread_mutex_lock(&vs->lock);
+    for (;;) {
+        while (!vs->callers_refresh_stop &&
+               !vs->callers_refresh_requested)
+            pthread_cond_wait(&vs->callers_refresh_cond, &vs->lock);
+        if (vs->callers_refresh_stop)
+            break;
+
+        vs->callers_refresh_requested = 0;
+        vs->callers_refresh_running = 1;
+        pthread_mutex_unlock(&vs->lock);
+
+        cJSON *new_auth_list = NULL;
+        if (voip_report_profile(vs->voip_server, vs->mqtt_token,
+                                &new_auth_list) == 0) {
+            voip_set_auth_list(vs, new_auth_list);
+        } else {
+            cJSON_Delete(new_auth_list);
+            LOG_W("授权列表刷新失败，保留上一次联系人列表");
+        }
+
+        pthread_mutex_lock(&vs->lock);
+        vs->callers_refresh_running = 0;
+        pthread_cond_broadcast(&vs->callers_refresh_cond);
+    }
     vs->callers_refresh_running = 0;
     pthread_cond_broadcast(&vs->callers_refresh_cond);
     pthread_mutex_unlock(&vs->lock);
@@ -1682,24 +1783,20 @@ void voip_on_callers_update(void *ctx) {
     VoipState *vs = (VoipState *)ctx;
     if (!vs) return;
     pthread_mutex_lock(&vs->lock);
-    if (vs->callers_refresh_running) {
+    if (vs->callers_refresh_stop) {
+        pthread_mutex_unlock(&vs->lock);
+        return;
+    }
+    if (vs->callers_refresh_running || vs->callers_refresh_requested) {
+        vs->callers_refresh_requested = 1;
+        pthread_cond_signal(&vs->callers_refresh_cond);
         pthread_mutex_unlock(&vs->lock);
         LOG_D("授权列表正在刷新，合并本次 callers_update");
         return;
     }
-    vs->callers_refresh_running = 1;
+    vs->callers_refresh_requested = 1;
+    pthread_cond_signal(&vs->callers_refresh_cond);
     pthread_mutex_unlock(&vs->lock);
-
-    pthread_t thread;
-    if (pthread_create(&thread, NULL, voip_refresh_callers_thread, vs) != 0) {
-        pthread_mutex_lock(&vs->lock);
-        vs->callers_refresh_running = 0;
-        pthread_cond_broadcast(&vs->callers_refresh_cond);
-        pthread_mutex_unlock(&vs->lock);
-        LOG_W("无法创建授权列表刷新线程");
-        return;
-    }
-    pthread_detach(thread);
     LOG_D("呼叫方列表已更新，后台重新获取…");
 }
 

@@ -7,6 +7,54 @@ os.environ.setdefault("TIRTC_SDK_VERSION", "2.2.1")
 from device_rtc_runtime import DeviceRtcRuntime, RuntimeConfig
 
 
+class _FakeSdkRuntime:
+    def __init__(self):
+        self.registered = {}
+        self.started = False
+        self.stopped = False
+        self.stop_calls = 0
+        self.generation = 0
+        self.active = None
+
+    def set_log_level(self, level):
+        self.log_level = level
+
+    def register_service(
+        self, service, callbacks, *, accepts_inbound, callback_guard
+    ):
+        self.registered[service] = (
+            callbacks, accepts_inbound, callback_guard)
+
+    def start(self, device_id, device_key, client_id, endpoint):
+        self.start_args = (device_id, device_key, client_id, endpoint)
+        self.started = True
+
+    def stop(self):
+        self.stop_calls += 1
+        self.stopped = True
+        self.started = False
+
+    def activate(self, service):
+        if self.active is not None:
+            raise RuntimeError("service already active")
+        self.generation += 1
+        self.active = (service, self.generation)
+        return self.generation
+
+    def deactivate(self, service, generation):
+        if self.active == (service, generation):
+            self.active = None
+            return True
+        return False
+
+
+def _module_mock():
+    module = mock.Mock()
+    module.runtime_callbacks.return_value = object()
+    module.callback_guard.return_value = object()
+    return module
+
+
 class DeviceRtcRuntimeTests(unittest.TestCase):
     def test_hardware_audio_keeps_ai_wire_format_on_alaw(self):
         config = RuntimeConfig(
@@ -30,10 +78,11 @@ class DeviceRtcRuntimeTests(unittest.TestCase):
         )
 
     def test_start_primes_voip_profile_before_stream(self):
-        stream = mock.Mock()
-        voip_module = mock.Mock()
-        ai_module = mock.Mock()
-        call_module = mock.Mock()
+        stream = _module_mock()
+        voip_module = _module_mock()
+        ai_module = _module_mock()
+        call_module = _module_mock()
+        sdk_runtime = _FakeSdkRuntime()
         voip_module.report_profile.return_value = [{"wx_open_id": "openid-1"}]
 
         runtime = DeviceRtcRuntime(
@@ -51,6 +100,7 @@ class DeviceRtcRuntimeTests(unittest.TestCase):
                 down_media_dir="./received",
             ),
             stream, voip_module, ai_module, call_module,
+            sdk_runtime=sdk_runtime,
         )
         runtime.voip = mock.Mock(wraps=runtime.voip)
 
@@ -60,13 +110,85 @@ class DeviceRtcRuntimeTests(unittest.TestCase):
             "https://voip.example.com", "mqtt-token"
         )
         runtime.voip.replace_callers.assert_called_once_with([{"wx_open_id": "openid-1"}])
-        stream.start.assert_called_once()
+        stream.start_service.assert_called_once()
+        self.assertTrue(sdk_runtime.started)
+        runtime.shutdown()
+        self.assertTrue(sdk_runtime.stopped)
+        runtime.shutdown()
+        self.assertEqual(sdk_runtime.stop_calls, 1)
+
+    def test_start_failure_closes_process_runtime_once(self):
+        stream = _module_mock()
+        voip_module = _module_mock()
+        ai_module = _module_mock()
+        call_module = _module_mock()
+        sdk_runtime = _FakeSdkRuntime()
+        voip_module.report_profile.side_effect = RuntimeError(
+            "profile unavailable")
+        runtime = DeviceRtcRuntime(
+            RuntimeConfig(
+                device_id="dev-1",
+                device_key="key-1",
+                client_id="client-1",
+                mqtt_token="mqtt-token",
+                tirtc_endpoint="http://rtc.example.com",
+                voip_server="https://voip.example.com",
+                ai_server="https://ai.example.com",
+                call_server="https://call.example.com",
+                up_audio_file="audio.g711a",
+                up_video_file="",
+                down_media_dir="./received",
+            ),
+            stream, voip_module, ai_module, call_module,
+            sdk_runtime=sdk_runtime,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "profile unavailable"):
+            runtime.start()
+
+        self.assertEqual(sdk_runtime.stop_calls, 1)
+        runtime.shutdown()
+        self.assertEqual(sdk_runtime.stop_calls, 1)
+
+    def test_shutdown_stops_sdk_even_when_business_stop_fails(self):
+        stream = _module_mock()
+        voip_module = _module_mock()
+        ai_module = _module_mock()
+        call_module = _module_mock()
+        sdk_runtime = _FakeSdkRuntime()
+        voip_module.report_profile.return_value = []
+        runtime = DeviceRtcRuntime(
+            RuntimeConfig(
+                device_id="dev-1",
+                device_key="key-1",
+                client_id="client-1",
+                mqtt_token="mqtt-token",
+                tirtc_endpoint="http://rtc.example.com",
+                voip_server="https://voip.example.com",
+                ai_server="https://ai.example.com",
+                call_server="https://call.example.com",
+                up_audio_file="audio.g711a",
+                up_video_file="",
+                down_media_dir="./received",
+            ),
+            stream, voip_module, ai_module, call_module,
+            sdk_runtime=sdk_runtime,
+        )
+        runtime.start()
+        stream.stop_service.side_effect = RuntimeError("stream stop failed")
+
+        with self.assertRaisesRegex(RuntimeError, "stream stop failed"):
+            runtime.shutdown()
+
+        self.assertEqual(sdk_runtime.stop_calls, 1)
+        self.assertFalse(runtime.arbiter._worker.is_alive())
 
     def test_stream_media_factory_supports_audio_only_config(self):
-        stream = mock.Mock()
-        voip_module = mock.Mock()
-        ai_module = mock.Mock()
-        call_module = mock.Mock()
+        stream = _module_mock()
+        voip_module = _module_mock()
+        ai_module = _module_mock()
+        call_module = _module_mock()
+        sdk_runtime = _FakeSdkRuntime()
         voip_module.report_profile.return_value = []
 
         with tempfile.TemporaryDirectory() as root:
@@ -89,6 +211,7 @@ class DeviceRtcRuntimeTests(unittest.TestCase):
                     down_media_dir=root,
                 ),
                 stream, voip_module, ai_module, call_module,
+                sdk_runtime=sdk_runtime,
             )
 
             self.assertFalse(runtime.terminal._video_capable)
@@ -96,7 +219,7 @@ class DeviceRtcRuntimeTests(unittest.TestCase):
             self.assertFalse(runtime.call._video_capable)
             runtime.start()
 
-            media_factory = stream.start.call_args.args[2]
+            media_factory = stream.start_service.call_args.args[0]
             source = media_factory()
             try:
                 self.assertFalse(source.has_video())
@@ -104,6 +227,7 @@ class DeviceRtcRuntimeTests(unittest.TestCase):
                 self.assertIsNotNone(packet)
             finally:
                 source.close()
+            runtime.shutdown()
 
 
 if __name__ == "__main__":

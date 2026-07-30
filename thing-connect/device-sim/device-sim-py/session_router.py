@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """MQTT 业务消息组合路由与统一终端命令入口。"""
 
-from concurrent.futures import ThreadPoolExecutor, wait
+import os
+import select
+import sys
 import threading
 
+from callback_work_queue import CallbackWorkQueue
 from call_type_policy import CallTypeError, resolve_call_type
 from session_arbiter import IncomingDecision
 from session_coordinator import SessionKind
@@ -19,12 +22,36 @@ class SessionMessageRouter:
         self.arbiter = arbiter
         self.voip = voip
         self.call = call
-        self._io_executor = ThreadPoolExecutor(
-            max_workers=2, thread_name_prefix="session-http")
-        self._io_lock = threading.Lock()
-        self._io_futures = set()
+        self._reject_work = CallbackWorkQueue(
+            "session-reject-http",
+            self._run_io,
+            self._warn,
+            maxsize=32,
+        )
+        self._refresh_work = CallbackWorkQueue(
+            "session-refresh-http",
+            self._run_io,
+            self._warn,
+            maxsize=1,
+        )
+        self._reject_work.start()
+        self._refresh_work.start()
         self._timer_lock = threading.Lock()
         self._pending_timers = {}
+        set_reject_submitter = getattr(
+            self.voip, "set_reject_submitter", None)
+        if callable(set_reject_submitter):
+            set_reject_submitter(self._submit_voip_reject)
+        set_callers_refresh_submitter = getattr(
+            self.voip, "set_callers_refresh_submitter", None)
+        if callable(set_callers_refresh_submitter):
+            set_callers_refresh_submitter(
+                lambda callback:
+                    self._submit_io(
+                        self._refresh_work,
+                        "VoIP 授权列表刷新",
+                        callback,
+                    ))
 
     def shutdown(self) -> None:
         with self._timer_lock:
@@ -35,34 +62,55 @@ class SessionMessageRouter:
         for timer in timers:
             if timer.is_alive() and timer is not threading.current_thread():
                 timer.join()
-        self._io_executor.shutdown(wait=True, cancel_futures=True)
+        self._refresh_work.stop()
+        self._reject_work.stop()
 
     def wait_for_idle(self) -> None:
         """测试和有序关闭使用；MQTT 回调本身不等待 HTTP。"""
-        with self._io_lock:
-            futures = tuple(self._io_futures)
-        if futures:
-            wait(futures)
+        self._reject_work.drain()
+        self._refresh_work.drain()
+
+    @staticmethod
+    def _warn(message: str) -> None:
+        print(f"[router] {message}", flush=True)
+
+    @staticmethod
+    def _run_io(item) -> None:
+        label, callback, args = item
+        try:
+            callback(*args)
+        except BaseException as exc:
+            print(f"[router] {label}任务失败: {exc}", flush=True)
+
+    def _submit_io(
+        self,
+        work: CallbackWorkQueue,
+        label: str,
+        callback,
+        *args,
+    ) -> bool:
+        submitted = work.submit((label, callback, args))
+        if not submitted:
+            print(f"[router] {label}任务未提交：队列已满或已停止", flush=True)
+        return submitted
 
     def _submit_device_reject(self, payload, reason: str) -> None:
-        try:
-            future = self._io_executor.submit(
-                self.call.reject_incoming, dict(payload), reason)
-        except RuntimeError as exc:
-            print(f"[router] 忙线拒接任务提交失败: {exc}", flush=True)
-            return
-        with self._io_lock:
-            self._io_futures.add(future)
+        self._submit_io(
+            self._reject_work,
+            "设备忙线拒接",
+            self.call.reject_incoming,
+            dict(payload),
+            reason,
+        )
 
-        def done(completed):
-            with self._io_lock:
-                self._io_futures.discard(completed)
-            try:
-                completed.result()
-            except BaseException as exc:
-                print(f"[router] 忙线拒接任务失败: {exc}", flush=True)
-
-        future.add_done_callback(done)
+    def _submit_voip_reject(self, payload, reason: int) -> None:
+        self._submit_io(
+            self._reject_work,
+            "VoIP 忙线拒接",
+            self.voip.reject_incoming,
+            dict(payload),
+            reason,
+        )
 
     def _arm_pending_expiry(self, kind, session_id: str, state) -> None:
         def expire():
@@ -86,7 +134,7 @@ class SessionMessageRouter:
     def on_call_incoming(self, payload):
         room_id = payload.get("wx_room_id", "")
         if not room_id:
-            self.voip.reject_incoming(payload, 7)
+            self._submit_voip_reject(payload, 7)
             return
         decision = self.arbiter.admit_incoming(
             SessionKind.VOIP, room_id, PENDING_CALL_TTL_SEC)
@@ -95,10 +143,10 @@ class SessionMessageRouter:
             if self.voip.is_active():
                 self.voip.on_call_incoming(payload)
             else:
-                self.voip.reject_incoming(payload, 5)
+                self._submit_voip_reject(payload, 5)
             return
         if decision == IncomingDecision.BUSY:
-            self.voip.reject_incoming(payload, 5)
+            self._submit_voip_reject(payload, 5)
             return
         try:
             self.voip.on_call_incoming(payload, replace_pending=True)
@@ -173,14 +221,58 @@ class TerminalController:
         self._print_help()
         while not stop_event.is_set():
             try:
-                line = input().strip()
+                raw_line = self._readline(stop_event)
             except EOFError:
                 break
+            if raw_line is None:
+                continue
+            if raw_line == "":
+                break
+            line = raw_line.strip()
             if line:
                 try:
                     self.execute(line, stop_event)
                 except Exception as exc:
                     print(f"[terminal] 命令执行失败: {exc}", flush=True)
+
+    @staticmethod
+    def _readline(stop_event):
+        """Read one command while remaining interruptible during shutdown."""
+        if os.name == "nt":
+            import msvcrt
+
+            chars = []
+            while not stop_event.is_set():
+                if not msvcrt.kbhit():
+                    stop_event.wait(0.1)
+                    continue
+                char = msvcrt.getwch()
+                if char in ("\r", "\n"):
+                    print()
+                    return "".join(chars)
+                if char == "\003":
+                    stop_event.set()
+                    return None
+                if char in ("\000", "\xe0"):
+                    if msvcrt.kbhit():
+                        msvcrt.getwch()
+                    continue
+                if char == "\b":
+                    if chars:
+                        chars.pop()
+                        print("\b \b", end="", flush=True)
+                    continue
+                chars.append(char)
+                print(char, end="", flush=True)
+            return None
+
+        try:
+            ready, _, _ = select.select([sys.stdin], [], [], 0.2)
+        except (OSError, ValueError):
+            return sys.stdin.readline()
+        if not ready:
+            return None
+        return sys.stdin.readline()
 
     def execute(self, line: str, stop_event) -> None:
         try:

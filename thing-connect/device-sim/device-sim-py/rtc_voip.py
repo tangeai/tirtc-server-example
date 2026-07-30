@@ -2,9 +2,10 @@
 from __future__ import annotations
 """rtc_voip.py — TiRTC VoIP WHIP 对讲会话管理（主动发起连接模式）
 
-接口约定（见 tirtc_sdk.py 顶部注释）：
-  init_sdk(device_id, secret_key, endpoint=None)
-  uninit_sdk()
+接口约定：
+  runtime_callbacks()
+  start_service()
+  stop_service()
   start_session(peer_id, token, audio_file)
   stop_session()
   is_active() -> bool
@@ -13,7 +14,6 @@ from __future__ import annotations
   reject_session(wx_app_id, wx_model_id, wx_session_token, wx_room_id, wx_payload, hangup_reason)
 """
 
-import base64
 import audioop
 import ctypes
 import json
@@ -24,14 +24,15 @@ import http_trace
 import sys
 import threading
 import time
-import urllib.parse
 
+from callback_work_queue import CallbackWorkQueue
 from g711 import alaw_decode, alaw_encode
 from media_source import VIDEO_FRAME_MS
 from media_postprocess import convert_audio_to_wav, convert_video_to_mp4
 from sdk_callback_guard import SdkCallbackGuard, join_worker_before_uninit
 
 import tirtc_sdk as sdk
+from tirtc_runtime import ServiceKind, process_tirtc_runtime
 from media_file_reader import AudioFileReader, VideoFileReader
 from media_formats import (
     AUDIO_FORMATS,
@@ -87,41 +88,17 @@ def _err(msg):   # error
 
 
 def _log_whip_connect_params(peer_id: str, token: str) -> None:
-    _log("── TiRtcWhipConnect 参数 ──")
-    # 解析 peer_id query string
-    if "?" in peer_id:
-        scheme, qs = peer_id.split("?", 1)
-        _log(f"  peer_id scheme : {scheme}")
-        for k, v in urllib.parse.parse_qsl(qs, keep_blank_values=True):
-            _log(f"  {k:30s} = {urllib.parse.unquote(v)}")
-    else:
-        _log(f"  peer_id : {peer_id}")
-    # 解码 token JWT payload（不验签，只看字段）
-    try:
-        parts = token.split(".")
-        if len(parts) >= 2:
-            pad = len(parts[1]) % 4
-            payload_b64 = parts[1] + "=" * (4 - pad if pad else 0)
-            payload = json.loads(base64.urlsafe_b64decode(payload_b64))
-            _log(f"  token.sub  : {payload.get('sub')}")
-            _log(f"  token.iss  : {payload.get('iss')}")
-            _log(f"  token.iat  : {payload.get('iat')}")
-            _log(f"  token.exp  : {payload.get('exp')}")
-            _log(f"  token.scope: {payload.get('scope','')}")
-            import time as _t
-            if payload.get("exp"):
-                ttl = payload["exp"] - int(_t.time())
-                _log(f"  token TTL  : {ttl}s {'(EXPIRED)' if ttl < 0 else ''}")
-    except Exception as e:
-        _log(f"  token (decode failed: {e}): {token}")
-    _log("───────────────────────────────")
+    scheme = peer_id.split("?", 1)[0] if peer_id else ""
+    _log(
+        "TiRtcWhipConnect 参数 "
+        f"peer_scheme={scheme or '<none>'} "
+        f"description_length={len(peer_id)} token_length={len(token)} "
+        "(敏感内容已隐藏)"
+    )
 
 # ── 模块状态 ──────────────────────────────────────────────────────────────────
-_sdk_running   = False
-_sdk_started   = threading.Event()
-_sdk_stopped   = threading.Event()
+_service_active = False
 _cbs_ref: "TIRTCCALLBACKS | None" = None
-_device_id_b: "bytes | None" = None
 _device_id = ""
 _session_end_callback = None
 _callback_guard = SdkCallbackGuard()
@@ -156,10 +133,11 @@ _up_video_format = "h264"
 _down_video_format = "h264"
 _session_role = "unknown"
 _cancel_on_connect = False
+_receive_work: "CallbackWorkQueue | None" = None
 
 
 def _tracked_callback(callback):
-    """记录仍在执行的 SDK 回调，避免回调栈未退出时反初始化 SDK。"""
+    """记录仍在执行的 SDK 回调，供业务切换和进程退出等待。"""
     return _callback_guard.wrap(callback)
 
 
@@ -174,7 +152,6 @@ def _schedule_disconnect_after_callback(hconn_val: int) -> None:
 
     def disconnect():
         global _session_state
-        _wait_for_callbacks_idle()
         with _state_lock:
             if _active_hconn != hconn_val or _session_state == "DISCONNECTING":
                 return
@@ -189,11 +166,17 @@ def _schedule_disconnect_after_callback(hconn_val: int) -> None:
             )
             _handle_disconnect(hconn_val)
 
-    threading.Thread(
-        target=disconnect,
-        daemon=True,
-        name="voip-remote-disconnect",
-    ).start()
+    _callback_guard.defer(
+        disconnect, name="voip-remote-disconnect")
+
+
+def _disconnect_stale_after_callback(hconn_val: int) -> None:
+    """Disconnect an unowned connection after leaving the SDK callback."""
+    def disconnect():
+        sdk.TiRtcDisconnect(ctypes.c_void_p(hconn_val))
+
+    _callback_guard.defer(
+        disconnect, name="voip-stale-disconnect")
 
 
 def configure_media_formats(up_audio: str, down_audio: str,
@@ -279,87 +262,57 @@ def configure_hardware_audio(enable: bool, fmt: str = "alaw_8khz") -> None:
         raise RuntimeError(f"无法启用 VoIP PC 音频: {e}") from e
 
 
-def init_sdk(device_id: str, secret_key: str, endpoint: str | None = None, client_id: str = "") -> None:
-    global _sdk_running, _cbs_ref, _device_id_b, _device_id
+def runtime_callbacks() -> TIRTCCALLBACKS:
+    global _cbs_ref
+    if _cbs_ref is None:
+        _cbs_ref = _build_callbacks()
+    return _cbs_ref
 
-    if _sdk_running:
-        _log("SDK 已运行，跳过重复初始化")
+
+def callback_guard() -> SdkCallbackGuard:
+    return _callback_guard
+
+
+def start_service(device_id: str) -> None:
+    global _service_active, _device_id, _receive_work
+    if _service_active:
         return
-
-    _sdk_started.clear()
-    _sdk_stopped.clear()
-
-    buf = ctypes.c_uint32(1024 * 1024)
-    sdk.TiRtcSetOption(sdk.TIRTC_OPT_MAX_SEND_BUFFER, ctypes.byref(buf), ctypes.sizeof(buf))
-
-    rc = sdk.TiRtcInit()
-    if rc != 0:
-        sys.exit(f"[rtc_voip] TiRtcInit failed: {sdk.TiRtcGetErrorStr(rc).decode()}")
-
-    sdk.TiRtcLogConfig(0, None, 0)
-    sdk.TiRtcLogSetLevel(3)
-
-    if endpoint:
-        ep_b = endpoint.encode()
-        sdk.TiRtcSetOption(sdk.TIRTC_OPT_SERVICE_ENDPOINT, ctypes.c_char_p(ep_b), len(ep_b))
-
-    _cbs_ref = _build_callbacks()
-    sk = secret_key.encode()
-    sdk.TiRtcSetOption(sdk.TIRTC_OPT_DEVICE_SECRET_KEY, ctypes.c_char_p(sk), len(sk))
-    cid = (client_id or device_id).encode()
-    sdk.set_client_id(cid)
-    _device_id_b = sdk.device_id_for_start(device_id, secret_key)
     _device_id = device_id
-    rc = sdk.TiRtcStart(_device_id_b, ctypes.byref(_cbs_ref))
-    if rc != 0:
-        sys.exit(f"[rtc_voip] TiRtcStart failed: {sdk.TiRtcGetErrorStr(rc).decode()}")
+    if _receive_work is None:
+        _receive_work = CallbackWorkQueue(
+            "voip-downlink",
+            _process_receive_item,
+            _warn,
+        )
+    _receive_work.start()
+    _service_active = True
+    _info("VoIP 业务已就绪")
 
-    _sdk_running = True
-    ver = sdk.TiRtcGetVersion().decode()
-    _info(f"TiRTC {ver} 启动中 device_id={device_id}，等待 SYS_STARTED…")
-    _sdk_started.wait(timeout=10.0)
-    _info("TiRTC SDK 已就绪")
 
-
-def uninit_sdk() -> None:
-    global _sdk_running, _speaker, _mic_capture
-    if not _sdk_running:
+def stop_service() -> None:
+    global _service_active, _speaker, _mic_capture
+    if not _service_active:
         return
+    _service_active = False
     stop_session()
     _cancel_connect_timer()
-    _sdk_running = False
-    # TiRtcStop/TiRtcUninit 不能与 ctypes SDK 回调并发。尤其远端 0x2001
-    # 会在 on_command 尚未返回时触发 on_disconnected 和上层会话切换。
-    _wait_for_callbacks_idle()
-    sdk.TiRtcStop()
-    _sdk_stopped.wait(timeout=8.0)
-    _wait_for_callbacks_idle()
-    sdk.TiRtcUninit()
+    _callback_guard.wait_for_all()
+    if _receive_work is not None:
+        _receive_work.stop()
     if _speaker is not None:
         _speaker.close()
         _speaker = None
     if _mic_capture is not None:
         _mic_capture.close()
         _mic_capture = None
-    _info("TiRTC SDK 已停止")
+    _info("VoIP 业务已停止")
 
 
-def is_sdk_running() -> bool:
-    return _sdk_running
+def is_service_active() -> bool:
+    return _service_active
 
 
 def _build_callbacks() -> TIRTCCALLBACKS:
-    def on_event(event, data, length):
-        if event == sdk.TIRTC_EVENT_SYS_STARTED:
-            _sdk_started.set()
-            _info("SYS_STARTED")
-        elif event == sdk.TIRTC_EVENT_SYS_STOPPED:
-            _sdk_stopped.set()
-            _info("SYS_STOPPED")
-
-    def on_conn_accepted(hconn):
-        pass  # voip 场景主动发起，不接受入站
-
     def on_conn_error(hconn, error):
         hval = ctypes.cast(hconn, ctypes.c_void_p).value
         _err(f"on_conn_error hconn={hval:#x} error={sdk.TiRtcGetErrorStr(error).decode()}")
@@ -368,26 +321,37 @@ def _build_callbacks() -> TIRTCCALLBACKS:
     def on_disconnected(hconn):
         hval = ctypes.cast(hconn, ctypes.c_void_p).value
         _log(f"on_disconnected hconn={hval:#x}")
-        _handle_disconnect(hval)
+        _callback_guard.defer(
+            _handle_disconnect,
+            hval,
+            name="voip-disconnected-cleanup",
+        )
 
     def on_audio(hconn, pFi, data):
+        if not data:
+            return
         fi = ctypes.cast(pFi, ctypes.POINTER(TIRTCFRAMEINFO)).contents
-        raw = (ctypes.c_uint8 * fi.length).from_address(
-            ctypes.cast(data, ctypes.c_void_p).value
-        )
-        _handle_audio(bytes(raw))
+        payload = ctypes.string_at(data, fi.length)
+        if _receive_work is not None:
+            _receive_work.submit(("audio", payload))
 
     def on_video(hconn, pFi, data):
         if not data:
             return
         fi = ctypes.cast(pFi, ctypes.POINTER(TIRTCFRAMEINFO)).contents
-        _handle_video(ctypes.string_at(data, fi.length))
+        payload = ctypes.string_at(data, fi.length)
+        if _receive_work is not None:
+            _receive_work.submit(("video", payload))
     def on_message(hconn, pFi, data): pass
     def on_command(hconn, cmdw, data, length):
         if cmdw == 0x2000:
             hval = ctypes.cast(hconn, ctypes.c_void_p).value
             _info(f"收到接通命令 0x2000 hconn={hval:#x}，双方对讲建立成功")
-            _start_media_threads(hval)
+            _callback_guard.defer(
+                _start_media_threads,
+                hval,
+                name="voip-media-start",
+            )
         elif cmdw == 0x2001:
             hval = ctypes.cast(hconn, ctypes.c_void_p).value
             _log(f"收到对端挂断命令 0x2001 hconn={hval:#x}，回调返回后主动断开")
@@ -401,8 +365,6 @@ def _build_callbacks() -> TIRTCCALLBACKS:
     def on_unsubscribe_audio(hconn, stream_id): pass
 
     cbs = TIRTCCALLBACKS()
-    cbs.on_event             = OnEventCB(_tracked_callback(on_event))
-    cbs.on_conn_accepted     = OnConnAcceptCB(_tracked_callback(on_conn_accepted))
     cbs.on_conn_error        = OnConnErrCB(_tracked_callback(on_conn_error))
     cbs.on_disconnected      = OnDisconnCB(_tracked_callback(on_disconnected))
     cbs.on_audio             = OnAudioCB(_tracked_callback(on_audio))
@@ -573,8 +535,18 @@ def _handle_video(data: bytes) -> None:
             _err(f"写接收视频失败: {e}")
 
 
+def _process_receive_item(item) -> None:
+    kind, data = item
+    if kind == "audio":
+        _handle_audio(data)
+    else:
+        _handle_video(data)
+
+
 def _close_receive_files() -> None:
     global _recv_file, _recv_video_file, _recv_audio_path, _recv_video_path
+    if _receive_work is not None:
+        _receive_work.drain()
     with _state_lock:
         af, _recv_file = _recv_file, None
         vf, _recv_video_file = _recv_video_file, None
@@ -870,7 +842,7 @@ def start_session(peer_id: str, token: str, audio_file: str,
         if not is_current:
             if error == 0 and hconn_val is not None:
                 _log(f"忽略过期 WHIP 连接回调 hconn={hconn_val:#x}，主动断开")
-                sdk.TiRtcDisconnect(ctypes.c_void_p(hconn_val))
+                _disconnect_stale_after_callback(hconn_val)
             return
 
         if error != 0 or hconn_val is None:
@@ -892,6 +864,22 @@ def start_session(peer_id: str, token: str, audio_file: str,
                 _session_end_callback()
             return
 
+        if not process_tirtc_runtime.bind_active_connection(
+            ServiceKind.VOIP, hconn_val
+        ):
+            _warn(
+                f"WHIP 连接完成时 VoIP 会话已切换 "
+                f"hconn={hconn_val:#x}，丢弃连接")
+            with _state_lock:
+                if (
+                    _session_generation == generation
+                    and _session_state == "CONNECTING"
+                ):
+                    _reset_session_state_locked()
+            _close_receive_files()
+            _disconnect_stale_after_callback(hconn_val)
+            return
+
         with _state_lock:
             if (
                 _session_generation != generation
@@ -911,7 +899,7 @@ def start_session(peer_id: str, token: str, audio_file: str,
                 _connect_timer.start()
         if stale_success:
             _log(f"WHIP 连接完成时会话已结束 hconn={hconn_val:#x}，主动断开")
-            sdk.TiRtcDisconnect(ctypes.c_void_p(hconn_val))
+            _disconnect_stale_after_callback(hconn_val)
             return
 
         if cancel_after_connect:
@@ -925,7 +913,7 @@ def start_session(peer_id: str, token: str, audio_file: str,
                 and _active_hconn == hconn_val
             )
         if not still_current:
-            sdk.TiRtcDisconnect(ctypes.c_void_p(hconn_val))
+            _disconnect_stale_after_callback(hconn_val)
             return
 
         if cancel_after_connect:
@@ -936,11 +924,10 @@ def start_session(peer_id: str, token: str, audio_file: str,
                 if _session_end_callback:
                     _session_end_callback()
 
-            threading.Thread(
-                target=stop_cancelled_session,
-                daemon=True,
+            _callback_guard.defer(
+                stop_cancelled_session,
                 name="voip-cancel-on-connect",
-            ).start()
+            )
 
     _connect_cb_ref = ConnectCB(_tracked_callback(connect_cb))
     with _state_lock:
@@ -1148,7 +1135,7 @@ def report_profile(voip_server: str, mqtt_token: str,
             "vert_mirror": vert_mirror,
             "audio_rate": AUDIO_FORMATS[_down_audio_format].sample_rate,
             "audio_channels": 1,
-            "up_video_mt": "", "down_video_mt": "",
+            "up_video_mt": "none", "down_video_mt": "none",
             "down_audio_mt": AUDIO_FORMATS[_down_audio_format].codec,
             "no_video": True,
             "calling_timeout_sec": 30,
@@ -1164,7 +1151,8 @@ def report_profile(voip_server: str, mqtt_token: str,
                     if selected_has_video else f"纯音频（{_up_audio_format}）")
             _info(f"上报 VoIP {mode} profile 成功")
         else:
-            _warn(f"上报 voip profile 失败（code={resp.get('code', r.status_code)}）: {resp.get('msg', r.text)}")
+            message = resp.get("msg") or "<响应体已省略>"
+            _warn(f"上报 voip profile 失败（code={resp.get('code', r.status_code)}）: {message}")
     except requests.RequestException as e:
         _warn(f"上报 voip profile 异常: {e}")
 
@@ -1177,7 +1165,8 @@ def report_profile(voip_server: str, mqtt_token: str,
             _info(f"授权用户列表（共 {len(auth_list)} 条）")
             return auth_list
         else:
-            _warn(f"拉取授权列表失败（code={resp.get('code', r.status_code)}）: {resp.get('msg', r.text)}")
+            message = resp.get("msg") or "<响应体已省略>"
+            _warn(f"拉取授权列表失败（code={resp.get('code', r.status_code)}）: {message}")
     except requests.RequestException as e:
         _warn(f"拉取授权列表异常: {e}")
     return None if contacts_error_none else []

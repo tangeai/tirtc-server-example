@@ -1,9 +1,9 @@
 /** \file main.c
  * \brief RTC Device Simulator — CLI entry point.
  *
- * The unified runtime starts with audio/video streaming.  VoIP, AI and
- * device calls temporarily own the one TiRTC SDK instance, then streaming
- * resumes automatically.
+ * One process-wide TiRTC SDK instance serves streaming, VoIP, AI and device
+ * calls.  The coordinator switches business sessions without restarting the
+ * SDK, and restores streaming after each foreground session.
  *
  * Usage:
  *   ./device-sim [OPTIONS]                          # default: stream mode
@@ -22,6 +22,7 @@
 #include <sys/select.h>
 #include <unistd.h>
 
+#include <curl/curl.h>
 #include <cjson/cJSON.h>
 
 #include "common.h"
@@ -33,6 +34,7 @@
 #include "tirtc_voip.h"
 #include "tirtc_ai.h"
 #include "tirtc_call.h"
+#include "tirtc_runtime.h"
 #include "call_session.h"
 #include "session_arbiter.h"
 #include "session_coordinator.h"
@@ -72,28 +74,87 @@ typedef struct {
     char pending_call_type[16];
     pthread_mutex_t lease_lock;
     SessionLease leases[SESSION_CALL + 1];
+    uint64_t rtc_generations[SESSION_CALL + 1];
 } DeviceRuntime;
+
+static int _activate_runtime(DeviceRuntime *rt, SessionKind kind,
+                             TirtcService service) {
+    uint64_t generation = tirtc_runtime_activate(service);
+    if (!generation) {
+        LOG_E("无法激活 TiRTC 业务 service=%s",
+              tirtc_runtime_service_name(service));
+        return -1;
+    }
+    rt->rtc_generations[kind] = generation;
+    return 0;
+}
+
+static void _deactivate_runtime(DeviceRuntime *rt, SessionKind kind,
+                                TirtcService service) {
+    uint64_t generation = rt->rtc_generations[kind];
+    rt->rtc_generations[kind] = 0;
+    if (generation)
+        (void)tirtc_runtime_deactivate(service, generation);
+}
 
 static int _start_stream(void *ctx) {
     DeviceRuntime *rt = ctx;
-    return stream_init_sdk_ex(rt->device_id, rt->secret_key, rt->client_id,
-                              rt->endpoint, rt->video, rt->audio,
-                              rt->up_audio_format, rt->up_video_format);
+    if (_activate_runtime(rt, SESSION_STREAM, TIRTC_SERVICE_STREAM) != 0)
+        return -1;
+    int rc = stream_service_start(rt->video, rt->audio,
+                                  rt->up_audio_format,
+                                  rt->up_video_format);
+    if (rc != 0)
+        _deactivate_runtime(rt, SESSION_STREAM, TIRTC_SERVICE_STREAM);
+    return rc;
 }
-static void _stop_stream(void *ctx) { (void)ctx; stream_uninit_sdk(); }
+static void _stop_stream(void *ctx) {
+    DeviceRuntime *rt = ctx;
+    _deactivate_runtime(rt, SESSION_STREAM, TIRTC_SERVICE_STREAM);
+    stream_service_stop();
+}
 static int _start_voip(void *ctx) {
     DeviceRuntime *rt = ctx;
-    if (voip_init_sdk(rt->device_id, rt->secret_key, rt->client_id, rt->endpoint) != 0) return -1;
-    cJSON *callers = NULL;
-    if (voip_report_profile(rt->voip_server, rt->mqtt_token, &callers) == 0)
-        voip_set_auth_list(rt->voip, callers);
-    return 0;
+    if (_activate_runtime(rt, SESSION_VOIP, TIRTC_SERVICE_VOIP) != 0)
+        return -1;
+    int rc = voip_service_start(rt->voip);
+    if (rc != 0)
+        _deactivate_runtime(rt, SESSION_VOIP, TIRTC_SERVICE_VOIP);
+    return rc;
 }
-static void _stop_voip(void *ctx) { DeviceRuntime *rt = ctx; voip_stop_session(rt->voip); voip_uninit_sdk(); }
-static int _start_ai(void *ctx) { DeviceRuntime *rt = ctx; return ai_init_sdk(rt->device_id, rt->secret_key, rt->client_id, rt->endpoint); }
-static void _stop_ai(void *ctx) { DeviceRuntime *rt = ctx; ai_stop_session(rt->ai); ai_uninit_sdk(); }
-static int _start_call(void *ctx) { DeviceRuntime *rt = ctx; return call_init_sdk(rt->device_id, rt->secret_key, rt->client_id, rt->endpoint); }
-static void _stop_call(void *ctx) { (void)ctx; call_hangup(); call_uninit_sdk(); }
+static void _stop_voip(void *ctx) {
+    DeviceRuntime *rt = ctx;
+    _deactivate_runtime(rt, SESSION_VOIP, TIRTC_SERVICE_VOIP);
+    voip_service_stop(rt->voip);
+}
+static int _start_ai(void *ctx) {
+    DeviceRuntime *rt = ctx;
+    if (_activate_runtime(rt, SESSION_AI, TIRTC_SERVICE_AI) != 0)
+        return -1;
+    int rc = ai_service_start(rt->ai);
+    if (rc != 0)
+        _deactivate_runtime(rt, SESSION_AI, TIRTC_SERVICE_AI);
+    return rc;
+}
+static void _stop_ai(void *ctx) {
+    DeviceRuntime *rt = ctx;
+    _deactivate_runtime(rt, SESSION_AI, TIRTC_SERVICE_AI);
+    ai_service_stop(rt->ai);
+}
+static int _start_call(void *ctx) {
+    DeviceRuntime *rt = ctx;
+    if (_activate_runtime(rt, SESSION_CALL, TIRTC_SERVICE_CALL) != 0)
+        return -1;
+    int rc = call_service_start();
+    if (rc != 0)
+        _deactivate_runtime(rt, SESSION_CALL, TIRTC_SERVICE_CALL);
+    return rc;
+}
+static void _stop_call(void *ctx) {
+    DeviceRuntime *rt = ctx;
+    _deactivate_runtime(rt, SESSION_CALL, TIRTC_SERVICE_CALL);
+    call_service_stop();
+}
 
 static void _store_lease(DeviceRuntime *rt, const SessionLease *lease) {
     if (!rt || !lease || lease->kind <= SESSION_NONE ||
@@ -196,7 +257,7 @@ static void _mqtt_voip_incoming(void *ctx, const cJSON *p) {
     const char *room_id = _payload_string(p, "wx_room_id");
     if (!room_id[0]) {
         LOG_W("忽略缺少 wx_room_id 的 VoIP 来电");
-        voip_reject_incoming_payload(p, 7);
+        (void)voip_reject_incoming_payload_async(rt->voip, p, 7);
         return;
     }
     int decision = session_arbiter_admit_incoming_id(
@@ -207,13 +268,13 @@ static void _mqtt_voip_incoming(void *ctx, const cJSON *p) {
             voip_on_call_incoming(rt->voip, p);
         else {
             LOG_W("VoIP 正在切换生命周期，拒绝非当前回铃来电");
-            voip_reject_incoming_payload(p, 5);
+            (void)voip_reject_incoming_payload_async(rt->voip, p, 5);
         }
         return;
     }
     if (decision < 0) {
         LOG_W("当前会话忙，直接拒绝微信来电");
-        voip_reject_incoming_payload(p, 5);
+        (void)voip_reject_incoming_payload_async(rt->voip, p, 5);
         return;
     }
     /* The arbiter may have lazily expired an old ticket milliseconds before
@@ -669,11 +730,11 @@ static void _usage(const char *prog) {
     printf("  --up-video-format FMT     Its format: %s (default: h264)\n", video_format_choices());
     printf("  --down-audio-format FMT   Downlink negotiation format (default: alaw_8khz)\n");
     printf("  --down-video-format FMT   Downlink negotiation format (default: h264)\n");
-    printf("  --ai-audio-file PATH      AI request audio file (default: ../assets/ai.pcm)\n");
-    printf("  --ai-up-audio-format FMT  AI request audio format (default: pcm_s16le_16khz)\n");
+    printf("  --ai-audio-file PATH      AI request audio file (default: --up-audio-file)\n");
+    printf("  --ai-up-audio-format FMT  AI request audio format (default: --up-audio-format)\n");
     printf("  Received audio/video is rate-limited in logs and discarded; it is never saved or played.\n\n");
     printf("Other:\n");
-    printf("  --endpoint     URL      service discovery entry (default: ep-open.tangeopen.com)\n");
+    printf("  --endpoint     URL      service discovery entry (default: http://ep-open.tangeopen.com)\n");
     printf("  --log-level    LEVEL    debug|info|warn|error (default: debug)\n");
     printf("  --help                  Show this help\n");
 }
@@ -681,6 +742,12 @@ static void _usage(const char *prog) {
 /* ── Main ────────────────────────────────────────────────────────────────── */
 
 int main(int argc, char *argv[]) {
+    if (curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK) {
+        fprintf(stderr, "初始化 libcurl 失败\n");
+        return 1;
+    }
+    atexit(curl_global_cleanup);
+
     /* ── Options ───────────────────────────────────────────────────────── */
     const char *device_id   = "";
     const char *device_key  = "";
@@ -694,7 +761,7 @@ int main(int argc, char *argv[]) {
     const char *down_audio_format = "alaw_8khz";
     const char *up_video_format = "h264";
     const char *down_video_format = "h264";
-    const char *ai_up_audio_format = "pcm_s16le_16khz";
+    const char *ai_up_audio_format = NULL;
     int insecure = 0;
 
     /* Media paths */
@@ -704,8 +771,8 @@ int main(int argc, char *argv[]) {
 
     /* Set defaults relative to binary location */
     snprintf(video_path,     sizeof(video_path),     "../assets/video.h264");
-    snprintf(audio_path,     sizeof(audio_path),     "../assets/audio.g711a");
-    snprintf(ai_audio_path,  sizeof(ai_audio_path),  "../assets/ai.pcm");
+    snprintf(audio_path,     sizeof(audio_path),     "../assets/number.alaw_8khz");
+    ai_audio_path[0] = '\0';
 
     /* Parse env vars */
     const char *env;
@@ -773,6 +840,10 @@ int main(int argc, char *argv[]) {
             default:  _usage(argv[0]); return 1;
         }
     }
+    if (!ai_audio_path[0])
+        snprintf(ai_audio_path, sizeof(ai_audio_path), "%s", audio_path);
+    if (!ai_up_audio_format)
+        ai_up_audio_format = up_audio_format;
 
     /* ── Set log level ─────────────────────────────────────────────────── */
     if (strcmp(log_level, "info") == 0)      log_set_level(LOG_INFO);
@@ -824,14 +895,10 @@ int main(int argc, char *argv[]) {
     DeviceServices svc;
     if (fetch_services(&svc, services_base) != 0) return 1;
 
-    /* Resolve TiRTC endpoint: env > service discovery > hardcoded default */
+    /* Resolve TiRTC endpoint: explicit environment override, then discovery. */
     const char *tirtc_endpoint = getenv("TIRTC_ENDPOINT");
-    if (!tirtc_endpoint || !tirtc_endpoint[0]) {
-        if (svc.tirtc_endpoint[0])
-            tirtc_endpoint = svc.tirtc_endpoint;
-        else
-            tirtc_endpoint = "http://ep-tirtc.tange365.com";
-    }
+    if (!tirtc_endpoint || !tirtc_endpoint[0])
+        tirtc_endpoint = svc.tirtc_endpoint;
 
     /* ── Phase 1: Bind if needed ───────────────────────────────────────── */
     char did[64]  = "";
@@ -874,7 +941,7 @@ int main(int argc, char *argv[]) {
             SEP_LINE();
             PROMPT_KV("绑定完成！本地持久化存储（Flash）：");
             PROMPT_KV("  device_id  = %s", did);
-            PROMPT_KV("  device_key = %s", dkey);
+            PROMPT_KV("  device_key = <hidden>");
             PROMPT_KV("  (来源: auth_grant 下发)");
             SEP_LINE();
             _save_creds_file(creds_file, did, dkey);
@@ -909,7 +976,6 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    if (!svc.call_server[0]) { LOG_E("服务发现未返回 call-srv，无法启动统一设备运行时"); return 1; }
     DeviceRuntime rt;
     memset(&rt, 0, sizeof(rt));
     rt.device_id = did;
@@ -918,7 +984,6 @@ int main(int argc, char *argv[]) {
     rt.endpoint = tirtc_endpoint;
     rt.voip_server = svc.voip_server;
     rt.ai_server = svc.ai_server;
-    rt.device_id = did;
     rt.mqtt_token = mqtt_token;
     rt.ai_audio = ai_audio_path;
     rt.up_audio_format = up_audio_spec->name;
@@ -926,12 +991,8 @@ int main(int argc, char *argv[]) {
     snprintf(rt.video, sizeof(rt.video), "%s", video_path);
     snprintf(rt.audio, sizeof(rt.audio), "%s", audio_path);
     rt.voip = voip_create(svc.voip_server, did, mqtt_token, audio_path);
-    /* Match the Python simulator: the bundled AI PCM file defaults to a
-     * PCM-16 kHz AI response; an explicit downlink format overrides it. */
-    const char *ai_down_audio_format =
-        strcmp(down_audio_format, "alaw_8khz") == 0 ? "pcm_s16le_16khz" : down_audio_format;
     rt.ai = ai_create_ex(svc.ai_server, did, mqtt_token, ai_audio_path,
-                         ai_up_audio_spec->name, ai_down_audio_format);
+                         ai_up_audio_spec->name, down_audio_spec->name);
     rt.call = call_create_ex(svc.call_server, did, mqtt_token,
                              audio_path, up_audio_spec->name,
                              video_path, up_video_spec->name);
@@ -950,17 +1011,44 @@ int main(int argc, char *argv[]) {
         call_destroy(rt.call);
         return 1;
     }
+    if (stream_service_register() != 0 ||
+        voip_service_register() != 0 ||
+        ai_service_register() != 0 ||
+        call_service_register() != 0) {
+        LOG_E("注册 TiRTC 业务回调失败");
+        tirtc_runtime_stop();
+        voip_destroy(rt.voip);
+        ai_destroy(rt.ai);
+        call_destroy(rt.call);
+        return 1;
+    }
+    if (tirtc_runtime_start(did, dkey, mac, tirtc_endpoint) != 0) {
+        LOG_E("启动进程级 TiRTC runtime 失败");
+        voip_destroy(rt.voip);
+        ai_destroy(rt.ai);
+        call_destroy(rt.call);
+        return 1;
+    }
 
     SessionAdapter stream = {_start_stream, _stop_stream, &rt};
     SessionAdapter voip = {_start_voip, _stop_voip, &rt};
     SessionAdapter ai = {_start_ai, _stop_ai, &rt};
     SessionAdapter call = {_start_call, _stop_call, &rt};
     pthread_mutex_init(&rt.lease_lock, NULL);
-    session_coordinator_init(&rt.coordinator, &stream, &voip, &ai, &call);
+    if (session_coordinator_init(
+            &rt.coordinator, &stream, &voip, &ai, &call) != 0) {
+        tirtc_runtime_stop();
+        pthread_mutex_destroy(&rt.lease_lock);
+        voip_destroy(rt.voip);
+        ai_destroy(rt.ai);
+        call_destroy(rt.call);
+        return 1;
+    }
     session_arbiter_init(&rt.arbiter, &rt.coordinator);
     if (!session_arbiter_ready(&rt.arbiter)) {
         session_arbiter_destroy(&rt.arbiter);
         session_coordinator_destroy(&rt.coordinator);
+        tirtc_runtime_stop();
         pthread_mutex_destroy(&rt.lease_lock);
         voip_destroy(rt.voip);
         ai_destroy(rt.ai);
@@ -980,6 +1068,7 @@ int main(int argc, char *argv[]) {
         voip_set_auth_list(rt.voip, initial_callers);
     if (session_coordinator_start_stream(&rt.coordinator) != 0) {
         session_arbiter_shutdown(&rt.arbiter);
+        tirtc_runtime_stop();
         voip_destroy(rt.voip);
         ai_destroy(rt.ai);
         call_destroy(rt.call);
@@ -1004,6 +1093,7 @@ int main(int argc, char *argv[]) {
     if (pthread_create(&cmd_tid, NULL, _runtime_cmd_thread, &rt) != 0) {
         LOG_E("无法创建终端线程");
         session_arbiter_shutdown(&rt.arbiter);
+        tirtc_runtime_stop();
         voip_destroy(rt.voip); ai_destroy(rt.ai); call_destroy(rt.call);
         session_arbiter_destroy(&rt.arbiter);
         session_coordinator_destroy(&rt.coordinator);
@@ -1017,6 +1107,7 @@ int main(int argc, char *argv[]) {
     pthread_join(cmd_tid, NULL);
     LOG_I("正在关闭...");
     session_arbiter_shutdown(&rt.arbiter);
+    tirtc_runtime_stop();
     voip_destroy(rt.voip);
     ai_destroy(rt.ai);
     call_destroy(rt.call);

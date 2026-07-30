@@ -82,8 +82,10 @@ TEST_SRCS := tests/test_core.c $(SRCDIR)/common.c $(SRCDIR)/media_format.c \
 	$(SRCDIR)/file_media_source.c $(SRCDIR)/sdk_callback_guard.c \
 	$(SRCDIR)/media_subscription_policy.c \
 	$(SRCDIR)/session_coordinator.c $(SRCDIR)/session_arbiter.c \
-	$(SRCDIR)/http_tls.c $(SRCDIR)/media_rx_log.c $(SRCDIR)/tirtc_ai.c \
-	$(SRCDIR)/tirtc_voip.c
+	$(SRCDIR)/http_tls.c $(SRCDIR)/media_rx_log.c \
+	$(SRCDIR)/tirtc_runtime.c $(SRCDIR)/tirtc_ai.c \
+	$(SRCDIR)/tirtc_voip.c $(SRCDIR)/tirtc_call.c \
+	$(SRCDIR)/call_session.c
 
 $(TEST_TARGET): $(TEST_SRCS) | $(OBJDIR)
 	@echo "  CC    $@"

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""TiRTC SDK 生命周期协调器。
+"""TiRTC 业务会话协调器。
 
-本模块只执行 SessionArbiter 已决定的生命周期切换，不处理业务优先级、
+本模块只执行 SessionArbiter 已决定的业务切换，不处理业务优先级、
 MQTT 协议、音视频帧、采集设备或文件读写。
 """
 
@@ -25,13 +25,11 @@ class SessionAdapter:
 
 
 class SessionCoordinator:
-    """串行切换唯一的 TiRTC 使用者，并在通话结束后恢复实时流。"""
+    """串行切换 runtime 的当前业务，并在通话结束后恢复实时流。"""
 
     def __init__(self, adapters: Dict[SessionKind, SessionAdapter],
                  cancel_pending: Optional[Callable[[SessionKind], None]] = None):
         self._adapters = adapters
-        # 兼容旧调用方。新的统一仲裁器不传此回调，由仲裁器自身精确清理
-        # pending ticket；直接使用 SessionCoordinator 的旧调用方仍保持原语义。
         self._cancel_pending = cancel_pending or (lambda _winner: None)
         self._transition_lock = threading.RLock()
         self._state_lock = threading.Lock()

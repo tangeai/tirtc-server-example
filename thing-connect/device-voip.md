@@ -85,7 +85,9 @@ Content-Type: application/json
   "object_fit": "contain",    // 视频缩放方式：fill / contain
   "audio_rate": 8000,         // 音频采样率：8000 / 16000 Hz
   "audio_channels": 1,        // 音频声道数：1 / 2
-  "video_mt": "",             // legacy 上下行视频编码；纯语音留空
+  "up_video_mt": "none",      // 设备→小程序不发送视频
+  "down_video_mt": "none",    // 小程序→设备不发送视频
+  "down_audio_mt": "alaw",    // 小程序→设备使用 G.711 A-law
   "no_video": true,           // 是否为无视频能力的纯语音设备
   "calling_timeout_sec": 30   // 呼叫超时时间（秒）
 }
@@ -171,7 +173,7 @@ VoIP 相关下行消息有三类：
 
 小程序第一次呼叫某台设备前，应先完成设备授权。当前实现流程是：
 
-1. 新版小程序先通过 [`PUT /v1/user/device/name`](api-reference.md#put-v1userdevicename) 设置设备名称
+1. 小程序先通过 [`PUT /v1/user/device/name`](api-reference.md#put-v1userdevicename) 设置设备名称
 2. 调 [`POST /v1/voip/user/sn-ticket`](api-reference.md#post-v1voipusersn-ticket)
 3. 将响应中的 `device_name` 传给 <a href="https://developers.weixin.qq.com/miniprogram/dev/framework/device/voip/auth.html" target="_blank" rel="noopener">`wx.requestDeviceVoIP(...)`</a>
 4. 成功后将相同 `device_name` 调 [`POST /v1/voip/user/report-auth`](api-reference.md#post-v1voipuserreport-auth)
@@ -190,8 +192,8 @@ VoIP 相关下行消息有三类：
 授权设备名称、手机端看到的设备来电名称、小程序呼设备时传入的 `deviceName` 必须保持
 一致。微信保存的是授权时快照；设备绑定后可以修改当前名称，但不会直接修改微信快照。
 改名后页面会醒目标记“待重新授权”，并提示用户在微信“最近使用”中删除小程序，再
-重新进入完成授权。解绑时服务端会清空设备名称和授权记录。为兼容已部署的旧小程序，
-绑定名称为空时 `sn-ticket` 会返回 `device_id` 作为授权名称。
+重新进入完成授权。解绑时服务端会清空设备名称和授权记录。绑定名称为空时，
+`sn-ticket` 使用 `device_id` 作为授权名称。
 
 ### 4. 小程序呼叫设备
 
@@ -246,7 +248,7 @@ VoIP 相关下行消息有三类：
 - 列表中不存在：授权记录已被清空，可以重新调用 `wx.requestDeviceVoIP`
 - API 调用失败：状态未知，不误报为未授权
 
-服务端无法主动获知所有微信设置变化。新版小程序成功读取
+服务端无法主动获知所有微信设置变化。小程序成功读取
 `wx.getDeviceVoIPList()` 后，会把明确为“列表缺失/已关闭”且服务端仍为 active 的授权
 删除，并通知设备刷新；API 调用失败得到 `unknown` 时不会删除。用户没有再次打开小程序
 时，设备外呼若收到微信错误码 `9`，服务端也会把授权标记为 `invalid`、从设备联系人
@@ -300,7 +302,7 @@ sequenceDiagram
 - `wx_room_id`
 - `wx_user_openid`
 - `wx_user_remark`
-- `wx_user_nickname`（与 `wx_user_remark` 相同，兼容旧设备）
+- `wx_user_nickname`（与 `wx_user_remark` 相同）
 - `wx_server_token`
 - `wx_session_key`
 - `wx_payload`
@@ -366,10 +368,9 @@ VoIP 建连成功后，设备进入对讲态，开始本地音频收发；如果
 - `error != 0`：建连失败，不能开始收发
 
 当前 「C 参考实现」的实际策略是：
-- 回调 error=0 后保存受保护状态，并把媒体任务启动延后到回调栈之外
-- 收到 0x2000 时只记录“双方已建立”；收到 0x2001 时投递断开动作，由延后任务调用 `TiRtcDisconnect`
-
-因此，若产品要求必须等业务接通确认后才发送媒体，应在自己的媒体任务中增加 0x2000 门闩；不要误以为当前 「C 参考实现」已经这样做。
+- 回调 `error=0` 后保存连接状态，继续等待业务接通确认
+- 收到 `0x2000` 后才由控制任务启动本地媒体
+- 收到 `0x2001` 时投递断开动作，由延后任务调用 `TiRtcDisconnect`
 
 ### 3. C 参考实现接听与媒体生命周期
 
@@ -377,6 +378,7 @@ VoIP 建连成功后，设备进入对讲态，开始本地音频收发；如果
 
 ~~~c
 #include "tirtc_voip.h"
+#include "tirtc_runtime.h"
 
 VoipState *voip = voip_create(voip_server, device_id, mqtt_token,
                               "/data/voip_up.g711a");
@@ -384,11 +386,20 @@ if (!voip) return -1;
 voip_configure_video(voip, "/data/voip_up.h264");
 if (voip_configure_down_audio_format("alaw_8khz") != 0) return -1;
 
-if (voip_init_sdk(device_id, device_key, client_id, endpoint) != 0) return -1;
+/* 进程启动时执行一次；同时支持其他业务时，先注册全部业务回调。 */
+if (voip_service_register() != 0 ||
+    tirtc_runtime_start(device_id, device_key, client_id, endpoint) != 0) {
+    voip_destroy(voip);
+    return -1;
+}
 
-/* 每次进入 VoIP 资源拥有态后都上报 profile，并缓存授权用户。 */
+/* 启动时上报一次 profile；callers_update 到达后刷新联系人缓存。 */
 cJSON *callers = NULL;
-if (voip_report_profile(voip_server, mqtt_token, &callers) != 0) return -1;
+if (voip_report_profile(voip_server, mqtt_token, &callers) != 0) {
+    tirtc_runtime_stop();
+    voip_destroy(voip);
+    return -1;
+}
 voip_set_auth_list(voip, callers); /* 所有权转给 VoipState，由 voip_destroy 释放。 */
 
 /* 正式 MQTT 的 channel=wx 来电回调：payload 就是消息 payload 字段。 */
@@ -397,14 +408,29 @@ void on_mqtt_wx_call(const cJSON *payload) {
     /* cmd topic ACK 由 device_flow.c 在分发前发送。 */
 }
 
+/* SessionCoordinator 接听前停止 STREAM，再激活 VoIP 业务代次。 */
+uint64_t generation = tirtc_runtime_activate(TIRTC_SERVICE_VOIP);
+if (generation == 0 || voip_service_start(voip) != 0) {
+    if (generation != 0)
+        tirtc_runtime_deactivate(TIRTC_SERVICE_VOIP, generation);
+    tirtc_runtime_stop();
+    voip_destroy(voip);
+    return -1;
+}
+
 /* 用户按下“接听”。内部取保存的 peer_id/token 并 TiRtcWhipConnect。 */
 if (voip_accept_pending(voip) != 0) {
     /* 建连提交失败；通知 UI 并恢复 STREAM 会话。 */
 }
 
 /* 用户挂断、收到 call_cancel 或连接错误时： */
-voip_stop_session(voip);     /* 0x2001 -> TiRtcDisconnect -> 回收推流任务 */
-voip_uninit_sdk();
+tirtc_runtime_deactivate(TIRTC_SERVICE_VOIP, generation);
+voip_service_stop(voip);     /* 0x2001 -> TiRtcDisconnect -> 回收推流任务 */
+
+/* Coordinator 此时恢复 STREAM，设备继续运行；这里不能停止或反初始化 SDK。 */
+
+/* 以下两行属于整个设备进程的统一退出路径，不属于 VoIP 会话结束路径。 */
+tirtc_runtime_stop();
 voip_destroy(voip);
 ~~~
 
@@ -475,7 +501,7 @@ Content-Type: application/json
 { "code": 0, "msg": "ok", "data": { "call_id": "8d4bc1f..." } }
 ```
 
-旧设备只判断 `code`，新增的 `data.call_id` 不改变原成功语义。服务端在发起前检查设备
+成功响应中的 `data.call_id` 用于关联本次外呼与后续 MQTT 回铃。服务端在发起前检查设备
 仍已绑定且联系人授权有效；同一设备或联系人 30 秒内重复发起会返回 `40900`。微信房间
 通知成功下发到设备后会提前释放防重状态，正常接通、挂断后可立即重拨。微信返回错误码
 `9` 时返回业务码 `40205`，设备应刷新联系人列表。只有设备 JWT 缺失、无效或过期时
@@ -486,10 +512,9 @@ voip-server 调用微信主叫 API 发起视频呼叫时，会在 `query` 中写
 `payload`/`wxa_payload` 保留给加入房间与设备通知链路透传，不作为小程序 UI 配置来源。
 请求未传 `payload` 时，服务端会自动写入本次 `call_id`、主叫设备、目标 OpenID 和
 房间类型；这些字段会随 MQTT 回推成为 `wx_call_id`、`wx_from`、`wx_room_type`。
-设备应优先用 `wx_call_id` 关联回铃，不能只按 OpenID 判断，否则同一微信用户恰好反向
-呼入时可能串房。旧服务端没有 `wx_call_id` 时，才退回 OpenID 兼容判断。调用方显式传入
-自定义 `payload` 时，服务端保持原值不覆盖，因此自定义 payload 若也需要精确关联，应
-自行携带 `id`、`from`、`to`、`room_type` 字段。
+设备必须用 `wx_call_id` 关联回铃，不能只按 OpenID 判断，否则同一微信用户恰好反向
+呼入时可能串房。调用方显式传入自定义 `payload` 时，服务端保持原值不覆盖；自定义
+payload 必须携带 `id`、`from`、`to`、`room_type` 字段，确保 MQTT 回推包含精确关联信息。
 
 ### 2. 等待回推 `call_incoming`
 

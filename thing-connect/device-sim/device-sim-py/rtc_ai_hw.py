@@ -2,7 +2,7 @@
 from __future__ import annotations
 """rtc_ai_hw.py — TiRTC AI 对话会话管理（跨平台硬件音频版）
 
-接口与 rtc_ai.py 完全兼容，区别：
+接口与 rtc_ai.py 一致，区别：
   - 上行音频：sounddevice 麦克风采集（替代读文件）
   - 下行音频：sounddevice 扬声器播放（替代写文件）
   - 跨平台：Windows / macOS / Linux 通用
@@ -50,6 +50,7 @@ _ECHO_GATE_ACTIVE = True
 _ECHO_GATE_ATTEN_DB = 24
 
 import tirtc_sdk as sdk
+from tirtc_runtime import ServiceKind, process_tirtc_runtime
 from tirtc_sdk import (
     TIRTCFRAMEINFO, TIRTCCALLBACKS,
     OnEventCB, OnConnAcceptCB, OnConnErrCB, OnDisconnCB,
@@ -72,11 +73,13 @@ AUDIO_PKT_SIZE    = SAMPLE_RATE * 2 * CHANNELS * AUDIO_PKT_MS // 1000   # 640 �
 AI_PLAYBACK_PKT_MS = 40
 AI_CMD            = 0x2100
 AI_AUDIO_STREAM_ID = 1
+AI_CONNECT_TIMEOUT_SEC = 10.0
+AI_START_RESPONSE_TIMEOUT_SEC = 10.0
 
-# 下行播放队列：on_audio 回调 → 播放线程
-_play_queue: "queue.Queue[tuple[bytes, int, int] | None]" = queue.Queue(maxsize=100)
+# 下行播放队列：on_audio 回调只复制帧，播放线程负责日志、解码和声卡 I/O
+_play_queue: "queue.Queue[tuple[bytes, int, int, int] | None]" = queue.Queue(maxsize=100)
 
-# 音频设备（由 _select_audio_devices 在 init_sdk 时自动选定）
+# 音频设备（由 _select_audio_devices 在 AI 业务激活时自动选定）
 _mic_device: "int | None" = None
 _spk_device: "int | None" = None
 
@@ -143,11 +146,8 @@ def _select_audio_devices() -> None:
 
 
 # ── 模块状态 ──────────────────────────────────────────────────────────────
-_sdk_running    = False
-_sdk_started    = threading.Event()
-_sdk_stopped    = threading.Event()
+_service_active = False
 _cbs_ref: "TIRTCCALLBACKS | None" = None
-_sdk_log_cb_ref = None
 _callback_guard = SdkCallbackGuard()
 
 # ── 会话状态 ──────────────────────────────────────────────────────────────
@@ -158,9 +158,107 @@ _stream_thread: "threading.Thread | None" = None
 _play_thread: "threading.Thread | None" = None
 _stream_stop    = threading.Event()
 _connect_cb_ref: "ConnectCB | None" = None
+_connect_cb_refs: "dict[int, ConnectCB]" = {}
+_connect_timer: "threading.Timer | None" = None
+_start_response_timer: "threading.Timer | None" = None
+_session_generation = 0
+_terminal_notified_generation = 0
 _msg_callback: "callable | None" = None
 _session_end_callback = None
 _audio_recv_count = 0
+
+
+def _cancel_session_timers_locked() -> None:
+    global _connect_timer, _start_response_timer
+    timers = (_connect_timer, _start_response_timer)
+    _connect_timer = None
+    _start_response_timer = None
+    for timer in timers:
+        if timer is not None:
+            timer.cancel()
+
+
+def _notify_session_end_once(generation: int) -> None:
+    global _terminal_notified_generation
+    with _state_lock:
+        if _terminal_notified_generation == generation:
+            return
+        _terminal_notified_generation = generation
+        callback = _session_end_callback
+    if callback:
+        callback()
+
+
+def _fail_current_session(generation: int, reason: str) -> bool:
+    with _state_lock:
+        current = (
+            generation == _session_generation
+            and _session_state != "IDLE"
+        )
+    if not current:
+        return False
+    stop_session()
+    _warn(reason)
+    _notify_session_end_once(generation)
+    return True
+
+
+def _fail_after_callback(generation: int, reason: str) -> None:
+    _callback_guard.defer(
+        _fail_current_session,
+        generation,
+        reason,
+        name="ai-hw-terminal-cleanup",
+    )
+
+
+def _arm_connect_timeout(generation: int) -> None:
+    global _connect_timer
+
+    def expire() -> None:
+        _fail_current_session(
+            generation,
+            f"等待 WHIP 连接回调超时"
+            f"（{AI_CONNECT_TIMEOUT_SEC:g}s），已结束 AI 会话",
+        )
+
+    with _state_lock:
+        if (
+            generation != _session_generation
+            or _session_state != "CONNECTING"
+            or _active_hconn is not None
+        ):
+            return
+        timer = threading.Timer(AI_CONNECT_TIMEOUT_SEC, expire)
+        timer.daemon = True
+        _connect_timer = timer
+    timer.start()
+
+
+def _arm_start_response_timeout(
+    generation: int, hconn_val: int
+) -> None:
+    global _start_response_timer
+
+    def expire() -> None:
+        _fail_current_session(
+            generation,
+            f"等待 AI start_session 响应超时"
+            f"（{AI_START_RESPONSE_TIMEOUT_SEC:g}s），已结束 AI 会话",
+        )
+
+    with _state_lock:
+        if (
+            generation != _session_generation
+            or _session_state != "CONNECTING"
+            or _active_hconn != hconn_val
+        ):
+            return
+        timer = threading.Timer(
+            AI_START_RESPONSE_TIMEOUT_SEC, expire)
+        timer.daemon = True
+        _start_response_timer = timer
+    timer.start()
 
 
 def _schedule_disconnect_after_callback(hconn_val: int) -> None:
@@ -169,7 +267,6 @@ def _schedule_disconnect_after_callback(hconn_val: int) -> None:
 
     def disconnect():
         global _session_state
-        _callback_guard.wait_for_idle()
         with _state_lock:
             if _active_hconn != hconn_val or _session_state == "DISCONNECTING":
                 return
@@ -182,11 +279,16 @@ def _schedule_disconnect_after_callback(hconn_val: int) -> None:
             )
             _handle_disconnect(hconn_val)
 
-    threading.Thread(
-        target=disconnect,
-        daemon=True,
-        name="ai-hw-remote-disconnect",
-    ).start()
+    _callback_guard.defer(
+        disconnect, name="ai-hw-remote-disconnect")
+
+
+def _disconnect_stale_after_callback(hconn_val: int) -> None:
+    def disconnect():
+        sdk.TiRtcDisconnect(ctypes.c_void_p(hconn_val))
+
+    _callback_guard.defer(
+        disconnect, name="ai-hw-stale-disconnect")
 
 
 def set_message_callback(cb) -> None:
@@ -199,82 +301,48 @@ def set_session_end_callback(callback) -> None:
     _session_end_callback = callback
 
 
-def init_sdk(device_id: str, secret_key: str, endpoint: str | None = None, client_id: str = "") -> None:
-    global _sdk_running, _cbs_ref
+def runtime_callbacks() -> TIRTCCALLBACKS:
+    global _cbs_ref
+    if _cbs_ref is None:
+        _cbs_ref = _build_callbacks()
+    return _cbs_ref
 
-    if _sdk_running:
-        _log("SDK 已运行，跳过重复初始化")
+
+def callback_guard() -> SdkCallbackGuard:
+    return _callback_guard
+
+
+def start_service() -> None:
+    global _service_active
+    if _service_active:
         return
-
     _select_audio_devices()
-    _sdk_started.clear()
-    _sdk_stopped.clear()
-
-    buf = ctypes.c_uint32(1024 * 1024)
-    sdk.TiRtcSetOption(sdk.TIRTC_OPT_MAX_SEND_BUFFER, ctypes.byref(buf), ctypes.sizeof(buf))
-
-    rc = sdk.TiRtcInit()
-    if rc != 0:
-        sys.exit(f"[rtc_ai_hw] TiRtcInit failed: {sdk.TiRtcGetErrorStr(rc).decode()}")
-
-    sdk.TiRtcLogConfig(0, None, 0)
-    sdk.TiRtcLogSetLevel(3)
-    if _LOG_LEVEL <= 10:
-        global _sdk_log_cb_ref
-        def _sdk_log_cb(line):
-            if line:
-                print(f"\033[0;90m[TiRTC-SDK]\033[0m {line.decode(errors='replace')}", flush=True)
-        _sdk_log_cb_ref = sdk.LogCB(_sdk_log_cb)
-        sdk.TiRtcLogSetCallback(_sdk_log_cb_ref)
-        sdk.TiRtcLogSetLevel(8)
-
-    if endpoint:
-        ep_b = endpoint.encode()
-        sdk.TiRtcSetOption(sdk.TIRTC_OPT_SERVICE_ENDPOINT, ctypes.c_char_p(ep_b), len(ep_b))
-
-    sk = secret_key.encode()
-    sdk.TiRtcSetOption(sdk.TIRTC_OPT_DEVICE_SECRET_KEY, ctypes.c_char_p(sk), len(sk))
-    cid = (client_id or device_id).encode()
-    sdk.set_client_id(cid)
-    _cbs_ref = _build_callbacks()
-    _device_id_b = sdk.device_id_for_start(device_id, secret_key)
-    rc = sdk.TiRtcStart(_device_id_b, ctypes.byref(_cbs_ref))
-    if rc != 0:
-        sys.exit(f"[rtc_ai_hw] TiRtcStart failed: {sdk.TiRtcGetErrorStr(rc).decode()}")
-
-    _sdk_running = True
-    ver = sdk.TiRtcGetVersion().decode()
-    _info(f"TiRTC {ver} 启动中 device_id={device_id}，等待 SYS_STARTED…")
-    _sdk_started.wait(timeout=10.0)
-    _info("TiRTC SDK 已就绪")
+    _service_active = True
+    _info("AI 硬件音频业务已就绪")
 
 
-def uninit_sdk() -> None:
-    global _sdk_running
-    if not _sdk_running:
+def stop_service() -> None:
+    global _service_active
+    if not _service_active:
         return
+    _service_active = False
     stop_session()
-    _sdk_running = False
-    _callback_guard.wait_for_idle()
-    sdk.TiRtcStop()
-    _sdk_stopped.wait(timeout=8.0)
-    _callback_guard.wait_for_idle()
-    sdk.TiRtcUninit()
-    _info("TiRTC SDK 已停止")
+    _callback_guard.wait_for_all()
+    with _state_lock:
+        _cancel_session_timers_locked()
+    _info("AI 硬件音频业务已停止")
+
+
+def _process_command_after_callback(hconn_val: int, raw: bytes) -> None:
+    try:
+        msg = json.loads(raw.decode())
+    except Exception as exc:
+        _err(f"AI cmd JSON 解析失败: {exc}")
+        return
+    _handle_ai_message(hconn_val, msg)
 
 
 def _build_callbacks() -> TIRTCCALLBACKS:
-    def on_event(event, data, length):
-        if event == sdk.TIRTC_EVENT_SYS_STARTED:
-            _sdk_started.set()
-            _info("SYS_STARTED")
-        elif event == sdk.TIRTC_EVENT_SYS_STOPPED:
-            _sdk_stopped.set()
-            _info("SYS_STOPPED")
-
-    def on_conn_accepted(hconn):
-        pass
-
     def on_conn_error(hconn, error):
         hval = ctypes.cast(hconn, ctypes.c_void_p).value
         _err(f"on_conn_error hconn={hval:#x} error={sdk.TiRtcGetErrorStr(error).decode()}")
@@ -283,44 +351,32 @@ def _build_callbacks() -> TIRTCCALLBACKS:
     def on_disconnected(hconn):
         hval = ctypes.cast(hconn, ctypes.c_void_p).value
         _info(f"on_disconnected hconn={hval:#x}")
-        _handle_disconnect(hval)
+        _callback_guard.defer(
+            _handle_disconnect,
+            hval,
+            name="ai-hw-disconnected-cleanup",
+        )
 
     def on_audio(hconn, pFi, data):
-        global _audio_recv_count, _round_first_frame
+        if not data:
+            return
         fi = ctypes.cast(pFi, ctypes.POINTER(TIRTCFRAMEINFO)).contents
         if fi.stream_id != AI_AUDIO_STREAM_ID:
             return
-        raw = (ctypes.c_uint8 * fi.length).from_address(
-            ctypes.cast(data, ctypes.c_void_p).value
-        )
-        _audio_recv_count += 1
+        raw = ctypes.string_at(data, fi.length)
         source_rate = 16000 if fi.flags == TIRTC_AUDIOSAMPLE_16K16B1C else 8000
-        n = _audio_recv_count
-        if _round_first_frame and _round_end_ts is not None:
-            latency_ms = int((time.monotonic() - _round_end_ts) * 1000)
-            _info(f"AI 延迟 {latency_ms} ms")
-            _round_first_frame = False
-        elif n == 1:
-            _fmt_names = {getattr(sdk, a): a for a in dir(sdk) if a.startswith("TIRTC_AUDIO_")}
-            _fmt_label = _fmt_names.get(fi.media, str(fi.media))
-            _khz = 16 if fi.flags == TIRTC_AUDIOSAMPLE_16K16B1C else 8
-            _info(f"收到AI音频格式: {_fmt_label} {_khz}kHz {fi.length}bytes/帧")
-        if n % 50 == 0:
-            _log(f"下行 AI 音频累计 {n} 帧")
-        _handle_audio(bytes(raw), fi.media, source_rate)
+        _handle_audio(raw, fi.media, source_rate, fi.flags)
 
     def on_command(hconn, cmdw, data, length):
         if cmdw != AI_CMD or data is None or length == 0:
             return
-        try:
-            raw_bytes = (ctypes.c_uint8 * length).from_address(
-                ctypes.cast(data, ctypes.c_void_p).value
-            )
-            msg = json.loads(bytes(raw_bytes).decode())
-        except Exception as e:
-            _err(f"AI cmd JSON 解析失败: {e}")
-            return
-        _handle_ai_message(ctypes.cast(hconn, ctypes.c_void_p).value, msg)
+        raw = ctypes.string_at(data, length)
+        _callback_guard.defer(
+            _process_command_after_callback,
+            ctypes.cast(hconn, ctypes.c_void_p).value,
+            raw,
+            name="ai-hw-command",
+        )
 
     def on_video(hconn, pFi, data): pass
     def on_message(hconn, pFi, data): pass
@@ -331,8 +387,6 @@ def _build_callbacks() -> TIRTCCALLBACKS:
     def on_unsubscribe_audio(hconn, stream_id): pass
 
     cbs = TIRTCCALLBACKS()
-    cbs.on_event             = OnEventCB(_callback_guard.wrap(on_event))
-    cbs.on_conn_accepted     = OnConnAcceptCB(_callback_guard.wrap(on_conn_accepted))
     cbs.on_conn_error        = OnConnErrCB(_callback_guard.wrap(on_conn_error))
     cbs.on_disconnected      = OnDisconnCB(_callback_guard.wrap(on_disconnected))
     cbs.on_audio             = OnAudioCB(_callback_guard.wrap(on_audio))
@@ -354,8 +408,63 @@ def _build_callbacks() -> TIRTCCALLBACKS:
     return cbs
 
 
-def _handle_ai_message(hconn_val: int, msg: dict) -> None:
+def _start_media_after_callback(generation: int, hconn_val: int) -> None:
     global _echo_gate, _session_state, _stream_thread, _play_thread
+
+    with _state_lock:
+        if (
+            generation != _session_generation
+            or _active_hconn != hconn_val
+            or _session_state != "CONNECTING"
+        ):
+            return
+        _session_state = "IN_CALL"
+        _stream_stop.clear()
+        while not _play_queue.empty():
+            try:
+                _play_queue.get_nowait()
+            except queue.Empty:
+                break
+        stream_thread = threading.Thread(
+            target=_mic_stream_worker,
+            args=(hconn_val,),
+            daemon=True,
+            name="ai-mic-stream",
+        )
+        play_thread = threading.Thread(
+            target=_speaker_play_worker,
+            daemon=True,
+            name="ai-speaker-play",
+        )
+        _stream_thread = stream_thread
+        _play_thread = play_thread
+
+    if _ECHO_GATE_AVAILABLE and _ECHO_GATE_ACTIVE:
+        _echo_gate = EchoGate.create(
+            sample_rate=16000,
+            frame_ms=20,
+            attenuation_db=_ECHO_GATE_ATTEN_DB,
+        )
+        _info(f"回声门控已启用 (衰减 {_ECHO_GATE_ATTEN_DB}dB)")
+    stream_thread.start()
+    play_thread.start()
+    _info("AI 会话建立，开始麦克风采集 + 扬声器播放")
+
+
+def _send_device_action_reply_after_callback(
+    hconn_val: int, message: bytes
+) -> None:
+    with _state_lock:
+        current = (
+            _active_hconn == hconn_val
+            and _session_state not in ("IDLE", "DISCONNECTING")
+        )
+    if current:
+        sdk.TiRtcSendCommand(
+            ctypes.c_void_p(hconn_val), AI_CMD, message, len(message))
+
+
+def _handle_ai_message(hconn_val: int, msg: dict) -> None:
     with _state_lock:
         if (_active_hconn != hconn_val
                 or _session_state in ("IDLE", "DISCONNECTING")):
@@ -369,41 +478,40 @@ def _handle_ai_message(hconn_val: int, msg: dict) -> None:
     if is_resp:
         if "error" in msg:
             _err(f"start_session 失败: {msg['error']}")
+            with _state_lock:
+                generation = _session_generation
+                if _start_response_timer is not None:
+                    _start_response_timer.cancel()
+            _fail_after_callback(
+                generation, "AI start_session 被服务端拒绝，已结束会话")
             return
         result = msg.get("result", {})
+        if not isinstance(result, dict):
+            with _state_lock:
+                generation = _session_generation
+                if _start_response_timer is not None:
+                    _start_response_timer.cancel()
+            _fail_after_callback(
+                generation, "AI start_session 响应无效，已结束会话")
+            return
         session_id = result.get("session_id", "")
         _info(f"start_session 成功 session_id={session_id}")
         _info(f"  服务端确认 input_audio={result.get('input_audio')} output_audio={result.get('output_audio')}")
-        # 创建回声门控
-        if _ECHO_GATE_AVAILABLE and _ECHO_GATE_ACTIVE:
-            _echo_gate = EchoGate.create(sample_rate=16000, frame_ms=20, attenuation_db=_ECHO_GATE_ATTEN_DB)
-            _info(f"回声门控已启用 (衰减 {_ECHO_GATE_ATTEN_DB}dB)")
         with _state_lock:
-            _session_state = "IN_CALL"
-            hconn_v = _active_hconn
-            _stream_stop.clear()
-            # 清空旧队列
-            while not _play_queue.empty():
-                try:
-                    _play_queue.get_nowait()
-                except queue.Empty:
-                    break
-            st = threading.Thread(
-                target=_mic_stream_worker,
-                args=(hconn_v,),
-                daemon=True,
-                name="ai-mic-stream",
-            )
-            pt = threading.Thread(
-                target=_speaker_play_worker,
-                daemon=True,
-                name="ai-speaker-play",
-            )
-            _stream_thread = st
-            _play_thread   = pt
-        st.start()
-        pt.start()
-        _info("AI 会话建立，开始麦克风采集 + 扬声器播放")
+            if (
+                _active_hconn != hconn_val
+                or _session_state != "CONNECTING"
+            ):
+                return
+            generation = _session_generation
+            if _start_response_timer is not None:
+                _start_response_timer.cancel()
+        _callback_guard.defer(
+            _start_media_after_callback,
+            generation,
+            hconn_val,
+            name="ai-hw-media-start",
+        )
         return
 
     if method not in ("caption", "round_start", "round_end"):
@@ -431,12 +539,19 @@ def _handle_ai_message(hconn_val: int, msg: dict) -> None:
 
     elif method == "device_action" and msg_id is not None:
         reply = json.dumps({"jsonrpc": "2.0", "id": msg_id, "result": {}}).encode()
-        sdk.TiRtcSendCommand(ctypes.c_void_p(hconn_val), AI_CMD, reply, len(reply))
+        _callback_guard.defer(
+            _send_device_action_reply_after_callback,
+            hconn_val,
+            reply,
+            name="ai-hw-device-action-reply",
+        )
 
 
-def _handle_audio(data: bytes, media: int, sample_rate: int) -> None:
+def _handle_audio(
+    data: bytes, media: int, sample_rate: int, flags: int
+) -> None:
     try:
-        _play_queue.put_nowait((data, media, sample_rate))
+        _play_queue.put_nowait((data, media, sample_rate, flags))
     except queue.Full:
         # 队列满时丢最旧的帧再入队，防止累积延迟
         try:
@@ -444,7 +559,7 @@ def _handle_audio(data: bytes, media: int, sample_rate: int) -> None:
         except queue.Empty:
             pass
         try:
-            _play_queue.put_nowait((data, media, sample_rate))
+            _play_queue.put_nowait((data, media, sample_rate, flags))
         except queue.Full:
             pass
 
@@ -455,6 +570,8 @@ def _handle_disconnect(hconn_val: int) -> None:
     with _state_lock:
         if _active_hconn != hconn_val:
             return
+        generation = _session_generation
+        _cancel_session_timers_locked()
         _session_state = "DISCONNECTING"
         _active_hconn  = None
         t_stream, _stream_thread = _stream_thread, None
@@ -475,8 +592,7 @@ def _handle_disconnect(hconn_val: int) -> None:
         if _session_state == "DISCONNECTING":
             _session_state = "IDLE"
     _info("连接已断开，回到 IDLE")
-    if _session_end_callback:
-        _session_end_callback()
+    _notify_session_end_once(generation)
 
 
 # _open_input / _open_output 已收敛到 audio_device.open_input_stream / open_output_stream
@@ -561,6 +677,7 @@ def _mic_stream_worker(hconn_val: int) -> None:
 
 def _speaker_play_worker() -> None:
     """Decode and play each 40 ms AI downlink frame without truncation."""
+    global _audio_recv_count, _round_first_frame
     device = _spk_device if _spk_device is not None else sd.default.device[1]
 
     try:
@@ -588,7 +705,32 @@ def _speaker_play_worker() -> None:
                     continue
                 if item is None:
                     break
-                data, media, source_rate = item
+                data, media, source_rate, flags = item
+                _audio_recv_count += 1
+                count = _audio_recv_count
+                if _round_first_frame and _round_end_ts is not None:
+                    latency_ms = int(
+                        (time.monotonic() - _round_end_ts) * 1000)
+                    _info(f"AI 延迟 {latency_ms} ms")
+                    _round_first_frame = False
+                elif count == 1:
+                    format_names = {
+                        getattr(sdk, name): name
+                        for name in dir(sdk)
+                        if name.startswith("TIRTC_AUDIO_")
+                    }
+                    format_label = format_names.get(media, str(media))
+                    khz = (
+                        16
+                        if flags == TIRTC_AUDIOSAMPLE_16K16B1C
+                        else 8
+                    )
+                    _info(
+                        f"收到 AI 音频格式: {format_label} "
+                        f"{khz}kHz {len(data)}bytes/帧"
+                    )
+                elif count % 50 == 0:
+                    _log(f"下行 AI 音频累计 {count} 帧")
                 if media == TIRTC_AUDIO_ALAW:
                     data = alaw_decode(data)
                 elif media != TIRTC_AUDIO_PCM:
@@ -631,7 +773,11 @@ def get_ai_token(ai_server: str, mqtt_token: str, device_id: str) -> dict:
     try:
         data = resp.json()
     except Exception as e:
-        _err(f"获取 AI token 响应非 JSON (HTTP {resp.status_code}): {e}\n  body: {resp.text[:200]}")
+        body_length = len((resp.text or "").encode("utf-8"))
+        _err(
+            f"获取 AI token 响应非 JSON (HTTP {resp.status_code}): {e}; "
+            f"响应体已省略（{body_length} bytes）"
+        )
         return {}
     if data.get("code") != 200:
         _err(f"获取 AI token 失败 code={data.get('code')} msg={data.get('msg')}")
@@ -659,7 +805,8 @@ def _parse_peer_id(peer_id: str) -> dict:
 
 def start_session(peer_id: str, token: str, audio_file: str = "", device_id: str = "") -> None:
     global _session_state, _active_hconn
-    global _connect_cb_ref, _stream_stop, _stream_thread, _play_thread, _audio_recv_count
+    global _connect_cb_ref, _stream_stop, _stream_thread, _play_thread
+    global _audio_recv_count, _session_generation
 
     _audio_recv_count = 0
 
@@ -667,6 +814,9 @@ def start_session(peer_id: str, token: str, audio_file: str = "", device_id: str
         if _session_state != "IDLE":
             _err(f"start_session: 当前状态 {_session_state}，不能发起新会话")
             return
+        _cancel_session_timers_locked()
+        _session_generation += 1
+        generation = _session_generation
         _session_state = "CONNECTING"
 
     _stream_stop.clear()
@@ -677,21 +827,61 @@ def start_session(peer_id: str, token: str, audio_file: str = "", device_id: str
 
     def connect_cb(error, hconn, user_data):
         global _session_state, _active_hconn
-        if error != 0:
-            _err(f"TiRtcWhipConnect 失败: rc={error} ({sdk.TiRtcGetErrorStr(error).decode()})")
-            with _state_lock:
-                _session_state = "IDLE"
+        hconn_val = (
+            ctypes.cast(hconn, ctypes.c_void_p).value if hconn else None)
+        with _state_lock:
+            _connect_cb_refs.pop(generation, None)
+            current = (
+                generation == _session_generation
+                and _session_state == "CONNECTING"
+            )
+            if current and _connect_timer is not None:
+                _connect_timer.cancel()
+        if not current:
+            if error == 0 and hconn_val is not None:
+                _disconnect_stale_after_callback(hconn_val)
+            return
+        if error != 0 or hconn_val is None:
+            detail = (
+                f"rc={error} ({sdk.TiRtcGetErrorStr(error).decode()})"
+                if error != 0 else "成功回调未返回 hconn"
+            )
+            _err(f"TiRtcWhipConnect 失败: {detail}")
+            _fail_after_callback(
+                generation, "AI WHIP 连接失败，已结束会话")
             return
 
-        hconn_val = ctypes.cast(hconn, ctypes.c_void_p).value
+        if not process_tirtc_runtime.bind_active_connection(
+            ServiceKind.AI, hconn_val
+        ):
+            _warn(
+                f"WHIP 连接完成时 AI 会话已切换 "
+                f"hconn={hconn_val:#x}，丢弃连接")
+            _disconnect_stale_after_callback(hconn_val)
+            _fail_after_callback(
+                generation, "AI runtime generation 已失效，结束会话")
+            return
+
         _info(f"WHIP 连接成功 hconn={hconn_val:#x}")
         with _state_lock:
-            _active_hconn = hconn_val
+            if (
+                generation != _session_generation
+                or _session_state != "CONNECTING"
+            ):
+                stale = True
+            else:
+                stale = False
+                _active_hconn = hconn_val
+        if stale:
+            _disconnect_stale_after_callback(hconn_val)
+            return
 
         def _send_start_session():
             time.sleep(0.3)
             with _state_lock:
                 if (
+                    generation != _session_generation
+                    or
                     _active_hconn != hconn_val
                     or _session_state in ("IDLE", "DISCONNECTING")
                 ):
@@ -709,22 +899,42 @@ def start_session(peer_id: str, token: str, audio_file: str = "", device_id: str
                 "params": params,
             }
             msg = json.dumps(envelope).encode()
-            sdk.TiRtcSendCommand(ctypes.c_void_p(hconn_val), AI_CMD, msg, len(msg))
+            rc = sdk.TiRtcSendCommand(
+                ctypes.c_void_p(hconn_val), AI_CMD, msg, len(msg))
+            if rc != 0:
+                _fail_current_session(
+                    generation,
+                    f"发送 AI start_session 失败 rc={rc}，已结束会话",
+                )
+                return
+            _arm_start_response_timeout(generation, hconn_val)
 
-        threading.Thread(target=_send_start_session, daemon=True, name="ai-start-session").start()
+        _callback_guard.defer(
+            _send_start_session,
+            name="ai-hw-start-session",
+        )
         _info("等待 start_session 响应后开始采集…")
 
     _connect_cb_ref = ConnectCB(_callback_guard.wrap(connect_cb))
+    with _state_lock:
+        _connect_cb_refs[generation] = _connect_cb_ref
     rc = sdk.TiRtcWhipConnect(peer_id.encode(), token.encode(), _connect_cb_ref, None)
     _log(f"TiRtcWhipConnect rc={rc}")
     if rc != 0:
         _err(f"TiRtcWhipConnect 调用失败: rc={rc} ({sdk.TiRtcGetErrorStr(rc).decode()})")
         with _state_lock:
-            _session_state = "IDLE"
+            _connect_cb_refs.pop(generation, None)
+        _fail_current_session(
+            generation,
+            f"TiRtcWhipConnect 调用失败 rc={rc}，已结束 AI 会话",
+        )
+        return
+    _arm_connect_timeout(generation)
 
 
 def stop_session() -> None:
     global _session_state, _active_hconn, _stream_thread, _play_thread
+    global _session_generation
 
     with _state_lock:
         state     = _session_state
@@ -733,6 +943,8 @@ def stop_session() -> None:
             _log("stop_session: 正在断开，等待 SDK 回调完成")
             return
         if state != "IDLE":
+            _cancel_session_timers_locked()
+            _session_generation += 1
             _session_state = "DISCONNECTING"
             _active_hconn = None
             t_stream, _stream_thread = _stream_thread, None

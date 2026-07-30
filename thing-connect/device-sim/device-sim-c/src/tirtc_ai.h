@@ -30,10 +30,11 @@ void ai_set_session_end_callback(AiState *as, ai_session_end_cb cb, void *user);
 /* Command input thread (aicall / hangup) */
 void ai_cmd_loop(AiState *as);
 
-/* ── SDK lifecycle (global singleton) ─────────────────────────────────── */
+/* ── Process-runtime integration ──────────────────────────────────────── */
 
-int  ai_init_sdk(const char *device_id, const char *secret_key, const char *client_id, const char *endpoint);
-void ai_uninit_sdk(void);
+int  ai_service_register(void);
+int  ai_service_start(AiState *as);
+void ai_service_stop(AiState *as);
 
 /* ── AI operations ────────────────────────────────────────────────────── */
 

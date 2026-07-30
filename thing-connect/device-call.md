@@ -407,11 +407,28 @@ Content-Type: application/json
 ~~~c
 #include "tirtc_call.h"
 #include "call_session.h"
+#include "tirtc_runtime.h"
 
 CallState *call = call_create(call_server, device_id, mqtt_token,
                               "/data/up.g711a", "/data/up.h264", "/data/recv");
 if (!call) return -1;
-if (call_init_sdk(device_id, device_key, client_id, endpoint) != 0) return -1;
+
+/* 进程启动时执行一次；同时支持其他业务时，先注册全部业务回调。 */
+if (call_service_register() != 0 ||
+    tirtc_runtime_start(device_id, device_key, client_id, endpoint) != 0) {
+    call_destroy(call);
+    return -1;
+}
+
+/* SessionCoordinator 发起或接听设备互呼前激活本业务代次。 */
+uint64_t generation = tirtc_runtime_activate(TIRTC_SERVICE_CALL);
+if (generation == 0 || call_service_start() != 0) {
+    if (generation != 0)
+        tirtc_runtime_deactivate(TIRTC_SERVICE_CALL, generation);
+    tirtc_runtime_stop();
+    call_destroy(call);
+    return -1;
+}
 
 /* 主叫：内部 POST /v1/call/request，保存 room_id 并等待被叫 TiRtcConnect。 */
 if (call_session_do_call(call, "TIRZ00000002", "video") != 0) {
@@ -436,9 +453,14 @@ call_session_do_reject(call, "busy");  /* pending 被叫才调用 */
 call_session_do_cancel(call);          /* 呼出等待中才调用 */
 call_session_do_hangup(call);          /* 已接通时调用，内部发 HTTP 和 0x2001 */
 
-/* 若前面未走 call_session_do_hangup()，关闭 SDK 前再调用 call_hangup()
-   停止媒体并断开 hconn；正常挂断路径不需要重复调用。 */
-call_uninit_sdk();
+/* 结束本次业务并归还代次；Coordinator 随后恢复 STREAM。 */
+tirtc_runtime_deactivate(TIRTC_SERVICE_CALL, generation);
+call_service_stop();
+
+/* Coordinator 此时恢复 STREAM，设备继续运行；这里不能停止或反初始化 SDK。 */
+
+/* 以下两行属于整个设备进程的统一退出路径，不属于设备互呼会话结束路径。 */
+tirtc_runtime_stop();
 call_destroy(call);
 ~~~
 

@@ -283,7 +283,7 @@ connection.connect({ deviceId, token })
 
 ### 1. 初始化 TiRTC 常驻监听
 
-实时预览模式下，设备不是主动外连，而是先本地 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcstart" target="_blank" rel="noopener">`TiRtcStart(...)`</a>，等待 H5 连接进来。新版接口中，`TiRtcStart` 只传 `device_id`，`device_key` 通过 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsetoption" target="_blank" rel="noopener">`TiRtcSetOption(TIRTC_OPT_DEVICE_SECRET_KEY, ...)`</a> 预先设置。
+实时预览模式下，设备不是主动外连，而是先本地 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcstart" target="_blank" rel="noopener">`TiRtcStart(...)`</a>，等待 H5 连接进来。`TiRtcStart` 只传 `device_id`，`device_key` 通过 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsetoption" target="_blank" rel="noopener">`TiRtcSetOption(TIRTC_OPT_DEVICE_SECRET_KEY, ...)`</a> 预先设置。
 
 典型步骤：
 
@@ -298,8 +298,8 @@ connection.connect({ deviceId, token })
 
 设备模拟器的参考实现见：
 
-- C 入口与生命周期：[device-sim/device-sim-c/src/tirtc_stream.c](device-sim/device-sim-c/src/tirtc_stream.c)
-- C 接口声明：[device-sim/device-sim-c/src/tirtc_stream.h](device-sim/device-sim-c/src/tirtc_stream.h)
+- C 进程级生命周期与统一回调：[device-sim/device-sim-c/src/tirtc_runtime.c](device-sim/device-sim-c/src/tirtc_runtime.c)
+- C 实时流会话与媒体发送：[device-sim/device-sim-c/src/tirtc_stream.c](device-sim/device-sim-c/src/tirtc_stream.c)
 - 完整可编译调用链：[device-sim/device-sim-c/README.md#各业务模块调用](device-sim/device-sim-c/README.md#各业务模块调用)
 
 ### 2. H5 连上后开始推流
@@ -410,9 +410,11 @@ static void on_unsubscribe_ignore(tirtc_conn_t h, uint8_t stream)
 static int on_subscribe_accept(tirtc_conn_t h, uint8_t stream)
 { (void)h; (void)stream; return 0; }
 
-int h5_stream_start(const char *device_id, const char *device_key,
-                    const char *client_id, const char *endpoint) {
+/* 进程启动时调用一次；H5 会话切换不能再次调用此函数。 */
+int process_rtc_start(const char *device_id, const char *device_key,
+                      const char *client_id, const char *endpoint) {
     static TIRTCCALLBACKS cbs;  /* SDK 仅保存指针，不能是栈变量。 */
+    uint32_t max_send_buffer = 1024 * 1024;
     memset(&cbs, 0, sizeof(cbs));
     cbs.on_event = on_event;
     cbs.on_conn_accepted = on_conn_accepted;
@@ -428,7 +430,10 @@ int h5_stream_start(const char *device_id, const char *device_key,
     cbs.on_subscribe_audio = on_subscribe_accept;
     cbs.on_unsubscribe_audio = on_unsubscribe_ignore;
 
-    int rc = TiRtcInit();
+    int rc = TiRtcSetOption(TIRTC_OPT_MAX_SEND_BUFFER,
+                            &max_send_buffer, sizeof(max_send_buffer));
+    if (rc != 0) return rc;
+    rc = TiRtcInit();
     if (rc != 0) return rc;
     if (endpoint && endpoint[0] &&
         (rc = TiRtcSetOption(TIRTC_OPT_SERVICE_ENDPOINT, endpoint, strlen(endpoint))) != 0) goto fail;
@@ -463,15 +468,17 @@ int h5_send_h264(const uint8_t *annexb_au, uint32_t len, uint32_t pts_ms, int is
 }
 ```
 
-上例的 `stream_event_push()` 是应用固定队列抽象，不是 TiRTC API。控制任务处理 `CONNECTED` 时保存句柄并启动采集，处理 `DISCONNECTED` 时停止采集，处理 `CONN_ERROR` 时清除匹配句柄并在回调栈外调用 `TiRtcDisconnect`。
+上例的 `process_rtc_start()` 属于进程级 runtime，只能在进程启动时调用一次；同时支持多个业务时，传给 `TiRtcStart` 的必须是按“连接归属 + 会话代次”分发的统一回调表，不能让每个业务各自启动 SDK。`stream_event_push()` 是应用固定队列抽象，不是 TiRTC API。控制任务处理 `CONNECTED` 时保存句柄并启动采集，处理 `DISCONNECTED` 时停止采集，处理 `CONN_ERROR` 时清除匹配句柄并在回调栈外调用 `TiRtcDisconnect`。
 
-停止顺序必须是：停止采集/编码任务并等待退出 → 如有连接则在控制任务调用 `TiRtcDisconnect(s_h5_conn)` → 等待正在执行的 SDK 回调和延后动作退出 → `TiRtcStop()` → 等待 `TIRTC_EVENT_SYS_STOPPED` → 再次确认无回调/媒体任务存活 → `TiRtcUninit()`。可直接对照 「C 参考实现」的 `stream_init_sdk()` / `stream_uninit_sdk()`；不要在任何 SDK 回调中调用 `TiRtcDisconnect`、`TiRtcStop` 或 `TiRtcUninit`。
+结束 H5 实时会话时只需：停止采集/编码任务并等待退出 → 在控制任务调用 `TiRtcDisconnect(s_h5_conn)` → 等待该会话的回调和延后动作退出。随后可以直接激活 VoIP、AI 或设备互呼业务，进程级 SDK 保持运行。
+
+只有进程退出时才执行：停止当前业务媒体并断开连接 → 等待全部业务回调和延后动作退出 → `TiRtcStop()` → 等待 `TIRTC_EVENT_SYS_STOPPED` → 再次确认无回调或媒体任务存活 → `TiRtcUninit()`。可直接对照「C 参考实现」的 `tirtc_runtime.c`、`tirtc_stream.c` 和 `session_coordinator.c`；不要在任何 SDK 回调中调用 `TiRtcDisconnect`、`TiRtcStop` 或 `TiRtcUninit`。
 
 ---
 
 ## 与其他业务的关系
 
-H5 实时查看本质上是“设备常驻推流，H5 被动连入”。它和 VoIP / AI / 设备呼设备不是同一种会话。
+H5 实时查看本质上是“设备常驻监听，H5 被动连入”。它和 VoIP、AI、设备互呼是不同业务会话，但共用同一个进程级 TiRTC SDK runtime；切换业务不重新初始化 SDK。
 
 现有服务端约束：
 

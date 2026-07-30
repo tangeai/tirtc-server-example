@@ -2,8 +2,8 @@
 """跨业务会话竞态仲裁器。
 
 MQTT、终端和 SDK 回调都必须经过本模块。SessionArbiter 只决定谁可以
-等待/使用唯一的 RTC 资源；SessionCoordinator 只执行已经决定好的 SDK
-生命周期切换。
+等待/使用唯一的 RTC 资源；SessionCoordinator 只执行已经决定好的业务
+会话切换，进程级 TiRTC SDK 保持运行。
 """
 
 from collections import deque
@@ -270,6 +270,7 @@ class SessionArbiter:
                 self._finish_idle.notify()
 
     def shutdown(self) -> None:
+        coordinator_error = None
         with self._transition_lock:
             with self._state_lock:
                 first = not self._closed
@@ -279,7 +280,10 @@ class SessionArbiter:
                 self._owner_cancelled = False
                 self._pending_ticket = None
             if first:
-                self._coordinator.shutdown()
+                try:
+                    self._coordinator.shutdown()
+                except BaseException as exc:
+                    coordinator_error = exc
         with self._finish_idle:
             self._worker_stop = True
             self._finish_idle.notify_all()
@@ -287,6 +291,8 @@ class SessionArbiter:
                 self._finish_idle.wait()
         if self._worker.is_alive() and self._worker is not threading.current_thread():
             self._worker.join()
+        if coordinator_error is not None:
+            raise coordinator_error
 
     def _lifecycle_worker(self) -> None:
         while True:

@@ -14,8 +14,8 @@ handler 接口（传入 connect_mqtt_blocking）：
     handler.on_device_call_incoming(payload: dict)
     handler.on_room_cancel(payload: dict)
     handler.on_device_call_reject(payload: dict)
-    handler.on_device_callers_update()                     # 旧回调
-    handler.on_device_callers_update_payload(payload: dict) # 可选新回调
+    handler.on_device_callers_update_payload(payload: dict) # 带通知内容
+    handler.on_device_callers_update()                      # 未实现上项时调用
 """
 
 import base64
@@ -74,7 +74,7 @@ def _log_mqtt_connection_details(label: str, broker_host: str, broker_port: int,
         f"tls={use_tls}",
         f"client_id={client_id}",
         f"username={username}",
-        f"password={password}",
+        f"password=<hidden:{len(password)} chars>",
     ]
     if topics:
         details.append(f"topics={topics}")
@@ -86,8 +86,11 @@ def _require_json(resp, action: str) -> dict:
     try:
         data = resp.json()
     except ValueError as e:
-        body = (resp.text or "")[:200].replace("\n", " ")
-        _err(f"{action}响应非 JSON（HTTP {resp.status_code}）: {e}; body={body!r}")
+        body_length = len((resp.text or "").encode("utf-8"))
+        _err(
+            f"{action}响应非 JSON（HTTP {resp.status_code}）: {e}; "
+            f"响应体已省略（{body_length} bytes）"
+        )
         sys.exit(1)
     if not isinstance(data, dict):
         _err(f"{action}响应格式错误（HTTP {resp.status_code}）：顶层必须是 JSON 对象")
@@ -111,11 +114,11 @@ def fetch_services(base_url: str = "") -> dict:
         "user_server":     "https://..." 或 "",
         "voip_server":     "https://...",
         "ai_server":       "https://...",
-        "call_server":     "https://..." 或 ""（services 端点未升级时为空，见下）,
+        "call_server":     "https://...",
         "mqtt_host":       "...",
         "mqtt_port":       8883,
         "mqtt_tls":        True,
-        "tirtc_endpoint":  "https://...",
+        "tirtc_endpoint":  "http://...",
       }
 
     失败时打印错误并 sys.exit(1)。
@@ -129,7 +132,7 @@ def fetch_services(base_url: str = "") -> dict:
         sys.exit(1)
 
     if resp.status_code != 200:
-        _err(f"服务发现返回 HTTP {resp.status_code}: {resp.text}")
+        _err(f"服务发现返回 HTTP {resp.status_code}（响应体已省略）")
         sys.exit(1)
 
     try:
@@ -138,9 +141,16 @@ def fetch_services(base_url: str = "") -> dict:
         _err(f"服务发现响应非 JSON: {e}")
         sys.exit(1)
 
-    required = ("device-srv", "voip-srv", "ai-srv", "mqtt-srv")
+    required = (
+        "device-srv",
+        "voip-srv",
+        "ai-srv",
+        "call-srv",
+        "mqtt-srv",
+        "tirtc-srv",
+    )
     for key in required:
-        if key not in raw:
+        if not isinstance(raw.get(key), str) or not raw[key]:
             _err(f"服务发现响应缺少字段 '{key}'")
             sys.exit(1)
 
@@ -149,6 +159,10 @@ def fetch_services(base_url: str = "") -> dict:
         scheme, host_port = mqtt_url.split("://", 1)
         mqtt_host, mqtt_port_str = host_port.rsplit(":", 1)
         mqtt_port = int(mqtt_port_str)
+        if scheme not in ("mqtt", "mqtts") or not mqtt_host:
+            raise ValueError("unsupported MQTT endpoint")
+        if mqtt_port < 1 or mqtt_port > 65535:
+            raise ValueError("invalid MQTT port")
         mqtt_tls  = (scheme == "mqtts")
     except Exception:
         _err(f"服务发现 mqtt-srv 格式无法解析: {mqtt_url!r}，期望 mqtt[s]://host:port")
@@ -159,14 +173,11 @@ def fetch_services(base_url: str = "") -> dict:
         "user_server":     raw.get("user-srv", ""),
         "voip_server":     raw["voip-srv"],
         "ai_server":       raw["ai-srv"],
-        # call-srv is optional (not required) so this keeps working against a
-        # call-srv remains optional at discovery parsing time; the full
-        # simulator runtime validates it before starting concurrent services.
-        "call_server":     raw.get("call-srv", ""),
+        "call_server":     raw["call-srv"],
         "mqtt_host":       mqtt_host,
         "mqtt_port":       mqtt_port,
         "mqtt_tls":        mqtt_tls,
-        "tirtc_endpoint":  raw.get("tirtc-srv", ""),
+        "tirtc_endpoint":  raw["tirtc-srv"],
     }
     _ok(f"服务发现成功: device={result['device_server']} mqtt={mqtt_host}:{mqtt_port}")
     return result
@@ -229,7 +240,7 @@ def report_device(server: str, mac: str, device_id: str = "",
     resp_code = data.get("code")
     _log(f"步骤 1  响应 HTTP:{resp.status_code} code={resp_code} msg={data.get('msg')}")
     if resp_code == 200:
-        _ok(f"步骤 1  验证码={data['data']['code']} temp_token={data['data']['temp_token']}")
+        _ok(f"步骤 1  验证码={data['data']['code']}，临时凭证已获取")
     if resp.status_code == 429 or data.get("code") == 429:
         retry = resp.headers.get("Retry-After", "10")
         _err(f"限频（429）：请等待 {retry}s 后重试")
@@ -275,7 +286,7 @@ def get_mqtt_token(server: str, device_id: str, device_key: str, mac: str = "") 
     data = _require_json(resp, "换取 token")
     _log(f"步骤 1/4  响应 HTTP:{resp.status_code} code={data.get('code')}")
     if data.get("code") == 200:
-        _ok(f"步骤 1/4  mqtt_token={data['data']['mqtt_token']}")
+        _ok("步骤 1/4  mqtt_token 获取成功（敏感内容已隐藏）")
     if data.get("code") == 6006:
         raise DeviceResetError("设备已被解绑，需重新走扫码绑定流程")
     if data.get("code") != 200:
@@ -331,9 +342,9 @@ def connect_temp_mqtt(broker_host: str, broker_port: int,
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:
-            _err(f"JSON 解析失败: {raw}")
+            _err(f"MQTT JSON 解析失败 [{msg.topic}]：响应体已省略（{len(msg.payload)} bytes）")
             return
-        _log(f"MQTT 收到 {msg.topic}: {raw}")
+        _log(f"MQTT 收到 [{msg.topic}] type={data.get('type', '')} bytes={len(msg.payload)}")
         if data.get("type") == "auth_grant":
             data = data.get("payload") or {}
         else:
@@ -453,7 +464,6 @@ def connect_mqtt_blocking(broker_host: str, broker_port: int,
 
     def on_message(client, userdata, msg):
         raw = msg.payload.decode()
-        _log(f"收到服务端消息 [{msg.topic}]: {raw}")
         if msg.topic.endswith("/cmd"):
             ack_t = msg.topic.replace("/cmd", "/ack")
             _log(f"发送 ACK [{ack_t}]: {{\"ack\":true}}")
@@ -461,10 +471,14 @@ def connect_mqtt_blocking(broker_host: str, broker_port: int,
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:
-            _err(f"JSON 解析失败: {raw}")
+            _err(f"MQTT JSON 解析失败 [{msg.topic}]：响应体已省略（{len(msg.payload)} bytes）")
             return
         msg_type = data.get("type", "")
         channel  = data.get("channel", "")
+        _log(
+            f"收到服务端消息 [{msg.topic}] "
+            f"type={msg_type} channel={channel} bytes={len(msg.payload)}"
+        )
         payload  = data.get("payload") or {}
         if msg_type == "unbind":
             _warn("收到服务端解绑通知，断开 MQTT 连接（凭证保留，重新绑定时复用）")
@@ -518,9 +532,15 @@ def connect_mqtt_blocking(broker_host: str, broker_port: int,
     client.on_message    = on_message
     client.connect(broker_host, broker_port, keepalive=60)
     client.loop_start()
-    threading.Thread(target=heartbeat_loop, daemon=True).start()
-    while not stop_event.wait(timeout=0.5):
-        pass
-    client.loop_stop()
-    client.disconnect()
+    heartbeat_thread = threading.Thread(
+        target=heartbeat_loop, name="mqtt-heartbeat")
+    heartbeat_thread.start()
+    try:
+        while not stop_event.wait(timeout=0.5):
+            pass
+    finally:
+        stop_event.set()
+        client.loop_stop()
+        client.disconnect()
+        heartbeat_thread.join()
     _ok("已断开 MQTT 连接")

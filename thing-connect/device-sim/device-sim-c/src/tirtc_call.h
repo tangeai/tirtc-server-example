@@ -2,7 +2,8 @@
  * \brief TiRTC device-to-device P2P call module — passive listen + TiRtcConnect.
  *
  * Unlike VoIP (TiRtcWhipConnect / WHIP client), this module uses TiRtcConnect
- * for true device↔device P2P. Both sides TiRtcStart as passive listeners.
+ * for true device↔device P2P.  The process-wide TiRTC runtime stays online
+ * while the coordinator selects the device-call business generation.
  *
  * Roles:
  *   - CALLER (initiator): Waits passively. Callee TiRtcConnect's → on_conn_accepted.
@@ -105,9 +106,10 @@ int call_expire_pending(CallState *cs, char *room_id_out,
 /* ── Command input thread (reads stdin) ────────────────────────── */
 void call_cmd_loop(CallState *cs);
 
-/* ── SDK lifecycle (global singleton, one per process) ─────────── */
-int  call_init_sdk(const char *device_id, const char *secret_key, const char *client_id, const char *endpoint);
-void call_uninit_sdk(void);
+/* ── Process-runtime integration ──────────────────────────────── */
+int  call_service_register(void);
+int  call_service_start(void);
+void call_service_stop(void);
 
 /* ── P2P call operations ───────────────────────────────────────── */
 void call_set_expected_room(CallState *cs, const char *room_id);

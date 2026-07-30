@@ -45,6 +45,8 @@ class SessionMessageRouterTests(unittest.TestCase):
         router = SessionMessageRouter(arbiter, voip, call)
         payload = {"wx_room_id": "room-1"}
         router.on_call_incoming(payload)
+        router.wait_for_idle()
+        router.shutdown()
         voip.on_call_incoming.assert_not_called()
         voip.reject_incoming.assert_called_once_with(payload, 5)
 
@@ -57,6 +59,8 @@ class SessionMessageRouterTests(unittest.TestCase):
         router = SessionMessageRouter(arbiter, voip, call)
 
         router.on_call_incoming({"wx_room_id": "wx-room"})
+        router.wait_for_idle()
+        router.shutdown()
 
         voip.on_call_incoming.assert_not_called()
         voip.reject_incoming.assert_called_once_with({"wx_room_id": "wx-room"}, 5)
@@ -125,6 +129,29 @@ class SessionMessageRouterTests(unittest.TestCase):
         router = SessionMessageRouter(arbiter, voip, call)
         router.on_device_call_incoming({
             "room_id": "room-async", "caller_id": "caller-1"})
+
+        self.assertTrue(started.wait(timeout=1))
+        self.assertFalse(release.is_set())
+        release.set()
+        router.wait_for_idle()
+        router.shutdown()
+
+    def test_voip_busy_reject_does_not_block_mqtt_callback(self):
+        import threading
+
+        arbiter = mock.Mock(current=SessionKind.AI)
+        arbiter.admit_incoming.return_value = IncomingDecision.BUSY
+        voip, call = mock.Mock(), mock.Mock()
+        started = threading.Event()
+        release = threading.Event()
+
+        def slow_reject(_payload, _reason):
+            started.set()
+            release.wait(timeout=1)
+
+        voip.reject_incoming.side_effect = slow_reject
+        router = SessionMessageRouter(arbiter, voip, call)
+        router.on_call_incoming({"wx_room_id": "wx-async"})
 
         self.assertTrue(started.wait(timeout=1))
         self.assertFalse(release.is_set())

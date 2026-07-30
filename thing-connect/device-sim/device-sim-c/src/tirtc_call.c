@@ -25,18 +25,14 @@
 #include "media_rx_log.h"
 #include "media_subscription_policy.h"
 #include "sdk_callback_guard.h"
+#include "tirtc_runtime.h"
 
 /* Reference to external stop flag (set by SIGINT handler in main) */
 extern volatile sig_atomic_t g_stop;
 
-/* ── Global SDK state ────────────────────────────────────────────────────── */
+/* ── Device-call service state ───────────────────────────────────────────── */
 
-static int              s_sdk_running   = 0;
-static int              s_sdk_started   = 0;
-static int              s_sdk_stopped   = 0;
-static pthread_mutex_t  s_state_mtx     = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t   s_started_cond  = PTHREAD_COND_INITIALIZER;
-static pthread_cond_t   s_stopped_cond  = PTHREAD_COND_INITIALIZER;
+static int              s_service_active;
 
 static tirtc_conn_t     s_active_conn   = NULL;
 static pthread_mutex_t  s_conn_mtx      = PTHREAD_MUTEX_INITIALIZER;
@@ -74,7 +70,6 @@ static int              s_connect_done  = 0;
 static int              s_connect_error = 0;
 static tirtc_conn_t     s_connect_hconn = NULL;
 static uint64_t         s_connect_generation;
-static TIRTCLOGCALLBACK s_log_cb = NULL;
 
 /* Audio/video constants */
 #define AUDIO_PKT_SIZE  320   /* 40ms G.711 A-law 8kHz */
@@ -90,34 +85,7 @@ static void _prepare_media_policy(void);
 static int _is_audio_call(void);
 static void _apply_video_downlink_policy(tirtc_conn_t hconn);
 
-/* ── SDK log callback (debug level) ──────────────────────────────────────── */
-
-static void _call_sdk_log_cb(const char *log, uint32_t length) {
-    sdk_callback_enter(&s_call_callback_guard);
-    LOG_SDK(log, length);
-    sdk_callback_leave(&s_call_callback_guard);
-}
-
-/* ── SDK callbacks ───────────────────────────────────────────────────────── */
-
-static void _call_on_event(int event, const void *data, int len) {
-    sdk_callback_enter(&s_call_callback_guard);
-    (void)data; (void)len;
-    if (event == TIRTC_EVENT_SYS_STARTED) {
-        pthread_mutex_lock(&s_state_mtx);
-        s_sdk_started = 1;
-        pthread_cond_signal(&s_started_cond);
-        pthread_mutex_unlock(&s_state_mtx);
-        LOG_I("SYS_STARTED");
-    } else if (event == TIRTC_EVENT_SYS_STOPPED) {
-        pthread_mutex_lock(&s_state_mtx);
-        s_sdk_stopped = 1;
-        pthread_cond_signal(&s_stopped_cond);
-        pthread_mutex_unlock(&s_state_mtx);
-        LOG_I("SYS_STOPPED");
-    }
-    sdk_callback_leave(&s_call_callback_guard);
-}
+/* ── Process-runtime callbacks ───────────────────────────────────────────── */
 
 static void _notify_call_transport_ended(void) {
     CallState *cs = s_call_state;
@@ -179,13 +147,13 @@ static void _deferred_accept_call(void *opaque) {
         TiRtcDisconnect(old);
     }
     pthread_mutex_lock(&s_conn_mtx);
-    if (s_sdk_running) {
+    if (s_service_active) {
         s_active_conn = hconn;
         s_session_state = SESS_CONNECTING;
         media_rx_log_reset(&s_rx_log);
     }
     pthread_mutex_unlock(&s_conn_mtx);
-    if (!s_sdk_running) {
+    if (!s_service_active) {
         TiRtcDisconnect(hconn);
         pthread_mutex_unlock(&s_call_control_mtx);
         return;
@@ -250,7 +218,12 @@ static void _call_on_audio(tirtc_conn_t hconn, const TIRTCFRAMEINFO *pFi, void *
     int matched = s_active_conn == hconn;
     pthread_mutex_unlock(&s_conn_mtx);
     (void)data;
-    if (matched) media_rx_log_audio(&s_rx_log, "设备通话", pFi);
+    MediaRxNotice notice;
+    if (matched &&
+        media_rx_log_note_audio(&s_rx_log, "设备通话", pFi, &notice))
+        (void)sdk_defer_copy_action(
+            &s_call_callback_guard, media_rx_log_emit, NULL,
+            &notice, sizeof(notice));
     sdk_callback_leave(&s_call_callback_guard);
 }
 
@@ -260,7 +233,12 @@ static void _call_on_video(tirtc_conn_t hconn, const TIRTCFRAMEINFO *pFi, void *
     int matched = s_active_conn == hconn;
     pthread_mutex_unlock(&s_conn_mtx);
     (void)data;
-    if (matched) media_rx_log_video(&s_rx_log, "设备通话", pFi);
+    MediaRxNotice notice;
+    if (matched &&
+        media_rx_log_note_video(&s_rx_log, "设备通话", pFi, &notice))
+        (void)sdk_defer_copy_action(
+            &s_call_callback_guard, media_rx_log_emit, NULL,
+            &notice, sizeof(notice));
     sdk_callback_leave(&s_call_callback_guard);
 }
 
@@ -270,59 +248,59 @@ static void _call_on_message(tirtc_conn_t hconn, const TIRTCFRAMEINFO *pFi, void
     sdk_callback_leave(&s_call_callback_guard);
 }
 
+static void _call_command_deferred(void *context, const void *data,
+                                   size_t length) {
+    tirtc_conn_t hconn = (tirtc_conn_t)context;
+    if (!data || length == 0 ||
+        length > SDK_CALLBACK_COPY_CAPACITY)
+        return;
+
+    char json_str[SDK_CALLBACK_COPY_CAPACITY + 1];
+    memcpy(json_str, data, length);
+    json_str[length] = '\0';
+    cJSON *root = cJSON_Parse(json_str);
+    if (!root) return;
+
+    cJSON *rid = cJSON_GetObjectItem(root, "room_id");
+    const char *received_room =
+        (rid && cJSON_IsString(rid)) ? rid->valuestring : "";
+    LOG_I("收到 0x2000 room_id=%s", received_room);
+
+    pthread_mutex_lock(&s_conn_mtx);
+    char expected[128];
+    STR_COPY(expected, s_expected_room_id);
+    expected[sizeof(expected) - 1] = '\0';
+    pthread_mutex_unlock(&s_conn_mtx);
+
+    if (expected[0] && strcmp(received_room, expected) != 0) {
+        LOG_W("0x2000 room_id 不匹配（期望 %s，收到 %s），断开",
+              expected, received_room);
+        cJSON_Delete(root);
+        _deferred_disconnect_call(hconn);
+        return;
+    }
+
+    char accepted_room[128];
+    STR_COPY(accepted_room, received_room);
+    cJSON_Delete(root);
+    pthread_mutex_lock(&s_conn_mtx);
+    if (s_active_conn == hconn) {
+        STR_COPY(s_pending_connected_room, accepted_room);
+        s_media_start_pending = 1;
+    }
+    pthread_mutex_unlock(&s_conn_mtx);
+    _deferred_start_call_media(hconn);
+}
+
 static void _call_on_command(tirtc_conn_t hconn, uint32_t cmdw,
                               const void *data, uint32_t len) {
     sdk_callback_enter(&s_call_callback_guard);
-    if (cmdw == 0x2000 && data && len > 0) {
-        /* Parse JSON to extract room_id */
-        char *json_str = (char *)malloc(len + 1);
-        if (!json_str) {
-            sdk_callback_leave(&s_call_callback_guard);
-            return;
-        }
-        memcpy(json_str, data, len);
-        json_str[len] = '\0';
-
-        cJSON *root = cJSON_Parse(json_str);
-        free(json_str);
-        if (!root) {
-            sdk_callback_leave(&s_call_callback_guard);
-            return;
-        }
-
-        cJSON *rid = cJSON_GetObjectItem(root, "room_id");
-        const char *received_room = (rid && cJSON_IsString(rid)) ? rid->valuestring : "";
-        LOG_I("收到 0x2000 room_id=%s", received_room);
-
-        pthread_mutex_lock(&s_conn_mtx);
-        char expected[128];
-        STR_COPY(expected, s_expected_room_id);
-        expected[sizeof(expected) - 1] = '\0';
-        pthread_mutex_unlock(&s_conn_mtx);
-
-        if (expected[0] && strcmp(received_room, expected) != 0) {
-            LOG_W("0x2000 room_id 不匹配（期望 %s，收到 %s），断开", expected, received_room);
-            cJSON_Delete(root);
-            if (sdk_defer_action(&s_call_callback_guard,
-                                 _deferred_disconnect_call, hconn) != 0)
-                LOG_E("无法延后断开 room_id 不匹配的连接");
-            sdk_callback_leave(&s_call_callback_guard);
-            return;
-        }
-
-        char accepted_room[128];
-        STR_COPY(accepted_room, received_room);
-        cJSON_Delete(root);
-        pthread_mutex_lock(&s_conn_mtx);
-        if (s_active_conn == hconn) {
-            STR_COPY(s_pending_connected_room, accepted_room);
-            s_media_start_pending = 1;
-        }
-        pthread_mutex_unlock(&s_conn_mtx);
-        if (sdk_defer_action(&s_call_callback_guard,
-                             _deferred_start_call_media, hconn) != 0)
-            LOG_E("无法延后启动设备通话媒体");
-    }
+    if (cmdw == 0x2000 && data && len > 0 &&
+        sdk_defer_copy_action(&s_call_callback_guard,
+                              _call_command_deferred, hconn,
+                              data, len) != 0)
+        LOG_E("设备通话命令超出控制队列容量或队列已满，已丢弃 len=%u",
+              len);
     sdk_callback_leave(&s_call_callback_guard);
 }
 
@@ -375,56 +353,11 @@ static void _call_on_unsubscribe_audio(tirtc_conn_t hconn, uint8_t stream_id) {
     sdk_callback_leave(&s_call_callback_guard);
 }
 
-/* ── SDK lifecycle ───────────────────────────────────────────────────────── */
+/* ── Process-runtime integration ─────────────────────────────────────────── */
 
-int call_init_sdk(const char *device_id, const char *secret_key, const char *client_id, const char *endpoint) {
-    if (s_sdk_running) {
-        LOG_W("SDK 已运行，跳过重复初始化");
-        return 0;
-    }
-
-    s_sdk_started = 0;
-    s_sdk_stopped = 0;
-
-    /* Set send buffer (must be before TiRtcInit) */
-    uint32_t buf = 1024 * 1024;
-    int rc = TiRtcSetOption(TIRTC_OPT_MAX_SEND_BUFFER, &buf, sizeof(buf));
-    if (rc != 0) {
-        LOG_E("TiRtcSetOption(MAX_SEND_BUFFER) failed: rc=%d (%s)", rc, TiRtcGetErrorStr(rc));
-        return -1;
-    }
-
-    rc = TiRtcInit();
-    if (rc != 0) {
-        LOG_E("TiRtcInit failed: rc=%d (%s)", rc, TiRtcGetErrorStr(rc));
-        return -1;
-    }
-
-    TiRtcLogConfig(0, NULL, 0);
-    TiRtcLogSetLevel(3);
-    if (g_log_level <= LOG_DEBUG) {
-        s_log_cb = _call_sdk_log_cb;
-        TiRtcLogSetCallback(s_log_cb);
-        TiRtcLogSetLevel(8);
-    }
-
-    if (endpoint && endpoint[0]) {
-        rc = TiRtcSetOption(TIRTC_OPT_SERVICE_ENDPOINT, endpoint, (uint32_t)strlen(endpoint));
-        if (rc != 0) {
-            LOG_E("TiRtcSetOption(ENDPOINT) failed: rc=%d", rc);
-            TiRtcUninit();
-            return -1;
-        }
-    }
-    rc = TiRtcSetOption(TIRTC_OPT_DEVICE_SECRET_KEY, secret_key, (uint32_t)strlen(secret_key));
-    if (rc != 0) { LOG_E("TiRtcSetOption(SECRET_KEY) failed: rc=%d", rc); TiRtcUninit(); return -1; }
-    rc = TiRtcSetOption(TIRTC_OPT_CLIENT_ID, client_id, (uint32_t)strlen(client_id));
-    if (rc != 0) { LOG_E("TiRtcSetOption(CLIENT_ID) failed: rc=%d", rc); TiRtcUninit(); return -1; }
-
-    /* Build callbacks (static — must outlive call_init_sdk per SDK docs) */
-    static TIRTCCALLBACKS cbs;
+int call_service_register(void) {
+    TIRTCCALLBACKS cbs;
     memset(&cbs, 0, sizeof(cbs));
-    cbs.on_event             = _call_on_event;
     cbs.on_conn_accepted     = _call_on_conn_accepted;
     cbs.on_conn_error        = _call_on_conn_error;
     cbs.on_disconnected      = _call_on_disconnected;
@@ -437,76 +370,22 @@ int call_init_sdk(const char *device_id, const char *secret_key, const char *cli
     cbs.on_unsubscribe_video = _call_on_unsubscribe_video;
     cbs.on_subscribe_audio   = _call_on_subscribe_audio;
     cbs.on_unsubscribe_audio = _call_on_unsubscribe_audio;
+    return tirtc_runtime_register_service(
+        TIRTC_SERVICE_CALL, &cbs, &s_call_callback_guard);
+}
 
-    rc = TiRtcStart(device_id, &cbs);
-    if (rc != 0) {
-        LOG_E("TiRtcStart failed: rc=%d (%s)", rc, TiRtcGetErrorStr(rc));
-        TiRtcUninit();
-        return -1;
-    }
-
-    s_sdk_running = 1;
-    LOG_I("TiRTC SDK 启动中，等待 SYS_STARTED…");
-
-    /* Wait for SYS_STARTED (10s timeout) */
-    struct timespec deadline;
-    clock_gettime(CLOCK_REALTIME, &deadline);
-    deadline.tv_sec += 10;
-
-    pthread_mutex_lock(&s_state_mtx);
-    int timed_out = 0;
-    while (!s_sdk_started && !timed_out && !g_stop) {
-        if (pthread_cond_timedwait(&s_started_cond, &s_state_mtx, &deadline) == ETIMEDOUT) {
-            timed_out = 1;
-        }
-    }
-    pthread_mutex_unlock(&s_state_mtx);
-
-    if (timed_out || !s_sdk_started) {
-        LOG_E("TiRTC SDK 启动超时");
-        s_sdk_running = 0;
-        sdk_callback_wait_all(&s_call_callback_guard);
-        TiRtcStop();
-        clock_gettime(CLOCK_REALTIME, &deadline);
-        deadline.tv_sec += 8;
-        pthread_mutex_lock(&s_state_mtx);
-        while (!s_sdk_stopped) {
-            if (pthread_cond_timedwait(&s_stopped_cond, &s_state_mtx,
-                                       &deadline) == ETIMEDOUT)
-                break;
-        }
-        pthread_mutex_unlock(&s_state_mtx);
-        sdk_callback_wait_all(&s_call_callback_guard);
-        TiRtcUninit();
-        return -1;
-    }
-
-    LOG_I("TiRTC SDK 已就绪，常驻监听入站连接");
+int call_service_start(void) {
+    s_service_active = 1;
+    LOG_I("设备互呼业务已就绪");
     return 0;
 }
 
-void call_uninit_sdk(void) {
-    if (!s_sdk_running) return;
-    s_sdk_running = 0;
-
+void call_service_stop(void) {
+    if (!s_service_active) return;
+    s_service_active = 0;
+    call_hangup();
     sdk_callback_wait_all(&s_call_callback_guard);
-    TiRtcStop();
-
-    struct timespec deadline;
-    clock_gettime(CLOCK_REALTIME, &deadline);
-    deadline.tv_sec += 8;
-
-    pthread_mutex_lock(&s_state_mtx);
-    int timed_out = 0;
-    while (!s_sdk_stopped && !timed_out) {
-        if (pthread_cond_timedwait(&s_stopped_cond, &s_state_mtx, &deadline) == ETIMEDOUT)
-            timed_out = 1;
-    }
-    pthread_mutex_unlock(&s_state_mtx);
-
-    sdk_callback_wait_all(&s_call_callback_guard);
-    TiRtcUninit();
-    LOG_I("TiRTC SDK 已停止");
+    LOG_I("设备互呼业务已停止");
 }
 
 /* ── Media stream ────────────────────────────────────────────────────────── */
@@ -716,6 +595,16 @@ static void _connect_cb(int error, tirtc_conn_t hconn, void *user_data) {
     free(context);
     pthread_mutex_lock(&s_connect_mtx);
     int current = generation == s_connect_generation;
+    pthread_mutex_unlock(&s_connect_mtx);
+    if (current && error == 0 && hconn &&
+        tirtc_runtime_bind_active_connection(TIRTC_SERVICE_CALL, hconn) != 0) {
+        error = TIRTC_E_INVALID_HANDLE;
+        if (sdk_defer_disconnect(&s_call_callback_guard, hconn) != 0)
+            LOG_E("无法延后断开失效 P2P 连接");
+        hconn = NULL;
+    }
+    pthread_mutex_lock(&s_connect_mtx);
+    current = generation == s_connect_generation;
     if (current) {
         s_connect_error = error;
         s_connect_hconn = hconn;
@@ -1079,7 +968,11 @@ void call_on_device_call_incoming(void *ctx, const cJSON *payload) {
     const char *rid = room_id   && cJSON_IsString(room_id)   ? room_id->valuestring   : "";
     const char *cid = caller_id && cJSON_IsString(caller_id) ? caller_id->valuestring : "";
     const char *cname = caller_name && cJSON_IsString(caller_name) ? caller_name->valuestring : cid;
-    const char *ct   = call_type && cJSON_IsString(call_type) ? call_type->valuestring : "video";
+    const char *requested_type =
+        call_type && cJSON_IsString(call_type) ? call_type->valuestring : "";
+    const char *ct =
+        strcmp(requested_type, "audio") == 0 || !cs->send_video[0]
+            ? "audio" : "video";
     if (!rid[0] || !cid[0]) {
         LOG_W("忽略缺少 room_id/caller_id 的设备来电");
         return;

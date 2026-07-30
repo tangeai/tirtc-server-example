@@ -17,6 +17,7 @@ import time
 import queue
 
 from audio_recorder import AudioRecorder
+from callback_work_queue import CallbackWorkQueue
 from media_postprocess import convert_video_to_mp4
 
 import tirtc_sdk as sdk
@@ -104,6 +105,7 @@ _stream_thread: "threading.Thread | None" = None
 _mic_thread: "threading.Thread | None" = None
 _speaker_thread: "threading.Thread | None" = None
 _video_thread: "threading.Thread | None" = None
+_receive_work: "CallbackWorkQueue | None" = None
 
 # 当前连接的 handle（由 rtc_call.py 通过 set_hconn 更新）
 _hconn: "ctypes.c_void_p | None" = None
@@ -262,6 +264,9 @@ def _has_running_media_threads() -> bool:
 def _close_receive_outputs(convert_video: bool = False) -> None:
     global _recv_recorder, _recv_vf, _recv_video_path
 
+    if _receive_work is not None:
+        _receive_work.drain()
+
     if _recv_vf is not None:
         try:
             _recv_vf.close()
@@ -282,7 +287,7 @@ def start() -> None:
     """建连成功后启动媒体收发。"""
     global _recv_recorder, _recv_vf, _stream_thread, _stream_stop
     global _mic_thread, _speaker_thread, _video_thread
-    global _play_queue
+    global _play_queue, _receive_work
 
     if _has_running_media_threads():
         _warn("媒体流已在运行，忽略重复 start()")
@@ -312,6 +317,14 @@ def start() -> None:
             _recv_vf = None
         _info(f"接收目录: {out_dir}")
 
+        if _receive_work is None:
+            _receive_work = CallbackWorkQueue(
+                "call-downlink",
+                _process_receive_item,
+                _warn,
+                maxsize=512,
+            )
+        _receive_work.start()
         _stream_stop.clear()
 
         # 硬件模式下创建回声门控（替代 AEC）
@@ -326,6 +339,8 @@ def start() -> None:
         if _echo_gate is not None:
             _echo_gate.close()
             _echo_gate = None
+        if _receive_work is not None:
+            _receive_work.stop()
         _close_receive_outputs(convert_video=False)
         _err(f"媒体流初始化失败: {e}")
         return
@@ -368,7 +383,7 @@ def stop() -> None:
     """停止媒体推流线程并关闭文件。"""
     global _recv_recorder, _recv_vf, _recv_video_path, _stream_thread
     global _mic_thread, _speaker_thread, _video_thread
-    global _play_queue, _echo_gate
+    global _play_queue, _echo_gate, _receive_work
 
     if _echo_gate is not None:
         _echo_gate.close()
@@ -391,6 +406,8 @@ def stop() -> None:
             join_worker_before_uninit(thread, _warn, f"设备通话 {attr}")
         globals()[attr] = None
 
+    if _receive_work is not None:
+        _receive_work.stop()
     _play_queue = None
     _close_receive_outputs(convert_video=True)
     reset_session()
@@ -410,7 +427,20 @@ def shutdown() -> None:
 
 
 def on_audio_frame(fi: TIRTCFRAMEINFO, buf: bytes) -> None:
-    """接收音频帧：写文件 + 硬件模式下解码推入播放队列。"""
+    """复制接收音频帧并交给媒体工作线程。"""
+    if _receive_work is None:
+        return
+    frame = TIRTCFRAMEINFO()
+    frame.stream_id = fi.stream_id
+    frame.media = fi.media
+    frame.flags = fi.flags
+    frame.reserved = fi.reserved
+    frame.ts = fi.ts
+    frame.length = len(buf)
+    _receive_work.submit(("audio", frame, bytes(buf)))
+
+
+def _process_audio_frame(fi: TIRTCFRAMEINFO, buf: bytes) -> None:
     global _recv_recorder
 
     if _recv_recorder is not None:
@@ -454,9 +484,23 @@ def on_audio_frame(fi: TIRTCFRAMEINFO, buf: bytes) -> None:
 
 
 def on_video_frame(buf: bytes) -> None:
-    """接收视频帧：写文件。"""
+    """复制接收视频帧并交给媒体工作线程。"""
+    if _receive_work is not None:
+        _receive_work.submit(("video", bytes(buf)))
+
+
+def _process_video_frame(buf: bytes) -> None:
     if _recv_vf is not None:
         _recv_vf.write(buf)
+
+
+def _process_receive_item(item) -> None:
+    if item[0] == "audio":
+        _, fi, buf = item
+        _process_audio_frame(fi, buf)
+    else:
+        _, buf = item
+        _process_video_frame(buf)
 
 
 # ── 硬件：麦克风采集 ──────────────────────────────────────────────────────────

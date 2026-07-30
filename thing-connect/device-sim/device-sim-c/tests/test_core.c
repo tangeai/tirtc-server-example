@@ -15,6 +15,8 @@
 #include "session_arbiter.h"
 #include "session_coordinator.h"
 #include "tirtc_ai.h"
+#include "tirtc_call.h"
+#include "tirtc_runtime.h"
 #include "tirtc_voip.h"
 
 int g_log_level = 100;
@@ -254,8 +256,48 @@ static void test_callback_guard(void) {
 }
 
 typedef struct {
-    SessionCoordinator *coordinator;
-    SessionKind kind;
+    int *values;
+    int *count;
+    int value;
+} DeferredMark;
+
+static void mark_deferred(void *opaque) {
+    DeferredMark *mark = opaque;
+    mark->values[(*mark->count)++] = mark->value;
+}
+
+static void copy_deferred(void *opaque, const void *data, size_t length) {
+    DeferredMark *mark = opaque;
+    assert(length == 1);
+    mark->values[(*mark->count)++] = *(const unsigned char *)data;
+}
+
+static void test_callback_control_queue(void) {
+    SdkCallbackGuard guard = SDK_CALLBACK_GUARD_INITIALIZER;
+    int values[3] = {0};
+    int count = 0;
+    DeferredMark first = {values, &count, 1};
+    DeferredMark second = {values, &count, 2};
+
+    assert(sdk_callback_guard_start(&guard) == 0);
+    sdk_callback_enter(&guard);
+    assert(sdk_defer_action(&guard, mark_deferred, &first) == 0);
+    assert(sdk_defer_action(&guard, mark_deferred, &second) == 0);
+    unsigned char copied = 3;
+    assert(sdk_defer_copy_action(
+               &guard, copy_deferred, &second,
+               &copied, sizeof(copied)) == 0);
+    sleep_ms(10);
+    assert(count == 0);
+    sdk_callback_leave(&guard);
+    sdk_callback_wait_all(&guard);
+    assert(count == 3);
+    assert(values[0] == 1 && values[1] == 2 && values[2] == 3);
+    sdk_callback_guard_stop(&guard);
+    assert(sdk_defer_action(&guard, mark_deferred, &first) != 0);
+}
+
+typedef struct {
     int starts;
     int stops;
 } CoordinatorAdapterContext;
@@ -269,23 +311,22 @@ static int coordinator_start(void *opaque) {
 static void coordinator_stop(void *opaque) {
     CoordinatorAdapterContext *context = opaque;
     context->stops++;
-    if (context->kind == SESSION_VOIP)
-        session_coordinator_finish_async(context->coordinator, SESSION_VOIP);
 }
 
-static void test_coordinator_reentrant_terminal_callback(void) {
+static void test_coordinator_switching(void) {
     SessionCoordinator coordinator;
-    CoordinatorAdapterContext stream = {&coordinator, SESSION_STREAM, 0, 0};
-    CoordinatorAdapterContext voip = {&coordinator, SESSION_VOIP, 0, 0};
-    CoordinatorAdapterContext ai = {&coordinator, SESSION_AI, 0, 0};
-    CoordinatorAdapterContext call = {&coordinator, SESSION_CALL, 0, 0};
+    CoordinatorAdapterContext stream = {0};
+    CoordinatorAdapterContext voip = {0};
+    CoordinatorAdapterContext ai = {0};
+    CoordinatorAdapterContext call = {0};
     SessionAdapter stream_adapter = {coordinator_start, coordinator_stop, &stream};
     SessionAdapter voip_adapter = {coordinator_start, coordinator_stop, &voip};
     SessionAdapter ai_adapter = {coordinator_start, coordinator_stop, &ai};
     SessionAdapter call_adapter = {coordinator_start, coordinator_stop, &call};
 
-    session_coordinator_init(&coordinator, &stream_adapter, &voip_adapter,
-                             &ai_adapter, &call_adapter);
+    assert(session_coordinator_init(
+               &coordinator, &stream_adapter, &voip_adapter,
+               &ai_adapter, &call_adapter) == 0);
     assert(session_coordinator_start_stream(&coordinator) == 0);
     assert(session_coordinator_begin(&coordinator, SESSION_VOIP) == 0);
     assert(session_coordinator_begin(&coordinator, SESSION_VOIP) != 0);
@@ -377,8 +418,9 @@ static void test_session_arbiter_policy(void) {
                                  arbiter_adapter_stop, &ai};
     SessionAdapter call_adapter = {arbiter_adapter_start,
                                    arbiter_adapter_stop, &call};
-    session_coordinator_init(&coordinator, &stream_adapter, &voip_adapter,
-                             &ai_adapter, &call_adapter);
+    assert(session_coordinator_init(
+               &coordinator, &stream_adapter, &voip_adapter,
+               &ai_adapter, &call_adapter) == 0);
     session_arbiter_init(&arbiter, &coordinator);
     assert(session_coordinator_start_stream(&coordinator) == 0);
     assert(session_arbiter_admit_incoming(&arbiter, SESSION_VOIP) == 0);
@@ -561,6 +603,21 @@ static void test_voip_malformed_cancel_and_failed_recovery(void) {
     voip_destroy(voip);
 }
 
+static void test_audio_only_call_downgrades_incoming_video(void) {
+    CallState *call = call_create_ex(
+        "https://call.example", "device-1", "token",
+        "audio.g711a", "alaw_8khz", "", "h264");
+    assert(call);
+    cJSON *incoming = cJSON_Parse(
+        "{\"room_id\":\"room-video\",\"caller_id\":\"caller-1\","
+        "\"call_type\":\"video\"}");
+    assert(incoming);
+    call_on_device_call_incoming(call, incoming);
+    assert(strcmp(call->pending_call_type, "audio") == 0);
+    cJSON_Delete(incoming);
+    call_destroy(call);
+}
+
 static void test_ai_connect_timeout(void) {
     AiState *ai = ai_create_ex(
         "https://ai.example", "device-1", "token", "audio.pcm",
@@ -576,6 +633,136 @@ static void test_ai_connect_timeout(void) {
     ai_destroy(ai);
 }
 
+typedef struct {
+    int accepted;
+    int disconnected;
+    int audio;
+    int commands;
+} RuntimeCallbackCounts;
+
+static RuntimeCallbackCounts runtime_stream_counts;
+static RuntimeCallbackCounts runtime_voip_counts;
+
+static void runtime_stream_accepted(tirtc_conn_t hconn) {
+    assert(hconn);
+    runtime_stream_counts.accepted++;
+}
+
+static void runtime_stream_disconnected(tirtc_conn_t hconn) {
+    assert(hconn);
+    runtime_stream_counts.disconnected++;
+}
+
+static void runtime_stream_audio(tirtc_conn_t hconn,
+                                 const TIRTCFRAMEINFO *frame, void *data) {
+    assert(hconn && frame && data);
+    runtime_stream_counts.audio++;
+}
+
+static void runtime_stream_command(tirtc_conn_t hconn, uint32_t command,
+                                   const void *data, uint32_t length) {
+    assert(hconn && command == 0x2000 && data && length == 1);
+    runtime_stream_counts.commands++;
+}
+
+static void runtime_voip_audio(tirtc_conn_t hconn,
+                               const TIRTCFRAMEINFO *frame, void *data) {
+    assert(hconn && frame && data);
+    runtime_voip_counts.audio++;
+}
+
+static void test_process_runtime_generation_dispatch(void) {
+    memset(&runtime_stream_counts, 0, sizeof(runtime_stream_counts));
+    memset(&runtime_voip_counts, 0, sizeof(runtime_voip_counts));
+    tirtc_runtime_test_reset();
+
+    TIRTCCALLBACKS stream = {0};
+    stream.on_conn_accepted = runtime_stream_accepted;
+    stream.on_disconnected = runtime_stream_disconnected;
+    stream.on_audio = runtime_stream_audio;
+    stream.on_command = runtime_stream_command;
+    assert(tirtc_runtime_register_service(
+               TIRTC_SERVICE_STREAM, &stream, NULL) == 0);
+
+    TIRTCCALLBACKS voip = {0};
+    voip.on_audio = runtime_voip_audio;
+    assert(tirtc_runtime_register_service(
+               TIRTC_SERVICE_VOIP, &voip, NULL) == 0);
+
+    tirtc_conn_t stream_conn = (tirtc_conn_t)(uintptr_t)0x101;
+    TIRTCFRAMEINFO frame = {0};
+    unsigned char payload = 0xd5;
+    uint64_t stream_generation =
+        tirtc_runtime_activate(TIRTC_SERVICE_STREAM);
+    assert(stream_generation != 0);
+    tirtc_runtime_test_on_conn_accepted(stream_conn);
+    assert(runtime_stream_counts.accepted == 1);
+    tirtc_runtime_test_on_audio(stream_conn, &frame, &payload);
+    tirtc_runtime_test_on_command(
+        stream_conn, 0x2000, &payload, sizeof(payload));
+    assert(runtime_stream_counts.audio == 1);
+    assert(runtime_stream_counts.commands == 1);
+    assert(tirtc_runtime_deactivate(
+               TIRTC_SERVICE_STREAM, stream_generation) == 0);
+
+    /* Every callback from the cancelled generation is discarded. */
+    tirtc_runtime_test_on_audio(stream_conn, &frame, &payload);
+    tirtc_runtime_test_on_command(
+        stream_conn, 0x2000, &payload, sizeof(payload));
+    tirtc_runtime_test_on_disconnected(stream_conn);
+    assert(runtime_stream_counts.audio == 1);
+    assert(runtime_stream_counts.commands == 1);
+    assert(runtime_stream_counts.disconnected == 0);
+
+    uint64_t voip_generation =
+        tirtc_runtime_activate(TIRTC_SERVICE_VOIP);
+    assert(voip_generation != 0);
+    tirtc_conn_t voip_conn = (tirtc_conn_t)(uintptr_t)0x202;
+    /* Outbound-only services must reject an unrelated inbound connection
+     * instead of binding it to the current generation. */
+    tirtc_conn_t unexpected_inbound =
+        (tirtc_conn_t)(uintptr_t)0x203;
+    tirtc_runtime_test_on_conn_accepted(unexpected_inbound);
+    tirtc_runtime_test_on_audio(
+        unexpected_inbound, &frame, &payload);
+    assert(runtime_voip_counts.audio == 0);
+    assert(tirtc_runtime_bind_active_connection(
+               TIRTC_SERVICE_STREAM, voip_conn) != 0);
+    assert(tirtc_runtime_bind_active_connection(
+               TIRTC_SERVICE_VOIP, voip_conn) == 0);
+    tirtc_runtime_test_on_audio(voip_conn, &frame, &payload);
+    assert(runtime_voip_counts.audio == 1);
+    assert(runtime_stream_counts.audio == 1);
+    assert(tirtc_runtime_deactivate(
+               TIRTC_SERVICE_VOIP, voip_generation) == 0);
+
+    /* Re-entering the same service creates a new generation. */
+    uint64_t next_voip_generation =
+        tirtc_runtime_activate(TIRTC_SERVICE_VOIP);
+    assert(next_voip_generation > voip_generation);
+    tirtc_runtime_test_on_audio(voip_conn, &frame, &payload);
+    assert(runtime_voip_counts.audio == 1);
+    assert(tirtc_runtime_deactivate(
+               TIRTC_SERVICE_VOIP, next_voip_generation) == 0);
+
+    /* Repeated service switches reuse the same process runtime and always
+     * advance the generation; no connection from an earlier turn survives. */
+    uint64_t previous_generation = next_voip_generation;
+    for (int i = 0; i < 100; ++i) {
+        uint64_t stream_turn =
+            tirtc_runtime_activate(TIRTC_SERVICE_STREAM);
+        assert(stream_turn > previous_generation);
+        assert(tirtc_runtime_deactivate(
+                   TIRTC_SERVICE_STREAM, stream_turn) == 0);
+        uint64_t voip_turn =
+            tirtc_runtime_activate(TIRTC_SERVICE_VOIP);
+        assert(voip_turn > stream_turn);
+        assert(tirtc_runtime_deactivate(
+                   TIRTC_SERVICE_VOIP, voip_turn) == 0);
+        previous_generation = voip_turn;
+    }
+}
+
 int main(void) {
     test_format_tables();
     test_media_subscription_policy();
@@ -584,10 +771,13 @@ int main(void) {
     test_encoded_audio_containers();
     test_annexb_video();
     test_callback_guard();
-    test_coordinator_reentrant_terminal_callback();
+    test_callback_control_queue();
+    test_coordinator_switching();
     test_session_arbiter_policy();
     test_voip_malformed_cancel_and_failed_recovery();
+    test_audio_only_call_downgrades_incoming_video();
     test_ai_connect_timeout();
+    test_process_runtime_generation_dispatch();
     puts("device-sim-c core tests passed");
     return 0;
 }

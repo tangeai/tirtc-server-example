@@ -61,7 +61,7 @@ python device_sim_main.py --device-id DEV000001 --device-key your-key
 启动成功后你应该看到这几类现象：
 
 - 设备完成服务发现、拿到 `mqtt_token`、建立正式 MQTT 长连接。
-- 实时流模块启动，默认开始推送 `../assets/` 下的测试媒体。
+- 实时流业务启动并等待 H5 连接；连接建立后循环发送 `../assets/` 下的测试媒体。
 - 终端进入交互模式，可以输入 `help`、`wxcall`、`aicall`、`call`、`accept`、`hangup` 等命令。
 - 下行音视频会保存到 `--down-media-dir/<device_id>/`。
 
@@ -140,7 +140,7 @@ Windows 也可使用文件模式；只有显式传入 `--with-mic` 时，VoIP、
 
 ### 生成扩展测试素材
 
-仓库已随附首次启动所需的 `audio.g711a` 与 `video.h264`，脚本不会覆盖它们。需要测试其他音视频编码格式时，再安装 `ffmpeg`、`espeak-ng` 并执行：
+仓库已随附首次启动所需的 `number.alaw_8khz` 与 `video.h264`，脚本不会覆盖它们。需要测试其他音视频编码格式时，再安装 `ffmpeg`、`espeak-ng` 并执行：
 
 ```bash
 bash ../scripts/gen_assets.sh
@@ -155,7 +155,7 @@ bash ../scripts/gen_assets.sh
 - 视频裸流：H264 仅生成 `1280x720`、15fps、10 秒；MJPEG 仅生成 `240x320`、`320x240`、`640x480`、`480x640`，均为 8fps、10 秒。模拟器会循环读取文件。
 - 每份视频裸流同时生成一个 `preview_*.mp4` 预览文件；预览文件只用于查看画面，不作为模拟器输入。
 - 视频文件名统一包含编码格式、分辨率、帧率、时长和总帧数，例如 `video_mjpeg_640x480_8fps_10s_80frames.mjpeg`。
-- 默认素材：`audio.g711a`、`video.h264` 随仓库提供，可直接给模拟器默认参数使用；音频约 30 秒，适合放入嵌入式设备 Flash。
+- 默认素材：`number.alaw_8khz`、`video.h264` 随仓库提供，可直接给模拟器默认参数使用；音频循环播报数字，适合检查声音内容与连续性。
 - 组合测试素材：供 VoIP / AI / 推流 / 呼设备几条链路复用
 
 可通过环境变量选择语音引擎：
@@ -194,14 +194,14 @@ bash ../scripts/gen_assets.sh
 ```bash
 # 已绑定设备：启动实时推流，同时监听三类通话
 python3 device_sim_main.py --device-id DEV000001 --device-key your-key \
-  --up-audio-file ../assets/audio.g711a
+  --up-audio-file ../assets/number.alaw_8khz
 
 # 首次上线（未绑定）
 python3 device_sim_main.py --mac AA:BB:CC:DD:EE:FF
 
 # 文件媒体模式
 python3 device_sim_main.py --device-id DEV000001 --device-key your-key \
-  --up-audio-file ../assets/audio.g711a \
+  --up-audio-file ../assets/number.alaw_8khz \
   --up-video-file ../assets/video.h264 --down-media-dir ./received
 
 # Windows PC 音频：麦克风上行 + 扬声器下行；视频仍读取本地文件
@@ -222,7 +222,7 @@ python3 device_sim_main.py --mac AA:BB:CC:DD:EE:FF
 
 # 2. 已绑定设备，使用默认素材启动
 python3 device_sim_main.py --device-id DEV000001 --device-key your-key \
-  --up-audio-file ../assets/audio.g711a --up-video-file ../assets/video.h264
+  --up-audio-file ../assets/number.alaw_8khz --up-video-file ../assets/video.h264
 ```
 
 | 参数 | 默认值 | 说明 |
@@ -232,9 +232,9 @@ python3 device_sim_main.py --device-id DEV000001 --device-key your-key \
 | `--mac` | `AA:BB:CC:DD:EE:FF` | 设备 MAC（未绑定流程） |
 | `--endpoint` | `http://ep-open.tangeopen.com` | 服务发现入口 |
 | `--with-mic` | — | Windows 下使用 PC 麦克风/扬声器；上下行须同时为 `alaw_8khz` 或 `alaw_16khz` |
-| `--up-audio-format` | `alaw_8khz` | 上行音频格式，使用标准称谓；旧值如 `g711a_8k` 仍兼容 |
-| `--down-audio-format` | `alaw_8khz` | 下行音频格式，使用标准称谓；旧值如 `g711a_8k` 仍兼容 |
-| `--up-audio-file` | `../assets/audio.g711a` | 各媒体模式通用的上行音频文件 |
+| `--up-audio-format` | `alaw_8khz` | 上行音频格式 |
+| `--down-audio-format` | `alaw_8khz` | 下行音频格式 |
+| `--up-audio-file` | `../assets/number.alaw_8khz` | 各媒体模式通用的 G.711A 8 kHz 数字语音文件 |
 | `--up-video-file` | `../assets/video.h264` | 各媒体模式通用的上行视频文件；空值或 `audio-only` 表示纯音频 |
 | `--up-video-format` | `h264` | 上行视频格式，支持 `h264/h265/mjpeg` |
 | `--down-video-format` | `h264` | 下行视频保存格式后缀，支持 `h264/h265/mjpeg` |
@@ -270,13 +270,19 @@ Python 与 C 模拟器统一通过 `SessionArbiter` 仲裁 MQTT、终端和 SDK 
 
 新增独占 RTC 的业务时，扩展 `SessionKind` 和生命周期适配器，并统一接入仲裁器；业务状态机不再互相查询状态来决定竞争结果。
 
+### TiRTC 运行时架构
+
+进程中只有一个 `TiRtcRuntime`，由它持有统一的 SDK 回调表和连接归属表。启动时完成一次 `TiRtcInit` / `TiRtcStart`，进程退出时执行一次 `TiRtcStop` / `TiRtcUninit`。实时流、VoIP、AI 和设备互呼只注册业务回调，切换时仅停止当前媒体、断开当前连接并激活下一业务代次，不重启 SDK。
+
+每个连接都绑定到建立它的业务代次。SDK 回调先经过 runtime 检查，再分发给当前业务；已经取消或切换的连接回调会被丢弃，迟到的成功连接会在回调返回后断开。每个回调域使用一个进程期常驻、有界的控制队列，媒体线程启停、断开连接、命令解析和会话恢复都在 SDK 回调栈之外执行；下行文件写入与声卡播放使用独立有界媒体队列。
+
 ## 启动后如何使用
 
 程序启动后会做几件事：
 
 1. 先走设备上线流程，拿到 `mqtt_token` 并建立正式 MQTT 长连接。
-2. 初始化实时推流模块。
-3. 初始化 VoIP / AI / 呼设备三个会话模块。
+2. 注册四类业务回调并启动进程级 TiRTC runtime。
+3. 激活实时流业务；VoIP、AI、设备互呼按会话仲裁结果临时切换。
 4. 进入终端交互模式，等待你输入命令。
 
 终端常用命令：
@@ -321,7 +327,7 @@ Python 与 C 模拟器统一通过 `SessionArbiter` 仲裁 MQTT、终端和 SDK 
 
 ```bash
 python3 device_sim_main.py --device-id DEV000001 --device-key your-key \
-  --up-audio-file ../assets/audio.g711a \
+  --up-audio-file ../assets/number.alaw_8khz \
   --up-video-file ../assets/video.h264 \
   --up-video-format h264
 ```
@@ -426,7 +432,7 @@ python3 device_sim_main.py --device-id DEV000001 --device-key your-key \
 
 ```bash
 python3 device_sim_main.py --device-id DEV000001 --device-key your-key \
-  --up-audio-file ../assets/audio.g711a \
+  --up-audio-file ../assets/number.alaw_8khz \
   --up-audio-format alaw_8khz \
   --down-audio-format alaw_8khz \
   --up-video-file ""
@@ -505,8 +511,9 @@ python3 device_sim_main.py --device-id DEV_B --device-key key-b \
 device-sim-py/
 ├── device_sim_main.py     # 入口：命令行解析、模式分发
 ├── device_rtc_runtime.py  # 四类业务的统一运行时组合
+├── tirtc_runtime.py       # 进程级 SDK 生命周期、统一回调与连接代次
 ├── session_arbiter.py     # 竞态策略：待接槽、独占所有权、代次隔离
-├── session_coordinator.py # 单 SDK 生命周期切换与 H5 恢复
+├── session_coordinator.py # 业务切换与 H5 恢复
 ├── session_router.py      # MQTT 与终端统一路由
 ├── device_flow.py         # 设备上线协议（HTTP + MQTT + HMAC 签名）
 ├── tirtc_sdk.py           # TiRTC SDK ctypes 绑定
@@ -515,7 +522,7 @@ device-sim-py/
 ├── g711.py                # G.711 A-law 编解码
 ├── media_source.py        # Annex-B H.264 帧级读取
 │
-├── rtc_voip.py            # VoIP 模块（SDK 生命周期、WHIP、音视频收发、PC 音频）
+├── rtc_voip.py            # VoIP 模块（WHIP、音视频收发、PC 音频）
 ├── rtc_voip_session.py    # VoIP 来/去电状态机
 │
 ├── rtc_ai.py              # AI 对话（文件模式）
@@ -617,51 +624,49 @@ tx_pcm = gate.process(mic_pcm)
 ### 业务模块调用方式
 
 ```python
-# VoIP
-import rtc_voip
-rtc_voip.init_sdk(device_id, device_key, endpoint=svc["tirtc_endpoint"])
-rtc_voip.configure_video("assets/video.h264")       # 空字符串表示纯音频 profile
-rtc_voip.configure_receive_dir("./received")
-auth_list = rtc_voip.report_profile(voip_server, mqtt_token)
-# 来电：VoipCallState.on_call_incoming(payload)
-rtc_voip.start_session(peer_id, token, audio_file="assets/audio.g711a")
-rtc_voip.stop_session()
-rtc_voip.uninit_sdk()
-
-# AI（文件模式）
 import rtc_ai
-rtc_ai.init_sdk(device_id, device_key, endpoint=svc["tirtc_endpoint"])
-rtc_ai.configure_audio_formats("alaw_8khz", "alaw_8khz")
-data = rtc_ai.get_ai_token(ai_server, mqtt_token, device_id)
-rtc_ai.start_session(data["peer_id"], data["token"], audio_file="assets/audio.g711a",
-                     device_id=device_id)
-rtc_ai.stop_session()
-rtc_ai.uninit_sdk()
-
-# AI（硬件模式，跨平台）
-import rtc_ai_hw
-rtc_ai_hw.init_sdk(device_id, device_key, endpoint=svc["tirtc_endpoint"])
-data = rtc_ai_hw.get_ai_token(ai_server, mqtt_token, device_id)
-rtc_ai_hw.start_session(data["peer_id"], data["token"], device_id=device_id)
-rtc_ai_hw.stop_session()
-rtc_ai_hw.uninit_sdk()
-
-# 设备间通话
 import rtc_call
-rtc_call.init_sdk(device_id, device_key, endpoint=svc["tirtc_endpoint"])
-# 主叫：call <device_id> → POST /v1/call/request
-# 被叫：accept → POST /v1/call/device/info → TiRtcConnect → TiRtcSendCommand(0x2000)
-rtc_call.hangup()
-rtc_call.uninit_sdk()
-
-# 推流
 import rtc_stream
-rtc_stream.start(device_id, device_key,
-                 media_factory=FileMediaSource(video_path="assets/video.h264",
-                                               audio_path="assets/audio.g711a"),
-                 endpoint=svc["tirtc_endpoint"])
-rtc_stream.stop()
+import rtc_voip
+import threading
+from device_rtc_runtime import DeviceRtcRuntime, RuntimeConfig
+from device_flow import connect_mqtt_blocking
+
+config = RuntimeConfig(
+    device_id=device_id,
+    device_key=device_key,
+    client_id=device_mac,
+    mqtt_token=mqtt_token,
+    tirtc_endpoint=svc["tirtc_endpoint"],
+    voip_server=svc["voip_server"],
+    ai_server=svc["ai_server"],
+    call_server=svc["call_server"],
+    up_audio_file="assets/number.alaw_8khz",
+    up_video_file="assets/video.h264",  # 空字符串表示设备无视频能力
+    down_media_dir="./received",
+)
+runtime = DeviceRtcRuntime(
+    config, rtc_stream, rtc_voip, rtc_ai, rtc_call)
+runtime.start()  # 进程级 SDK 启动一次，并进入空闲 H5 实时流
+stop_event = threading.Event()
+command_thread = threading.Thread(
+    target=runtime.run_cmd_loop,
+    args=(stop_event,),
+    name="cmd-loop",
+)
+command_thread.start()
+try:
+    connect_mqtt_blocking(
+        mqtt_host, mqtt_port, device_id, mqtt_token,
+        runtime.message_handler, stop_event=stop_event,
+        use_tls=mqtt_tls)
+finally:
+    stop_event.set()
+    command_thread.join()
+    runtime.shutdown()  # 停业务和媒体后，进程级 SDK 停止一次
 ```
+
+VoIP、AI、设备互呼和实时流模块不单独初始化或反初始化 SDK。终端命令和 MQTT 消息通过 `SessionArbiter` / `SessionCoordinator` 切换当前业务；模块只负责本业务的 HTTP、连接状态和媒体。
 
 ## SSL/TLS 配置
 
@@ -836,11 +841,11 @@ ffmpeg -i input.mp4 -c:v libx264 -r 15 -bf 0 -g 30 -bsf:v h264_mp4toannexb -an o
 空 payload 表示预烧设备被解绑，用本地凭证继续。
 
 **call_incoming — VoIP**（`device/sn_{id}/cmd`，`channel:"wx"`）：
-payload 中的 `wx_user_remark` 是设备联系人备注名；模拟器优先显示该字段，旧服务端未下发时按 `wx_user_openid` 从本地联系人缓存查找。设备收到后回 ACK，然后 `TiRtcWhipConnect(peer_id, token)`；WHIP 建连成功后继续等待平台下发 `0x2000`，收到后才启动本地音视频发送线程。若 10 秒内未收到 `0x2000`，设备会主动断开并恢复空闲态。
+payload 中的 `wx_user_remark` 是设备联系人备注名；字段缺失时按 `wx_user_openid` 从本地联系人缓存查找。设备收到后回 ACK，然后 `TiRtcWhipConnect(peer_id, token)`；WHIP 建连成功后继续等待平台下发 `0x2000`，收到后才启动本地音视频发送线程。若 10 秒内未收到 `0x2000`，设备会主动断开并恢复空闲态。
 
 **call_incoming — 设备间**（`device/sn_{id}/cmd`，`channel:"device"`）：
 ```json
-{"type":"call_incoming","channel":"device","msg":{"room_id":"...","caller_id":"...","call_type":"video"}}
+{"type":"call_incoming","channel":"device","payload":{"room_id":"...","caller_id":"...","call_type":"video"}}
 ```
 设备执行 `accept` 后调用 `POST /v1/call/device/info` 获取 token，然后 `TiRtcConnect`。
 
@@ -858,7 +863,7 @@ payload 中的 `wx_user_remark` 是设备联系人备注名；模拟器优先显
 
 ```json
 {"jsonrpc":"2.0","id":"uuid","method":"start_session",
- "params":{"device_id":"...","role_id":"...","input_audio":{"sample_rate":16000,"channels":1},"output_audio":{"sample_rate":16000,"channels":1}}}
+ "params":{"device_id":"...","role_id":"...","input_audio":{"sample_rate":8000,"channels":1},"output_audio":{"sample_rate":8000,"channels":1}}}
 ```
 
 WHIP 连接成功后需等 ~300ms KCP 握手再发 `start_session`。
@@ -906,10 +911,10 @@ WHIP 连接成功后需等 ~300ms KCP 握手再发 `start_session`。
 ## 常见坑
 
 1. **回调对象必须保持存活**：ctypes `CFUNCTYPE` 包装器存入 `cbs._cb_refs` 列表，防止 GC
-2. **回调内不能阻塞或反向调用断开/反初始化**：SDK 回调在内部线程执行，只能复制数据、更新受保护状态或投递事件；`Disconnect`、线程启停和会话恢复必须延后到回调栈之外
+2. **回调内不能阻塞或反向调用断开/反初始化**：SDK 回调在内部线程执行，只能复制数据、更新受保护状态或投递事件；每个回调域只有一个常驻有界控制队列，`Disconnect`、命令解析、线程启停和会话恢复必须延后到回调栈之外，文件与声卡 I/O 使用独立有界媒体队列
 3. **`TiRtcWhipConnect` 返回 0 ≠ 成功**：真正结果在 `connect_cb` 回调的 `error` 参数
 4. **AI WHIP 连接后等 ~300ms**：KCP 握手完成前发送命令会丢失
 5. **AI 文件发完即停止上行**：连接保持到服务端返回 `end_session`，不再额外补静音
 6. **H.264 必须重新编码**：`-c copy` 导致 SPS/PPS 缺失、B 帧残留
-7. **一个进程只有一个 `TiRtcInit`**：多模式互斥
+7. **SDK 生命周期属于进程级 runtime**：只在进程启动时 Init/Start，业务切换不 Stop/Uninit，进程退出时才 Stop/Uninit
 8. **扬声器外放时有回声**：将电脑音量调到 ~15%，程序启动时会提示

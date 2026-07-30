@@ -9,6 +9,9 @@ import rtc_ai
 import rtc_call
 import rtc_stream
 from sdk_callback_guard import SdkCallbackGuard
+from tirtc_runtime import TiRtcRuntime
+from tirtc_runtime import ServiceKind
+from tirtc_sdk import TIRTCCALLBACKS
 
 
 class SdkLifecycleTests(unittest.TestCase):
@@ -42,58 +45,116 @@ class SdkLifecycleTests(unittest.TestCase):
         waiter.join(timeout=1.0)
         self.assertTrue(wait_finished.is_set())
         self.assertEqual(guard.active_count, 0)
+        guard.close()
 
-    def test_ai_uninit_waits_for_callback_return(self):
-        old_running = rtc_ai._sdk_running
-        stopped_was_set = rtc_ai._sdk_stopped.is_set()
+    def test_callback_guard_control_queue_waits_and_preserves_order(self):
+        guard = SdkCallbackGuard()
+        order = []
+        entered = threading.Event()
+        release = threading.Event()
+
+        def callback():
+            guard.defer(lambda: order.append(1), name="first")
+            guard.defer(lambda: order.append(2), name="second")
+            entered.set()
+            release.wait(timeout=2.0)
+
+        callback_thread = threading.Thread(target=guard.wrap(callback))
+        callback_thread.start()
+        self.assertTrue(entered.wait(timeout=1.0))
+        time.sleep(0.02)
+        self.assertEqual([], order)
+
+        release.set()
+        callback_thread.join(timeout=1.0)
+        guard.wait_for_all()
+        self.assertEqual([1, 2], order)
+        guard.close()
+
+    def test_runtime_stop_waits_for_callback_return(self):
+        runtime = TiRtcRuntime()
         release, callback_thread = self._start_blocked_callback(
-            rtc_ai._callback_guard
+            runtime._callback_guard
         )
-        rtc_ai._sdk_running = True
-        rtc_ai._sdk_stopped.set()
-        try:
-            with mock.patch.object(rtc_ai, "stop_session"), \
-                    mock.patch.object(rtc_ai.sdk, "TiRtcStop") as sdk_stop, \
-                    mock.patch.object(rtc_ai.sdk, "TiRtcUninit") as sdk_uninit:
-                uninit_thread = threading.Thread(target=rtc_ai.uninit_sdk)
-                uninit_thread.start()
-                time.sleep(0.05)
-                sdk_stop.assert_not_called()
-                sdk_uninit.assert_not_called()
+        runtime._initialized = True
+        runtime._start_submitted = True
+        runtime._started = True
+        runtime._stopped_event.set()
+        with mock.patch.object(
+                rtc_ai.sdk, "TiRtcStop", return_value=0) as sdk_stop, \
+                mock.patch.object(rtc_ai.sdk, "TiRtcUninit") as sdk_uninit:
+            stop_thread = threading.Thread(target=runtime.stop)
+            stop_thread.start()
+            time.sleep(0.05)
+            sdk_stop.assert_not_called()
+            sdk_uninit.assert_not_called()
 
-                release.set()
-                callback_thread.join(timeout=1.0)
-                uninit_thread.join(timeout=1.0)
-        finally:
-            rtc_ai._sdk_running = old_running
-            if stopped_was_set:
-                rtc_ai._sdk_stopped.set()
-            else:
-                rtc_ai._sdk_stopped.clear()
+            release.set()
+            callback_thread.join(timeout=1.0)
+            stop_thread.join(timeout=1.0)
 
-        self.assertFalse(uninit_thread.is_alive())
+        self.assertFalse(stop_thread.is_alive())
         sdk_stop.assert_called_once_with()
         sdk_uninit.assert_called_once_with()
 
-    def test_stream_stop_waits_for_callback_return(self):
-        old_running = rtc_stream._sdk_running
+    def test_runtime_stop_drains_service_deferred_tasks_before_sdk_stop(self):
+        runtime = TiRtcRuntime()
+        service_guard = SdkCallbackGuard()
+        runtime.register_service(
+            ServiceKind.AI,
+            TIRTCCALLBACKS(),
+            accepts_inbound=False,
+            callback_guard=service_guard,
+        )
+        runtime._initialized = True
+        runtime._start_submitted = True
+        runtime._started = True
+        runtime._stopped_event.set()
+        entered = threading.Event()
+        release = threading.Event()
+
+        def deferred_action():
+            entered.set()
+            release.wait(timeout=2.0)
+
+        service_guard.defer(
+            deferred_action, name="test-service-deferred")
+        self.assertTrue(entered.wait(timeout=1.0))
+
+        with mock.patch.object(
+                rtc_ai.sdk, "TiRtcStop", return_value=0) as sdk_stop, \
+                mock.patch.object(rtc_ai.sdk, "TiRtcUninit") as sdk_uninit:
+            stop_thread = threading.Thread(target=runtime.stop)
+            stop_thread.start()
+            time.sleep(0.05)
+            sdk_stop.assert_not_called()
+            sdk_uninit.assert_not_called()
+
+            release.set()
+            stop_thread.join(timeout=1.0)
+
+        self.assertFalse(stop_thread.is_alive())
+        sdk_stop.assert_called_once_with()
+        sdk_uninit.assert_called_once_with()
+
+    def test_stream_service_stop_waits_for_callback_return(self):
+        old_active = rtc_stream._service_active
         old_conn = rtc_stream._active_conn
         old_thread = rtc_stream._active_thread
-        stopped_was_set = rtc_stream._sdk_stopped.is_set()
         release, callback_thread = self._start_blocked_callback(
             rtc_stream._callback_guard
         )
-        rtc_stream._sdk_running = True
+        rtc_stream._service_active = True
         rtc_stream._active_conn = None
         rtc_stream._active_thread = None
-        rtc_stream._sdk_stopped.set()
         try:
             with mock.patch.object(rtc_stream, "_close_talkback_file"), \
                     mock.patch.object(
                         rtc_stream.sdk, "TiRtcStop", return_value=0
                     ) as sdk_stop, \
                     mock.patch.object(rtc_stream.sdk, "TiRtcUninit") as sdk_uninit:
-                stop_thread = threading.Thread(target=rtc_stream.stop)
+                stop_thread = threading.Thread(
+                    target=rtc_stream.stop_service)
                 stop_thread.start()
                 time.sleep(0.05)
                 sdk_stop.assert_not_called()
@@ -103,50 +164,41 @@ class SdkLifecycleTests(unittest.TestCase):
                 callback_thread.join(timeout=1.0)
                 stop_thread.join(timeout=1.0)
         finally:
-            rtc_stream._sdk_running = old_running
+            rtc_stream._service_active = old_active
             rtc_stream._active_conn = old_conn
             rtc_stream._active_thread = old_thread
-            if stopped_was_set:
-                rtc_stream._sdk_stopped.set()
-            else:
-                rtc_stream._sdk_stopped.clear()
 
         self.assertFalse(stop_thread.is_alive())
-        sdk_stop.assert_called_once_with()
-        sdk_uninit.assert_called_once_with()
+        sdk_stop.assert_not_called()
+        sdk_uninit.assert_not_called()
 
-    def test_device_call_uninit_waits_for_callback_return(self):
-        old_running = rtc_call._sdk_running
-        stopped_was_set = rtc_call._sdk_stopped.is_set()
+    def test_device_call_service_stop_waits_for_callback_return(self):
+        old_active = rtc_call._service_active
         release, callback_thread = self._start_blocked_callback(
             rtc_call._callback_guard
         )
-        rtc_call._sdk_running = True
-        rtc_call._sdk_stopped.set()
+        rtc_call._service_active = True
         try:
             with mock.patch.object(rtc_call, "hangup"), \
                     mock.patch.object(rtc_call._media, "shutdown"), \
                     mock.patch.object(rtc_call.sdk, "TiRtcStop") as sdk_stop, \
                     mock.patch.object(rtc_call.sdk, "TiRtcUninit") as sdk_uninit:
-                uninit_thread = threading.Thread(target=rtc_call.uninit_sdk)
-                uninit_thread.start()
+                stop_thread = threading.Thread(
+                    target=rtc_call.stop_service)
+                stop_thread.start()
                 time.sleep(0.05)
                 sdk_stop.assert_not_called()
                 sdk_uninit.assert_not_called()
 
                 release.set()
                 callback_thread.join(timeout=1.0)
-                uninit_thread.join(timeout=1.0)
+                stop_thread.join(timeout=1.0)
         finally:
-            rtc_call._sdk_running = old_running
-            if stopped_was_set:
-                rtc_call._sdk_stopped.set()
-            else:
-                rtc_call._sdk_stopped.clear()
+            rtc_call._service_active = old_active
 
-        self.assertFalse(uninit_thread.is_alive())
-        sdk_stop.assert_called_once_with()
-        sdk_uninit.assert_called_once_with()
+        self.assertFalse(stop_thread.is_alive())
+        sdk_stop.assert_not_called()
+        sdk_uninit.assert_not_called()
 
     def test_stale_device_call_disconnect_does_not_stop_current_media(self):
         old_state = rtc_call._session_state

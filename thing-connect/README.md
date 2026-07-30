@@ -139,11 +139,13 @@ sig[olen] = '\0';
 
 设备侧的四类能力共用 TiRTC C SDK。先掌握以下 5 点，再看各功能代码。
 
-**① 生命周期（顺序固定）**：<a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcinit" target="_blank" rel="noopener">`TiRtcInit`</a> → <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsetoption" target="_blank" rel="noopener">`TiRtcSetOption`</a> → <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcstart" target="_blank" rel="noopener">`TiRtcStart`</a> → 等 `on_event(SYS_STARTED)` → 业务 → <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcstop" target="_blank" rel="noopener">`TiRtcStop`</a> → 等 `on_event(SYS_STOPPED)` → <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcuninit" target="_blank" rel="noopener">`TiRtcUninit`</a>
+**① 进程级生命周期（顺序固定）**：<a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsetoption" target="_blank" rel="noopener">`TiRtcSetOption(TIRTC_OPT_MAX_SEND_BUFFER)`</a> → <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcinit" target="_blank" rel="noopener">`TiRtcInit`</a> → 其余 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsetoption" target="_blank" rel="noopener">`TiRtcSetOption`</a> → <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcstart" target="_blank" rel="noopener">`TiRtcStart`</a> → 等 `on_event(SYS_STARTED)` → 多个业务会话共享 SDK → 进程退出时 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcstop" target="_blank" rel="noopener">`TiRtcStop`</a> → 等 `on_event(SYS_STOPPED)` → <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcuninit" target="_blank" rel="noopener">`TiRtcUninit`</a>
+
+> H5 实时、VoIP、AI 和设备互呼共用一个进程级 SDK runtime 和一张统一回调表。业务切换只停止媒体、断开当前连接并更新会话代次，不调用 `TiRtcStop` / `TiRtcUninit`。连接及异步结果必须绑定会话代次，迟到回调不能进入新的同类会话。
 
 > 参数来源：`device_id / device_key` 来自[设备上线](#业务流程)，`endpoint` 取[服务发现](api-reference.md#service-discovery)返回的 `tirtc-srv`，`client_id` 推荐使用设备 MAC，必须唯一且不可变；一旦变更，设备将无法连接。
 >
-> `g_sdk_ready`、`s_active_conn` 和 `s_force_key` 是 **「C 参考实现」**的业务状态变量，不是 SDK 字段。
+> `g_sdk_ready`、`s_active_conn` 和 `s_force_key` 是下方精简示例的应用状态变量，不是 SDK 字段。完整实现由 `tirtc_runtime` 保存 SDK 状态和连接归属。
 
 ```c
 /* ── 1. 实现 SDK 回调（运行在 SDK 内部线程，避免 sleep、阻塞和耗时操作）── */
@@ -170,17 +172,13 @@ static void on_conn_error(tirtc_conn_t hconn, int error) {
    ⚠️ data 在回调返回后即失效，需要保留须先拷贝。
    stream 14 = H5 talkback 音频；AI 下行音频也走这里 → 拷贝后交给扬声器。 */
 static void on_audio(tirtc_conn_t hconn, const TIRTCFRAMEINFO *pFi, void *data) {
-    (void)hconn;
-    /* speaker_write(data, pFi->length);  // 平台音频输出 */
+    /* 复制后投递；控制/媒体任务再调用 speaker_write。 */
+    app_rtc_media_push(hconn, pFi, data, pFi->length);
 }
 
-/* 0x2000 / 0x2100 是平台预留业务命令，回调中按原始 cmdw 分发。 */
+/* 0x2000 / 0x2100 是平台预留业务命令；复制后由控制任务解析。 */
 static void on_command(tirtc_conn_t hconn, uint32_t cmdw, const void *data, uint32_t len) {
-    (void)hconn; (void)data; (void)len;
-    switch (cmdw) {
-        case 0x2100: /* AI start_session / end_session 响应 */ break;
-        case 0x2000: /* VoIP / 设备互呼：对端已接通 */   break;
-    }
+    app_rtc_command_push(hconn, cmdw, data, len);
 }
 
 /* 对端请求在 stream_id 上立即发关键帧 → 置标志，推流线程下一帧强制 IDR（第一个功能） */
@@ -204,8 +202,8 @@ static void on_unsubscribe_nop(tirtc_conn_t hconn, uint8_t stream_id) {
 /* ── 2. 注册回调 + 初始化 + 启动（顺序固定）── */
 static TIRTCCALLBACKS cbs;                 /* 必须 static：SDK 只存指针，生命周期须覆盖整个运行期 */
 
-static int init_sdk(const char *endpoint, const char *device_key,
-                    const char *client_id, const char *device_id) {
+static int process_rtc_start(const char *endpoint, const char *device_key,
+                             const char *client_id, const char *device_id) {
     int rc;
     uint32_t max_send_buffer = 512 * 1024;
 
@@ -230,8 +228,8 @@ static int init_sdk(const char *endpoint, const char *device_key,
     rc = TiRtcInit();
     if (rc != 0) return rc;
 
-    /* endpoint：推荐取 GET http://ep-open.tangeopen.com/services 的 tirtc-srv。
-       endpoint 为空时不设置此 option；随附 SDK 2.2.1 默认 https://ep-tirtc.tange365.com。 */
+    /* endpoint 必须取 GET http://ep-open.tangeopen.com/services 的 tirtc-srv。
+       空值只作防御性处理：不设置 option，也不在设备端固化替代地址。 */
     if (endpoint && endpoint[0]) {
         rc = TiRtcSetOption(TIRTC_OPT_SERVICE_ENDPOINT, endpoint, (uint32_t)strlen(endpoint));
         if (rc != 0) goto fail;
@@ -252,7 +250,7 @@ fail:
 }
 ```
 
-> ⚠️ SDK 回调运行在内部线程，不要 `sleep`、阻塞、创建/等待线程，也不要从回调中反向调用 `TiRtcDisconnect`、`TiRtcStop` 或 `TiRtcUninit`。回调只复制仍需使用的数据、更新受保护状态或投递到应用自己的固定队列；断开、线程启停、会话恢复和延时动作由控制任务在回调栈外执行。`app_rtc_event_push()` 是上例中的应用队列抽象，不是 TiRTC API。需要延时的操作（如 AI 等待 300ms）只记录时间，由业务主循环执行。[`TiRtcStart`](https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcstart) 返回 0 仅表示初步检查通过；收到 `SYS_STARTED` 后 SDK 才可用。
+> ⚠️ SDK 回调运行在内部线程，不要 `sleep`、阻塞、创建/等待线程，也不要从回调中反向调用 `TiRtcDisconnect`、`TiRtcStop` 或 `TiRtcUninit`。回调只复制仍需使用的数据、更新受保护状态或投递到应用自己的固定队列；断开、线程启停、命令解析、文件/声卡 I/O、会话恢复和延时动作由常驻控制或媒体任务在回调栈外执行。`app_rtc_event_push()`、`app_rtc_media_push()` 和 `app_rtc_command_push()` 是上例中的应用队列抽象，不是 TiRTC API。需要延时的操作（如 AI 等待 300ms）只记录时间，由业务主循环执行。[`TiRtcStart`](https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcstart) 返回 0 仅表示初步检查通过；收到 `SYS_STARTED` 后 SDK 才可用。
 
 **② 三种连接方式**
 
@@ -397,7 +395,7 @@ static void *push_thread(void *arg) {
 
 **完成标志：** 在 H5 设备列表中打开设备后，可以正常播放音视频；按住说话时，设备能够收到 H5 音频。
 
-**参考实现：** [tirtc_stream.c](device-sim/device-sim-c/src/tirtc_stream.c) 中的 `stream_init_sdk()` 封装了 SDK 初始化和推流循环。完整契约与排查见 [device-h5-live.md](device-h5-live.md#设备侧接入)。
+**参考实现：** [tirtc_runtime.c](device-sim/device-sim-c/src/tirtc_runtime.c) 统一管理进程级 SDK 生命周期与回调分发，[tirtc_stream.c](device-sim/device-sim-c/src/tirtc_stream.c) 只管理实时流会话和媒体发送。完整契约与排查见 [device-h5-live.md](device-h5-live.md#设备侧接入)。
 
 ---
 
@@ -473,7 +471,7 @@ if (g_ai_conn && !g_ai_started && now_ms() - g_ai_connect_at >= 300) {
    }
    ```
 
-   > 字段全集与取值以 [api-reference.md](api-reference.md#post-v1voipdeviceprofile) 为准。另有 `video_mt`（同时设上下行视频编码）属 legacy 兼容字段，**不可与 `up_video_mt` / `down_video_mt` 同时出现**，否则云端拒绝；已用 up/down 时不要传它。**注意没有上行音频字段**：上行音频编码由设备调用 `TiRtcSendAudioStream` 发送时的实际帧格式决定，无需在此上报（本接口仅有 `down_audio_mt`）。
+   > 字段全集与取值以 [api-reference.md](api-reference.md#post-v1voipdeviceprofile) 为准。**注意没有上行音频字段**：上行音频编码由设备调用 `TiRtcSendAudioStream` 发送时的实际帧格式决定，无需在此上报（本接口仅有 `down_audio_mt`）。
 
 2. 监听 MQTT `device/sn_{device_id}/cmd`，收到 `call_incoming`（payload 含 `peer_id` + `token`）；`device/sn_{device_id}/notify` 收 `call_cancel` / `callers_update`
 3. 设备主动呼小程序：调 [`POST /v1/voip/device/call`](api-reference.md#post-v1voipdevicecall)，等微信回调后同样走第 2 步的 `call_incoming`

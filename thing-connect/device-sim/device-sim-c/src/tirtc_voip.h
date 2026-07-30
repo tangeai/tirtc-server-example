@@ -39,14 +39,17 @@ void voip_on_call_incoming(void *ctx, const cJSON *payload);
 void voip_on_callers_update(void *ctx);
 void voip_on_call_cancel(void *ctx, const cJSON *payload);
 int  voip_reject_incoming_payload(const cJSON *payload, int reason);
+int  voip_reject_incoming_payload_async(VoipState *vs,
+                                        const cJSON *payload, int reason);
 
 /* Command input thread (reads stdin, dispatches yes/no/wxcall/hangup/cancel) */
 void voip_cmd_loop(VoipState *vs);
 
-/* ── SDK lifecycle (global singleton, one per process) ─────────────────── */
+/* ── Process-runtime integration ───────────────────────────────────────── */
 
-int  voip_init_sdk(const char *device_id, const char *secret_key, const char *client_id, const char *endpoint);
-void voip_uninit_sdk(void);
+int  voip_service_register(void);
+int  voip_service_start(VoipState *vs);
+void voip_service_stop(VoipState *vs);
 
 /* ── VoIP operations ───────────────────────────────────────────────────── */
 

@@ -14,26 +14,20 @@
 extern "C" {
 #endif
 
-/** Initialize TiRTC SDK in streaming (passive-server) mode.
- *  device_id and secret_key follow the TiRTC 2.2.1 credential API.
- *  Returns 0 on success, exits on failure. */
-int stream_init_sdk(const char *device_id, const char *secret_key, const char *client_id, const char *endpoint,
-                    const char *video_path, const char *audio_path);
-int stream_init_sdk_ex(const char *device_id, const char *secret_key,
-                       const char *client_id, const char *endpoint,
-                       const char *video_path, const char *audio_path,
-                       const char *audio_format, const char *video_format);
+/** Register stream handlers with the process-wide TiRTC runtime. */
+int stream_service_register(void);
 
-/** Stop TiRTC SDK and clean up. */
-void stream_uninit_sdk(void);
+/** Configure and activate stream service resources. */
+int stream_service_start(const char *video_path, const char *audio_path,
+                         const char *audio_format, const char *video_format);
 
-/** True while the SDK is running. */
+/** Stop stream media and disconnect its active connection. */
+void stream_service_stop(void);
+
+/** True while the stream service owns the current session. */
 int stream_is_active(void);
 
-/*
- * Legacy H.264/G.711A source API.  Kept so existing embedding code still
- * compiles; new simulator code uses file_media_source.h directly.
- */
+/* H.264/G.711A file-source helper API. */
 typedef struct {
     FILE *vf;
     FILE *af;

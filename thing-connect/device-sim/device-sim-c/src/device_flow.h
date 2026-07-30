@@ -51,7 +51,7 @@ typedef struct {
     void (*on_device_call_incoming)(void *ctx, const cJSON *payload);
     void (*on_device_room_cancel)(void *ctx, const cJSON *payload);
     void (*on_device_call_reject)(void *ctx, const cJSON *payload);
-    /* Legacy callback remains source-compatible; _ex receives the new payload. */
+    /* Payload-free notification callback; _ex receives the message payload. */
     void (*on_device_callers_update)(void *ctx);
     void (*on_device_callers_update_ex)(void *ctx, const cJSON *payload);
     void (*on_device_callee_answered)(void *ctx, const cJSON *payload);

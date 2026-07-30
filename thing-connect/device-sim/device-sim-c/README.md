@@ -4,7 +4,7 @@
 
 **定位：Linux 文件级模拟。** 从文件读取音视频发送；所有 RTC 场景收到的下行音视频仅限频记录日志，随后立即丢弃。程序没有接收文件、接收目录或播放路径，也不适配真实摄像头、麦克风和扬声器。这是嵌入式设备端的协议与 TiRTC 调用参考；产品移植边界、Linux 交叉编译和 RTOS 模块拆分见 [从 「C 参考实现」移植到嵌入式设备](../../device-porting.md)。
 
-**统一运行时：** 程序启动后先常驻实时推流；VoIP、AI 对讲和设备互呼按需独占 TiRTC SDK，会话结束后自动恢复实时推流。四项业务由同一个 MQTT 长连接和终端命令入口处理，不再通过 `--with-*` 选择互斥模式。
+**统一运行时：** 进程启动时初始化并启动一次 TiRTC SDK，退出时才停止和释放。实时流、VoIP、AI 对讲和设备互呼共享这一实例；Coordinator 只切换当前业务和媒体连接，会话结束后自动恢复实时流。四项业务由同一个 MQTT 长连接和终端命令入口处理。
 
 四个业务场景：**音视频推流 / VoIP 对讲 / AI 对话 / 设备间 P2P 通话**。
 
@@ -37,7 +37,7 @@ cd device-sim-c && make
 
 持续集成或交付前使用 `make WERROR=1` 将编译警告视为错误，并用 `make WERROR=1 test` 运行文件分帧与 SDK 回调屏障测试。
 
-仓库已内置默认的 `../assets/video.h264` 和 `../assets/audio.g711a`，可直接启动。需要额外格式素材时再生成：
+仓库已内置默认的 `../assets/video.h264` 和 `../assets/number.alaw_8khz`，可直接启动。需要额外格式素材时再生成：
 ```bash
 bash ../scripts/gen_assets.sh
 ```
@@ -62,14 +62,14 @@ bash ../scripts/gen_assets.sh
 | `--mac` | `AA:BB:CC:DD:EE:FF` | 设备 MAC（未绑定流程） |
 | `--endpoint` | `http://ep-open.tangeopen.com` | 服务发现入口 |
 | `--log-level` | `debug` | `debug` / `info` / `warn` / `error` |
-| `--up-audio-file` | `../assets/audio.g711a` | 推流、VoIP、设备互呼共用的编码音频文件（环境变量 `UP_AUDIO_FILE`） |
+| `--up-audio-file` | `../assets/number.alaw_8khz` | 推流、VoIP、AI 和设备互呼共用的 G.711A 8 kHz 数字语音文件（环境变量 `UP_AUDIO_FILE`） |
 | `--up-audio-format` | `alaw_8khz` | 上述文件格式（环境变量 `UP_AUDIO_FORMAT`） |
 | `--down-audio-format` | `alaw_8khz` | 下行协商格式；接收数据仍会丢弃（环境变量 `DOWN_AUDIO_FORMAT`） |
 | `--up-video-file` | `../assets/video.h264` | 推流、VoIP、设备互呼共用的编码视频文件；空路径表示纯音频（环境变量 `UP_VIDEO_FILE`） |
 | `--up-video-format` | `h264` | 上述文件格式（环境变量 `UP_VIDEO_FORMAT`） |
 | `--down-video-format` | `h264` | 下行协商格式；接收数据仍会丢弃（环境变量 `DOWN_VIDEO_FORMAT`） |
-| `--ai-audio-file` | `../assets/ai.pcm` | AI 请求上行音频文件（环境变量 `AI_AUDIO_FILE`） |
-| `--ai-up-audio-format` | `pcm_s16le_16khz` | AI 请求音频格式（环境变量 `AI_UP_AUDIO_FORMAT`） |
+| `--ai-audio-file` | 与 `--up-audio-file` 相同 | AI 请求上行音频文件（环境变量 `AI_AUDIO_FILE`） |
+| `--ai-up-audio-format` | 与 `--up-audio-format` 相同 | AI 请求音频格式（环境变量 `AI_UP_AUDIO_FORMAT`） |
 | `VOIP_SCREEN_WIDTH`（环境变量） | `1280` | 设备自身屏幕宽度（像素），与上行视频素材分辨率无关 |
 | `VOIP_SCREEN_HEIGHT`（环境变量） | `720` | 设备自身屏幕高度（像素），与上行视频素材分辨率无关 |
 | `VOIP_CAMERA_ROTATION`（环境变量） | `0` | 微信 VoIP 通话 UI 顺时针旋转角度，仅支持 `0/90/180/270`，随 device profile 上报 |
@@ -94,18 +94,18 @@ bash ../scripts/gen_assets.sh
 
 ### 会话冲突与竞态规则
 
-`SessionArbiter` 是 MQTT、终端和 SDK 回调进入 RTC 生命周期前的唯一仲裁点，C 与 Python 模拟器使用相同规则：
+`SessionArbiter` 是 MQTT、终端和 SDK 回调进入 RTC 业务会话前的唯一仲裁点，C 与 Python 模拟器使用相同规则：
 
 - H5 实时流是空闲基线，不占业务会话名额；仅有待接来电时继续推流。
 - 全局只有一个待接槽位，VoIP/设备来电按到达仲裁器的先后顺序 first-wins；后来的来电直接回复 busy，不会覆盖第一通来电。
 - 待接槽位绑定 `room_id` 和票据代次，并有 45 秒 TTL；迟到取消只能取消同一房间，不能清掉后来到达的新来电。
-- VoIP 外呼、AI 对讲、设备外呼以及接听来电都必须先取得唯一 RTC 所有权；所有权存在或已有待接来电时，其他业务不能启动，不做跨业务抢占。
+- VoIP 外呼、AI 对讲、设备外呼以及接听来电都必须先取得唯一业务会话所有权；所有权存在或已有待接来电时，其他业务不能启动，不做跨业务抢占。
 - 当前 VoIP 外呼回铃与真正的新来电由仲裁器原子分类，避免“检查后状态改变”的竞态。
 - 接听从 `PENDING → STARTING → ACTIVE` 提交；获取 token 或连接期间收到同房间取消时不会继续连接，也不会复活旧来电。
 - 失败、拒接、取消、超时、远端挂断统一归还所有权并恢复 H5；异步结束携带会话代次，旧代次事件不能结束新会话。生命周期结束使用常驻队列，H5 恢复失败会限次重试。
 - 设备忙线拒接 HTTP 由后台队列执行，不阻塞 MQTT 网络回调。
 
-后续新增需要独占 TiRTC 的业务时，只需增加 `SessionKind`、生命周期适配器并统一经过 `SessionArbiter`，不要在业务模块间互相读取状态拼接冲突判断。
+后续新增互斥 RTC 业务时，增加 `SessionKind`、业务适配器和 runtime 回调注册，并统一经过 `SessionArbiter`；业务模块之间不直接读取对方状态。
 
 ### 当前 C 参考实现的媒体参数范围
 
@@ -134,12 +134,13 @@ bash ../scripts/gen_assets.sh
 ```
 src/
 ├── main.c                 # 入口：命令行、统一 MQTT 与终端路由
+├── tirtc_runtime.h/c      # 进程级 SDK 生命周期、统一回调与连接代次
 ├── session_arbiter.h/c    # 竞态策略：待接槽、独占所有权、代次隔离
-├── session_coordinator.h/c # 单 SDK 会话切换：通话结束恢复推流
+├── session_coordinator.h/c # 业务会话切换：通话结束恢复推流
 ├── common.h               # 公共定义
 ├── file_media_source.h/c  # 多格式编码媒体文件分帧器
 ├── media_rx_log.h/c       # 下行音视频限频日志与丢弃
-├── sdk_callback_guard.h/c # SDK 回调生命周期屏障与延后动作
+├── sdk_callback_guard.h/c # SDK 回调屏障与常驻有界控制队列
 ├── http_tls.h/c           # libcurl TLS 校验配置
 ├── device_flow.h/c        # 设备上线协议（HTTP + MQTT + HMAC 签名）
 ├── tirtc_voip.h/c         # VoIP 模块（WHIP 连接、文件媒体上行、拒接信令）
@@ -229,59 +230,62 @@ cp /etc/ssl/certs/ca-certificates.crt ../assets/ca-certificates.crt
 
 SDK 的初始化与回调注册、WHIP/P2P 连接、媒体帧 `TIRTCFRAMEINFO`、命令通道与错误处理的完整用法，统一见 [thing-connect/README 的「TiRTC SDK 速查」](../../README.md#tirtc-sdk-速查)——那里是权威速查，本节不再重复。
 
-> 关键约束（速查里有完整版）：`TIRTCCALLBACKS` 必须 `static`；回调在 SDK 线程触发、禁止阻塞；`TiRtcStart` 返回 0 不等于启动成功，须等 `on_event(SYS_STARTED)`；WHIP 建连后 AI 要延时 ~300ms 再发 `0x2100`。
+> 关键约束（速查里有完整版）：传给 `TiRtcStart` 的 `TIRTCCALLBACKS` 生命周期必须覆盖 SDK 运行期；回调在 SDK 线程触发、禁止阻塞；当前实现把断开、媒体启停、命令解析和限频媒体日志投递到常驻有界控制队列，不在回调中创建线程；`TiRtcStart` 返回 0 不等于启动成功，须等 `on_event(SYS_STARTED)`；WHIP 建连后 AI 要延时约 300ms 再发 `0x2100`。
 >
-> 本仓库 「C 参考实现」的凭证传递：`device_id`、`secret_key`、`client_id` 分别传给各业务模块的 `*_init_sdk()`，模块内部依次设置 `TIRTC_OPT_DEVICE_SECRET_KEY`、`TIRTC_OPT_CLIENT_ID` 后调用 `TiRtcStart(device_id, &cbs)`。不要把 `device_id` 与 `device_key` 拼成一个字符串传给 `TiRtcStart`。
+> `tirtc_runtime` 是 SDK 生命周期和统一回调表的唯一所有者。它设置 `TIRTC_OPT_DEVICE_SECRET_KEY`、`TIRTC_OPT_CLIENT_ID` 后调用一次 `TiRtcStart(device_id, &callbacks)`。业务模块只注册回调并管理业务状态、连接和媒体，不调用 SDK 初始化或反初始化。不要把 `device_id` 与 `device_key` 拼成一个字符串传给 `TiRtcStart`。
 
 ### 各业务模块调用
 
 ```c
-// ── VoIP ──
-// 一个进程只有一个 TiRTC SDK 实例；SessionArbiter 准入后由
-// session_coordinator 在进入 VoIP 时调用。
-voip_init_sdk(did, dkey, client_id, svc.tirtc_endpoint);
+// ── 进程初始化 ──
 VoipState *vs = voip_create(svc.voip_server, did, mqtt_token,
-                            "../assets/audio.g711a");
-voip_configure_media(vs, "../assets/audio.g711a", "alaw_8khz",
-                     "../assets/video.h264", "h264");
-cJSON *auth_list = NULL;
-voip_report_profile(svc.voip_server, mqtt_token, &auth_list);
-voip_set_auth_list(vs, auth_list);
+                            "../assets/number.alaw_8khz");
+AiState *as = ai_create_ex(svc.ai_server, did, mqtt_token,
+                           "../assets/number.alaw_8khz",
+                           "alaw_8khz", "alaw_8khz");
+CallState *cs = call_create_ex(svc.call_server, did, mqtt_token,
+                               "../assets/number.alaw_8khz", "alaw_8khz",
+                               "../assets/video.h264", "h264");
+
+stream_service_register();
+voip_service_register();
+ai_service_register();
+call_service_register();
+tirtc_runtime_start(did, dkey, client_id, svc.tirtc_endpoint);
+
+// Coordinator 激活实时流业务后：
+stream_service_start("../assets/video.h264", "../assets/number.alaw_8khz",
+                     "alaw_8khz", "h264");
+
+// ── VoIP 业务 ──
+// Coordinator 先激活 TIRTC_SERVICE_VOIP，再调用：
+voip_service_start(vs);
 // 来电接听：voip_start_session(vs, peer_id, token, audio_file)
 // 来电拒接：voip_reject_session(app_id, model_id, token, room_id, payload, 7)
 // 主叫：    voip_do_outgoing_call_ex(vs, caller, "video")
-// 挂断：    voip_stop_session(vs)
-voip_destroy(vs); voip_uninit_sdk();
+// 结束业务：voip_service_stop(vs)
 
-// ── AI ──
-ai_init_sdk(did, dkey, client_id, svc.tirtc_endpoint);
-AiState *as = ai_create_ex(svc.ai_server, did, mqtt_token,
-                           "../assets/ai.pcm",
-                           "pcm_s16le_16khz", "pcm_s16le_16khz");
+// ── AI 业务 ──
+ai_service_start(as);
 ai_get_token(svc.ai_server, mqtt_token, did,
              peer_id, sizeof(peer_id), token, sizeof(token),
              role_id, sizeof(role_id));
-ai_start_session(as, peer_id, token, "../assets/ai.pcm", did, role_id);
-ai_stop_session(as);
-ai_destroy(as); ai_uninit_sdk();
+ai_start_session(as, peer_id, token, "../assets/number.alaw_8khz", did, role_id);
+// 结束业务：ai_service_stop(as)
 
-// ── Call ──
-call_init_sdk("DEV001", "your-key", "AA:BB:CC:DD:EE:FF", svc.tirtc_endpoint);
-CallState *cs = call_create_ex(svc.call_server, did, mqtt_token,
-                               "../assets/audio.g711a", "alaw_8khz",
-                               "../assets/video.h264", "h264");
+// ── 设备互呼业务 ──
+call_service_start();
 // 主叫：call_session_do_call(cs, "TIRZ00000002", "video")
 // 被叫：accept → call_session_do_accept(cs) → TiRtcConnect → 0x2000
 // 被叫：reject → call_session_do_reject(cs, "decline")
-call_session_do_hangup(cs);
-call_destroy(cs); call_uninit_sdk();
+// 结束业务：call_service_stop()
 
-// ── Stream ──
-stream_init_sdk_ex(did, dkey, client_id, svc.tirtc_endpoint,
-                   "../assets/video.h264", "../assets/audio.g711a",
-                   "alaw_8khz", "h264");
-while (!g_stop) sleep_ms(100);
-stream_uninit_sdk();
+// ── 进程退出 ──
+// 先由 Coordinator 停止当前业务，再停止 SDK，最后销毁业务状态。
+tirtc_runtime_stop();
+voip_destroy(vs);
+ai_destroy(as);
+call_destroy(cs);
 ```
 
 ## MQTT 消息
@@ -324,7 +328,7 @@ stream_uninit_sdk();
 
 ```json
 {"jsonrpc":"2.0","id":"uuid","method":"start_session",
- "params":{"device_id":"DEV001","role_id":"...","input_audio":{"sample_rate":16000,"channels":1},"output_audio":{"sample_rate":16000,"channels":1}}}
+ "params":{"device_id":"DEV001","role_id":"...","input_audio":{"sample_rate":8000,"channels":1},"output_audio":{"sample_rate":8000,"channels":1}}}
 ```
 
 WHIP 连接后等 ~300ms KCP 握手再发送。
@@ -336,7 +340,7 @@ WHIP 连接后等 ~300ms KCP 握手再发送。
 | 场景 | 默认格式 | 默认包间隔 | stream_id |
 |------|----------|------------|-----------|
 | VoIP / 设备通话 / 实时流音频 | A-law 8 kHz | 40 ms | 10 |
-| AI 上行 | PCM S16LE 16 kHz | 20 ms | 1 |
+| AI 上行 | A-law 8 kHz | 40 ms | 1 |
 | 视频 | H.264 Annex-B | 约 66.7 ms | 11 |
 
 H.264 必须重新编码（`-c copy` 不可用）：
@@ -414,8 +418,8 @@ LDFLAGS += -lTiRTC
 
 ## 常见坑
 
-1. **`TIRTCCALLBACKS` 必须 `static`**：SDK 只存指针，局部变量函数返回后失效
-2. **回调内不能阻塞或反向调用断开/反初始化**：当前实现用回调屏障跟踪所有回调，并把断开、线程启动和会话恢复延后到回调栈之外
+1. **SDK 回调表必须覆盖整个运行期**：当前实现由进程级 `tirtc_runtime` 静态持有统一回调表，业务模块只向 runtime 注册自己的处理函数
+2. **回调内不能阻塞或反向调用断开/反初始化**：当前实现用回调屏障跟踪所有回调，并通过每个回调域的常驻有界控制队列，把断开、命令解析、线程启停、限频日志和会话恢复放到回调栈之外
 3. **`on_conn_accepted` 后推流返回 -40002**：ICE/DTLS 握手未完成，短暂重试
 4. **VoIP `peer_id` 缓冲区 ≥ 1024 字节**：URL 参数长度不固定，截断导致 -40012
 5. **AI WHIP 后等 ~300ms**：KCP 握手完成前发命令会丢失

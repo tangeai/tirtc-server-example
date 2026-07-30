@@ -21,7 +21,7 @@
 | `mqtt-srv` | ✅ | MQTT 地址，格式 `mqtt://host:port` 或 `mqtts://host:port` |
 | `tirtc-srv` | ✅ | TiRTC SDK 服务入口；用于 `TIRTC_OPT_SERVICE_ENDPOINT` |
 
-设备应使用服务发现返回的地址，不要将各业务服务地址或 `tirtc-srv` 固化在固件中。**「C 参考实现」**见 [`fetch_services()`](device-sim/device-sim-c/src/device_flow.c#L187)。
+设备应使用服务发现返回的地址，不要将各业务服务地址或 `tirtc-srv` 固化在固件中。**「C 参考实现」**见 [`fetch_services()`](device-sim/device-sim-c/src/device_flow.c)。
 
 ---
 
@@ -908,7 +908,6 @@ JWT 由 register / login 返回的 `token` 提供，含 `user_id` claim。缺失
 | up_video_mt | string | | 上行视频编码（设备→小程序）：`h264`、`h265`、`mjpeg`、`none` |
 | down_video_mt | string | | 下行视频编码（小程序→设备）：`h264`、`mjpeg`、`none`（不支持 h265） |
 | down_audio_mt | string | | 下行音频编码（小程序→设备）：`alaw`、`amr`、`opus`，默认 `alaw` |
-| video_mt | string | | 同时设置上下行视频编码：`h264`、`mjpeg`、`none`。不要与 up_video_mt / down_video_mt 同时使用 |
 | no_video | bool | | 是否无视频能力 |
 | calling_timeout_sec | int | | 呼叫超时秒数 |
 
@@ -971,6 +970,8 @@ JWT 由 register / login 返回的 `token` 提供，含 `user_id` claim。缺失
 >   "down_video_mt": "h264",
 >   // 小程序发送给设备的音频使用 AMR 编码
 >   "down_audio_mt": "amr",
+>   // 设备具有视频能力
+>   "no_video": false,
 >   // 呼叫等待 30 秒后超时
 >   "calling_timeout_sec": 30
 > }
@@ -982,7 +983,7 @@ JWT 由 register / login 返回的 `token` 提供，含 `user_id` claim。缺失
 > {
 >   "screen_width": 1, "screen_height": 1,
 >   "audio_rate": 8000, "audio_channels": 1,
->   "up_video_mt": "", "down_video_mt": "", "down_audio_mt": "",
+>   "up_video_mt": "none", "down_video_mt": "none", "down_audio_mt": "alaw",
 >   "no_video": true,
 >   "calling_timeout_sec": 30
 > }

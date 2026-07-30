@@ -25,15 +25,6 @@ class _FakeTimer:
             self.callback()
 
 
-class _ImmediateThread:
-    def __init__(self, target, args=(), **_kwargs):
-        self.target = target
-        self.args = args
-
-    def start(self):
-        self.target(*self.args)
-
-
 class VoipCallStateTests(unittest.TestCase):
     def test_explicit_video_is_rejected_without_video(self):
         target = {
@@ -156,11 +147,7 @@ class VoipCallStateTests(unittest.TestCase):
 
     def test_callers_update_preserves_cached_contacts_when_refresh_fails(self):
         cached = [{"wx_open_id": "openid-1", "remark": "缓存备注"}]
-        with mock.patch("rtc_voip_session.rtc_voip") as rtc_voip, \
-                mock.patch(
-                    "rtc_voip_session.threading.Thread",
-                    side_effect=_ImmediateThread,
-                ):
+        with mock.patch("rtc_voip_session.rtc_voip") as rtc_voip:
             rtc_voip._LOG_LEVEL = 40
             rtc_voip.report_profile.return_value = None
             state = VoipCallState(
@@ -170,6 +157,8 @@ class VoipCallStateTests(unittest.TestCase):
                 "audio.g711a",
                 auth_list=cached,
             )
+            state.set_callers_refresh_submitter(
+                lambda callback: (callback(), True)[1])
 
             state.on_callers_update()
 

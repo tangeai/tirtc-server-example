@@ -229,12 +229,12 @@ TiRtcSendAudioStream(hconn, &fi, audio_frame);
 
 AI 会话结束时，设备应：
 
-1. 先停止本地音频采集/发送线程
-2. 由控制任务在 SDK 回调栈外调用 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcdisconnect" target="_blank" rel="noopener">`TiRtcDisconnect`</a>
-3. 等待媒体线程和正在执行的 SDK 回调退出，再反初始化 SDK
-4. 清理当前 session 状态
+1. 先将当前 AI 业务代次标记为失效，阻止新的回调进入
+2. 停止本地音频采集/发送线程
+3. 由控制任务在 SDK 回调栈外调用 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcdisconnect" target="_blank" rel="noopener">`TiRtcDisconnect`</a>，等待媒体线程和当前业务回调退出并清理 session 状态
+4. 恢复空闲实时流；进程级 TiRTC SDK 保持运行
 
-顺序不要反过来。否则容易出现“采集线程还在送音频，但连接句柄已经释放”的问题。
+只有设备进程退出时才执行 `TiRtcStop` / `TiRtcUninit`。顺序不要反过来，否则容易出现“采集线程还在送音频，但连接句柄已经释放”的问题。
 
 ### 5. C 参考实现调用骨架
 
@@ -242,15 +242,28 @@ AI 模块已把 HTTP、WHIP 回调、0x2100 JSON-RPC 和 PCM 推流封装在 tir
 
 ~~~c
 #include "tirtc_ai.h"
+#include "tirtc_runtime.h"
 
 /* 设备上线完成后已有：device_id、device_key、client_id、mqtt_token、
-   ai_server 和 TiRTC endpoint。一个进程同一时间只能初始化一个业务 SDK。 */
+   ai_server 和 TiRTC endpoint。进程启动时注册一次回调并启动一次 SDK。
+   同时支持其他业务时，须在 tirtc_runtime_start() 前注册全部业务。 */
 AiState *ai = ai_create_ex(ai_server, device_id, mqtt_token,
                            "/data/ai_input_16k.pcm",
                            "pcm_s16le_16khz", "pcm_s16le_16khz");
 if (ai == NULL) return -1;
 
-if (ai_init_sdk(device_id, device_key, client_id, endpoint) != 0) {
+if (ai_service_register() != 0 ||
+    tirtc_runtime_start(device_id, device_key, client_id, endpoint) != 0) {
+    ai_destroy(ai);
+    return -1;
+}
+
+/* SessionCoordinator 切入 AI 时激活新代次并启动业务状态。 */
+uint64_t generation = tirtc_runtime_activate(TIRTC_SERVICE_AI);
+if (generation == 0 || ai_service_start(ai) != 0) {
+    if (generation != 0)
+        tirtc_runtime_deactivate(TIRTC_SERVICE_AI, generation);
+    tirtc_runtime_stop();
     ai_destroy(ai);
     return -1;
 }
@@ -261,18 +274,14 @@ char role_id[64] = {0};
 if (ai_get_token(ai_server, mqtt_token, device_id,
                  peer_id, sizeof(peer_id), token, sizeof(token),
                  role_id, sizeof(role_id)) != 0) {
-    ai_uninit_sdk();
-    ai_destroy(ai);
-    return -1;
+    goto leave_ai;
 }
 
 /* 内部调用 TiRtcWhipConnect()；成功回调后发送 0x2100
    start_session。返回 0 只表示异步请求已提交。 */
 if (ai_start_session(ai, peer_id, token, "/data/ai_input_16k.pcm",
                      device_id, role_id) != 0) {
-    ai_uninit_sdk();
-    ai_destroy(ai);
-    return -1;
+    goto leave_ai;
 }
 
 while (!need_hangup) {
@@ -281,9 +290,15 @@ while (!need_hangup) {
     platform_sleep_ms(10);
 }
 
-/* ai_stop_session() 先停止推流，再发送 end_session、断开 hconn。 */
-ai_stop_session(ai);
-ai_uninit_sdk();
+leave_ai:
+tirtc_runtime_deactivate(TIRTC_SERVICE_AI, generation);
+/* ai_service_stop() 先停止推流，再发送 end_session、断开 hconn。 */
+ai_service_stop(ai);
+
+/* Coordinator 此时恢复 STREAM，设备继续运行；这里不能停止或反初始化 SDK。 */
+
+/* 以下两行属于整个设备进程的统一退出路径，不属于 AI 会话结束路径。 */
+tirtc_runtime_stop();
 ai_destroy(ai);
 ~~~
 

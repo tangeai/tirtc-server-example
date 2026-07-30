@@ -2,15 +2,16 @@
 from __future__ import annotations
 """rtc_stream.py — TiRTC 音视频推流（被动接受连接模式）
 
-接口约定（见 tirtc_sdk.py 顶部注释）：
-  start(device_id, secret_key, media_factory, endpoint=None)
-  stop()
+接口约定：
+  runtime_callbacks()
+  start_service(media_factory)
+  stop_service()
   is_active() -> bool
   get_state() -> str   # "IDLE" | "IN_CALL"
 
 对讲功能（H5 按住说话 → stream 14 → 设备端接收并保存文件）：
   configure_talkback(enabled=True, recv_dir="./received", device_id="xxx")
-  在 start() 之前调用，on_audio 回调中检查 stream_id==14 时写入 received_audio.raw。
+  在 start_service() 之前调用，on_audio 回调中检查 stream_id==14 时写入 received_audio.raw。
 """
 
 import ctypes
@@ -20,6 +21,7 @@ import threading
 import time
 
 from typing import Callable
+from callback_work_queue import CallbackWorkQueue
 from media_source import MediaSource, VIDEO_FRAME_MS
 from sdk_callback_guard import SdkCallbackGuard, join_worker_before_uninit
 import tirtc_sdk as sdk
@@ -42,8 +44,6 @@ TALKBACK_STREAM_ID = 14
 
 # ── 模块状态 ──────────────────────────────────────────────────────────────────
 _state_lock   = threading.Lock()
-_sdk_started  = threading.Event()
-_sdk_stopped  = threading.Event()
 _stop_event   = threading.Event()
 _active_conn  = None           # tirtc_conn_t (ctypes c_void_p value)
 _active_thread: threading.Thread | None = None
@@ -52,14 +52,13 @@ _media_factory: "Callable[[], MediaSource] | None" = None
 
 # 保持对回调对象的引用，防止 GC
 _cbs_ref: TIRTCCALLBACKS | None = None
-_device_id_ref: bytes | None = None
-_sdk_log_cb_ref = None
-_sdk_running = False  # guard against duplicate start() calls
+_service_active = False
 _callback_guard = SdkCallbackGuard()
 
 # 对讲录音
 from audio_recorder import AudioRecorder
 _talkback_recorder: AudioRecorder | None = None
+_talkback_work: CallbackWorkQueue | None = None
 
 _LOG_LEVEL = 10  # debug=10 info=20 warn=30 error=40
 
@@ -87,6 +86,8 @@ def _open_talkback_file() -> None:
 
 
 def _close_talkback_file() -> None:
+    if _talkback_work is not None:
+        _talkback_work.drain()
     if _talkback_recorder is None or not _talkback_recorder.is_open:
         return
     _talkback_recorder.close()
@@ -117,92 +118,117 @@ def _sdk_err(fn_name, rc):
 def _schedule_disconnect_after_callback(hconn_val: int) -> None:
     """避免从 SDK 回调内部重入 Disconnect。"""
     def disconnect():
-        _callback_guard.wait_for_idle()
-        if not _sdk_running:
+        if not _service_active:
             return
+        _close_talkback_file()
         rc = sdk.TiRtcDisconnect(ctypes.c_void_p(hconn_val))
         if rc != 0:
             _sdk_err("TiRtcDisconnect", rc)
 
-    threading.Thread(
-        target=disconnect,
-        daemon=True,
-        name="stream-callback-disconnect",
-    ).start()
+    _callback_guard.defer(
+        disconnect, name="stream-callback-disconnect")
 
 
-def start(device_id: str, secret_key: str,
-          media_factory: "Callable[[], MediaSource]",
-          endpoint: str = None, client_id: str = "") -> None:
-    global _media_factory, _cbs_ref, _device_id_ref, _sdk_running
+def _activate_connection_after_callback(hconn_val: int) -> None:
+    """Replace the active stream connection outside the SDK callback stack."""
+    global _active_conn, _active_thread
 
-    if _sdk_running:
-        _log("TiRTC 已在运行，跳过重复启动")
+    if not _service_active or _media_factory is None:
+        sdk.TiRtcDisconnect(ctypes.c_void_p(hconn_val))
+        return
+    try:
+        source = _media_factory()
+    except BaseException as exc:
+        _err(f"创建媒体源失败 hconn={hconn_val:#x}: {exc}")
+        sdk.TiRtcDisconnect(ctypes.c_void_p(hconn_val))
+        return
+
+    with _state_lock:
+        if not _service_active:
+            old_conn = None
+            old_thread = None
+            install = False
+        elif _active_conn == hconn_val:
+            old_conn = None
+            old_thread = None
+            install = False
+        else:
+            old_conn, _active_conn = _active_conn, None
+            old_thread, _active_thread = _active_thread, None
+            _stop_event.set()
+            install = True
+
+    if not install:
+        source.close()
+        if not _service_active:
+            sdk.TiRtcDisconnect(ctypes.c_void_p(hconn_val))
+        return
+    if old_conn is not None:
+        sdk.TiRtcDisconnect(ctypes.c_void_p(old_conn))
+    join_worker_before_uninit(old_thread, _warn, "旧实时流")
+    _close_talkback_file()
+
+    with _state_lock:
+        if not _service_active:
+            install = False
+        else:
+            _stop_event.clear()
+            _active_conn = hconn_val
+            thread = threading.Thread(
+                target=_stream_worker,
+                args=(hconn_val, source),
+                daemon=True,
+                name="tirtc-stream",
+            )
+            _active_thread = thread
+            install = True
+    if not install:
+        source.close()
+        sdk.TiRtcDisconnect(ctypes.c_void_p(hconn_val))
+        return
+
+    _open_talkback_file()
+    thread.start()
+    _info(f"实时流连接已建立 hconn={hconn_val:#x}")
+
+
+def runtime_callbacks() -> TIRTCCALLBACKS:
+    global _cbs_ref
+    if _cbs_ref is None:
+        _cbs_ref = _build_callbacks()
+    return _cbs_ref
+
+
+def callback_guard() -> SdkCallbackGuard:
+    return _callback_guard
+
+
+def start_service(
+    media_factory: "Callable[[], MediaSource]",
+) -> None:
+    global _media_factory, _service_active, _talkback_work
+
+    if _service_active:
         return
 
     _media_factory = media_factory
+    if _talkback_work is None:
+        _talkback_work = CallbackWorkQueue(
+            "stream-talkback",
+            _process_talkback_item,
+            _warn,
+        )
+    _talkback_work.start()
     _stop_event.clear()
-    _sdk_started.clear()
-    _sdk_stopped.clear()
-
-    ver = sdk.TiRtcGetVersion()
-    _log(f"TiRTC version: {ver.decode()}")
-
-    # 设置发送缓冲区（须在 Init 前）
-    buf = ctypes.c_uint32(1024 * 1024)
-    rc = sdk.TiRtcSetOption(TIRTC_OPT_MAX_SEND_BUFFER,
-                         ctypes.byref(buf), ctypes.sizeof(buf))
-    if rc != 0:
-        _sdk_err("TiRtcSetOption(MAX_SEND_BUFFER)", rc)
-        sys.exit(1)
-
-    rc = sdk.TiRtcInit()
-    if rc != 0:
-        _sdk_err("TiRtcInit", rc)
-        sys.exit(1)
-
-    sdk.TiRtcLogConfig(0, None, 0)
-    sdk.TiRtcLogSetLevel(3)   # 默认静默，仅输出 SDK 错误级别日志
-    if _LOG_LEVEL <= 10:
-        # debug 级别：开启 SDK 详细日志，通过回调打印（不含 WebRTC 底层）
-        global _sdk_log_cb_ref
-        def _sdk_log_cb(line):
-            if line:
-                print(f"\033[0;90m[TiRTC-SDK]\033[0m {line.decode(errors='replace')}", flush=True)
-        _sdk_log_cb_ref = sdk.LogCB(_sdk_log_cb)
-        sdk.TiRtcLogSetCallback(_sdk_log_cb_ref)
-        sdk.TiRtcLogSetLevel(8)
-
-    if endpoint:
-        ep_b = endpoint.encode()
-        rc = sdk.TiRtcSetOption(TIRTC_OPT_SERVICE_ENDPOINT,
-                             ctypes.c_char_p(ep_b), len(ep_b))
-        if rc != 0:
-            _sdk_err("TiRtcSetOption(ENDPOINT)", rc)
-            sdk.TiRtcUninit()
-            sys.exit(1)
-
-    _cbs_ref = _build_callbacks()
-    sk = secret_key.encode()
-    rc = sdk.TiRtcSetOption(TIRTC_OPT_DEVICE_SECRET_KEY, ctypes.c_char_p(sk), len(sk))
-    cid = (client_id or device_id).encode()
-    sdk.set_client_id(cid)
-    _device_id_ref = sdk.device_id_for_start(device_id, secret_key)
-    rc = sdk.TiRtcStart(_device_id_ref, ctypes.byref(_cbs_ref))
-    if rc != 0:
-        _sdk_err("TiRtcStart", rc)
-        sdk.TiRtcUninit()
-        sys.exit(1)
-
-    _sdk_running = True
-    _log(f"TiRTC 启动中，等待客户端连接 (device_id={device_id})…")
+    _service_active = True
+    _info("实时流业务已就绪，等待客户端连接")
 
 
-def stop() -> None:
-    global _sdk_running, _active_conn, _active_thread
-    if not _sdk_running:
+def stop_service() -> None:
+    global _service_active, _active_conn, _active_thread, _talkback_work
+    if not _service_active:
         return
-    _sdk_running = False
+    _service_active = False
     with _state_lock:
         _stop_event.set()
         active_conn_local, _active_conn = _active_conn, None
@@ -215,24 +241,18 @@ def stop() -> None:
     if _active_thread_local is not None:
         _active_thread_local.join(timeout=8.0)
 
-    _callback_guard.wait_for_idle()
+    _callback_guard.wait_for_all()
     _close_talkback_file()
-    rc = sdk.TiRtcStop()
-    if rc != 0:
-        _sdk_err("TiRtcStop", rc)
-
-    _sdk_stopped.wait(timeout=8.0)
-    _callback_guard.wait_for_idle()
-    # 再次确认推流线程已退出，防止 Uninit 时访问已释放的 SDK 资源
+    if _talkback_work is not None:
+        _talkback_work.stop()
     if _active_thread_local is not None and _active_thread_local.is_alive():
         join_worker_before_uninit(
             _active_thread_local, _warn, "实时音视频推流", timeout=3.0)
-    sdk.TiRtcUninit()
-    _log("TiRTC 已停止")
+    _info("实时流业务已停止")
 
 
 def is_active() -> bool:
-    return _sdk_running
+    return _service_active
 
 
 def get_state() -> str:
@@ -348,42 +368,30 @@ def _stream_worker(hconn_val: int, source: MediaSource) -> None:
         _log(f"推流线程退出 hconn={hconn_val:#x}")
 
 
+def _process_talkback_item(item) -> None:
+    frame, buf = item
+    recorder = _talkback_recorder
+    if recorder is None or not recorder.is_open:
+        return
+    recorder.write_frame(frame, buf)
+    if recorder.frame_count == 1:
+        _info(
+            f"H5 对讲音频流检测到: stream={frame.stream_id} "
+            f"media={frame.media} {frame.length}bytes/帧"
+        )
+
+
 # ── SDK 回调 ──────────────────────────────────────────────────────────────────
 def _build_callbacks() -> TIRTCCALLBACKS:
 
-    def on_event(event, data, length):
-        _log(f"SDK 事件 event={event} data={data} length={length}") 
-        if event == TIRTC_EVENT_SYS_STARTED:
-            _sdk_started.set()
-            _log("SDK 已启动，等待客户端连接…")
-        elif event == TIRTC_EVENT_SYS_STOPPED:
-            _sdk_stopped.set()
-            _log("SDK 已停止")
-
     def on_conn_accepted(hconn):
         _log(f"on_conn_accepted: 连接已接受 hconn={ctypes.cast(hconn, ctypes.c_void_p).value:#x}")
-        global _active_conn, _active_thread
         hconn_val = ctypes.cast(hconn, ctypes.c_void_p).value
-        _log(f"客户端已连接 hconn={hconn_val:#x}")
-
-        with _state_lock:
-            # 踢掉旧连接
-            old_conn = _active_conn
-            _active_conn = hconn_val
-
-            _open_talkback_file()
-
-            t = threading.Thread(
-                target=_stream_worker,
-                args=(hconn_val, _media_factory()),
-                daemon=True,
-                name="tirtc-stream",
-            )
-            _active_thread = t
-            t.start()
-        if old_conn is not None:
-            _schedule_disconnect_after_callback(old_conn)
-        return 0
+        _callback_guard.defer(
+            _activate_connection_after_callback,
+            hconn_val,
+            name="stream-accept",
+        )
 
 
     def on_conn_error(hconn, error):
@@ -394,7 +402,6 @@ def _build_callbacks() -> TIRTCCALLBACKS:
         with _state_lock:
             if _active_conn == hconn_val:
                 _active_conn = None
-        _close_talkback_file()
         _schedule_disconnect_after_callback(hconn_val)
 
     def on_disconnected(hconn):
@@ -404,7 +411,10 @@ def _build_callbacks() -> TIRTCCALLBACKS:
         with _state_lock:
             if _active_conn == hconn_val:
                 _active_conn = None
-        _close_talkback_file()
+        _callback_guard.defer(
+            _close_talkback_file,
+            name="stream-talkback-close",
+        )
 
     def on_audio(hconn, pFi, data):
         if not data or _talkback_recorder is None or not _talkback_recorder.is_open:
@@ -416,9 +426,15 @@ def _build_callbacks() -> TIRTCCALLBACKS:
         if fi.stream_id != TALKBACK_STREAM_ID:
             return
         buf = ctypes.string_at(data, fi.length)
-        _talkback_recorder.write_frame(fi, buf)
-        if _talkback_recorder.frame_count == 1:
-            _info(f"H5 对讲音频流检测到: stream={fi.stream_id} media={fi.media} {fi.length}bytes/帧")
+        frame = TIRTCFRAMEINFO()
+        frame.stream_id = fi.stream_id
+        frame.media = fi.media
+        frame.flags = fi.flags
+        frame.reserved = fi.reserved
+        frame.ts = fi.ts
+        frame.length = len(buf)
+        if _talkback_work is not None:
+            _talkback_work.submit((frame, buf))
 
     def on_video(hconn, pFi, data):
         pass
@@ -449,7 +465,6 @@ def _build_callbacks() -> TIRTCCALLBACKS:
         _log(f"on_unsubscribe_audio: 音频取消订阅 hconn={ctypes.cast(hconn, ctypes.c_void_p).value:#x} stream_id={stream_id}")
 
     cbs = TIRTCCALLBACKS()
-    cbs.on_event             = OnEventCB(_callback_guard.wrap(on_event))
     cbs.on_conn_accepted     = OnConnAcceptCB(_callback_guard.wrap(on_conn_accepted))
     cbs.on_conn_error        = OnConnErrCB(_callback_guard.wrap(on_conn_error))
     cbs.on_disconnected      = OnDisconnCB(_callback_guard.wrap(on_disconnected))

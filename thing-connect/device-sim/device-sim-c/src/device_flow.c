@@ -215,7 +215,14 @@ int fetch_services(DeviceServices *svc, const char *base_url) {
     memset(svc, 0, sizeof(*svc));
     char url[512];
     if (base_url && base_url[0]) {
-        snprintf(url, sizeof(url), "%s/services", base_url);
+        size_t base_length = strlen(base_url);
+        int written = snprintf(
+            url, sizeof(url), "%s%sservices", base_url,
+            base_url[base_length - 1] == '/' ? "" : "/");
+        if (written < 0 || (size_t)written >= sizeof(url)) {
+            LOG_E("服务发现入口地址过长");
+            return -1;
+        }
     } else {
         snprintf(url, sizeof(url), "http://ep-open.tangeopen.com/services");
     }
@@ -238,57 +245,88 @@ int fetch_services(DeviceServices *svc, const char *base_url) {
     }
 
     /* Extract each field */
-    const char *fields[] = {"device-srv", "voip-srv", "ai-srv", "call-srv", "mqtt-srv"};
-    for (int i = 0; i < 5; i++) {
+    const char *fields[] = {
+        "device-srv", "voip-srv", "ai-srv", "call-srv",
+        "mqtt-srv", "tirtc-srv"
+    };
+    for (int i = 0; i < 6; i++) {
         cJSON *item = cJSON_GetObjectItem(root, fields[i]);
-        if (!item || !cJSON_IsString(item)) {
-            if (i == 3) {  /* call-srv is optional */
-                svc->call_server[0] = '\0';
-                continue;
-            }
+        if (!item || !cJSON_IsString(item) || !item->valuestring[0]) {
             LOG_E("服务发现缺失字段: %s", fields[i]);
             cJSON_Delete(root);
             return -1;
         }
         const char *val = item->valuestring;
-        if (i == 0) STR_COPY(svc->device_server, val);
-        if (i == 1) STR_COPY(svc->voip_server, val);
-        if (i == 2) STR_COPY(svc->ai_server, val);
-        if (i == 3) STR_COPY(svc->call_server, val);
+        char *destination = NULL;
+        size_t capacity = 0;
+        if (i == 0) {
+            destination = svc->device_server;
+            capacity = sizeof(svc->device_server);
+        } else if (i == 1) {
+            destination = svc->voip_server;
+            capacity = sizeof(svc->voip_server);
+        } else if (i == 2) {
+            destination = svc->ai_server;
+            capacity = sizeof(svc->ai_server);
+        } else if (i == 3) {
+            destination = svc->call_server;
+            capacity = sizeof(svc->call_server);
+        } else if (i == 5) {
+            destination = svc->tirtc_endpoint;
+            capacity = sizeof(svc->tirtc_endpoint);
+        }
+        if (destination) {
+            if (strlen(val) >= capacity) {
+                LOG_E("服务发现字段过长: %s", fields[i]);
+                cJSON_Delete(root);
+                return -1;
+            }
+            str_copy(destination, capacity, val);
+        }
         if (i == 4) {
             /* Parse mqtt[s]://host:port */
             const char *hp = val;
             int is_tls = 0;
             if (strncmp(hp, "mqtts://", 8) == 0) { hp += 8; is_tls = 1; }
             else if (strncmp(hp, "mqtt://", 7) == 0) { hp += 7; is_tls = 0; }
+            else {
+                LOG_E("mqtt-srv scheme 异常: %s", val);
+                cJSON_Delete(root);
+                return -1;
+            }
             const char *colon = strrchr(hp, ':');
-            if (!colon) {
+            if (!colon || colon == hp) {
                 LOG_E("mqtt-srv 格式异常: %s", val);
                 cJSON_Delete(root);
                 return -1;
             }
             size_t host_len = (size_t)(colon - hp);
-            if (host_len >= sizeof(svc->mqtt_host)) host_len = sizeof(svc->mqtt_host) - 1;
+            if (host_len >= sizeof(svc->mqtt_host)) {
+                LOG_E("mqtt-srv 主机名过长");
+                cJSON_Delete(root);
+                return -1;
+            }
             memcpy(svc->mqtt_host, hp, host_len);
             svc->mqtt_host[host_len] = '\0';
-            svc->mqtt_port = atoi(colon + 1);
+            errno = 0;
+            char *port_end = NULL;
+            long parsed_port = strtol(colon + 1, &port_end, 10);
+            if (errno != 0 || port_end == colon + 1 || *port_end != '\0' ||
+                parsed_port < 1 || parsed_port > 65535) {
+                LOG_E("mqtt-srv 端口异常: %s", val);
+                cJSON_Delete(root);
+                return -1;
+            }
+            svc->mqtt_port = (int)parsed_port;
             svc->mqtt_tls  = is_tls;
         }
-    }
-
-    /* tirtc-srv is optional — fall back to hardcoded default if missing */
-    cJSON *tirtc = cJSON_GetObjectItem(root, "tirtc-srv");
-    if (tirtc && cJSON_IsString(tirtc)) {
-        STR_COPY(svc->tirtc_endpoint, tirtc->valuestring);
-    } else {
-        svc->tirtc_endpoint[0] = '\0';
     }
 
     cJSON_Delete(root);
 
     LOG_I("服务发现完成: device=%s mqtt=%s:%d tirtc=%s",
           svc->device_server, svc->mqtt_host, svc->mqtt_port,
-          svc->tirtc_endpoint[0] ? svc->tirtc_endpoint : "(default)");
+          svc->tirtc_endpoint);
     return 0;
 }
 
@@ -369,7 +407,7 @@ int report_device(const char *server,
         return -1;
     }
 
-    LOG_D("step 1  response HTTP:%ld  body:%.200s", http_code, body.buf);
+    LOG_D("step 1  response HTTP:%ld code=%d", http_code, json_code(body.buf));
 
     int code = json_code(body.buf);
     if (code == 429 || http_code == 429) {
@@ -446,8 +484,8 @@ int get_mqtt_token(const char *server,
     snprintf(h_sig,  sizeof(h_sig),  "X-Signature: %s", sig);
 
     const char *hdrs[] = { h_id, h_ts, h_nonce, h_mac, h_sig };
-    LOG_D("step 1/4  POST %s  headers={X-Device-Id:%s X-Timestamp:%s X-Nonce:%s X-Signature:%s}",
-          url, device_id, ts_str, nonce, sig);
+    LOG_D("step 1/4  POST %s  headers={X-Device-Id:%s X-Timestamp:%s X-Nonce:%s X-Signature:<hidden>}",
+          url, device_id, ts_str, nonce);
 
     char body_buf[4096];
     StrBuf body;
@@ -534,11 +572,10 @@ static void _temp_on_message(struct mosquitto *mq, void *obj,
                              const struct mosquitto_message *msg) {
     TempMqttCtx *ctx = (TempMqttCtx *)obj;
     const char *raw = (const char *)msg->payload;
-    LOG_D("MQTT received [%s]: %.*s", msg->topic, msg->payloadlen, raw);
-
     cJSON *root = cJSON_ParseWithLength(raw, (size_t)msg->payloadlen);
     if (!root) {
-        LOG_E("MQTT JSON 解析失败: %.*s", msg->payloadlen, raw);
+        LOG_E("MQTT JSON 解析失败 [%s]，响应体已省略 (%d bytes)",
+              msg->topic, msg->payloadlen);
         return;
     }
 
@@ -547,6 +584,8 @@ static void _temp_on_message(struct mosquitto *mq, void *obj,
         cJSON_Delete(root);
         return;
     }
+    LOG_D("MQTT received [%s] type=%s bytes=%d",
+          msg->topic, type->valuestring, msg->payloadlen);
 
     if (strcmp(type->valuestring, "auth_grant") == 0) {
         cJSON *payload = cJSON_GetObjectItem(root, "payload");
@@ -755,8 +794,6 @@ static void _perm_on_message(struct mosquitto *mq, void *obj,
                              const struct mosquitto_message *msg) {
     PermMqttCtx *ctx = (PermMqttCtx *)obj;
     const char *raw = (const char *)msg->payload;
-    LOG_D("MQTT message [%s]: %.*s", msg->topic, msg->payloadlen, raw);
-
     /* Auto-ACK for /cmd topics */
     if (strstr(msg->topic, "/cmd")) {
         char ack_topic[128];
@@ -768,7 +805,8 @@ static void _perm_on_message(struct mosquitto *mq, void *obj,
 
     cJSON *root = cJSON_ParseWithLength(raw, (size_t)msg->payloadlen);
     if (!root) {
-        LOG_E("MQTT JSON parse failed: %.*s", msg->payloadlen, raw);
+        LOG_E("MQTT JSON parse failed [%s], body omitted (%d bytes)",
+              msg->topic, msg->payloadlen);
         return;
     }
 
@@ -778,6 +816,8 @@ static void _perm_on_message(struct mosquitto *mq, void *obj,
 
     const char *t = type    && cJSON_IsString(type)    ? type->valuestring    : "";
     const char *ch = channel && cJSON_IsString(channel) ? channel->valuestring : "";
+    LOG_D("MQTT message [%s] type=%s channel=%s bytes=%d",
+          msg->topic, t, ch, msg->payloadlen);
 
     if (strcmp(t, "unbind") == 0) {
         LOG_W("收到解绑通知，断开连接（凭证已保留）...");

@@ -131,7 +131,10 @@ class AiCallState:
         peer_id = creds.get("peer_id", "")
         token   = creds.get("token", "")
         if not peer_id or not token:
-            _warn(f"AI token 响应缺少 peer_id/token: {creds}")
+            _warn(
+                "AI token 响应缺少必要字段 "
+                f"(peer_id={'yes' if peer_id else 'no'}, token={'yes' if token else 'no'})"
+            )
             return
         _info(f"连接 AI 服务 peer_id={peer_id[:40]}…")
         self._before_start(lambda: rtc_ai.start_session(

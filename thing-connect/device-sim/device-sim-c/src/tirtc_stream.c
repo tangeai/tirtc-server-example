@@ -14,16 +14,12 @@
 #include "file_media_source.h"
 #include "media_rx_log.h"
 #include "sdk_callback_guard.h"
+#include "tirtc_runtime.h"
 #include "tirtc/tiRTC.h"
 
 extern volatile sig_atomic_t g_stop;
 
-static int s_sdk_running;
-static int s_sdk_started;
-static int s_sdk_stopped;
-static pthread_mutex_t s_state_mtx = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t s_started_cond = PTHREAD_COND_INITIALIZER;
-static pthread_cond_t s_stopped_cond = PTHREAD_COND_INITIALIZER;
+static int s_service_active;
 
 static tirtc_conn_t s_active_conn;
 static pthread_mutex_t s_conn_mtx = PTHREAD_MUTEX_INITIALIZER;
@@ -72,36 +68,10 @@ static int _take_force_key(void) {
     return force_key;
 }
 
-static void _stream_sdk_log_cb(const char *log, uint32_t length) {
-    sdk_callback_enter(&s_callback_guard);
-    LOG_SDK(log, length);
-    sdk_callback_leave(&s_callback_guard);
-}
-
-static void _on_event(int event, const void *data, int len) {
-    sdk_callback_enter(&s_callback_guard);
-    (void)data;
-    (void)len;
-    if (event == TIRTC_EVENT_SYS_STARTED) {
-        pthread_mutex_lock(&s_state_mtx);
-        s_sdk_started = 1;
-        pthread_cond_signal(&s_started_cond);
-        pthread_mutex_unlock(&s_state_mtx);
-        LOG_I("SYS_STARTED");
-    } else if (event == TIRTC_EVENT_SYS_STOPPED) {
-        pthread_mutex_lock(&s_state_mtx);
-        s_sdk_stopped = 1;
-        pthread_cond_signal(&s_stopped_cond);
-        pthread_mutex_unlock(&s_state_mtx);
-        LOG_I("SYS_STOPPED");
-    }
-    sdk_callback_leave(&s_callback_guard);
-}
-
 static void _accept_connection(void *opaque) {
     tirtc_conn_t hconn = (tirtc_conn_t)opaque;
     pthread_mutex_lock(&s_handoff_mtx);
-    if (!s_sdk_running) {
+    if (!s_service_active) {
         TiRtcDisconnect(hconn);
         pthread_mutex_unlock(&s_handoff_mtx);
         return;
@@ -124,7 +94,7 @@ static void _accept_connection(void *opaque) {
     }
 
     pthread_mutex_lock(&s_conn_mtx);
-    if (!s_sdk_running || s_active_conn) {
+    if (!s_service_active || s_active_conn) {
         pthread_mutex_unlock(&s_conn_mtx);
         file_media_source_close(&s_media);
         TiRtcDisconnect(hconn);
@@ -188,7 +158,11 @@ static void _on_audio(tirtc_conn_t hconn, const TIRTCFRAMEINFO *frame, void *dat
     sdk_callback_enter(&s_callback_guard);
     (void)hconn;
     (void)data;
-    media_rx_log_audio(&s_rx_log, "实时流", frame);
+    MediaRxNotice notice;
+    if (media_rx_log_note_audio(&s_rx_log, "实时流", frame, &notice))
+        (void)sdk_defer_copy_action(
+            &s_callback_guard, media_rx_log_emit, NULL,
+            &notice, sizeof(notice));
     sdk_callback_leave(&s_callback_guard);
 }
 
@@ -196,7 +170,11 @@ static void _on_video(tirtc_conn_t hconn, const TIRTCFRAMEINFO *frame, void *dat
     sdk_callback_enter(&s_callback_guard);
     (void)hconn;
     (void)data;
-    media_rx_log_video(&s_rx_log, "实时流", frame);
+    MediaRxNotice notice;
+    if (media_rx_log_note_video(&s_rx_log, "实时流", frame, &notice))
+        (void)sdk_defer_copy_action(
+            &s_callback_guard, media_rx_log_emit, NULL,
+            &notice, sizeof(notice));
     sdk_callback_leave(&s_callback_guard);
 }
 
@@ -339,58 +317,9 @@ static void *_push_thread(void *arg) {
     return NULL;
 }
 
-int stream_init_sdk_ex(const char *device_id, const char *secret_key,
-                       const char *client_id, const char *endpoint,
-                       const char *video_path, const char *audio_path,
-                       const char *audio_format, const char *video_format) {
-    s_audio_format = audio_format_find(audio_format);
-    s_video_format = video_format_find(video_format);
-    if (!s_audio_format || ((video_path && video_path[0]) && !s_video_format)) {
-        LOG_E("上行媒体格式无效: audio=%s video=%s",
-              audio_format ? audio_format : "", video_format ? video_format : "");
-        return -1;
-    }
-    STR_COPY(s_video_path, video_path ? video_path : "");
-    STR_COPY(s_audio_path, audio_path ? audio_path : "");
-    if (s_sdk_running) return 0;
-
-    pthread_mutex_lock(&s_state_mtx);
-    s_sdk_started = 0;
-    s_sdk_stopped = 0;
-    pthread_mutex_unlock(&s_state_mtx);
-
-    uint32_t buffer_size = 1024 * 1024;
-    TiRtcSetOption(TIRTC_OPT_MAX_SEND_BUFFER, &buffer_size, sizeof(buffer_size));
-    int rc = TiRtcInit();
-    if (rc != 0) {
-        LOG_E("TiRtcInit 失败: %s", TiRtcGetErrorStr(rc));
-        return -1;
-    }
-    TiRtcLogConfig(0, NULL, 0);
-    TiRtcLogSetLevel(3);
-    if (g_log_level <= LOG_DEBUG) {
-        TiRtcLogSetCallback(_stream_sdk_log_cb);
-        TiRtcLogSetLevel(8);
-    }
-    if (endpoint && endpoint[0]) {
-        rc = TiRtcSetOption(TIRTC_OPT_SERVICE_ENDPOINT, endpoint,
-                            (uint32_t)strlen(endpoint));
-        if (rc != 0) LOG_W("设置 TiRTC endpoint 失败: %s", TiRtcGetErrorStr(rc));
-    }
-    rc = TiRtcSetOption(TIRTC_OPT_DEVICE_SECRET_KEY, secret_key,
-                        (uint32_t)strlen(secret_key));
-    if (rc == 0)
-        rc = TiRtcSetOption(TIRTC_OPT_CLIENT_ID, client_id,
-                            (uint32_t)strlen(client_id));
-    if (rc != 0) {
-        LOG_E("设置 TiRTC 凭证失败: %s", TiRtcGetErrorStr(rc));
-        TiRtcUninit();
-        return -1;
-    }
-
-    static TIRTCCALLBACKS callbacks;
+int stream_service_register(void) {
+    TIRTCCALLBACKS callbacks;
     memset(&callbacks, 0, sizeof(callbacks));
-    callbacks.on_event = _on_event;
     callbacks.on_conn_accepted = _on_conn_accepted;
     callbacks.on_conn_error = _on_conn_error;
     callbacks.on_disconnected = _on_disconnected;
@@ -403,57 +332,30 @@ int stream_init_sdk_ex(const char *device_id, const char *secret_key,
     callbacks.on_unsubscribe_video = _on_unsubscribe;
     callbacks.on_subscribe_audio = _on_sub_audio;
     callbacks.on_unsubscribe_audio = _on_unsubscribe;
+    return tirtc_runtime_register_service(
+        TIRTC_SERVICE_STREAM, &callbacks, &s_callback_guard);
+}
 
-    rc = TiRtcStart(device_id, &callbacks);
-    if (rc != 0) {
-        LOG_E("TiRtcStart 失败: %s", TiRtcGetErrorStr(rc));
-        TiRtcUninit();
+int stream_service_start(const char *video_path, const char *audio_path,
+                         const char *audio_format, const char *video_format) {
+    s_audio_format = audio_format_find(audio_format);
+    s_video_format = video_format_find(video_format);
+    if (!s_audio_format || ((video_path && video_path[0]) && !s_video_format)) {
+        LOG_E("上行媒体格式无效: audio=%s video=%s",
+              audio_format ? audio_format : "", video_format ? video_format : "");
         return -1;
     }
-    s_sdk_running = 1;
-    pthread_mutex_lock(&s_state_mtx);
-    struct timespec deadline;
-    clock_gettime(CLOCK_REALTIME, &deadline);
-    deadline.tv_sec += 10;
-    while (!s_sdk_started && !g_stop) {
-        if (pthread_cond_timedwait(&s_started_cond, &s_state_mtx,
-                                   &deadline) == ETIMEDOUT)
-            break;
-    }
-    pthread_mutex_unlock(&s_state_mtx);
-    if (!s_sdk_started) {
-        LOG_E("等待 SYS_STARTED %s", g_stop ? "已取消" : "超时");
-        s_sdk_running = 0;
-        sdk_callback_wait_all(&s_callback_guard);
-        TiRtcStop();
-        pthread_mutex_lock(&s_state_mtx);
-        clock_gettime(CLOCK_REALTIME, &deadline);
-        deadline.tv_sec += 8;
-        while (!s_sdk_stopped) {
-            if (pthread_cond_timedwait(&s_stopped_cond, &s_state_mtx,
-                                       &deadline) == ETIMEDOUT)
-                break;
-        }
-        pthread_mutex_unlock(&s_state_mtx);
-        sdk_callback_wait_all(&s_callback_guard);
-        TiRtcUninit();
-        return -1;
-    }
-    LOG_I("TiRTC SDK 已就绪（上行 audio=%s video=%s；下行日志后丢弃）",
+    STR_COPY(s_video_path, video_path ? video_path : "");
+    STR_COPY(s_audio_path, audio_path ? audio_path : "");
+    s_service_active = 1;
+    LOG_I("实时流业务已就绪（上行 audio=%s video=%s；下行日志后丢弃）",
           s_audio_format->name, s_video_path[0] ? s_video_format->name : "关闭");
     return 0;
 }
 
-int stream_init_sdk(const char *device_id, const char *secret_key,
-                    const char *client_id, const char *endpoint,
-                    const char *video_path, const char *audio_path) {
-    return stream_init_sdk_ex(device_id, secret_key, client_id, endpoint,
-                              video_path, audio_path, "alaw_8khz", "h264");
-}
-
-void stream_uninit_sdk(void) {
-    if (!s_sdk_running) return;
-    s_sdk_running = 0;
+void stream_service_stop(void) {
+    if (!s_service_active) return;
+    s_service_active = 0;
     _stop_push_thread();
 
     pthread_mutex_lock(&s_conn_mtx);
@@ -463,24 +365,11 @@ void stream_uninit_sdk(void) {
     if (hconn) TiRtcDisconnect(hconn);
 
     sdk_callback_wait_all(&s_callback_guard);
-    TiRtcStop();
-    pthread_mutex_lock(&s_state_mtx);
-    struct timespec deadline;
-    clock_gettime(CLOCK_REALTIME, &deadline);
-    deadline.tv_sec += 8;
-    while (!s_sdk_stopped) {
-        if (pthread_cond_timedwait(&s_stopped_cond, &s_state_mtx,
-                                   &deadline) == ETIMEDOUT)
-            break;
-    }
-    pthread_mutex_unlock(&s_state_mtx);
-    sdk_callback_wait_all(&s_callback_guard);
-    TiRtcUninit();
-    LOG_I("TiRTC SDK 已停止");
+    LOG_I("实时流业务已停止");
 }
 
 int stream_is_active(void) {
-    return s_sdk_running;
+    return s_service_active;
 }
 
 int h264_source_open(H264FileSource *src, const char *video_path,
@@ -497,8 +386,7 @@ int h264_source_open(H264FileSource *src, const char *video_path,
         free(source);
         return -1;
     }
-    /* Keep the legacy public struct size unchanged.  first_pending was an
-     * internal heap pointer in the old reader and remains private storage. */
+    /* The public helper stores its private source pointer in first_pending. */
     src->first_pending = (char *)source;
     return 0;
 }

@@ -32,7 +32,8 @@
 | 「C 参考实现」文件/能力 | 在产品中保留 | 必须替换为板端实现 |
 |---|---|---|
 | device_flow.c | 请求顺序、HMAC 签名串、HTTP/MQTT 消息格式、Topic、ACK 规则 | libcurl、libmosquitto、文件 CA 证书、pthread 心跳 |
-| tirtc_stream.c | TiRtcInit / SetOption / Start，TIRTCFRAMEINFO 字段，连接回调逻辑 | H.264/G.711A 文件读取器、pthread 推流任务 |
+| tirtc_runtime.c / sdk_callback_guard.c | 进程级 TiRtcInit / SetOption / Start / Stop / Uninit、统一回调表、连接与业务代次分发、常驻有界控制队列 | pthread 锁/条件变量/工作线程，替换为 RTOS mutex、事件组和固定任务/固定队列 |
+| tirtc_stream.c | H5 入站连接状态、TIRTCFRAMEINFO 字段、实时媒体发送 | H.264/G.711A 文件读取器、pthread 推流任务 |
 | tirtc_ai.c | 获取 token、WHIP、0x2100 JSON-RPC、300ms 延迟、会话状态 | curl、PCM 文件读取、pthread、下行日志/丢弃 |
 | tirtc_voip.c | profile、MQTT 来电字段、WHIP、0x2001 挂断 | curl、G.711A/H.264 文件读取、扬声器适配 |
 | tirtc_call.c / call_session.c | 建房、接听、TiRtcConnect、0x2000 接通确认、房间状态 | curl、pthread、文件媒体 |
@@ -120,7 +121,7 @@ device_identity、device_http、device_mqtt 的字段和状态转移以 [device-
 | device_http | device_flow.c（Report/Token）、tirtc_ai.c、tirtc_voip.c、call_session.c | `esp_http_client` + mbedtls HMAC | Report 4 签名 header / Token 5 签名 header，签名串 `device_id+timestamp+nonce` |
 | device_mqtt | device_flow.c（临时/正式连接、ack、心跳） | `esp_mqtt_client`（`MQTT_OVER_SSL`） | `.cert_pem` 嵌入 PEM；`/cmd` 必须 ack；30s 心跳 |
 | device_media | tirtc_stream.c（H264FileSource）、各 tirtc_*.c 下行日志/丢弃 | `esp_camera` + I2S/codec + 环形缓冲 | 上行替换为真实采集/编码；下行替换为扬声器缓冲/显示队列（Linux C 示例只记录元数据后丢弃） |
-| device_session | session_arbiter.c / session_coordinator.c（pthread mutex/cond） | FreeRTOS `xSemaphoreCreateMutex` / 固定队列 / event group | Arbiter 负责准入、pending 与 generation；Coordinator 只负责 STREAM/VOIP/AI/CALL 的 SDK 切换 |
+| device_session | session_arbiter.c / session_coordinator.c（pthread mutex/cond） | FreeRTOS `xSemaphoreCreateMutex` / 固定队列 / event group | Arbiter 负责准入、pending 与 generation；Coordinator 只切换 STREAM/VOIP/AI/CALL 业务会话，进程级 SDK 保持运行 |
 | device_tirtc | 各 tirtc_*.c | TiRTC C API（不变） | 仅日志 sink、时间源、随机源适配（见下表） |
 
 「C 参考实现」在 `common.h` 里用的几个 POSIX 运行时工具，也要按下表替换（`now_ms`/`sleep_ms`/`rand_hex` 在各业务模块里被频繁调用）：
@@ -130,7 +131,7 @@ device_identity、device_http、device_mqtt 的字段和状态转移以 [device-
 | `now_ms()`（`clock_gettime CLOCK_MONOTONIC`） | 毫秒时间戳 | `(uint64_t)xTaskGetTickCount() * portTICK_PERIOD_MS` |
 | `sleep_ms(ms)`（`nanosleep`） | 毫秒延时 | `vTaskDelay(pdMS_TO_TICKS(ms))` |
 | `rand_hex`（`/dev/urandom`，有 fallback） | 生成 nonce | `esp_fill_random` 再转 hex |
-| pthread mutex/cond（session_arbiter / session_coordinator） | 准入状态、生命周期队列和 SDK 切换串行化 | `xSemaphoreCreateMutex` / 固定 queue / event group |
+| pthread mutex/cond（session_arbiter）与 coordinator mutex | 准入状态、生命周期队列和 SDK 切换串行化 | `xSemaphoreCreateMutex` / 固定 queue / event group |
 | `log_set_sink`（`common.h:34`） | 日志重定向 | 接 UART/RTT 的 sink |
 
 ### 2. 先完成设备上线，再接媒体

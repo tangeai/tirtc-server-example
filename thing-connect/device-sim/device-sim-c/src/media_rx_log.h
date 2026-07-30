@@ -12,12 +12,24 @@ typedef struct {
     uint64_t video_frames;
 } MediaRxLog;
 
+typedef struct {
+    char session[24];
+    uint64_t count;
+    uint32_t media;
+    uint32_t flags;
+    uint32_t length;
+    int video;
+} MediaRxNotice;
+
 #define MEDIA_RX_LOG_INITIALIZER { PTHREAD_MUTEX_INITIALIZER, 0, 0 }
 
 void media_rx_log_reset(MediaRxLog *log);
-void media_rx_log_audio(MediaRxLog *log, const char *session,
-                        const TIRTCFRAMEINFO *frame);
-void media_rx_log_video(MediaRxLog *log, const char *session,
-                        const TIRTCFRAMEINFO *frame);
+int media_rx_log_note_audio(MediaRxLog *log, const char *session,
+                            const TIRTCFRAMEINFO *frame,
+                            MediaRxNotice *notice);
+int media_rx_log_note_video(MediaRxLog *log, const char *session,
+                            const TIRTCFRAMEINFO *frame,
+                            MediaRxNotice *notice);
+void media_rx_log_emit(void *context, const void *data, size_t length);
 
 #endif

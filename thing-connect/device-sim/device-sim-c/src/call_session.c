@@ -373,7 +373,7 @@ int call_session_do_call(CallState *cs, const char *target_id, const char *call_
 
     int code = _json_resp_code(body_buf);
     if (code != 200) {
-        LOG_W("发起呼叫失败（code=%d）: %s", code, body_buf);
+        LOG_W("发起呼叫失败（code=%d，响应体已省略）", code);
         goto failed;
     }
 
@@ -484,7 +484,7 @@ int call_session_do_accept(CallState *cs) {
 
     int code = _json_resp_code(body_buf);
     if (code != 200) {
-        LOG_W("接听失败（code=%d）: %s", code, body_buf);
+        LOG_W("接听失败（code=%d，响应体已省略）", code);
         return -1;
     }
 
@@ -794,7 +794,7 @@ int call_session_do_list_contacts(CallState *cs) {
 
     int code = _json_resp_code(body_buf);
     if (code != 200) {
-        LOG_W("拉取联系人失败: %s", body_buf);
+        LOG_W("拉取联系人失败（响应体已省略）");
         return -1;
     }
 
@@ -916,7 +916,7 @@ int call_session_do_list_pending_contacts(CallState *cs) {
     int ret = _http_get(url, cs->mqtt_token, body_buf, sizeof(body_buf), &http_code);
     if (ret != 0) return -1;
     if (_json_resp_code(body_buf) != 200) {
-        LOG_W("拉取待审批联系人申请失败: %s", body_buf);
+        LOG_W("拉取待审批联系人申请失败（响应体已省略）");
         return -1;
     }
 
@@ -1061,7 +1061,7 @@ int call_session_do_query_room(CallState *cs) {
 
     int code = _json_resp_code(body_buf);
     if (code != 200) {
-        LOG_W("查询房间失败: %s", body_buf);
+        LOG_W("查询房间失败（响应体已省略）");
         return -1;
     }
 
@@ -1091,6 +1091,9 @@ int call_session_do_query_room(CallState *cs) {
     const char *rl   = role   && cJSON_IsString(role)   ? role->valuestring   : "?";
     const char *cl   = caller && cJSON_IsString(caller) ? caller->valuestring : "?";
     const char *cct  = ct     && cJSON_IsString(ct)     ? ct->valuestring     : "?";
+    const char *selected_type =
+        strcmp(cct, "audio") == 0 || !cs->send_video[0]
+            ? "audio" : "video";
 
     /* Sync local state */
     pthread_mutex_lock(&cs->lock);
@@ -1099,12 +1102,11 @@ int call_session_do_query_room(CallState *cs) {
     }
     cs->active = 1;
     STR_COPY(cs->room_id, r_id); STR_COPY(cs->role, rl);
-    STR_COPY(cs->active_call_type,
-             strcmp(cct, "audio") == 0 ? "audio" : "video");
+    STR_COPY(cs->active_call_type, selected_type);
     pthread_mutex_unlock(&cs->lock);
 
     LOG_I("当前房间: room_id=%s status=%s role=%s caller=%s type=%s",
-          r_id, st, rl, cl, cct);
+          r_id, st, rl, cl, selected_type);
 
     cJSON_Delete(resp);
     return 0;

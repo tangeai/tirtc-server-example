@@ -19,6 +19,17 @@ class FakeResponse:
         raise ValueError("not json")
 
 
+class JsonResponse:
+    status_code = 200
+    text = ""
+
+    def __init__(self, body):
+        self._body = body
+
+    def json(self):
+        return self._body
+
+
 class DeviceSimulatorTests(unittest.TestCase):
     def test_device_id_and_key_must_be_paired(self):
         self.assertTrue(device_credentials.credentials_are_paired("dev1", "key1"))
@@ -54,6 +65,29 @@ class DeviceSimulatorTests(unittest.TestCase):
         reason = type("Reason", (), {"value": 0x98})()
         self.assertEqual(device_flow._mqtt_reason_value(reason), 0x98)
         self.assertEqual(device_flow._mqtt_reason_value(7), 7)
+
+    def test_service_discovery_requires_all_business_and_tirtc_addresses(self):
+        body = {
+            "device-srv": "https://device.example",
+            "voip-srv": "https://voip.example",
+            "ai-srv": "https://ai.example",
+            "call-srv": "https://call.example",
+            "mqtt-srv": "mqtts://mqtt.example:8883",
+            "tirtc-srv": "http://rtc.example",
+        }
+        with mock.patch.object(
+                device_flow.requests, "get",
+                return_value=JsonResponse(body)):
+            services = device_flow.fetch_services("https://open.example")
+        self.assertEqual(services["call_server"], "https://call.example")
+        self.assertEqual(services["tirtc_endpoint"], "http://rtc.example")
+
+        body.pop("call-srv")
+        with mock.patch.object(
+                device_flow.requests, "get",
+                return_value=JsonResponse(body)):
+            with self.assertRaises(SystemExit):
+                device_flow.fetch_services("https://open.example")
 
 
 if __name__ == "__main__":

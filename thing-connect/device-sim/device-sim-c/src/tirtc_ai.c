@@ -26,6 +26,7 @@
 #include "media_format.h"
 #include "media_rx_log.h"
 #include "sdk_callback_guard.h"
+#include "tirtc_runtime.h"
 
 extern volatile sig_atomic_t g_stop;
 
@@ -113,7 +114,7 @@ struct AiState {
     void             *on_session_end_user;
 };
 
-/* Global singleton for SDK callbacks */
+/* Active AI business state selected by the process runtime. */
 static AiState     *s_active_ai = NULL;
 static pthread_mutex_t s_ai_mtx = PTHREAD_MUTEX_INITIALIZER;
 
@@ -160,41 +161,9 @@ void ai_set_session_end_callback(AiState *as, ai_session_end_cb cb, void *user) 
     pthread_mutex_unlock(&as->lock);
 }
 
-/* ── SDK lifecycle ───────────────────────────────────────────────────────── */
+/* ── Process-runtime callbacks ───────────────────────────────────────────── */
 
-static int              s_ai_sdk_running  = 0;
-static int              s_ai_sdk_started  = 0;
-static int              s_ai_sdk_stopped  = 0;
-static pthread_mutex_t  s_ai_state_mtx    = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t   s_ai_started_cond = PTHREAD_COND_INITIALIZER;
-static pthread_cond_t   s_ai_stopped_cond = PTHREAD_COND_INITIALIZER;
 static SdkCallbackGuard s_ai_callback_guard = SDK_CALLBACK_GUARD_INITIALIZER;
-
-/* SDK 内部日志回调（debug 级别启用） */
-static void _ai_sdk_log_cb(const char *log, uint32_t length) {
-    sdk_callback_enter(&s_ai_callback_guard);
-    LOG_SDK(log, length);
-    sdk_callback_leave(&s_ai_callback_guard);
-}
-
-static void _a_on_event(int event, const void *data, int len) {
-    sdk_callback_enter(&s_ai_callback_guard);
-    (void)data;(void)len;
-    if (event == TIRTC_EVENT_SYS_STARTED) {
-        pthread_mutex_lock(&s_ai_state_mtx);
-        s_ai_sdk_started = 1;
-        pthread_cond_signal(&s_ai_started_cond);
-        pthread_mutex_unlock(&s_ai_state_mtx);
-        LOG_I("SYS_STARTED");
-    } else if (event == TIRTC_EVENT_SYS_STOPPED) {
-        pthread_mutex_lock(&s_ai_state_mtx);
-        s_ai_sdk_stopped = 1;
-        pthread_cond_signal(&s_ai_stopped_cond);
-        pthread_mutex_unlock(&s_ai_state_mtx);
-        LOG_I("SYS_STOPPED");
-    }
-    sdk_callback_leave(&s_ai_callback_guard);
-}
 
 /* Forward declarations */
 static void _ai_handle_message(AiState *as, tirtc_conn_t hconn, const char *json_str);
@@ -251,8 +220,12 @@ static void _a_on_disconnected(tirtc_conn_t hconn) {
 static void _a_on_audio(tirtc_conn_t hconn, const TIRTCFRAMEINFO *pFi, void *data) {
     sdk_callback_enter(&s_ai_callback_guard);
     AiState *as = _active_ai();
-    if (_ai_hconn_matches(as, hconn))
-        media_rx_log_audio(&as->rx_log, "AI", pFi);
+    MediaRxNotice notice;
+    if (_ai_hconn_matches(as, hconn) &&
+        media_rx_log_note_audio(&as->rx_log, "AI", pFi, &notice))
+        (void)sdk_defer_copy_action(
+            &s_ai_callback_guard, media_rx_log_emit, NULL,
+            &notice, sizeof(notice));
     (void)data;
     sdk_callback_leave(&s_ai_callback_guard);
 }
@@ -260,10 +233,30 @@ static void _a_on_audio(tirtc_conn_t hconn, const TIRTCFRAMEINFO *pFi, void *dat
 static void _a_on_video(tirtc_conn_t hconn, const TIRTCFRAMEINFO *pFi, void *data) {
     sdk_callback_enter(&s_ai_callback_guard);
     AiState *as = _active_ai();
-    if (_ai_hconn_matches(as, hconn))
-        media_rx_log_video(&as->rx_log, "AI", pFi);
+    MediaRxNotice notice;
+    if (_ai_hconn_matches(as, hconn) &&
+        media_rx_log_note_video(&as->rx_log, "AI", pFi, &notice))
+        (void)sdk_defer_copy_action(
+            &s_ai_callback_guard, media_rx_log_emit, NULL,
+            &notice, sizeof(notice));
     (void)data;
     sdk_callback_leave(&s_ai_callback_guard);
+}
+
+static void _ai_command_deferred(void *context, const void *data,
+                                 size_t length) {
+    tirtc_conn_t hconn = (tirtc_conn_t)context;
+    if (!data || length == 0 ||
+        length > SDK_CALLBACK_COPY_CAPACITY)
+        return;
+
+    char json_str[SDK_CALLBACK_COPY_CAPACITY + 1];
+    memcpy(json_str, data, length);
+    json_str[length] = '\0';
+
+    AiState *as = _active_ai();
+    if (_ai_hconn_matches(as, hconn))
+        _ai_handle_message(as, hconn, json_str);
 }
 
 static void _a_on_command(tirtc_conn_t hconn, uint32_t cmdw, const void *data, uint32_t len) {
@@ -272,32 +265,16 @@ static void _a_on_command(tirtc_conn_t hconn, uint32_t cmdw, const void *data, u
         sdk_callback_leave(&s_ai_callback_guard);
         return;
     }
-
-    /* Copy to null-terminated string */
-    char *json_str = (char *)malloc(len + 1);
-    if (!json_str) {
-        sdk_callback_leave(&s_ai_callback_guard);
-        return;
-    }
-    memcpy(json_str, data, len);
-    json_str[len] = '\0';
-
-    AiState *as = _active_ai();
-
-    if (_ai_hconn_matches(as, hconn))
-        _ai_handle_message(as, hconn, json_str);
-    free(json_str);
+    if (sdk_defer_copy_action(&s_ai_callback_guard,
+                              _ai_command_deferred, hconn,
+                              data, len) != 0)
+        LOG_E("AI 命令超出控制队列容量或队列已满，已丢弃 len=%u", len);
     sdk_callback_leave(&s_ai_callback_guard);
 }
 
 static void _a_nop_4(tirtc_conn_t h, const TIRTCFRAMEINFO *f, void *d) {
     sdk_callback_enter(&s_ai_callback_guard);
     (void)h;(void)f;(void)d;
-    sdk_callback_leave(&s_ai_callback_guard);
-}
-static void _a_nop_1(tirtc_conn_t h) {
-    sdk_callback_enter(&s_ai_callback_guard);
-    (void)h;
     sdk_callback_leave(&s_ai_callback_guard);
 }
 static void _a_nop_unsub(tirtc_conn_t h, uint8_t s) {
@@ -312,40 +289,9 @@ static int _a_ret0(tirtc_conn_t h, uint8_t s) {
     return 0;
 }
 
-int ai_init_sdk(const char *device_id, const char *secret_key, const char *client_id, const char *endpoint) {
-    if (s_ai_sdk_running) return 0;
-
-    pthread_mutex_lock(&s_ai_state_mtx);
-    s_ai_sdk_started = 0;
-    s_ai_sdk_stopped = 0;
-    pthread_mutex_unlock(&s_ai_state_mtx);
-
-    uint32_t buf_size = 1024 * 1024;
-    TiRtcSetOption(TIRTC_OPT_MAX_SEND_BUFFER, &buf_size, sizeof(buf_size));
-
-    int rc = TiRtcInit();
-    if (rc != 0) { LOG_E("TiRtcInit: %s", TiRtcGetErrorStr(rc)); return -1; }
-
-    TiRtcLogConfig(0, NULL, 0);
-    TiRtcLogSetLevel(3);
-
-    /* Debug 级别：打开 SDK 内部日志 */
-    if (g_log_level <= LOG_DEBUG) {
-        TiRtcLogSetCallback(_ai_sdk_log_cb);
-        TiRtcLogSetLevel(8);
-    }
-
-    if (endpoint && endpoint[0])
-        TiRtcSetOption(TIRTC_OPT_SERVICE_ENDPOINT, endpoint, (uint32_t)strlen(endpoint));
-    rc = TiRtcSetOption(TIRTC_OPT_DEVICE_SECRET_KEY, secret_key, (uint32_t)strlen(secret_key));
-    if (rc != 0) { LOG_E("TiRtcSetOption(SECRET_KEY): %s", TiRtcGetErrorStr(rc)); TiRtcUninit(); return -1; }
-    rc = TiRtcSetOption(TIRTC_OPT_CLIENT_ID, client_id, (uint32_t)strlen(client_id));
-    if (rc != 0) { LOG_E("TiRtcSetOption(CLIENT_ID): %s", TiRtcGetErrorStr(rc)); TiRtcUninit(); return -1; }
-
-    static TIRTCCALLBACKS cbs;
+int ai_service_register(void) {
+    TIRTCCALLBACKS cbs;
     memset(&cbs, 0, sizeof(cbs));
-    cbs.on_event             = _a_on_event;
-    cbs.on_conn_accepted     = _a_nop_1;
     cbs.on_conn_error        = _a_on_conn_error;
     cbs.on_disconnected      = _a_on_disconnected;
     cbs.on_audio             = _a_on_audio;
@@ -357,53 +303,27 @@ int ai_init_sdk(const char *device_id, const char *secret_key, const char *clien
     cbs.on_unsubscribe_video = _a_nop_unsub;
     cbs.on_subscribe_audio   = _a_ret0;
     cbs.on_unsubscribe_audio = _a_nop_unsub;
+    return tirtc_runtime_register_service(
+        TIRTC_SERVICE_AI, &cbs, &s_ai_callback_guard);
+}
 
-    rc = TiRtcStart(device_id, &cbs);
-    if (rc != 0) { LOG_E("TiRtcStart: %s", TiRtcGetErrorStr(rc)); TiRtcUninit(); return -1; }
-
-    s_ai_sdk_running = 1;
-    LOG_I("TiRTC %s 启动中，等待 SYS_STARTED…", TiRtcGetVersion());
-
-    pthread_mutex_lock(&s_ai_state_mtx);
-    struct timespec dl; clock_gettime(CLOCK_REALTIME, &dl); dl.tv_sec += 10;
-    while (!s_ai_sdk_started && !g_stop)
-        if (pthread_cond_timedwait(&s_ai_started_cond, &s_ai_state_mtx, &dl) == ETIMEDOUT) break;
-    pthread_mutex_unlock(&s_ai_state_mtx);
-
-    if (!s_ai_sdk_started) {
-        LOG_E("等待 SYS_STARTED %s", g_stop ? "已取消" : "超时");
-        s_ai_sdk_running = 0;
-        sdk_callback_wait_all(&s_ai_callback_guard);
-        TiRtcStop();
-        pthread_mutex_lock(&s_ai_state_mtx);
-        clock_gettime(CLOCK_REALTIME, &dl);
-        dl.tv_sec += 8;
-        while (!s_ai_sdk_stopped)
-            if (pthread_cond_timedwait(&s_ai_stopped_cond,
-                                       &s_ai_state_mtx, &dl) == ETIMEDOUT)
-                break;
-        pthread_mutex_unlock(&s_ai_state_mtx);
-        sdk_callback_wait_all(&s_ai_callback_guard);
-        TiRtcUninit();
-        return -1;
-    }
-    LOG_I("TiRTC SDK 已就绪");
+int ai_service_start(AiState *as) {
+    if (!as) return -1;
+    pthread_mutex_lock(&s_ai_mtx);
+    s_active_ai = as;
+    pthread_mutex_unlock(&s_ai_mtx);
+    LOG_I("AI 业务已就绪");
     return 0;
 }
 
-void ai_uninit_sdk(void) {
-    if (!s_ai_sdk_running) return;
-    s_ai_sdk_running = 0;
+void ai_service_stop(AiState *as) {
+    if (!as) return;
+    ai_stop_session(as);
     sdk_callback_wait_all(&s_ai_callback_guard);
-    TiRtcStop();
-    pthread_mutex_lock(&s_ai_state_mtx);
-    struct timespec dl; clock_gettime(CLOCK_REALTIME, &dl); dl.tv_sec += 8;
-    while (!s_ai_sdk_stopped)
-        if (pthread_cond_timedwait(&s_ai_stopped_cond, &s_ai_state_mtx, &dl) == ETIMEDOUT) break;
-    pthread_mutex_unlock(&s_ai_state_mtx);
-    sdk_callback_wait_all(&s_ai_callback_guard);
-    TiRtcUninit();
-    LOG_I("TiRTC SDK 已停止");
+    pthread_mutex_lock(&s_ai_mtx);
+    if (s_active_ai == as) s_active_ai = NULL;
+    pthread_mutex_unlock(&s_ai_mtx);
+    LOG_I("AI 业务已停止");
 }
 
 /* ── AI token ────────────────────────────────────────────────────────────── */
@@ -420,7 +340,7 @@ int ai_get_token(const char *ai_server, const char *mqtt_token,
     char body_buf[4096];
     long http_code = 0;
     if (_ai_http_get(url, mqtt_token, body_buf, sizeof(body_buf), &http_code) != 0) {
-        LOG_D("GET %s -> HTTP %ld body: %s", url, http_code, body_buf);
+        LOG_D("GET %s -> HTTP %ld", url, http_code);
         LOG_E("AI token 请求失败");
         return -1;
     }
@@ -431,7 +351,7 @@ int ai_get_token(const char *ai_server, const char *mqtt_token,
     cJSON *code = cJSON_GetObjectItem(root, "code");
     if (!code || !cJSON_IsNumber(code) || code->valueint != 200) {
         cJSON *msg = cJSON_GetObjectItem(root, "msg");
-        LOG_D("GET %s -> HTTP %ld body: %s", url, http_code, body_buf);
+        LOG_D("GET %s -> HTTP %ld", url, http_code);
         LOG_E("AI token 获取失败 code=%d msg=%s",
               code ? code->valueint : -1,
               (msg && cJSON_IsString(msg)) ? msg->valuestring : "?");
@@ -448,7 +368,7 @@ int ai_get_token(const char *ai_server, const char *mqtt_token,
         if (tok && cJSON_IsString(tok)) str_copy(token_out, tok_size, tok->valuestring);
         if (rid && cJSON_IsString(rid)) str_copy(role_id_out, rid_size, rid->valuestring);
     }
-    LOG_D("GET %s -> HTTP %ld body: %s", url, http_code, body_buf);
+    LOG_D("GET %s -> HTTP %ld", url, http_code);
     cJSON_Delete(root);
     LOG_I("AI token 获取成功");
     return 0;
@@ -702,6 +622,23 @@ static void _ai_connect_cb(int error, tirtc_conn_t hconn, void *user_data) {
         return;
     }
 
+    if (tirtc_runtime_bind_active_connection(TIRTC_SERVICE_AI, hconn) != 0) {
+        as->hconn = NULL;
+        as->start_pending = 0;
+        as->connect_deadline_ms = 0;
+        as->start_response_deadline_ms = 0;
+        as->session_state = SESS_IDLE;
+        pthread_mutex_unlock(&as->lock);
+        LOG_W("WHIP 连接完成时 AI 会话已切换，丢弃连接");
+        if (sdk_defer_disconnect(&s_ai_callback_guard, hconn) != 0)
+            LOG_E("无法延后断开失效 AI 连接");
+        if (as->on_session_end &&
+            sdk_defer_action(&s_ai_callback_guard, as->on_session_end,
+                             as->on_session_end_user) != 0)
+            LOG_E("无法延后通知 AI runtime 代次失效");
+        sdk_callback_leave(&s_ai_callback_guard);
+        return;
+    }
     LOG_I("WHIP 连接成功");
     as->hconn = hconn;
     as->connect_deadline_ms = 0;

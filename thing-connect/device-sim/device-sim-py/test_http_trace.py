@@ -5,12 +5,14 @@ import http_trace
 
 
 class HTTPTraceTests(unittest.TestCase):
-    def test_request_logs_full_exchange_without_redaction(self):
+    def test_request_logs_exchange_with_credentials_redacted(self):
         response = mock.Mock(status_code=200)
         response.json.return_value = {
             "code": 200,
             "data": {
                 "mqtt_token": "response-secret",
+                "peer_id": "http://rtc.example/connect?credential=secret",
+                "wx_session_key": "wechat-session-secret",
                 "device_id": "device-1",
             },
         }
@@ -35,11 +37,19 @@ class HTTPTraceTests(unittest.TestCase):
             "POST https://device.example/v1/device/token?code=query-secret",
             rendered,
         )
-        self.assertIn('"Authorization":"Bearer request-secret"', rendered)
-        self.assertIn('"X-Signature":"signature-secret"', rendered)
-        self.assertIn('"device_key":"body-secret"', rendered)
-        self.assertIn('"mqtt_token":"response-secret"', rendered)
+        self.assertIn('"Authorization":"<redacted>"', rendered)
+        self.assertIn('"X-Signature":"<redacted>"', rendered)
+        self.assertIn('"device_key":"<redacted>"', rendered)
+        self.assertIn('"mqtt_token":"<redacted>"', rendered)
+        self.assertIn('"peer_id":"<redacted>"', rendered)
+        self.assertIn('"wx_session_key":"<redacted>"', rendered)
         self.assertIn('"device_id":"device-1"', rendered)
+        self.assertNotIn("request-secret", rendered)
+        self.assertNotIn("signature-secret", rendered)
+        self.assertNotIn("body-secret", rendered)
+        self.assertNotIn("response-secret", rendered)
+        self.assertNotIn("wechat-session-secret", rendered)
+        self.assertNotIn("credential=secret", rendered)
 
 
 if __name__ == "__main__":

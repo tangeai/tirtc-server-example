@@ -5,16 +5,8 @@ tirtc_sdk.py — TiRTC SDK ctypes 绑定层
 对应头文件：include/tirtc/tiRTC.h
 加载动态库：lib/libTiRTC.so
 
-本文件只做绑定，不持有任何初始化状态。
-每个 rtc_*.py 模块各自调用 TiRtcInit/TiRtcStart，进程内互斥。
-
-rtc_*.py 模块接口约定（每个模块都暴露以下函数）：
-  init_sdk(device_id, secret_key, endpoint=None)  # TiRtcInit + TiRtcStart
-  uninit_sdk()                                     # TiRtcStop + TiRtcUninit
-  start_session(...)   # 参数因场景不同
-  stop_session()
-  is_active() -> bool
-  get_state() -> str   # "IDLE" | "CONNECTING" | "IN_CALL"
+本文件只做原生 API 绑定，不持有初始化状态。进程级生命周期和统一回调
+由 tirtc_runtime.py 管理；rtc_*.py 业务模块只管理会话、连接和媒体。
 """
 
 import ctypes
@@ -158,32 +150,28 @@ TiRtcUninit          = _bind("TiRtcUninit",        None)
 TiRtcSetOption       = _bind("TiRtcSetOption",     ctypes.c_int,
                                ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32)
 
-# TIRTC_OPT_CLIENT_ID / APP_ID 是 2.2.1 新增；0.1.6 的 option enum 只到 CONNECT_CACHE(=9)，
-# 传 opt=11 会越界 → glibc "buffer overflow detected"。用版本守卫。
-def _ver_tuple(v):
+# Keep old SDK handling inside the binding layer.  Business modules and
+# current-facing documentation use the current API without version branches.
+def _ver_tuple(value):
     try:
-        return tuple(int(x) for x in v.split("."))
-    except (ValueError, AttributeError):
+        return tuple(int(part) for part in value.split("."))
+    except (AttributeError, ValueError):
         return (0,)
+
 
 HAS_CLIENT_ID_OPT = _ver_tuple(_SDK_VERSION) >= (2, 2, 1)
 
-def set_client_id(cid):
-    """设置 TIRTC_OPT_CLIENT_ID。SDK < 2.2.1 无此选项，跳过（no-op）。
 
-    0.1.6 的 option enum 到 CONNECT_CACHE(=9) 为止，opt=11 越界会触发 buffer overflow。
-    """
-    if HAS_CLIENT_ID_OPT:
-        TiRtcSetOption(TIRTC_OPT_CLIENT_ID, ctypes.c_char_p(cid), len(cid))
+def set_client_id(cid):
+    """Set CLIENT_ID when the loaded SDK exposes that option."""
+    if not HAS_CLIENT_ID_OPT:
+        return 0
+    return TiRtcSetOption(
+        TIRTC_OPT_CLIENT_ID, ctypes.c_char_p(cid), len(cid))
 
 
 def device_id_for_start(device_id, secret_key):
-    """构造 TiRtcStart 的第一个参数（deviceId）。
-
-    - 2.2.1+: 纯 device_id（secret_key 经 TIRTC_OPT_DEVICE_SECRET_KEY 设、client_id 经 set_client_id 设）
-    - 0.1.6:  "{device_id},{secret_key}" 拼接串（secret_key 内嵌在 deviceId 里）。
-              0.1.6 的 TiRtcStart 内部按这个拼接格式解析，传纯 device_id 会溢出 → buffer overflow。
-    """
+    """Build the TiRtcStart identity expected by the loaded SDK."""
     if HAS_CLIENT_ID_OPT:
         return device_id.encode()
     return f"{device_id},{secret_key}".encode()
@@ -221,7 +209,10 @@ TiRtcSubscribeVideo  = _bind("TiRtcSubscribeVideo", ctypes.c_int,
                                ctypes.c_void_p, ctypes.c_uint8)
 TiRtcUnsubscribeVideo = _bind("TiRtcUnsubscribeVideo", ctypes.c_int,
                                 ctypes.c_void_p, ctypes.c_uint8)
-LogCB                = ctypes.CFUNCTYPE(None, ctypes.c_char_p)
+if HAS_CLIENT_ID_OPT:
+    LogCB = ctypes.CFUNCTYPE(None, ctypes.c_char_p, ctypes.c_uint32)
+else:
+    LogCB = ctypes.CFUNCTYPE(None, ctypes.c_char_p)
 TiRtcLogSetCallback  = _bind("TiRtcLogSetCallback", None, LogCB)
 TiRtcServiceRequest  = _bind("TiRtcServiceRequest", ctypes.c_int,
                                ctypes.c_char_p, ctypes.c_char_p,

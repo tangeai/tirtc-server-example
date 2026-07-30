@@ -14,6 +14,10 @@ from rtc_voip_session import VoipCallState
 from session_arbiter import SessionArbiter
 from session_coordinator import SessionAdapter, SessionCoordinator, SessionKind
 from session_router import SessionMessageRouter, TerminalController
+from tirtc_runtime import (
+    ServiceKind,
+    process_tirtc_runtime,
+)
 
 
 @dataclass(frozen=True)
@@ -40,14 +44,26 @@ class RuntimeConfig:
 class DeviceRtcRuntime:
     """组合四个清晰模块，实现实时流被通话临时抢占的主干流程。"""
 
-    def __init__(self, config: RuntimeConfig, stream, voip, ai, call):
+    def __init__(
+        self,
+        config: RuntimeConfig,
+        stream,
+        voip,
+        ai,
+        call,
+        sdk_runtime=process_tirtc_runtime,
+    ):
         self.config = config
         self.stream = stream
         self.voip_module = voip
         self.ai_module = ai
         self.call_module = call
+        self.sdk_runtime = sdk_runtime
+        self._shutdown_lock = threading.Lock()
+        self._shutdown = False
         self._lease_lock = threading.Lock()
         self._leases = {}
+        self._rtc_generations = {}
         for module in (stream, voip, ai, call):
             module.set_log_level(config.log_level)
         voip.configure_video(config.up_video_file)
@@ -57,6 +73,31 @@ class DeviceRtcRuntime:
             config.up_video_format, config.down_video_format)
         self._ai_audio_file, self._ai_up_audio_format, self._ai_down_audio_format = \
             self._resolve_ai_defaults(config)
+        self.sdk_runtime.set_log_level(config.log_level)
+        self.sdk_runtime.register_service(
+            ServiceKind.STREAM,
+            stream.runtime_callbacks(),
+            accepts_inbound=True,
+            callback_guard=stream.callback_guard(),
+        )
+        self.sdk_runtime.register_service(
+            ServiceKind.VOIP,
+            voip.runtime_callbacks(),
+            accepts_inbound=False,
+            callback_guard=voip.callback_guard(),
+        )
+        self.sdk_runtime.register_service(
+            ServiceKind.AI,
+            ai.runtime_callbacks(),
+            accepts_inbound=False,
+            callback_guard=ai.callback_guard(),
+        )
+        self.sdk_runtime.register_service(
+            ServiceKind.CALL,
+            call.runtime_callbacks(),
+            accepts_inbound=True,
+            callback_guard=call.callback_guard(),
+        )
 
         adapters = {
             SessionKind.STREAM: SessionAdapter(self._start_stream, self._stop_stream),
@@ -117,27 +158,71 @@ class DeviceRtcRuntime:
 
     def start(self) -> None:
         self._print_media_config()
-        self._prime_voip_profile()
-        self.coordinator.start_stream()
+        c = self.config
+        try:
+            self.sdk_runtime.start(
+                c.device_id,
+                c.device_key,
+                c.client_id,
+                c.tirtc_endpoint or None,
+            )
+            self._prime_voip_profile()
+            self.coordinator.start_stream()
+        except BaseException:
+            try:
+                self.shutdown()
+            except BaseException as cleanup_error:
+                print(
+                    f"[device] 启动失败后的清理也失败: {cleanup_error}",
+                    flush=True,
+                )
+            raise
 
     def shutdown(self) -> None:
-        self.message_handler.shutdown()
-        self.arbiter.shutdown()
+        with self._shutdown_lock:
+            if self._shutdown:
+                return
+            self._shutdown = True
+
+        first_error = None
+        try:
+            self.message_handler.shutdown()
+        except BaseException as exc:
+            first_error = exc
+        try:
+            self.arbiter.shutdown()
+        except BaseException as exc:
+            if first_error is None:
+                first_error = exc
+        try:
+            self.sdk_runtime.stop()
+        except BaseException as exc:
+            if first_error is None:
+                first_error = exc
+        if first_error is not None:
+            raise first_error
 
     def run_cmd_loop(self, stop_event) -> None:
         self.terminal.run_cmd_loop(stop_event)
 
     def _start_stream(self) -> None:
         c = self.config
-        self.stream.configure_talkback(True, c.down_media_dir, c.device_id)
-        self.stream.start(
-            c.device_id, c.device_key,
-            lambda: FileMediaSource(
-                c.up_video_file, c.up_audio_file,
-                audio_format=c.up_audio_format,
-                video_format=c.up_video_format),
-            c.tirtc_endpoint or None, client_id=c.client_id,
-        )
+        generation = self._activate_runtime(
+            SessionKind.STREAM, ServiceKind.STREAM)
+        try:
+            self.stream.configure_talkback(
+                True, c.down_media_dir, c.device_id)
+            self.stream.start_service(
+                lambda: FileMediaSource(
+                    c.up_video_file, c.up_audio_file,
+                    audio_format=c.up_audio_format,
+                    video_format=c.up_video_format),
+            )
+        except BaseException:
+            self._deactivate_runtime(
+                SessionKind.STREAM, ServiceKind.STREAM, generation)
+            self.stream.stop_service()
+            raise
 
     def _print_media_config(self) -> None:
         """在首次启动时打印实际选用的文件，便于确认默认素材与参数覆盖。"""
@@ -165,42 +250,84 @@ class DeviceRtcRuntime:
         )
 
     def _stop_stream(self) -> None:
-        self.stream.stop()
+        self._deactivate_runtime(
+            SessionKind.STREAM, ServiceKind.STREAM)
+        self.stream.stop_service()
 
     def _start_voip(self) -> None:
         c = self.config
-        self.voip_module.init_sdk(c.device_id, c.device_key,
-                                  c.tirtc_endpoint or None, client_id=c.client_id)
-        self.voip_module.configure_video(c.up_video_file)
-        self.voip_module.configure_receive_dir(c.down_media_dir)
-        if c.hardware_audio:
-            self.voip_module.configure_hardware_audio(True, fmt=c.up_audio_format)
-        self.voip.replace_callers(self.voip_module.report_profile(
-            c.voip_server, c.mqtt_token))
+        generation = self._activate_runtime(
+            SessionKind.VOIP, ServiceKind.VOIP)
+        try:
+            self.voip_module.start_service(c.device_id)
+            self.voip_module.configure_video(c.up_video_file)
+            self.voip_module.configure_receive_dir(c.down_media_dir)
+            if c.hardware_audio:
+                self.voip_module.configure_hardware_audio(
+                    True, fmt=c.up_audio_format)
+        except BaseException:
+            self._deactivate_runtime(
+                SessionKind.VOIP, ServiceKind.VOIP, generation)
+            self.voip_module.stop_service()
+            raise
 
     def _stop_voip(self) -> None:
-        self.voip_module.stop_session()
-        self.voip_module.uninit_sdk()
+        self._deactivate_runtime(
+            SessionKind.VOIP, ServiceKind.VOIP)
+        self.voip_module.stop_service()
 
     def _start_ai(self) -> None:
-        c = self.config
-        self.ai_module.init_sdk(c.device_id, c.device_key,
-                                c.tirtc_endpoint or None, client_id=c.client_id)
+        generation = self._activate_runtime(
+            SessionKind.AI, ServiceKind.AI)
+        try:
+            self.ai_module.start_service()
+        except BaseException:
+            self._deactivate_runtime(
+                SessionKind.AI, ServiceKind.AI, generation)
+            self.ai_module.stop_service()
+            raise
 
     def _stop_ai(self) -> None:
-        self.ai_module.stop_session()
-        self.ai_module.uninit_sdk()
+        self._deactivate_runtime(SessionKind.AI, ServiceKind.AI)
+        self.ai_module.stop_service()
 
     def _start_call(self) -> None:
         c = self.config
-        self.call_module.init_sdk(c.device_id, c.device_key,
-                                  c.tirtc_endpoint or None, client_id=c.client_id)
-        if c.hardware_audio:
-            self.call_module.configure_hardware_audio(True, fmt=c.up_audio_format)
+        generation = self._activate_runtime(
+            SessionKind.CALL, ServiceKind.CALL)
+        try:
+            self.call_module.start_service()
+            if c.hardware_audio:
+                self.call_module.configure_hardware_audio(
+                    True, fmt=c.up_audio_format)
+        except BaseException:
+            self._deactivate_runtime(
+                SessionKind.CALL, ServiceKind.CALL, generation)
+            self.call_module.stop_service()
+            raise
 
     def _stop_call(self) -> None:
-        self.call_module.hangup()
-        self.call_module.uninit_sdk()
+        self._deactivate_runtime(SessionKind.CALL, ServiceKind.CALL)
+        self.call_module.stop_service()
+
+    def _activate_runtime(
+        self, kind: SessionKind, service: ServiceKind
+    ) -> int:
+        generation = self.sdk_runtime.activate(service)
+        self._rtc_generations[kind] = generation
+        return generation
+
+    def _deactivate_runtime(
+        self,
+        kind: SessionKind,
+        service: ServiceKind,
+        generation: int | None = None,
+    ) -> None:
+        active_generation = self._rtc_generations.pop(kind, None)
+        if generation is not None:
+            active_generation = generation
+        if active_generation is not None:
+            self.sdk_runtime.deactivate(service, active_generation)
 
     def _prime_voip_profile(self) -> None:
         """启动实时流前先上报 VoIP profile，确保微信回调能找到设备媒体能力。"""
@@ -209,7 +336,7 @@ class DeviceRtcRuntime:
             self.voip.replace_callers(callers)
 
     def _finish_async(self, kind: SessionKind) -> None:
-        """SDK 回调线程不得直接 Stop/Uninit，交给独立生命周期线程。"""
+        """SDK 回调线程只提交业务结束，不在回调栈中切换媒体连接。"""
         with self._lease_lock:
             lease = self._leases.get(kind)
         self.arbiter.finish_async(

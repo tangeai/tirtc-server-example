@@ -79,7 +79,13 @@ class CallState:
             _warn("忽略缺少 room_id/caller_id 的设备来电")
             return
         caller_name = p.get("caller_name", caller_id)
-        call_type   = p.get("call_type", "video")
+        requested_type = p.get("call_type")
+        call_type = (
+            "audio"
+            if requested_type == "audio"
+            or not getattr(self, "_video_capable", True)
+            else "video"
+        )
         with self._lock:
             self._incoming_generation += 1
             generation = self._incoming_generation
@@ -604,7 +610,11 @@ class CallState:
             room_id = data['room_id']
             role    = data['role']
             call_type = (
-                "audio" if data.get("call_type") == "audio" else "video")
+                "audio"
+                if data.get("call_type") == "audio"
+                or not getattr(self, "_video_capable", True)
+                else "video"
+            )
             with self._lock:
                 if self._room_id != room_id:
                     _ok(f"同步房间状态: room_id={room_id} role={role}")
@@ -613,7 +623,7 @@ class CallState:
                 self._call_type = call_type
             rtc_call.set_call_type(call_type)
             _ok(f"当前房间: room_id={data['room_id']} status={data['status']} "
-                f"role={data['role']} caller={data['caller']} type={data['call_type']}")
+                f"role={data['role']} caller={data['caller']} type={call_type}")
 
     # ── 终端命令 ──────────────────────────────────────────────────────────────
 

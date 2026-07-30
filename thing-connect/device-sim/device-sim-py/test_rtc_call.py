@@ -9,9 +9,17 @@ import rtc_call
 class RtcCallVideoPolicyTests(unittest.TestCase):
     def setUp(self):
         self._call_type = rtc_call._session_call_type
+        self._service_active = rtc_call._service_active
+        self._session_state = rtc_call._session_state
+        self._active_hconn = rtc_call._active_hconn
+        self._expected_room_id = rtc_call._expected_room_id
 
     def tearDown(self):
         rtc_call._session_call_type = self._call_type
+        rtc_call._service_active = self._service_active
+        rtc_call._session_state = self._session_state
+        rtc_call._active_hconn = self._active_hconn
+        rtc_call._expected_room_id = self._expected_room_id
         rtc_call._media.reset_session()
 
     def test_audio_call_unsubscribes_remote_video(self):
@@ -47,6 +55,24 @@ class RtcCallVideoPolicyTests(unittest.TestCase):
             unsubscribe.assert_called_once_with(11)
         finally:
             rtc_call._active_hconn = old_hconn
+
+    def test_inbound_call_becomes_in_call_only_after_2000(self):
+        rtc_call._service_active = True
+        rtc_call._session_state = "IDLE"
+        rtc_call._active_hconn = None
+        rtc_call._expected_room_id = "room-1"
+
+        with mock.patch.object(rtc_call._media, "set_hconn"), \
+                mock.patch.object(rtc_call._media, "start") as media_start, \
+                mock.patch.object(rtc_call, "_apply_video_downlink_policy"):
+            rtc_call._accept_inbound_connection_after_callback(0x1234)
+            self.assertEqual("CONNECTING", rtc_call.get_state())
+            media_start.assert_not_called()
+
+            rtc_call._process_command_after_callback(
+                0x1234, b'{"room_id":"room-1"}')
+            self.assertEqual("IN_CALL", rtc_call.get_state())
+            media_start.assert_called_once_with()
 
 
 if __name__ == "__main__":

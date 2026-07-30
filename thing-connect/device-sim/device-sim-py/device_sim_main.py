@@ -3,7 +3,7 @@
 device_sim_main.py — 模拟 RTC 设备完整生命周期
 
 阶段一（验证码流程）：report_device → connect_temp_mqtt → 获取 device_id + device_key
-阶段二：get_mqtt_token → (voip init) → connect_mqtt_blocking
+阶段二：get_mqtt_token → 启动进程级 TiRTC runtime → connect_mqtt_blocking
 
 快速入门见 quickstart.py（已绑定设备最简流程）
 
@@ -143,16 +143,17 @@ def _print_bind_guide(user_server: str, code: str) -> None:
     print(f"\033[1;36m[device]\033[0m  操作指引      : 打开首页完成注册/登录后，进入设备绑定并输入上方验证码")
 
 
-def _print_tts_guide(server: str, code: str, temp_token: str) -> None:
-    """打印可直接复制的验证码 TTS 下载及播放命令。"""
+def _print_tts_guide(server: str, code: str) -> None:
+    """打印验证码 TTS 下载及播放命令，不把临时凭证写入日志。"""
     tts_url = f"{server.rstrip('/')}/v1/device/tts?code={code}&fmt=wav"
     output_file = "/tmp/device-verify-code.wav"
     curl_command = (
         "curl -fsS "
-        f"-H {shlex.quote(f'Authorization: Bearer {temp_token}')} "
+        f"-H {shlex.quote('Authorization: Bearer <TEMP_TOKEN>')} "
         f"{shlex.quote(tts_url)} -o {output_file}"
     )
     print(f"\033[1;35m[device]\033[0m  播放验证码 TTS（请在有扬声器的电脑终端执行）：")
+    print(f"\033[1;35m[device]\033[0m    将 <TEMP_TOKEN> 替换为本次临时凭证；凭证不会写入日志")
     print(f"\033[1;35m[device]\033[0m    下载 : {curl_command}")
     print(f"\033[1;35m[device]\033[0m    macOS: afplay {output_file}")
     print(f"\033[1;35m[device]\033[0m    Linux: ffplay -nodisp -autoexit {output_file}")
@@ -179,14 +180,14 @@ def _bind_via_scan(args, server: str, broker_host: str, broker_port: int, broker
         _err("服务端未返回 temp_client_id，请升级 device-server")
         sys.exit(1)
     print(f"\033[1;32m[device]\033[0m 验证码      : \033[1;30;103m {code} \033[0m  \033[92m← 设备 TTS 播报此 6 位数字\033[0m")
-    print(f"\033[0;32m[device]\033[0m temp_token   : {temp_token}")
+    print(f"\033[0;32m[device]\033[0m temp_token   : <hidden>")
     print(f"\033[0;32m[device]\033[0m temp_client  : {temp_client_id}")
     print()
     print(f"\033[1;96m[device]\033[0m ╔══════════════════════════════════════╗")
     print(f"\033[1;96m[device]\033[0m   请访问首页完成注册/登录")
     print(f"\033[1;96m[device]\033[0m   然后输入验证码: \033[1;30;103m {code} \033[0m")
     print(f"\033[1;96m[device]\033[0m ╚══════════════════════════════════════╝")
-    _print_tts_guide(server, code, temp_token)
+    _print_tts_guide(server, code)
     _print_bind_guide(user_server, code)
     print()
     result = connect_temp_mqtt(
@@ -209,7 +210,7 @@ def _bind_via_scan(args, server: str, broker_host: str, broker_port: int, broker
     print(f"\033[0;32m[device]\033[0m ══════════════════════════════════════")
     print(f"\033[0;32m[device]\033[0m  绑定完成！本地持久化存储（Flash）：")
     print(f"\033[0;32m[device]\033[0m    device_id  = {device_id}")
-    print(f"\033[0;32m[device]\033[0m    device_key = {device_key}")
+    print(f"\033[0;32m[device]\033[0m    device_key = <hidden>")
     print(f"\033[0;32m[device]\033[0m    (来源: {'预烧凭证' if not result else 'auth_grant 下发'})")
     print(f"\033[0;32m[device]\033[0m ══════════════════════════════════════")
     return device_id, device_key
@@ -245,7 +246,7 @@ def main():
                              "alaw_8khz 或 alaw_16khz")
     _base = getattr(sys, "_MEIPASS", None) or os.path.join(os.path.dirname(__file__), "..")
     _assets = os.path.join(_base, "assets")
-    _default_audio_file = os.path.join(_assets, "audio.g711a")
+    _default_audio_file = os.path.join(_assets, "number.alaw_8khz")
     _default_video_file = os.path.join(_assets, "video.h264")
     media = parser.add_argument_group("通用媒体参数")
     media.add_argument("--up-audio-format", default=os.getenv("UP_AUDIO_FORMAT", "alaw_8khz"),
@@ -255,7 +256,7 @@ def main():
                        type=normalize_audio_format, choices=AUDIO_FORMAT_CHOICES,
                        help="下行音频格式（默认 alaw_8khz）")
     media.add_argument("--up-audio-file", default=os.getenv("UP_AUDIO_FILE", _default_audio_file),
-                       help="上行音频文件路径（默认 ../assets/audio.g711a）")
+                       help="上行音频文件路径（默认 ../assets/number.alaw_8khz）")
     media.add_argument("--up-video-file", default=os.getenv("UP_VIDEO_FILE", _default_video_file),
                        help="上行视频文件路径（默认 ../assets/video.h264）；空值表示纯音频")
     media.add_argument("--up-video-format", default=os.getenv("UP_VIDEO_FORMAT", "h264"),
@@ -320,8 +321,8 @@ def main():
     _broker_tls     = svc["mqtt_tls"]
     _voip_server    = svc["voip_server"]
     _ai_server      = svc["ai_server"]
-    _call_server    = svc.get("call_server", "")
-    _tirtc_endpoint = os.getenv("TIRTC_ENDPOINT") or svc.get("tirtc_endpoint") or "http://ep-tirtc.tange365.com"
+    _call_server    = svc["call_server"]
+    _tirtc_endpoint = os.getenv("TIRTC_ENDPOINT") or svc["tirtc_endpoint"]
     print(f"[device] TiRTC endpoint: {_tirtc_endpoint}")
 
     if _rtc_voip_available:
@@ -336,11 +337,6 @@ def main():
         print("\033[0;31m[device]\033[0m TiRTC Stream/VoIP/AI/Call 模块加载不完整，退出",
               file=sys.stderr, flush=True)
         sys.exit(1)
-    if not _call_server:
-        print("\033[0;31m[device]\033[0m 服务发现未返回 call-srv，退出",
-              file=sys.stderr, flush=True)
-        sys.exit(1)
-
     print(f"\n\033[1m{'─'*50}\033[0m\n 模拟 RTC 设备上线流程\n\033[1m{'─'*50}\033[0m")
 
     device_id  = args.device_id
@@ -400,24 +396,33 @@ def main():
     stop_event = threading.Event()
 
     def handle_sigint(sig, frame):
+        del sig, frame
         print()
-        runtime.shutdown()
         stop_event.set()
 
     signal.signal(signal.SIGINT, handle_sigint)
 
-    runtime.start()
-    threading.Thread(target=runtime.run_cmd_loop,
-                     args=(stop_event,), daemon=True, name="cmd-loop").start()
-
-    connect_mqtt_blocking(
-        _broker_host, _broker_port, device_id, mqtt_token,
-        runtime.message_handler,
-        stop_event,
-        use_tls=_broker_tls,
-    )
-
-    runtime.shutdown()
+    command_thread = None
+    try:
+        runtime.start()
+        command_thread = threading.Thread(
+            target=runtime.run_cmd_loop,
+            args=(stop_event,),
+            name="cmd-loop",
+        )
+        command_thread.start()
+        connect_mqtt_blocking(
+            _broker_host, _broker_port, device_id, mqtt_token,
+            runtime.message_handler,
+            stop_event,
+            use_tls=_broker_tls,
+        )
+    finally:
+        stop_event.set()
+        if (command_thread is not None
+                and command_thread is not threading.current_thread()):
+            command_thread.join()
+        runtime.shutdown()
 
 
 if __name__ == "__main__":
