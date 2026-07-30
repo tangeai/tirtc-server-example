@@ -62,7 +62,7 @@ python3 -m venv .venv
 
 首次启动不需要填写 `device_id` 或 `device_key`。终端会显示六位验证码和体验平台地址：
 
-1. 打开终端提示的地址并登录。
+1. 打开 [TiRTC 体验平台](https://demo-open.tange-ai.com) 并登录。
 2. 输入六位验证码绑定模拟设备。
 3. 绑定成功后，模拟器自动上线并开始发送默认音视频。
 

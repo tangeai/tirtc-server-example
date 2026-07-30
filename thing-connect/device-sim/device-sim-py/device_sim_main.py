@@ -20,6 +20,7 @@ import sys
 import threading
 
 DEFAULT_SDK_VERSION = "2.2.1"
+EXPERIENCE_PLATFORM_URL = "https://demo-open.tange-ai.com"
 
 if not ((3, 10) <= sys.version_info[:2] <= (3, 12)):
     sys.exit(
@@ -135,10 +136,8 @@ def _terminal_link(url: str, label: str = "") -> str:
     return f"\033]8;;{url}\033\\{text}\033]8;;\033\\"
 
 
-def _print_bind_guide(user_server: str, code: str) -> None:
-    homepage_url = (user_server or "").rstrip("/")
-    if not homepage_url:
-        return
+def _print_bind_guide() -> None:
+    homepage_url = EXPERIENCE_PLATFORM_URL
     print(f"\033[1;36m[device]\033[0m  注册/登录入口: \033[1;96;4m{_terminal_link(homepage_url, homepage_url)}\033[0m")
     print(f"\033[1;36m[device]\033[0m  操作指引      : 打开首页完成注册/登录后，进入设备绑定并输入上方验证码")
 
@@ -160,7 +159,7 @@ def _print_tts_guide(server: str, code: str) -> None:
 
 
 def _bind_via_scan(args, server: str, broker_host: str, broker_port: int, broker_tls: bool,
-                   device_id: str = "", device_key: str = "", user_server: str = ""):
+                   device_id: str = "", device_key: str = ""):
     """阶段一：report → 展示验证码 → 临时 MQTT 等待绑定，返回 (device_id, device_key)。
 
     当 args.device_key 存在时（预烧设备解绑后重绑），使用签名 Report（情况1）；
@@ -188,7 +187,7 @@ def _bind_via_scan(args, server: str, broker_host: str, broker_port: int, broker
     print(f"\033[1;96m[device]\033[0m   然后输入验证码: \033[1;30;103m {code} \033[0m")
     print(f"\033[1;96m[device]\033[0m ╚══════════════════════════════════════╝")
     _print_tts_guide(server, code)
-    _print_bind_guide(user_server, code)
+    _print_bind_guide()
     print()
     result = connect_temp_mqtt(
         broker_host=broker_host,
@@ -315,7 +314,6 @@ def main():
 
     svc = fetch_services(base_url=args.endpoint)
     _server         = svc["device_server"]
-    _user_server    = svc.get("user_server", "")
     _broker_host    = svc["mqtt_host"]
     _broker_port    = svc["mqtt_port"]
     _broker_tls     = svc["mqtt_tls"]
@@ -348,7 +346,7 @@ def main():
     if not (device_id and device_key):
         device_id, device_key = _bind_via_scan(
             args, _server, _broker_host, _broker_port, _broker_tls,
-            device_id=device_id, device_key=device_key, user_server=_user_server,
+            device_id=device_id, device_key=device_key,
         )
         _save_creds(device_id, device_key, args.creds_file)
     else:
@@ -367,7 +365,7 @@ def main():
         print(f"\033[1;33m[device]\033[0m 重新进入验证码绑定流程（保留原 device_id={device_id}）")
         device_id, device_key = _bind_via_scan(
             args, _server, _broker_host, _broker_port, _broker_tls,
-            device_id=device_id, device_key=device_key, user_server=_user_server,
+            device_id=device_id, device_key=device_key,
         )
         _save_creds(device_id, device_key, args.creds_file)
         mqtt_token = get_mqtt_token(_server, device_id, device_key, args.mac)

@@ -39,6 +39,8 @@
 #include "session_arbiter.h"
 #include "session_coordinator.h"
 
+#define EXPERIENCE_PLATFORM_URL "https://demo-open.tange-ai.com"
+
 /* Globals */
 int          g_log_level = LOG_DEBUG;
 volatile sig_atomic_t g_stop = 0;
@@ -930,7 +932,8 @@ int main(int argc, char *argv[]) {
         LOG_I("验证码      : \033[1m%s\033[0m  ← 设备 TTS 播报此 6 位数字", rep.code);
         LOG_D("已获取临时 MQTT 凭证（敏感内容已隐藏）");
         LOG_I("temp_client  : %s", rep.temp_client_id);
-        PROMPT_BOX("请在 H5 页面输入验证码: \033[1m%s\033[0m", rep.code);
+        LOG_I("注册/登录入口: %s", EXPERIENCE_PLATFORM_URL);
+        PROMPT_BOX("进入设备绑定并输入验证码: \033[1m%s\033[0m", rep.code);
 
         if (connect_temp_mqtt(svc.mqtt_host, svc.mqtt_port,
                               rep.temp_client_id, rep.temp_token,

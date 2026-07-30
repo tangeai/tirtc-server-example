@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 
+import io
 import json
 import os
 import stat
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from unittest import mock
 
 import device_credentials
 import device_flow
+import device_sim_main
 
 
 class FakeResponse:
@@ -31,6 +34,14 @@ class JsonResponse:
 
 
 class DeviceSimulatorTests(unittest.TestCase):
+    def test_bind_guide_uses_fixed_experience_platform(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            device_sim_main._print_bind_guide()
+
+        self.assertIn("https://demo-open.tange-ai.com", output.getvalue())
+        self.assertNotIn("srv-open.tangeopen.com", output.getvalue())
+
     def test_device_id_and_key_must_be_paired(self):
         self.assertTrue(device_credentials.credentials_are_paired("dev1", "key1"))
         self.assertTrue(device_credentials.credentials_are_paired("", ""))

@@ -28,6 +28,7 @@
 #define PLATFORM_DEFAULT_HTTP_TIMEOUT_MS 15000U
 #define PLATFORM_DEFAULT_DISCOVERY "http://ep-open.tangeopen.com/services"
 #define PLATFORM_DEFAULT_PROVISION_TIMEOUT_SECONDS 190U
+#define EXPERIENCE_PLATFORM_URL "https://demo-open.tange-ai.com"
 #define PROVISION_DONE_BIT BIT0
 #define PROVISION_ERROR_BIT BIT1
 
@@ -896,7 +897,8 @@ esp_err_t platform_client_provision(const platform_provision_config_t *config,
     }
     ESP_LOGW(TAG, "============================================================");
     ESP_LOGW(TAG, "verification code: %s", report.code);
-    ESP_LOGW(TAG, "enter this code on the H5 binding page");
+    ESP_LOGW(TAG, "registration/login: %s", EXPERIENCE_PLATFORM_URL);
+    ESP_LOGW(TAG, "open device binding and enter this verification code");
     ESP_LOGW(TAG, "============================================================");
     (void)snprintf(s_verification_code,
                    sizeof(s_verification_code),

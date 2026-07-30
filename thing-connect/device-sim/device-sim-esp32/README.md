@@ -97,7 +97,7 @@ wifi-clear
 Wi-Fi 连通后，如果 NVS 中没有设备凭证，设备会自动：
 
 1. 上报 Wi-Fi STA MAC，获取验证码和临时 MQTT 凭证。
-2. 在串口醒目打印验证码，等待用户在 H5 绑定页输入。
+2. 在串口打印验证码和 [TiRTC 体验平台](https://demo-open.tange-ai.com) 地址，等待用户登录后进入设备绑定并输入验证码。
 3. 接收临时 MQTT 的 `auth_grant`，发送 QoS1 ACK。
 4. 将下发的 `device_id/device_key` 写入 NVS，随后启动正式 MQTT 和 TiRTC。
 
