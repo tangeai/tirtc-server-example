@@ -153,7 +153,7 @@ static inline const char *sess_state_str(SessionState s) {
 
 /* ── Audio / video constants ────────────────────────────────────────────── */
 
-#define AUDIO_PKT_SIZE_VOIP  320   /* 40ms G.711 A-law 8kHz 16bit mono */
+#define AUDIO_PKT_SIZE_VOIP  320   /* 40ms G.711 A-law 8kHz 8-bit mono */
 #define AUDIO_PKT_MS_VOIP    40
 #define AUDIO_PKT_SIZE_AI    640   /* 20ms PCM 16kHz 16bit mono */
 #define AUDIO_PKT_MS_AI      20

@@ -727,7 +727,8 @@ static void _usage(const char *prog) {
     printf("  --ca-cert      PATH     MQTT/HTTPS CA certificate (env: MQTT_CA_CERT, default: ../assets/ca-certificates.crt)\n\n");
     printf("  --insecure              Disable MQTT/HTTPS certificate checks (test only; env: TIRTC_INSECURE=1)\n\n");
     printf("Media options (same names as the Python simulator):\n");
-    printf("  --up-audio-file PATH      Encoded audio file for stream/VoIP/device calls\n");
+    printf("  --up-audio-file PATH      Encoded audio file for stream/VoIP/device calls"
+           " (default: %s)\n", DEFAULT_AUDIO_PATH);
     printf("  --up-audio-format FMT     Its format (default: alaw_8khz)\n");
     printf("  --up-video-file PATH      Encoded video file; pass an empty path for audio-only\n");
     printf("  --up-video-format FMT     Its format: %s (default: h264)\n", video_format_choices());
@@ -774,7 +775,7 @@ int main(int argc, char *argv[]) {
     char audio_path[512];
     char ai_audio_path[512];
 
-    /* Set defaults relative to binary location */
+    /* Defaults when launched from the documented device-sim-c directory. */
     snprintf(video_path,     sizeof(video_path),     "../assets/video.h264");
     snprintf(audio_path,     sizeof(audio_path),     DEFAULT_AUDIO_PATH);
     ai_audio_path[0] = '\0';
