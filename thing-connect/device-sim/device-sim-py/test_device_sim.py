@@ -34,6 +34,15 @@ class JsonResponse:
 
 
 class DeviceSimulatorTests(unittest.TestCase):
+    def test_supported_python_versions_are_3_10_through_3_14(self):
+        for minor in range(10, 15):
+            with self.subTest(minor=minor):
+                self.assertTrue(device_sim_main._is_supported_python((3, minor, 0)))
+
+        self.assertFalse(device_sim_main._is_supported_python((3, 9, 99)))
+        self.assertFalse(device_sim_main._is_supported_python((3, 15, 0)))
+        self.assertFalse(device_sim_main._is_supported_python((4, 0, 0)))
+
     def test_default_audio_is_bundled_g711a_file(self):
         self.assertEqual(device_sim_main.DEFAULT_AUDIO_FILENAME, "audio.g711a")
 

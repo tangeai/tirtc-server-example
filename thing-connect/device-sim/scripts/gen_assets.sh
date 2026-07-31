@@ -28,7 +28,8 @@
 #
 # 依赖：
 #   - 系统命令：espeak-ng（回退语音）, ffmpeg, python3
-#   - Python 包：numpy, soxr；edge-tts 由脚本按需安装
+#   - Python 包：numpy, soxr；Python 3.13+ 还需 audioop-lts；
+#     edge-tts 由脚本按需安装
 #   - AMR 编码（生成 number.amr_nb / number.amr_wb）：
 #       ffmpeg 需带 libopencore_amrnb / libvo_amrwbenc
 #
@@ -36,17 +37,22 @@
 #   macOS:
 #     brew install espeak-ng ffmpeg python
 #     python3 -m pip install numpy soxr edge-tts
+#     # Python 3.13+:
+#     python3 -m pip install audioop-lts
 #
 #   Ubuntu / Debian:
 #     apt update
 #     apt install -y espeak-ng ffmpeg python3 python3-pip python3-numpy \
 #       libavcodec-extra
 #     python3 -m pip install soxr edge-tts
+#     # Python 3.13+:
+#     python3 -m pip install audioop-lts
 #
 #   Windows:
 #     1. 安装 Python 3
 #     2. 安装 ffmpeg、espeak-ng 并加入 PATH
 #     3. 执行: py -m pip install numpy soxr edge-tts
+#        Python 3.13+ 再执行: py -m pip install audioop-lts
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -90,13 +96,13 @@ if [ -n "$_missing" ]; then
     echo -e "${RED}请安装缺失的依赖后重试:${RESET}"
     echo "  macOS:"
     echo "    brew install espeak-ng ffmpeg python"
-    echo "    python3 -m pip install numpy soxr edge-tts"
+    echo "    python3 -m pip install -r $SCRIPT_DIR/../device-sim-py/requirements.txt"
     echo "  Ubuntu / Debian:"
     echo "    apt update"
     echo "    apt install -y espeak-ng ffmpeg python3 python3-pip python3-numpy libavcodec-extra"
-    echo "    python3 -m pip install soxr edge-tts"
+    echo "    python3 -m pip install -r $SCRIPT_DIR/../device-sim-py/requirements.txt"
     echo "  Windows:"
-    echo "    py -m pip install numpy soxr edge-tts"
+    echo "    py -m pip install -r $SCRIPT_DIR/../device-sim-py/requirements.txt"
     exit 1
 fi
 
@@ -114,14 +120,14 @@ if ! ffmpeg -hide_banner -filters 2>/dev/null | grep -F 'drawtext' >/dev/null; t
     exit 1
 fi
 
-# 检查 Python 依赖
-"$PYTHON_BIN" -c "import numpy, soxr" 2>/dev/null || {
-    echo -e "${RED}✗ Python 依赖缺失 (numpy, soxr)${RESET}"
+# 检查 Python 依赖（3.13+ 的 audioop 由 audioop-lts 提供）
+"$PYTHON_BIN" -c "import audioop, numpy, soxr" 2>/dev/null || {
+    echo -e "${RED}✗ Python 依赖缺失 (audioop, numpy, soxr)${RESET}"
     echo "  Ubuntu / Debian:"
     echo "    apt install -y python3-pip python3-numpy"
-    echo "    python3 -m pip install soxr"
+    echo "    python3 -m pip install -r $SCRIPT_DIR/../device-sim-py/requirements.txt"
     echo "  macOS / Windows:"
-    echo "    python3 -m pip install numpy soxr"
+    echo "    python3 -m pip install -r $SCRIPT_DIR/../device-sim-py/requirements.txt"
     exit 1
 }
 

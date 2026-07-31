@@ -24,7 +24,7 @@
 
 ### 开始前
 
-- 本页命令适用于 **Ubuntu / Debian x86_64**，需要 Python 3.10–3.12 和 `sudo` 权限。
+- 本页命令适用于 **Ubuntu / Debian x86_64**，需要 CPython 3.10–3.14 和 `sudo` 权限。
 - 请准备一个可接收邮件的邮箱，用于注册 H5 演示平台。
 - macOS（仅 Apple Silicon）和 Windows x86_64 请使用 [各平台启动说明](thing-connect/device-sim/device-sim-py/README.md#环境搭建)；Linux ARM 等未随仓库提供 SDK 的平台，需先获取匹配架构的 [TiRTC SDK](https://docs.tange.ai/products/tirtc/overview/what-is-tirtc.html)。
 
@@ -33,7 +33,7 @@
 ```bash
 git clone https://github.com/tange-ai/tirtc-server-example.git
 cd tirtc-server-example/thing-connect/device-sim/device-sim-py
-# Ubuntu / Debian（Python 3.10–3.12、x86_64）：安装 Python
+# Ubuntu / Debian（CPython 3.10–3.14、x86_64）：安装 Python
 sudo apt update
 sudo apt install -y python3 python3-venv
 

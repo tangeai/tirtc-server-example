@@ -22,11 +22,22 @@ import threading
 DEFAULT_SDK_VERSION = "2.2.1"
 DEFAULT_AUDIO_FILENAME = "audio.g711a"
 EXPERIENCE_PLATFORM_URL = "https://demo-open.tange-ai.com"
+MIN_PYTHON_VERSION = (3, 10)
+MAX_PYTHON_VERSION = (3, 14)
 
-if not ((3, 10) <= sys.version_info[:2] <= (3, 12)):
+
+def _is_supported_python(version_info=None):
+    """Return whether the interpreter is in the simulator's supported range."""
+    version = tuple(
+        (sys.version_info if version_info is None else version_info)[:2]
+    )
+    return MIN_PYTHON_VERSION <= version <= MAX_PYTHON_VERSION
+
+
+if not _is_supported_python():
     sys.exit(
         f"[device] 当前 Python {sys.version.split()[0]} 不受支持；"
-        "请使用 Python 3.10–3.12。Python 3.13 已移除模拟器依赖的 audioop 模块。"
+        "请使用 Python 3.10–3.14。"
     )
 
 # ── 依赖检查 ──────────────────────────────────────────────────────────────────
@@ -40,10 +51,16 @@ def _find_missing_deps(requirements):
     return missing
 
 
-_MISSING_DEPS = _find_missing_deps([
+_REQUIRED_DEPS = [
     ("paho.mqtt.client", "paho-mqtt"),
     ("requests", "requests"),
-])
+]
+if sys.version_info[:2] >= (3, 13):
+    # audioop was removed from the standard library in 3.13. audioop-lts
+    # installs a compatible module under the original "audioop" import name.
+    _REQUIRED_DEPS.append(("audioop", "audioop-lts"))
+
+_MISSING_DEPS = _find_missing_deps(_REQUIRED_DEPS)
 if _MISSING_DEPS:
     print("\033[1;33m[warn] 缺少依赖:\033[0m")
     for _mod, _pip in _MISSING_DEPS:

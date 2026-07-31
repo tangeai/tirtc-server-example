@@ -24,14 +24,14 @@ echo -e "${CYAN}  TiRTC 设备模拟器 — macOS 环境安装${RESET}"
 echo -e "${CYAN}══════════════════════════════════════════${RESET}"
 echo ""
 
-# ── 1. 检查 Python 3.10–3.12 ───────────────────────────────────────────────
+# ── 1. 检查 Python 3.10–3.14 ───────────────────────────────────────────────
 PYTHON=""
-for _py in python3.12 python3.11 python3.10 python3; do
+for _py in python3.14 python3.13 python3.12 python3.11 python3.10 python3; do
     if command -v "$_py" &>/dev/null; then
         _ver=$("$_py" --version 2>&1 | awk '{print $2}')
         _major=$(echo "$_ver" | cut -d. -f1)
         _minor=$(echo "$_ver" | cut -d. -f2)
-        if [ "$_major" -eq 3 ] && [ "$_minor" -ge 10 ] && [ "$_minor" -le 12 ]; then
+        if [ "$_major" -eq 3 ] && [ "$_minor" -ge 10 ] && [ "$_minor" -le 14 ]; then
             PYTHON="$_py"
             break
         fi
@@ -39,10 +39,10 @@ for _py in python3.12 python3.11 python3.10 python3; do
 done
 
 if [ -z "$PYTHON" ]; then
-    echo -e "${RED}✗ 未找到受支持的 Python 3.10–3.12${RESET}"
+    echo -e "${RED}✗ 未找到受支持的 Python 3.10–3.14${RESET}"
     echo ""
-    echo "请安装 Python 3.12:"
-    echo "  brew install python@3.12"
+    echo "请安装 Python 3.14:"
+    echo "  brew install python@3.14"
     echo ""
     echo "或从官网下载: https://www.python.org/downloads/"
     exit 1

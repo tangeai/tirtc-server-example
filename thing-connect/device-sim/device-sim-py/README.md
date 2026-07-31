@@ -14,7 +14,7 @@
 ### 1. 准备运行环境
 
 - Windows 10/11 x64、Ubuntu x64 或 macOS Apple 芯片
-- Python **3.10–3.12**
+- CPython **3.10–3.14**
 - 仓库已包含模拟器所需的 TiRTC SDK **2.2.1** 和默认音视频素材
 
 克隆仓库后无需另外下载模拟器 SDK。以 Windows 为例，仓库中应能看到：
@@ -30,11 +30,11 @@ Ubuntu 和 macOS 对应目录分别为 `linux-x86_64` 和 `macos-arm64`。
 #### Windows（PowerShell）
 
 ```powershell
-winget install -e --id Python.Python.3.12
+winget install -e --id Python.Python.3.14
 # 首次安装 Python 后，请重新打开 PowerShell
 
 cd thing-connect\device-sim\device-sim-py
-py -3.12 -m venv .venv
+py -3.14 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\python.exe device_sim_main.py
 ```
@@ -105,7 +105,10 @@ source ../venv/bin/activate
 python3 device_sim_main.py --device-id DEV000001 --device-key your-key
 ```
 
-`setup_mac.sh` 检查 Python 3.10–3.12、创建 venv，并安装 Python 与系统依赖。
+`setup_mac.sh` 检查 Python 3.10–3.14、创建 venv，并安装 Python 与系统依赖。
+
+Python 3.13 起标准库不再包含 `audioop`；`requirements.txt` 会仅在
+Python 3.13–3.14 下安装兼容包 `audioop-lts`，无需手工处理。
 
 macOS 下默认使用**文件媒体模式**模拟设备采集；如需测试本机麦克风/扬声器路径，可额外安装 `sounddevice`。
 

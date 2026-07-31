@@ -1,5 +1,6 @@
 paho-mqtt>=2.0
 requests>=2.20
+audioop-lts>=0.2.2; python_version >= "3.13" and python_version < "3.15"
 gtts>=2.5
 pydub>=0.25
 numpy>=1.24
