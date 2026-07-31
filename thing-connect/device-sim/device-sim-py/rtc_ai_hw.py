@@ -35,7 +35,7 @@ try:
     import sounddevice as sd
 except ImportError:
     print("\033[1;33m[warn] sounddevice 未安装，无法使用硬件音频。请安装:\033[0m")
-    print("  pip install sounddevice numpy soxr")
+    print("  python -m pip install -r requirements-audio.txt")
     raise
 
 try:

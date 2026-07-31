@@ -110,7 +110,7 @@ python3 device_sim_main.py --device-id DEV000001 --device-key your-key
 Python 3.13 起标准库不再包含 `audioop`；`requirements.txt` 会仅在
 Python 3.13–3.14 下安装兼容包 `audioop-lts`，无需手工处理。
 
-macOS 下默认使用**文件媒体模式**模拟设备采集；如需测试本机麦克风/扬声器路径，可额外安装 `sounddevice`。
+macOS 使用**文件媒体模式**模拟设备采集；当前 `--with-mic` 硬件音频模式仅支持 Windows。
 
 可选快捷方式：
 
@@ -142,10 +142,13 @@ python -m pip install -r requirements.txt
 # 文件媒体模式
 python device_sim_main.py --device-id DEV000001 --device-key your-key
 
-# 硬件音频（--with-mic）额外需要：
-python -m pip install sounddevice
+# 硬件音频（--with-mic）：安装基础依赖和可选声卡依赖
+python -m pip install -r requirements-audio.txt
 python device_sim_main.py --device-id DEV000001 --device-key your-key --with-mic
 ```
+
+`requirements-audio.txt` 已包含基础 `requirements.txt`，新环境若直接使用
+`--with-mic`，只执行硬件音频这一条安装命令即可。
 
 Windows 也可使用文件模式；只有显式传入 `--with-mic` 时，VoIP、AI 或设备间通话才使用 PC 麦克风和扬声器。此模式线上上下行必须同时使用 `alaw_8khz` 或同时使用 `alaw_16khz`（G.711A、单声道）；PCM/AMR/Opus 只能去掉 `--with-mic` 后使用预编码文件测试。视频仍由本地媒体文件模拟，可选 `h264/h265/mjpeg`。
 
@@ -200,7 +203,7 @@ bash ../scripts/gen_assets.sh
 |------|--------|------|
 | 基础 | `paho-mqtt`, `requests` | MQTT 通信、HTTP 请求 |
 | 文件模式 / 素材生成 | `numpy`, `soxr` | PCM 重采样、素材生成 |
-| 可选 | `sounddevice` | 硬件麦克风/扬声器（`--with-mic`） |
+| 可选硬件音频 | `requirements-audio.txt`（`sounddevice`） | Windows 麦克风/扬声器（`--with-mic`） |
 
 ## 启动方式
 

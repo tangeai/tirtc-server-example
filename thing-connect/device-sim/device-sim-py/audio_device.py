@@ -2,7 +2,7 @@
 from __future__ import annotations
 """audio_device.py — 音频设备抽象（Windows: WASAPI/MME；Linux/macOS: PortAudio 默认）
 
-依赖：sounddevice（已在 requirements.txt）、soxr（已在 requirements.txt）
+依赖：sounddevice（requirements-audio.txt）、numpy/soxr（requirements.txt）
 """
 
 try:

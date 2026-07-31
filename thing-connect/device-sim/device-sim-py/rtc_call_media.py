@@ -231,7 +231,7 @@ def configure_hardware_audio(enable: bool, fmt: str = "alaw_8khz",
         from audio_device import SpeakerPlayback, select_mic, select_speaker
     except (ImportError, RuntimeError) as e:
         _err(f"无法加载音频设备: {e}")
-        _err("请安装依赖: pip install sounddevice numpy soxr")
+        _err("请安装依赖: python -m pip install -r requirements-audio.txt")
         _hw_audio = False
         return
 

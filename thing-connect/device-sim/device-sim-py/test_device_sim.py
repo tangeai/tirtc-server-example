@@ -6,7 +6,7 @@ import os
 import stat
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from unittest import mock
 
 import device_credentials
@@ -34,6 +34,43 @@ class JsonResponse:
 
 
 class DeviceSimulatorTests(unittest.TestCase):
+    def test_without_mic_does_not_probe_audio_dependencies(self):
+        stderr = io.StringIO()
+        with mock.patch.object(
+                device_sim_main, "_find_missing_deps") as find_missing, \
+                mock.patch.object(
+                    device_sim_main.sys,
+                    "argv",
+                    ["device_sim_main.py", "--device-id", "unpaired"],
+                ), \
+                redirect_stderr(stderr), \
+                self.assertRaises(SystemExit):
+            device_sim_main.main()
+
+        find_missing.assert_not_called()
+        self.assertNotIn("requirements-audio.txt", stderr.getvalue())
+
+    def test_with_mic_missing_dependency_points_to_audio_requirements(self):
+        stderr = io.StringIO()
+        with mock.patch.object(device_sim_main.sys, "platform", "win32"), \
+                mock.patch.object(
+                    device_sim_main,
+                    "_find_missing_deps",
+                    return_value=[("sounddevice", "sounddevice")],
+                ), \
+                mock.patch.object(
+                    device_sim_main.sys,
+                    "argv",
+                    ["device_sim_main.py", "--with-mic"],
+                ), \
+                redirect_stderr(stderr), \
+                self.assertRaises(SystemExit) as raised:
+            device_sim_main.main()
+
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("requirements-audio.txt", stderr.getvalue())
+        self.assertIn("sounddevice", stderr.getvalue())
+
     def test_supported_python_versions_are_3_10_through_3_14(self):
         for minor in range(10, 15):
             with self.subTest(minor=minor):

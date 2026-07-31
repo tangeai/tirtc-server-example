@@ -88,11 +88,11 @@ def _early_sdk_version(argv):
 if not os.environ.get("TIRTC_SDK_VERSION"):
     os.environ["TIRTC_SDK_VERSION"] = _early_sdk_version(sys.argv) or DEFAULT_SDK_VERSION
 
-_OPTIONAL_HW_AUDIO_DEPS = _find_missing_deps([
+_OPTIONAL_HW_AUDIO_DEPS = [
     ("numpy", "numpy"),
     ("sounddevice", "sounddevice"),
     ("soxr", "soxr"),
-])
+]
 
 import device_flow
 from media_formats import (
@@ -133,16 +133,9 @@ except (ImportError, OSError, SystemExit):
     pass
 
 _rtc_ai_available = False
-_rtc_ai_hw_available = False
 try:
     import rtc_ai as _rtc_ai
     _rtc_ai_available = True
-except (ImportError, OSError, SystemExit):
-    pass
-
-try:
-    import rtc_ai_hw as _rtc_ai_hw
-    _rtc_ai_hw_available = True
 except (ImportError, OSError, SystemExit):
     pass
 
@@ -306,11 +299,25 @@ def main():
             )
         except ValueError as exc:
             parser.error(str(exc))
-    if args.with_mic and _OPTIONAL_HW_AUDIO_DEPS:
-        missing = " ".join(pip_name for _, pip_name in _OPTIONAL_HW_AUDIO_DEPS)
-        parser.error(f"--with-mic 缺少依赖，请先执行: pip install {missing}")
-    if args.with_mic and not _rtc_ai_hw_available:
-        parser.error("--with-mic 需要可用的 sounddevice、numpy 和 soxr")
+    if args.with_mic:
+        missing_hw_audio_deps = _find_missing_deps(_OPTIONAL_HW_AUDIO_DEPS)
+        if missing_hw_audio_deps:
+            missing = " ".join(
+                pip_name for _, pip_name in missing_hw_audio_deps
+            )
+            parser.error(
+                "--with-mic 缺少硬件音频依赖，请先执行: "
+                "python -m pip install -r requirements-audio.txt "
+                f"（缺少: {missing}）"
+            )
+        try:
+            import rtc_ai_hw as _rtc_ai_hw
+        except (ImportError, OSError, SystemExit) as exc:
+            parser.error(
+                "--with-mic 无法加载硬件音频模块；请确认已执行 "
+                "python -m pip install -r requirements-audio.txt："
+                f"{exc}"
+            )
     if AUDIO_FORMATS[args.down_audio_format].codec not in ("alaw", "amr", "opus"):
         parser.error("--down-audio-format 必须使用 VoIP 支持的 alaw/amr/opus 编码")
 
