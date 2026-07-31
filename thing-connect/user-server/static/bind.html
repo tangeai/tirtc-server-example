@@ -217,9 +217,10 @@
       $('panel-code').classList.add('hidden');
       showResult(data, 'code');
     } catch (e) {
-      btn.disabled = false;
-      btn.textContent = '确认绑定';
       showErr('code', '网络错误，请检查连接后重试');
+    } finally {
+      btn.disabled = $('code-input').value.trim().length !== 6;
+      btn.textContent = '确认绑定';
     }
   }
 
@@ -227,6 +228,7 @@
     $('result-card').classList.add('hidden');
     $('panel-code').classList.remove('hidden');
     const input = $('code-input');
+    $('btn-bind-code').textContent = '确认绑定';
     input.value = '';
     checkCodeReady();
     input.focus();
@@ -259,9 +261,10 @@
       $('panel-id').classList.add('hidden');
       showResult(data, 'id');
     } catch (e) {
-      btn.disabled = false;
-      btn.textContent = '确认绑定';
       showErr('id', '网络错误，请检查连接后重试');
+    } finally {
+      btn.disabled = $('devid-input').value.trim().length === 0;
+      btn.textContent = '确认绑定';
     }
   }
 
@@ -269,6 +272,7 @@
     $('result-card').classList.add('hidden');
     $('panel-id').classList.remove('hidden');
     const input = $('devid-input');
+    $('btn-bind-id').textContent = '确认绑定';
     input.value = '';
     checkIdReady();
     input.focus();
