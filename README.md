@@ -62,8 +62,6 @@ python device_sim_main.py --mac AA:BB:CC:DD:EE:FF
 
 浏览器打开 <a href="https://demo-open.tange-ai.com/" target="_blank" rel="noopener">https://demo-open.tange-ai.com/</a>，用邮箱注册账号并登录。
 
-![注册账号](images/quickstart/h5-register.png)
-
 ### 步骤 4：绑定模拟器设备
 
 在 H5 设备页面输入步骤 2 终端中显示的 6 位验证码，完成绑定。绑定成功后模拟器自动保存设备凭证并建立长连接，开始推送实时音视频。
