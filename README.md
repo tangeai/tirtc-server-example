@@ -72,7 +72,7 @@ python device_sim_main.py --mac AA:BB:CC:DD:EE:FF
 
 在 H5 设备列表点击刚绑定的设备，即可看到模拟器推送的实时画面、听到实时音频。至此首个闭环完成 ✅
 
-https://github.com/user-attachments/assets/cb534315-00e7-4b47-99f0-024693ec338d
+https://github.com/user-attachments/assets/80ee6d4c-35dc-4425-813f-476e63ab1b40
 
 ---
 
