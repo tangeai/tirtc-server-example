@@ -1,6 +1,9 @@
 import unittest
 from unittest import mock
 import io
+import os
+import sys
+import threading
 from contextlib import redirect_stdout
 
 from session_coordinator import SessionKind
@@ -178,6 +181,143 @@ class SessionMessageRouterTests(unittest.TestCase):
 
 
 class TerminalControllerTests(unittest.TestCase):
+    def test_command_loop_keeps_reading_while_command_executes(self):
+        coordinator = mock.Mock(current=SessionKind.STREAM)
+        terminal = TerminalController(
+            coordinator, mock.Mock(), mock.Mock(), mock.Mock())
+        stop_event = threading.Event()
+        first_started = threading.Event()
+        release_first = threading.Event()
+        second_read = threading.Event()
+        second_executed = threading.Event()
+        read_index = 0
+        executed = []
+
+        def read_command(_stop_event):
+            nonlocal read_index
+            read_index += 1
+            if read_index == 1:
+                return "room\n"
+            if read_index == 2:
+                self.assertTrue(first_started.wait(timeout=1.0))
+                second_read.set()
+                return "help\n"
+            if read_index == 3:
+                self.assertTrue(second_executed.wait(timeout=1.0))
+                return "exit\n"
+            _stop_event.wait(0.01)
+            return None
+
+        def execute(command, _stop_event):
+            executed.append(command)
+            if command == "room":
+                first_started.set()
+                self.assertTrue(release_first.wait(timeout=1.0))
+            elif command == "help":
+                second_executed.set()
+
+        terminal._readline = read_command
+        terminal.execute = execute
+        output = io.StringIO()
+        with redirect_stdout(output):
+            command_loop = threading.Thread(
+                target=terminal.run_cmd_loop,
+                args=(stop_event,),
+                daemon=True,
+            )
+            command_loop.start()
+            self.assertTrue(second_read.wait(timeout=1.0))
+            self.assertFalse(second_executed.is_set())
+            release_first.set()
+            self.assertTrue(second_executed.wait(timeout=1.0))
+            self.assertTrue(stop_event.wait(timeout=1.0))
+            command_loop.join(timeout=1.0)
+
+        self.assertFalse(command_loop.is_alive())
+        self.assertEqual(executed, ["room", "help"])
+        self.assertIn("新指令已排队", output.getvalue())
+
+    def test_interactive_eof_stops_simulator(self):
+        coordinator = mock.Mock(current=SessionKind.STREAM)
+        terminal = TerminalController(
+            coordinator, mock.Mock(), mock.Mock(), mock.Mock())
+        terminal._readline = mock.Mock(return_value="")
+        stop_event = threading.Event()
+        stdin = mock.Mock()
+        stdin.isatty.return_value = True
+
+        with mock.patch.object(sys, "stdin", stdin):
+            with redirect_stdout(io.StringIO()) as output:
+                terminal.run_cmd_loop(stop_event)
+
+        self.assertTrue(stop_event.is_set())
+        self.assertIn("终端输入已结束", output.getvalue())
+
+    def test_noninteractive_eof_only_disables_command_input(self):
+        coordinator = mock.Mock(current=SessionKind.STREAM)
+        terminal = TerminalController(
+            coordinator, mock.Mock(), mock.Mock(), mock.Mock())
+        terminal._readline = mock.Mock(return_value="")
+        stop_event = threading.Event()
+        stdin = mock.Mock()
+        stdin.isatty.return_value = False
+
+        with mock.patch.object(sys, "stdin", stdin):
+            with redirect_stdout(io.StringIO()):
+                terminal.run_cmd_loop(stop_event)
+
+        self.assertFalse(stop_event.is_set())
+
+    def test_exit_only_signals_runtime_owner(self):
+        coordinator = mock.Mock(current=SessionKind.STREAM)
+        terminal = TerminalController(
+            coordinator, mock.Mock(), mock.Mock(), mock.Mock())
+        stop_event = threading.Event()
+
+        terminal.execute("exit", stop_event)
+
+        self.assertTrue(stop_event.is_set())
+        coordinator.shutdown.assert_not_called()
+
+    @unittest.skipIf(os.name == "nt", "POSIX stdin implementation")
+    def test_readline_preserves_multiple_commands_from_one_os_read(self):
+        coordinator = mock.Mock(current=SessionKind.STREAM)
+        terminal = TerminalController(
+            coordinator, mock.Mock(), mock.Mock(), mock.Mock())
+        read_fd, write_fd = os.pipe()
+        stdin = io.TextIOWrapper(
+            os.fdopen(read_fd, "rb", buffering=0), encoding="utf-8")
+        self.addCleanup(stdin.close)
+        self.addCleanup(os.close, write_fd)
+        os.write(write_fd, "help\nct remark peer-1 客厅\n".encode())
+
+        with mock.patch.object(sys, "stdin", stdin):
+            self.assertEqual(terminal._readline(threading.Event()), "help\n")
+            self.assertEqual(
+                terminal._readline(threading.Event()),
+                "ct remark peer-1 客厅\n",
+            )
+
+    @unittest.skipIf(os.name == "nt", "POSIX stdin implementation")
+    def test_readline_preserves_partial_command_until_newline(self):
+        coordinator = mock.Mock(current=SessionKind.STREAM)
+        terminal = TerminalController(
+            coordinator, mock.Mock(), mock.Mock(), mock.Mock())
+        read_fd, write_fd = os.pipe()
+        stdin = io.TextIOWrapper(
+            os.fdopen(read_fd, "rb", buffering=0), encoding="utf-8")
+        self.addCleanup(stdin.close)
+        self.addCleanup(os.close, write_fd)
+
+        with mock.patch.object(sys, "stdin", stdin):
+            os.write(write_fd, "ct remark peer-1 客".encode())
+            self.assertIsNone(terminal._readline(threading.Event()))
+            os.write(write_fd, "厅\n".encode())
+            self.assertEqual(
+                terminal._readline(threading.Event()),
+                "ct remark peer-1 客厅\n",
+            )
+
     def test_contact_add_sends_contact_request(self):
         coordinator = mock.Mock(current=SessionKind.STREAM)
         voip, ai, call = mock.Mock(), mock.Mock(), mock.Mock()

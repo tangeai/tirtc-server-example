@@ -24,6 +24,7 @@ DEFAULT_AUDIO_FILENAME = "audio.g711a"
 EXPERIENCE_PLATFORM_URL = "https://demo-open.tange-ai.com"
 MIN_PYTHON_VERSION = (3, 10)
 MAX_PYTHON_VERSION = (3, 14)
+COMMAND_THREAD_JOIN_TIMEOUT_SEC = 5.0
 
 
 def _is_supported_python(version_info=None):
@@ -431,6 +432,7 @@ def main():
         command_thread = threading.Thread(
             target=runtime.run_cmd_loop,
             args=(stop_event,),
+            daemon=True,
             name="cmd-loop",
         )
         command_thread.start()
@@ -444,7 +446,12 @@ def main():
         stop_event.set()
         if (command_thread is not None
                 and command_thread is not threading.current_thread()):
-            command_thread.join()
+            command_thread.join(timeout=COMMAND_THREAD_JOIN_TIMEOUT_SEC)
+            if command_thread.is_alive():
+                print(
+                    "[device] 终端命令仍在结束中，继续关闭 RTC 运行时",
+                    flush=True,
+                )
         runtime.shutdown()
 
 

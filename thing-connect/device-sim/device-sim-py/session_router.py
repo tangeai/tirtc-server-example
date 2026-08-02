@@ -2,6 +2,7 @@
 """MQTT 业务消息组合路由与统一终端命令入口。"""
 
 import os
+import queue
 import select
 import sys
 import threading
@@ -13,6 +14,7 @@ from session_coordinator import SessionKind
 from terminal_ui import print_box
 
 PENDING_CALL_TTL_SEC = 45.0
+TERMINAL_COMMAND_QUEUE_SIZE = 32
 
 
 class SessionMessageRouter:
@@ -216,27 +218,105 @@ class TerminalController:
         self.call = call
         self._video_capable = bool(video_capable)
         self._pending_selection = None
+        self._stdin_source = None
+        self._stdin_buffer = bytearray()
+        self._stdin_eof = False
+        self._command_state_lock = threading.Lock()
+        self._commands_outstanding = 0
 
     def run_cmd_loop(self, stop_event) -> None:
         self._print_help()
-        while not stop_event.is_set():
-            try:
-                raw_line = self._readline(stop_event)
-            except EOFError:
-                break
-            if raw_line is None:
-                continue
-            if raw_line == "":
-                break
-            line = raw_line.strip()
-            if line:
+        commands = queue.Queue(maxsize=TERMINAL_COMMAND_QUEUE_SIZE)
+        reader_done = threading.Event()
+        with self._command_state_lock:
+            self._commands_outstanding = 0
+        reader = threading.Thread(
+            target=self._read_commands,
+            args=(stop_event, commands, reader_done),
+            daemon=True,
+            name="terminal-input",
+        )
+        reader.start()
+        try:
+            while not stop_event.is_set():
+                try:
+                    line = commands.get(timeout=0.2)
+                except queue.Empty:
+                    if reader_done.is_set():
+                        break
+                    continue
                 try:
                     self.execute(line, stop_event)
                 except Exception as exc:
                     print(f"[terminal] 命令执行失败: {exc}", flush=True)
+                finally:
+                    with self._command_state_lock:
+                        self._commands_outstanding -= 1
+                    commands.task_done()
+        finally:
+            reader.join(timeout=0.5)
+            with self._command_state_lock:
+                self._commands_outstanding = 0
+
+    def _read_commands(self, stop_event, commands, reader_done) -> None:
+        try:
+            self._read_commands_until_stopped(stop_event, commands)
+        except Exception as exc:
+            print(f"[terminal] 输入线程失败: {exc}", flush=True)
+            if self._stdin_is_tty():
+                stop_event.set()
+        finally:
+            reader_done.set()
+
+    def _read_commands_until_stopped(self, stop_event, commands) -> None:
+        while not stop_event.is_set():
+            try:
+                raw_line = self._readline(stop_event)
+            except EOFError:
+                raw_line = ""
+            if raw_line is None:
+                continue
+            if stop_event.is_set():
+                break
+            if raw_line == "":
+                if self._stdin_is_tty():
+                    print("[terminal] 终端输入已结束，正在退出…", flush=True)
+                    stop_event.set()
+                break
+            line = raw_line.strip()
+            if not line:
+                continue
+            if self._is_exit_command(line):
+                stop_event.set()
+                break
+            with self._command_state_lock:
+                queued = self._commands_outstanding > 0
+                try:
+                    commands.put_nowait(line)
+                except queue.Full:
+                    submitted = False
+                else:
+                    self._commands_outstanding += 1
+                    submitted = True
+            if not submitted:
+                print("[terminal] 待执行命令过多，本条指令未提交", flush=True)
+                continue
+            if queued:
+                print("[terminal] 前一条命令执行中，新指令已排队", flush=True)
+
+    @classmethod
+    def _is_exit_command(cls, line: str) -> bool:
+        command = line.split(maxsplit=1)[0].lower()
+        return cls._COMMAND_ALIASES.get(command, command) == "exit"
 
     @staticmethod
-    def _readline(stop_event):
+    def _stdin_is_tty() -> bool:
+        try:
+            return bool(sys.stdin.isatty())
+        except (AttributeError, OSError, ValueError):
+            return False
+
+    def _readline(self, stop_event):
         """Read one command while remaining interruptible during shutdown."""
         if os.name == "nt":
             import msvcrt
@@ -266,13 +346,54 @@ class TerminalController:
                 print(char, end="", flush=True)
             return None
 
+        source = sys.stdin
+        if source is not self._stdin_source:
+            self._stdin_source = source
+            self._stdin_buffer.clear()
+            self._stdin_eof = False
+
+        line = self._pop_stdin_line(source)
+        if line is not None:
+            return line
+
         try:
-            ready, _, _ = select.select([sys.stdin], [], [], 0.2)
-        except (OSError, ValueError):
-            return sys.stdin.readline()
+            fd = source.fileno()
+            ready, _, _ = select.select([fd], [], [], 0.2)
+        except (AttributeError, OSError, TypeError, ValueError):
+            return source.readline()
         if not ready:
             return None
-        return sys.stdin.readline()
+        try:
+            chunk = os.read(fd, 4096)
+        except BlockingIOError:
+            return None
+        if chunk:
+            self._stdin_buffer.extend(chunk)
+        else:
+            self._stdin_eof = True
+        return self._pop_stdin_line(source)
+
+    def _pop_stdin_line(self, source):
+        newline = self._stdin_buffer.find(b"\n")
+        if newline >= 0:
+            raw_line = bytes(self._stdin_buffer[:newline + 1])
+            del self._stdin_buffer[:newline + 1]
+            return self._decode_stdin(raw_line, source)
+        if not self._stdin_eof:
+            return None
+        if not self._stdin_buffer:
+            return ""
+        raw_line = bytes(self._stdin_buffer)
+        self._stdin_buffer.clear()
+        return self._decode_stdin(raw_line, source)
+
+    @staticmethod
+    def _decode_stdin(raw_line: bytes, source) -> str:
+        encoding = getattr(source, "encoding", None) or "utf-8"
+        try:
+            return raw_line.decode(encoding, errors="replace")
+        except LookupError:
+            return raw_line.decode("utf-8", errors="replace")
 
     def execute(self, line: str, stop_event) -> None:
         try:
@@ -331,7 +452,6 @@ class TerminalController:
             self._print_help()
         elif command == "exit":
             self._pending_selection = None
-            self.arbiter.shutdown()
             stop_event.set()
         else:
             self._pending_selection = None

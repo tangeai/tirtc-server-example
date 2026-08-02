@@ -308,7 +308,7 @@ Python 与 C 模拟器统一通过 `SessionArbiter` 仲裁 MQTT、终端和 SDK 
 - `aicall` 发起 AI 对话
 - `call <device_id> [video|audio]` 呼叫设备
 - `accept / reject [reason] / cancel / hangup` 处理当前通话
-- `contacts / room / help / exit`
+- `ct list / ct pending / room / help / exit`
 
 `call` 和 `wxcall` 未指定通话类型时，有上行视频素材则使用 `video`，未配置上行视频素材则使用 `audio`。显式指定 `video` 时必须已经配置上行视频素材。
 
@@ -319,6 +319,8 @@ Python 与 C 模拟器统一通过 `SessionArbiter` 仲裁 MQTT、终端和 SDK 
 - `r` = `reject`
 - `h` = `hangup`
 - `e` = `exit`
+
+终端持续接收输入。涉及网络访问或会话切换的命令尚未执行完成时，后续命令按输入顺序排队，最多等待 32 条；超出上限的指令会提示未提交。输入 `exit`、`e`，或在 Linux/macOS 交互终端按 Ctrl+D，会结束模拟器。
 
 这些缩写可以直接单独输入后回车。例如来电时输入 `a` 等价于 `accept`，输入 `r` 等价于 `reject`。
 
