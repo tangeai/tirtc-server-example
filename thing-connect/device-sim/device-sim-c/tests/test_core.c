@@ -9,8 +9,10 @@
 #include <sys/stat.h>
 
 #include "audio_recorder.h"
+#include "device_adapter.h"
 #include "device_flow.h"
 #include "file_media_source.h"
+#include "linux_device_adapter.h"
 #include "media_format.h"
 #include "media_subscription_policy.h"
 #include "sdk_callback_guard.h"
@@ -21,8 +23,220 @@
 #include "tirtc_runtime.h"
 #include "tirtc_voip.h"
 
-int g_log_level = 100;
-volatile sig_atomic_t g_stop = 0;
+typedef struct {
+    int audio_remaining;
+    int video_remaining;
+    int closes;
+    int sink_submits;
+    int sink_flushes;
+    int resource_acquires;
+    int resource_releases;
+    int notifications;
+    int recoveries;
+    DeviceProductEvent last_event;
+} AdapterContractContext;
+
+static int adapter_identity_load(void *opaque, const char *slot,
+                                 char *id, size_t id_size,
+                                 char *key, size_t key_size) {
+    (void)opaque;
+    assert(strcmp(slot, "test-slot") == 0);
+    return str_copy(id, id_size, "device-test") |
+           str_copy(key, key_size, "key-test");
+}
+
+static int adapter_media_open(void *opaque,
+                              const DeviceMediaSourceConfig *config,
+                              void **handle) {
+    AdapterContractContext *context = opaque;
+    assert(config->business == DEVICE_BUSINESS_CALL);
+    context->audio_remaining = 1;
+    context->video_remaining = 1;
+    *handle = context;
+    return 0;
+}
+
+static int adapter_media_has_video(void *opaque, void *handle) {
+    assert(opaque == handle);
+    return 1;
+}
+
+static int adapter_media_next_audio(void *opaque, void *handle,
+                                    DeviceMediaPacket *packet) {
+    static const unsigned char audio[] = {1, 2, 3};
+    AdapterContractContext *context = opaque;
+    assert(handle == context);
+    if (context->audio_remaining <= 0) return 0;
+    context->audio_remaining--;
+    *packet = (DeviceMediaPacket){audio, sizeof(audio), 20.0, 0};
+    return 1;
+}
+
+static int adapter_media_next_video(void *opaque, void *handle,
+                                    int force_key_frame,
+                                    DeviceMediaPacket *packet) {
+    static const unsigned char video[] = {4, 5};
+    AdapterContractContext *context = opaque;
+    assert(handle == context);
+    assert(force_key_frame == 1);
+    if (context->video_remaining <= 0) return 0;
+    context->video_remaining--;
+    *packet = (DeviceMediaPacket){video, sizeof(video), 0.0, 7};
+    return 1;
+}
+
+static void adapter_media_close(void *opaque, void *handle) {
+    AdapterContractContext *context = opaque;
+    assert(handle == context);
+    context->closes++;
+}
+
+static int adapter_sink_submit(void *opaque,
+                               const DeviceDownlinkFrame *frame) {
+    AdapterContractContext *context = opaque;
+    assert(frame->business == DEVICE_BUSINESS_CALL);
+    assert(frame->generation == 1);
+    context->sink_submits++;
+    return 0;
+}
+
+static void adapter_sink_flush(void *opaque, DeviceBusiness business,
+                               uint64_t generation) {
+    AdapterContractContext *context = opaque;
+    assert(business == DEVICE_BUSINESS_CALL && generation == 1);
+    context->sink_flushes++;
+}
+
+static void adapter_product_notify(void *opaque,
+                                   const DeviceProductEvent *event) {
+    AdapterContractContext *context = opaque;
+    context->notifications++;
+    context->last_event = *event;
+}
+
+static int adapter_resource_acquire(void *opaque, DeviceBusiness business) {
+    AdapterContractContext *context = opaque;
+    assert(business == DEVICE_BUSINESS_CALL);
+    context->resource_acquires++;
+    return 0;
+}
+
+static void adapter_resource_release(void *opaque, DeviceBusiness business) {
+    AdapterContractContext *context = opaque;
+    assert(business == DEVICE_BUSINESS_CALL);
+    context->resource_releases++;
+}
+
+static void adapter_recovery_report(void *opaque, DeviceRecoveryDomain domain,
+                                    int code, const char *detail) {
+    AdapterContractContext *context = opaque;
+    assert(domain == DEVICE_RECOVERY_MEDIA && code == -7);
+    assert(strcmp(detail, "media failed") == 0);
+    context->recoveries++;
+}
+
+static int adapter_random_bytes(void *opaque, unsigned char *output,
+                                size_t length) {
+    (void)opaque;
+    memset(output, 0xab, length);
+    return 0;
+}
+
+static void test_device_adapter_contract(void) {
+    device_adapter_reset_for_testing();
+    DeviceAdapterV1 invalid = {0};
+    assert(device_adapter_install(&invalid) != 0);
+
+    AdapterContractContext context = {0};
+    DeviceAdapterV1 adapter = {
+        .abi_version = DEVICE_ADAPTER_ABI_V1,
+        .struct_size = sizeof(adapter),
+        .identity = {.context = &context, .load = adapter_identity_load},
+        .media_source = {
+            .context = &context,
+            .open = adapter_media_open,
+            .has_video = adapter_media_has_video,
+            .next_audio = adapter_media_next_audio,
+            .next_video = adapter_media_next_video,
+            .close = adapter_media_close,
+        },
+        .media_sink = {
+            .context = &context,
+            .submit = adapter_sink_submit,
+            .flush = adapter_sink_flush,
+        },
+        .product = {
+            .context = &context,
+            .notify = adapter_product_notify,
+        },
+        .resource = {
+            .context = &context,
+            .acquire = adapter_resource_acquire,
+            .release = adapter_resource_release,
+        },
+        .recovery = {
+            .context = &context,
+            .report = adapter_recovery_report,
+        },
+        .security = {
+            .context = &context,
+            .random_bytes = adapter_random_bytes,
+        },
+    };
+    assert(device_adapter_install(&adapter) == 0);
+    memset(&adapter, 0, sizeof(adapter));
+
+    char id[32], key[32];
+    assert(device_identity_load("test-slot", id, sizeof(id),
+                                key, sizeof(key)) == 0);
+    assert(strcmp(id, "device-test") == 0 &&
+           strcmp(key, "key-test") == 0);
+
+    DeviceMediaSource source;
+    DeviceMediaSourceConfig config = {
+        .audio_locator = "capture://microphone",
+        .audio_format = "alaw_8khz",
+        .video_locator = "capture://camera",
+        .video_format = "h264",
+        .audio_packet_ms = 20,
+        .business = DEVICE_BUSINESS_CALL,
+    };
+    assert(device_media_source_open(&source, &config) == 0);
+    assert(device_media_source_has_video(&source));
+    DeviceMediaPacket packet;
+    assert(device_media_source_next_audio(&source, &packet) == 1);
+    assert(packet.length == 3 && packet.duration_ms == 20.0);
+    assert(device_media_source_next_audio(&source, &packet) == 0);
+    assert(device_media_source_next_video(&source, 1, &packet) == 1);
+    assert(packet.length == 2 && packet.key_frame == 1);
+    device_media_source_close(&source);
+    assert(context.closes == 1);
+
+    assert(device_resource_acquire(DEVICE_BUSINESS_CALL) == 0);
+    device_adapter_session_starting(DEVICE_BUSINESS_CALL);
+    device_adapter_session_started(DEVICE_BUSINESS_CALL);
+    unsigned char downlink[] = {9};
+    assert(device_media_sink_submit(
+               DEVICE_BUSINESS_CALL, 0, 10, 1, 0, 20,
+               downlink, sizeof(downlink)) == 0);
+    assert(device_media_sink_is_enabled(DEVICE_BUSINESS_CALL, 0));
+    device_adapter_session_stopped(DEVICE_BUSINESS_CALL);
+    device_resource_release(DEVICE_BUSINESS_CALL);
+    assert(context.resource_acquires == 1 && context.resource_releases == 1);
+    assert(context.sink_submits == 1 && context.sink_flushes == 1);
+    assert(context.notifications == 3);
+    assert(context.last_event.type == DEVICE_SESSION_STOPPED);
+
+    device_recovery_report(DEVICE_RECOVERY_MEDIA, -7, "media failed");
+    assert(context.recoveries == 1);
+    unsigned char random[4] = {0};
+    assert(device_security_random_bytes(random, sizeof(random)) == 0);
+    assert(random[0] == 0xab && random[3] == 0xab);
+    assert(!device_security_allow_insecure_transport());
+
+    device_adapter_reset_for_testing();
+    assert(linux_device_adapter_install_default() == 0);
+}
 
 static void write_all(int fd, const unsigned char *data, size_t length) {
     while (length) {
@@ -468,6 +682,46 @@ typedef struct {
     int stops;
 } CoordinatorAdapterContext;
 
+typedef struct {
+    DeviceBusiness held;
+    int acquires;
+    int releases;
+    int started;
+    int stopped;
+    int flushes;
+} CoordinatorProductContext;
+
+static int coordinator_resource_acquire(void *opaque,
+                                        DeviceBusiness business) {
+    CoordinatorProductContext *context = opaque;
+    assert(context->held == DEVICE_BUSINESS_NONE);
+    context->held = business;
+    context->acquires++;
+    return 0;
+}
+
+static void coordinator_resource_release(void *opaque,
+                                         DeviceBusiness business) {
+    CoordinatorProductContext *context = opaque;
+    assert(context->held == business);
+    context->held = DEVICE_BUSINESS_NONE;
+    context->releases++;
+}
+
+static void coordinator_product_notify(void *opaque,
+                                       const DeviceProductEvent *event) {
+    CoordinatorProductContext *context = opaque;
+    if (event->type == DEVICE_SESSION_STARTED) context->started++;
+    if (event->type == DEVICE_SESSION_STOPPED) context->stopped++;
+}
+
+static void coordinator_sink_flush(void *opaque, DeviceBusiness business,
+                                   uint64_t generation) {
+    CoordinatorProductContext *context = opaque;
+    assert(business != DEVICE_BUSINESS_NONE && generation > 0);
+    context->flushes++;
+}
+
 static int coordinator_start(void *opaque) {
     CoordinatorAdapterContext *context = opaque;
     context->starts++;
@@ -480,6 +734,26 @@ static void coordinator_stop(void *opaque) {
 }
 
 static void test_coordinator_switching(void) {
+    device_adapter_reset_for_testing();
+    CoordinatorProductContext product = {0};
+    DeviceAdapterV1 product_adapter = {
+        .abi_version = DEVICE_ADAPTER_ABI_V1,
+        .struct_size = sizeof(product_adapter),
+        .media_sink = {
+            .context = &product,
+            .flush = coordinator_sink_flush,
+        },
+        .product = {
+            .context = &product,
+            .notify = coordinator_product_notify,
+        },
+        .resource = {
+            .context = &product,
+            .acquire = coordinator_resource_acquire,
+            .release = coordinator_resource_release,
+        },
+    };
+    assert(device_adapter_install(&product_adapter) == 0);
     SessionCoordinator coordinator;
     CoordinatorAdapterContext stream = {0};
     CoordinatorAdapterContext voip = {0};
@@ -501,6 +775,12 @@ static void test_coordinator_switching(void) {
     assert(stream.starts == 2);
     assert(voip.starts == 1 && voip.stops == 1);
     session_coordinator_destroy(&coordinator);
+    assert(product.held == DEVICE_BUSINESS_NONE);
+    assert(product.acquires == 3 && product.releases == 3);
+    assert(product.started == 3 && product.stopped == 3);
+    assert(product.flushes == 3);
+    device_adapter_reset_for_testing();
+    assert(linux_device_adapter_install_default() == 0);
 }
 
 typedef struct {
@@ -1086,6 +1366,9 @@ static void test_process_runtime_generation_dispatch(void) {
 }
 
 int main(void) {
+    g_log_level = 100;
+    assert(linux_device_adapter_install_default() == 0);
+    test_device_adapter_contract();
     test_format_tables();
     test_audio_recorder_files();
     test_ai_start_session_json_declares_codecs();

@@ -629,4 +629,4 @@ Authorization: Bearer <mqtt_token>
 - 旧通话被新来电顶掉：这是当前设计，若不想切换应主动调 [`/v1/call/reject`](api-reference.md#post-v1callreject)
 - 进程崩溃重启后状态乱：启动时调用 [`GET /v1/call/room`](api-reference.md#get-v1callroom) 做房间恢复
 
-> 端到端验证以 「C 参考实现」为准：按 [device-sim/device-sim-c/README.md](device-sim/device-sim-c/README.md) 启动两台设备；使用 `call <设备ID> [video|audio]` 发起、`accept` / `reject` 响应。完整 HTTP 封装在 [call_session.c](device-sim/device-sim-c/src/call_session.c)，P2P 建连与 `0x2000` 确认在 [tirtc_call.c](device-sim/device-sim-c/src/tirtc_call.c)。
+> 使用 Linux C 默认适配联调：按 [device-sim/device-sim-c/README.md](device-sim/device-sim-c/README.md) 启动两台实例；使用 `call <设备ID> [video|audio]` 发起、`accept` / `reject` 响应。HTTP 封装在 [call_session.c](device-sim/device-sim-c/src/call_session.c)，P2P 建连与 `0x2000` 确认在 [tirtc_call.c](device-sim/device-sim-c/src/tirtc_call.c)。默认上行来自文件，默认下行 sink 为空而只记录后丢弃；产品可通过 `DeviceAdapterV1` 替换，单元测试仍不等于真实服务端到端验证。

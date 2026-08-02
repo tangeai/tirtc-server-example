@@ -1,11 +1,19 @@
-# Makefile — C device simulator (embedded-reference implementation)
-# Target: Ubuntu 22.04 x86_64; portable to embedded Linux/RTOS
+# Makefile — Linux C device reference implementation
+# Target: Linux user space. Other operating systems require a separate port.
 
 TARGET  := device-sim
+PRODUCT_TARGET := device-sim-product
+FRAMEWORK_TARGET := libdevice-reference.a
 SRCDIR  := src
 OBJDIR  := obj
+AR      ?= ar
 WERROR  ?= 0
 SANITIZE ?=
+SYSROOT ?=
+PKG_CONFIG ?= pkg-config
+EXTRA_CFLAGS ?=
+EXTRA_LDFLAGS ?=
+PRODUCT_ADAPTER_OBJ ?=
 
 # The repository keeps SDK releases under <platform>/<version>.  Allow the
 # target platform/version to be selected for native or cross compilation.
@@ -17,39 +25,69 @@ MBEDTLS_SDK_DIR ?= ../sdk/$(SDK_PLATFORM)/$(MBEDTLS_SDK_VERSION)
 SDK_INC := -I$(SDK_DIR)/include
 SDK_LIB := -L$(SDK_DIR)/lib -lTiRTC
 
-PKG_CFLAGS  := $(shell pkg-config --cflags libcurl 2>/dev/null)
-PKG_LDFLAGS := $(shell pkg-config --libs   libcurl 2>/dev/null)
-
-# cjson doesn't ship a .pc file on Ubuntu — add manually
-PKG_CFLAGS  += -I/usr/include/cjson
-PKG_LDFLAGS += -lcjson
+CURL_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags libcurl 2>/dev/null)
+CURL_LIBS   ?= $(shell $(PKG_CONFIG) --libs libcurl 2>/dev/null)
+CJSON_CFLAGS ?=
+CJSON_LIBS   ?= -lcjson
+MOSQUITTO_CFLAGS ?=
+MOSQUITTO_LIBS   ?= -lmosquitto
+RPATH ?= $$ORIGIN/../sdk/$(SDK_PLATFORM)/$(SDK_VERSION)/lib
 
 CFLAGS  := -Wall -Wextra -std=gnu99 -g -O2 -pthread -D_GNU_SOURCE
-CFLAGS  += $(SDK_INC) -I$(MBEDTLS_SDK_DIR)/include $(PKG_CFLAGS)
+CFLAGS  += $(SDK_INC) -I$(MBEDTLS_SDK_DIR)/include
+CFLAGS  += $(CURL_CFLAGS) $(CJSON_CFLAGS) $(MOSQUITTO_CFLAGS)
+ifneq ($(strip $(SYSROOT)),)
+CFLAGS  += --sysroot=$(SYSROOT)
+endif
 ifeq ($(WERROR),1)
 CFLAGS  += -Werror
 endif
 ifneq ($(SANITIZE),)
 CFLAGS  += -fsanitize=$(SANITIZE) -fno-omit-frame-pointer
 endif
+CFLAGS  += $(EXTRA_CFLAGS)
 
 LDFLAGS := -pthread
-LDFLAGS += -Wl,-rpath,'$$ORIGIN/../sdk/$(SDK_PLATFORM)/$(SDK_VERSION)/lib'
+ifneq ($(strip $(RPATH)),)
+LDFLAGS += -Wl,-rpath,'$(RPATH)'
+endif
 LDFLAGS += $(SDK_LIB)
-LDFLAGS += $(PKG_LDFLAGS)
-LDFLAGS += -lmosquitto
+LDFLAGS += $(CURL_LIBS) $(CJSON_LIBS) $(MOSQUITTO_LIBS)
 LDFLAGS += -lm
+ifneq ($(strip $(SYSROOT)),)
+LDFLAGS += --sysroot=$(SYSROOT)
+endif
 ifneq ($(SANITIZE),)
 LDFLAGS += -fsanitize=$(SANITIZE)
 endif
+LDFLAGS += $(EXTRA_LDFLAGS)
 
 SRCS := $(wildcard $(SRCDIR)/*.c)
 OBJS := $(SRCS:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
+FRAMEWORK_OBJS := $(filter-out $(OBJDIR)/reference_main.o,$(OBJS))
 DEPS := $(OBJS:.o=.d)
 
-.PHONY: all clean run help check-sdk test
+.PHONY: all framework product adapter-template-check clean run help check-sdk test
 
 all: check-sdk $(TARGET)
+
+framework: check-sdk $(FRAMEWORK_TARGET)
+
+product: check-sdk $(OBJS)
+	@test -n "$(strip $(PRODUCT_ADAPTER_OBJ))" || \
+		( echo "Set PRODUCT_ADAPTER_OBJ to a compiled product adapter object."; \
+		  exit 1 )
+	@echo "  LD    $(PRODUCT_TARGET)"
+	@$(CC) $(CFLAGS) -o $(PRODUCT_TARGET) $(OBJS) \
+		$(PRODUCT_ADAPTER_OBJ) $(LDFLAGS)
+
+ADAPTER_TEMPLATE_OBJ := $(OBJDIR)/product_adapter_template.o
+
+adapter-template-check: $(ADAPTER_TEMPLATE_OBJ)
+
+$(ADAPTER_TEMPLATE_OBJ): examples/product_adapter_template.c | $(OBJDIR)
+	@echo "  CC    $<"
+	@$(CC) $(CFLAGS) -I$(SRCDIR) -c $< -o $@
 
 check-sdk:
 	@test -f "$(SDK_DIR)/include/tirtc/tiRTC.h" && test -f "$(SDK_DIR)/lib/libTiRTC.so" || \
@@ -65,6 +103,10 @@ $(TARGET): $(OBJS)
 	@echo "  LD    $@"
 	@$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
+$(FRAMEWORK_TARGET): $(FRAMEWORK_OBJS)
+	@echo "  AR    $@"
+	@$(AR) rcs $@ $^
+
 $(OBJDIR)/%.o: $(SRCDIR)/%.c | $(OBJDIR)
 	@echo "  CC    $<"
 	@$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
@@ -75,10 +117,11 @@ $(OBJDIR):
 -include $(DEPS)
 
 clean:
-	rm -rf $(OBJDIR) $(TARGET)
+	rm -rf $(OBJDIR) $(TARGET) $(PRODUCT_TARGET) $(FRAMEWORK_TARGET)
 
 TEST_TARGET := $(OBJDIR)/test-core
 TEST_SRCS := tests/test_core.c $(SRCDIR)/common.c $(SRCDIR)/audio_recorder.c \
+	$(SRCDIR)/device_adapter.c $(SRCDIR)/linux_device_adapter.c \
 	$(SRCDIR)/media_format.c \
 	$(SRCDIR)/file_media_source.c $(SRCDIR)/sdk_callback_guard.c \
 	$(SRCDIR)/media_subscription_policy.c \
@@ -102,8 +145,12 @@ run: $(TARGET)
 help:
 	@echo "Usage:"
 	@echo "  make          Build $(TARGET)"
+	@echo "  make framework Build reusable $(FRAMEWORK_TARGET) (without main)"
+	@echo "  make product PRODUCT_ADAPTER_OBJ=... Build $(PRODUCT_TARGET)"
+	@echo "  make adapter-template-check Validate the product adapter template"
 	@echo "  make WERROR=1 Build with warnings treated as errors"
 	@echo "  make SANITIZE=address WERROR=1  Build with AddressSanitizer"
+	@echo "  make CC=<cross-gcc> SYSROOT=<path> SDK_PLATFORM=<target>  Cross-build"
 	@echo "  make test     Run C core tests"
 	@echo "  make clean    Remove build artifacts"
 	@echo ""

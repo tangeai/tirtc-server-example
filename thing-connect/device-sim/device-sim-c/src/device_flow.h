@@ -1,7 +1,7 @@
 /** \file device_flow.h
  * \brief Device provisioning protocol layer — HTTP + MQTT + HMAC signing.
  *
- * Embedded-reference: shows how a device talks to the server over
+ * Linux reference: shows how a device talks to the server over
  * libcurl (HTTP) + libmosquitto (MQTT) + SDK bundled mbedTLS (HMAC-SHA256 / Base64).
  */
 
@@ -11,10 +11,9 @@
 #include <stddef.h>
 #include <signal.h>
 #include <cjson/cJSON.h>
-/* NOTE: Linux uses the mbedTLS headers shipped with SDK 0.1.6, verified
- * compatible with the SDK 2.2.1 exported one-shot HMAC/Base64 symbols.
- * On embedded platforms (ESP-IDF/FreeRTOS), use the platform mbedTLS:
- *   mbedtls_md_context_t / mbedtls_md_hmac_starts/update/finish + base64 */
+/* Linux uses the mbedTLS headers shipped with SDK 0.1.6, verified compatible
+ * with the SDK 2.2.1 exported one-shot HMAC/Base64 symbols.  Other targets
+ * must use the cryptographic API provided by their own platform port. */
 
 #ifdef __cplusplus
 extern "C" {
@@ -92,7 +91,8 @@ int report_device(const char *server,
 
 /** POST /v1/device/token with HMAC-SHA256 signature.
  *  Writes mqtt_token into token_out (caller-supplied buffer).
- *  Returns 0 on success, -1 on error (caller may retry or exit). */
+ *  Returns 0 on success, -2 when business code 6006 requires rebinding,
+ *  and -1 on another error. */
 int get_mqtt_token(const char *server,
                    const char *device_id, const char *device_key,
                    const char *mac,

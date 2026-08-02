@@ -1,10 +1,10 @@
-# 多业务会话竞态仲裁与嵌入式实现参考
+# 多业务会话并发控制与产品实现参考
 
-本文说明一台设备同时承载 H5 实时、微信 VoIP、AI 对讲和设备互呼时，如何用统一仲裁器处理并发、取消、超时和迟到回调。它既是当前 C/Python 模拟器的实现说明，也可以作为 Linux 嵌入式设备、FreeRTOS、RT-Thread、Zephyr 等产品固件的设计参考。
+本文说明一台设备同时承载 H5 实时、微信 VoIP、AI 对讲和设备互呼时，如何用统一仲裁器处理并发、取消、超时和迟到回调。文中的 Linux C 代码只对应 `device-sim-c`；其他操作系统或芯片需要建立独立移植并重新验证。
 
 > 业务接入顺序和协议字段分别见 [设备接入总览](device-integration.md)、[H5 实时](device-h5-live.md)、[微信 VoIP](device-voip.md)、[AI 对讲](device-ai.md) 和 [设备互呼](device-call.md)。本文只讨论设备端并发控制，不改变任何 HTTP、MQTT 或 TiRTC 对外接口。
 
-**文档导航：** [返回总览](README.md) | [统一状态机](device-session-model.md) | [嵌入式移植](device-porting.md) | [C 参考实现](device-sim/device-sim-c/README.md) | [Python 模拟器](device-sim/device-sim-py/README.md)
+**文档导航：** [返回总览](README.md) | [统一状态机](device-session-model.md) | [二次开发](device-porting.md) | [Linux C 参考实现](device-sim/device-sim-c/README.md) | [Python 模拟器](device-sim/device-sim-py/README.md)
 
 ## 1. 适用范围与结论
 
@@ -20,11 +20,11 @@
 1. 用一个 `SessionArbiter` 决定谁有权使用资源。
 2. 用一个 `SessionCoordinator` 执行 TiRTC 的 Stop/Start 切换。
 3. 每个业务保留自己的局部状态机，不直接读取其它业务的内部状态。
-4. 每次所有权都附带递增的 `generation`，把它当作 fencing token。
-5. 每个异步阶段必须有 deadline；失败、取消和超时都进入同一个结束出口。
+4. 每次取得所有权时递增 `generation`（会话代次）；回调必须携带并核对该数值，旧代次不能修改新会话。
+5. 每个异步阶段必须记录结束时刻 `deadline`；失败、取消和超时都进入同一个结束出口。
 6. SDK 回调只投递事件，不在回调栈里执行 Stop/Uninit。
 
-这不是只针对本项目的特殊写法。它组合了嵌入式和分布式系统中常用的有限状态机、单写者事件队列、租约/栅栏令牌和 watchdog deadline，适合作为同类单资源设备的参考实现。
+有限状态机、有界事件队列、单一状态写入者、单调时钟超时和旧回调隔离都是常见工程做法。本项目把它们组合成一套具体策略；设备侧不存在强制所有产品使用同一组合的统一实现，队列容量、超时和优先级仍须按产品资源验证。
 
 如果硬件能真正并行运行多套 RTC、编码器和音频链路，应把“唯一资源”扩展成资源集合，而不是绕过仲裁器。
 
@@ -107,20 +107,20 @@ CALL: IDLE -> OUTGOING/PENDING -> CONNECTING -> IN_CALL -> IDLE
 
 不能收到高优先级事件后直接修改 `owner`，否则旧 SDK 回调可能终止新会话。
 
-## 5. pending ticket
+## 5. 待接记录（代码字段 `pending`）
 
 来电到达时先原子申请 pending：
 
 ```text
 offer_pending(kind, room_id, ttl):
     lock
-    清理已超时 ticket
+    清理已超时的待接记录
     如果 owner != NONE 或 pending 已存在: BUSY
     pending = {kind, room_id, pending_generation++, deadline}
     unlock
 ```
 
-ticket 必须包含：
+待接记录必须包含：
 
 - `kind`：VOIP 或 CALL；
 - `session_id`：通常是 `room_id`；
@@ -129,7 +129,7 @@ ticket 必须包含：
 
 取消消息必须同时匹配 kind 和 session_id。这样旧房间的迟到取消不会清除新房间。
 
-接听不是“先清 pending，再随便启动”，而是原子消费 ticket：
+接听不是“先清 pending，再随便启动”，而是原子消费待接记录：
 
 ```text
 PENDING(room-A)
@@ -137,11 +137,11 @@ PENDING(room-A)
     -> STARTING(owner=kind, owner_session_id=room-A)
 ```
 
-如果启动失败且同一 ticket 没有被取消，可以恢复 pending；如果启动期间已收到同房间取消，则禁止恢复。
+如果启动失败且同一待接记录没有被取消，可以恢复 pending；如果启动期间已收到同房间取消，则禁止恢复。
 
-## 6. generation lease：阻止迟到回调
+## 6. 会话代次（代码字段 `generation`）：阻止迟到回调
 
-每次创建新 owner 时递增 generation，并返回：
+每次创建新 owner 时递增 generation，并返回一份会话标识（代码类型为 `session_lease`）：
 
 ```c
 struct session_lease {
@@ -169,7 +169,7 @@ CALL generation=42 启动
 
 Python 特别要注意：lease 必须在进入可能同步回调的 SDK action 之前保存。C 参考实现先取得并保存 lease，再调用业务 action。否则第二次同类会话同步失败时可能误用上一代 lease。
 
-generation 建议使用 64 位无符号整数。嵌入式产品不应在设备重启后持久化它；它只保护当前进程/本次上电周期。
+generation 使用 64 位无符号整数。产品不应在设备重启后持久化它；它只保护当前进程或本次启动周期。
 
 ## 7. 启动、提交与回滚
 
@@ -185,7 +185,7 @@ generation 建议使用 64 位无符号整数。嵌入式产品不应在设备�
 清理当前 generation 的局部状态
 -> 归还 owner
 -> 恢复 STREAM
--> 必要时恢复尚未取消的 pending ticket
+-> 必要时恢复尚未取消的待接记录
 ```
 
 成功响应也要验证结构。比如 HTTP 返回 `code=200` 但没有 `data.room_id`，仍属于失败，不能让 owner 留在 CALL。
@@ -201,7 +201,7 @@ generation 建议使用 64 位无符号整数。嵌入式产品不应在设备�
 - HTTP/SDK 立即失败；
 - SDK 异步连接失败；
 - 服务端返回错误；
-- watchdog 超时；
+- 等待超过截止时刻；
 - 媒体线程发生不可恢复错误。
 
 它们最终都执行：
@@ -223,9 +223,9 @@ SDK 回调线程不得直接执行 Stop/Uninit，原因包括：
 - 媒体线程可能仍在 SDK Send 调用栈内；
 - Uninit 可能释放当前 callback table。
 
-C 使用常驻生命周期队列；RTOS 推荐使用固定长度 queue。不要为每次回调动态创建任务。
+Linux C 参考实现使用常驻生命周期队列；其他平台应在独立移植中提供固定长度事件队列，不要为每次回调动态创建任务。
 
-## 9. deadline 与 watchdog
+## 9. 超时截止时刻（代码字段 `deadline`）
 
 “SDK 通常会回调”不能作为资源释放条件。每个异步阶段都必须有 deadline：
 
@@ -285,9 +285,9 @@ transition_lock -> arbiter state_lock -> coordinator lock -> business lock
 
 Python 需要同样遵守此规则。GIL 不能替代状态锁，因为 ctypes SDK 回调、Timer 和媒体线程可以并发进入。
 
-## 12. RTOS/嵌入式落地方式
+## 12. 非 Linux 产品的独立移植原则
 
-在 RTOS 上更推荐“单写者 actor”：
+如果目标系统使用固定任务和消息队列，可让一个 `session task` 成为 owner、pending 和 generation 的唯一写入者：
 
 ```text
 MQTT task ─┐
@@ -310,9 +310,9 @@ struct session_event {
 
 移植建议：
 
-| Linux 参考实现 | RTOS 建议 |
+| Linux 参考实现 | 固定任务/消息队列平台的独立实现 |
 |---|---|
-| pthread mutex/condition | RTOS mutex + fixed queue，或单 session task |
+| pthread mutex/condition | 平台 mutex + 固定队列，或单一 session task |
 | detached/background thread | 固定任务，不按事件创建任务 |
 | `clock_gettime(CLOCK_MONOTONIC)` | tick count 转毫秒，处理 tick wrap |
 | `malloc/calloc` callback context | 固定对象池或 generation 索引 |
@@ -337,7 +337,7 @@ ISR 中不能运行仲裁器，只能使用 ISR-safe queue 投递简化事件。
 开发和现场诊断时持续检查：
 
 1. `owner == NONE` 时，Coordinator 最终应为 STREAM 或系统正在关闭。
-2. `owner != NONE` 时不能存在新的 pending ticket。
+2. `owner != NONE` 时不能存在新的待接记录。
 3. 同一时刻最多一个业务 adapter 处于 started。
 4. terminal generation 小于当前 generation 时不能改变状态。
 5. 所有 CONNECTING/WAITING 状态都有非零 deadline。
@@ -360,8 +360,8 @@ event, kind, session_id, generation, old_owner, new_owner, reason, deadline
 |---|---|
 | 第二次同类会话在 action 内同步失败 | 使用新 lease 释放，恢复 STREAM |
 | 旧成功 callback 晚于新会话 | 断开旧 handle，不修改新状态 |
-| SDK 永远不回 callback | watchdog 释放 owner |
-| AI 永远不回 `start_session` | watchdog Disconnect 并恢复 STREAM |
+| SDK 永远不回 callback | 超时处理释放 owner |
+| AI 永远不回 `start_session` | 超时后 Disconnect 并恢复 STREAM |
 | VoIP 永远不回铃 | 30 秒 deadline 释放 VOIP |
 | cancel 与成功 callback 同时发生 | 只有一个提交成功 |
 | MQTT `room_id=null/数字/数组` | 不崩溃，不改变其它房间 |
@@ -394,7 +394,7 @@ Python：
 
 1. 增加新的 `SessionKind`。
 2. 注册 start/stop adapter。
-3. 定义是否需要 pending ticket 和 session_id。
+3. 定义是否需要待接记录和 session_id。
 4. 所有入口先经过 arbiter。
 5. 启动前发布 lease。
 6. 为每个异步阶段设置 deadline。

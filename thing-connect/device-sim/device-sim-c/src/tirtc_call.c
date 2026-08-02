@@ -1,8 +1,8 @@
 /** \file tirtc_call.c
  * \brief TiRTC device-to-device P2P call — passive listen + TiRtcConnect retry.
  *
- * Embedded-reference: demonstrates TiRtcConnect for device↔device P2P calling.
- * Reads already-encoded media files and discards received media after logging.
+ * Linux reference: demonstrates TiRtcConnect for device-to-device P2P calls.
+ * It reads encoded media files and discards received media after logging.
  */
 
 #include "tirtc_call.h"
@@ -20,7 +20,7 @@
 #include <cjson/cJSON.h>
 
 #include "tirtc/tiRTC.h"
-#include "file_media_source.h"
+#include "device_adapter.h"
 #include "media_format.h"
 #include "media_rx_log.h"
 #include "media_subscription_policy.h"
@@ -41,7 +41,7 @@ static SessionState     s_session_state = SESS_IDLE;
 static char             s_expected_room_id[128] = "";
 
 /* Media state */
-static FileMediaSource s_media_src;
+static DeviceMediaSource s_media_src;
 static int              s_media_running  = 0;
 static pthread_t        s_media_thread;
 static int              s_media_thread_created;
@@ -217,7 +217,10 @@ static void _call_on_audio(tirtc_conn_t hconn, const TIRTCFRAMEINFO *pFi, void *
     pthread_mutex_lock(&s_conn_mtx);
     int matched = s_active_conn == hconn;
     pthread_mutex_unlock(&s_conn_mtx);
-    (void)data;
+    if (matched)
+        (void)device_media_sink_submit(
+            DEVICE_BUSINESS_CALL, 0, pFi->stream_id, pFi->media,
+            pFi->flags, pFi->ts, data, pFi->length);
     MediaRxNotice notice;
     if (matched &&
         media_rx_log_note_audio(&s_rx_log, "设备通话", pFi, &notice))
@@ -232,7 +235,10 @@ static void _call_on_video(tirtc_conn_t hconn, const TIRTCFRAMEINFO *pFi, void *
     pthread_mutex_lock(&s_conn_mtx);
     int matched = s_active_conn == hconn;
     pthread_mutex_unlock(&s_conn_mtx);
-    (void)data;
+    if (matched)
+        (void)device_media_sink_submit(
+            DEVICE_BUSINESS_CALL, 1, pFi->stream_id, pFi->media,
+            pFi->flags, pFi->ts, data, pFi->length);
     MediaRxNotice notice;
     if (matched &&
         media_rx_log_note_video(&s_rx_log, "设备通话", pFi, &notice))
@@ -426,7 +432,7 @@ static void _start_media_stream(void) {
     pthread_mutex_unlock(&s_conn_mtx);
     if (already_running) return;
     if (!s_send_audio_path[0] || !s_send_audio_format) {
-        LOG_W("未配置上行音频文件，跳过媒体流");
+        LOG_W("未配置上行音频源，跳过媒体流");
         return;
     }
     int with_video = s_send_video_path[0] != '\0' && !_is_audio_call();
@@ -435,10 +441,16 @@ static void _start_media_stream(void) {
         media_subscription_policy_prepare(&s_media_policy, with_video);
     pthread_mutex_unlock(&s_conn_mtx);
     const char *video_path = with_video ? s_send_video_path : "";
-    if (file_media_source_open(&s_media_src, s_send_audio_path,
-                               s_send_audio_format, video_path,
-                               s_send_video_format, AUDIO_PKT_MS) != 0) {
-        LOG_E("无法打开发送媒体文件: video=%s audio=%s",
+    DeviceMediaSourceConfig media_config = {
+        .audio_locator = s_send_audio_path,
+        .audio_format = s_send_audio_format ? s_send_audio_format->name : NULL,
+        .video_locator = video_path,
+        .video_format = s_send_video_format ? s_send_video_format->name : NULL,
+        .audio_packet_ms = AUDIO_PKT_MS,
+        .business = DEVICE_BUSINESS_CALL,
+    };
+    if (device_media_source_open(&s_media_src, &media_config) != 0) {
+        LOG_E("无法打开设备通话上行媒体源: video=%s audio=%s",
               s_send_video_path, s_send_audio_path);
         return;
     }
@@ -451,14 +463,14 @@ static void _start_media_stream(void) {
         pthread_mutex_lock(&s_conn_mtx);
         s_media_running = 0;
         pthread_mutex_unlock(&s_conn_mtx);
-        file_media_source_close(&s_media_src);
+        device_media_source_close(&s_media_src);
         LOG_E("无法创建设备互呼媒体线程");
         return;
     }
     pthread_mutex_lock(&s_conn_mtx);
     s_media_thread_created = 1;
     pthread_mutex_unlock(&s_conn_mtx);
-    LOG_I("上行文件媒体已启动；下行音视频记录日志后丢弃");
+    LOG_I("设备通话上行媒体已启动；下行音视频提交 media sink");
 }
 
 static void _stop_media_stream(void) {
@@ -474,7 +486,7 @@ static void _stop_media_stream(void) {
     pthread_mutex_unlock(&s_conn_mtx);
     if (join_thread) {
         pthread_join(thread, NULL);
-        file_media_source_close(&s_media_src);
+        device_media_source_close(&s_media_src);
         LOG_I("媒体流已停止");
     }
     pthread_mutex_lock(&s_conn_mtx);
@@ -489,7 +501,7 @@ static void *_media_worker(void *arg) {
     int     first_video   = 1;
     int64_t wall_start_ms = now_ms();
     int     consec_fail   = 0;
-    int has_video = file_media_source_has_video(&s_media_src);
+    int has_video = device_media_source_has_video(&s_media_src);
     int video_was_enabled = 0;
 
     while (!g_stop) {
@@ -518,11 +530,8 @@ static void *_media_worker(void *arg) {
         int rc;
         int send_audio = !video_enabled || audio_pts_ms <= video_pts_ms;
         if (send_audio) {
-            const unsigned char *payload;
-            size_t length;
-            double duration_ms;
-            if (!file_media_source_next_audio(&s_media_src, &payload, &length,
-                                              &duration_ms))
+            DeviceMediaPacket packet;
+            if (device_media_source_next_audio(&s_media_src, &packet) <= 0)
                 break;
             TIRTCFRAMEINFO fi;
             memset(&fi, 0, sizeof(fi));
@@ -530,28 +539,26 @@ static void *_media_worker(void *arg) {
             fi.media = s_send_audio_format->media;
             fi.flags = s_send_audio_format->flags;
             fi.ts = (uint32_t)audio_pts_ms;
-            fi.length = (uint32_t)length;
-            rc = TiRtcSendAudioStream(conn, &fi, payload);
-            audio_pts_ms += duration_ms;
+            fi.length = (uint32_t)packet.length;
+            rc = TiRtcSendAudioStream(conn, &fi, packet.data);
+            audio_pts_ms += packet.duration_ms;
         } else {
-            const unsigned char *payload;
-            size_t length;
-            int is_key = 0;
             pthread_mutex_lock(&s_conn_mtx);
             int force_key = s_force_key;
             s_force_key = 0;
             pthread_mutex_unlock(&s_conn_mtx);
-            if (!file_media_source_next_video(&s_media_src, &payload, &length,
-                                              &is_key, first_video || force_key))
+            DeviceMediaPacket packet;
+            if (device_media_source_next_video(
+                    &s_media_src, first_video || force_key, &packet) <= 0)
                 break;
             TIRTCFRAMEINFO fi;
             memset(&fi, 0, sizeof(fi));
             fi.stream_id = STREAM_ID_VIDEO;
             fi.media = s_send_video_format->media;
-            fi.flags     = is_key ? TIRTC_FRAME_FLAG_KEY_FRAME : 0;
+            fi.flags = packet.key_frame ? TIRTC_FRAME_FLAG_KEY_FRAME : 0;
             fi.ts = (uint32_t)video_pts_ms;
-            fi.length = (uint32_t)length;
-            rc = TiRtcSendVideoStream(conn, &fi, payload);
+            fi.length = (uint32_t)packet.length;
+            rc = TiRtcSendVideoStream(conn, &fi, packet.data);
             video_pts_ms += 1000.0 / VIDEO_FPS;
         }
         if (rc < 0) {

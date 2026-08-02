@@ -37,3 +37,6 @@ thing-connect/local-deploy.sh
 /.codex_tmp
 /thing-connect/device-sim/assets/*.mjpeg
 /thing-connect/device-sim/assets/video_h264_annexb_*.h264
+/thing-connect/device-sim/device-sim-c/device-sim
+/thing-connect/device-sim/device-sim-c/device-sim-product
+/thing-connect/device-sim/device-sim-c/libdevice-reference.a

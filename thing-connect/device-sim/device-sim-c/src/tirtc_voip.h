@@ -1,5 +1,5 @@
 /** \file tirtc_voip.h
- * \brief TiRTC VoIP module — WHIP client + audio push + state machine.
+ * \brief TiRTC VoIP module — WHIP client, file media, and state machine.
  */
 
 #ifndef TIRTC_VOIP_H

@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "device_adapter.h"
 #include "file_media_source.h"
 #include "media_rx_log.h"
 #include "sdk_callback_guard.h"
@@ -29,7 +30,7 @@ static int s_push_thread_created;
 static int s_push_running;
 static int s_force_key;
 
-static FileMediaSource s_media;
+static DeviceMediaSource s_media;
 static const AudioFormat *s_audio_format;
 static const VideoFormat *s_video_format;
 static char s_video_path[512];
@@ -84,10 +85,16 @@ static void _accept_connection(void *opaque) {
     if (old_conn) TiRtcDisconnect(old_conn);
     _stop_push_thread();
 
-    if (file_media_source_open(&s_media, s_audio_path, s_audio_format,
-                               s_video_path, s_video_format,
-                               AUDIO_PKT_MS_VOIP) != 0) {
-        LOG_E("无法打开上行文件媒体");
+    DeviceMediaSourceConfig media_config = {
+        .audio_locator = s_audio_path,
+        .audio_format = s_audio_format ? s_audio_format->name : NULL,
+        .video_locator = s_video_path,
+        .video_format = s_video_format ? s_video_format->name : NULL,
+        .audio_packet_ms = AUDIO_PKT_MS_VOIP,
+        .business = DEVICE_BUSINESS_STREAM,
+    };
+    if (device_media_source_open(&s_media, &media_config) != 0) {
+        LOG_E("无法打开实时流上行媒体源");
         TiRtcDisconnect(hconn);
         pthread_mutex_unlock(&s_handoff_mtx);
         return;
@@ -96,7 +103,7 @@ static void _accept_connection(void *opaque) {
     pthread_mutex_lock(&s_conn_mtx);
     if (!s_service_active || s_active_conn) {
         pthread_mutex_unlock(&s_conn_mtx);
-        file_media_source_close(&s_media);
+        device_media_source_close(&s_media);
         TiRtcDisconnect(hconn);
         pthread_mutex_unlock(&s_handoff_mtx);
         return;
@@ -111,7 +118,7 @@ static void _accept_connection(void *opaque) {
     } else {
         s_push_running = 0;
         s_active_conn = NULL;
-        file_media_source_close(&s_media);
+        device_media_source_close(&s_media);
         LOG_E("无法创建实时推流线程");
         TiRtcDisconnect(hconn);
     }
@@ -157,7 +164,9 @@ static void _on_disconnected(tirtc_conn_t hconn) {
 static void _on_audio(tirtc_conn_t hconn, const TIRTCFRAMEINFO *frame, void *data) {
     sdk_callback_enter(&s_callback_guard);
     (void)hconn;
-    (void)data;
+    (void)device_media_sink_submit(
+        DEVICE_BUSINESS_STREAM, 0, frame->stream_id, frame->media,
+        frame->flags, frame->ts, data, frame->length);
     MediaRxNotice notice;
     if (media_rx_log_note_audio(&s_rx_log, "实时流", frame, &notice))
         (void)sdk_defer_copy_action(
@@ -169,7 +178,9 @@ static void _on_audio(tirtc_conn_t hconn, const TIRTCFRAMEINFO *frame, void *dat
 static void _on_video(tirtc_conn_t hconn, const TIRTCFRAMEINFO *frame, void *data) {
     sdk_callback_enter(&s_callback_guard);
     (void)hconn;
-    (void)data;
+    (void)device_media_sink_submit(
+        DEVICE_BUSINESS_STREAM, 1, frame->stream_id, frame->media,
+        frame->flags, frame->ts, data, frame->length);
     MediaRxNotice notice;
     if (media_rx_log_note_video(&s_rx_log, "实时流", frame, &notice))
         (void)sdk_defer_copy_action(
@@ -238,7 +249,7 @@ static void *_push_thread(void *arg) {
     pthread_mutex_unlock(&s_conn_mtx);
     if (!hconn) return NULL;
 
-    int has_video = file_media_source_has_video(&s_media);
+    int has_video = device_media_source_has_video(&s_media);
     double audio_pts_ms = 0.0;
     double video_pts_ms = 0.0;
     int64_t wall_start_ms = now_ms();
@@ -263,32 +274,27 @@ static void *_push_thread(void *arg) {
         memset(&frame, 0, sizeof(frame));
         int rc;
         if (send_audio) {
-            const unsigned char *payload;
-            size_t length;
-            double duration_ms;
-            if (!file_media_source_next_audio(&s_media, &payload, &length,
-                                              &duration_ms))
+            DeviceMediaPacket packet;
+            if (device_media_source_next_audio(&s_media, &packet) <= 0)
                 break;
             frame.stream_id = STREAM_ID_AUDIO;
             frame.media = s_audio_format->media;
             frame.flags = s_audio_format->flags;
             frame.ts = (uint32_t)audio_pts_ms;
-            frame.length = (uint32_t)length;
-            rc = TiRtcSendAudioStream(hconn, &frame, payload);
-            audio_pts_ms += duration_ms;
+            frame.length = (uint32_t)packet.length;
+            rc = TiRtcSendAudioStream(hconn, &frame, packet.data);
+            audio_pts_ms += packet.duration_ms;
         } else {
-            const unsigned char *payload;
-            size_t length;
-            int key;
-            if (!file_media_source_next_video(&s_media, &payload, &length, &key,
-                                              _take_force_key()))
+            DeviceMediaPacket packet;
+            if (device_media_source_next_video(
+                    &s_media, _take_force_key(), &packet) <= 0)
                 break;
             frame.stream_id = STREAM_ID_VIDEO;
             frame.media = s_video_format->media;
-            frame.flags = key ? TIRTC_FRAME_FLAG_KEY_FRAME : 0;
+            frame.flags = packet.key_frame ? TIRTC_FRAME_FLAG_KEY_FRAME : 0;
             frame.ts = (uint32_t)video_pts_ms;
-            frame.length = (uint32_t)length;
-            rc = TiRtcSendVideoStream(hconn, &frame, payload);
+            frame.length = (uint32_t)packet.length;
+            rc = TiRtcSendVideoStream(hconn, &frame, packet.data);
             video_pts_ms += 1000.0 / VIDEO_FPS;
         }
 
@@ -312,7 +318,7 @@ static void *_push_thread(void *arg) {
             consecutive_failures++;
         }
     }
-    file_media_source_close(&s_media);
+    device_media_source_close(&s_media);
     LOG_I("推流线程退出");
     return NULL;
 }
@@ -348,7 +354,7 @@ int stream_service_start(const char *video_path, const char *audio_path,
     STR_COPY(s_video_path, video_path ? video_path : "");
     STR_COPY(s_audio_path, audio_path ? audio_path : "");
     s_service_active = 1;
-    LOG_I("实时流业务已就绪（上行 audio=%s video=%s；下行日志后丢弃）",
+    LOG_I("实时流业务已就绪（上行 audio=%s video=%s；下行提交 media sink）",
           s_audio_format->name, s_video_path[0] ? s_video_format->name : "关闭");
     return 0;
 }

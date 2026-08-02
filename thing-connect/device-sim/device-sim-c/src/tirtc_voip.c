@@ -1,9 +1,9 @@
 /** \file tirtc_voip.c
- * \brief TiRTC VoIP module — WHIP client, audio push, call state machine.
+ * \brief TiRTC VoIP module — WHIP client, file media, and call state machine.
  *
- * Embedded-reference: demonstrates TiRTC WHIP connections for VoIP,
- * including incoming call handling, outgoing calls, reject, and
- * G.711 A-law audio streaming.
+ * Linux reference: demonstrates TiRTC WHIP connections for VoIP, including
+ * incoming call handling, outgoing calls, rejection, and encoded file-media
+ * streaming. It does not capture, play, or display hardware media.
  */
 
 #include "tirtc_voip.h"
@@ -26,7 +26,7 @@
 #include "device_flow.h"    /* http_get / http_post helpers need extern... */
 #define LOG_MODULE "voip"
 #include "common.h"
-#include "file_media_source.h"
+#include "device_adapter.h"
 #include "http_tls.h"
 #include "media_format.h"
 #include "media_rx_log.h"
@@ -632,10 +632,10 @@ static void _deferred_start_media(void *opaque) {
     pthread_mutex_unlock(&vs->lock);
     pthread_mutex_unlock(&vs->control_lock);
     if (start && !started) {
-        LOG_E("无法创建 VoIP 文件媒体线程，断开会话");
+        LOG_E("无法创建 VoIP 上行媒体线程，断开会话");
         _deferred_disconnect_session(hconn);
     } else if (start) {
-        LOG_I("收到 0x2000，开始 VoIP 文件媒体收发");
+        LOG_I("收到 0x2000，开始 VoIP 媒体收发");
     }
 }
 
@@ -661,12 +661,16 @@ static void _von_audio(tirtc_conn_t hconn, const TIRTCFRAMEINFO *pFi, void *data
     sdk_callback_enter(&s_voip_callback_guard);
     VoipState *vs = _active_voip();
     MediaRxNotice notice;
-    if (_voip_hconn_matches(vs, hconn) &&
+    int matched = _voip_hconn_matches(vs, hconn);
+    if (matched)
+        (void)device_media_sink_submit(
+            DEVICE_BUSINESS_VOIP, 0, pFi->stream_id, pFi->media,
+            pFi->flags, pFi->ts, data, pFi->length);
+    if (matched &&
         media_rx_log_note_audio(&vs->rx_log, "VoIP", pFi, &notice))
         (void)sdk_defer_copy_action(
             &s_voip_callback_guard, media_rx_log_emit, NULL,
             &notice, sizeof(notice));
-    (void)data;
     sdk_callback_leave(&s_voip_callback_guard);
 }
 
@@ -674,12 +678,16 @@ static void _von_video(tirtc_conn_t hconn, const TIRTCFRAMEINFO *pFi, void *data
     sdk_callback_enter(&s_voip_callback_guard);
     VoipState *vs = _active_voip();
     MediaRxNotice notice;
-    if (_voip_hconn_matches(vs, hconn) &&
+    int matched = _voip_hconn_matches(vs, hconn);
+    if (matched)
+        (void)device_media_sink_submit(
+            DEVICE_BUSINESS_VOIP, 1, pFi->stream_id, pFi->media,
+            pFi->flags, pFi->ts, data, pFi->length);
+    if (matched &&
         media_rx_log_note_video(&vs->rx_log, "VoIP", pFi, &notice))
         (void)sdk_defer_copy_action(
             &s_voip_callback_guard, media_rx_log_emit, NULL,
             &notice, sizeof(notice));
-    (void)data;
     sdk_callback_leave(&s_voip_callback_guard);
 }
 
@@ -797,13 +805,19 @@ static void *_voip_push_thread(void *arg) {
     video_format = vs->up_video_format;
     pthread_mutex_unlock(&vs->lock);
 
-    LOG_D("VoIP 文件媒体线程启动 audio=%s video=%s",
+    LOG_D("VoIP 上行媒体线程启动 audio=%s video=%s",
           audio_path, video_path[0] ? video_path : "关闭");
-    FileMediaSource source;
-    if (file_media_source_open(&source, audio_path, audio_format,
-                               video_path, video_format,
-                               AUDIO_PKT_MS_VOIP) != 0) {
-        LOG_E("无法打开 VoIP 媒体文件");
+    DeviceMediaSource source;
+    DeviceMediaSourceConfig media_config = {
+        .audio_locator = audio_path,
+        .audio_format = audio_format ? audio_format->name : NULL,
+        .video_locator = video_path,
+        .video_format = video_format ? video_format->name : NULL,
+        .audio_packet_ms = AUDIO_PKT_MS_VOIP,
+        .business = DEVICE_BUSINESS_VOIP,
+    };
+    if (device_media_source_open(&source, &media_config) != 0) {
+        LOG_E("无法打开 VoIP 上行媒体源");
         pthread_mutex_lock(&vs->lock);
         tirtc_conn_t hconn = vs->active_hconn;
         pthread_mutex_unlock(&vs->lock);
@@ -814,7 +828,7 @@ static void *_voip_push_thread(void *arg) {
     double audio_pts_ms = 0.0, video_pts_ms = 0.0;
     int64_t wall_start  = now_ms();
     int force_key = 1;
-    int has_video = file_media_source_has_video(&source);
+    int has_video = device_media_source_has_video(&source);
     int consecutive_failures = 0;
 
     while (!g_stop) {
@@ -837,41 +851,36 @@ static void *_voip_push_thread(void *arg) {
         int rc;
         int send_audio = !has_video || audio_pts_ms <= video_pts_ms;
         if (send_audio) {
-            const unsigned char *payload;
-            size_t length;
-            double duration_ms;
-            if (!file_media_source_next_audio(&source, &payload, &length,
-                                              &duration_ms))
+            DeviceMediaPacket packet;
+            if (device_media_source_next_audio(&source, &packet) <= 0)
                 break;
             TIRTCFRAMEINFO fi = {0};
             fi.stream_id = STREAM_ID_AUDIO;
             fi.media = audio_format->media;
             fi.flags = audio_format->flags;
             fi.ts = (uint32_t)audio_pts_ms;
-            fi.length = (uint32_t)length;
-            rc = TiRtcSendAudioStream(hconn, &fi, payload);
-            audio_pts_ms += duration_ms;
+            fi.length = (uint32_t)packet.length;
+            rc = TiRtcSendAudioStream(hconn, &fi, packet.data);
+            audio_pts_ms += packet.duration_ms;
         } else {
-            const unsigned char *payload;
-            size_t length;
-            int key = 0;
             pthread_mutex_lock(&vs->lock);
             if (vs->force_key) {
                 force_key = 1;
                 vs->force_key = 0;
             }
             pthread_mutex_unlock(&vs->lock);
-            if (!file_media_source_next_video(&source, &payload, &length,
-                                              &key, force_key))
+            DeviceMediaPacket packet;
+            if (device_media_source_next_video(
+                    &source, force_key, &packet) <= 0)
                 break;
             force_key = 0;
             TIRTCFRAMEINFO fi = {0};
             fi.stream_id = STREAM_ID_VIDEO;
             fi.media = video_format->media;
-            fi.flags = key ? TIRTC_FRAME_FLAG_KEY_FRAME : 0;
+            fi.flags = packet.key_frame ? TIRTC_FRAME_FLAG_KEY_FRAME : 0;
             fi.ts = (uint32_t)video_pts_ms;
-            fi.length = (uint32_t)length;
-            rc = TiRtcSendVideoStream(hconn, &fi, payload);
+            fi.length = (uint32_t)packet.length;
+            rc = TiRtcSendVideoStream(hconn, &fi, packet.data);
             video_pts_ms += 1000.0 / VIDEO_FPS;
         }
         if (rc >= 0) {
@@ -897,8 +906,8 @@ static void *_voip_push_thread(void *arg) {
         }
     }
 
-    file_media_source_close(&source);
-    LOG_D("VoIP 文件媒体线程退出");
+    device_media_source_close(&source);
+    LOG_D("VoIP 上行媒体线程退出");
     return NULL;
 }
 
@@ -1034,7 +1043,7 @@ int voip_start_session(VoipState *vs, const char *peer_id, const char *token,
     connect_ctx->vs = vs;
     connect_ctx->generation = generation;
 
-    LOG_I("下行 VoIP 音视频：限频记录日志后丢弃");
+    LOG_I("下行 VoIP 音视频提交 media sink（默认仅记录日志）");
     LOG_I("正在 WHIP 连接…");
 
     pthread_mutex_lock(&s_vs_mtx);
@@ -1420,7 +1429,7 @@ int voip_do_outgoing_call_ex(VoipState *vs, const cJSON *caller,
                          ? strcmp(call_type, "video") == 0
                          : (vs->voip_video[0] && vs->up_video_format);
     if (video_call && (!vs->voip_video[0] || !vs->up_video_format)) {
-        LOG_W("未配置上行视频文件，不能发起视频微信通话");
+        LOG_W("未配置上行视频源，不能发起视频微信通话");
         return -1;
     }
     cJSON *body = cJSON_CreateObject();

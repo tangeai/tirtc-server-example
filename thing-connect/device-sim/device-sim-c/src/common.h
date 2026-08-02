@@ -1,8 +1,9 @@
 /** \file common.h
- * \brief Shared types, constants, and utility macros for the device simulator.
+ * \brief Shared Linux/POSIX types, constants, and utility macros.
  *
- * Embedded-compatible: uses only C99/POSIX, no heap allocation required for helpers.
- * All third-party headers are guarded so individual modules only include what they need.
+ * These helpers belong to the Linux reference implementation.  A product port
+ * must replace POSIX time, random, signal, thread, file, and log facilities as
+ * required by its target platform.
  */
 
 #ifndef COMMON_H
@@ -28,9 +29,10 @@ extern "C" {
 enum { LOG_DEBUG = 10, LOG_INFO = 20, LOG_WARN = 30, LOG_ERROR = 40 };
 
 extern int g_log_level;
+extern volatile sig_atomic_t g_stop;
 
-/* A board can replace the default stdout/stderr sink with UART, syslog, RTT,
- * or another platform logger. `line` has no trailing newline. */
+/* A Linux integrator can replace the default stdout/stderr sink with syslog or
+ * another application logger. `line` has no trailing newline. */
 typedef void (*log_sink_fn)(int level, const char *line, void *user);
 void log_set_sink(log_sink_fn sink, void *user);
 void log_set_level(int level);
@@ -63,16 +65,8 @@ void log_write(int level, const char *module, const char *fmt, ...)
 #  define C_RESET  "\033[0m"
 #endif
 
-/* Wall-clock timestamp for log lines: "HH:MM:SS.mmm" */
-static inline void log_timestamp(char *buf, size_t sz) {
-    struct timespec ts;
-    struct tm tm_info;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    localtime_r(&ts.tv_sec, &tm_info);
-    int ms = (int)(ts.tv_nsec / 1000000);
-    snprintf(buf, sz, "%02d:%02d:%02d.%03d",
-             tm_info.tm_hour, tm_info.tm_min, tm_info.tm_sec, ms);
-}
+/* Wall-clock timestamp for log lines: "HH:MM:SS.mmm". */
+void log_timestamp(char *buf, size_t size);
 
 /* ── Base log macro ─────────────────────────────────────────────────────── */
 
@@ -178,20 +172,13 @@ static inline const char *sess_state_str(SessionState s) {
 
 /* ── Utility helpers ────────────────────────────────────────────────────── */
 
-/** Monotonic wall clock in milliseconds (best-effort). */
-static inline int64_t now_ms(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
-}
+/** Monotonic process clock in milliseconds. */
+int64_t now_ms(void);
 
 /** Sleep for at least `ms` milliseconds. */
-static inline void sleep_ms(int ms) {
-    struct timespec ts = { ms / 1000, (ms % 1000) * 1000000L };
-    nanosleep(&ts, NULL);
-}
+void sleep_ms(int ms);
 
-/* Bounded string copy for fixed-size embedded buffers.  Unlike strncpy(), it
+/* Bounded string copy for fixed-size buffers.  Unlike strncpy(), it
  * always terminates the destination and reports truncation to the caller. */
 static inline int str_copy(char *dst, size_t dst_size, const char *src) {
     if (!dst || dst_size == 0) return -1;
@@ -217,31 +204,11 @@ static inline int path_join(char *dst, size_t dst_size, const char *left, const 
     return 0;
 }
 
-/** Generate `len` bytes of hex random string into `out` (must hold 2*len + 1). */
-static inline void rand_hex(char *out, int len) {
-    FILE *fp = fopen("/dev/urandom", "rb");
-    if (!fp) {
-        /* fallback: time-based pseudo-random (embedded fallback) */
-        unsigned int seed = (unsigned int)time(NULL);
-        for (int i = 0; i < len; i++) {
-            seed = seed * 1103515245 + 12345;
-            sprintf(out + 2*i, "%02x", (seed >> 16) & 0xFF);
-        }
-        out[2*len] = '\0';
-        return;
-    }
-    unsigned char buf[32];
-    size_t r = 0;
-    if (len > 0) r = fread(buf, 1, (size_t)len, fp);
-    if (r < (size_t)len)
-        memset(buf + r, 0, (size_t)(len - (int)r));
-    fclose(fp);
-    for (int i = 0; i < len; i++)
-        sprintf(out + 2*i, "%02x", buf[i]);
-    out[2*len] = '\0';
-}
+/** Generate `len` cryptographically random bytes as lowercase hex.
+ * `out` must hold `2 * len + 1` bytes. Returns 0 or -1 without a fallback. */
+int rand_hex(char *out, int len);
 
-/** String buffer with fixed capacity (embedded-friendly, no malloc). */
+/** String buffer with fixed capacity and no heap allocation. */
 typedef struct {
     char *buf;
     size_t cap;

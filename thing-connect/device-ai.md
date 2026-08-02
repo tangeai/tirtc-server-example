@@ -37,7 +37,8 @@ AI 也走 WHIP 上行（设备推流到服务端），核心 API 仍是：
 
 **完成标志：**
 
-- **设备侧**：`ai_poll` 持续无错；`on_audio` 收到 AI 下行音频并交扬声器播放。
+- **Linux C 参考实现**：`ai_poll` 持续无错；`on_audio` 收到 AI 下行音频并异步写入文件。
+- **产品设备**：除上述协议结果外，还要确认下行音频经过有界队列、解码并由扬声器连续播放。
 - **对端（AI 平台）**：返回 `start_session` 成功响应，且能持续收到设备上行音频，多轮对话正常。
 
 ---
@@ -211,11 +212,11 @@ TiRtcSendAudioStream(hconn, &fi, audio_frame);
 
 > `start_session.input_audio`、`fi.media`、`fi.flags` 三者必须完全对齐，否则平台识别失败或解码异常。
 
-当前参考实现的行为是：
+当前 Linux C 参考实现的行为是：
 
 - `start_session` 成功前，不启动上行推流线程
 - 成功后再开始送音频（`stream_id = 1`，格式对齐响应的 `input_audio`）
-- 下行音频由 `on_audio` 回调接收（`stream_id = 1`），按响应的 `output_audio` 解码播放
+- 下行音频由 `on_audio` 回调接收（`stream_id = 1`）并先提交 `DeviceMediaSinkOps`；Linux 默认无 sink 时才复制后异步写入接收目录，它不解码或驱动扬声器
 
 > **上行 / 下行实操**：① 上行单帧时长建议 ≤ 100ms；② 下行流式播放，不要等整句 TTS 结束再播，收到 `interrupt` 或 `end_session` 时立即清播放缓冲。
 
@@ -236,9 +237,9 @@ AI 会话结束时，设备应：
 
 只有设备进程退出时才执行 `TiRtcStop` / `TiRtcUninit`。顺序不要反过来，否则容易出现“采集线程还在送音频，但连接句柄已经释放”的问题。
 
-### 5. C 参考实现调用骨架
+### 5. Linux C 参考实现调用顺序
 
-AI 模块已把 HTTP、WHIP 回调、0x2100 JSON-RPC 和 PCM 推流封装在 tirtc_ai.c。产品代码不应绕过这些步骤直接调用发送 API；按以下顺序调用即可。所有函数声明见 [tirtc_ai.h](device-sim/device-sim-c/src/tirtc_ai.h)，实际调用点见 [main.c](device-sim/device-sim-c/src/main.c)。
+Linux AI 模块把 HTTP、WHIP 回调、`0x2100` JSON-RPC 和已编码文件音频发送封装在 `tirtc_ai.c`。下面代码展示这些 Linux API 的调用顺序；`need_hangup` 和 `platform_sleep_ms()` 是说明控制循环的占位符，不是参考实现 API。产品应保留协议顺序和回调约束，并用自己的网络、采集、播放、任务和超时实现替换 Linux 模块。函数声明见 [tirtc_ai.h](device-sim/device-sim-c/src/tirtc_ai.h)，实际调用点见 [main.c](device-sim/device-sim-c/src/main.c)。
 
 ~~~c
 #include "tirtc_ai.h"
@@ -417,4 +418,4 @@ AI 的角色管理属于 H5 管理端职责，不在设备侧处理，但设备�
 - AI 没有说话但设备已经开始上行：建议按参考实现，收到 `start_session` 成功响应后再启动采集
 - 角色不对：检查 H5 管理端是否给该设备做了角色绑定；设备侧下一次重新调 [`/v1/ai/token`](api-reference.md#get-v1aitoken) 才会看到新角色
 
-> 端到端验证使用 「C 参考实现」：启动 [device-sim/device-sim-c/README.md](device-sim/device-sim-c/README.md) 后，在终端输入 `aicall`；它调用 `ai_get_token()`、`ai_start_session()`，并由 `ai_poll()` 在安全的业务线程里完成延迟信令和推流启动。
+> 使用 Linux C 参考实现联调：启动 [device-sim/device-sim-c/README.md](device-sim/device-sim-c/README.md) 后，在终端输入 `aicall`；它调用 `ai_get_token()`、`ai_start_session()`，并由 `ai_poll()` 在业务线程里完成延迟信令和文件音频发送。需要可用账号、服务和 TiRTC SDK；仓库单元测试本身不证明外部端到端链路已通过。

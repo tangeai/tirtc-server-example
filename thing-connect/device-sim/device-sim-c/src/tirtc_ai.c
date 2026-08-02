@@ -1,9 +1,9 @@
 /** \file tirtc_ai.c
- * \brief TiRTC AI conversation module — WHIP + JSON-RPC + PCM audio push.
+ * \brief TiRTC AI conversation module — WHIP + JSON-RPC + encoded audio push.
  *
- * Embedded-reference: demonstrates TiRTC AI voice conversation,
- * including start_session handshake, caption display, and encoded file-audio
- * streaming.  Received AI audio is recorded outside the SDK callback thread.
+ * Linux reference: demonstrates the AI start_session handshake, caption
+ * handling, and encoded file-audio streaming. Received AI audio is recorded
+ * outside the SDK callback thread; no capture or speaker hardware is used.
  */
 
 #include "tirtc_ai.h"
@@ -22,7 +22,7 @@
 #define LOG_MODULE "ai"
 #include "common.h"
 #include "audio_recorder.h"
-#include "file_media_source.h"
+#include "device_adapter.h"
 #include "http_tls.h"
 #include "media_format.h"
 #include "media_rx_log.h"
@@ -286,7 +286,11 @@ static void _a_on_audio(tirtc_conn_t hconn, const TIRTCFRAMEINFO *pFi, void *dat
     AiState *as = _active_ai();
     MediaRxNotice notice;
     if (_ai_hconn_matches(as, hconn)) {
-        (void)audio_recorder_submit(&as->recorder, pFi, data);
+        int sink_result = device_media_sink_submit(
+            DEVICE_BUSINESS_AI, 0, pFi->stream_id, pFi->media, pFi->flags,
+            pFi->ts, data, pFi->length);
+        if (sink_result == DEVICE_ADAPTER_NOT_HANDLED)
+            (void)audio_recorder_submit(&as->recorder, pFi, data);
         if (media_rx_log_note_audio(&as->rx_log, "AI", pFi, &notice))
             (void)sdk_defer_copy_action(
                 &s_ai_callback_guard, _ai_audio_notice_emit, NULL,
@@ -299,12 +303,15 @@ static void _a_on_video(tirtc_conn_t hconn, const TIRTCFRAMEINFO *pFi, void *dat
     sdk_callback_enter(&s_ai_callback_guard);
     AiState *as = _active_ai();
     MediaRxNotice notice;
-    if (_ai_hconn_matches(as, hconn) &&
-        media_rx_log_note_video(&as->rx_log, "AI", pFi, &notice))
-        (void)sdk_defer_copy_action(
-            &s_ai_callback_guard, media_rx_log_emit, NULL,
-            &notice, sizeof(notice));
-    (void)data;
+    if (_ai_hconn_matches(as, hconn)) {
+        (void)device_media_sink_submit(
+            DEVICE_BUSINESS_AI, 1, pFi->stream_id, pFi->media, pFi->flags,
+            pFi->ts, data, pFi->length);
+        if (media_rx_log_note_video(&as->rx_log, "AI", pFi, &notice))
+            (void)sdk_defer_copy_action(
+                &s_ai_callback_guard, media_rx_log_emit, NULL,
+                &notice, sizeof(notice));
+    }
     sdk_callback_leave(&s_ai_callback_guard);
 }
 
@@ -459,9 +466,11 @@ static void _ai_handle_message(AiState *as, tirtc_conn_t hconn, const char *json
             cJSON *message = cJSON_IsObject(error)
                                  ? cJSON_GetObjectItem(error, "message")
                                  : NULL;
-            LOG_E("start_session failed: %s",
-                  cJSON_IsString(message) && message->valuestring
-                      ? message->valuestring : "?");
+            const char *error_message = "?";
+            if (message != NULL && cJSON_IsString(message) &&
+                message->valuestring != NULL)
+                error_message = message->valuestring;
+            LOG_E("start_session failed: %s", error_message);
             cJSON_Delete(msg);
             if (sdk_defer_action(&s_ai_callback_guard,
                                  _ai_disconnect_deferred, hconn) != 0)
@@ -580,11 +589,18 @@ static void *_ai_push_thread(void *arg) {
     audio_format = as->up_audio_format;
     pthread_mutex_unlock(&as->lock);
 
-    LOG_D("AI 文件音频线程启动: %s (%s)", audio_path, audio_format->name);
-    FileMediaSource source;
-    if (file_media_source_open(&source, audio_path, audio_format,
-                               "", NULL, AUDIO_PKT_MS_AI) != 0) {
-        LOG_E("无法打开 AI 音频文件: %s", audio_path);
+    LOG_D("AI 上行音频线程启动: %s (%s)", audio_path, audio_format->name);
+    DeviceMediaSource source;
+    DeviceMediaSourceConfig media_config = {
+        .audio_locator = audio_path,
+        .audio_format = audio_format->name,
+        .video_locator = "",
+        .video_format = "",
+        .audio_packet_ms = AUDIO_PKT_MS_AI,
+        .business = DEVICE_BUSINESS_AI,
+    };
+    if (device_media_source_open(&source, &media_config) != 0) {
+        LOG_E("无法打开 AI 上行音频源: %s", audio_path);
         pthread_mutex_lock(&as->lock);
         tirtc_conn_t hconn = as->hconn;
         pthread_mutex_unlock(&as->lock);
@@ -601,16 +617,15 @@ static void *_ai_push_thread(void *arg) {
         tirtc_conn_t hconn = as->hconn;
         pthread_mutex_unlock(&as->lock);
         if (!running || !hconn) break;
-        if (source.audio_index >= source.audio_count) {
-            LOG_I("AI 音频文件发送完毕，等待服务端 VAD");
+        DeviceMediaPacket packet;
+        int source_result = device_media_source_next_audio(&source, &packet);
+        if (source_result <= 0) {
+            if (source_result == 0)
+                LOG_I("AI 上行音频源发送完毕，等待服务端 VAD");
+            else
+                LOG_E("AI 上行音频源读取失败: %d", source_result);
             break;
         }
-        const unsigned char *payload;
-        size_t length;
-        double duration_ms;
-        if (!file_media_source_next_audio(&source, &payload, &length,
-                                          &duration_ms))
-            break;
 
         /* Pacing */
         int64_t elapsed = now_ms() - wall_start;
@@ -629,9 +644,9 @@ static void *_ai_push_thread(void *arg) {
         fi.media = audio_format->media;
         fi.flags = audio_format->flags;
         fi.ts = (uint32_t)pts_ms;
-        fi.length = (uint32_t)length;
+        fi.length = (uint32_t)packet.length;
 
-        int rc = TiRtcSendAudioStream(hconn, &fi, payload);
+        int rc = TiRtcSendAudioStream(hconn, &fi, packet.data);
         if (rc == TIRTC_E_CONN_TIMEOUTCLOSE || rc == TIRTC_E_CONN_REMOTECLOSE ||
             rc == TIRTC_E_CONN_OTHER_ERROR) {
             LOG_D("连接已关闭，退出推流");
@@ -639,10 +654,10 @@ static void *_ai_push_thread(void *arg) {
         } else if (rc == TIRTC_E_INVALID_HANDLE) {
             sleep_ms(5);
         }
-        pts_ms += duration_ms;
+        pts_ms += packet.duration_ms;
     }
 
-    file_media_source_close(&source);
+    device_media_source_close(&source);
     LOG_D("音频推流线程退出");
     return NULL;
 }
@@ -742,22 +757,26 @@ int ai_start_session(AiState *as, const char *peer_id, const char *token,
     pthread_mutex_unlock(&as->lock);
     media_rx_log_reset(&as->rx_log);
 
-    char receive_name[96];
-    snprintf(receive_name, sizeof(receive_name), "ai_%lld.raw",
-             (long long)time(NULL));
-    if (audio_recorder_open(&as->recorder, receive_dir, device_id,
-                            receive_name) != 0) {
-        pthread_mutex_lock(&as->lock);
-        if (as->connect_generation == generation)
-            as->session_state = SESS_IDLE;
-        pthread_mutex_unlock(&as->lock);
-        LOG_E("无法创建 AI 接收音频文件: dir=%s device=%s",
-              receive_dir, device_id);
-        return -1;
+    if (!device_media_sink_is_enabled(DEVICE_BUSINESS_AI, 0)) {
+        char receive_name[96];
+        snprintf(receive_name, sizeof(receive_name), "ai_%lld.raw",
+                 (long long)time(NULL));
+        if (audio_recorder_open(&as->recorder, receive_dir, device_id,
+                                receive_name) != 0) {
+            pthread_mutex_lock(&as->lock);
+            if (as->connect_generation == generation)
+                as->session_state = SESS_IDLE;
+            pthread_mutex_unlock(&as->lock);
+            LOG_E("无法创建 AI 接收音频文件: dir=%s device=%s",
+                  receive_dir, device_id);
+            return -1;
+        }
+        LOG_I("接收 AI 音频 -> %s",
+              audio_recorder_raw_path(&as->recorder));
+    } else {
+        LOG_I("下行 AI 音频交给产品 media sink");
     }
-    LOG_I("接收 AI 音频 -> %s",
-          audio_recorder_raw_path(&as->recorder));
-    LOG_I("下行 AI 视频：限频记录日志后丢弃");
+    LOG_I("下行 AI 视频：交给已启用的产品 sink，否则仅记录日志");
     LOG_I("Starting AI session device_id=%s role_id=%s", device_id, role_id);
     pthread_mutex_lock(&s_ai_mtx);
     s_active_ai = as;
@@ -955,7 +974,11 @@ static void _ai_send_deferred_start(AiState *as) {
     if (!hconn) return;
 
     char req_id[33];
-    rand_hex(req_id, 16);
+    if (rand_hex(req_id, 16) != 0) {
+        LOG_E("无法生成 AI request_id");
+        ai_stop_session(as);
+        return;
+    }
 
     char *json_str = _ai_build_start_session_json(as, req_id);
     if (!json_str) {

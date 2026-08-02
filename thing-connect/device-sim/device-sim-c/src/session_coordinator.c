@@ -2,23 +2,76 @@
 
 #define LOG_MODULE "session"
 #include "common.h"
+#include "device_adapter.h"
+
+static DeviceBusiness _device_business(SessionKind kind) {
+    switch (kind) {
+    case SESSION_STREAM: return DEVICE_BUSINESS_STREAM;
+    case SESSION_VOIP: return DEVICE_BUSINESS_VOIP;
+    case SESSION_AI: return DEVICE_BUSINESS_AI;
+    case SESSION_CALL: return DEVICE_BUSINESS_CALL;
+    default: return DEVICE_BUSINESS_NONE;
+    }
+}
+
+static void _notify_session(DeviceSessionEventType type, SessionKind kind,
+                            int code) {
+    DeviceBusiness business = _device_business(kind);
+    uint64_t generation = device_adapter_session_generation(business);
+    DeviceProductEvent event = {
+        .type = type,
+        .business = business,
+        .generation = generation,
+        .code = code,
+    };
+    str_copy(event.detail, sizeof(event.detail), session_kind_name(kind));
+    device_product_notify(&event);
+}
 
 static int _start_locked(SessionCoordinator *sc, SessionKind kind) {
     SessionAdapter *adapter = &sc->adapters[kind];
+    DeviceBusiness business = _device_business(kind);
     if (!adapter->start) {
         LOG_E("%s 模块不可用", session_kind_name(kind));
+        device_adapter_session_starting(business);
+        device_adapter_session_failed(business, -1,
+                                      session_kind_name(kind));
         return -1;
     }
-    if (adapter->start(adapter->ctx) != 0) return -1;
+    device_adapter_session_starting(business);
+    int result = device_resource_acquire(business);
+    if (result != 0) {
+        LOG_E("%s 产品资源申请失败: %d", session_kind_name(kind), result);
+        device_adapter_session_failed(business, result,
+                                      session_kind_name(kind));
+        device_recovery_report(DEVICE_RECOVERY_RESOURCE, result,
+                               session_kind_name(kind));
+        return -1;
+    }
+    result = adapter->start(adapter->ctx);
+    if (result != 0) {
+        device_resource_release(business);
+        device_adapter_session_failed(business, result,
+                                      session_kind_name(kind));
+        device_recovery_report(DEVICE_RECOVERY_TIRTC, result,
+                               session_kind_name(kind));
+        return -1;
+    }
     sc->current = kind;
+    device_adapter_session_started(business);
     return 0;
 }
 
 static void _stop_locked(SessionCoordinator *sc) {
     SessionKind current = sc->current;
     sc->current = SESSION_NONE;
-    if (current != SESSION_NONE && sc->adapters[current].stop)
+    if (current == SESSION_NONE) return;
+    DeviceBusiness business = _device_business(current);
+    _notify_session(DEVICE_SESSION_STOPPING, current, 0);
+    if (sc->adapters[current].stop)
         sc->adapters[current].stop(sc->adapters[current].ctx);
+    device_adapter_session_stopped(business);
+    device_resource_release(business);
 }
 
 int session_coordinator_init(SessionCoordinator *sc,

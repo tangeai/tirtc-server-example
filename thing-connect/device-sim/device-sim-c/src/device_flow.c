@@ -1,8 +1,8 @@
 /** \file device_flow.c
  * \brief Device provisioning — HTTP + MQTT + mbedTLS signing.
  *
- * Embedded-reference: demonstrates how a device communicates with
- * the server using standard embedded-compatible C libraries.
+ * Linux reference: demonstrates how a device communicates with the server
+ * using Linux/POSIX libraries.
  *
  * Libraries used:
  *   - libcurl       (HTTP GET/POST, TLS)
@@ -24,6 +24,7 @@
 #include <cjson/cJSON.h>
 
 #include "common.h"
+#include "device_adapter.h"
 #include "http_tls.h"
 
 /* ── Global stop flag (shared across modules, defined in main.c) ──── */
@@ -50,11 +51,15 @@ static int _configure_mqtt_tls(struct mosquitto *mq, int use_tls) {
     if (!use_tls) return 0;
     if (access(g_ca_cert, R_OK) != 0) {
         LOG_E("MQTT CA 证书不可读: %s (%s)", g_ca_cert, strerror(errno));
+        device_recovery_report(DEVICE_RECOVERY_SECURITY, errno,
+                               "MQTT CA 证书不可读");
         return -1;
     }
     int rc = mosquitto_tls_set(mq, g_ca_cert, NULL, NULL, NULL, NULL);
     if (rc != MOSQ_ERR_SUCCESS) {
         LOG_E("mosquitto_tls_set 失败: %s (cert=%s)", mosquitto_strerror(rc), g_ca_cert);
+        device_recovery_report(DEVICE_RECOVERY_SECURITY, rc,
+                               "MQTT TLS 配置失败");
         return -1;
     }
     if (g_mqtt_insecure) {
@@ -99,6 +104,8 @@ static int http_get(const char *url, StrBuf *body, long *http_code) {
     CURLcode res = curl_easy_perform(curl);
     if (res != CURLE_OK) {
         LOG_E("HTTP GET %s 失败: %s", url, curl_easy_strerror(res));
+        device_recovery_report(DEVICE_RECOVERY_NETWORK, (int)res,
+                               "HTTP GET 失败");
         curl_easy_cleanup(curl);
         return -1;
     }
@@ -134,6 +141,8 @@ static int http_post(const char *url, const char *json_body,
     curl_slist_free_all(hlist);
     if (res != CURLE_OK) {
         LOG_E("HTTP POST %s 失败: %s", url, curl_easy_strerror(res));
+        device_recovery_report(DEVICE_RECOVERY_NETWORK, (int)res,
+                               "HTTP POST 失败");
         curl_easy_cleanup(curl);
         return -1;
     }
@@ -188,13 +197,23 @@ static int json_data_str(const char *json_str, const char *key,
 }
 
 /* =========================================================================
- *  Crypto: HMAC-SHA256 + Base64 (OpenSSL — 嵌入式替换为 mbedTLS 见 README)
+ *  Crypto: HMAC-SHA256 + Base64 (SDK-bundled mbedTLS)
  * ========================================================================= */
 
 int hmac_sha256_b64(const char *key, const char *data,
                     char *out, size_t out_size) {
+    if (!key || !data || !out || out_size == 0) {
+        LOG_E("HMAC-SHA256 签名参数无效");
+        return -1;
+    }
+    const mbedtls_md_info_t *md_info =
+        mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+    if (!md_info) {
+        LOG_E("mbedTLS 不支持 SHA-256");
+        return -1;
+    }
     unsigned char digest[32];
-    int rc = mbedtls_md_hmac(mbedtls_md_info_from_type(MBEDTLS_MD_SHA256),
+    int rc = mbedtls_md_hmac(md_info,
                              (const unsigned char *)key, strlen(key),
                              (const unsigned char *)data, strlen(data), digest);
     if (rc != 0) { LOG_E("HMAC-SHA256 签名失败: -0x%04x", -rc); return -1; }
@@ -371,7 +390,10 @@ int report_device(const char *server,
         snprintf(ts_str, sizeof(ts_str), "%ld", (long)time(NULL));
 
         char nonce[17];
-        rand_hex(nonce, 8);
+        if (rand_hex(nonce, 8) != 0) {
+            LOG_E("无法生成 Report 签名随机数");
+            return -1;
+        }
 
         char raw[320];
         snprintf(raw, sizeof(raw), "%s%s%s",
@@ -474,7 +496,10 @@ int get_mqtt_token(const char *server,
     snprintf(ts_str, sizeof(ts_str), "%ld", (long)time(NULL));
 
     char nonce[17];
-    rand_hex(nonce, 8);
+    if (rand_hex(nonce, 8) != 0) {
+        LOG_E("无法生成 Token 签名随机数");
+        return -1;
+    }
 
     char raw[320];
     snprintf(raw, sizeof(raw), "%s%s%s", device_id, ts_str, nonce);
@@ -556,6 +581,8 @@ static void _temp_on_connect(struct mosquitto *mq, void *obj, int rc) {
         LOG_D("已订阅 %s，等待 auth_grant...", topic);
     } else {
         LOG_E("临时 MQTT 连接被拒绝 rc=%d (temp_token 已过期?)", rc);
+        device_recovery_report(DEVICE_RECOVERY_MQTT, rc,
+                               "临时 MQTT 连接被拒绝");
         pthread_mutex_lock(&ctx->mtx);
         ctx->connect_rc = rc;
         ctx->done = 1;
@@ -785,6 +812,8 @@ static void _perm_on_connect(struct mosquitto *mq, void *obj, int rc) {
         LOG_I("step 3/4  设备已上线，长连接已建立 (Ctrl+C 退出)");
     } else {
         LOG_E("永久 MQTT 连接被拒绝 rc=%d", rc);
+        device_recovery_report(DEVICE_RECOVERY_MQTT, rc,
+                               "正式 MQTT 连接被拒绝");
         *ctx->stop_flag = 1;
     }
 }
@@ -795,8 +824,12 @@ static void _perm_on_disconnect(struct mosquitto *mq, void *obj, int rc) {
     if (*ctx->stop_flag) return;
     if (rc == 0x98 || rc == 0x99 || rc == 152 || rc == 153) {
         LOG_W("Token 已过期 (rc=%#x)，请重新获取 mqtt_token 并重连", rc);
+        device_recovery_report(DEVICE_RECOVERY_MQTT, rc,
+                               "MQTT Token 已过期");
     } else if (rc != 0) {
         LOG_W("MQTT 断开 rc=%d，自动重连中...", rc);
+        device_recovery_report(DEVICE_RECOVERY_MQTT, rc,
+                               "MQTT 非主动断开");
     }
 }
 
@@ -934,6 +967,8 @@ int connect_mqtt_blocking(const char *host, int port,
     int rc = mosquitto_connect(mq, host, port, 60);
     if (rc != MOSQ_ERR_SUCCESS) {
         LOG_E("mosquitto_connect 失败: %s", mosquitto_strerror(rc));
+        device_recovery_report(DEVICE_RECOVERY_MQTT, rc,
+                               "正式 MQTT 初始连接失败");
         mosquitto_destroy(mq);
         mosquitto_lib_cleanup();
         return -1;

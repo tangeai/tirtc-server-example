@@ -4,8 +4,7 @@
 
 > 本文描述多业务共存时的设备端主干设计。设备上线与 MQTT 规范见 [device-integration.md](device-integration.md)；各业务接入细节见 [device-h5-live.md](device-h5-live.md)、[device-voip.md](device-voip.md)、[device-ai.md](device-ai.md)、[device-call.md](device-call.md)。
 >
-> generation lease、pending ticket、deadline、迟到回调、锁顺序和 RTOS
-> 移植细节见 [多业务会话竞态仲裁与嵌入式实现参考](device-session-arbiter.md)。
+> `generation` 是区分新旧会话的递增代次，`pending` 是最多保存一通来电的待接记录，`deadline` 是按单调时钟计算的超时截止时刻。迟到回调、锁顺序和产品移植细节见 [多业务会话并发控制与产品实现参考](device-session-arbiter.md)。
 
 **文档导航：** [返回总览](README.md) | [返回设备入口](device-integration.md) | [H5 实时](device-h5-live.md) | [微信 VoIP](device-voip.md) | [AI 对讲](device-ai.md) | [设备呼设备](device-call.md)
 
@@ -77,7 +76,7 @@
 
 ## 业务抢占规则
 
-下面这套规则和当前模拟器实现一致，适合做默认策略。
+下面这套规则和当前 Linux C 参考实现一致，可作为资源互斥产品的起始策略；是否适合最终产品必须结合交互和硬件资源验证。
 
 ### 1. H5 实时是后台态
 
@@ -102,9 +101,7 @@
 
 ### 4. 全局只保留一个 pending 来电
 
-当前模拟器使用一个带 `room_id`、代次和 45 秒 TTL 的全局 pending
-ticket。VoIP/设备来电 first-wins，后来的来电立即 busy 拒绝，不能覆盖
-第一通来电。这样 `accept` 永远只对应一个确定房间。
+当前 Linux C 参考实现使用一个带 `room_id`、代次和 45 秒有效期的全局待接记录 `pending`。VoIP/设备来电按先到者保留，后来的来电立即 busy 拒绝，不能覆盖第一通来电。这样 `accept` 永远只对应一个确定房间。
 
 如果产品需要 VoIP 优先等抢占策略，应按
 [显式抢占协议](device-session-arbiter.md#4-默认冲突策略)实现，不能在 SDK
@@ -194,7 +191,7 @@ ticket。VoIP/设备来电 first-wins，后来的来电立即 busy 拒绝，不�
 2. `session_router`
    - 只负责按消息类型把 MQTT 分发到各业务状态机
 3. `session_arbiter`
-   - 负责来电准入、唯一 owner、pending ticket、deadline 与 generation 隔离
+   - 负责来电准入、唯一 owner、待接记录、超时与会话代次隔离
 4. `session_coordinator`
    - 不判断业务优先级，只串行停止当前适配器、启动目标适配器和恢复 STREAM
 5. `voip / ai / call / stream`
@@ -212,6 +209,6 @@ device-sim-c 是当前仓库的 「C 参考实现」，代码组织如下：
 - 会话仲裁器：[device-sim/device-sim-c/src/session_arbiter.c](device-sim/device-sim-c/src/session_arbiter.c)
 - 会话协调器：[device-sim/device-sim-c/src/session_coordinator.c](device-sim/device-sim-c/src/session_coordinator.c)
 - MQTT 路由：[device-sim/device-sim-c/src/device_flow.c](device-sim/device-sim-c/src/device_flow.c)
-- 完整竞态与嵌入式参考：[device-session-arbiter.md](device-session-arbiter.md)
+- 完整并发控制与产品实现参考：[device-session-arbiter.md](device-session-arbiter.md)
 
-如果你在做嵌入式移植，建议优先保留 Router → Arbiter → Coordinator/业务适配器的边界，即使底层语言换成 C / C++ / RTOS 任务模型也一样成立。
+产品二次开发时建议保留 Router → Arbiter → Coordinator/业务适配器的职责边界。非 Linux 目标应作为独立移植实现自己的任务、同步、队列和硬件适配，并重新完成竞态测试。

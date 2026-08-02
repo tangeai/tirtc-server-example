@@ -1,12 +1,12 @@
 # ThingConnect 开发者文档
 
-ThingConnect 让嵌入式设备具备 **H5 实时预览与对讲、AI 对讲、微信 IoT VoIP、设备间互呼** 四类能力，由设备端 **「C 参考实现」**、H5/小程序前端和五个 Go 服务组成。
+ThingConnect 展示设备如何接入 **H5 实时预览与对讲、AI 对讲、微信 IoT VoIP、设备间互呼** 四类能力。仓库包含 Linux 用户态 **「C 参考实现」**、Python 模拟器、H5/小程序前端和五个 Go 服务；真实产品设备不属于仓库已实现范围。
 
 本页按「业务流程 → H5 出图 → 扩展对讲」展开。首次体验请先按[项目快速体验](../README.md)跑通「上线 → 绑定 → H5 出图」。
 
 > 本页提供各能力的**最小接入步骤和 TiRTC SDK 调用骨架**。完整字段、错误码和排查方法见各节的「参考实现」和「深入」链接。
 
-> 三端使用不同的接入方式：设备端使用 **TiRTC C SDK**（[SDK 头文件](device-sim/sdk/linux-x86_64/2.2.1/include/tirtc/tiRTC.h)）；H5 使用 [TiRTC Web SDK](device-h5-live.md#h5-端接入)；微信小程序使用[微信 IoT VoIP](weixin-mini-program/README.md#4-接入微信-voip)。设备侧以 [**「C 参考实现」**](device-sim/device-sim-c)为准；移植到产品固件时，需替换其中的 libcurl、libmosquitto、pthread 和文件媒体读写。
+> 三端使用不同的接入方式：设备端使用 **TiRTC C SDK**（[SDK 头文件](device-sim/sdk/linux-x86_64/2.2.1/include/tirtc/tiRTC.h)）；H5 使用 [TiRTC Web SDK](device-h5-live.md#h5-端接入)；微信小程序使用[微信 IoT VoIP](weixin-mini-program/README.md#微信-voip-开发)。设备协议顺序和会话控制可参考 [Linux C 参考实现](device-sim/device-sim-c/README.md)；产品化时必须完成[十项二次开发 TODO](device-porting.md#二次开发-todo)，不能只替换几个系统库就视为移植完成。
 
 ---
 
@@ -14,12 +14,12 @@ ThingConnect 让嵌入式设备具备 **H5 实时预览与对讲、AI 对讲、�
 
 设备端流程分为「上线与绑定、H5 实时出图、扩展对讲」三段，下面通过时序图展示。
 
-> **启动时先检查 Flash：** 没有 `device_id + device_key`，调用 [`POST /v1/device/report`](api-reference.md#post-v1devicereport) 注册绑定；已有凭证，先调用 [`POST /v1/device/token`](api-reference.md#post-v1devicetoken)。如果接口返回 **HTTP 410**，且响应体业务错误码为 **`6006`**，说明设备未绑定或已解绑，需携带 HMAC 签名重新调用 [`POST /v1/device/report`](api-reference.md#post-v1devicereport)。
+> **启动时先检查持久化存储：** 没有 `device_id + device_key`，调用 [`POST /v1/device/report`](api-reference.md#post-v1devicereport) 注册绑定；已有凭证，先调用 [`POST /v1/device/token`](api-reference.md#post-v1devicetoken)。如果接口返回 **HTTP 410**，且响应体业务错误码为 **`6006`**，说明设备未绑定或已解绑，需携带 HMAC 签名重新调用 [`POST /v1/device/report`](api-reference.md#post-v1devicereport)。
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant D as 设备（C 参考实现）
+    participant D as 设备端（Linux C 文件媒体示例）
     participant DS as device-server
     participant MQ as MQTT Broker
     participant US as user-server
@@ -27,7 +27,7 @@ sequenceDiagram
     participant RTC as TiRTC
 
     Note over D,U: ① 上线与绑定
-    alt 路径 A：Flash 中没有 device_id + device_key
+    alt 路径 A：持久化存储中没有 device_id + device_key
         D->>DS: POST /v1/device/report（body: {mac}，无签名 Header）
         DS-->>D: code + temp_client_id + temp_token
         D->>MQ: 临时连接（ClientID=User=temp_client_id，Pass=temp_token）
@@ -36,7 +36,7 @@ sequenceDiagram
         MQ-->>D: auth_grant
         D->>DS: POST /v1/device/token（HMAC 签名，Header: X-Device-Id / X-Timestamp / X-Nonce / X-Signature）
         DS-->>D: mqtt_token
-    else 路径 B：Flash 中已有 device_id + device_key
+    else 路径 B：持久化存储中已有 device_id + device_key
         D->>DS: POST /v1/device/token（HMAC 签名，Header 同上）
         alt token 获取成功
             DS-->>D: mqtt_token
@@ -73,13 +73,13 @@ sequenceDiagram
 
 **① 上线与绑定**（设备获得身份）
 
-根据 Flash 中是否已有 `device_id + device_key` 选择上线流程。
+根据持久化存储中是否已有 `device_id + device_key` 选择上线流程。
 
-- **路径 A：Flash 中没有凭证。** 调用 [`POST /v1/device/report`](api-reference.md#post-v1devicereport) 获取验证码和临时 MQTT 凭证。用户绑定后，设备收到 `device_id + device_key`，立即写入 Flash，再调用 [`POST /v1/device/token`](api-reference.md#post-v1devicetoken) 获取正式 MQTT token。
+- **路径 A：持久化存储中没有凭证。** 调用 [`POST /v1/device/report`](api-reference.md#post-v1devicereport) 获取验证码和临时 MQTT 凭证。用户绑定后，设备收到 `device_id + device_key`，先安全持久化，再调用 [`POST /v1/device/token`](api-reference.md#post-v1devicetoken) 获取正式 MQTT token。
 
-- **路径 B：Flash 中已有凭证。** 先调用 [`POST /v1/device/token`](api-reference.md#post-v1devicetoken)。成功后直接使用返回的 MQTT token；如果接口返回 **HTTP 410**，且响应体业务错误码为 **`6006`**，则携带 HMAC 签名调用 [`POST /v1/device/report`](api-reference.md#post-v1devicereport)，重新完成绑定。
+- **路径 B：持久化存储中已有凭证。** 先调用 [`POST /v1/device/token`](api-reference.md#post-v1devicetoken)。成功后直接使用返回的 MQTT token；如果接口返回 **HTTP 410**，且响应体业务错误码为 **`6006`**，则携带 HMAC 签名调用 [`POST /v1/device/report`](api-reference.md#post-v1devicereport)，重新完成绑定。
 
-两条路径调用 [`POST /v1/device/token`](api-reference.md#post-v1devicetoken) 时，均使用相同的签名 Header：`X-Device-Id` / `X-Timestamp` / `X-Nonce` / `X-Signature`。签名算法为 **mbedTLS HMAC-SHA256 → Base64**（ESP32 / STM32 / nRF 通用）：
+两条路径调用 [`POST /v1/device/token`](api-reference.md#post-v1devicetoken) 时，均使用相同的签名 Header：`X-Device-Id` / `X-Timestamp` / `X-Nonce` / `X-Signature`。Linux C 参考实现使用 **mbedTLS HMAC-SHA256 → Base64**：
 
 ```c
 // 签名串 = device_id + timestamp + nonce
@@ -89,15 +89,21 @@ sequenceDiagram
 #include <mbedtls/base64.h>
 
 char raw[256];
-snprintf(raw, sizeof(raw), "%s%s%s", device_id, timestamp, nonce);
+int n = snprintf(raw, sizeof(raw), "%s%s%s", device_id, timestamp, nonce);
+if (n < 0 || (size_t)n >= sizeof(raw)) return -1;
 
 unsigned char hmac[32];
-mbedtls_md_hmac(mbedtls_md_info_from_type(MBEDTLS_MD_SHA256),
-                (const unsigned char *)device_key, strlen(device_key),
-                (const unsigned char *)raw, strlen(raw), hmac);
+const mbedtls_md_info_t *md = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+if (md == NULL ||
+    mbedtls_md_hmac(md,
+                    (const unsigned char *)device_key, strlen(device_key),
+                    (const unsigned char *)raw, strlen(raw), hmac) != 0)
+    return -1;
 
-size_t olen; char sig[64];
-mbedtls_base64_encode((unsigned char *)sig, sizeof(sig), &olen, hmac, 32);
+size_t olen = 0; char sig[64];
+if (mbedtls_base64_encode((unsigned char *)sig, sizeof(sig), &olen,
+                          hmac, sizeof(hmac)) != 0 || olen >= sizeof(sig))
+    return -1;
 sig[olen] = '\0';
 ```
 
@@ -115,7 +121,8 @@ sig[olen] = '\0';
 
 | 一方 | 负责 |
 |---|---|
-| 设备（**「C 参考实现」**） | 上线身份、MQTT、TiRTC 推流 / 对讲、媒体采集播放 |
+| Linux C 参考实现 | 上线、凭证、MQTT、TiRTC、会话控制，以及 `DeviceAdapterV1` 二次开发边界；默认仍为文件媒体/stdin 演示 |
+| 产品设备 | 平台与硬件适配、真实身份、采集编码、解码播放、视频显示、产品交互、资源仲裁、异常恢复和量产安全 |
 | H5 / 小程序 | 登录、绑定、取 token、发起 / 接听通话 |
 | 服务端（5 个 Go 服务） | 身份、绑定、签发各业务 token、MQTT 信令、微信回调、房间管理 |
 | MQTT Broker | 设备长连接、来电与通知下发 |
@@ -296,11 +303,11 @@ TiRtcSendVideoStream(hconn, &video, video_frame);
 
 ### 你的第一个设备端功能：H5 出图
 
-如果还没有跑通过完整流程，请先按[项目快速体验](../README.md)使用 Python 模拟器完成「上线 → 绑定 → H5 出图」。本节再将同一流程迁移到 **「C 参考实现」或真实设备**：先获取设备身份，再推送音视频。
+如果还没有跑通过完整流程，请先按[项目快速体验](../README.md)使用 Python 模拟器完成「上线 → 绑定 → H5 出图」。本节先用 **Linux C 参考实现**验证设备协议和文件媒体路径；真实设备再按[二次开发文档](device-porting.md)接入硬件。
 
 #### 步骤 1：设备上线
 
-所有能力共用这个前提：设备完成上线，持有 `device_id + device_key`、`mqtt_token` 和正式 MQTT 长连接。**「C 参考实现」**用 `device_flow.c` 封装了完整流程（[main.c](device-sim/device-sim-c/src/main.c) 是真实调用范本）：
+所有能力共用这个前提：设备完成上线，持有 `device_id + device_key`、`mqtt_token` 和正式 MQTT 长连接。**Linux C 参考实现**用 `device_flow.c` 封装该流程；[main.c](device-sim/device-sim-c/src/main.c) 是 Linux 上可运行的控制流，不是硬件产品启动代码：
 
 ```c
 #include "device_flow.h"
@@ -314,7 +321,7 @@ report_device(svc.device_server, mac, NULL, NULL, &rep); /* → rep.code：TTS �
 char did[64] = "", dkey[256] = "";
 connect_temp_mqtt(svc.mqtt_host, svc.mqtt_port,
                   rep.temp_client_id, rep.temp_token, 190, svc.mqtt_tls,
-                  did, sizeof did, dkey, sizeof dkey);   /* 收到 auth_grant 回填 did/dkey，须存 Flash */
+                  did, sizeof did, dkey, sizeof dkey);   /* 收到 auth_grant 后回填 did/dkey */
 
 /* 阶段 2：已绑定 → HMAC 签名换 mqtt_token（返回 6006 表示已解绑，需带签名重新 report，见 device-integration） */
 char mqtt_token[512];
@@ -327,7 +334,7 @@ connect_mqtt_blocking(svc.mqtt_host, svc.mqtt_port, did, mqtt_token,
                       &g_stop /*停止标志*/, svc.mqtt_tls);
 ```
 
-> 绑定后把 `did/dkey` 持久化到 Flash（**「C 参考实现」**用 `device_creds.json` 原子写入 + fsync，权限 0600）；已预烧凭证的设备直接从阶段 2 开始。完整字段、临时/正式连接参数、Token 刷新、断连原因码见 [device-integration.md](device-integration.md#上线全流程)。
+> 绑定后必须持久化 `did/dkey`。Linux C 参考实现写入 `device_creds.json`，使用同目录临时文件 + `fsync` + `rename`，权限为 0600；产品设备应换成受保护的设备存储。已预置凭证的设备直接从阶段 2 开始。完整字段、临时/正式连接参数、Token 刷新和断连原因码见 [device-integration.md](device-integration.md#上线全流程)。
 
 #### 步骤 2：H5 推流出图
 
@@ -341,7 +348,7 @@ connect_mqtt_blocking(svc.mqtt_host, svc.mqtt_port, did, mqtt_token,
 | 设备 → H5 视频 | `11` | H.264 裸流，首帧须关键帧 |
 | H5 → 设备 按住说话 | `14` | G.711A，默认 8kHz |
 
-**TiRTC SDK 调用：** `on_conn_accepted` 只投递连接事件，设备控制任务在回调返回后保存句柄并启动推流线程；线程按时间戳节流，循环「取一帧 → 填帧头 → 发送」。帧字段含义见 SDK 速查③，这里聚焦循环结构和 stream 契约。
+**TiRTC SDK 调用：** `on_conn_accepted` 只投递连接事件，设备控制任务在回调返回后保存句柄并启动推流线程；线程按时间戳节流，循环「取一帧 → 填帧头 → 发送」。下面是说明调用顺序的产品侧伪代码，`app_rtc_event_push`、`h264_source_next_*`、`src` 和 `VIDEO_FRAME_MS` 都不是 TiRTC API，也不是可直接编译的 Linux C 参考实现符号；实际代码见 [tirtc_stream.c](device-sim/device-sim-c/src/tirtc_stream.c) 和 [file_media_source.c](device-sim/device-sim-c/src/file_media_source.c)。
 
 ```c
 /* SDK 回调：只投递事件。 */
@@ -359,7 +366,7 @@ static void stream_control_on_connected(tirtc_conn_t hconn) {
 static void *push_thread(void *arg) {
     int64_t audio_pts = 0, video_pts = 0, start = now_ms();   /* now_ms / sleep_ms 见 common.h */
     while (s_active_conn && !g_stop) {
-        /* 节流：对齐墙上时钟，等到下一帧该发的时刻，避免发太快 */
+        /* 节流：对齐单调时钟，等到下一帧该发的时刻，避免发太快 */
         int64_t target = audio_pts < video_pts ? audio_pts : video_pts;
         int64_t wait = target - (now_ms() - start);
         if (wait > 2) { sleep_ms(wait > 50 ? 50 : (int)wait); continue; }
@@ -388,12 +395,12 @@ static void *push_thread(void *arg) {
 }
 /* 其余回调（在 cbs 里注册，见速查①）：
    on_request_key_frame(hconn, sid) → 置 s_force_key，下一帧强制 IDR
-   on_audio(hconn, pFi, data)       → sid=14 的 talkback 音频交给扬声器播放 */
+   on_audio(hconn, pFi, data)       → sid=14；产品复制并投递给播放队列 */
 ```
 
-> `s_active_conn`、`s_push_thread` 和 `s_force_key` 是 stream 模块状态，`g_stop` 是进程停止标志。`src` 是媒体源；**「C 参考实现」**使用 `H264FileSource`，产品固件应替换为实际采集和编码模块。连接断开及 `TIRTC_E_BUSY` 处理见 [tirtc_stream.c](device-sim/device-sim-c/src/tirtc_stream.c) 的 `_push_thread()`。
+> 上述变量和函数只服务于伪代码。Linux C 默认适配实际使用 `FileMediaSource` 读取已编码文件；产品通过 `DeviceMediaSourceOps` 替换成真实采集和编码模块。连接断开及 `TIRTC_E_BUSY` 处理见 [tirtc_stream.c](device-sim/device-sim-c/src/tirtc_stream.c) 的 `_push_thread()`。
 
-**完成标志：** 在 H5 设备列表中打开设备后，可以正常播放音视频；按住说话时，设备能够收到 H5 音频。
+**Linux C 参考实现完成标志：** H5 能播放参考实现从文件发送的音视频；按住说话时，参考实现能记录收到的 H5 音频帧。收到帧不代表扬声器已播放。
 
 **参考实现：** [tirtc_runtime.c](device-sim/device-sim-c/src/tirtc_runtime.c) 统一管理进程级 SDK 生命周期与回调分发，[tirtc_stream.c](device-sim/device-sim-c/src/tirtc_stream.c) 只管理实时流会话和媒体发送。完整契约与排查见 [device-h5-live.md](device-h5-live.md#设备侧接入)。
 
@@ -523,7 +530,7 @@ void on_call_connected(int err, tirtc_conn_t hconn, void *user) {
 
 **参考实现：** [call_session.c](device-sim/device-sim-c/src/call_session.c) 中的 `call_session_do_call()` 负责主叫建房；[tirtc_call.c](device-sim/device-sim-c/src/tirtc_call.c) 中的 `call_on_device_call_incoming()` 负责被叫获取 token、建立连接并发送 `0x2000` 接通确认。完整流程见 [device-call.md](device-call.md#被叫流程)。
 
-> ⚠️ 一台设备要同时承载多类业务（推流中来了 VoIP 来电、AI 会话中收到设备呼叫），必须按统一状态机处理抢占与恢复。先看 [统一状态机](device-session-model.md)，实现和嵌入式移植细节见 [竞态仲裁参考](device-session-arbiter.md)。
+> ⚠️ 一台设备要同时承载多类业务（推流中来了 VoIP 来电、AI 会话中收到设备呼叫），必须按统一状态机处理抢占与恢复。先看 [统一状态机](device-session-model.md)，并发控制与产品实现细节见 [会话仲裁参考](device-session-arbiter.md)。
 
 ---
 
@@ -531,7 +538,7 @@ void on_call_connected(int err, tirtc_conn_t hconn, void *user) {
 
 > **H5：** 使用 TiRTC Web SDK，通过 [`TiRtcConn`](device-h5-live.md#h5-端接入) 直连设备。
 >
-> **微信小程序：** 使用[微信 IoT VoIP](weixin-mini-program/README.md#4-接入微信-voip) 与设备对讲，不使用 `TiRtcConn`。
+> **微信小程序：** 使用[微信 IoT VoIP](weixin-mini-program/README.md#微信-voip-开发) 与设备对讲，不使用 `TiRtcConn`。
 
 ### H5 开发
 
@@ -667,8 +674,8 @@ bash build.sh
 | [微信 VoIP 对讲设备接入](device-voip.md) | 扩展：VoIP / 小程序 |
 | [设备呼设备接入](device-call.md) | 扩展：设备互呼 |
 | [设备统一状态机](device-session-model.md) | 一台设备承载多类业务时 |
-| [设备会话竞态仲裁](device-session-arbiter.md) | pending、generation、迟到回调与 RTOS 队列实现 |
-| [从 **「C 参考实现」**移植到嵌入式设备](device-porting.md) | Linux 交叉编译 / RTOS 适配 |
+| [设备会话竞态仲裁](device-session-arbiter.md) | 待处理来电、会话代次、迟到回调与事件队列 |
+| [从 Linux C 参考实现进行二次开发](device-porting.md) | Linux 交叉编译 / 十项产品 TODO 与验收 |
 | [微信小程序开发](weixin-mini-program/README.md) | 做小程序 |
 | [部署与运维](deployment.md) | 上生产 / 二次开发服务端 |
 | [API Reference](api-reference.md) | 联调字段、排错 |
@@ -678,7 +685,7 @@ bash build.sh
 
 ```text
 thing-connect/
-├── device-sim/device-sim-c/  # 设备端 C 参考实现（设备侧行为以这里为准）
+├── device-sim/device-sim-c/  # Linux C 参考实现（文件媒体，不接硬件）
 ├── device-sim/device-sim-py/  # Python 设备模拟器（首次体验用）
 ├── device-sim/sdk/<platform>/2.2.1/include/tirtc/tiRTC.h  # TiRTC C SDK 权威头文件
 ├── device-server/            # 设备身份与 MQTT token

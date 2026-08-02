@@ -434,7 +434,7 @@ tirtc_runtime_stop();
 voip_destroy(voip);
 ~~~
 
-voip_start_session() 是底层方法，参数为 MQTT payload 中的 peer_id、token 和上行 G.711A 文件/采集源；通常调用 voip_accept_pending()，避免应用层重复解析或遗漏来电状态。板端需在 tirtc_voip.c 的 _voip_handle_audio() 将下行帧接到扬声器，在 _voip_push_thread() 将文件读取替换为麦克风编码器输出。
+`voip_start_session()` 是 Linux 参考实现的底层方法，参数为 MQTT payload 中的 `peer_id`、`token` 和上行媒体配置；通常调用 `voip_accept_pending()`，避免应用层重复解析或遗漏来电状态。`_von_audio()` 将下行帧交给 `DeviceMediaSinkOps.submit`，Linux 默认适配没有 sink，因此只记录元数据后丢弃。产品必须在 sink 中复制到有界播放队列，并通过 `DeviceMediaSourceOps` 用麦克风采集和编码输出替换默认文件源。
 
 ---
 
@@ -572,8 +572,7 @@ Python 模拟器的实现行为是：
 5. 随后 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcdisconnect" target="_blank" rel="noopener">`TiRtcDisconnect`</a>
 6. 如果 `10s` 内房间通知没到，则直接结束本地取消状态
 
-C 与 ESP32 参考实现会立即结束本地等待，并把本次 `call_id` 暂存为已取消；迟到回铃
-会被拒绝。两种策略都不能让尚未进房间的小程序立即停止振铃。
+Linux C 参考实现会立即结束本地等待，并把本次 `call_id` 暂存为已取消；迟到回铃会被拒绝。它与前述 Python 策略都不能让尚未进房间的小程序立即停止振铃。其他芯片的独立移植行为以各自文档和代码为准。
 
 因此这里的关键约束是：
 

@@ -1,6 +1,29 @@
 #define LOG_MODULE "arbiter"
 #include "common.h"
+#include "device_adapter.h"
 #include "session_arbiter.h"
+
+static DeviceBusiness _device_business(SessionKind kind) {
+    switch (kind) {
+    case SESSION_STREAM: return DEVICE_BUSINESS_STREAM;
+    case SESSION_VOIP: return DEVICE_BUSINESS_VOIP;
+    case SESSION_AI: return DEVICE_BUSINESS_AI;
+    case SESSION_CALL: return DEVICE_BUSINESS_CALL;
+    default: return DEVICE_BUSINESS_NONE;
+    }
+}
+
+static void _notify_incoming(SessionKind kind, const char *session_id) {
+    DeviceBusiness business = _device_business(kind);
+    DeviceProductEvent event = {
+        .type = DEVICE_SESSION_INCOMING,
+        .business = business,
+        .generation = device_adapter_session_generation(business),
+    };
+    str_copy(event.session_id, sizeof(event.session_id),
+             session_id ? session_id : "");
+    device_product_notify(&event);
+}
 
 static uint32_t _kind_bit(SessionKind kind) {
     return kind > SESSION_NONE && kind <= SESSION_CALL
@@ -49,6 +72,8 @@ static void _finish_coordinator_with_recovery(SessionArbiter *arbiter,
     }
     LOG_E("%s 结束后恢复 H5 实时流失败",
           session_kind_name(kind));
+    device_recovery_report(DEVICE_RECOVERY_TIRTC, -1,
+                           "会话结束后恢复实时流失败");
 }
 
 static void _finish_generation(SessionArbiter *arbiter, SessionKind kind,
@@ -139,6 +164,8 @@ int session_arbiter_offer_pending_id(SessionArbiter *arbiter, SessionKind kind,
     if (!granted)
         LOG_W("会话冲突：%s 来电未获得待接权",
               session_kind_name(kind));
+    else
+        _notify_incoming(kind, session_id);
     return granted ? 0 : -1;
 }
 
@@ -169,6 +196,7 @@ int session_arbiter_admit_incoming_id(SessionArbiter *arbiter,
         decision = 0;
     }
     pthread_mutex_unlock(&arbiter->state_lock);
+    if (decision == 0) _notify_incoming(kind, session_id);
     return decision;
 }
 

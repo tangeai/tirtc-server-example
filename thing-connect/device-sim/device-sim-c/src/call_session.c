@@ -825,13 +825,20 @@ int call_session_do_list_contacts(CallState *cs) {
     /* Cache contacts for index-based commands */
     int count = cJSON_GetArraySize(contacts);
     cJSON *new_list = cJSON_Duplicate(contacts, 1);
-    char **new_ids = count > 0 ? calloc((size_t)count, sizeof(char *)) : NULL;
-    if (!new_list || (count > 0 && !new_ids)) {
+    if (!new_list) {
         LOG_E("联系人缓存内存不足");
-        cJSON_Delete(new_list);
-        free(new_ids);
         cJSON_Delete(resp);
         return -1;
+    }
+    char **new_ids = NULL;
+    if (count > 0) {
+        new_ids = calloc((size_t)count, sizeof(*new_ids));
+        if (!new_ids) {
+            LOG_E("联系人 ID 缓存内存不足");
+            cJSON_Delete(new_list);
+            cJSON_Delete(resp);
+            return -1;
+        }
     }
 
     for (int i = 0; i < count; i++) {

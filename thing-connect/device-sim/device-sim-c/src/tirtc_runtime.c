@@ -7,6 +7,7 @@
 
 #define LOG_MODULE "rtc-runtime"
 #include "common.h"
+#include "device_adapter.h"
 #include "sdk_callback_guard.h"
 
 extern volatile sig_atomic_t g_stop;
@@ -502,6 +503,8 @@ int tirtc_runtime_start(const char *device_id, const char *secret_key,
 
     if (sdk_callback_guard_start(&s_runtime.callback_guard) != 0) {
         LOG_E("无法启动 TiRTC runtime 控制队列");
+        device_recovery_report(DEVICE_RECOVERY_TIRTC, -1,
+                               "TiRTC runtime 控制队列启动失败");
         return -1;
     }
     if (sdk_callback_guard_start(&s_runtime.sdk_log_guard) != 0) {
@@ -525,12 +528,16 @@ int tirtc_runtime_start(const char *device_id, const char *secret_key,
                             sizeof(buffer_size));
     if (rc != 0) {
         LOG_E("设置发送缓冲区失败 rc=%d (%s)", rc, TiRtcGetErrorStr(rc));
+        device_recovery_report(DEVICE_RECOVERY_TIRTC, rc,
+                               "TiRTC 发送缓冲区配置失败");
         tirtc_runtime_stop();
         return -1;
     }
     rc = TiRtcInit();
     if (rc != 0) {
         LOG_E("TiRtcInit 失败 rc=%d (%s)", rc, TiRtcGetErrorStr(rc));
+        device_recovery_report(DEVICE_RECOVERY_TIRTC, rc,
+                               "TiRtcInit 失败");
         tirtc_runtime_stop();
         return -1;
     }
@@ -561,6 +568,8 @@ int tirtc_runtime_start(const char *device_id, const char *secret_key,
     if (rc != 0) {
         LOG_E("设置 TiRTC 启动参数失败 rc=%d (%s)",
               rc, TiRtcGetErrorStr(rc));
+        device_recovery_report(DEVICE_RECOVERY_TIRTC, rc,
+                               "TiRTC 启动参数配置失败");
         tirtc_runtime_stop();
         return -1;
     }
@@ -569,6 +578,8 @@ int tirtc_runtime_start(const char *device_id, const char *secret_key,
     rc = TiRtcStart(device_id, &s_runtime.sdk_callbacks);
     if (rc != 0) {
         LOG_E("TiRtcStart 失败 rc=%d (%s)", rc, TiRtcGetErrorStr(rc));
+        device_recovery_report(DEVICE_RECOVERY_TIRTC, rc,
+                               "TiRtcStart 失败");
         tirtc_runtime_stop();
         return -1;
     }
@@ -580,6 +591,9 @@ int tirtc_runtime_start(const char *device_id, const char *secret_key,
     if (_wait_started() == 0) return 0;
 
     LOG_E("等待 SDK 启动%s", g_stop ? "已取消" : "超时");
+    device_recovery_report(DEVICE_RECOVERY_TIRTC, -1,
+                           g_stop ? "TiRTC 启动已取消" :
+                                    "TiRTC 启动等待超时");
     tirtc_runtime_stop();
     return -1;
 }

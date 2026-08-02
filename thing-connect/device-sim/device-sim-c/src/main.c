@@ -17,18 +17,17 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <sys/select.h>
 #include <unistd.h>
 
 #include <curl/curl.h>
 #include <cjson/cJSON.h>
 
 #include "common.h"
+#include "device_adapter.h"
+#include "device_reference.h"
 #include "device_flow.h"
-#include "file_media_source.h"
 #include "http_tls.h"
+#include "linux_device_adapter.h"
 #include "media_format.h"
 #include "tirtc_stream.h"
 #include "tirtc_voip.h"
@@ -41,10 +40,6 @@
 
 #define DEFAULT_AUDIO_PATH "../assets/audio.g711a"
 #define EXPERIENCE_PLATFORM_URL "https://demo-open.tange-ai.com"
-
-/* Globals */
-int          g_log_level = LOG_DEBUG;
-volatile sig_atomic_t g_stop = 0;
 
 /* ── Signal handler ──────────────────────────────────────────────────────── */
 
@@ -585,10 +580,59 @@ static void _handle_command(DeviceRuntime *rt, const char *line) {
     call_session_dispatch(rt->call, line);
 }
 
+static void _handle_product_action(DeviceRuntime *rt,
+                                   const DeviceProductAction *action) {
+    if (!rt || !action) return;
+    char command[1024];
+    command[0] = '\0';
+    switch (action->type) {
+    case DEVICE_ACTION_RAW_COMMAND:
+        STR_COPY(command, action->raw_command);
+        break;
+    case DEVICE_ACTION_ACCEPT:
+        STR_COPY(command, "accept");
+        break;
+    case DEVICE_ACTION_REJECT:
+        snprintf(command, sizeof(command), "reject %s",
+                 action->reason[0] ? action->reason : "decline");
+        break;
+    case DEVICE_ACTION_START_AI:
+        STR_COPY(command, "aicall");
+        break;
+    case DEVICE_ACTION_HANGUP:
+        STR_COPY(command, "hangup");
+        break;
+    case DEVICE_ACTION_CANCEL:
+        STR_COPY(command, "cancel");
+        break;
+    case DEVICE_ACTION_DIAL_DEVICE:
+        snprintf(command, sizeof(command), "call %s %s", action->target,
+                 action->call_type[0] ? action->call_type :
+                 _default_call_type(rt));
+        break;
+    case DEVICE_ACTION_DIAL_CONTACT_INDEX:
+        snprintf(command, sizeof(command), "call %d %s", action->index,
+                 action->call_type[0] ? action->call_type :
+                 _default_call_type(rt));
+        break;
+    case DEVICE_ACTION_DIAL_WX_INDEX:
+        snprintf(command, sizeof(command), "wxcall %d %s", action->index,
+                 action->call_type[0] ? action->call_type :
+                 _default_call_type(rt));
+        break;
+    case DEVICE_ACTION_EXIT:
+        STR_COPY(command, "exit");
+        break;
+    case DEVICE_ACTION_NONE:
+    default:
+        return;
+    }
+    if (command[0]) _handle_command(rt, command);
+}
+
 static void *_runtime_cmd_thread(void *arg) {
     DeviceRuntime *rt = arg;
     _print_commands();
-    char line[1024];
     while (!g_stop) {
         ai_poll(rt->ai);
         voip_expire_outgoing(rt->voip);
@@ -602,95 +646,24 @@ static void *_runtime_cmd_thread(void *arg) {
                                 sizeof(expired_room)))
             session_arbiter_clear_pending_id(
                 &rt->arbiter, SESSION_CALL, expired_room);
-        fd_set fds; FD_ZERO(&fds); FD_SET(STDIN_FILENO, &fds);
-        struct timeval tv = {0, 100000};
-        if (select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv) <= 0) continue;
-        if (!fgets(line, sizeof(line), stdin)) {
+        DeviceProductAction action;
+        int action_result = device_product_poll_action(&action, 100);
+        if (action_result < 0) {
+            device_recovery_report(DEVICE_RECOVERY_PLATFORM, action_result,
+                                   "product action poll failed");
             sleep_ms(100);
             continue;
         }
-        line[strcspn(line, "\r\n")] = '\0';
-        if (line[0]) _handle_command(rt, line);
+        if (action_result > 0) _handle_product_action(rt, &action);
     }
     return NULL;
-}
-
-/* ── Credential persistence ─────────────────────────────────────────────── */
-
-static int _load_creds_file(const char *path, char *device_id, size_t id_size,
-                            char *device_key, size_t key_size) {
-    if (!path || !path[0]) return -1;
-    FILE *fp = fopen(path, "r");
-    if (!fp) return -1;
-
-    fseek(fp, 0, SEEK_END);
-    long fsize = ftell(fp);
-    if (fsize <= 0 || fsize > 8192) { fclose(fp); return -1; }
-    fseek(fp, 0, SEEK_SET);
-
-    char *buf = (char *)malloc((size_t)fsize + 1);
-    if (!buf) { fclose(fp); return -1; }
-    if (fread(buf, 1, (size_t)fsize, fp) != (size_t)fsize) {
-        free(buf); fclose(fp); return -1;
-    }
-    buf[fsize] = '\0';
-    fclose(fp);
-
-    cJSON *root = cJSON_Parse(buf);
-    free(buf);
-    if (!root) return -1;
-
-    cJSON *did  = cJSON_GetObjectItem(root, "device_id");
-    cJSON *dkey = cJSON_GetObjectItem(root, "device_key");
-    int ok = 0;
-    if (did && cJSON_IsString(did) && dkey && cJSON_IsString(dkey)
-        && did->valuestring[0] && dkey->valuestring[0]) {
-        str_copy(device_id, id_size, did->valuestring);
-        str_copy(device_key, key_size, dkey->valuestring);
-        LOG_I("从本地文件加载凭证 device_id=%s", device_id);
-        ok = 1;
-    }
-    cJSON_Delete(root);
-    return ok ? 0 : -1;
-}
-
-static void _save_creds_file(const char *path, const char *device_id, const char *device_key) {
-    if (!path || !path[0]) return;
-    cJSON *root = cJSON_CreateObject();
-    if (!root) { LOG_E("凭证 JSON 分配失败"); return; }
-    if (!cJSON_AddStringToObject(root, "device_id", device_id) ||
-        !cJSON_AddStringToObject(root, "device_key", device_key)) {
-        cJSON_Delete(root);
-        LOG_E("凭证 JSON 字段分配失败");
-        return;
-    }
-    char *json_str = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (!json_str) { LOG_E("生成凭证 JSON 失败"); return; }
-
-    char temp_path[1024];
-    if (snprintf(temp_path, sizeof(temp_path), "%s.tmp", path) >= (int)sizeof(temp_path)) {
-        LOG_E("凭证路径过长"); free(json_str); return;
-    }
-    int fd = open(temp_path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
-    if (fd < 0) { LOG_W("保存凭证失败: %s", strerror(errno)); free(json_str); return; }
-    FILE *fp = fdopen(fd, "w");
-    int ok = fp && fputs(json_str, fp) >= 0 && fflush(fp) == 0 && fsync(fd) == 0;
-    if (fp) fclose(fp); else close(fd);
-    if (ok && rename(temp_path, path) == 0) {
-        LOG_I("凭证已原子保存到 %s（权限 0600）", path);
-    } else {
-        LOG_W("保存凭证失败: %s", strerror(errno));
-        unlink(temp_path);
-    }
-    free(json_str);
 }
 
 /* ── Print banner ────────────────────────────────────────────────────────── */
 
 static void _banner(void) {
     printf(C_BOLD "──────────────────────────────────────────────────" C_RESET "\n");
-    printf("  模拟 RTC 设备上线流程 (C)\n");
+    printf("  TiRTC Linux C 设备端参考实现\n");
     printf(C_BOLD "──────────────────────────────────────────────────" C_RESET "\n\n");
 }
 
@@ -700,16 +673,27 @@ static int _validate_media_files(const char *audio_path,
                                  const VideoFormat *video_format,
                                  const char *ai_audio_path,
                                  const AudioFormat *ai_audio_format) {
-    FileMediaSource source;
-    if (file_media_source_open(&source, audio_path, audio_format,
-                               video_path, video_format,
-                               AUDIO_PKT_MS_VOIP) != 0)
+    DeviceMediaSource source;
+    DeviceMediaSourceConfig config = {
+        .audio_locator = audio_path,
+        .audio_format = audio_format ? audio_format->name : NULL,
+        .video_locator = video_path,
+        .video_format = video_format ? video_format->name : NULL,
+        .audio_packet_ms = AUDIO_PKT_MS_VOIP,
+        .business = DEVICE_BUSINESS_STREAM,
+    };
+    if (device_media_source_open(&source, &config) != 0)
         return -1;
-    file_media_source_close(&source);
-    if (file_media_source_open(&source, ai_audio_path, ai_audio_format,
-                               "", NULL, AUDIO_PKT_MS_AI) != 0)
+    device_media_source_close(&source);
+    config.audio_locator = ai_audio_path;
+    config.audio_format = ai_audio_format ? ai_audio_format->name : NULL;
+    config.video_locator = "";
+    config.video_format = NULL;
+    config.audio_packet_ms = AUDIO_PKT_MS_AI;
+    config.business = DEVICE_BUSINESS_AI;
+    if (device_media_source_open(&source, &config) != 0)
         return -1;
-    file_media_source_close(&source);
+    device_media_source_close(&source);
     return 0;
 }
 
@@ -726,7 +710,7 @@ static void _usage(const char *prog) {
     printf("  --timeout      SEC      auth_grant timeout (default: 190)\n\n");
     printf("  --ca-cert      PATH     MQTT/HTTPS CA certificate (env: MQTT_CA_CERT, default: ../assets/ca-certificates.crt)\n\n");
     printf("  --insecure              Disable MQTT/HTTPS certificate checks (test only; env: TIRTC_INSECURE=1)\n\n");
-    printf("Media options (same names as the Python simulator):\n");
+    printf("Linux default media adapter options:\n");
     printf("  --up-audio-file PATH      Encoded audio file for stream/VoIP/device calls"
            " (default: %s)\n", DEFAULT_AUDIO_PATH);
     printf("  --up-audio-format FMT     Its format (default: alaw_8khz)\n");
@@ -737,7 +721,7 @@ static void _usage(const char *prog) {
     printf("  --down-media-dir PATH     AI downlink recording root (default: received)\n");
     printf("  --ai-audio-file PATH      AI request audio file (default: --up-audio-file)\n");
     printf("  --ai-up-audio-format FMT  AI request audio format (default: --up-audio-format)\n");
-    printf("  AI audio is saved under --down-media-dir/<device_id>/; other downlink media is discarded.\n\n");
+    printf("  The stock adapter records AI audio and discards other downlink media; a product sink replaces this behavior.\n\n");
     printf("Other:\n");
     printf("  --endpoint     URL      service discovery entry (default: http://ep-open.tangeopen.com)\n");
     printf("  --log-level    LEVEL    debug|info|warn|error (default: debug)\n");
@@ -746,7 +730,34 @@ static void _usage(const char *prog) {
 
 /* ── Main ────────────────────────────────────────────────────────────────── */
 
-int main(int argc, char *argv[]) {
+/* A product may link an object that provides a strong implementation of this
+ * Linux-only hook. It must install DeviceAdapterV1 before worker threads are
+ * created. The stock build falls through to the file-media demo adapter. */
+__attribute__((weak)) int device_product_adapter_install(void) {
+    return DEVICE_ADAPTER_NOT_HANDLED;
+}
+
+int device_reference_run(int argc, char *argv[]) {
+    int product_adapter_result = device_product_adapter_install();
+    if (product_adapter_result < 0) {
+        fprintf(stderr, "初始化产品设备适配器失败: %d\n",
+                product_adapter_result);
+        return 1;
+    }
+    if (product_adapter_result == 0 && !device_adapter_is_installed()) {
+        fprintf(stderr, "产品适配器入口返回成功但未安装 DeviceAdapterV1\n");
+        return 1;
+    }
+    if (product_adapter_result != 0 &&
+        product_adapter_result != DEVICE_ADAPTER_NOT_HANDLED) {
+        fprintf(stderr, "产品适配器入口返回未知状态: %d\n",
+                product_adapter_result);
+        return 1;
+    }
+    if (linux_device_adapter_install_default() != 0) {
+        fprintf(stderr, "初始化 Linux 默认设备适配器失败\n");
+        return 1;
+    }
     if (curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK) {
         fprintf(stderr, "初始化 libcurl 失败\n");
         return 1;
@@ -861,6 +872,10 @@ int main(int argc, char *argv[]) {
     else                                      log_set_level(LOG_DEBUG);
 
     set_mqtt_ca_cert(ca_cert);
+    if (insecure && !device_security_allow_insecure_transport()) {
+        LOG_E("产品安全适配器禁止关闭 TLS 证书校验");
+        return 1;
+    }
     set_mqtt_insecure(insecure);
     http_tls_configure(ca_cert, insecure);
     if (insecure)
@@ -922,7 +937,9 @@ int main(int argc, char *argv[]) {
 
     if (!did[0] || !dkey[0]) {
         /* Try loading from local creds file before scan-binding */
-        _load_creds_file(creds_file, did, sizeof(did), dkey, sizeof(dkey));
+        if (device_identity_load(creds_file, did, sizeof(did),
+                                 dkey, sizeof(dkey)) == 0)
+            LOG_I("从身份适配器加载凭证 device_id=%s", did);
     }
     if (!did[0] || !dkey[0]) {
         PHASE_TITLE("阶段一：未绑定上线 — 获取验证码并等待绑定");
@@ -959,11 +976,17 @@ int main(int argc, char *argv[]) {
             PROMPT_KV("  device_key = <hidden>");
             PROMPT_KV("  (来源: auth_grant 下发)");
             SEP_LINE();
-            _save_creds_file(creds_file, did, dkey);
+            if (device_identity_save(creds_file, did, dkey) != 0) {
+                LOG_E("身份适配器无法持久化新凭证");
+                device_recovery_report(DEVICE_RECOVERY_IDENTITY, -1,
+                                       "save granted credentials failed");
+                return 1;
+            }
         }
     } else {
         LOG_I("使用预存凭证 device_id=%s，直接进入阶段二", did);
-        _save_creds_file(creds_file, did, dkey);
+        if (device_identity_save(creds_file, did, dkey) != 0)
+            LOG_W("身份适配器未保存显式提供的凭证");
     }
 
     /* ── Phase 2: Get mqtt_token ───────────────────────────────────────── */
@@ -986,7 +1009,12 @@ int main(int argc, char *argv[]) {
         if (get_mqtt_token(svc.device_server, did, dkey, mac,
                            mqtt_token, sizeof(mqtt_token)) != 0)
             return 1;
-        _save_creds_file(creds_file, did, dkey);
+        if (device_identity_save(creds_file, did, dkey) != 0) {
+            LOG_E("重新绑定后无法持久化凭证");
+            device_recovery_report(DEVICE_RECOVERY_IDENTITY, -1,
+                                   "save rebound credentials failed");
+            return 1;
+        }
     } else if (tok_ret != 0) {
         return 1;
     }
@@ -1021,7 +1049,7 @@ int main(int argc, char *argv[]) {
     ai_configure_receive_dir(rt.ai, down_media_dir);
     if (voip_configure_media(rt.voip, audio_path, up_audio_spec->name,
                              video_path, up_video_spec->name) != 0) {
-        LOG_E("配置 VoIP 文件媒体失败");
+        LOG_E("配置 VoIP 上行媒体源失败");
         voip_destroy(rt.voip);
         ai_destroy(rt.ai);
         call_destroy(rt.call);

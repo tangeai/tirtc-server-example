@@ -1,5 +1,5 @@
 /** \file tirtc_ai.h
- * \brief TiRTC AI conversation module — WHIP client + JSON-RPC signaling + PCM audio.
+ * \brief TiRTC AI conversation module — WHIP client, JSON-RPC, and file audio.
  */
 
 #ifndef TIRTC_AI_H

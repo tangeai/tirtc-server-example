@@ -2,7 +2,7 @@
 
 设备从上电到建立 MQTT 长连接的完整流程：两条上线路径、临时/正式连接、Topic 与消息规范、Token 生命周期。
 
-> 设备上线流程以本文档为准。嵌入式实现只参考 [device-sim-c](device-sim/device-sim-c/README.md)（C）；HTTP 接口字段定义见 [api-reference.md#device-server](api-reference.md#device-server)。
+> 设备上线协议以本文档为准。Linux 上的可运行控制流见 [device-sim-c](device-sim/device-sim-c/README.md)；它不是硬件固件，也不包含安全存储、硬件身份或量产机制。HTTP 字段定义见 [api-reference.md#device-server](api-reference.md#device-server)。
 
 **文档导航：** [返回总览](README.md) | [H5 实时](device-h5-live.md) | [微信 VoIP](device-voip.md) | [AI 对讲](device-ai.md) | [设备呼设备](device-call.md) | [统一状态机](device-session-model.md) | [API Reference](api-reference.md)
 
@@ -37,25 +37,25 @@
 
 ## 上线全流程
 
-设备上电后根据 Flash 中是否已持久化 `device_id + device_key` 选择路径，**两条路径独立，不允许交叉**：
+设备启动后根据持久化存储中是否已有 `device_id + device_key` 选择路径，**两条路径独立，不允许交叉**：
 
 | 路径 | 触发条件 | 第一接口 | 凭证来源 |
 |------|---------|---------|---------|
-| 验证码 | Flash 无 ID+Key | [`POST /v1/device/report`](api-reference.md#post-v1devicereport) | 扫码后从 device_pool 分配（`assign=dynamic`） |
-| 预烧凭证 | Flash 有 ID+Key | [`POST /v1/device/token`](api-reference.md#post-v1devicetoken) | 出厂烧录（`assign=preburn`） |
+| 验证码 | 持久化存储无 ID+Key | [`POST /v1/device/report`](api-reference.md#post-v1devicereport) | 绑定后从 device_pool 分配（`assign=dynamic`） |
+| 预置凭证 | 持久化存储有 ID+Key | [`POST /v1/device/token`](api-reference.md#post-v1devicetoken) | 生产阶段安全写入（`assign=preburn`） |
 
 无论走哪条路径，最终都收敛到同一步：用 `device_id + device_key` 调 [`/v1/device/token`](api-reference.md#post-v1devicetoken) 换 `mqtt_token`，建立正式连接。上线完成后设备才进入 VoIP / AI / 设备间通话等业务流程。
 
 > **返回约定（device-server）：** 成功返回 `HTTP 200` 且 body `code=200`；失败返回对应的 HTTP 状态码，body 携带业务 `code`（如 `HTTP 410 + code=6006`）。
 
 > **路径选择规则：**
-> 1. Flash 有凭证 → 先调 [`POST /v1/device/token`](api-reference.md#post-v1devicetoken)；返回 `HTTP 200 + code=200` → 直接建立正式连接。
+> 1. 持久化存储有凭证 → 先调 [`POST /v1/device/token`](api-reference.md#post-v1devicetoken)；返回 `HTTP 200 + code=200` → 直接建立正式连接。
 > 2. Token 返回 `HTTP 410 + code=6006`（设备已被解绑）→ 调 Report 时**必须携带签名 Header**（`X-Device-Id` / `X-Timestamp` / `X-Nonce` / `X-Signature`，用本地 `device_key` 签名，算法同 [`/v1/device/token`](api-reference.md#post-v1devicetoken)），服务端才会将设备绑回原 ID，而非从 pool 分配新 ID；绑定成功后下发的 `auth_grant` 为空 payload，设备继续使用本地凭证（见 [api-reference.md#post-v1devicereport](api-reference.md#post-v1devicereport)）。
-> 3. Flash 无凭证 → 调 [`POST /v1/device/report`](api-reference.md#post-v1devicereport)（不带签名 Header，body 只有 `mac` 一个字段），走验证码流程从 pool 分配新 ID。
+> 3. 持久化存储无凭证 → 调 [`POST /v1/device/report`](api-reference.md#post-v1devicereport)（不带签名 Header，body 只有 `mac` 一个字段），走验证码流程从 pool 分配新 ID。
 
 ```mermaid
 flowchart TD
-    A[设备上电] --> B{Flash 有 ID + KEY?}
+    A[设备启动] --> B{持久化存储有 ID + KEY?}
     B -- 有 --> C["POST /v1/device/token"]
     B -- 无 --> D["POST /v1/device/report<br/>body 只有 mac"]
     C -- "HTTP 200 + code=200" --> Z["建立正式连接：<br/>ClientID = sn_{device_id}，<br/>Username = device_id，<br/>Password = mqtt_token"]
@@ -68,7 +68,7 @@ flowchart TD
     H -- "扫码或 device_id 绑回原 ID，<br/>同用户已有设备则复用，不扣额度" --> I["auth_grant（空 payload）"]
     H -- "新用户或无此 MAC" --> J["从 pool 分配新 ID，<br/>auth_grant 含 device_id，device_key"]
     I --> K["ACK，断开临时连接"]
-    J --> L["持久化凭证到 Flash，<br/>ACK，断开临时连接"]
+    J --> L["安全持久化凭证，<br/>ACK，断开临时连接"]
     K --> M["POST /v1/device/token"]
     L --> M
     M --> Z
@@ -78,7 +78,7 @@ flowchart TD
 
 ### C 参考实现的完整上线调用顺序
 
-「C 参考实现」已把 HTTP、HMAC、临时 MQTT 和正式 MQTT 封装在 device_flow.c。以下代码是板端启动任务应保留的控制流；替换 Flash 读写、平台停止标志和 MQTT 业务回调即可。函数声明见 [device_flow.h](device-sim/device-sim-c/src/device_flow.h)，完整实现见 [device_flow.c](device-sim/device-sim-c/src/device_flow.c)。
+Linux C 参考实现已把 HTTP、HMAC、临时 MQTT 和正式 MQTT 封装在 `device_flow.c`。以下代码说明产品应保留的协议分支；`flash_load_credentials()`、`flash_save_credentials()`、`mac`、`runtime` 和业务回调都是产品必须提供的占位符，不是参考实现 API。产品还需完成[十项二次开发 TODO](device-porting.md#二次开发-todo)，不能只替换存储函数。函数声明见 [device_flow.h](device-sim/device-sim-c/src/device_flow.h)，Linux 完整实现见 [device_flow.c](device-sim/device-sim-c/src/device_flow.c)。
 
 ~~~c
 #include <string.h>
@@ -93,7 +93,7 @@ char mqtt_token[512] = {0};
 if (fetch_services(&svc, NULL) != 0) return -1;
 set_mqtt_ca_cert("/data/ca-certificates.crt");
 
-/* 从 Flash 读取。返回 0 表示已有完整的 ID + Key。 */
+/* 产品提供：从受保护的持久化存储读取；0 表示已有完整 ID + Key。 */
 int has_credentials = flash_load_credentials(device_id, sizeof(device_id),
                                              device_key, sizeof(device_key)) == 0;
 if (has_credentials) {
@@ -120,8 +120,10 @@ if (!has_credentials) {
 
     /* 新分配设备才带 payload；空 payload 表示沿用本地凭证。 */
     if (granted_id[0] && granted_key[0]) {
-        strcpy(device_id, granted_id);
-        strcpy(device_key, granted_key);
+        size_t id_len = strlen(granted_id), key_len = strlen(granted_key);
+        if (id_len >= sizeof(device_id) || key_len >= sizeof(device_key)) return -1;
+        memcpy(device_id, granted_id, id_len + 1);
+        memcpy(device_key, granted_key, key_len + 1);
         if (flash_save_credentials(device_id, device_key) != 0) return -1;
     }
     if (!device_id[0] || !device_key[0]) return -1;
@@ -179,8 +181,8 @@ Report 成功后，设备从 **HTTP 响应** 中拿到 `temp_client_id`（格式
 
 | 消息 | 设备动作 |
 |------|---------|
-| `auth_grant`（有 payload） | 裸设备分配到新凭证：持久化 `device_id` + `device_key` 到 Flash，ACK，断开临时连接，用新凭证调 Token 上线 |
-| `auth_grant`（空 payload） | 已解绑设备绑回原 ID：ACK，断开临时连接，沿用 Flash 中已有凭证调 Token 上线 |
+| `auth_grant`（有 payload） | 裸设备分配到新凭证：安全持久化 `device_id` + `device_key`，ACK，断开临时连接，用新凭证调 Token 上线 |
+| `auth_grant`（空 payload） | 已解绑设备绑回原 ID：ACK，断开临时连接，沿用持久化存储中的已有凭证调 Token 上线 |
 
 ---
 
@@ -286,10 +288,10 @@ Report 成功后，设备从 **HTTP 响应** 中拿到 `temp_client_id`（格式
 
 ## Token 生命周期
 
-`mqtt_token` 有效期由 `service.token_expiry` 控制（默认 168h = 7 天）。设备有两种推荐策略：
+`mqtt_token` 有效期由 `service.token_expiry` 控制（默认 168h = 7 天）。产品应明确选择以下一种策略：
 
-- **缓存**：持久化存储 token，每次重连复用，到期前提前刷新。
-- **上电即取**：每次上电调一次 [`/v1/device/token`](api-reference.md#post-v1devicetoken)，简单可靠，适合不在意启动耗时的场景。
+- **内存缓存并提前刷新**：运行期间记录到期时间，在过期前重新获取；重启后重新取 token。这样不增加长期凭证落盘范围。
+- **安全持久化 token**：仅在产品必须离线快速启动时采用；存储必须防止未授权读取，并在到期前或认证失败后刷新。
 
 **Token 过期断连：** EMQX 在 JWT 过期时主动断开设备，`onDisconnect` 收到原因码 `0x98`（认证过期）或 `0x99`（ACL 拒绝）。设备应以此作为触发信号，重新调用 [`/v1/device/token`](api-reference.md#post-v1devicetoken) 换取新 token 后重连。
 
@@ -310,12 +312,12 @@ Report 成功后，设备从 **HTTP 响应** 中拿到 `temp_client_id`（格式
 
 | 原因码 | 含义 | 设备动作 |
 |--------|------|---------|
-| `152` | 认证失败（MQTT CONNECT 被拒） | 检查 token 是否有效，重试 |
+| `152` | 认证失败（MQTT CONNECT 被拒） | 停止无界重试，检查连接参数并重新获取 token 后按退避策略重连 |
 | `153` | 认证失败（MQTT CONNECT 被拒） | 同上 |
 | `0x98` | JWT 认证过期（EMQX `auth_expired`） | 重新调 [`POST /v1/device/token`](api-reference.md#post-v1devicetoken) 换取新 token 后重连 |
 | `0x99` | ACL 拒绝（EMQX `acl_denied`） | 检查 token 中的 `device_id` claim 是否匹配 ClientID |
 
-> 「C 参考实现」的重连、心跳与 MQTT 消息分发实现在 [device-sim/device-sim-c/src/device_flow.c](device-sim/device-sim-c/src/device_flow.c)。
+> Linux C 参考实现的心跳、消息分发和使用当前 token 的短暂断线重连位于 [device_flow.c](device-sim/device-sim-c/src/device_flow.c)。它不会在进程内自动刷新 token，也不会在长期故障后重启整个运行时；这两项属于产品的异常恢复 TODO。
 
 ### TiRTC SDK 返回值约定
 

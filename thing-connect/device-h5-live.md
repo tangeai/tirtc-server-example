@@ -296,7 +296,7 @@ connection.connect({ deviceId, token })
 
 > 顺序不可调换：<a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsetoption" target="_blank" rel="noopener">`TiRtcSetOption(TIRTC_OPT_DEVICE_SECRET_KEY, ...)`</a> 必须先于 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcstart" target="_blank" rel="noopener">`TiRtcStart`</a>——后者执行后设备即用 `device_key` 向平台鉴权。
 
-设备模拟器的参考实现见：
+Linux C 参考实现见：
 
 - C 进程级生命周期与统一回调：[device-sim/device-sim-c/src/tirtc_runtime.c](device-sim/device-sim-c/src/tirtc_runtime.c)
 - C 实时流会话与媒体发送：[device-sim/device-sim-c/src/tirtc_stream.c](device-sim/device-sim-c/src/tirtc_stream.c)
@@ -314,7 +314,7 @@ connection.connect({ deviceId, token })
 - <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsendaudiostream" target="_blank" rel="noopener">`TiRtcSendAudioStream`</a>
 - <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsendvideostream" target="_blank" rel="noopener">`TiRtcSendVideoStream`</a>
 
-如果 H5 发来关键帧请求，设备应尽快补一个关键帧。模拟器里通过 `on_request_key_frame` 触发下一帧强制 key frame。
+如果 H5 发来关键帧请求，设备应尽快补一个关键帧。Linux C 参考实现通过 `on_request_key_frame` 触发文件源返回下一关键帧。
 
 ### 3. 设备端不需要感知 H5 token 细节
 
@@ -351,11 +351,11 @@ H5 token 是 `user-server` 用设备 `device_key` 构造的 connect token，scop
 - 松开按钮后：`stream_id = 14` 停止送帧
 - 浏览器静音、页面离开或连接断开：同样停止送帧
 
-设备 「C 参考实现」的 `on_audio` 回调是媒体适配层的替换点。硬件设备应在该回调中判断 `pFi->stream_id == 14`，并将 `data` 按 `pFi->media` 与 `pFi->flags` 交给 G.711A 解码和扬声器播放链路，而不是落盘。回调不能阻塞；建议只写入环形缓冲区，由播放任务取走。
+Linux C 参考实现的 `tirtc_stream.c::_on_audio()` 会校验当前连接并调用 `DeviceMediaSinkOps.submit`；Linux 默认适配没有 sink，所以只做限频日志后丢弃，不包含扬声器播放。产品应实现 sink，在回调内把 payload 复制到有界播放队列并立即返回；独立媒体任务再解码并驱动扬声器。SDK 回调返回后 `data` 即失效，且回调内不得阻塞。
 
-### 4. 可移植的 C 骨架
+### 4. 产品侧 C 调用示例
 
-下面是 H5 实时预览所需的完整 SDK 调用骨架。`capture_*`、`speaker_enqueue_g711a` 和 `ring_buffer_*` 是必须由板端替换的媒体适配函数；TiRTC 初始化、回调、帧属性和发送顺序不可省略。
+下面的代码只说明 TiRTC 调用顺序，不是可直接编译的 Linux C 参考实现。`stream_event_push()`、`ring_buffer_write()`、`talkback_queue` 和 `encoder_request_idr()` 都是伪代码占位符；实际 Linux 代码见 `tirtc_runtime.c`、`tirtc_stream.c`、`device_adapter.c` 和 Linux 默认的 `linux_device_adapter.c`。
 
 ```c
 #include <string.h>
@@ -485,13 +485,13 @@ H5 实时查看本质上是“设备常驻监听，H5 被动连入”。它和 V
 - [`GET /v1/user/device/rtc-token`](api-reference.md#get-v1userdevicertc-token) 不会因为设备正在通话而拒绝签发 token
 - H5 侧只收到 `in_call` 提示，由前端决定是否继续连接
 
-设备侧建议自己定义业务优先级。模拟器当前策略是：
+设备侧必须明确业务优先级。Linux C 参考实现当前策略是：
 
 - 程序默认启动实时推流
 - VoIP / AI / 设备呼设备开始后，暂停实时流
 - 业务会话结束后，再恢复实时流
 
-如果你的硬件要允许“实时预览 + 业务会话”并行，需要自行评估：
+如果产品要允许“实时预览 + 业务会话”并行，需要自行评估：
 
 - 编码器/带宽是否够用
 - 麦克风/扬声器是否允许多路复用
@@ -507,4 +507,4 @@ H5 实时查看本质上是“设备常驻监听，H5 被动连入”。它和 V
 - `rtc-token` 返回 `40300`：说明这台设备不属于当前 H5 登录用户
 - H5 提示 `in_call=true`：是状态提示，不是服务端拒绝；是否允许继续预览要看前端和设备自己的策略
 
-> 板端验证与完整 「C 参考实现」命令见 [device-porting.md](device-porting.md) 和 [device-sim/device-sim-c/README.md](device-sim/device-sim-c/README.md)。
+> 二次开发验收与 Linux C 参考实现命令见 [device-porting.md](device-porting.md) 和 [device-sim/device-sim-c/README.md](device-sim/device-sim-c/README.md)。

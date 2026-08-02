@@ -1,344 +1,308 @@
-# 从 C 参考实现移植到嵌入式设备
+# 从 Linux C 参考实现进行二次开发
 
-本章不是“把 Linux 上的 「C 参考实现」编译到板子上”就结束。它提供设备端协议和 TiRTC 调用的**可运行样板**：嵌入式开发者应保留其上线、MQTT、会话和 RTC 调用顺序，把 Linux 依赖及文件媒体替换为自己平台的网络、存储、任务和采集播放实现。
+本文说明如何把 [Linux C 设备端参考实现](device-sim/device-sim-c/README.md) 用于真实 Linux 设备的接入验证和产品二次开发。
 
-> 「C 参考实现」位于 [device-sim/device-sim-c](device-sim/device-sim-c)。它直接使用 libcurl、libmosquitto 和 pthread，因此**不能原样移植到 FreeRTOS、RT-Thread、Zephyr 或裸机**。Linux 设备可以先交叉编译运行它验证 SDK；RTOS 产品应按本章的模块边界重建平台适配层。
+本文不把 C 参考实现描述成硬件固件。它展示协议、TiRTC 调用顺序和会话处理；摄像头、麦克风、扬声器、显示屏和产品交互均由开发者实现。非 Linux 目标属于独立移植工程，应在其自己的代码和文档中定义平台 API、构建和验收，不应混入 `device-sim-c` 的 Linux 运行说明。
 
-**文档导航：** [返回总览](README.md) | [设备上线与 MQTT](device-integration.md) | [统一竞态仲裁](device-session-arbiter.md) | [H5 实时](device-h5-live.md) | [AI](device-ai.md) | [VoIP](device-voip.md) | [设备互呼](device-call.md)
+## 先选择目标
 
-## 目标与交付物
+### 目标 A：验证目标 Linux 能运行 TiRTC
 
-完成移植后，设备固件至少要具备：
+这个目标只要求在目标 Linux 上交叉编译或本地编译 C 参考实现，继续用文件模拟媒体。它能验证：
 
-1. 持久化 device_id 与 device_key。
-2. 通过 HTTPS 完成 Report / Token，并用 MQTT 建立正式长连接。
-3. 通过 TiRtcStart 常驻接收 H5 实时连接。
-4. 将摄像头、麦克风和扬声器接入 TiRTC 帧收发。
-5. 收到 MQTT 来电后，按需进入 VoIP 或设备互呼；按键/业务触发 AI。
-6. 在 VoIP、AI、设备互呼结束后恢复 H5 实时推流。
+- CPU/ABI/libc 与 TiRTC SDK 是否匹配。
+- DNS、TLS、HTTP、MQTT 和 TiRTC 网络是否可用。
+- 设备 Report、绑定、Token、MQTT 和四类业务是否能在目标 Linux 运行。
+- 已编码文件能否按 TiRTC 媒体帧契约发送，以及下行回调能否到达。
 
-## 先确认目标平台
+这不能证明真实采集、编码、播放、显示、掉电恢复和量产安全已完成。
 
-移植开始前先向平台方获取**与设备 CPU、系统、libc 和工具链匹配**的 TiRTC C SDK。SDK 不匹配时，后续代码移植无意义。
+### 目标 B：开发真实 Linux 产品
 
-| 目标 | 正确做法 | 不应做的事 |
+除了目标 A，还必须完成本文列出的十项 TODO，用真实平台和硬件实现替换 Linux 演示逻辑，并在目标设备上做功能、故障、长稳和安全验收。
+
+## 目标形态：可产品化参考架构
+
+这里的目标不是制造一个不存在的“通用标准固件”，而是把稳定的协议核心与产品差异隔开：
+
+```text
+设备协议与会话核心
+  ├── 上线、签名、MQTT 与业务协议
+  ├── TiRTC 单实例生命周期与统一回调
+  └── 会话状态、代次、超时和资源准入
+                    │
+             DeviceAdapterV1
+                    │
+  ├── 平台：单调时钟、墙上时钟、休眠
+  ├── 身份：凭证读取、写入、解绑和恢复出厂
+  ├── 媒体：音视频 source、audio sink、video sink
+  ├── 产品：按键/UI/提示、资源申请与释放
+  └── 运行：分类故障上报、随机数和不安全传输审批
+```
+
+当前 C 参考实现已经提供版本化 `DeviceAdapterV1`、Linux 默认适配、产品适配模板、独立静态库构建和契约测试。接口固定了函数表复制、上下文寿命、媒体帧所有权、SDK 回调限制、错误返回、会话代次、资源申请回滚和停止清理顺序。因此可以称为**Linux C 产品化参考架构和二次开发框架**。这里的“产品化”指边界适合替换和验证，不表示默认文件适配已经具备真实硬件能力，也不表示代码已经通过任何具体产品的量产认证。
+
+实际接口见 [`device_adapter.h`](device-sim/device-sim-c/src/device_adapter.h)，渐进替换入口见 [`product_adapter_template.c`](device-sim/device-sim-c/examples/product_adapter_template.c)。产品可先调用 `linux_device_adapter_build()`取得可运行的默认表，再完整替换一个接口组，最后调用一次 `device_adapter_install()`。使用自有进程入口时，可继续调用 [`device_reference_run()`](device-sim/device-sim-c/src/device_reference.h) 复用完整上线与会话编排；运行期间不允许重装适配器。
+
+### 接口返回值、线程与所有权
+
+| 接口 | 调用线程 | 返回与所有权 |
 |---|---|---|
-| Linux ARM / Linux MIPS 等 | 获取目标架构的 SDK，使用目标交叉工具链和 sysroot 编译 「C 参考实现」 | 用仓库的 linux-x86_64 动态库复制到 ARM 板子 |
-| RTOS（ESP-IDF、RT-Thread、Zephyr 等） | 获取该平台可用的 SDK；将协议和媒体适配为任务/SDK API | 链接 libcurl、libmosquitto、pthread 的 Linux Demo |
-| 裸机 | 先确认 SDK 和 TLS/MQTT 所需运行时是否支持该平台 | 假设 C 源码天然可在无 OS 环境运行 |
+| `media_source.open/next_*/close` | 对应业务的媒体工作线程 | `next_*`：`1` 为一帧，`0` 为正常结束，负数为故障；帧内存由产品持有到下次取帧或关闭 |
+| `media_sink.submit` | TiRTC SDK 回调线程 | 返回前复制到产品自己的有界队列，不能保留 SDK 帧指针，不能播放、显示或阻塞 |
+| `media_sink.flush` | 会话停止控制路径 | 清除指定业务和代次的残留帧，返回前不要求完成硬件关闭 |
+| `product.poll_action` | 应用控制路径 | UI 动作经统一仲裁，超时返回 0 |
+| `product.notify` | MQTT 回调或串行会话控制路径 | 必须复制栈上事件并非阻塞入队；不能反向重入会话切换接口 |
+| `resource.acquire/release` | 串行会话切换路径 | `acquire` 失败前完成回滚；`release` 幂等 |
+| `recovery.report` | MQTT 回调、工作线程或会话控制路径 | 只做非阻塞提交，不在调用栈中执行长耗时重启 |
 
-## 识别哪些代码保留、哪些必须替换
+## 可保留与必须替换的边界
 
-| 「C 参考实现」文件/能力 | 在产品中保留 | 必须替换为板端实现 |
+| C 参考实现 | 可借鉴或保留 | 二次开发中必须按产品重做 |
 |---|---|---|
-| device_flow.c | 请求顺序、HMAC 签名串、HTTP/MQTT 消息格式、Topic、ACK 规则 | libcurl、libmosquitto、文件 CA 证书、pthread 心跳 |
-| tirtc_runtime.c / sdk_callback_guard.c | 进程级 TiRtcInit / SetOption / Start / Stop / Uninit、统一回调表、连接与业务代次分发、常驻有界控制队列 | pthread 锁/条件变量/工作线程，替换为 RTOS mutex、事件组和固定任务/固定队列 |
-| tirtc_stream.c | H5 入站连接状态、TIRTCFRAMEINFO 字段、实时媒体发送 | H.264/G.711A 文件读取器、pthread 推流任务 |
-| tirtc_ai.c / audio_recorder.c | 获取 token、WHIP、0x2100 JSON-RPC、300ms 延迟、会话状态、回调外异步录音模式 | curl、文件读取、pthread、Linux 文件录音器 |
-| tirtc_voip.c | profile、MQTT 来电字段、WHIP、0x2001 挂断 | curl、G.711A/H.264 文件读取、扬声器适配 |
-| tirtc_call.c / call_session.c | 建房、接听、TiRtcConnect、0x2000 接通确认、房间状态 | curl、pthread、文件媒体 |
-| session_arbiter.c / session_coordinator.c | pending ticket、generation lease、deadline、STREAM / VOIP / AI / CALL 的独占与恢复规则 | pthread mutex/condition，替换为单 session task、RTOS mutex/固定队列/事件组；详见 [竞态仲裁参考](device-session-arbiter.md) |
-| main.c / Makefile | 仅作 Linux 演示入口和编译参考 | CLI、stdin 命令、getopt、Makefile 中的宿主依赖 |
+| `device_flow.c` | 服务发现、Report/Token 顺序、签名串、MQTT 参数、Topic、ACK 和心跳 | 网络管理、Token 刷新主循环、时间同步、凭证安全存储 |
+| `tirtc_runtime.c` | SDK 单实例生命周期、统一回调表、连接代次分发 | 与产品进程管理、看门狗、日志和故障拉起的集成 |
+| `sdk_callback_guard.c` | 回调屏障、回调外延后操作、有界队列 | 队列容量、满队策略、线程优先级和实时性参数 |
+| `session_arbiter.c` | 待接记录、唯一所有者、代次隔离、超时和幂等结束 | 业务优先级、抢占策略和真实硬件资源映射 |
+| `session_coordinator.c` | STREAM / VOIP / AI / CALL 停止、启动和恢复顺序 | 真实采集、编码、播放、显示资源的启停与失败回滚 |
+| `tirtc_stream.c` | H5 入站连接、订阅、帧参数和关键帧请求 | 用真实采集替换文件源，用播放/显示队列替换下行日志 |
+| `tirtc_ai.c` | AI Token、WHIP、`0x2100`、延迟发送、会话状态 | 用真实音频链路替换文件上行和下行录音文件 |
+| `tirtc_voip.c` | profile、授权列表、来电/外呼、WHIP、拒接和挂断 | 用真实媒体和产品交互替换文件上行、下行丢弃和 CLI |
+| `tirtc_call.c` / `call_session.c` | 建房、接听、P2P 连接、`0x2000`、拒接/取消/挂断 | 用真实媒体、联系人 UI 和产品提示替换演示逻辑 |
+| `main.c` / `Makefile` | Linux 调用顺序、构建参数示例 | CLI、`stdin`、环境变量、启动服务和发布流程 |
+| `device_adapter.*` / `linux_device_adapter.*` | V1 线程、所有权、错误码、代次和默认 Linux 行为 | 各产品的驱动、队列、硬件策略、存储、UI、恢复与安全实现 |
 
-## 路径 A：Linux 嵌入式设备交叉编译验证
+## 二次开发 TODO
 
-此路径的目的只是先证明**目标 Linux 的 SDK、网络、TLS、MQTT 和 RTC 能工作**。媒体仍然可以读文件；这不是产品媒体接入。
+以下十项都是产品必做项；各项的实现要求和验收条件如下。
 
-### 1. 准备目标 SDK 与 sysroot
+### TODO 1：平台适配
 
-将 SDK 放在与目标相符的位置，例如：
+#### 先获取匹配的 SDK
 
-~~~text
+必须获取与目标 Linux 的 CPU、ABI、libc 和工具链匹配的 TiRTC C SDK。SDK 不匹配时，修改业务代码无法解决链接或运行问题。
+
+建议 SDK 布局：
+
+```text
 thing-connect/device-sim/sdk/
-└── linux-aarch64/
-    └── 2.2.1/
-        ├── include/tirtc/tiRTC.h
-        └── lib/libTiRTC.so
-~~~
+└── <target-platform>/
+    ├── 2.2.1/include/tirtc/
+    ├── 2.2.1/lib/libTiRTC.so
+    └── 0.1.6/include/mbedtls/
+```
 
-sysroot 中必须有目标架构的 curl、mosquitto、cJSON 头文件和库。不能混用宿主机 x86_64 的 pkg-config 结果。
+交叉编译示例：
 
-### 2. 交叉编译
-
-~~~bash
+```bash
 cd thing-connect/device-sim/device-sim-c
-export PKG_CONFIG_SYSROOT_DIR=/opt/aarch64-sysroot
-export PKG_CONFIG_LIBDIR=/opt/aarch64-sysroot/usr/lib/aarch64-linux-gnu/pkgconfig
-
 make clean
-make \
+make WERROR=1 \
   CC=aarch64-linux-gnu-gcc \
+  PKG_CONFIG=aarch64-linux-gnu-pkg-config \
+  SYSROOT=/path/to/target-sysroot \
   SDK_PLATFORM=linux-aarch64 \
   SDK_VERSION=2.2.1 \
   MBEDTLS_SDK_VERSION=0.1.6
-~~~
+```
 
-如果目标 SDK 没有与 0.1.6 兼容的 mbedTLS 头文件，不能通过修改版本号强行编译；应让平台提供兼容 SDK，或把 device_flow.c 的 HMAC/Base64 改为目标平台 mbedTLS 实现。
+只构建不含参考 `main` 的静态库：
 
-> `MBEDTLS_SDK_VERSION=0.1.6` 取自 `Makefile:15` 的默认值，对应 `sdk/<平台>/0.1.6/include/mbedtls/` 提供的头文件。libTiRTC 已内嵌 mbedTLS，**不要额外链接** `libmbedcrypto`/`libssl`/`libcrypto`，否则符号冲突（见 [device-sim-c/README.md](device-sim/device-sim-c/README.md)）。仓库的 `windows-x86_64` SDK 不含 mbedtls 目录，Windows 不能套用本 Makefile。
+```bash
+make WERROR=1 framework
+```
 
-### 3. 部署并验证
+`PKG_CONFIG` 必须返回目标 sysroot 中的 libcurl 参数，不能误用主机库。如果工具链没有 pkg-config wrapper，可显式传入 `CURL_CFLAGS`、`CURL_LIBS`、`CJSON_CFLAGS`、`CJSON_LIBS`、`MOSQUITTO_CFLAGS` 和 `MOSQUITTO_LIBS`。产品安装路径不保留仓库相对 SDK 布局时，设置 `RPATH=` 禁用演示 rpath，并由系统动态链接器配置目标库路径。
 
-将以下文件复制到板端同一发布目录：device-sim、目标架构 libTiRTC.so、CA 证书、video.h264、audio.g711a。设置运行时库路径后启动：
+真实项目还需要适配：
 
-~~~bash
-export LD_LIBRARY_PATH=/opt/tirtc/lib
-./device-sim \
-  --device-id "$DEVICE_ID" \
-  --device-key "$DEVICE_KEY" \
-  --ca-cert /etc/ssl/certs/ca-certificates.crt \
-  --up-audio-file /opt/tirtc/media/audio.g711a \
-  --up-video-file /opt/tirtc/media/video.h264
-~~~
+- 启动顺序：网络就绪、时间就绪、凭证就绪后再请求 Token 并启动 TiRTC。
+- 时钟：签名时间使用已校准的墙上时钟；会话超时使用单调时钟。
+- 随机数：通过 `security.random_bytes` 接入并验证产品批准的密码学安全随机数源；Linux 默认实现只使用 `getrandom()` 或 `/dev/urandom`，失败时不会降级到伪随机数。
+- 网络：处理网口/Wi-Fi/4G 的获取地址、DNS、切换和断网事件。
+- 进程：将 CLI 入口接到实际 daemon/service，实现看门狗和有序退出。
 
-验证 H5 能看到画面、听到声音，说明目标 Linux 环境可以进入下一步。此时不要宣称产品已完成；摄像头、麦克风、扬声器和掉电恢复仍未接入。
+验收：冷启动、网络未就绪、校时失败、DNS 失败、SDK 动态库缺失和进程重启都有明确日志和可恢复路径。
 
-## 路径 B：RTOS/产品固件移植
+### TODO 2：设备身份
 
-> ⚠️ **先拿到目标平台的 TiRTC SDK。** 仓库只附带 `linux-x86_64` / `macos-arm64` / `windows-x86_64` 的预编译库，**不能**复制到 ESP32 或其它 RTOS。TiRTC 头文件 `basedef.h` 内部已为 `__ESP32S3__` / `__ESP32P4__` / `__FREERTOS__` / `__EC71X__` 等平台预留类型分支，但对应的预编译库需向平台方获取（见 [TiRTC SDK 下载](https://docs.tange.ai/products/tirtc/download.html)）。拿到 SDK 前，下面的代码移植无意义。ESP-IDF 的 component 骨架与 sdkconfig 项见 [device-sim-c/README.md](device-sim/device-sim-c/README.md)。
+C 参考实现的 `identity` 默认适配用 `device_creds.json` 保存 `device_id/device_key`，只用于 Linux 演示。产品需要完整替换 `DeviceIdentityOps`：
 
-### 1. 创建五个板端模块
+1. 定义未绑定、已绑定、已解绑和凭证损坏的持久化状态。
+2. 用安全存储或设备密钥封装替换普通 JSON 文件。
+3. 保留“本地凭证 → Token；6006 → 带签名 Report 重新绑定”的顺序。
+4. 区分验证码绑定与工厂预置凭证，不在日志中打印 `device_key`。
+5. 定义解绑、设备转移、恢复出厂和存储写失败的产品行为。
 
-不要复制 main.c 后到处加条件编译。按下面接口拆分，业务模块不直接依赖具体 RTOS：
+验收：首次绑定、掉电重启、服务端解绑、本地凭证损坏和存储写入失败均不会泄露凭证或进入无限重试。
 
-~~~text
-app/
-├── device_identity.c   # Flash/NVS：device_id、device_key
-├── device_http.c       # HTTPS：Report、Token、AI/VoIP/Call HTTP
-├── device_mqtt.c       # MQTT TLS、订阅、ACK、心跳、重连
-├── device_media.c      # 摄像头/麦克风/编码器/扬声器/环形缓冲
-├── device_session.c    # STREAM/VOIP/AI/CALL 资源仲裁
-└── device_tirtc.c      # TiRTC 初始化、回调、帧收发
-~~~
+### TODO 3：真实上行音频
 
-device_identity、device_http、device_mqtt 的字段和状态转移以 [device-integration.md](device-integration.md) 的 C 调用顺序为准。不要将 device_key 下发给前端或写入日志。
+实现 `DeviceMediaSourceOps`，将默认 `FileMediaSource` 的音频输出替换为：
 
-各模块到 ESP-IDF API 的映射（TiRTC C 调用本身不变，只是替换它周围的网络/存储/任务/媒体实现）：
+```text
+麦克风 / 音频 codec → 采样 → 预处理 → 编码 → 有界发送队列 → TiRtcSendAudioStream
+```
 
-| 板端模块 | 「C 参考实现」源文件 | ESP-IDF 替换 API | 替换要点 |
-|---|---|---|---|
-| device_identity | device_flow.c（凭证读写） | NVS：`nvs_open` + `nvs_get_str`/`nvs_set_str` | key 名 `device_id`/`device_key` 不变（同 `device_creds.json`）；预烧设备直接读 NVS 跳过验证码 |
-| device_http | device_flow.c（Report/Token）、tirtc_ai.c、tirtc_voip.c、call_session.c | `esp_http_client` + mbedtls HMAC | Report 4 签名 header / Token 5 签名 header，签名串 `device_id+timestamp+nonce` |
-| device_mqtt | device_flow.c（临时/正式连接、ack、心跳） | `esp_mqtt_client`（`MQTT_OVER_SSL`） | `.cert_pem` 嵌入 PEM；`/cmd` 必须 ack；30s 心跳 |
-| device_media | tirtc_stream.c（H264FileSource）、audio_recorder.c、各 tirtc_*.c 下行处理 | `esp_camera` + I2S/codec + 环形缓冲 | 上行替换为真实采集/编码；AI 异步文件录音替换为扬声器缓冲，其他下行日志替换为显示/播放队列 |
-| device_session | session_arbiter.c / session_coordinator.c（pthread mutex/cond） | FreeRTOS `xSemaphoreCreateMutex` / 固定队列 / event group | Arbiter 负责准入、pending 与 generation；Coordinator 只切换 STREAM/VOIP/AI/CALL 业务会话，进程级 SDK 保持运行 |
-| device_tirtc | 各 tirtc_*.c | TiRTC C API（不变） | 仅日志 sink、时间源、随机源适配（见下表） |
+保留的媒体契约：
 
-「C 参考实现」在 `common.h` 里用的几个 POSIX 运行时工具，也要按下表替换（`now_ms`/`sleep_ms`/`rand_hex` 在各业务模块里被频繁调用）：
-
-| 「C 参考实现」（common.h） | 作用 | ESP-IDF / FreeRTOS 替换 |
-|---|---|---|
-| `now_ms()`（`clock_gettime CLOCK_MONOTONIC`） | 毫秒时间戳 | `(uint64_t)xTaskGetTickCount() * portTICK_PERIOD_MS` |
-| `sleep_ms(ms)`（`nanosleep`） | 毫秒延时 | `vTaskDelay(pdMS_TO_TICKS(ms))` |
-| `rand_hex`（`/dev/urandom`，有 fallback） | 生成 nonce | `esp_fill_random` 再转 hex |
-| pthread mutex/cond（session_arbiter）与 coordinator mutex | 准入状态、生命周期队列和 SDK 切换串行化 | `xSemaphoreCreateMutex` / 固定 queue / event group |
-| `log_set_sink`（`common.h:34`） | 日志重定向 | 接 UART/RTT 的 sink |
-
-### 2. 先完成设备上线，再接媒体
-
-先在不打开摄像头的情况下完成：Flash 读取凭证 → Report/Token → MQTT 正式连接 → 收到 cmd 并 ACK。正式 MQTT 运行后才初始化实时流和业务路由。
-
-需要保留的调用关系如下：
-
-~~~c
-/* 具体 HTTP/MQTT 函数由 ESP-IDF、Paho、lwIP 等实现。 */
-if (load_credentials(&device_id, &device_key) == 0) {
-    rc = request_mqtt_token(device_id, device_key, mac, &mqtt_token);
-}
-if (rc == DEVICE_UNBOUND) {
-    report = report_device_signed_if_possible(mac, device_id, device_key);
-    wait_auth_grant_and_persist(report.temp_client_id, report.temp_token);
-    mqtt_token = request_mqtt_token(device_id, device_key, mac);
-}
-mqtt_connect("sn_{device_id}", device_id, mqtt_token);
-mqtt_subscribe("device/sn_{device_id}/cmd", 1);
-mqtt_subscribe("device/sn_{device_id}/notify", 1);
-~~~
-
-下面给出 ESP-IDF 上的三段最小实现。协议字段、签名串、MQTT 参数一律以 「C 参考实现」的 `device_flow.c` 为准，这里只把 IO/网络层换成 ESP-IDF API。
-
-#### 凭证读写（NVS）
-
-key 名与 `device_creds.json` 一致；预烧设备直接命中、跳过验证码：
-
-~~~c
-#include "nvs.h"
-
-int load_credentials(char *did, size_t did_n, char *dkey, size_t dkey_n) {
-    nvs_handle_t h;
-    if (nvs_open("tirtc", NVS_READONLY, &h) != ESP_OK) return -1;     /* 未绑定 */
-    esp_err_t e = nvs_get_str(h, "device_id", did, &did_n);
-    if (e == ESP_OK) e = nvs_get_str(h, "device_key", dkey, &dkey_n);
-    nvs_close(h);
-    return (e == ESP_OK) ? 0 : -1;
-}
-
-void save_credentials(const char *did, const char *dkey) {            /* 收到 auth_grant 后持久化 */
-    nvs_handle_t h;
-    if (nvs_open("tirtc", NVS_READWRITE, &h) != ESP_OK) return;
-    nvs_set_str(h, "device_id", did);
-    nvs_set_str(h, "device_key", dkey);
-    nvs_commit(h);
-    nvs_close(h);
-}
-~~~
-
-#### HMAC + Report/Token（esp_http_client + mbedtls）
-
-签名串与算法与 `device_flow.c:168-181` 完全一致：
-
-~~~c
-#include "mbedtls/md.h"
-#include "mbedtls/base64.h"
-#include "esp_http_client.h"
-#include "esp_system.h"
-
-static void hmac_sha256_b64(const char *key, const char *data, char *out, size_t out_n) {
-    unsigned char digest[32];
-    mbedtls_md_hmac(mbedtls_md_info_from_type(MBEDTLS_MD_SHA256),
-                    (const unsigned char *)key, strlen(key),
-                    (const unsigned char *)data, strlen(data), digest);
-    size_t olen = 0;
-    mbedtls_base64_encode((unsigned char *)out, out_n, &olen, digest, sizeof digest);
-    out[olen] = '\0';
-}
-
-/* POST /v1/device/token：空 body、5 个签名 header（Report 只发 4 个、且 body 是 {"mac":"..."}） */
-static int request_mqtt_token(const char *server, const char *device_id,
-                              const char *device_key, const char *mac,
-                              char *token_out, size_t token_n) {
-    char ts[16], nonce_raw[8], nonce_hex[17], raw[256], sig[64];
-    snprintf(ts, sizeof ts, "%ld", (long)time(NULL));       /* 需先 SNTP 对时 */
-    esp_fill_random(nonce_raw, 8);                          /* 对应 device_flow.c 的 rand_hex */
-    bytes_to_hex(nonce_raw, nonce_hex, sizeof nonce_raw);   /* → 16 hex 字符 */
-    snprintf(raw, sizeof raw, "%s%s%s", device_id, ts, nonce_hex);   /* 签名串无分隔 */
-    hmac_sha256_b64(device_key, raw, sig, sizeof sig);
-
-    char url[256]; snprintf(url, sizeof url, "%s/v1/device/token", server);
-    esp_http_client_config_t cfg = {
-        .url = url, .method = HTTP_METHOD_POST,
-        .cert_pem = server_ca_pem,            /* 嵌入 PEM，打开校验（demo 关了校验，产品必须开） */
-    };
-    esp_http_client_handle_t c = esp_http_client_init(&cfg);
-    esp_http_client_set_header(c, "X-Device-Id", device_id);
-    esp_http_client_set_header(c, "X-Timestamp", ts);
-    esp_http_client_set_header(c, "X-Nonce", nonce_hex);
-    esp_http_client_set_header(c, "X-Mac", mac);            /* Report 无此 header */
-    esp_http_client_set_header(c, "X-Signature", sig);
-    esp_http_client_set_post_field(c, "", 0);               /* 空 body */
-
-    int rc = -1;
-    if (esp_http_client_perform(c) == ESP_OK)
-        rc = parse_token_from_response(c, token_out, token_n);   /* 6006=已解绑，需带签名重 report */
-    esp_http_client_cleanup(c);
-    return rc;
-}
-~~~
-
-#### 正式 MQTT（esp_mqtt_client）
-
-ClientID / Username / Password 与 `device_flow.c:796-866` 一致：
-
-~~~c
-#include "esp_mqtt.h"
-#include "esp_timer.h"
-
-static char device_id[64];   /* 上线后填入，供 ack/心跳 topic 拼接 */
-
-static void mqtt_event_cb(void *arg, esp_event_base_t base, int32_t id, void *data) {
-    esp_mqtt_event_handle_t e = data;
-    if (id == MQTT_EVENT_DATA && topic_is_cmd(e->topic, e->topic_len)) {
-        char ack[80]; snprintf(ack, sizeof ack, "device/sn_%s/ack", device_id);
-        esp_mqtt_client_publish(e->client, ack, "{\"ack\":true}", 11, 1, 0);  /* /cmd 必须 ack */
-        dispatch_cmd(e->data, e->data_len);   /* 按 type/channel 分发到 VoIP/Call 模块 */
-    }
-}
-
-void start_formal_mqtt(const char *uri, const char *mqtt_token) {
-    char client_id[80]; snprintf(client_id, sizeof client_id, "sn_%s", device_id);
-    esp_mqtt_client_config_t mcfg = {
-        .uri = uri,                          /* mqtts://...:8883 → MQTT_OVER_SSL */
-        .client_id = client_id,
-        .username = device_id,               /* 不带 sn_：EMQX 用它比对 token 里的 device_id */
-        .password = mqtt_token,
-        .cert_pem = broker_ca_pem,           /* 嵌入 PEM */
-        .keepalive = 60,
-    };
-    esp_mqtt_client_handle_t mq = esp_mqtt_client_init(&mcfg);
-    esp_mqtt_client_register_event(mq, ESP_MQTT_EVENT_ANY, mqtt_event_cb, NULL);
-    esp_mqtt_client_start(mq);
-    /* MQTT_EVENT_CONNECTED 后再 subscribe cmd/notify，并用 esp_timer 起 30s 心跳
-       （publish device/sn_{id}/up = {"type":"heartbeat","seq":N,"ts":T}，见 device_flow.c:771-794） */
-}
-~~~
-
-> ⚠️ **三个易错点（均来自 device_flow.c）：** ① `temp_client_id` 来自 Report 响应的**服务端下发**，**不能**用 MAC 本地派生（device_flow.c:375）；② CA 证书用嵌入 PEM（`.cert_pem`），ESP32 没有文件路径；③ demo 的 HTTP 关了 TLS 校验，产品必须用 `cert_pem` 打开校验。sdkconfig 至少开 `CONFIG_MBEDTLS_MD_ENABLED` / `CONFIG_MBEDTLS_SHA256_ENABLED` / `CONFIG_MBEDTLS_BASE64_ENABLED`。
-
-### 3. 用真实媒体替换文件读写
-
-H5 实时流的媒体契约固定如下：
-
-| 方向 | stream_id | 固件要做什么 |
+| 业务 | 默认 `stream_id` | 参考格式 |
 |---|---:|---|
-| 设备到 H5 音频 | 10 | 麦克风采样 → G.711A 编码 → 发送 |
-| 设备到 H5 视频 | 11 | 摄像头 → H.264 Annex-B 编码器 → 发送 |
-| H5 到设备 talkback | 14 | 接收 G.711A → 解码 → 扬声器播放 |
+| H5 实时流 | 10 | G.711 A-law 8 kHz 单声道 |
+| 微信 VoIP | 10 | 以 profile 上报和房间协商为准 |
+| 设备互呼 | 10 | 以双方设备能力为准 |
+| AI | 1 | 以 `start_session.input_audio` 为准 |
 
-采集和播放必须在设备任务中运行，不能阻塞 TiRTC 回调。下面代码是产品适配层的最小发送和接收方式：
+需要实现发送节奏、PTS、输入欠载、发送缓冲满、音频中断、采集设备重启和媒体切换。不能在 TiRTC 回调线程中采集、编码或等待音频硬件。
 
-~~~c
-void media_send_h5_audio(tirtc_conn_t hconn, const uint8_t *alaw,
-                         uint32_t bytes, uint32_t pts_ms) {
-    TIRTCFRAMEINFO fi = {0};
-    fi.stream_id = 10;
-    fi.media = TIRTC_AUDIO_ALAW;
-    fi.flags = TIRTC_AUDIOSAMPLE_8K16B1C;
-    fi.ts = pts_ms;
-    fi.length = bytes;
-    TiRtcSendAudioStream(hconn, &fi, (void *)alaw);
-}
+验收：无音频累积延迟、无长时间漂移，采集中断后可恢复，会话切换不会重复占用麦克风。
 
-void media_send_h5_video(tirtc_conn_t hconn, const uint8_t *annexb_au,
-                         uint32_t bytes, uint32_t pts_ms, int is_idr) {
-    TIRTCFRAMEINFO fi = {0};
-    fi.stream_id = 11;
-    fi.media = TIRTC_VIDEO_H264;
-    fi.flags = is_idr ? TIRTC_FRAME_FLAG_KEY_FRAME : 0;
-    fi.ts = pts_ms;
-    fi.length = bytes;
-    TiRtcSendVideoStream(hconn, &fi, (void *)annexb_au);
-}
+### TODO 4：真实上行视频
 
-void on_audio(tirtc_conn_t hconn, const TIRTCFRAMEINFO *fi, void *data) {
-    (void)hconn;
-    if (fi->stream_id == 14 && fi->media == TIRTC_AUDIO_ALAW)
-        speaker_queue_g711a(data, fi->length); /* 只入队，回调内不解码/播放 */
-}
-~~~
+在同一 `DeviceMediaSourceOps` 中将视频文件源替换为：
 
-> ⚠️ **ESP32 媒体现实：** ESP32-CAM 普遍输出 **MJPEG**，但当前 H5 页面只接受 **H.264**（见 [device-h5-live.md](device-h5-live.md#媒体格式与默认约定)）。ESP32 没有硬件 H.264 编码器，需软件编码或外置编码芯片，否则要同时改前端和设备实现。Linux 「C 参考实现」将 AI 下行音频复制到独立录音队列，其他下行媒体仅记录元数据后丢弃；产品应把同一回调外队列模式替换为扬声器缓冲和显示队列——不要在 TiRTC 回调里直接解码、播放或写文件。
+```text
+摄像头 → 图像处理 → H.264/H.265/MJPEG 编码 → Access Unit 队列 → TiRtcSendVideoStream
+```
 
-完整 TiRTC 初始化、全部回调和停止顺序见 [H5 实时查看与按住说话](device-h5-live.md)。
+开发者必须根据 H5、VoIP 对端和设备互呼的实际能力选择编码格式，不能因为参考程序能拆 MJPEG/H.265 文件就假设所有对端都能播放。
 
-### 4. 按功能逐项接入
+需要实现：
 
-1. 调用 TiRtcStart 后，先完成 H5 实时流和 talkback。
-2. 接入 AI：复用 HTTP token，调用 TiRtcWhipConnect，300ms 后发 0x2100 start_session。
-3. 接入 VoIP：启动时上报 profile，MQTT call_incoming 后由业务任务决定接听/拒接。
-4. 接入设备互呼：主叫建房；被叫取 token 后 TiRtcConnect 并发送 0x2000。
-5. 用 session coordinator 保证四类会话互斥；前台会话结束后恢复 STREAM。
+- 完整编码帧边界和正确 `media/flags/ts/length`。
+- 第一帧为关键帧，并响应 `on_request_key_frame`。
+- 码率、帧率、分辨率、旋转和镜像与上报 profile 一致。
+- 队列满时优先丢弃可丢帧，在下一个关键帧恢复。
 
-各能力的完整 C 方法与接口参见 [AI](device-ai.md)、[VoIP](device-voip.md)、[设备互呼](device-call.md) 与 [统一状态机](device-session-model.md)。
+验收：H5、VoIP 对端和另一台设备均能在声明的分辨率/帧率下解码，关键帧请求能恢复画面。
 
-## 板端验收清单
+### TODO 5：下行播放
 
-- [ ] 断电重启后仍能从 Flash 读取设备凭证并重新上线。
-- [ ] mqtt_token 过期或 MQTT 被拒绝后，重新请求 Token 并重连。
-- [ ] H5 可看视频、听音频；按住说话可从扬声器播放。
-- [ ] TiRTC 回调中不进行 HTTP、MQTT、Flash、编码、解码或阻塞等待。
-- [ ] AI、VoIP、设备互呼结束后，H5 实时流会恢复。
-- [ ] 设备日志不打印 device_key、mqtt_token、WHIP token。
+C 参考实现通过 `DeviceMediaSinkOps.submit` 投递下行帧，但默认没有硬件播放。产品 sink 应实现：
 
-## C 参考实现的用途
+```text
+on_audio → 校验会话/代次/格式 → 复制到有界环形队列 → 返回
+                                                        ↓
+                                      独立播放任务解码并驱动扬声器
+```
 
-Linux 「C 参考实现」仍然有价值：它是协议字段、HTTP 请求、MQTT 路由、TiRTC API 调用和媒体帧属性的可运行对照。产品开发应从其中复制**调用顺序和错误处理**，不是复制其 libcurl/libmosquitto/pthread/文件读写实现。
+H5 talkback 默认使用 `stream_id=14`；AI、VoIP 和设备互呼以各业务协商格式为准。播放任务需处理抖动缓冲、解码错误、静音、音量、开关功放和快速终止。
+
+验收：四类业务的下行音频可听，无回调阻塞，挂断后不播放旧会话残留音频。
+
+### TODO 6：视频显示
+
+C 参考实现用同一 `DeviceMediaSinkOps.submit` 的 `video` 字段区分视频。默认不解码或显示，产品需要与音频相同的回调外队列，并实现：
+
+- 按会话和代次清理迟到视频帧。
+- 解码器重置、关键帧等待和错误恢复。
+- 显示旋转、镜像、缩放、裁切、宽高比和屏幕开关。
+- 解码或显示来不及时的明确丢帧策略。
+
+验收：视频姿态和 profile 一致，切换/挂断不显示旧会话画面，解码过载不拖慢 SDK 回调。
+
+### TODO 7：产品交互
+
+终端命令只是默认 `DeviceProductOps` 测试入口。产品需用 `poll_action/notify` 将下列动作映射到实际 UI/按键：
+
+- AI 开始、结束或 PTT 按下/松开。
+- VoIP 和设备互呼的联系人选择、外呼、接听、拒接、取消和挂断。
+- 来电、连接中、通话中、忙线、超时、断网和鉴权失效的可见反馈。
+- 并发操作和重复按键的防抖、幂等和禁用状态。
+
+UI 不应直接调用底层断开或修改业务私有状态；所有会话操作仍经过统一仲裁入口。
+
+验收：快速重复操作、两类来电同时到达、连接中取消和断网时操作都不会造成重复会话或 UI 假状态。
+
+### TODO 8：资源仲裁
+
+C 参考实现已实现逻辑会话仲裁，并在会话切换时调用 `DeviceResourceOps.acquire/release`，但默认操作为空，不管理真实硬件。二次开发必须将：
+
+```text
+STREAM / VOIP / AI / CALL
+          ↓
+麦克风、扬声器、摄像头、编码器、解码器、屏幕、内存和带宽
+```
+
+建立明确映射。默认非抢占策略可以保留，也可按产品需求调整；不论选择哪种策略，都必须定义资源申请、启动失败回滚、结束释放和 H5 实时流恢复。
+
+验收：并发来电、AI 中来电、连接中取消、启动硬件失败和迟到回调不会双重占用或遗留硬件资源。
+
+### TODO 9：异常恢复
+
+C 参考实现演示了业务级超时和会话恢复，并通过 `DeviceRecoveryOps.report` 分类提交关键失败，但默认不执行产品恢复策略。产品还需要运行时主循环：
+
+```text
+网络就绪
+  → 服务发现
+  → 加载/绑定设备身份
+  → 获取 MQTT Token
+  → 启动正式 MQTT 和 TiRTC
+  → 运行
+  → 根据错误类型回到对应步骤
+```
+
+必须区分：
+
+- 短暂断网：使用当前 Token 有界退避重连。
+- Token 过期/认证失败：重新请求 Token，不用旧 Token 无限重连。
+- 6006/解绑：进入重新绑定，不当作普通网络错误。
+- 服务入口失效：重新服务发现。
+- SDK 启动失败：完整反初始化后再有界重试。
+- 业务超时：使当前代次失效、释放会话、恢复 H5。
+- 队列满：可观测地丢弃、合并或触发状态校准，不静默遗失生命周期事件。
+
+所有重试必须有上限、退避和可观测错误，不应将网络故障变成 CPU/流量无限循环。
+
+验收：注入 DNS 失败、HTTP 超时、MQTT 断开、Token 过期、SDK 不回调、队列满和媒体任务退出，设备能恢复或进入明确的降级状态。
+
+### TODO 10：安全与量产
+
+最低要求：
+
+- 默认启用 TLS 证书链和主机名校验；产品不开放 `--insecure` 能力。
+- 凭证、MQTT Token、WHIP Token 和用户媒体不写入普通日志。
+- 使用安全注入、加密存储或安全芯片保护长期凭证。
+- 使用密码学安全随机数，并保证签名时间不可被未授权回拨。
+- 让 `DeviceSecurityOps.allow_insecure_transport` 在生产配置恒为 false；测试开关不能进入量产镜像。
+- 定义 CA 更新、固件签名、OTA、回滚和恢复出厂流程。
+- 使用专用低权限账号运行设备进程，限制文件、设备节点和网络权限。
+- 建立版本兼容矩阵、软件物料清单、漏洞修复流程和现场日志脱敏规则。
+
+验收：安全评审、弱网长稳、长时间内存/句柄监测、升级与回滚、掉电注入和批量出厂/绑定流程均通过。
+
+## 建议实施顺序
+
+1. **先在开发机跑通 C 参考实现**：使协议、账号和服务环境可验证，并运行 `make WERROR=1 test`。
+2. **复制产品适配模板并在目标 Linux 使用默认文件媒体运行**：排除 SDK、工具链、TLS、MQTT 和 RTC 环境问题。
+3. **完成设备身份和运行时主循环**：确保掉电、断网和 Token 过期可恢复。
+4. **先接入 H5 真实音频上下行**：验证采集、编码、队列和播放。
+5. **再接入 H5 真实视频**：验证编码格式、关键帧和弱网恢复。
+6. **按 AI → VoIP → 设备互呼增加业务**：每增加一项，同时验证结束后恢复 H5。
+7. **接入产品交互和真实资源仲裁**：不允许 UI 绕过仲裁器直接操作 SDK 会话。
+8. **完成故障注入、长稳、安全和量产验收**。
+
+## 验收清单
+
+- [ ] 冷启动和掉电后能正确读取设备身份并上线。
+- [ ] 无凭证、凭证损坏、服务端解绑和 6006 都进入正确绑定路径。
+- [ ] MQTT Token 过期后能重新获取 Token 并恢复订阅。
+- [ ] H5 可以看、听和对讲，下行音频由扬声器播放。
+- [ ] AI、VoIP 和设备互呼的上下行媒体均使用真实硬件。
+- [ ] 四类业务的同时触发、拒接、取消、超时和迟到回调符合产品策略。
+- [ ] 前台会话结束后恢复 H5，不留下旧会话音视频或硬件资源。
+- [ ] TiRTC 回调中无 HTTP、MQTT、文件 I/O、编解码、播放、显示或阻塞等待。
+- [ ] 队列满、SDK 不回调、网络反复断开和媒体设备重启都有可观测恢复路径。
+- [ ] 日志不包含 `device_key`、完整 Token 或用户敏感媒体。
+- [ ] 通过目标设备的弱网、长稳、资源、温度、安全、升级和掉电测试。
+
+## 相关文档
+
+- [Linux C 参考实现 README](device-sim/device-sim-c/README.md)
+- [设备上线与 MQTT](device-integration.md)
+- [H5 实时查看与对讲](device-h5-live.md)
+- [AI 对讲](device-ai.md)
+- [微信 VoIP](device-voip.md)
+- [设备互呼](device-call.md)
+- [统一状态机](device-session-model.md)
+- [多业务会话仲裁](device-session-arbiter.md)
