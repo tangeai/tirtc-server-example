@@ -314,7 +314,12 @@ Linux C 参考实现见：
 - <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsendaudiostream" target="_blank" rel="noopener">`TiRtcSendAudioStream`</a>
 - <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsendvideostream" target="_blank" rel="noopener">`TiRtcSendVideoStream`</a>
 
-如果 H5 发来关键帧请求，设备应尽快补一个关键帧。Linux C 参考实现通过 `on_request_key_frame` 触发文件源返回下一关键帧。
+H5 在 `connect()` 完成后才挂载并订阅输出，设备在连接接入时发送的首个 IDR
+可能已经错过。因此设备除了处理 `on_request_key_frame`，还应在视频订阅回调中请求新关键帧；
+`TiRtcSendVideoStream` 返回 `TIRTC_E_BUSY` 后也应尽快补关键帧，避免持续丢弃非关键帧。
+
+预编码文件源不能在当前位置即时编码 IDR，只能前进到下一个关键帧。发生这种跳转时，
+音频文件读取位置也必须移动到相同媒体时间，输出时间戳继续单调递增，避免恢复画面后音画内容错位。
 
 ### 3. 设备端不需要感知 H5 token 细节
 
@@ -502,6 +507,8 @@ H5 实时查看本质上是“设备常驻监听，H5 被动连入”。它和 V
 ## 问题排查
 
 - H5 能登录但看不到画面：先确认设备已经 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcstart" target="_blank" rel="noopener">`TiRtcStart`</a> 成功，并且 `on_conn_accepted` 后确实开始发 `stream 10/11`
+- H5 连接成功但首帧慢：确认视频订阅回调会请求新关键帧，并检查 `TIRTC_E_BUSY` 后是否补发关键帧；不能只依赖连接接入时发送的首个 IDR
+- 文件媒体恢复后音画错位：确认跳到下一个视频 IDR 时，音频文件读取位置也跳到相同媒体时间，音视频输出时间戳仍保持单调递增
 - H5 有画面没声音：确认设备上行音频确实走 `stream 10`，H5 已订阅音频
 - 按住说话设备没收到：确认设备 `on_audio` 回调里处理了来自 H5 连接的 `stream_id == 14` 音频帧，并按 `G.711A`、`8000/16000Hz` 解码
 - `rtc-token` 返回 `40300`：说明这台设备不属于当前 H5 登录用户

@@ -66,6 +66,39 @@
   添加设备
 </button>
 
+<!-- DEVICE NAME MODAL -->
+<div id="name-modal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-[200] items-center justify-center" onclick="closeNameModal()">
+  <form class="bg-white border border-gray-200 rounded-2xl p-7 w-[380px] max-w-[calc(100vw-32px)] shadow-xl" onclick="event.stopPropagation()" onsubmit="saveDeviceName(); return false;">
+    <div class="flex items-start justify-between gap-4 mb-5">
+      <div>
+        <h2 class="text-[17px] font-bold text-gray-900 mb-1">设置设备名称</h2>
+        <p class="text-xs text-gray-400 leading-relaxed">最多 13 个字符，用于设备列表和微信设备来电显示。</p>
+      </div>
+      <button type="button" onclick="closeNameModal()" class="flex-shrink-0 w-8 h-8 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors" aria-label="关闭">
+        <svg class="w-4 h-4 mx-auto" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <path d="M18 6L6 18M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+    <div class="mb-4">
+      <label for="device-name-input" class="block text-xs font-medium text-gray-600 mb-1.5">设备名称</label>
+      <input id="device-name-input" type="text" autocomplete="off" placeholder="例如：客厅学习机"
+        class="w-full px-3.5 py-2.5 text-sm border border-gray-200 rounded-lg outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all">
+      <div class="flex items-center justify-between mt-1.5">
+        <span id="name-device-id" class="font-mono text-[10px] text-gray-400 truncate"></span>
+        <span id="name-char-count" class="text-[10px] text-gray-400">0 / 13</span>
+      </div>
+    </div>
+    <div class="px-3 py-2.5 mb-5 rounded-lg bg-amber-50 border border-amber-200 text-[11px] text-amber-700 leading-relaxed">
+      如果微信已保存旧的授权名称，需要清除原授权并重新授权后，新名称才会在微信端生效。
+    </div>
+    <div class="flex gap-2.5">
+      <button type="button" onclick="closeNameModal()" class="flex-1 py-2.5 text-sm text-gray-500 bg-gray-50 border border-gray-200 rounded-lg hover:border-gray-300 transition-colors">取消</button>
+      <button id="name-save-button" type="submit" class="flex-1 py-2.5 text-sm font-semibold text-white bg-emerald-500 border border-emerald-500 rounded-lg hover:bg-emerald-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">保存名称</button>
+    </div>
+  </form>
+</div>
+
 <!-- RESET MODAL -->
 <div id="reset-modal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-[200] items-center justify-center">
   <div class="bg-white border border-gray-200 rounded-2xl p-7 w-[360px] max-w-[calc(100vw-48px)] shadow-xl">
@@ -87,6 +120,14 @@ const token = localStorage.getItem('token');
 if (!token) location.href = '/';
 
 let resetDeviceID = null;
+let editingDeviceID = null;
+let devices = [];
+
+function escapeHTML(value) {
+  return String(value ?? '').replace(/[&<>'"]/g, char => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
+  })[char]);
+}
 
 async function api(path, opts = {}) {
   const res = await fetch(path, {
@@ -119,6 +160,7 @@ async function loadDevices() {
   const grid = $('device-grid');
 
   if (devData.code !== 200 || !devData.data?.length) {
+    devices = [];
     $('device-count').textContent = '';
     grid.innerHTML = `
       <div class="col-span-full flex flex-col items-center py-20 text-center">
@@ -134,59 +176,73 @@ async function loadDevices() {
     return;
   }
 
+  devices = devData.data;
   $('device-count').textContent = `(${devData.data.length})`;
 
   grid.innerHTML = devData.data.map(d => {
-    const isBound  = d.status === 1;
     const isOnline = d.online;
+    const deviceID = escapeHTML(d.device_id || '');
+    const deviceName = escapeHTML(d.device_name || '未命名设备');
+    const mac = escapeHTML(d.mac || '');
+    const bindTime = escapeHTML(d.bind_time || '');
 
     return `
     <div class="bg-white border ${isOnline ? 'border-emerald-200' : 'border-gray-200'} rounded-2xl overflow-hidden shadow-sm hover:-translate-y-0.5 hover:shadow-md transition-all duration-150">
-      <div class="flex items-start justify-between gap-2.5 px-[18px] pt-4 pb-3 border-b border-gray-100 min-w-0">
-        <div class="min-w-0 flex-1">
-          <div class="font-mono text-[13px] font-medium text-gray-900 mb-1.5 truncate">${d.device_id || '—'}</div>
-          <div class="flex items-center gap-2">
-            ${isBound ? `
-              <span class="w-[7px] h-[7px] rounded-full flex-shrink-0 ${isOnline ? 'bg-emerald-500 animate-pulse-dot' : 'bg-gray-300'}"></span>
-              <span class="text-[11px] font-medium ${isOnline ? 'text-emerald-600' : 'text-gray-400'}">${isOnline ? '在线' : '离线'}</span>
-            ` : ''}
-            <span class="text-[10px] font-medium px-2 py-0.5 rounded-full ${isBound ? 'bg-violet-50 text-violet-600 border border-violet-200' : 'bg-gray-100 text-gray-400 border border-gray-200'}">${isBound ? '已绑定' : '未绑定'}</span>
+      <div class="px-[18px] pt-4 pb-3 border-b border-gray-100 min-w-0">
+        <div class="flex items-center justify-between gap-3 min-w-0">
+          <div class="flex items-center gap-2 min-w-0 flex-1">
+            <span class="text-[15px] font-semibold text-gray-900 truncate" title="${deviceName}">${deviceName}</span>
+            <button type="button" data-device-id="${deviceID}" onclick="openNameModal(this.dataset.deviceId)"
+              class="flex-shrink-0 flex items-center gap-1 px-1.5 py-1 text-[10px] font-medium text-emerald-600 rounded-md hover:bg-emerald-50 transition-colors" title="修改设备名称">
+              <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                <path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4Z"/>
+              </svg>
+              修改
+            </button>
           </div>
+          <span class="max-w-[48%] flex-shrink-0 font-mono text-[10px] text-gray-400 truncate" title="${deviceID}">${deviceID || '—'}</span>
         </div>
-        ${isBound ? `<button onclick="askReset('${d.device_id}')" class="flex-shrink-0 text-[11px] font-medium px-2.5 py-1 rounded-md border border-gray-200 text-gray-400 hover:border-red-200 hover:text-red-500 hover:bg-red-50 transition-all whitespace-nowrap">重置</button>` : ''}
+        <div class="flex items-center justify-between gap-2 mt-2.5">
+          <div class="flex items-center gap-2 flex-wrap min-w-0">
+            <span class="w-[7px] h-[7px] rounded-full flex-shrink-0 ${isOnline ? 'bg-emerald-500 animate-pulse-dot' : 'bg-gray-300'}"></span>
+            <span class="text-[11px] font-medium ${isOnline ? 'text-emerald-600' : 'text-gray-400'}">${isOnline ? '在线' : '离线'}</span>
+            ${d.has_camera ? `<span class="text-[10px] font-medium px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-200">摄像头</span>` : ''}
+            ${d.has_screen ? `<span class="text-[10px] font-medium px-2 py-0.5 rounded-full bg-violet-50 text-violet-600 border border-violet-200">带屏</span>` : ''}
+          </div>
+          <button type="button" data-device-id="${deviceID}" onclick="askReset(this.dataset.deviceId)" class="flex-shrink-0 text-[11px] font-medium px-2.5 py-1 rounded-md border border-gray-200 text-gray-400 hover:border-red-200 hover:text-red-500 hover:bg-red-50 transition-all whitespace-nowrap">重置</button>
+        </div>
       </div>
 
-      <div class="px-5 py-3.5">
+      ${d.mac || d.bind_time ? `<div class="px-5 py-3.5">
         ${d.mac ? `
         <div class="flex items-center gap-2 mb-2">
           <span class="font-mono text-[11px] text-gray-400 w-[52px] flex-shrink-0">MAC</span>
-          <span class="font-mono text-xs text-gray-600 truncate min-w-0">${d.mac}</span>
+          <span class="font-mono text-xs text-gray-600 truncate min-w-0">${mac}</span>
         </div>` : ''}
         ${d.bind_time ? `
         <div class="flex items-center gap-2">
-          <span class="font-mono text-[11px] text-gray-400 w-[52px] flex-shrink-0">绑定</span>
-          <span class="font-mono text-xs text-gray-600 truncate min-w-0">${d.bind_time}</span>
+          <span class="text-[11px] text-gray-400 w-[52px] flex-shrink-0">绑定时间</span>
+          <span class="font-mono text-xs text-gray-600 truncate min-w-0">${bindTime}</span>
         </div>` : ''}
-        ${!d.mac && !d.bind_time ? `<p class="text-xs text-gray-400">设备尚未绑定物理硬件</p>` : ''}
-      </div>
+      </div>` : ''}
 
       <div class="grid grid-cols-3 gap-2 px-4 py-2.5 border-t border-gray-100">
         <button class="flex items-center justify-center gap-1.5 py-1.5 text-xs font-medium rounded-lg border transition-all border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-gray-800 hover:border-gray-300"
-          onclick="goLive('${d.device_id}')" title="实时音视频">
+          data-device-id="${deviceID}" onclick="goLive(this.dataset.deviceId)" title="实时音视频">
           <svg class="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
             <rect x="2" y="5" width="13" height="10" rx="2"/><path d="M15 8l3-2v8l-3-2"/>
           </svg>
           实时
         </button>
         <button class="flex items-center justify-center gap-1.5 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-gray-800 hover:border-gray-300 transition-all"
-          onclick="goConfig('${d.device_id}')" title="配置智能体">
+          data-device-id="${deviceID}" onclick="goConfig(this.dataset.deviceId)" title="配置智能体">
           <svg class="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
             <circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
           </svg>
           智能体
         </button>
         <button class="flex items-center justify-center gap-1.5 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-gray-800 hover:border-gray-300 transition-all"
-          onclick="goContacts('${d.device_id}')" title="联系人管理">
+          data-device-id="${deviceID}" onclick="goContacts(this.dataset.deviceId)" title="联系人管理">
           <svg class="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
             <path d="M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="10" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M17 3.13a4 4 0 0 1 0 7.75"/>
           </svg>
@@ -200,6 +256,71 @@ async function loadDevices() {
 function goLive(id)     { location.href = '/player?device_id=' + encodeURIComponent(id); }
 function goConfig(id)   { location.href = '/v1/ai/agent?device_id=' + encodeURIComponent(id); }
 function goContacts(id) { location.href = '/contacts?device_id=' + encodeURIComponent(id); }
+
+function updateNameCharCount() {
+  const length = Array.from($('device-name-input').value || '').length;
+  $('name-char-count').textContent = `${length} / 13`;
+  $('name-char-count').classList.toggle('text-red-500', length > 13);
+}
+
+function openNameModal(deviceID) {
+  const device = devices.find(item => item.device_id === deviceID);
+  if (!device) {
+    toast('未找到该设备，请刷新后重试', true);
+    return;
+  }
+  editingDeviceID = deviceID;
+  $('device-name-input').value = device.device_name || '';
+  $('name-device-id').textContent = deviceID;
+  updateNameCharCount();
+  const modal = $('name-modal');
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+  setTimeout(() => $('device-name-input').focus(), 0);
+}
+
+function closeNameModal() {
+  editingDeviceID = null;
+  const modal = $('name-modal');
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+  $('name-save-button').disabled = false;
+  $('name-save-button').textContent = '保存名称';
+}
+
+async function saveDeviceName() {
+  const deviceID = editingDeviceID;
+  const deviceName = $('device-name-input').value.trim();
+  if (!deviceID) return;
+  if (!deviceName) {
+    toast('请输入设备名称', true);
+    $('device-name-input').focus();
+    return;
+  }
+  if (Array.from(deviceName).length > 13) {
+    toast('设备名称最多 13 个字符', true);
+    $('device-name-input').focus();
+    return;
+  }
+
+  const button = $('name-save-button');
+  button.disabled = true;
+  button.textContent = '保存中…';
+  try {
+    const data = await api('/v1/user/device/name', {
+      method: 'PUT',
+      body: JSON.stringify({ device_id: deviceID, device_name: deviceName }),
+    });
+    if (data.code !== 200) throw new Error(data.msg || '保存失败');
+    closeNameModal();
+    toast('设备名称已保存');
+    await loadDevices();
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = '保存名称';
+    toast(error.message || '保存失败', true);
+  }
+}
 
 function askReset(deviceID) {
   resetDeviceID = deviceID;
@@ -232,6 +353,10 @@ function logout() {
   location.href = '/';
 }
 
+$('device-name-input').addEventListener('input', updateNameCharCount);
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && !$('name-modal').classList.contains('hidden')) closeNameModal();
+});
 loadDevices();
 </script>
 </body>

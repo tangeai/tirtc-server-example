@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import ctypes
 import threading
 import time
 import unittest
@@ -178,6 +179,17 @@ class SdkLifecycleTests(unittest.TestCase):
         self.assertFalse(stop_thread.is_alive())
         sdk_stop.assert_not_called()
         sdk_uninit.assert_not_called()
+
+    def test_stream_video_subscription_requests_key_frame(self):
+        rtc_stream._force_key_frame.clear()
+        callbacks = rtc_stream.runtime_callbacks()
+
+        result = callbacks.on_subscribe_video(
+            ctypes.c_void_p(0x101), rtc_stream.VIDEO_STREAM_ID)
+
+        self.assertEqual(result, 0)
+        self.assertTrue(rtc_stream._force_key_frame.is_set())
+        rtc_stream._force_key_frame.clear()
 
     def test_device_call_service_stop_waits_for_callback_return(self):
         old_active = rtc_call._service_active

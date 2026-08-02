@@ -68,6 +68,11 @@ class AudioFileReader:
                 if skipped_ms >= duration_ms:
                     break
 
+    def seek_duration(self, duration_ms: float) -> None:
+        """Move to an absolute media position within the looping file."""
+        self._index = 0
+        self.skip_duration(duration_ms)
+
     def _parse(self, data: bytes) -> list[AudioPacket]:
         codec = self.format.codec
         if codec in ("pcm", "alaw"):
@@ -103,6 +108,7 @@ class VideoFileReader:
         self._index = 0
         self._first_key_index = next((i for i, (_, is_key) in enumerate(self._frames) if is_key), 0)
         self._index = self._first_key_index
+        self._last_frame_index: "int | None" = None
 
     def next_frame(self, force_key: bool = False) -> "tuple[bytes, bool] | None":
         if force_key and not self._advance_to_key():
@@ -113,12 +119,19 @@ class VideoFileReader:
             self._index = 0
             if force_key:
                 self._advance_to_key()
+        self._last_frame_index = self._index
         frame = self._frames[self._index]
         self._index += 1
         return frame
 
     def first_key_index(self) -> int:
         return self._first_key_index
+
+    def current_index(self) -> int:
+        return self._index
+
+    def last_frame_index(self) -> "int | None":
+        return self._last_frame_index
 
     def _advance_to_key(self) -> bool:
         checked = 0
@@ -276,14 +289,12 @@ def _split_annexb_nals(data: bytes) -> list[bytes]:
 
 
 def _find_start_code(data: bytes, pos: int) -> tuple[int, int]:
-    index = pos
-    limit = len(data) - 3
-    while index <= limit:
-        if data[index:index + 3] == b"\x00\x00\x01":
-            return index, 3
-        if data[index:index + 4] == b"\x00\x00\x00\x01":
-            return index, 4
-        index += 1
+    three = data.find(b"\x00\x00\x01", pos)
+    four = data.find(b"\x00\x00\x00\x01", pos)
+    if four >= 0 and (three < 0 or four <= three):
+        return four, 4
+    if three >= 0:
+        return three, 3
     return len(data), 0
 
 

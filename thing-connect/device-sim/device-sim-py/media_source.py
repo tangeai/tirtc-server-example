@@ -86,7 +86,18 @@ class FileMediaSource(MediaSource):
     def next_video(self, force_key: bool = False) -> "tuple[bytes, bool] | None":
         if self._video_reader is None:
             return None
-        return self._video_reader.next_frame(force_key=force_key)
+        requested_index = self._video_reader.current_index()
+        result = self._video_reader.next_frame(force_key=force_key)
+        selected_index = self._video_reader.last_frame_index()
+        if (force_key and result is not None and selected_index is not None
+                and selected_index != requested_index):
+            # A pre-encoded file cannot create an IDR at the current media
+            # position.  When recovery seeks video to the next IDR, move the
+            # looping audio file to the same content position.  Output PTS
+            # remain monotonic in the sender; only the file read positions
+            # change together.
+            self._audio_reader.seek_duration(selected_index * VIDEO_FRAME_MS)
+        return result
 
     def close(self) -> None:
         pass

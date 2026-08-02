@@ -7,6 +7,7 @@ import unittest
 os.environ.setdefault("TIRTC_SDK_VERSION", "2.2.1")
 
 from media_file_reader import AudioFileReader, VideoFileReader
+from media_source import FileMediaSource
 
 
 def _write_temp(root: str, name: str, data: bytes) -> str:
@@ -123,6 +124,34 @@ class MediaFileReaderTests(unittest.TestCase):
             self.assertTrue(first[1])
             self.assertFalse(second[1])
             self.assertIsNone(reader.next_frame())
+
+    def test_forced_key_frame_realigns_file_audio(self):
+        with tempfile.TemporaryDirectory() as root:
+            audio = b"".join(bytes([index]) * 320 for index in range(8))
+            audio_path = _write_temp(root, "audio.g711a", audio)
+            video = (
+                b"\x00\x00\x00\x01\x67\x64\x00\x1f"
+                b"\x00\x00\x00\x01\x65\x88\x84"
+                b"\x00\x00\x00\x01\x41\x9a"
+                b"\x00\x00\x00\x01\x41\x9b"
+                b"\x00\x00\x00\x01\x67\x64\x00\x1f"
+                b"\x00\x00\x00\x01\x65\x88\x85"
+            )
+            video_path = _write_temp(root, "video.h264", video)
+            source = FileMediaSource(video_path, audio_path)
+
+            first_audio, _ = source.next_audio_packet()
+            first_video, first_is_key = source.next_video()
+            forced_video, forced_is_key = source.next_video(force_key=True)
+            aligned_audio, _ = source.next_audio_packet()
+
+            self.assertEqual(first_audio, bytes([0]) * 320)
+            self.assertTrue(first_is_key)
+            self.assertTrue(forced_is_key)
+            self.assertNotEqual(first_video, forced_video)
+            # The forced IDR is video frame 3: 3 * 1000/15 = 200 ms,
+            # which maps to audio packet 5 at 40 ms per packet.
+            self.assertEqual(aligned_audio, bytes([5]) * 320)
 
     def test_h265_reader_groups_access_units(self):
         with tempfile.TemporaryDirectory() as root:

@@ -429,6 +429,20 @@ static int _parse_mjpeg(FileMediaSource *source) {
     return frames.count ? 0 : -1;
 }
 
+static void _align_audio_to_video_index(FileMediaSource *source,
+                                        size_t video_index) {
+    source->audio_index = 0;
+    double skip_ms = video_index * (1000.0 / 15.0);
+    double skipped_ms = 0.0;
+    while (source->audio_index < source->audio_count) {
+        double duration = source->audio_chunks[source->audio_index].duration_ms;
+        if (skipped_ms + duration > skip_ms) break;
+        skipped_ms += duration;
+        source->audio_index++;
+    }
+    if (source->audio_index >= source->audio_count) source->audio_index = 0;
+}
+
 static void _align_to_first_key(FileMediaSource *source) {
     source->first_key_index = 0;
     for (size_t i = 0; i < source->video_count; ++i) {
@@ -438,15 +452,7 @@ static void _align_to_first_key(FileMediaSource *source) {
         }
     }
     source->video_index = source->first_key_index;
-    double skip_ms = source->first_key_index * (1000.0 / 15.0);
-    double skipped_ms = 0.0;
-    while (source->audio_index < source->audio_count) {
-        double duration = source->audio_chunks[source->audio_index].duration_ms;
-        if (skipped_ms + duration > skip_ms) break;
-        skipped_ms += duration;
-        source->audio_index++;
-    }
-    if (source->audio_index >= source->audio_count) source->audio_index = 0;
+    _align_audio_to_video_index(source, source->first_key_index);
 }
 
 int file_media_source_open(FileMediaSource *source,
@@ -511,6 +517,7 @@ int file_media_source_next_video(FileMediaSource *source,
                                  int force_key) {
     if (!source || !data || !length || !is_key || !source->video_count)
         return 0;
+    size_t requested_index = source->video_index;
     if (force_key) {
         size_t checked = 0;
         while (checked < source->video_count) {
@@ -522,6 +529,8 @@ int file_media_source_next_video(FileMediaSource *source,
         if (checked == source->video_count) return 0;
     }
     if (source->video_index >= source->video_count) source->video_index = 0;
+    if (force_key && source->video_index != requested_index)
+        _align_audio_to_video_index(source, source->video_index);
     const FileMediaChunk *chunk = &source->video_chunks[source->video_index++];
     *data = source->video_data + chunk->offset;
     *length = chunk->length;

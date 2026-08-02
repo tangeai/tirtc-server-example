@@ -544,6 +544,12 @@ void on_call_connected(int err, tirtc_conn_t hconn, void *user) {
 
 H5 页面由 user-server 提供静态文件。用户登录后取 RTC token，再用 Web SDK 直连设备。完整页面见 [player.html](user-server/static/player.html)。
 
+登录后可在 [devices.html](user-server/static/devices.html) 管理设备。页面通过
+[`GET /v1/user/device/list`](api-reference.md#get-v1userdevicelist) 获取当前用户已绑定设备；
+点击设备名称旁的“修改”，通过
+[`PUT /v1/user/device/name`](api-reference.md#put-v1userdevicename) 保存名称。
+列表中的设备均为当前绑定设备，状态区域用于查看在线/离线及摄像头、带屏等设备能力。
+
 **步骤：**
 
 1. 用户登录 user-server 拿 `user_jwt`，且 `device_id` 已绑定在该用户名下

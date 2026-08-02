@@ -48,6 +48,7 @@ _stop_event   = threading.Event()
 _active_conn  = None           # tirtc_conn_t (ctypes c_void_p value)
 _active_thread: threading.Thread | None = None
 _force_key_frame = threading.Event()
+_force_key_lock = threading.Lock()
 _media_factory: "Callable[[], MediaSource] | None" = None
 
 # 保持对回调对象的引用，防止 GC
@@ -113,6 +114,18 @@ def _err(msg):
 
 def _sdk_err(fn_name, rc):
     _err(f"{fn_name} failed: rc={rc} ({sdk.TiRtcGetErrorStr(rc).decode()})")
+
+
+def _request_key_frame() -> None:
+    with _force_key_lock:
+        _force_key_frame.set()
+
+
+def _take_key_frame_request() -> bool:
+    with _force_key_lock:
+        requested = _force_key_frame.is_set()
+        _force_key_frame.clear()
+        return requested
 
 
 def _schedule_disconnect_after_callback(hconn_val: int) -> None:
@@ -309,8 +322,8 @@ def _stream_worker(hconn_val: int, source: MediaSource) -> None:
 
     def _send_video() -> bool:
         nonlocal video_pts_ms, first_video, consec_fail
-        force_key = first_video or _force_key_frame.is_set()
-        _force_key_frame.clear()
+        key_requested = _take_key_frame_request()
+        force_key = first_video or key_requested
 
         result = source.next_video(force_key=force_key)
         if result is None:
@@ -331,6 +344,11 @@ def _stream_worker(hconn_val: int, source: MediaSource) -> None:
         rc = sdk.TiRtcSendVideoStream(hconn, ctypes.byref(fi), buf)
         if rc in CONN_FATAL_ERRORS:
             return False
+        elif rc == TIRTC_E_BUSY:
+            # The SDK drops non-key frames after a full send buffer until an
+            # IDR arrives.  Request recovery immediately instead of waiting
+            # for the file's next natural GOP boundary.
+            _request_key_frame()
         elif rc < 0 and rc not in (TIRTC_E_BUSY, TIRTC_E_INVALID_HANDLE, TIRTC_E_CONN_CLOSED):
             _err(f"SendVideoStream rc={rc}: {sdk.TiRtcGetErrorStr(rc).decode()}")
             consec_fail += 1
@@ -448,10 +466,14 @@ def _build_callbacks() -> TIRTCCALLBACKS:
     def on_request_key_frame(hconn, stream_id):
         _log(f"on_request_key_frame: 收到关键帧请求 hconn={ctypes.cast(hconn, ctypes.c_void_p).value:#x} stream_id={stream_id}")
         if stream_id == VIDEO_STREAM_ID:
-            _force_key_frame.set()
+            _request_key_frame()
 
     def on_subscribe_video(hconn, stream_id):
         _log(f"on_subscribe_video: 视频订阅 hconn={ctypes.cast(hconn, ctypes.c_void_p).value:#x} stream_id={stream_id}")
+        if stream_id == VIDEO_STREAM_ID:
+            # H5 attaches/subscribes only after connect() resolves, so the
+            # IDR sent at connection acceptance may already be gone.
+            _request_key_frame()
         return 0
 
     def on_unsubscribe_video(hconn, stream_id):

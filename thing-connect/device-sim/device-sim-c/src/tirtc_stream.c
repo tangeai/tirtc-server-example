@@ -223,6 +223,13 @@ static int _on_sub_video(tirtc_conn_t hconn, uint8_t stream_id) {
     sdk_callback_enter(&s_callback_guard);
     (void)hconn;
     LOG_D("订阅视频 stream_id=%u", stream_id);
+    if (stream_id == STREAM_ID_VIDEO) {
+        /* H5 subscribes after connect completes and may have missed the IDR
+         * sent when the connection was accepted. */
+        pthread_mutex_lock(&s_conn_mtx);
+        s_force_key = 1;
+        pthread_mutex_unlock(&s_conn_mtx);
+    }
     sdk_callback_leave(&s_callback_guard);
     return 0;
 }

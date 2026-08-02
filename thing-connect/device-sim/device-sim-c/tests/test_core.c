@@ -609,6 +609,59 @@ static void test_annexb_video(void) {
     unlink(video_path);
 }
 
+static void test_force_key_realigns_audio(void) {
+    char audio_path[] = "/tmp/tirtc-c-key-audio-XXXXXX";
+    char video_path[] = "/tmp/tirtc-c-key-video-XXXXXX";
+    int audio_fd = mkstemp(audio_path);
+    int video_fd = mkstemp(video_path);
+    assert(audio_fd >= 0 && video_fd >= 0);
+
+    unsigned char audio[8 * 320];
+    for (size_t packet = 0; packet < 8; ++packet)
+        memset(audio + packet * 320, (int)packet, 320);
+    static const unsigned char h264[] = {
+        0, 0, 0, 1, 0x67, 0x01,
+        0, 0, 0, 1, 0x65, 0x02,
+        0, 0, 0, 1, 0x41, 0x03,
+        0, 0, 0, 1, 0x41, 0x04,
+        0, 0, 0, 1, 0x67, 0x05,
+        0, 0, 0, 1, 0x65, 0x06,
+    };
+    write_all(audio_fd, audio, sizeof(audio));
+    write_all(video_fd, h264, sizeof(h264));
+    close(audio_fd);
+    close(video_fd);
+
+    FileMediaSource source;
+    assert(file_media_source_open(&source, audio_path,
+                                  audio_format_find("alaw_8khz"),
+                                  video_path, video_format_find("h264"),
+                                  40) == 0);
+    assert(source.video_count == 4);
+
+    const unsigned char *payload;
+    size_t length;
+    double duration;
+    int key = 0;
+    assert(file_media_source_next_audio(
+               &source, &payload, &length, &duration));
+    assert(payload[0] == 0);
+    assert(file_media_source_next_video(
+               &source, &payload, &length, &key, 0));
+    assert(key);
+    assert(file_media_source_next_video(
+               &source, &payload, &length, &key, 1));
+    assert(key);
+    assert(file_media_source_next_audio(
+               &source, &payload, &length, &duration));
+    /* Forced IDR is video frame 3, or 200 ms at 15 fps. */
+    assert(payload[0] == 5);
+
+    file_media_source_close(&source);
+    unlink(audio_path);
+    unlink(video_path);
+}
+
 typedef struct {
     SdkCallbackGuard *guard;
     int *finished;
@@ -1378,6 +1431,7 @@ int main(void) {
     test_invalid_amr();
     test_encoded_audio_containers();
     test_annexb_video();
+    test_force_key_realigns_audio();
     test_callback_guard();
     test_callback_control_queue();
     test_coordinator_switching();
