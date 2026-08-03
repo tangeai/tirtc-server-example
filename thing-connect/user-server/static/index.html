@@ -1408,7 +1408,7 @@
               <path d="M12 3 4 7v5c0 4.6 3.1 7.7 8 9 4.9-1.3 8-4.4 8-9V7l-8-4Z"/>
               <path d="m9 12 2 2 4-4"/>
             </svg>
-            无需开发板 · 支持三大桌面系统
+            无需开发板 · 支持 Windows、macOS Apple Silicon、Ubuntu x86_64
           </div>
           <div class="hero-mirror">
             <span>GitHub 下载较慢？</span>
@@ -1442,7 +1442,7 @@
               <span class="terminal-cursor" aria-hidden="true"></span>
             </div>
             <div class="terminal-divider"></div>
-            <div class="terminal-line terminal-muted">命令运行后，在浏览器打开：</div>
+            <div class="terminal-line terminal-muted">复制以上命令运行成功后，在浏览器打开：</div>
             <div class="terminal-line">
               <a class="terminal-link" href="https://demo-open.tange-ai.com/" target="_blank" rel="noreferrer">https://demo-open.tange-ai.com/</a>
             </div>
@@ -1673,7 +1673,7 @@
     const copyButtonLabel = copyButton.querySelector("span");
     const terminalCommands = Array.from(document.querySelectorAll(".terminal-command"))
       .map((line) => line.textContent.replace(/^(?:\$|PS>)\s*/, "").trim())
-      .join("\n");
+      .join("\n") + "\n";
 
     copyButton.addEventListener("click", async () => {
       try {
