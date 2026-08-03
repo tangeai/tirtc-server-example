@@ -21,6 +21,18 @@ const SWIPE_OPEN_X = -88
 const MAX_DEVICE_NAME_CHARS = 13
 const AUTH_NAME_POOL = ['爸爸', '妈妈', '爷爷', '奶奶', '哥哥', '姐姐', '朋友']
 
+function generateUUID() {
+  const hex = '0123456789abcdef'
+  const segments = [8, 4, 4, 4, 12]
+  return segments.map((len) => {
+    let s = ''
+    for (let i = 0; i < len; i += 1) {
+      s += hex[Math.floor(Math.random() * 16)]
+    }
+    return s
+  }).join('-')
+}
+
 function randomAuthNames(count = 4) {
   const names = AUTH_NAME_POOL.slice()
   for (let i = names.length - 1; i > 0; i -= 1) {
@@ -858,6 +870,7 @@ Page({
       if (roomType === 'video') {
         applyVideoUIConfig(wmpfVoip, device)
       }
+      const randUuid = generateUUID()
       const displayDeviceName = device.authorizedDeviceName || device.device_name
       const { roomId } = await wmpfVoip.callDevice({
         sn: deviceId,
@@ -868,6 +881,7 @@ Page({
         nickName: this.data.contactRemark || '微信用户',
         deviceName: displayDeviceName,
         isCloud: true,
+        payload: randUuid,
       })
       if (!roomId) throw new Error('创建房间失败')
       app.globalData.currentCall = { deviceId, roomId }
