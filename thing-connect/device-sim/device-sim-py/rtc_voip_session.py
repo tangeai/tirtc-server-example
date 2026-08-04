@@ -505,6 +505,13 @@ class VoipCallState:
             active = bool(self._outgoing_call or self._active_room_id)
         return active or rtc_voip.is_active()
 
+    def matches_active_room(self, room_id: str) -> bool:
+        """Return whether an MQTT callback belongs to the active room."""
+        if not room_id:
+            return False
+        with self._lock:
+            return self._active_room_id == room_id
+
     def accept(self) -> None:
         with self._lock:
             pending = dict(self._pending_call)

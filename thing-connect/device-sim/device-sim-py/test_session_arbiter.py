@@ -68,17 +68,26 @@ class SessionArbiterTests(unittest.TestCase):
 
     def test_incoming_classification_is_atomic(self):
         self.assertEqual(
-            self.arbiter.admit_incoming(SessionKind.VOIP),
+            self.arbiter.admit_incoming(SessionKind.VOIP, "room-1"),
             IncomingDecision.PENDING,
         )
         self.assertEqual(
-            self.arbiter.admit_incoming(SessionKind.VOIP),
+            self.arbiter.admit_incoming(SessionKind.VOIP, "room-1"),
+            IncomingDecision.DUPLICATE,
+        )
+        self.assertEqual(
+            self.arbiter.admit_incoming(SessionKind.VOIP, "room-2"),
             IncomingDecision.BUSY,
         )
         self.arbiter.begin(
-            SessionKind.VOIP, lambda: None, consume_pending=True)
+            SessionKind.VOIP, lambda: None, consume_pending=True,
+            session_id="room-1")
         self.assertEqual(
-            self.arbiter.admit_incoming(SessionKind.VOIP),
+            self.arbiter.admit_incoming(SessionKind.VOIP, "room-1"),
+            IncomingDecision.DUPLICATE,
+        )
+        self.assertEqual(
+            self.arbiter.admit_incoming(SessionKind.VOIP, "room-2"),
             IncomingDecision.CURRENT,
         )
 

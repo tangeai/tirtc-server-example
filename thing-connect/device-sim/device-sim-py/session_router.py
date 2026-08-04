@@ -140,8 +140,14 @@ class SessionMessageRouter:
             return
         decision = self.arbiter.admit_incoming(
             SessionKind.VOIP, room_id, PENDING_CALL_TTL_SEC)
+        if decision == IncomingDecision.DUPLICATE:
+            return
         if decision == IncomingDecision.CURRENT:
             # 本设备外呼的回铃也经由同一个 MQTT 方法到达。
+            matches_active_room = getattr(self.voip, "matches_active_room", None)
+            if (callable(matches_active_room)
+                    and matches_active_room(room_id) is True):
+                return
             if self.voip.is_active():
                 self.voip.on_call_incoming(payload)
             else:

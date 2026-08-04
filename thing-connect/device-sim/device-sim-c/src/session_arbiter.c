@@ -173,17 +173,26 @@ int session_arbiter_offer_pending(SessionArbiter *arbiter, SessionKind kind) {
     return session_arbiter_offer_pending_id(arbiter, kind, "", 0);
 }
 
-int session_arbiter_admit_incoming_id(SessionArbiter *arbiter,
-                                      SessionKind kind,
-                                      const char *session_id,
-                                      int64_t ttl_ms) {
+SessionIncomingDecision session_arbiter_admit_incoming_id(
+    SessionArbiter *arbiter, SessionKind kind, const char *session_id,
+    int64_t ttl_ms) {
     uint32_t bit = _kind_bit(kind);
-    if (!arbiter || !bit || kind == SESSION_STREAM) return -1;
+    if (!arbiter || !bit || kind == SESSION_STREAM)
+        return SESSION_INCOMING_BUSY;
     pthread_mutex_lock(&arbiter->state_lock);
     _expire_pending_locked(arbiter);
-    int decision = -1;
+    SessionIncomingDecision decision = SESSION_INCOMING_BUSY;
     if (!arbiter->closed && arbiter->owner == kind) {
-        decision = 1;
+        decision = session_id && session_id[0] &&
+                   arbiter->owner_session_id[0] &&
+                   strcmp(arbiter->owner_session_id, session_id) == 0
+                       ? SESSION_INCOMING_DUPLICATE
+                       : SESSION_INCOMING_CURRENT;
+    } else if (!arbiter->closed && arbiter->pending_mask != 0) {
+        if (arbiter->pending_mask == bit && session_id && session_id[0] &&
+            arbiter->pending_session_id[0] &&
+            strcmp(arbiter->pending_session_id, session_id) == 0)
+            decision = SESSION_INCOMING_DUPLICATE;
     } else if (!arbiter->closed && arbiter->owner == SESSION_NONE &&
                arbiter->pending_mask == 0) {
         arbiter->pending_mask = bit;
@@ -193,15 +202,16 @@ int session_arbiter_admit_incoming_id(SessionArbiter *arbiter,
                  session_id ? session_id : "");
         arbiter->pending_deadline_ms =
             ttl_ms > 0 ? now_ms() + ttl_ms : 0;
-        decision = 0;
+        decision = SESSION_INCOMING_PENDING;
     }
     pthread_mutex_unlock(&arbiter->state_lock);
-    if (decision == 0) _notify_incoming(kind, session_id);
+    if (decision == SESSION_INCOMING_PENDING)
+        _notify_incoming(kind, session_id);
     return decision;
 }
 
-int session_arbiter_admit_incoming(SessionArbiter *arbiter,
-                                   SessionKind kind) {
+SessionIncomingDecision session_arbiter_admit_incoming(
+    SessionArbiter *arbiter, SessionKind kind) {
     return session_arbiter_admit_incoming_id(arbiter, kind, "", 0);
 }
 

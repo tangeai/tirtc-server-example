@@ -922,9 +922,31 @@ static void test_session_arbiter_policy(void) {
                &ai_adapter, &call_adapter) == 0);
     session_arbiter_init(&arbiter, &coordinator);
     assert(session_coordinator_start_stream(&coordinator) == 0);
-    assert(session_arbiter_admit_incoming(&arbiter, SESSION_VOIP) == 0);
-    assert(session_arbiter_admit_incoming(&arbiter, SESSION_VOIP) == -1);
+    assert(session_arbiter_admit_incoming_id(
+               &arbiter, SESSION_VOIP, "room-1", 45000) ==
+           SESSION_INCOMING_PENDING);
+    assert(session_arbiter_admit_incoming_id(
+               &arbiter, SESSION_VOIP, "room-1", 45000) ==
+           SESSION_INCOMING_DUPLICATE);
+    assert(session_arbiter_admit_incoming_id(
+               &arbiter, SESSION_VOIP, "room-2", 45000) ==
+           SESSION_INCOMING_BUSY);
     session_arbiter_clear_pending(&arbiter, SESSION_VOIP);
+
+    SessionLease incoming_lease;
+    assert(session_arbiter_admit_incoming_id(
+               &arbiter, SESSION_VOIP, "room-active", 45000) ==
+           SESSION_INCOMING_PENDING);
+    assert(session_arbiter_begin_id(
+               &arbiter, SESSION_VOIP, 1, "room-active",
+               &incoming_lease) == 0);
+    assert(session_arbiter_admit_incoming_id(
+               &arbiter, SESSION_VOIP, "room-active", 45000) ==
+           SESSION_INCOMING_DUPLICATE);
+    assert(session_arbiter_admit_incoming_id(
+               &arbiter, SESSION_VOIP, "room-other", 45000) ==
+           SESSION_INCOMING_CURRENT);
+    session_arbiter_finish_lease(&arbiter, &incoming_lease);
 
     assert(session_arbiter_offer_pending_id(
                &arbiter, SESSION_CALL, "room-a", 45000) == 0);
@@ -966,7 +988,8 @@ static void test_session_arbiter_policy(void) {
     assert(session_arbiter_begin(&arbiter, SESSION_AI, 0) != 0);
     assert(session_arbiter_begin(&arbiter, winner, 1) == 0);
     assert(session_arbiter_current(&arbiter) == winner);
-    assert(session_arbiter_admit_incoming(&arbiter, winner) == 1);
+    assert(session_arbiter_admit_incoming(&arbiter, winner) ==
+           SESSION_INCOMING_CURRENT);
     assert(session_arbiter_begin(&arbiter, SESSION_AI, 0) != 0);
     session_arbiter_finish(&arbiter, winner);
     assert(session_arbiter_current(&arbiter) == SESSION_NONE);

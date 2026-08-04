@@ -22,6 +22,7 @@ class SessionConflict(RuntimeError):
 
 class IncomingDecision(Enum):
     CURRENT = "current"
+    DUPLICATE = "duplicate"
     PENDING = "pending"
     BUSY = "busy"
 
@@ -98,14 +99,20 @@ class SessionArbiter:
 
     def admit_incoming(self, kind: SessionKind, session_id: str = "",
                        ttl: float = 45.0) -> IncomingDecision:
-        """原子判断同业务回铃，或为真正的新来电登记待接槽。"""
+        """原子区分回铃、重复投递、新来电和忙线。"""
         self._validate_business_kind(kind)
         with self._state_lock:
             self._expire_pending_locked()
             if not self._closed and self._owner == kind:
+                if (session_id and self._owner_session_id == session_id):
+                    return IncomingDecision.DUPLICATE
                 return IncomingDecision.CURRENT
+            ticket = self._pending_ticket
+            if (ticket is not None and ticket.kind == kind and session_id
+                    and ticket.session_id == session_id):
+                return IncomingDecision.DUPLICATE
             if (not self._closed and self._owner is None
-                    and self._pending_ticket is None):
+                    and ticket is None):
                 self._pending_generation += 1
                 self._pending_ticket = _PendingTicket(
                     kind, session_id, self._pending_generation,

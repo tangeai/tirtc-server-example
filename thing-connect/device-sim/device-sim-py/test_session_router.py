@@ -21,6 +21,7 @@ class SessionMessageRouterTests(unittest.TestCase):
         arbiter = mock.Mock(current=SessionKind.VOIP)
         arbiter.admit_incoming.return_value = IncomingDecision.CURRENT
         voip, call = mock.Mock(), mock.Mock()
+        voip.matches_active_room.return_value = False
         voip.is_active.return_value = True
         router = self._router(arbiter, voip, call)
         payload = {"wx_room_id": "own-outgoing-room"}
@@ -28,6 +29,33 @@ class SessionMessageRouterTests(unittest.TestCase):
         router.on_call_incoming(payload)
 
         voip.on_call_incoming.assert_called_once_with(payload)
+        voip.reject_incoming.assert_not_called()
+
+    def test_duplicate_voip_message_is_ignored_without_reject(self):
+        arbiter = mock.Mock(current=None)
+        arbiter.admit_incoming.return_value = IncomingDecision.DUPLICATE
+        voip, call = mock.Mock(), mock.Mock()
+        router = self._router(arbiter, voip, call)
+        payload = {"wx_room_id": "duplicate-room"}
+
+        router.on_call_incoming(payload)
+        router.wait_for_idle()
+
+        voip.on_call_incoming.assert_not_called()
+        voip.reject_incoming.assert_not_called()
+
+    def test_active_outgoing_room_retransmission_is_ignored(self):
+        arbiter = mock.Mock(current=SessionKind.VOIP)
+        arbiter.admit_incoming.return_value = IncomingDecision.CURRENT
+        voip, call = mock.Mock(), mock.Mock()
+        voip.matches_active_room.return_value = True
+        router = self._router(arbiter, voip, call)
+        payload = {"wx_room_id": "own-outgoing-room"}
+
+        router.on_call_incoming(payload)
+        router.wait_for_idle()
+
+        voip.on_call_incoming.assert_not_called()
         voip.reject_incoming.assert_not_called()
 
     def test_device_call_is_rejected_while_voip_active(self):

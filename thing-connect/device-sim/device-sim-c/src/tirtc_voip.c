@@ -1135,6 +1135,15 @@ int voip_has_pending(VoipState *vs) {
     return pending;
 }
 
+int voip_matches_active_room(VoipState *vs, const char *room_id) {
+    if (!vs || !room_id || !room_id[0]) return 0;
+    pthread_mutex_lock(&vs->lock);
+    int matches = vs->active_room_id[0] &&
+                  strcmp(vs->active_room_id, room_id) == 0;
+    pthread_mutex_unlock(&vs->lock);
+    return matches;
+}
+
 int voip_has_pending_or_outgoing(VoipState *vs) {
     if (!vs) return 0;
     pthread_mutex_lock(&vs->lock);

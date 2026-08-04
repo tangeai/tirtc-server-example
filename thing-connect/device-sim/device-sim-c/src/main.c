@@ -258,10 +258,14 @@ static void _mqtt_voip_incoming(void *ctx, const cJSON *p) {
         (void)voip_reject_incoming_payload_async(rt->voip, p, 7);
         return;
     }
-    int decision = session_arbiter_admit_incoming_id(
+    SessionIncomingDecision decision = session_arbiter_admit_incoming_id(
         &rt->arbiter, SESSION_VOIP, room_id, 45000);
-    if (decision > 0) {
+    if (decision == SESSION_INCOMING_DUPLICATE)
+        return;
+    if (decision == SESSION_INCOMING_CURRENT) {
         /* The callback may be the answer/ringback for our own VoIP call. */
+        if (voip_matches_active_room(rt->voip, room_id))
+            return;
         if (voip_is_active(rt->voip))
             voip_on_call_incoming(rt->voip, p);
         else {
@@ -270,7 +274,7 @@ static void _mqtt_voip_incoming(void *ctx, const cJSON *p) {
         }
         return;
     }
-    if (decision < 0) {
+    if (decision == SESSION_INCOMING_BUSY) {
         LOG_W("当前会话忙，直接拒绝微信来电");
         (void)voip_reject_incoming_payload_async(rt->voip, p, 5);
         return;

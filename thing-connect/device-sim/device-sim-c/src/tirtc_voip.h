@@ -59,6 +59,7 @@ int  voip_start_session(VoipState *vs, const char *peer_id, const char *token,
                         const char *audio_file);
 void voip_stop_session(VoipState *vs);
 int  voip_is_active(const VoipState *vs);
+int  voip_matches_active_room(VoipState *vs, const char *room_id);
 int  voip_reject_session(const char *wx_app_id, const char *wx_model_id,
                          const char *wx_session_token, const char *wx_room_id,
                          const char *wx_payload, int hangup_reason);

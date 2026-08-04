@@ -24,6 +24,13 @@ typedef int (*session_arbiter_action_fn)(void *user);
 typedef void (*session_arbiter_lease_ready_fn)(void *user,
                                                const SessionLease *lease);
 
+typedef enum {
+    SESSION_INCOMING_BUSY = -1,
+    SESSION_INCOMING_PENDING = 0,
+    SESSION_INCOMING_CURRENT = 1,
+    SESSION_INCOMING_DUPLICATE = 2,
+} SessionIncomingDecision;
+
 /*
  * Central policy gate for every producer of session events (terminal, MQTT,
  * SDK callbacks).  It owns conflict decisions; SessionCoordinator owns only
@@ -62,13 +69,11 @@ int session_arbiter_offer_pending(SessionArbiter *arbiter, SessionKind kind);
 int session_arbiter_offer_pending_id(SessionArbiter *arbiter, SessionKind kind,
                                      const char *session_id,
                                      int64_t ttl_ms);
-/* Returns 1 for the current owner's event, 0 for a newly reserved pending
- * slot, and -1 when another event owns either slot. */
-int session_arbiter_admit_incoming(SessionArbiter *arbiter, SessionKind kind);
-int session_arbiter_admit_incoming_id(SessionArbiter *arbiter,
-                                      SessionKind kind,
-                                      const char *session_id,
-                                      int64_t ttl_ms);
+SessionIncomingDecision session_arbiter_admit_incoming(
+    SessionArbiter *arbiter, SessionKind kind);
+SessionIncomingDecision session_arbiter_admit_incoming_id(
+    SessionArbiter *arbiter, SessionKind kind, const char *session_id,
+    int64_t ttl_ms);
 void session_arbiter_clear_pending(SessionArbiter *arbiter, SessionKind kind);
 void session_arbiter_clear_pending_id(SessionArbiter *arbiter,
                                       SessionKind kind,
