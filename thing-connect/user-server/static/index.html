@@ -613,7 +613,7 @@
     }
 
     .routes {
-      padding: 112px 0 118px;
+      padding: 112px 0 40px;
     }
 
     .section-heading {
@@ -790,16 +790,66 @@
 
     .video-frame video {
       width: 100%;
-      aspect-ratio: 16 / 10;
+      aspect-ratio: 16 / 9;
       display: block;
       object-fit: cover;
       background: #101a1a;
+    }
+
+    .video-play-button {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      border: 0;
+      color: var(--white);
+      background: linear-gradient(180deg, rgba(8, 18, 18, 0.02) 36%, rgba(8, 18, 18, 0.48));
+      font-size: 14px;
+      font-weight: 720;
+      cursor: pointer;
+      transition: background 160ms ease;
+    }
+
+    .video-play-icon {
+      position: relative;
+      width: 46px;
+      height: 46px;
+      border: 1px solid rgba(255, 255, 255, 0.42);
+      border-radius: 50%;
+      background: rgba(15, 23, 23, 0.78);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+    }
+
+    .video-play-icon::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 0;
+      height: 0;
+      margin: -7px 0 0 -4px;
+      border-top: 7px solid transparent;
+      border-bottom: 7px solid transparent;
+      border-left: 11px solid var(--white);
+    }
+
+    .video-play-button:hover {
+      background: linear-gradient(180deg, rgba(8, 18, 18, 0.08) 36%, rgba(8, 18, 18, 0.58));
+    }
+
+    .video-play-button:focus-visible {
+      outline: 3px solid #7ee2d2;
+      outline-offset: -5px;
     }
 
     .video-label {
       position: absolute;
       top: 22px;
       left: 22px;
+      z-index: 2;
       display: inline-flex;
       align-items: center;
       gap: 8px;
@@ -834,7 +884,7 @@
     }
 
     .final-cta {
-      padding: 112px 0;
+      padding: 56px 0 112px;
     }
 
     .final-cta-inner {
@@ -1285,9 +1335,12 @@
         font-size: 12px;
       }
 
-      .routes,
+      .routes {
+        padding: 78px 0 40px;
+      }
+
       .final-cta {
-        padding: 78px 0;
+        padding: 56px 0 78px;
       }
 
       .section-heading {
@@ -1505,7 +1558,7 @@
           <div class="video-step-heading reveal">
             <span class="setup-number">02</span>
             <div>
-              <h3>直接观看四个功能演示</h3>
+              <h3>直接观看功能视频演示</h3>
               <p>先了解 TiRTC 能实现什么；模拟器成功上线并绑定后，再跟随视频逐项操作。</p>
             </div>
           </div>
@@ -1513,11 +1566,12 @@
           <div class="video-grid">
             <article class="video-card reveal">
               <div class="video-frame">
-                <video controls preload="metadata" poster="images/video-live-view-poster.jpg">
+                <video controls preload="metadata" poster="/static/images/video-live-view-poster.jpg">
                   <source src="https://demo-open.tange-ai.com/download/videos/simulator-live-view.mp4" type="video/mp4">
                   当前浏览器不支持视频播放。
                 </video>
-                <span class="video-label"><i></i> 功能 01</span>
+                <button class="video-play-button" type="button" aria-label="播放设备远程查看实时音视频演示"><span class="video-play-icon" aria-hidden="true"></span>播放演示</button>
+                <span class="video-label"><i></i> 远程实时查看</span>
               </div>
               <h3>设备远程查看实时音视频</h3>
               <p>演示设备如何通过 TiRTC 推送音视频，并在 Web 体验平台（H5）中完成远程实时查看。</p>
@@ -1525,11 +1579,12 @@
 
             <article class="video-card reveal">
               <div class="video-frame">
-                <video controls preload="metadata" poster="images/video-ai-intercom-poster.jpg">
+                <video controls preload="metadata" poster="/static/images/video-ai-intercom-poster.jpg">
                   <source src="https://demo-open.tange-ai.com/download/videos/ai-call.mp4" type="video/mp4">
                   当前浏览器不支持视频播放。
                 </video>
-                <span class="video-label"><i></i> 功能 02</span>
+                <button class="video-play-button" type="button" aria-label="播放 AI 语音对讲与设备呼叫演示"><span class="video-play-icon" aria-hidden="true"></span>播放演示</button>
+                <span class="video-label"><i></i> AI 对讲与设备呼叫</span>
               </div>
               <h3>AI 语音对讲+设备呼设备+设备呼微信小程序</h3>
               <p>当前已实现 AI语音对讲，AI控制设备呼叫设备，设备呼叫微信小程序。</p>
@@ -1713,6 +1768,22 @@
     } else {
       revealItems.forEach((item) => item.classList.add("visible"));
     }
+
+    document.querySelectorAll(".video-frame").forEach((frame) => {
+      const video = frame.querySelector("video");
+      const playButton = frame.querySelector(".video-play-button");
+      if (!video || !playButton) return;
+
+      playButton.addEventListener("click", () => {
+        video.play().catch(() => {});
+      });
+      video.addEventListener("play", () => {
+        playButton.hidden = true;
+      });
+      video.addEventListener("ended", () => {
+        playButton.hidden = false;
+      });
+    });
 
     document.getElementById("year").textContent = new Date().getFullYear();
   </script>
