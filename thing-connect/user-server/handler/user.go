@@ -50,6 +50,8 @@ type Server struct {
 	RDB       *redis.Client
 	MQTT      *mqttc.Broker
 	JWTSecret string
+
+	passwordResetMailQueueCancel context.CancelFunc
 }
 
 func NewServer(userSvc *service.UserService, bindSvc *service.BindService, mqtt *mqttc.Broker, jwtSecret, callServerURL, internalKey string, roleStore store.RoleBindingStore, cleanup *UnbindCleanup) *Server {
@@ -85,6 +87,11 @@ func (s *Server) Register(r *gin.Engine) {
 		cfg := service.DefaultServiceConfig()
 		// In the legacy/test path captcha and mailer are noop stubs.
 		s.userSvc = service.NewUserService(userStore, cacheStore, &noopCaptcha{}, &noopMailer{}, s.JWTSecret, cfg)
+		passwordResetMailQueue := service.NewInMemoryPasswordResetEmailQueue(s.userSvc.DeliverPasswordResetCode)
+		s.userSvc.SetPasswordResetEmailQueue(passwordResetMailQueue)
+		queueCtx, queueCancel := context.WithCancel(context.Background())
+		s.passwordResetMailQueueCancel = queueCancel
+		go passwordResetMailQueue.Run(queueCtx)
 		var mqttPub service.MQTTPublisher
 		if s.MQTT != nil {
 			mqttPub = s.MQTT
@@ -102,6 +109,8 @@ func (s *Server) Register(r *gin.Engine) {
 	v1.POST("/user/send-code", s.postSendCode)
 	v1.POST("/user/register", s.postRegister)
 	v1.POST("/user/login", s.postLogin)
+	v1.POST("/user/password-reset/send-code", s.postPasswordResetSendCode)
+	v1.POST("/user/password-reset", s.postPasswordReset)
 
 	// Authenticated
 	auth := v1.Group("", JWTAuth(s.jwtSecret))
@@ -112,6 +121,15 @@ func (s *Server) Register(r *gin.Engine) {
 	auth.POST("/user/device/bind-by-id", s.postBindByDeviceID)
 	auth.DELETE("/user/device/reset", s.deleteReset)
 	auth.GET("/user/device/rtc-token", s.getRtcToken)
+}
+
+// Close releases background workers created by the legacy integration path.
+// Production wiring owns and stops its queue in user-server/main.go.
+func (s *Server) Close() {
+	if s.passwordResetMailQueueCancel != nil {
+		s.passwordResetMailQueueCancel()
+		s.passwordResetMailQueueCancel = nil
+	}
 }
 
 type sendCodeReq struct {
@@ -129,6 +147,20 @@ func (s *Server) postSendCode(c *gin.Context) {
 	}
 	tok := captcha.CaptchaToken{CaptchaID: req.CaptchaID, Validate: req.Validate, User: req.User}
 	if err := s.userSvc.SendCode(c.Request.Context(), req.Email, tok); err != nil {
+		apiresp.FromError(c, err)
+		return
+	}
+	apiresp.OK(c, nil)
+}
+
+func (s *Server) postPasswordResetSendCode(c *gin.Context) {
+	var req sendCodeReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		apiresp.BadParamError(c, err)
+		return
+	}
+	tok := captcha.CaptchaToken{CaptchaID: req.CaptchaID, Validate: req.Validate, User: req.User}
+	if err := s.userSvc.SendPasswordResetCode(c.Request.Context(), req.Email, c.ClientIP(), tok); err != nil {
 		apiresp.FromError(c, err)
 		return
 	}
@@ -176,6 +208,19 @@ func (s *Server) postLogin(c *gin.Context) {
 		return
 	}
 	apiresp.OK(c, gin.H{"token": jwtTok, "user_id": userID})
+}
+
+func (s *Server) postPasswordReset(c *gin.Context) {
+	var req registerReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		apiresp.BadParamError(c, err)
+		return
+	}
+	if err := s.userSvc.ResetPassword(c.Request.Context(), req.Email, req.Password, req.Code, c.ClientIP()); err != nil {
+		apiresp.FromError(c, err)
+		return
+	}
+	apiresp.OK(c, nil)
 }
 
 func (s *Server) getQuota(c *gin.Context) {

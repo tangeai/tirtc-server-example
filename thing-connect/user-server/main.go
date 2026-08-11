@@ -94,6 +94,8 @@ func main() {
 	}
 
 	userSvc := service.NewUserService(userStore, cacheStore, captchaVerifier, emailMailer, cfg.JWTSecret, svcCfg)
+	passwordResetMailQueue := service.NewInMemoryPasswordResetEmailQueue(userSvc.DeliverPasswordResetCode)
+	userSvc.SetPasswordResetEmailQueue(passwordResetMailQueue)
 
 	var mqttPub service.MQTTPublisher
 	if broker != nil {
@@ -109,6 +111,7 @@ func main() {
 	r.StaticFile("/", staticDir+"/index.html")
 	r.StaticFile("/login", staticDir+"/auth.html")
 	r.StaticFile("/register", staticDir+"/auth.html")
+	r.StaticFile("/forgot-password", staticDir+"/auth.html")
 	r.StaticFile("/devices", staticDir+"/devices.html")
 	r.StaticFile("/bind", staticDir+"/bind.html")
 	r.StaticFile("/player", staticDir+"/player.html")
@@ -138,6 +141,7 @@ func main() {
 	cleanup := &usrhandler.UnbindCleanup{Enqueue: outbox.Enqueue}
 	outboxCtx, outboxCancel := context.WithCancel(context.Background())
 	go outbox.Run(outboxCtx)
+	go passwordResetMailQueue.Run(outboxCtx)
 
 	usrhandler.NewServer(userSvc, bindSvc, broker, cfg.JWTSecret, cfg.Call.CallServerURL, cfg.Call.InternalKey, roleStore, cleanup).Register(r)
 

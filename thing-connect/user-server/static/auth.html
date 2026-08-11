@@ -334,6 +334,27 @@
       background: #2a353a;
     }
 
+    .form-links {
+      margin: 14px 0 0;
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 700;
+      text-align: right;
+    }
+
+    .form-links button {
+      padding: 0;
+      border: 0;
+      color: inherit;
+      background: transparent;
+      font: inherit;
+    }
+
+    .form-links button:hover {
+      color: var(--accent-dark);
+      text-decoration: underline;
+    }
+
     .form-note {
       min-height: 20px;
       margin: 14px 0 0;
@@ -341,6 +362,10 @@
       font-size: 13px;
       line-height: 1.5;
       text-align: center;
+    }
+
+    .form-note.success {
+      color: var(--accent);
     }
 
     .card-footnote {
@@ -477,7 +502,7 @@
           <p id="card-sub">继续管理和调试你的 TiRTC 设备</p>
         </div>
 
-        <div class="auth-tabs" role="tablist" aria-label="账号操作">
+        <div class="auth-tabs" id="auth-tabs" role="tablist" aria-label="账号操作">
           <button class="auth-tab active" id="tab-login" type="button" role="tab" aria-selected="true" onclick="switchTab('login')">登录</button>
           <button class="auth-tab" id="tab-register" type="button" role="tab" aria-selected="false" onclick="switchTab('register')">免费注册</button>
         </div>
@@ -492,6 +517,7 @@
             <input type="password" id="login-password" placeholder="请输入密码" required autocomplete="current-password">
           </div>
           <button class="primary-button" type="submit" id="btn-login-submit">登录</button>
+          <p class="form-links"><button type="button" onclick="switchTab('reset')">忘记密码？</button></p>
         </form>
 
         <form id="form-register" class="hidden" onsubmit="doRegister(event)">
@@ -515,6 +541,30 @@
             <input type="password" id="reg-password2" placeholder="再次输入密码" minlength="6" required autocomplete="new-password">
           </div>
           <button class="primary-button" type="submit" id="btn-register">创建账号并进入平台</button>
+        </form>
+
+        <form id="form-reset" class="hidden" onsubmit="doResetPassword(event)">
+          <div class="field">
+            <label for="reset-email">注册邮箱</label>
+            <input type="email" id="reset-email" placeholder="请输入注册邮箱地址" required autocomplete="email">
+          </div>
+          <div class="field">
+            <label for="reset-code">邮箱验证码</label>
+            <div class="code-row">
+              <input type="text" id="reset-code" placeholder="6 位验证码" maxlength="6" pattern="[0-9]{6}" inputmode="numeric" required autocomplete="one-time-code">
+              <button class="send-code" type="button" onclick="doSendResetCode()" id="btn-send-reset-code">获取验证码</button>
+            </div>
+          </div>
+          <div class="field">
+            <label for="reset-password">新密码</label>
+            <input type="password" id="reset-password" placeholder="至少 6 位" minlength="6" required autocomplete="new-password">
+          </div>
+          <div class="field">
+            <label for="reset-password2">确认新密码</label>
+            <input type="password" id="reset-password2" placeholder="再次输入新密码" minlength="6" required autocomplete="new-password">
+          </div>
+          <button class="primary-button" type="submit" id="btn-reset-password">重置密码</button>
+          <p class="form-links"><button type="button" onclick="switchTab('login')">返回登录</button></p>
         </form>
 
         <p class="form-note" id="err-msg" role="alert" aria-live="polite"></p>
@@ -598,7 +648,7 @@ function setupRegCaptcha() {
 
 function setupCaptcha() {
   setupLoginCaptcha();
-  if (!$('form-register').classList.contains('hidden')) setupRegCaptcha();
+  if (!$('form-register').classList.contains('hidden') || !$('form-reset').classList.contains('hidden')) setupRegCaptcha();
 }
 
 async function waitForCaptcha(getInstance, setupInstance) {
@@ -614,21 +664,33 @@ async function waitForCaptcha(getInstance, setupInstance) {
 // ── Auth logic ────────────────────────────────────────────────────────────
 function switchTab(tab, updateUrl = true) {
   const isLogin = tab === 'login';
+  const isRegister = tab === 'register';
+  const isReset = tab === 'reset';
   $('form-login').classList.toggle('hidden', !isLogin);
-  $('form-register').classList.toggle('hidden', isLogin);
+  $('form-register').classList.toggle('hidden', !isRegister);
+  $('form-reset').classList.toggle('hidden', !isReset);
+  $('auth-tabs').classList.toggle('hidden', isReset);
   $('tab-login').classList.toggle('active', isLogin);
-  $('tab-register').classList.toggle('active', !isLogin);
+  $('tab-register').classList.toggle('active', isRegister);
   $('tab-login').setAttribute('aria-selected', String(isLogin));
-  $('tab-register').setAttribute('aria-selected', String(!isLogin));
-  $('card-title').textContent = isLogin ? '登录体验平台' : '创建体验账号';
-  $('card-sub').textContent   = isLogin ? '继续管理和调试你的 TiRTC 设备' : '注册后即可添加模拟器或真实设备';
-  document.title = isLogin ? '登录 · TiRTC 体验平台' : '注册 · TiRTC 体验平台';
-  if (updateUrl) history.replaceState(null, '', isLogin ? '/login' : '/register');
+  $('tab-register').setAttribute('aria-selected', String(isRegister));
+  $('card-title').textContent = isLogin ? '登录体验平台' : (isRegister ? '创建体验账号' : '找回密码');
+  $('card-sub').textContent   = isLogin ? '继续管理和调试你的 TiRTC 设备' : (isRegister ? '注册后即可添加模拟器或真实设备' : '验证注册邮箱后即可设置新密码');
+  document.title = isLogin ? '登录 · TiRTC 体验平台' : (isRegister ? '注册 · TiRTC 体验平台' : '找回密码 · TiRTC 体验平台');
+  if (updateUrl) history.replaceState(null, '', isLogin ? '/login' : (isRegister ? '/register' : '/forgot-password'));
   showErr('');
-  if (!isLogin && CAPTCHA_ID) setupRegCaptcha();
+  if ((isRegister || isReset) && CAPTCHA_ID) setupRegCaptcha();
 }
 
-function showErr(msg) { $('err-msg').textContent = msg; }
+function showErr(msg) {
+  $('err-msg').classList.remove('success');
+  $('err-msg').textContent = msg;
+}
+
+function showSuccess(msg) {
+  $('err-msg').classList.add('success');
+  $('err-msg').textContent = msg;
+}
 
 function setBtn(id, text, disabled) {
   const b = $('' + id);
@@ -741,9 +803,9 @@ async function _submitSendCode(email, tok) {
   }
 }
 
-function startSendCodeCooldown() {
+function startSendCodeCooldown(buttonID = 'btn-send-code') {
   let secs = 60;
-  const btn = $('btn-send-code');
+  const btn = $(buttonID);
   btn.disabled = true;
   btn.textContent = `${secs}s 后重新获取`;
   const t = setInterval(() => {
@@ -756,6 +818,60 @@ function startSendCodeCooldown() {
       btn.textContent = `${secs}s 后重新获取`;
     }
   }, 1000);
+}
+
+async function doSendResetCode() {
+  const emailInput = $('reset-email');
+  const email = emailInput.value.trim();
+  if (!email) { showErr('请输入注册邮箱地址'); return; }
+  if (!emailInput.checkValidity()) { showErr('请输入正确的邮箱地址'); return; }
+  showErr('');
+  if (captchaInitPromise && !(await captchaInitPromise)) {
+    showErr('页面配置加载失败，请刷新后重试');
+    return;
+  }
+  if (CAPTCHA_ID) {
+    regCaptchaToken = null;
+    _regSendAfterVerify = tok => _submitResetCode(email, tok);
+    try {
+      const instance = await waitForCaptcha(() => regCaptchaIns, setupRegCaptcha);
+      instance.refresh();
+      instance.verify();
+    } catch (_) {
+      _regSendAfterVerify = null;
+      showErr('人机验证加载失败，请刷新页面重试');
+    }
+  } else {
+    await _submitResetCode(email, null);
+  }
+}
+
+async function _submitResetCode(email, tok) {
+  setBtn('btn-send-reset-code', '发送中…', true);
+  try {
+    const res = await fetch('/v1/user/password-reset/send-code', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email,
+        captcha_id: tok ? tok.captcha_id : '',
+        validate: tok ? tok.validate : '',
+        user: '',
+      }),
+    });
+    const data = await res.json();
+    if (data.code === 200) {
+      showSuccess('如该邮箱已注册，验证码将发送至该邮箱');
+      startSendCodeCooldown('btn-send-reset-code');
+    } else {
+      showErr(data.code === 40012 ? '人机验证失败，请重试' : (data.msg || '发送失败'));
+      setBtn('btn-send-reset-code', '获取验证码', false);
+    }
+  } catch (_) {
+    showErr('网络连接失败，请稍后重试');
+    setBtn('btn-send-reset-code', '获取验证码', false);
+  } finally {
+    regCaptchaToken = null;
+  }
 }
 
 async function doRegister(e) {
@@ -783,13 +899,45 @@ async function doRegister(e) {
   } finally { setBtn('btn-register', '创建账号并进入平台', false); }
 }
 
-if (localStorage.getItem('token')) {
+async function doResetPassword(e) {
+  e.preventDefault();
+  const email = $('reset-email').value.trim();
+  const code = $('reset-code').value.trim();
+  const pwd = $('reset-password').value;
+  const pwd2 = $('reset-password2').value;
+  if (!email) { showErr('请输入注册邮箱地址'); return; }
+  if (!code) { showErr('请输入验证码'); return; }
+  if (!pwd) { showErr('请输入新密码'); return; }
+  if (pwd !== pwd2) { showErr('两次密码不一致'); return; }
+  setBtn('btn-reset-password', '重置中…', true);
+  showErr('');
+  try {
+    const res = await fetch('/v1/user/password-reset', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password: pwd, code }),
+    });
+    const data = await res.json();
+    if (data.code === 200) {
+      showSuccess('密码已重置，请使用新密码登录');
+      localStorage.clear();
+      sessionStorage.clear();
+      setTimeout(() => switchTab('login'), 800);
+    } else {
+      showErr(data.code === 40013 ? '验证码错误或已过期' : (data.msg || '密码重置失败'));
+    }
+  } catch (_) {
+    showErr('网络连接失败，请稍后重试');
+  } finally {
+    setBtn('btn-reset-password', '重置密码', false);
+  }
+}
+
+if (localStorage.getItem('token') && location.pathname !== '/forgot-password') {
   location.href = '/devices';
 } else {
-  const requestedTab = location.pathname === '/register'
-    || new URLSearchParams(location.search).get('tab') === 'register'
-    ? 'register'
-    : 'login';
+  const requestedTab = location.pathname === '/forgot-password'
+    ? 'reset'
+    : (location.pathname === '/register' || new URLSearchParams(location.search).get('tab') === 'register' ? 'register' : 'login');
   switchTab(requestedTab, false);
   captchaInitPromise = initCaptchaId();
 }

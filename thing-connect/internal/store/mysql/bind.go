@@ -454,6 +454,38 @@ func (s *cacheStore) GetEmailCode(ctx context.Context, email string) (string, er
 	return val, nil
 }
 
+func (s *cacheStore) ConsumeEmailCode(ctx context.Context, email, code string) (bool, error) {
+	result, err := s.rdb.Eval(ctx, `
+		if redis.call("GET", KEYS[1]) == ARGV[1] then
+			return redis.call("DEL", KEYS[1])
+		end
+		return 0
+	`, []string{"email_code:" + email}, code).Int64()
+	if err != nil {
+		return false, fmt.Errorf("cacheStore.ConsumeEmailCode: %w", err)
+	}
+	return result == 1, nil
+}
+
+func (s *cacheStore) IncrPasswordResetAttempt(ctx context.Context, scope string, window time.Duration) (int64, error) {
+	key := "password_reset_attempt:" + scope
+	windowMS := window.Milliseconds()
+	if windowMS < 1 {
+		windowMS = 1
+	}
+	count, err := s.rdb.Eval(ctx, `
+		local count = redis.call("INCR", KEYS[1])
+		if count == 1 then
+			redis.call("PEXPIRE", KEYS[1], ARGV[1])
+		end
+		return count
+	`, []string{key}, windowMS).Int64()
+	if err != nil {
+		return 0, fmt.Errorf("cacheStore.IncrPasswordResetAttempt: %w", err)
+	}
+	return count, nil
+}
+
 func (s *cacheStore) IsDeviceOnline(ctx context.Context, deviceID string) (bool, error) {
 	val, err := s.rdb.Get(ctx, "online:"+deviceID).Result()
 	if err == redis.Nil {

@@ -29,7 +29,7 @@ service:
   quota_per_user: 10        # 兼容字段；当前注册不读取，配额来自 users.bind_quota 默认值
   code_ttl: 190s            # 验证码有效期（默认 190s）
   rate_limit_window: 190s   # 设备上报限频窗口（默认 190s）
-  rate_limit_max_hits: 10   # 窗口内最大请求数（默认 10）
+  rate_limit_max_hits: 10   # 设备上报窗口内最大请求数（默认 10）
   token_expiry: 168h        # JWT 有效期（默认 7 天）
   mqtt_ack_timeout: 5s      # MQTT 下发等待 ACK 超时（默认 5s）
 

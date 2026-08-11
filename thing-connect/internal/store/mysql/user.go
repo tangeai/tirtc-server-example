@@ -40,6 +40,14 @@ func (s *userStore) CreateUser(ctx context.Context, email, passwordHash string) 
 	return id, nil
 }
 
+func (s *userStore) UpdatePassword(ctx context.Context, userID int64, passwordHash string) error {
+	if _, err := s.db.ExecContext(ctx,
+		`UPDATE users SET password=? WHERE id=?`, passwordHash, userID); err != nil {
+		return fmt.Errorf("userStore.UpdatePassword: %w", err)
+	}
+	return nil
+}
+
 func (s *userStore) GetQuota(ctx context.Context, userID int64) (int, error) {
 	var q int
 	if err := s.db.GetContext(ctx, &q,

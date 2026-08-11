@@ -81,6 +81,9 @@ func (f *fakeCacheForDevice) SetEmailCode(_ context.Context, _, _ string, _ time
 func (f *fakeCacheForDevice) GetEmailCode(_ context.Context, _ string) (string, error) {
 	return "", errors.New("not used")
 }
+func (f *fakeCacheForDevice) ConsumeEmailCode(_ context.Context, _, _ string) (bool, error) {
+	return false, errors.New("not used")
+}
 func (f *fakeCacheForDevice) IsDeviceOnline(_ context.Context, _ string) (bool, error) {
 	return false, nil
 }
@@ -92,6 +95,9 @@ func (f *fakeCacheForDevice) DelVerifyAndCode(_ context.Context, _, _ string) er
 	return nil
 }
 func (f *fakeCacheForDevice) DelEmailCode(_ context.Context, _ string) error { return nil }
+func (f *fakeCacheForDevice) IncrPasswordResetAttempt(_ context.Context, _ string, _ time.Duration) (int64, error) {
+	return 1, nil
+}
 func (f *fakeCacheForDevice) SetNonce(_ context.Context, _ string, _ time.Duration) (bool, error) {
 	return f.nonceOK, nil
 }

@@ -4,9 +4,12 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"math/big"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -46,12 +49,97 @@ type OnlineChecker interface {
 
 // UserService handles user registration, login, and quota.
 type UserService struct {
-	user      store.UserStore
-	cache     store.CacheStore
-	captcha   captcha.Verifier
-	mailer    mailer.Mailer
-	jwtSecret string
-	cfg       ServiceConfig
+	user                    store.UserStore
+	cache                   store.CacheStore
+	captcha                 captcha.Verifier
+	mailer                  mailer.Mailer
+	passwordResetEmailQueue PasswordResetEmailQueue
+	jwtSecret               string
+	cfg                     ServiceConfig
+}
+
+// PasswordResetEmailQueue accepts a public reset request for asynchronous
+// delivery. It deliberately receives every valid request before account
+// lookup, keeping the HTTP path independent of account existence.
+type PasswordResetEmailQueue interface {
+	Enqueue(ctx context.Context, email string) error
+}
+
+const (
+	passwordResetMailQueueSize = 256
+	passwordResetMailWorkers   = 2
+
+	passwordResetSendCodeWindow       = time.Minute
+	passwordResetSendEmailMaxAttempts = 1
+	passwordResetSendIPMaxAttempts    = 10
+)
+
+// InMemoryPasswordResetEmailQueue keeps the public request path independent
+// of account lookup and SMTP without adding persistent application state. A
+// user can safely request a new code if a process restart drops a queued job.
+type InMemoryPasswordResetEmailQueue struct {
+	jobs    chan string
+	deliver func(context.Context, string) error
+
+	mu      sync.Mutex
+	pending map[string]struct{}
+}
+
+func NewInMemoryPasswordResetEmailQueue(
+	deliver func(context.Context, string) error,
+) *InMemoryPasswordResetEmailQueue {
+	return &InMemoryPasswordResetEmailQueue{
+		jobs:    make(chan string, passwordResetMailQueueSize),
+		deliver: deliver,
+		pending: make(map[string]struct{}),
+	}
+}
+
+func (q *InMemoryPasswordResetEmailQueue) Enqueue(ctx context.Context, email string) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if _, ok := q.pending[email]; ok {
+		return nil
+	}
+	q.pending[email] = struct{}{}
+	select {
+	case q.jobs <- email:
+		return nil
+	case <-ctx.Done():
+		delete(q.pending, email)
+		return ctx.Err()
+	default:
+		delete(q.pending, email)
+		return ErrPasswordResetMailQueueFull
+	}
+}
+
+// Run processes password-reset email jobs until ctx is cancelled. Delivery
+// errors are logged; users can request another verification code to retry.
+func (q *InMemoryPasswordResetEmailQueue) Run(ctx context.Context) {
+	for i := 0; i < passwordResetMailWorkers; i++ {
+		go q.runWorker(ctx)
+	}
+	<-ctx.Done()
+}
+
+func (q *InMemoryPasswordResetEmailQueue) runWorker(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case email := <-q.jobs:
+			deliveryCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			err := q.deliver(deliveryCtx, email)
+			cancel()
+			q.mu.Lock()
+			delete(q.pending, email)
+			q.mu.Unlock()
+			if err != nil {
+				slog.Warn("password reset email delivery failed", "err", err)
+			}
+		}
+	}
 }
 
 func NewUserService(
@@ -72,32 +160,165 @@ func NewUserService(
 	}
 }
 
+// SetPasswordResetEmailQueue enables asynchronous reset-email delivery. It
+// must be called during application startup before requests are served.
+func (s *UserService) SetPasswordResetEmailQueue(queue PasswordResetEmailQueue) {
+	s.passwordResetEmailQueue = queue
+}
+
 // SendCode verifies the captcha token, then sends a 6-digit email code.
 // The code is stored in Redis under key "email_code:{email}" with TTL = cfg.CodeTTL.
 func (s *UserService) SendCode(ctx context.Context, email string, tok captcha.CaptchaToken) error {
+	email = normalizeEmail(email)
 	if err := s.captcha.Verify(ctx, tok); err != nil {
 		return ErrCaptchaFailed
 	}
+	return s.sendEmailCode(ctx, email, email, registrationCodeEmail)
+}
 
+// SendPasswordResetCode validates and rate-limits the public request, then queues it for
+// asynchronous delivery. It does not look up the account or contact SMTP on
+// the request path, so the response cannot reveal whether an email is
+// registered.
+func (s *UserService) SendPasswordResetCode(ctx context.Context, email, clientIP string, tok captcha.CaptchaToken) error {
+	email = normalizeEmail(email)
+	if err := s.captcha.Verify(ctx, tok); err != nil {
+		return ErrCaptchaFailed
+	}
+	if err := s.limitPasswordResetSendCode(ctx, email, clientIP); err != nil {
+		return err
+	}
+	if s.passwordResetEmailQueue == nil {
+		return fmt.Errorf("service.SendPasswordResetCode: email queue is not configured")
+	}
+	if err := s.passwordResetEmailQueue.Enqueue(ctx, email); err != nil {
+		if errors.Is(err, ErrPasswordResetMailQueueFull) {
+			return ErrRateLimit
+		}
+		return fmt.Errorf("service.SendPasswordResetCode Enqueue: %w", err)
+	}
+	return nil
+}
+
+// DeliverPasswordResetCode runs only in the in-memory mail worker. Unknown
+// emails are acknowledged without sending any mail. Delivery errors are
+// returned for logging; users may submit a new request to retry.
+func (s *UserService) DeliverPasswordResetCode(ctx context.Context, email string) error {
+	email = normalizeEmail(email)
+	user, err := s.user.GetUserByEmail(ctx, email)
+	if err != nil {
+		return fmt.Errorf("service.DeliverPasswordResetCode GetUserByEmail: %w", err)
+	}
+	if user == nil {
+		return nil
+	}
+	return s.sendEmailCode(ctx, email, passwordResetCodeKey(email), passwordResetCodeEmail)
+}
+
+type emailCodeMessage struct {
+	subject string
+	body    string
+}
+
+func (s *UserService) sendEmailCode(
+	ctx context.Context,
+	email, cacheKey string,
+	buildMessage func(code string, ttl time.Duration) emailCodeMessage,
+) error {
 	n, err := rand.Int(rand.Reader, big.NewInt(1000000))
 	if err != nil {
 		return fmt.Errorf("service.SendCode rand: %w", err)
 	}
 	code := fmt.Sprintf("%06d", n.Int64())
-	if err := s.cache.SetEmailCode(ctx, email, code, s.cfg.CodeTTL); err != nil {
+	if err := s.cache.SetEmailCode(ctx, cacheKey, code, s.cfg.CodeTTL); err != nil {
 		return fmt.Errorf("service.SendCode SetEmailCode: %w", err)
 	}
 
-	body := fmt.Sprintf("Your verification code is: %s\n\nValid for %s.", code, s.cfg.CodeTTL)
-	if err := s.mailer.Send(ctx, email, "Your verification code", body); err != nil {
-		_ = s.cache.DelEmailCode(ctx, email)
+	message := buildMessage(code, s.cfg.CodeTTL)
+	if err := s.mailer.Send(ctx, email, message.subject, message.body); err != nil {
+		_ = s.cache.DelEmailCode(ctx, cacheKey)
 		return fmt.Errorf("service.SendCode Send: %w", err)
+	}
+	return nil
+}
+
+const emailSource = "TiRTC 体验平台"
+
+func registrationCodeEmail(code string, ttl time.Duration) emailCodeMessage {
+	return emailCodeMessage{
+		subject: "【TiRTC 体验平台】注册验证码",
+		body: fmt.Sprintf(`您好：
+
+您正在注册 TiRTC 体验平台账号，本次注册验证码为：%s。
+验证码将在 %s 后失效，请勿向任何人透露。
+
+若非本人操作，请忽略此邮件。
+
+来源：%s`, code, formatCodeTTL(ttl), emailSource),
+	}
+}
+
+func passwordResetCodeEmail(code string, ttl time.Duration) emailCodeMessage {
+	return emailCodeMessage{
+		subject: "【TiRTC 体验平台】找回密码验证码",
+		body: fmt.Sprintf(`您好：
+
+您正在重置 TiRTC 体验平台账号密码，本次找回密码验证码为：%s。
+验证码将在 %s 后失效，请勿向任何人透露。
+
+若非本人操作，请忽略此邮件；如有疑问，请联系平台管理员。
+
+来源：%s`, code, formatCodeTTL(ttl), emailSource),
+	}
+}
+
+func formatCodeTTL(ttl time.Duration) string {
+	seconds := int(ttl.Round(time.Second).Seconds())
+	if seconds <= 0 {
+		return "短时间"
+	}
+	minutes, seconds := seconds/60, seconds%60
+	if minutes == 0 {
+		return fmt.Sprintf("%d 秒", seconds)
+	}
+	if seconds == 0 {
+		return fmt.Sprintf("%d 分钟", minutes)
+	}
+	return fmt.Sprintf("%d 分 %d 秒", minutes, seconds)
+}
+
+func normalizeEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
+}
+
+func passwordResetCodeKey(email string) string { return "password_reset:" + normalizeEmail(email) }
+
+const (
+	passwordResetEmailMaxAttempts = 5
+	passwordResetIPMaxAttempts    = 20
+)
+
+func (s *UserService) limitPasswordResetSendCode(ctx context.Context, email, clientIP string) error {
+	emailAttempts, err := s.cache.IncrPasswordResetAttempt(ctx, "send:email:"+email, passwordResetSendCodeWindow)
+	if err != nil {
+		return fmt.Errorf("service.SendPasswordResetCode email rate limit: %w", err)
+	}
+	if emailAttempts > passwordResetSendEmailMaxAttempts {
+		return ErrRateLimit
+	}
+	ipAttempts, err := s.cache.IncrPasswordResetAttempt(ctx, "send:ip:"+clientIP, passwordResetSendCodeWindow)
+	if err != nil {
+		return fmt.Errorf("service.SendPasswordResetCode IP rate limit: %w", err)
+	}
+	if ipAttempts > passwordResetSendIPMaxAttempts {
+		return ErrRateLimit
 	}
 	return nil
 }
 
 // Register validates the email code, then creates the user.
 func (s *UserService) Register(ctx context.Context, email, password, code string) (string, int64, error) {
+	email = normalizeEmail(email)
 	// Validate email code first.
 	storedCode, err := s.cache.GetEmailCode(ctx, email)
 	if err != nil {
@@ -137,6 +358,7 @@ func (s *UserService) Register(ctx context.Context, email, password, code string
 
 // Login verifies the captcha token, then authenticates the user.
 func (s *UserService) Login(ctx context.Context, email, password string, tok captcha.CaptchaToken) (string, int64, error) {
+	email = normalizeEmail(email)
 	if err := s.captcha.Verify(ctx, tok); err != nil {
 		return "", 0, ErrCaptchaFailed
 	}
@@ -157,6 +379,55 @@ func (s *UserService) Login(ctx context.Context, email, password string, tok cap
 		return "", 0, fmt.Errorf("service.Login issueJWT: %w", err)
 	}
 	return jwtTok, user.ID, nil
+}
+
+// ResetPassword verifies a password-reset code and replaces the stored bcrypt
+// password hash. Reset codes use a separate cache key from registration codes.
+func (s *UserService) ResetPassword(ctx context.Context, email, password, code, clientIP string) error {
+	email = normalizeEmail(email)
+	if err := s.limitPasswordResetAttempts(ctx, email, clientIP); err != nil {
+		return err
+	}
+	user, err := s.user.GetUserByEmail(ctx, email)
+	if err != nil {
+		return fmt.Errorf("service.ResetPassword GetUserByEmail: %w", err)
+	}
+	if user == nil {
+		return ErrInvalidCode
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("service.ResetPassword bcrypt: %w", err)
+	}
+	consumed, err := s.cache.ConsumeEmailCode(ctx, passwordResetCodeKey(email), code)
+	if err != nil {
+		return fmt.Errorf("service.ResetPassword ConsumeEmailCode: %w", err)
+	}
+	if !consumed {
+		return ErrInvalidCode
+	}
+	if err := s.user.UpdatePassword(ctx, user.ID, string(hash)); err != nil {
+		return fmt.Errorf("service.ResetPassword UpdatePassword: %w", err)
+	}
+	return nil
+}
+
+func (s *UserService) limitPasswordResetAttempts(ctx context.Context, email, clientIP string) error {
+	emailAttempts, err := s.cache.IncrPasswordResetAttempt(ctx, "email:"+email, s.cfg.CodeTTL)
+	if err != nil {
+		return fmt.Errorf("service.ResetPassword email rate limit: %w", err)
+	}
+	if emailAttempts > passwordResetEmailMaxAttempts {
+		return ErrRateLimit
+	}
+	ipAttempts, err := s.cache.IncrPasswordResetAttempt(ctx, "ip:"+clientIP, s.cfg.CodeTTL)
+	if err != nil {
+		return fmt.Errorf("service.ResetPassword IP rate limit: %w", err)
+	}
+	if ipAttempts > passwordResetIPMaxAttempts {
+		return ErrRateLimit
+	}
+	return nil
 }
 
 func (s *UserService) Quota(ctx context.Context, userID int64) (int, error) {

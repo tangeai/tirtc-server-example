@@ -83,6 +83,7 @@ func newSuite(t *testing.T) *suite {
 	t.Cleanup(func() {
 		s.devSrv.Close()
 		s.usrSrv.Close()
+		usrS.Close()
 		rdb.Close()
 		sqlDB.Close()
 	})
