@@ -426,6 +426,46 @@
       background: #6aba87;
     }
 
+    .terminal-platforms {
+      position: relative;
+      z-index: 1;
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      padding: 3px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.035);
+    }
+
+    .terminal-platform {
+      min-height: 26px;
+      padding: 4px 9px;
+      border: 0;
+      border-radius: 6px;
+      color: #82918f;
+      background: transparent;
+      font: 700 11px/1 ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      white-space: nowrap;
+      cursor: pointer;
+      transition: color 160ms ease, background 160ms ease;
+    }
+
+    .terminal-platform:hover {
+      color: #cbd6d4;
+    }
+
+    .terminal-platform.active {
+      color: #dce7e5;
+      background: rgba(121, 210, 196, 0.14);
+      box-shadow: inset 0 0 0 1px rgba(121, 210, 196, 0.12);
+    }
+
+    .terminal-platform:focus-visible {
+      outline: 2px solid #79d2c4;
+      outline-offset: 2px;
+    }
+
     .terminal-copy {
       position: relative;
       z-index: 1;
@@ -465,6 +505,10 @@
       padding: 28px 26px 24px;
       color: #d4dedc;
       font: 13px/1.85 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .terminal-platform-content[hidden] {
+      display: none;
     }
 
     .terminal-line {
@@ -1225,6 +1269,29 @@
 
     }
 
+    @media (max-width: 520px) {
+      .terminal-bar {
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 8px;
+        padding-inline: 10px;
+      }
+
+      .terminal-dots {
+        display: none;
+      }
+
+      .terminal-platforms {
+        gap: 2px;
+        min-width: 0;
+        padding: 2px;
+      }
+
+      .terminal-platform {
+        padding-inline: 5px;
+        font-size: 9px;
+      }
+    }
+
     @media (max-width: 1080px) {
       .nav-links,
       .nav-actions {
@@ -1473,7 +1540,11 @@
         <div class="terminal reveal" aria-label="模拟器运行效果">
           <div class="terminal-bar">
             <div class="terminal-dots"><i></i><i></i><i></i></div>
-            <span>Windows — PowerShell</span>
+            <div class="terminal-platforms" role="tablist" aria-label="选择运行环境">
+              <button class="terminal-platform active" id="terminal-tab-windows" type="button" role="tab" aria-selected="true" aria-controls="terminal-panel-windows" data-terminal-platform="windows">Windows</button>
+              <button class="terminal-platform" id="terminal-tab-ubuntu-python" type="button" role="tab" aria-selected="false" aria-controls="terminal-panel-ubuntu-python" data-terminal-platform="ubuntu-python" tabindex="-1">Ubuntu Python</button>
+              <button class="terminal-platform" id="terminal-tab-ubuntu-c" type="button" role="tab" aria-selected="false" aria-controls="terminal-panel-ubuntu-c" data-terminal-platform="ubuntu-c" tabindex="-1">Ubuntu C</button>
+            </div>
             <button class="terminal-copy" type="button" aria-label="复制 PowerShell 运行命令">
               <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true">
                 <rect x="6.5" y="6.5" width="9" height="9" rx="1.5"/>
@@ -1483,16 +1554,42 @@
             </button>
           </div>
           <div class="terminal-body">
-            <div class="terminal-line terminal-success terminal-command"><span class="terminal-prompt">PS&gt; </span>winget install -e --id Python.Python.3.14</div>
-            <div class="terminal-line terminal-success terminal-command">git clone https://github.com/tangeai/tirtc-server-example</div>
-            <div class="terminal-line terminal-success terminal-command">cd tirtc-server-example</div>
-            <div class="terminal-line terminal-success terminal-command">cd thing-connect/device-sim/device-sim-py</div>
-            <div class="terminal-line terminal-success terminal-command">py -3.14 -m venv .venv</div>
-            <div class="terminal-line terminal-success terminal-command">.\.venv\Scripts\python.exe -m pip install --upgrade pip</div>
-            <div class="terminal-line terminal-success terminal-command">.\.venv\Scripts\python.exe -m pip install -r requirements.txt</div>
-            <div class="terminal-line terminal-success terminal-command terminal-running">
-              <span class="terminal-command-text">.\.venv\Scripts\python.exe device_sim_main.py --mac AA:BB:CC:DD:EE:FF</span>
-              <span class="terminal-cursor" aria-hidden="true"></span>
+            <div class="terminal-platform-content" id="terminal-panel-windows" role="tabpanel" aria-labelledby="terminal-tab-windows" data-terminal-panel="windows">
+              <div class="terminal-line terminal-success terminal-command"><span class="terminal-prompt">PS&gt; </span>winget install -e --id Python.Python.3.14</div>
+              <div class="terminal-line terminal-success terminal-command">git clone https://github.com/tangeai/tirtc-server-example</div>
+              <div class="terminal-line terminal-success terminal-command">cd tirtc-server-example</div>
+              <div class="terminal-line terminal-success terminal-command">cd thing-connect/device-sim/device-sim-py</div>
+              <div class="terminal-line terminal-success terminal-command">py -3.14 -m venv .venv</div>
+              <div class="terminal-line terminal-success terminal-command">.\.venv\Scripts\python.exe -m pip install --upgrade pip</div>
+              <div class="terminal-line terminal-success terminal-command">.\.venv\Scripts\python.exe -m pip install -r requirements.txt</div>
+              <div class="terminal-line terminal-success terminal-command terminal-running">
+                <span class="terminal-command-text">.\.venv\Scripts\python.exe device_sim_main.py --mac AA:BB:CC:DD:EE:FF</span>
+                <span class="terminal-cursor" aria-hidden="true"></span>
+              </div>
+            </div>
+            <div class="terminal-platform-content" id="terminal-panel-ubuntu-python" role="tabpanel" aria-labelledby="terminal-tab-ubuntu-python" data-terminal-panel="ubuntu-python" hidden>
+              <div class="terminal-line terminal-success terminal-command"><span class="terminal-prompt">$ </span>sudo apt update &amp;&amp; sudo apt install -y git python3 python3-venv</div>
+              <div class="terminal-line terminal-success terminal-command">git clone https://github.com/tangeai/tirtc-server-example</div>
+              <div class="terminal-line terminal-success terminal-command">cd tirtc-server-example</div>
+              <div class="terminal-line terminal-success terminal-command">cd thing-connect/device-sim/device-sim-py</div>
+              <div class="terminal-line terminal-success terminal-command">python3 -m venv .venv</div>
+              <div class="terminal-line terminal-success terminal-command">./.venv/bin/python -m pip install --upgrade pip</div>
+              <div class="terminal-line terminal-success terminal-command">./.venv/bin/python -m pip install -r requirements.txt</div>
+              <div class="terminal-line terminal-success terminal-command terminal-running">
+                <span class="terminal-command-text">./.venv/bin/python device_sim_main.py --mac AA:BB:CC:DD:EE:FF</span>
+                <span class="terminal-cursor" aria-hidden="true"></span>
+              </div>
+            </div>
+            <div class="terminal-platform-content" id="terminal-panel-ubuntu-c" role="tabpanel" aria-labelledby="terminal-tab-ubuntu-c" data-terminal-panel="ubuntu-c" hidden>
+              <div class="terminal-line terminal-success terminal-command"><span class="terminal-prompt">$ </span>sudo apt update &amp;&amp; sudo apt install -y git build-essential pkg-config libcurl4-openssl-dev libmosquitto-dev libcjson-dev</div>
+              <div class="terminal-line terminal-success terminal-command">git clone https://github.com/tangeai/tirtc-server-example</div>
+              <div class="terminal-line terminal-success terminal-command">cd tirtc-server-example</div>
+              <div class="terminal-line terminal-success terminal-command">cd thing-connect/device-sim/device-sim-c</div>
+              <div class="terminal-line terminal-success terminal-command">make WERROR=1</div>
+              <div class="terminal-line terminal-success terminal-command terminal-running">
+                <span class="terminal-command-text">./device-sim --mac AA:BB:CC:DD:EE:FF</span>
+                <span class="terminal-cursor" aria-hidden="true"></span>
+              </div>
             </div>
             <div class="terminal-divider"></div>
             <div class="terminal-line terminal-muted">复制以上命令运行成功后，在浏览器打开：</div>
@@ -1727,11 +1824,65 @@
 
     const copyButton = document.querySelector(".terminal-copy");
     const copyButtonLabel = copyButton.querySelector("span");
-    const terminalCommands = Array.from(document.querySelectorAll(".terminal-command"))
-      .map((line) => line.textContent.replace(/^(?:\$|PS>)\s*/, "").trim())
-      .join("\n") + "\n";
+    const terminalPlatformButtons = Array.from(document.querySelectorAll("[data-terminal-platform]"));
+    const terminalPlatformPanels = Array.from(document.querySelectorAll("[data-terminal-panel]"));
+    const terminalPlatformNames = {
+      windows: "Windows PowerShell",
+      "ubuntu-python": "Ubuntu Python",
+      "ubuntu-c": "Ubuntu C",
+    };
+    let activeTerminalPlatform = "windows";
+    let copyResetTimer = null;
+
+    function resetCopyButton() {
+      if (copyResetTimer) window.clearTimeout(copyResetTimer);
+      copyResetTimer = null;
+      copyButtonLabel.textContent = "复制命令";
+      copyButton.classList.remove("copied");
+      copyButton.setAttribute("aria-label", `复制 ${terminalPlatformNames[activeTerminalPlatform]} 运行命令`);
+    }
+
+    function switchTerminalPlatform(platform) {
+      if (!terminalPlatformNames[platform]) return;
+      activeTerminalPlatform = platform;
+      terminalPlatformButtons.forEach((button) => {
+        const active = button.dataset.terminalPlatform === platform;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-selected", String(active));
+        button.tabIndex = active ? 0 : -1;
+      });
+      terminalPlatformPanels.forEach((panel) => {
+        panel.hidden = panel.dataset.terminalPanel !== platform;
+      });
+      resetCopyButton();
+    }
+
+    function getActiveTerminalCommands() {
+      const activePanel = document.querySelector(`[data-terminal-panel="${activeTerminalPlatform}"]`);
+      return Array.from(activePanel.querySelectorAll(".terminal-command"))
+        .map((line) => line.textContent.replace(/^(?:\$|PS>)\s*/, "").trim())
+        .join("\n") + "\n";
+    }
+
+    terminalPlatformButtons.forEach((button) => {
+      button.addEventListener("click", () => switchTerminalPlatform(button.dataset.terminalPlatform));
+      button.addEventListener("keydown", (event) => {
+        const currentIndex = terminalPlatformButtons.indexOf(button);
+        let nextIndex = currentIndex;
+        if (event.key === "ArrowRight") nextIndex = (currentIndex + 1) % terminalPlatformButtons.length;
+        else if (event.key === "ArrowLeft") nextIndex = (currentIndex - 1 + terminalPlatformButtons.length) % terminalPlatformButtons.length;
+        else if (event.key === "Home") nextIndex = 0;
+        else if (event.key === "End") nextIndex = terminalPlatformButtons.length - 1;
+        else return;
+        event.preventDefault();
+        const nextButton = terminalPlatformButtons[nextIndex];
+        switchTerminalPlatform(nextButton.dataset.terminalPlatform);
+        nextButton.focus();
+      });
+    });
 
     copyButton.addEventListener("click", async () => {
+      const terminalCommands = getActiveTerminalCommands();
       try {
         await navigator.clipboard.writeText(terminalCommands);
       } catch (_) {
@@ -1747,11 +1898,7 @@
       copyButtonLabel.textContent = "已复制";
       copyButton.classList.add("copied");
       copyButton.setAttribute("aria-label", "运行命令已复制");
-      window.setTimeout(() => {
-        copyButtonLabel.textContent = "复制命令";
-        copyButton.classList.remove("copied");
-        copyButton.setAttribute("aria-label", "复制 PowerShell 运行命令");
-      }, 1800);
+      copyResetTimer = window.setTimeout(resetCopyButton, 1800);
     });
 
     const revealItems = document.querySelectorAll(".reveal");
