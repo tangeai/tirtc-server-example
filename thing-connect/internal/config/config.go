@@ -61,12 +61,16 @@ type ServiceCfg struct {
 	RoomTTLHours               int           `yaml:"room_ttl_hours"`
 }
 
+// InternalCfg configures shared service-to-service credentials.
+type InternalCfg struct {
+	// Key guards ai/voip/call internal unbind endpoints via X-Internal-Key.
+	// All services must use the same value.
+	Key string `yaml:"key"`
+}
+
 // CallCfg configures call-server specific behavior.
 type CallCfg struct {
-	// InternalKey guards the ai/voip/call internal unbind endpoints via the
-	// X-Internal-Key header. All four services must use the same value.
-	InternalKey   string `yaml:"internal_key"`
-	CallServerURL string `yaml:"call_server_url"` // user-server → call-server base URL
+	ServerURL string `yaml:"server_url"` // user-server → call-server base URL
 }
 
 // VoipCfg configures voip-server specific behavior.
@@ -140,6 +144,7 @@ type Config struct {
 	TirtcAichat TirtcAichatCfg `yaml:"tirtc_aichat"`
 	Wechat      WechatCfg      `yaml:"wechat"`
 	Ws          WsCfg          `yaml:"ws"`
+	Internal    InternalCfg    `yaml:"internal"`
 	Call        CallCfg        `yaml:"call"`
 	Voip        VoipCfg        `yaml:"voip"`
 	Ai          AiCfg          `yaml:"ai"`

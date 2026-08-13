@@ -20,9 +20,8 @@ mqtt:
 
 jwt_secret: "your-jwt-secret-shared-with-device-server"
 
-# 服务间解绑清理接口鉴权；须与 user/ai/call-server 一致。
-call:
-  internal_key: "your-internal-service-key"
+internal:
+  key: "your-internal-service-key" # 须与 user/ai/call-server 一致
 
 tirtc:
   app_id: "your-tirtc-app-id"

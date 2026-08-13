@@ -10,9 +10,8 @@ database:
 
 jwt_secret: "replace-with-same-secret-as-device-server"
 
-# 服务间解绑清理接口鉴权；须与 user/voip/call-server 一致
-call:
-  internal_key: "your-internal-service-key"
+internal:
+  key: "your-internal-service-key" # 须与 user/voip/call-server 一致
 
 tirtc:
   app_id: "your-app-id"

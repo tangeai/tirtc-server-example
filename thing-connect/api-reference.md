@@ -2769,7 +2769,7 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 
 服务间调用：设备解绑时永久删除所有涉及该设备的 `call_contact` 记录（包括待审批、已拒绝和已软删除记录），释放房间，并向原有未删除联系人的对端发送 `callers_update`。
 
-**鉴权**: `X-Internal-Key` 请求头，值需匹配配置 `call.internal_key`
+**鉴权**: `X-Internal-Key` 请求头，值需匹配配置 `internal.key`
 
 **请求体**: `{ "device_id": "TIRZ00000001" }`　**成功响应**: `{ "code": 200, "msg": "ok" }`　**错误码**: `40301`（key 不匹配或未配置）、`40000`（缺 device_id）；错误仍使用 HTTP 200。
 

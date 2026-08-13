@@ -167,8 +167,19 @@ yaml_section_value() {
     ' "$file"
 }
 
+yaml_has_section_key() {
+    local file="$1" section="$2" key="$3"
+    awk -v section="$section" -v key="$key" '
+        { sub(/\r$/, "") }
+        $0 == section ":" { inside=1; next }
+        /^[^[:space:]]/ { inside=0 }
+        inside && $0 ~ "^[[:space:]]+" key ":[[:space:]]*" { found=1; exit }
+        END { exit !found }
+    ' "$file"
+}
+
 validate_configs() {
-    local svc cfg jwt expected_jwt="" internal expected_internal=""
+    local svc cfg jwt expected_jwt="" internal expected_internal="" url
     for svc in "${ALL_SERVICES[@]}"; do
         cfg="$DEPLOY_ROOT/$svc/config.yaml"
         [ -f "$cfg" ] || { err "$svc: config.yaml 不存在"; return 1; }
@@ -181,11 +192,24 @@ validate_configs() {
 
     for svc in user-server voip-server ai-server call-server; do
         cfg="$DEPLOY_ROOT/$svc/config.yaml"
-        internal="$(yaml_section_value "$cfg" call internal_key)"
-        [ -n "$internal" ] || { err "$svc: call.internal_key 未配置"; return 1; }
+        internal="$(yaml_section_value "$cfg" internal key)"
+        [ -n "$internal" ] || { err "$svc: internal.key 未配置"; return 1; }
         [ -z "$expected_internal" ] && expected_internal="$internal"
-        [ "$internal" = "$expected_internal" ] || { err "$svc: call.internal_key 与其他服务不一致"; return 1; }
+        [ "$internal" = "$expected_internal" ] || { err "$svc: internal.key 与其他服务不一致"; return 1; }
+        if yaml_has_section_key "$cfg" call internal_key; then
+            err "$svc: 请将旧配置 call.internal_key 迁移为 internal.key"
+            return 1
+        fi
     done
+
+    for svc in ai voip call; do
+        url="$(yaml_section_value "$DEPLOY_ROOT/user-server/config.yaml" "$svc" server_url)"
+        [ -n "$url" ] || { err "user-server: $svc.server_url 未配置"; return 1; }
+    done
+    if yaml_has_section_key "$DEPLOY_ROOT/user-server/config.yaml" call call_server_url; then
+        err "user-server: 请将旧配置 call.call_server_url 迁移为 call.server_url"
+        return 1
+    fi
     log "配置校验通过"
 }
 

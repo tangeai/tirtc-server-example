@@ -15,7 +15,7 @@ import (
 func TestInternalUnbindInvalidCredentialUsesBusinessCode(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	server := NewServer(
-		&config.Config{Call: config.CallCfg{InternalKey: "expected-key"}},
+		&config.Config{Internal: config.InternalCfg{Key: "expected-key"}},
 		nil,
 		nil,
 		nil,

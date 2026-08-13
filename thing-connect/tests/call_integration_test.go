@@ -154,7 +154,7 @@ func (cs *callSuite) POSTInternal(t *testing.T, path string, body any) *apiResp 
 	b, _ := json.Marshal(body)
 	req, _ := http.NewRequest(http.MethodPost, cs.callSrv.URL+path, strings.NewReader(string(b)))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Internal-Key", cs.cfg.Call.InternalKey)
+	req.Header.Set("X-Internal-Key", cs.cfg.Internal.Key)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("POST %s: %v", path, err)

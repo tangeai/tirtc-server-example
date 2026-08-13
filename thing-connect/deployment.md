@@ -134,9 +134,11 @@ smtp:                          # 邮件发送（注册验证码）
   password: "xxx"
   from: "no-reply@example.com"
 
-call:                          # 三个解绑清理接口共用同一内部密钥
-  internal_key: "shared-internal-key"
-  call_server_url: "http://localhost:9005"
+internal:                      # 三个解绑清理接口共用同一内部密钥
+  key: "shared-internal-key"
+
+call:
+  server_url: "http://localhost:9005"
 
 ai:                            # 解绑时清理设备 AI 角色绑定
   server_url: "http://localhost:9004"
@@ -145,8 +147,8 @@ voip:                          # 解绑时清理 VoIP profile、授权和外呼�
   server_url: "http://localhost:9003"
 ```
 
-> 配置任一 `ai.server_url`、`voip.server_url` 或 `call.call_server_url` 时，
-> `call.internal_key` 必须同时配置，并与 ai-server、voip-server、
+> 配置任一 `ai.server_url`、`voip.server_url` 或 `call.server_url` 时，
+> `internal.key` 必须同时配置，并与 ai-server、voip-server、
 > call-server 中的值完全一致。三个地址都配置后，解绑清理才覆盖全部业务服务。
 
 ### voip-server
@@ -168,9 +170,8 @@ mqtt:
 
 jwt_secret: "shared-secret"   # 与所有服务相同
 
-# 服务间解绑清理接口鉴权；与 user/ai/call-server 使用同一个值
-call:
-  internal_key: "shared-internal-key"
+internal:                      # 服务间解绑清理接口鉴权；与 user/ai/call-server 使用同一个值
+  key: "shared-internal-key"
 
 tirtc:
   app_id: "your-tirtc-app-id"
@@ -211,8 +212,8 @@ tirtc_aichat:
   default_role_id: "fin63bby1og0"               # 默认 AI 角色 ID
   base_role_url: "https://..."                  # 可选，角色 API 独立地址
 
-call:
-  internal_key: "shared-internal-key"            # 服务间调用的 X-Internal-Key
+internal:
+  key: "shared-internal-key"                      # 服务间调用的 X-Internal-Key
 ```
 
 > `tirtc_aichat.base_role_url` 缺省时回退到 `tirtc_aichat.base_url`。角色详情全部存于探鸽云端，本地 `ai_device_role` 表只记录设备→角色绑定。
@@ -245,8 +246,8 @@ service:
   max_contacts_per_device: 200   # 单设备联系人上限
   room_ttl_hours: 12             # 房间 Redis key 兜底 TTL
 
-call:
-  internal_key: "your-internal-service-key"   # 与 user/ai/voip-server 共用的解绑清理密钥
+internal:
+  key: "your-internal-service-key"              # 与 user/ai/voip-server 共用的解绑清理密钥
 ```
 
 ---

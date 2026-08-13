@@ -12,7 +12,7 @@ type internalUnbindBody struct {
 
 // POST /v1/voip/internal/unbind — service-to-service only, guarded by X-Internal-Key.
 func (s *Server) postInternalUnbind(c *gin.Context) {
-	if s.cfg.Call.InternalKey == "" || c.GetHeader("X-Internal-Key") != s.cfg.Call.InternalKey {
+	if s.cfg.Internal.Key == "" || c.GetHeader("X-Internal-Key") != s.cfg.Internal.Key {
 		apiresp.Fail(c, apiresp.ErrInternalCredential, "内部服务凭证无效")
 		return
 	}

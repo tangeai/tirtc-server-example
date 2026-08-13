@@ -76,7 +76,7 @@ func main() {
 			SecretKeyID: cfg.Tirtc.SecretKeyID,
 		}
 		agentClient := tirtcapi.NewAgentAPIClient(agentCfg, &http.Client{Timeout: 10 * time.Second})
-		aihandler.NewAgentHandler(agentClient, roleStore, userRoleStore, userResourceStore, cfg.TirtcAichat.DefaultRoleID, cfg.Call.InternalKey, cfg.TirtcAichat.ResourceQuota, cfg.TirtcAichat.DefaultResources).Register(r, cfg.JWTSecret)
+		aihandler.NewAgentHandler(agentClient, roleStore, userRoleStore, userResourceStore, cfg.TirtcAichat.DefaultRoleID, cfg.Internal.Key, cfg.TirtcAichat.ResourceQuota, cfg.TirtcAichat.DefaultResources).Register(r, cfg.JWTSecret)
 	} else {
 		log.Println("tirtc_aichat.base_url not set, agent API disabled")
 	}

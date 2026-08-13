@@ -35,3 +35,17 @@ func TestLoad_LogOverride(t *testing.T) {
 		t.Errorf("Log.Format want json, got %q", cfg.Log.Format)
 	}
 }
+
+func TestLoad_InternalAndCallConfig(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(p, []byte("jwt_secret: test\ninternal:\n  key: shared-key\ncall:\n  server_url: http://call:9005\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Load(p)
+	if cfg.Internal.Key != "shared-key" {
+		t.Errorf("Internal.Key = %q, want shared-key", cfg.Internal.Key)
+	}
+	if cfg.Call.ServerURL != "http://call:9005" {
+		t.Errorf("Call.ServerURL = %q, want http://call:9005", cfg.Call.ServerURL)
+	}
+}

@@ -30,5 +30,5 @@ service:
   max_contacts_per_device: 200
   room_ttl_hours: 12
 
-call:
-  internal_key: "your-internal-service-key"  # 须与 user/ai/voip-server 一致
+internal:
+  key: "your-internal-service-key" # 须与 user/ai/voip-server 一致

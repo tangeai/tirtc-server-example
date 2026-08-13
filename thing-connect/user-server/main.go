@@ -126,16 +126,16 @@ func main() {
 
 	targets := []cleanupoutbox.Target{}
 	if cfg.Ai.ServerURL != "" {
-		targets = append(targets, cleanupoutbox.Target{Name: "ai", URL: strings.TrimRight(cfg.Ai.ServerURL, "/") + "/v1/ai/internal/unbind", InternalKey: cfg.Call.InternalKey})
+		targets = append(targets, cleanupoutbox.Target{Name: "ai", URL: strings.TrimRight(cfg.Ai.ServerURL, "/") + "/v1/ai/internal/unbind", InternalKey: cfg.Internal.Key})
 	}
 	if cfg.Voip.ServerURL != "" {
-		targets = append(targets, cleanupoutbox.Target{Name: "voip", URL: strings.TrimRight(cfg.Voip.ServerURL, "/") + "/v1/voip/internal/unbind", InternalKey: cfg.Call.InternalKey})
+		targets = append(targets, cleanupoutbox.Target{Name: "voip", URL: strings.TrimRight(cfg.Voip.ServerURL, "/") + "/v1/voip/internal/unbind", InternalKey: cfg.Internal.Key})
 	}
-	if cfg.Call.CallServerURL != "" {
-		targets = append(targets, cleanupoutbox.Target{Name: "call", URL: strings.TrimRight(cfg.Call.CallServerURL, "/") + "/v1/call/internal/unbind", InternalKey: cfg.Call.InternalKey})
+	if cfg.Call.ServerURL != "" {
+		targets = append(targets, cleanupoutbox.Target{Name: "call", URL: strings.TrimRight(cfg.Call.ServerURL, "/") + "/v1/call/internal/unbind", InternalKey: cfg.Internal.Key})
 	}
-	if len(targets) > 0 && cfg.Call.InternalKey == "" {
-		log.Fatal("config: call.internal_key must be set when cross-service cleanup URLs are configured")
+	if len(targets) > 0 && cfg.Internal.Key == "" {
+		log.Fatal("config: internal.key must be set when cross-service cleanup URLs are configured")
 	}
 	outbox := cleanupoutbox.NewOutbox(sqlDB, targets)
 	cleanup := &usrhandler.UnbindCleanup{Targets: cleanupoutbox.TargetNames(targets)}
@@ -143,7 +143,7 @@ func main() {
 	go outbox.Run(outboxCtx)
 	go passwordResetMailQueue.Run(outboxCtx)
 
-	usrhandler.NewServer(userSvc, bindSvc, broker, cfg.JWTSecret, cfg.Call.CallServerURL, cfg.Call.InternalKey, roleStore, cleanup).Register(r)
+	usrhandler.NewServer(userSvc, bindSvc, broker, cfg.JWTSecret, cfg.Call.ServerURL, cfg.Internal.Key, roleStore, cleanup).Register(r)
 
 	addr := fmt.Sprintf(":%d", cfg.Server.HTTPPort)
 	srv := &http.Server{

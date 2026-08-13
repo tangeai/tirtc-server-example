@@ -33,10 +33,11 @@ service:
   token_expiry: 168h        # JWT 有效期（默认 7 天）
   mqtt_ack_timeout: 5s      # MQTT 下发等待 ACK 超时（默认 5s）
 
-# 解绑清理：三个业务服务共用同一个 X-Internal-Key
+internal:
+  key: "your-internal-service-key" # 服务间解绑清理接口共用的 X-Internal-Key
+
 call:
-  internal_key: "your-internal-service-key"
-  call_server_url: "http://127.0.0.1:9005"
+  server_url: "http://127.0.0.1:9005"
 
 ai:
   server_url: "http://127.0.0.1:9004"
