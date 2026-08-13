@@ -150,17 +150,29 @@ func TestCommitUnbind(t *testing.T) {
 	userID := seedUser(t, sqlDB)
 	defer cleanBind(t, sqlDB, devID)
 
-	store := mysqlstore.NewBindStore(sqlDB)
+	bindStore := mysqlstore.NewBindStore(sqlDB)
 	fp := model.Fingerprint{MAC: "AA:BB:CC:DD:EE:02"}
-	gotID, _ := store.CommitBindFromPool(context.Background(), fp, userID)
+	gotID, _ := bindStore.CommitBindFromPool(context.Background(), fp, userID)
 	if _, err := sqlDB.Exec(
 		`UPDATE device_bind SET device_name='客厅学习机' WHERE device_id=?`,
 		gotID); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := store.CommitUnbind(context.Background(), gotID, userID); err != nil {
-		t.Fatalf("CommitUnbind: %v", err)
+	if _, err := sqlDB.Exec(`
+		INSERT INTO call_contact (device_id_a, device_id_b, user_id_a, user_id_b, status)
+		VALUES (?, ?, ?, ?, 1)`, gotID, "peer-"+gotID, userID, userID); err != nil {
+		t.Fatalf("seed call contact: %v", err)
+	}
+	defer sqlDB.Exec(`DELETE FROM call_contact WHERE device_id_a=? OR device_id_b=?`, gotID, gotID)
+	defer sqlDB.Exec(`DELETE FROM cleanup_outbox WHERE device_id=?`, gotID)
+
+	cleanupStore, ok := bindStore.(store.UnbindCleanupStore)
+	if !ok {
+		t.Fatal("bind store does not support transactional cleanup")
+	}
+	if err := cleanupStore.CommitUnbindWithCleanup(context.Background(), gotID, userID, []string{"ai", "voip", "call"}); err != nil {
+		t.Fatalf("CommitUnbindWithCleanup: %v", err)
 	}
 
 	var uid int64
@@ -186,6 +198,14 @@ func TestCommitUnbind(t *testing.T) {
 	sqlDB.QueryRow(`SELECT status FROM device_pool WHERE device_id=?`, gotID).Scan(&poolStatus)
 	if poolStatus != 0 {
 		t.Errorf("after unbind device_pool.status: want 0, got %d", poolStatus)
+	}
+
+	var queued int
+	if err := sqlDB.Get(&queued, `SELECT COUNT(*) FROM cleanup_outbox WHERE device_id=?`, gotID); err != nil {
+		t.Fatal(err)
+	}
+	if queued != 3 {
+		t.Errorf("cleanup tasks = %d, want 3", queued)
 	}
 }
 

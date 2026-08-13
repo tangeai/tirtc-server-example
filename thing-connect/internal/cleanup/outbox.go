@@ -38,6 +38,24 @@ func NewOutbox(db *sqlx.DB, targets []Target) *Outbox {
 	return &Outbox{db: db, client: &http.Client{Timeout: 5 * time.Second}, targets: m}
 }
 
+// TargetNames returns the configured, de-duplicated delivery targets. It is
+// used when an unbind transaction writes its outbox records before dispatch.
+func TargetNames(targets []Target) []string {
+	seen := make(map[string]struct{}, len(targets))
+	names := make([]string, 0, len(targets))
+	for _, target := range targets {
+		if target.Name == "" || target.URL == "" {
+			continue
+		}
+		if _, exists := seen[target.Name]; exists {
+			continue
+		}
+		seen[target.Name] = struct{}{}
+		names = append(names, target.Name)
+	}
+	return names
+}
+
 // Enqueue records one task per configured target. Re-enqueueing an existing
 // task makes it immediately eligible for another attempt.
 func (o *Outbox) Enqueue(ctx context.Context, deviceID string) error {

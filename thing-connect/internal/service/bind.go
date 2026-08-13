@@ -357,6 +357,13 @@ func (s *BindService) bindByDeviceIDInternal(ctx context.Context, userID int64, 
 
 // Reset unbinds a device from the user.
 func (s *BindService) Reset(ctx context.Context, deviceID string, userID int64) error {
+	return s.ResetWithCleanup(ctx, deviceID, userID, nil)
+}
+
+// ResetWithCleanup unbinds a device and persists cleanup events in the same
+// local transaction. Other services receive those events only through the
+// outbox dispatcher; their databases remain isolated.
+func (s *BindService) ResetWithCleanup(ctx context.Context, deviceID string, userID int64, cleanupTargets []string) error {
 	row, err := s.bind.GetBindByDeviceID(ctx, deviceID)
 	if err != nil {
 		return fmt.Errorf("service.Reset GetBindByDeviceID: %w", err)
@@ -364,7 +371,15 @@ func (s *BindService) Reset(ctx context.Context, deviceID string, userID int64) 
 	if row == nil || row.UserID != userID {
 		return ErrDeviceNotFound
 	}
-	if err := s.bind.CommitUnbind(ctx, deviceID, userID); err != nil {
+	if len(cleanupTargets) > 0 {
+		atomicStore, ok := s.bind.(store.UnbindCleanupStore)
+		if !ok {
+			return fmt.Errorf("service.ResetWithCleanup: bind store does not support transactional cleanup outbox")
+		}
+		if err := atomicStore.CommitUnbindWithCleanup(ctx, deviceID, userID, cleanupTargets); err != nil {
+			return fmt.Errorf("service.ResetWithCleanup CommitUnbindWithCleanup: %w", err)
+		}
+	} else if err := s.bind.CommitUnbind(ctx, deviceID, userID); err != nil {
 		return fmt.Errorf("service.Reset CommitUnbind: %w", err)
 	}
 	if s.mqtt != nil {

@@ -65,12 +65,19 @@ func (s *Server) deleteReset(c *gin.Context) {
 		return
 	}
 	deviceID := req.DeviceID
-	if err := s.bindSvc.Reset(c.Request.Context(), deviceID, currentUserID(c)); err != nil {
+	var cleanupTargets []string
+	if s.UnbindCleanup != nil {
+		cleanupTargets = s.UnbindCleanup.Targets
+	}
+	if err := s.bindSvc.ResetWithCleanup(c.Request.Context(), deviceID, currentUserID(c), cleanupTargets); err != nil {
 		apiresp.FromError(c, err)
 		return
 	}
-	// Run cross-cutting cleanup callbacks (all best-effort).
-	s.runUnbindCleanup(c.Request.Context(), deviceID)
+	// Transactional outbox targets were recorded with the unbind above. Legacy
+	// callback wiring remains for tests and local integrations without targets.
+	if len(cleanupTargets) == 0 {
+		s.runUnbindCleanup(c.Request.Context(), deviceID)
+	}
 	apiresp.OK(c, gin.H{"msg": "reset success"})
 }
 

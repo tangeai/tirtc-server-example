@@ -275,6 +275,17 @@ func (s *bindStore) TouchRebind(ctx context.Context, deviceID string, userID int
 // so the log captures the fingerprint at time of unbind.
 // last_user_id is preserved — not updated during unbind.
 func (s *bindStore) CommitUnbind(ctx context.Context, deviceID string, userID int64) error {
+	return s.commitUnbind(ctx, deviceID, userID, nil)
+}
+
+// CommitUnbindWithCleanup persists the unbind and its service-cleanup events in
+// one MySQL transaction. The outbox is owned by user-server; target services
+// remain isolated behind their internal HTTP APIs.
+func (s *bindStore) CommitUnbindWithCleanup(ctx context.Context, deviceID string, userID int64, targets []string) error {
+	return s.commitUnbind(ctx, deviceID, userID, targets)
+}
+
+func (s *bindStore) commitUnbind(ctx context.Context, deviceID string, userID int64, targets []string) error {
 	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("bindStore.CommitUnbind begin: %w", err)
@@ -327,7 +338,32 @@ func (s *bindStore) CommitUnbind(ctx context.Context, deviceID string, userID in
 		return fmt.Errorf("bindStore.CommitUnbind log: %w", err)
 	}
 
+	for _, target := range uniqueCleanupTargets(targets) {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO cleanup_outbox (device_id, target, next_attempt_at)
+			VALUES (?, ?, NOW())
+			ON DUPLICATE KEY UPDATE next_attempt_at=NOW(), last_error=''`, deviceID, target); err != nil {
+			return fmt.Errorf("bindStore.CommitUnbind cleanup outbox %s: %w", target, err)
+		}
+	}
+
 	return tx.Commit()
+}
+
+func uniqueCleanupTargets(targets []string) []string {
+	seen := make(map[string]struct{}, len(targets))
+	result := make([]string, 0, len(targets))
+	for _, target := range targets {
+		if target == "" {
+			continue
+		}
+		if _, exists := seen[target]; exists {
+			continue
+		}
+		seen[target] = struct{}{}
+		result = append(result, target)
+	}
+	return result
 }
 
 func (s *bindStore) GetDeviceKey(ctx context.Context, deviceID string) (*model.DevicePool, error) {

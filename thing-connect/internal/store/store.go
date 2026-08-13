@@ -46,6 +46,13 @@ type BindStore interface {
 	GetUserDevices(ctx context.Context, userID int64) ([]model.DeviceBind, error)
 }
 
+// UnbindCleanupStore atomically records cleanup events with a device unbind.
+// The events are delivered by user-server's outbox to other services; this
+// interface deliberately contains no knowledge of those services' tables.
+type UnbindCleanupStore interface {
+	CommitUnbindWithCleanup(ctx context.Context, deviceID string, userID int64, targets []string) error
+}
+
 // CacheStore handles Redis operations for verification codes and online status.
 type CacheStore interface {
 	// IncrReportAttempt counts Report calls for physHash within window, starting

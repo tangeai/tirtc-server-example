@@ -20,7 +20,11 @@ import (
 // UnbindCleanup holds callbacks for cross-cutting cleanup after a device unbind.
 // Each callback is best-effort — failures are logged, never block the response.
 type UnbindCleanup struct {
+	// Targets are persisted with the unbind transaction, then delivered through
+	// the user-server outbox. They name remote services, never database tables.
+	Targets []string
 	// Enqueue persists all configured cross-service cleanup notifications.
+	// Kept for legacy/test wiring that does not use transactional outbox events.
 	Enqueue func(ctx context.Context, deviceID string) error
 	// DeleteLocalRole removes the ai_device_role row for this device.
 	DeleteLocalRole func(ctx context.Context, deviceID string) error

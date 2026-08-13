@@ -138,7 +138,7 @@ func main() {
 		log.Fatal("config: call.internal_key must be set when cross-service cleanup URLs are configured")
 	}
 	outbox := cleanupoutbox.NewOutbox(sqlDB, targets)
-	cleanup := &usrhandler.UnbindCleanup{Enqueue: outbox.Enqueue}
+	cleanup := &usrhandler.UnbindCleanup{Targets: cleanupoutbox.TargetNames(targets)}
 	outboxCtx, outboxCancel := context.WithCancel(context.Background())
 	go outbox.Run(outboxCtx)
 	go passwordResetMailQueue.Run(outboxCtx)

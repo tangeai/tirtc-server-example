@@ -15,11 +15,12 @@ import (
 // ── fakeBindStore ────────────────────────────────────────────────────────────
 
 type fakeBindStore struct {
-	bindByFP  *model.DeviceBind // returned by GetBindByFingerprint
-	bindByID  *model.DeviceBind // returned by GetBindByDeviceID
-	devKey    *model.DevicePool
-	claimErr  error
-	claimedFP model.Fingerprint
+	bindByFP       *model.DeviceBind // returned by GetBindByFingerprint
+	bindByID       *model.DeviceBind // returned by GetBindByDeviceID
+	devKey         *model.DevicePool
+	claimErr       error
+	claimedFP      model.Fingerprint
+	cleanupTargets []string
 }
 
 func (f *fakeBindStore) GetBindByFingerprint(_ context.Context, _ string, _ int64) (*model.DeviceBind, error) {
@@ -43,6 +44,10 @@ func (f *fakeBindStore) CommitClaim(_ context.Context, _ string, fp model.Finger
 }
 func (f *fakeBindStore) TouchRebind(_ context.Context, _ string, _ int64) error  { return nil }
 func (f *fakeBindStore) CommitUnbind(_ context.Context, _ string, _ int64) error { return f.claimErr }
+func (f *fakeBindStore) CommitUnbindWithCleanup(_ context.Context, _ string, _ int64, targets []string) error {
+	f.cleanupTargets = append([]string(nil), targets...)
+	return f.claimErr
+}
 func (f *fakeBindStore) GetDeviceKey(_ context.Context, _ string) (*model.DevicePool, error) {
 	return f.devKey, nil
 }
@@ -519,6 +524,23 @@ func TestReset_NotOwned(t *testing.T) {
 	err := svc.Reset(context.Background(), "dev-R", 1)
 	if !errors.Is(err, ErrDeviceNotFound) {
 		t.Errorf("Reset not owned: want ErrDeviceNotFound, got %v", err)
+	}
+}
+
+func TestResetWithCleanup_PersistsTargetsWithUnbind(t *testing.T) {
+	bs := &fakeBindStore{bindByID: &model.DeviceBind{DeviceID: "dev-R", UserID: 1}}
+	svc := newBindSvc(bs, &fakeCache3{online: true})
+	if err := svc.ResetWithCleanup(context.Background(), "dev-R", 1, []string{"ai", "voip", "call"}); err != nil {
+		t.Fatalf("ResetWithCleanup: %v", err)
+	}
+	if got, want := bs.cleanupTargets, []string{"ai", "voip", "call"}; len(got) != len(want) {
+		t.Fatalf("cleanup targets = %v, want %v", got, want)
+	} else {
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("cleanup targets = %v, want %v", got, want)
+			}
+		}
 	}
 }
 
