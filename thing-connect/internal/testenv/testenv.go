@@ -35,10 +35,18 @@ func LoadConfigOrSkip(t testing.TB, candidates ...string) *config.Config {
 // is unavailable on the current machine.
 func OpenDBOrSkip(t testing.TB, cfg *config.Config) *sqlx.DB {
 	t.Helper()
-	if err := validateTestDatabaseDSN(cfg.Database.DSN); err != nil {
+	return OpenDatabaseOrSkip(t, cfg.Database)
+}
+
+// OpenDatabaseOrSkip opens an explicitly prepared database configuration.
+// Tests that adjust DSN parameters (for example, connection time zones) still
+// retain the same dedicated _test database and local/CI availability policy.
+func OpenDatabaseOrSkip(t testing.TB, database config.DatabaseCfg) *sqlx.DB {
+	t.Helper()
+	if err := validateTestDatabaseDSN(database.DSN); err != nil {
 		t.Fatalf("refusing unsafe integration-test database: %v", err)
 	}
-	sqlDB, err := db.Open(cfg.Database)
+	sqlDB, err := db.Open(database)
 	if err != nil {
 		if os.Getenv("CI") != "" {
 			t.Fatalf("integration test database unavailable in CI: %v", err)

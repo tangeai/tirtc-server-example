@@ -147,10 +147,7 @@ func TestClaimLeaseUsesDatabaseClockAcrossTimezones(t *testing.T) {
 	dsn.Params["time_zone"] = "'+08:00'"
 	databaseConfig := cfg.Database
 	databaseConfig.DSN = dsn.FormatDSN()
-	sqlDB, err := db.Open(databaseConfig)
-	if err != nil {
-		t.Fatal(err)
-	}
+	sqlDB := testenv.OpenDatabaseOrSkip(t, databaseConfig)
 	t.Cleanup(func() { _ = sqlDB.Close() })
 	if err := db.MigrateAdmin(sqlDB); err != nil {
 		t.Fatal(err)
