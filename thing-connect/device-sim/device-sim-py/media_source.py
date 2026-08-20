@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-"""media_source.py — 音视频数据源抽象与文件实现"""
+"""media_source.py — 音视频数据源抽象、文件音频及可切换视频源。"""
 
 import sys
 from abc import ABC, abstractmethod
 
-from media_file_reader import AudioFileReader, VideoFileReader
+from media_file_reader import AudioFileReader
 from media_formats import AUDIO_FORMATS, VIDEO_FORMATS
+from camera_video_source import (
+    close_video_source,
+    is_camera_source,
+    open_video_source,
+)
 
 
 class MediaSource(ABC):
@@ -45,21 +50,25 @@ VIDEO_FRAME_MS = 1000 / 15
 
 
 class FileMediaSource(MediaSource):
-    """从本地文件循环读取已经编码好的音视频帧。"""
+    """循环读取音频文件，并从文件或摄像头读取编码视频帧。"""
 
     def __init__(self, video_path: str, audio_path: str,
                  audio_format: str = "alaw_8khz",
                  video_format: str = "h264") -> None:
         self._audio_format = AUDIO_FORMATS[audio_format]
         self._video_format = VIDEO_FORMATS[video_format] if video_path else None
+        self._video_is_file = bool(video_path and not is_camera_source(video_path))
         try:
             self._audio_reader = AudioFileReader(audio_path, audio_format, DEFAULT_AUDIO_PKT_MS)
-            self._video_reader = VideoFileReader(video_path, video_format) if video_path else None
+            self._video_reader = (
+                open_video_source(video_path, video_format)
+                if video_path else None
+            )
         except OSError as exc:
             sys.exit(f"[media] 文件打开失败: {exc}")
         except ValueError as exc:
             sys.exit(f"[media] 文件格式无效: {exc}")
-        if self._video_reader is not None:
+        if self._video_reader is not None and self._video_is_file:
             self._audio_reader.skip_duration(self._video_reader.first_key_index() * VIDEO_FRAME_MS)
 
     def has_video(self) -> bool:
@@ -86,6 +95,8 @@ class FileMediaSource(MediaSource):
     def next_video(self, force_key: bool = False) -> "tuple[bytes, bool] | None":
         if self._video_reader is None:
             return None
+        if not self._video_is_file:
+            return self._video_reader.next_frame(force_key=force_key)
         requested_index = self._video_reader.current_index()
         result = self._video_reader.next_frame(force_key=force_key)
         selected_index = self._video_reader.last_frame_index()
@@ -100,4 +111,4 @@ class FileMediaSource(MediaSource):
         return result
 
     def close(self) -> None:
-        pass
+        close_video_source(self._video_reader)

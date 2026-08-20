@@ -17,6 +17,7 @@ import time
 import queue
 
 from audio_recorder import AudioRecorder
+from camera_video_source import close_video_source, open_video_source
 from callback_work_queue import CallbackWorkQueue
 from media_postprocess import convert_video_to_mp4
 
@@ -29,7 +30,7 @@ from tirtc_sdk import (
     TIRTC_AUDIOSAMPLE_8K16B1C, TIRTC_AUDIOSAMPLE_16K16B1C,
     CONN_FATAL_ERRORS,
 )
-from media_file_reader import AudioFileReader, VideoFileReader
+from media_file_reader import AudioFileReader
 from media_formats import (
     AUDIO_FORMATS,
     VIDEO_FORMATS,
@@ -628,14 +629,15 @@ def _speaker_worker() -> None:
 # ── 硬件模式：纯视频发送 ──────────────────────────────────────────────────────
 
 def _video_only_worker() -> None:
-    """文件视频 → TiRtcSendVideoStream"""
+    """文件或摄像头视频 → TiRtcSendVideoStream"""
     video_pts_ms = 0
     first_video = True
     wall_start_ms = _now_ms()
     seen_generation = -1
 
+    reader = None
     try:
-        reader = VideoFileReader(_send_video_path, _send_video_fmt)
+        reader = open_video_source(_send_video_path, _send_video_fmt)
         while not _stream_stop.is_set():
             _, video_enabled, generation = _video_state()
             if not video_enabled:
@@ -673,6 +675,7 @@ def _video_only_worker() -> None:
     except Exception as e:
         _err(f"视频推流线程异常: {e}")
     finally:
+        close_video_source(reader)
         _log("视频推流线程退出")
 
 
@@ -691,7 +694,14 @@ def _media_worker(hconn_val: int) -> None:
     has_video, _, _ = _video_state()
     video_spec = VIDEO_FORMATS[_send_video_fmt] if has_video else None
     audio_reader = AudioFileReader(_send_audio_path, _send_audio_fmt, AUDIO_PKT_MS)
-    video_reader = VideoFileReader(_send_video_path, _send_video_fmt) if has_video else None
+    try:
+        video_reader = (
+            open_video_source(_send_video_path, _send_video_fmt)
+            if has_video else None
+        )
+    except Exception as exc:
+        _err(f"无法打开设备通话视频源: {exc}")
+        return
 
     audio_pts_ms  = 0
     video_pts_ms  = 0.0 if has_video else float("inf")
@@ -776,4 +786,5 @@ def _media_worker(hconn_val: int) -> None:
         import traceback
         traceback.print_exc()
     finally:
+        close_video_source(video_reader)
         _log("媒体推流线程退出")

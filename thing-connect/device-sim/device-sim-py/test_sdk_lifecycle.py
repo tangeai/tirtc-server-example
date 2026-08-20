@@ -191,6 +191,56 @@ class SdkLifecycleTests(unittest.TestCase):
         self.assertTrue(rtc_stream._force_key_frame.is_set())
         rtc_stream._force_key_frame.clear()
 
+    def test_stream_replacement_releases_old_source_before_opening_new_one(self):
+        old_active = rtc_stream._service_active
+        old_conn = rtc_stream._active_conn
+        old_thread = rtc_stream._active_thread
+        old_factory = rtc_stream._media_factory
+        old_stop_requested = rtc_stream._stop_event.is_set()
+        events = []
+
+        class OldStreamThread:
+            @staticmethod
+            def join(timeout=None):
+                events.append("old source released")
+
+            @staticmethod
+            def is_alive():
+                return False
+
+        new_source = mock.Mock()
+
+        def open_new_source():
+            events.append("new source opened")
+            return new_source
+
+        rtc_stream._service_active = True
+        rtc_stream._active_conn = 0x101
+        rtc_stream._active_thread = OldStreamThread()
+        rtc_stream._media_factory = open_new_source
+        new_thread = mock.Mock()
+        try:
+            with mock.patch.object(
+                    rtc_stream.sdk, "TiRtcDisconnect", return_value=0), \
+                    mock.patch.object(rtc_stream, "_close_talkback_file"), \
+                    mock.patch.object(rtc_stream, "_open_talkback_file"), \
+                    mock.patch.object(
+                        rtc_stream.threading, "Thread", return_value=new_thread):
+                rtc_stream._activate_connection_after_callback(0x202)
+        finally:
+            if old_stop_requested:
+                rtc_stream._stop_event.set()
+            else:
+                rtc_stream._stop_event.clear()
+            rtc_stream._service_active = old_active
+            rtc_stream._active_conn = old_conn
+            rtc_stream._active_thread = old_thread
+            rtc_stream._media_factory = old_factory
+
+        self.assertEqual(
+            ["old source released", "new source opened"], events)
+        new_thread.start.assert_called_once_with()
+
     def test_device_call_service_stop_waits_for_callback_return(self):
         old_active = rtc_call._service_active
         release, callback_thread = self._start_blocked_callback(

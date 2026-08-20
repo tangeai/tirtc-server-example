@@ -71,6 +71,42 @@ class DeviceSimulatorTests(unittest.TestCase):
         self.assertIn("requirements-audio.txt", stderr.getvalue())
         self.assertIn("sounddevice", stderr.getvalue())
 
+    def test_with_camera_missing_dependency_points_to_camera_requirements(self):
+        stderr = io.StringIO()
+        with mock.patch.object(device_sim_main.sys, "platform", "win32"), \
+                mock.patch.object(
+                    device_sim_main,
+                    "_find_missing_deps",
+                    return_value=[("cv2", "opencv-python"), ("av", "av")],
+                ), \
+                mock.patch.object(
+                    device_sim_main.sys,
+                    "argv",
+                    ["device_sim_main.py", "--with-camera"],
+                ), \
+                redirect_stderr(stderr), \
+                self.assertRaises(SystemExit) as raised:
+            device_sim_main.main()
+
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("requirements-camera.txt", stderr.getvalue())
+        self.assertIn("opencv-python", stderr.getvalue())
+
+    def test_with_camera_is_rejected_outside_windows(self):
+        stderr = io.StringIO()
+        with mock.patch.object(device_sim_main.sys, "platform", "linux"), \
+                mock.patch.object(
+                    device_sim_main.sys,
+                    "argv",
+                    ["device_sim_main.py", "--with-camera"],
+                ), \
+                redirect_stderr(stderr), \
+                self.assertRaises(SystemExit) as raised:
+            device_sim_main.main()
+
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("仅支持 Windows", stderr.getvalue())
+
     def test_supported_python_versions_are_3_10_through_3_14(self):
         for minor in range(10, 15):
             with self.subTest(minor=minor):

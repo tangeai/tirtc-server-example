@@ -149,37 +149,43 @@ def _activate_connection_after_callback(hconn_val: int) -> None:
     if not _service_active or _media_factory is None:
         sdk.TiRtcDisconnect(ctypes.c_void_p(hconn_val))
         return
-    try:
-        source = _media_factory()
-    except BaseException as exc:
-        _err(f"创建媒体源失败 hconn={hconn_val:#x}: {exc}")
-        sdk.TiRtcDisconnect(ctypes.c_void_p(hconn_val))
-        return
+    media_factory = _media_factory
 
     with _state_lock:
         if not _service_active:
             old_conn = None
             old_thread = None
             install = False
+            disconnect_new = True
         elif _active_conn == hconn_val:
             old_conn = None
             old_thread = None
             install = False
+            disconnect_new = False
         else:
             old_conn, _active_conn = _active_conn, None
             old_thread, _active_thread = _active_thread, None
             _stop_event.set()
             install = True
+            disconnect_new = False
 
     if not install:
-        source.close()
-        if not _service_active:
+        if disconnect_new:
             sdk.TiRtcDisconnect(ctypes.c_void_p(hconn_val))
         return
     if old_conn is not None:
         sdk.TiRtcDisconnect(ctypes.c_void_p(old_conn))
     join_worker_before_uninit(old_thread, _warn, "旧实时流")
     _close_talkback_file()
+
+    try:
+        # The previous worker closes its media source in finally.  Open the
+        # replacement afterwards so exclusive Windows cameras are reusable.
+        source = media_factory()
+    except BaseException as exc:
+        _err(f"创建媒体源失败 hconn={hconn_val:#x}: {exc}")
+        sdk.TiRtcDisconnect(ctypes.c_void_p(hconn_val))
+        return
 
     with _state_lock:
         if not _service_active:

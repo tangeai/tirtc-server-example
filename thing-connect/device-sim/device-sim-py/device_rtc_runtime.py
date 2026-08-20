@@ -7,6 +7,7 @@
 from dataclasses import dataclass
 import threading
 
+from camera_video_source import describe_video_source
 from media_source import FileMediaSource
 from rtc_ai_session import AiCallState
 from rtc_call_session import CallState
@@ -228,22 +229,24 @@ class DeviceRtcRuntime:
             raise
 
     def _print_media_config(self) -> None:
-        """在首次启动时打印实际选用的文件，便于确认默认素材与参数覆盖。"""
+        """在首次启动时打印实际媒体源，便于确认参数覆盖。"""
         c = self.config
+        video_source = describe_video_source(
+            c.up_video_file, c.up_video_format)
         if c.hardware_audio:
             print(
-                f"[device] 文件媒体配置: 视频={c.up_video_file} ({c.up_video_format})，"
+                f"[device] 媒体配置: 视频={video_source}，"
                 f"音频=本机麦克风/扬声器（本地 PCM 16k，"
                 f"线上 {c.up_audio_format}/{c.down_audio_format}）",
                 flush=True,
             )
             return
 
-        print("[device] 文件媒体配置（循环读取）:", flush=True)
+        print("[device] 媒体配置:", flush=True)
         print(
             f"[device]   推流 / VoIP / 设备互呼: "
             f"音频={c.up_audio_file} ({c.up_audio_format})，"
-            f"视频={c.up_video_file or '未启用'} ({c.up_video_format})",
+            f"视频={video_source}",
             flush=True,
         )
         print(

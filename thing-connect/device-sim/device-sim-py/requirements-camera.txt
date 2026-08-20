@@ -1,0 +1,5 @@
+-r requirements.txt
+
+# Optional Windows PC camera capture used by --with-camera.
+opencv-python>=4.10; sys_platform == "win32"
+av>=12; sys_platform == "win32"

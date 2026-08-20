@@ -47,7 +47,7 @@ def _find_missing_deps(requirements):
     for mod, pip_name in requirements:
         try:
             importlib.import_module(mod)
-        except ImportError:
+        except (ImportError, OSError):
             missing.append((mod, pip_name))
     return missing
 
@@ -95,7 +95,17 @@ _OPTIONAL_HW_AUDIO_DEPS = [
     ("soxr", "soxr"),
 ]
 
+_OPTIONAL_CAMERA_DEPS = [
+    ("cv2", "opencv-python"),
+    ("av", "av"),
+]
+
 import device_flow
+from camera_video_source import (
+    camera_source_uri,
+    is_camera_source,
+    validate_camera_source,
+)
 from media_formats import (
     AUDIO_FORMATS,
     AUDIO_FORMAT_CHOICES,
@@ -255,6 +265,11 @@ def main():
     parser.add_argument("--with-mic", action="store_true", dest="with_mic",
                         help="Windows 使用本机麦克风/扬声器；上下行必须使用相同的 "
                              "alaw_8khz 或 alaw_16khz")
+    parser.add_argument("--with-camera", action="store_true", dest="with_camera",
+                        help="Windows 使用 PC 摄像头替代上行视频文件，输出 "
+                             "1280x720、15fps、H.264")
+    parser.add_argument("--camera-index", default=0, type=int,
+                        help="--with-camera 使用的摄像头编号（默认 0）")
     _base = getattr(sys, "_MEIPASS", None) or os.path.join(os.path.dirname(__file__), "..")
     _assets = os.path.join(_base, "assets")
     _default_audio_file = os.path.join(_assets, DEFAULT_AUDIO_FILENAME)
@@ -292,6 +307,12 @@ def main():
 
     if args.with_mic and not sys.platform.startswith("win"):
         parser.error("--with-mic 仅支持 Windows；其他平台请使用媒体文件模式")
+    if args.with_camera and not sys.platform.startswith("win"):
+        parser.error("--with-camera 仅支持 Windows；其他平台请使用媒体文件模式")
+    if args.camera_index < 0:
+        parser.error("--camera-index 不能小于 0")
+    if args.with_camera and args.up_video_format != "h264":
+        parser.error("--with-camera 要求 --up-video-format=h264")
     if args.with_mic:
         try:
             validate_with_mic_audio_formats(
@@ -319,6 +340,22 @@ def main():
                 "python -m pip install -r requirements-audio.txt："
                 f"{exc}"
             )
+    if args.with_camera:
+        missing_camera_deps = _find_missing_deps(_OPTIONAL_CAMERA_DEPS)
+        if missing_camera_deps:
+            missing = " ".join(
+                pip_name for _, pip_name in missing_camera_deps
+            )
+            parser.error(
+                "--with-camera 缺少摄像头依赖，请先执行: "
+                "python -m pip install -r requirements-camera.txt "
+                f"（缺少: {missing}）"
+            )
+        try:
+            validate_camera_source(args.camera_index)
+        except (ImportError, OSError, RuntimeError, ValueError) as exc:
+            parser.error(f"--with-camera 初始化失败: {exc}")
+        args.up_video_file = camera_source_uri(args.camera_index)
     if AUDIO_FORMATS[args.down_audio_format].codec not in ("alaw", "amr", "opus"):
         parser.error("--down-audio-format 必须使用 VoIP 支持的 alaw/amr/opus 编码")
 
@@ -326,7 +363,8 @@ def main():
         parser.error("--device-id 和 --device-key 必须成对提供（环境变量 DEVICE_ID/DEVICE_KEY 同样如此）")
 
     for label, path in (("上行音频", args.up_audio_file), ("上行视频", args.up_video_file)):
-        if path and (not os.path.isfile(path) or os.path.getsize(path) == 0):
+        if (path and not is_camera_source(path)
+                and (not os.path.isfile(path) or os.path.getsize(path) == 0)):
             parser.error(
                 f"{label}素材不存在或为空: {path}。"
                 "请先在 device-sim/device-sim-py 目录执行: bash ../scripts/gen_assets.sh"

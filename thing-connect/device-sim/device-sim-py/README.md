@@ -8,6 +8,7 @@
 - 设备呼微信小程序 VoIP
 
 模拟器默认读取仓库自带的音视频素材，不会使用电脑的摄像头、麦克风或扬声器。
+Windows 可通过 `--with-camera` 使用 PC 摄像头，通过 `--with-mic` 使用麦克风和扬声器。
 
 ## 快速开始
 
@@ -37,6 +38,10 @@ cd thing-connect\device-sim\device-sim-py
 py -3.14 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\python.exe device_sim_main.py
+
+# 可选：使用默认摄像头作为上行视频
+.\.venv\Scripts\python.exe -m pip install -r requirements-camera.txt
+.\.venv\Scripts\python.exe device_sim_main.py --with-camera
 ```
 
 #### Ubuntu
@@ -145,12 +150,18 @@ python device_sim_main.py --device-id DEV000001 --device-key your-key
 # 硬件音频（--with-mic）：安装基础依赖和可选声卡依赖
 python -m pip install -r requirements-audio.txt
 python device_sim_main.py --device-id DEV000001 --device-key your-key --with-mic
+
+# 摄像头视频（--with-camera）：安装基础依赖和可选摄像头依赖
+python -m pip install -r requirements-camera.txt
+python device_sim_main.py --device-id DEV000001 --device-key your-key --with-camera
 ```
 
-`requirements-audio.txt` 已包含基础 `requirements.txt`，新环境若直接使用
-`--with-mic`，只执行硬件音频这一条安装命令即可。
+`requirements-audio.txt` 和 `requirements-camera.txt` 均包含基础 `requirements.txt`。
+只使用一种 PC 硬件时，安装对应的依赖文件即可；同时使用摄像头和麦克风时，两份都要安装。
 
-Windows 也可使用文件模式；只有显式传入 `--with-mic` 时，VoIP、AI 或设备间通话才使用 PC 麦克风和扬声器。此模式线上上下行必须同时使用 `alaw_8khz` 或同时使用 `alaw_16khz`（G.711A、单声道）；PCM/AMR/Opus 只能去掉 `--with-mic` 后使用预编码文件测试。视频仍由本地媒体文件模拟，可选 `h264/h265/mjpeg`。
+Windows 也可使用文件模式；只有显式传入 `--with-mic` 时，VoIP、AI 或设备间通话才使用 PC 麦克风和扬声器。此模式线上上下行必须同时使用 `alaw_8khz` 或同时使用 `alaw_16khz`（G.711A、单声道）；PCM/AMR/Opus 只能去掉 `--with-mic` 后使用预编码文件测试。
+
+显式传入 `--with-camera` 时，实时推流、VoIP 和设备间视频通话使用 `--camera-index` 指定的 PC 摄像头，`--up-video-file` 被摄像头替代。画面统一缩放并编码为 `1280x720`、15fps、H.264 Annex-B；`--up-video-format` 必须为 `h264`。未传 `--with-camera` 时，视频继续从 `--up-video-file` 循环读取，支持 `h264/h265/mjpeg`。
 
 如果 Windows 环境没有 `python3` 命令，可用 `py -3` 等价执行。
 
@@ -204,6 +215,7 @@ bash ../scripts/gen_assets.sh
 | 基础 | `paho-mqtt`, `requests` | MQTT 通信、HTTP 请求 |
 | 文件模式 / 素材生成 | `numpy`, `soxr` | PCM 重采样、素材生成 |
 | 可选硬件音频 | `requirements-audio.txt`（`sounddevice`） | Windows 麦克风/扬声器（`--with-mic`） |
+| 可选摄像头视频 | `requirements-camera.txt`（`opencv-python`, `av`） | Windows 摄像头采集和 H.264 编码（`--with-camera`） |
 
 ## 启动方式
 
@@ -220,10 +232,10 @@ python3 device_sim_main.py --device-id DEV000001 --device-key your-key \
   --up-audio-file ../assets/audio.g711a \
   --up-video-file ../assets/video.h264 --down-media-dir ./received
 
-# Windows PC 音频：麦克风上行 + 扬声器下行；视频仍读取本地文件
+# Windows PC 音视频：麦克风上行 + 扬声器下行 + 默认摄像头上行
 python3 device_sim_main.py --device-id DEV000001 --device-key your-key \
-  --with-mic --up-audio-format alaw_8khz --down-audio-format alaw_8khz \
-  --up-video-file ../assets/video.h264 --up-video-format h264
+  --with-mic --with-camera \
+  --up-audio-format alaw_8khz --down-audio-format alaw_8khz
 ```
 
 `--with-mic` 时声卡仍采集和播放 PCM 16k，但模拟器会在本地完成
@@ -248,6 +260,8 @@ python3 device_sim_main.py --device-id DEV000001 --device-key your-key \
 | `--mac` | `AA:BB:CC:DD:EE:FF` | 设备 MAC（未绑定流程） |
 | `--endpoint` | `http://ep-open.tangeopen.com` | 服务发现入口 |
 | `--with-mic` | — | Windows 下使用 PC 麦克风/扬声器；上下行须同时为 `alaw_8khz` 或 `alaw_16khz` |
+| `--with-camera` | — | Windows 下使用 PC 摄像头替代上行视频文件；输出固定为 720P、15fps、H.264 Annex-B |
+| `--camera-index` | `0` | `--with-camera` 使用的摄像头编号 |
 | `--up-audio-format` | `alaw_8khz` | 上行音频格式 |
 | `--down-audio-format` | `alaw_8khz` | 下行音频格式 |
 | `--up-audio-file` | `../assets/audio.g711a` | 各媒体模式通用的 G.711A 8 kHz 单声道音频文件 |
@@ -538,6 +552,7 @@ device-sim-py/
 ├── device_flow.py         # 设备上线协议（HTTP + MQTT + HMAC 签名）
 ├── tirtc_sdk.py           # TiRTC SDK ctypes 绑定
 ├── audio_device.py        # 跨平台音频设备（麦克风/扬声器）
+├── camera_video_source.py # Windows 摄像头采集与 H.264 编码
 ├── rtc_echo_gate.py       # 回声门控（替代 AEC，远端有声时衰减麦克风）
 ├── g711.py                # G.711 A-law 编解码
 ├── media_source.py        # Annex-B H.264 帧级读取
@@ -797,7 +812,8 @@ resp = requests.post(f"{server}/v1/device/token", headers=headers)
 Windows `--with-mic` 在线上使用上下行一致的 `alaw_8khz` 或 `alaw_16khz`，默认
 `alaw_8khz`。麦克风 PCM 16k 在发送前按目标采样率重采样并编码为 G.711 A-law；
 收到的 G.711 A-law 解码后再交给扬声器。AI `start_session` 会显式协商
-`codec=g711a`、对应采样率及单声道。视频仍来自 `--up-video-file` 文件。
+`codec=g711a`、对应采样率及单声道。视频来源由 `--with-camera` 或
+`--up-video-file` 决定。
 
 ### 接收媒体与音频格式检测
 
@@ -938,3 +954,4 @@ WHIP 连接成功后需等 ~300ms KCP 握手再发 `start_session`。
 6. **H.264 必须重新编码**：`-c copy` 导致 SPS/PPS 缺失、B 帧残留
 7. **SDK 生命周期属于进程级 runtime**：只在进程启动时 Init/Start，业务切换不 Stop/Uninit，进程退出时才 Stop/Uninit
 8. **扬声器外放时有回声**：将电脑音量调到 ~15%，程序启动时会提示
+9. **摄像头无法打开**：确认只在 Windows 使用 `--with-camera`，检查 Windows“相机隐私设置”是否允许桌面应用访问，并用 `--camera-index 1` 等编号选择其他摄像头

@@ -3,10 +3,12 @@
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 os.environ.setdefault("TIRTC_SDK_VERSION", "2.2.1")
 
 from media_file_reader import AudioFileReader, VideoFileReader
+import media_source
 from media_source import FileMediaSource
 
 
@@ -152,6 +154,27 @@ class MediaFileReaderTests(unittest.TestCase):
             # The forced IDR is video frame 3: 3 * 1000/15 = 200 ms,
             # which maps to audio packet 5 at 40 ms per packet.
             self.assertEqual(aligned_audio, bytes([5]) * 320)
+
+    def test_camera_media_source_does_not_use_file_seek_contract(self):
+        with tempfile.TemporaryDirectory() as root:
+            audio_path = _write_temp(root, "audio.g711a", b"\xd5" * 320)
+            camera = mock.Mock()
+            camera.next_frame.return_value = (b"\x00\x00\x00\x01\x65", True)
+            with mock.patch.object(
+                    media_source, "open_video_source", return_value=camera):
+                source = FileMediaSource("camera://0", audio_path)
+                try:
+                    self.assertTrue(source.has_video())
+                    self.assertEqual(
+                        source.next_video(force_key=True),
+                        (b"\x00\x00\x00\x01\x65", True),
+                    )
+                finally:
+                    source.close()
+
+            camera.next_frame.assert_called_once_with(force_key=True)
+            camera.first_key_index.assert_not_called()
+            camera.close.assert_called_once_with()
 
     def test_h265_reader_groups_access_units(self):
         with tempfile.TemporaryDirectory() as root:

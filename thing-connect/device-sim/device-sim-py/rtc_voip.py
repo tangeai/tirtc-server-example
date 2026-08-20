@@ -26,6 +26,11 @@ import threading
 import time
 
 from callback_work_queue import CallbackWorkQueue
+from camera_video_source import (
+    close_video_source,
+    describe_video_source,
+    open_video_source,
+)
 from g711 import alaw_decode, alaw_encode
 from media_source import VIDEO_FRAME_MS
 from media_postprocess import convert_audio_to_wav, convert_video_to_mp4
@@ -33,7 +38,7 @@ from sdk_callback_guard import SdkCallbackGuard, join_worker_before_uninit
 
 import tirtc_sdk as sdk
 from tirtc_runtime import ServiceKind, process_tirtc_runtime
-from media_file_reader import AudioFileReader, VideoFileReader
+from media_file_reader import AudioFileReader
 from media_formats import (
     AUDIO_FORMATS,
     VIDEO_FORMATS,
@@ -188,7 +193,7 @@ def configure_media_formats(up_audio: str, down_audio: str,
 
 
 def configure_video(video_file: str = "") -> None:
-    """配置 VoIP 上行 H.264 Annex-B 文件；空字符串表示纯音频设备。"""
+    """配置 VoIP 上行编码视频源；空字符串表示纯音频设备。"""
     global _video_file_path
     _video_file_path = video_file
 
@@ -710,13 +715,15 @@ def _audio_stream_worker(hconn_val: int, audio_file: str) -> None:
 
 
 def _video_stream_worker(hconn_val: int, video_file: str) -> None:
-    """循环发送本地视频文件，固定按 15fps 节奏。"""
+    """发送文件或摄像头视频源，固定按 15fps 节奏。"""
     hconn = ctypes.c_void_p(hconn_val)
-    _log(f"视频推流线程启动 file={video_file}")
+    source_label = describe_video_source(video_file, _up_video_format)
+    _log(f"视频推流线程启动 source={source_label}")
+    reader = None
     try:
-        reader = VideoFileReader(video_file, _up_video_format)
-    except (OSError, ValueError) as e:
-        _err(f"无法打开视频文件 {video_file}: {e}")
+        reader = open_video_source(video_file, _up_video_format)
+    except (ImportError, OSError, RuntimeError, ValueError) as e:
+        _err(f"无法打开视频源 {source_label}: {e}")
         return
 
     video_pts_ms = 0.0
@@ -726,10 +733,11 @@ def _video_stream_worker(hconn_val: int, video_file: str) -> None:
     consecutive_errors = 0
     try:
         while not _stream_stop.is_set():
-            result = reader.next_frame(force_key=_force_key_frame.is_set())
+            force_key = first_video or _force_key_frame.is_set()
             _force_key_frame.clear()
+            result = reader.next_frame(force_key=force_key)
             if result is None:
-                _err("视频文件不包含可发送帧")
+                _err("视频源不包含可发送帧")
                 break
             frame_data, is_key = result
 
@@ -768,6 +776,7 @@ def _video_stream_worker(hconn_val: int, video_file: str) -> None:
             first_video = first_video and rc < 0
             video_pts_ms += VIDEO_FRAME_MS
     finally:
+        close_video_source(reader)
         _log("视频推流线程退出")
 
 
