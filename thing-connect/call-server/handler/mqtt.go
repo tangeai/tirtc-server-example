@@ -25,7 +25,7 @@ type envelope struct {
 	Type    string `json:"type"`
 	Channel string `json:"channel"`
 	Msg     any    `json:"payload"`
-	Ts      string `json:"ts"`
+	TS      string `json:"ts"`
 }
 
 func newEnvelope(from, msgType string, msg any) envelope {
@@ -35,7 +35,7 @@ func newEnvelope(from, msgType string, msg any) envelope {
 		Type:    msgType,
 		Channel: "device",
 		Msg:     msg,
-		Ts:      time.Now().UTC().Format("2006-01-02T15:04:05.000Z"),
+		TS:      time.Now().UTC().Format("2006-01-02T15:04:05.000Z"),
 	}
 }
 

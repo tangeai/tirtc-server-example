@@ -1,7 +1,9 @@
 package config
 
 import (
+	"bytes"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -13,7 +15,8 @@ import (
 )
 
 type ServerCfg struct {
-	HTTPPort int `yaml:"http_port"`
+	HTTPPort       int      `yaml:"http_port"`
+	TrustedProxies []string `yaml:"trusted_proxies"`
 }
 
 // LogCfg configures the slog logger shared by all servers.
@@ -83,15 +86,53 @@ type AiCfg struct {
 	ServerURL string `yaml:"server_url"` // user-server → ai-server base URL
 }
 
+type AdminCfg struct {
+	ServerURL string `yaml:"server_url"`
+}
+
+// DiscoveryCfg publishes the bootstrap endpoints consumed by device
+// reference implementations. It is hosted by user-server at /services.
+type DiscoveryCfg struct {
+	Enabled         bool   `yaml:"enabled"`
+	DeviceServerURL string `yaml:"device_server_url"`
+	UserServerURL   string `yaml:"user_server_url"`
+	VoIPServerURL   string `yaml:"voip_server_url"`
+	AIServerURL     string `yaml:"ai_server_url"`
+	CallServerURL   string `yaml:"call_server_url"`
+	MQTTURL         string `yaml:"mqtt_url"`
+	TiRTCEndpoint   string `yaml:"tirtc_endpoint"`
+}
+
 type YidunCfg struct {
 	CaptchaID string `yaml:"captcha_id"`
 	SecretID  string `yaml:"secret_id"`
 	SecretKey string `yaml:"secret_key"`
 }
 
+// CaptchaProviderCfg contains the credentials and public widget identifier for
+// one human-verification provider. PublicConfig is returned to clients; never
+// put secrets in it.
+type CaptchaProviderCfg struct {
+	CaptchaID            string            `yaml:"captcha_id"`
+	SecretID             string            `yaml:"secret_id"`
+	SecretKey            string            `yaml:"secret_key"`
+	AppSecretKey         string            `yaml:"app_secret_key"`
+	MiniProgramSecretKey string            `yaml:"mini_program_secret_key"`
+	PublicConfig         map[string]string `yaml:"public_config"`
+}
+
+// CaptchaCfg selects a provider without coupling the application configuration
+// to a particular vendor. The deprecated yidun section remains readable for
+// existing deployments.
+type CaptchaCfg struct {
+	Provider  string                        `yaml:"provider"`
+	Providers map[string]CaptchaProviderCfg `yaml:"providers"`
+}
+
 type SMTPCfg struct {
 	Host     string `yaml:"host"`
 	Port     int    `yaml:"port"`
+	TLSMode  string `yaml:"tls_mode"`
 	Username string `yaml:"username"`
 	Password string `yaml:"password"`
 	From     string `yaml:"from"`
@@ -119,6 +160,7 @@ type WsCfg struct {
 }
 
 type WxApp struct {
+	Enabled        *bool  `yaml:"enabled"`
 	Secret         string `yaml:"secret"`
 	Token          string `yaml:"token"`
 	EncodingAESKey string `yaml:"encoding_aes_key"`
@@ -139,6 +181,7 @@ type Config struct {
 	JWTSecret   string         `yaml:"jwt_secret"`
 	Service     ServiceCfg     `yaml:"service"`
 	Yidun       YidunCfg       `yaml:"yidun"`
+	Captcha     CaptchaCfg     `yaml:"captcha"`
 	SMTP        SMTPCfg        `yaml:"smtp"`
 	Tirtc       TirtcCfg       `yaml:"tirtc"`
 	TirtcAichat TirtcAichatCfg `yaml:"tirtc_aichat"`
@@ -148,16 +191,31 @@ type Config struct {
 	Call        CallCfg        `yaml:"call"`
 	Voip        VoipCfg        `yaml:"voip"`
 	Ai          AiCfg          `yaml:"ai"`
+	Admin       AdminCfg       `yaml:"admin"`
+	Discovery   DiscoveryCfg   `yaml:"discovery"`
 }
 
 func Load(path string) *Config {
+	cfg, err := LoadFile(path)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return cfg
+}
+
+// LoadFile parses one service configuration and rejects unknown YAML fields.
+// Returning an error makes validation reusable by tests and deployment tools,
+// while Load retains the existing fail-fast server API.
+func LoadFile(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		log.Fatalf("config: read %s: %v", path, err)
+		return nil, fmt.Errorf("config: read %s: %w", path, err)
 	}
 	var cfg Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		log.Fatalf("config: parse %s: %v", path, err)
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&cfg); err != nil {
+		return nil, fmt.Errorf("config: parse %s: %w", path, err)
 	}
 	if cfg.Server.HTTPPort == 0 {
 		cfg.Server.HTTPPort = 8080
@@ -172,10 +230,13 @@ func Load(path string) *Config {
 		cfg.Redis.Addr = "127.0.0.1:6379"
 	}
 	if cfg.JWTSecret == "" {
-		log.Fatal("config: jwt_secret must be set")
+		return nil, fmt.Errorf("config: jwt_secret must be set")
 	}
-	if cfg.JWTSecret == "change-me-in-production" {
-		log.Fatal("config: jwt_secret must not use the insecure default")
+	if IsPlaceholderSecret(cfg.JWTSecret) {
+		return nil, fmt.Errorf("config: jwt_secret still uses a public placeholder")
+	}
+	if cfg.Internal.Key != "" && IsPlaceholderSecret(cfg.Internal.Key) {
+		return nil, fmt.Errorf("config: internal.key still uses a public placeholder")
 	}
 	if cfg.Service.QuotaPerUser == 0 {
 		cfg.Service.QuotaPerUser = 10
@@ -210,7 +271,18 @@ func Load(path string) *Config {
 	if cfg.Service.MQTTACKTimeout == 0 {
 		cfg.Service.MQTTACKTimeout = 5 * time.Second
 	}
-	return &cfg
+	return &cfg, nil
+}
+
+// IsPlaceholderSecret identifies example values that must never be accepted
+// as runtime credentials. It intentionally does not impose a new minimum
+// length on existing deployments, which would invalidate otherwise compatible
+// user sessions after an upgrade.
+func IsPlaceholderSecret(value string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	return normalized == "change-me-in-production" ||
+		strings.HasPrefix(normalized, "replace-with-") ||
+		strings.HasPrefix(normalized, "your-")
 }
 
 func ParseFlags() string {
@@ -251,5 +323,8 @@ func (c *Config) WxAppFor(appID string) (WxApp, bool) {
 		appID = c.Wechat.DefaultAppID
 	}
 	app, ok := c.Wechat.Apps[appID]
+	if ok && app.Enabled != nil && !*app.Enabled {
+		return WxApp{}, false
+	}
 	return app, ok
 }

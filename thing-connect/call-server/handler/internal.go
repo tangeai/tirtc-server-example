@@ -15,7 +15,7 @@ type internalUnbindBody struct {
 // this one; the other server-to-server calls in this codebase don't have a
 // precedent either, so this is a deliberate addition).
 func (s *Server) postInternalUnbind(c *gin.Context) {
-	if s.cfg.Internal.Key == "" || c.GetHeader("X-Internal-Key") != s.cfg.Internal.Key {
+	if s.Config().Internal.Key == "" || c.GetHeader("X-Internal-Key") != s.Config().Internal.Key {
 		apiresp.Fail(c, apiresp.ErrInternalCredential, "内部服务凭证无效")
 		return
 	}

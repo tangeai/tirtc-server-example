@@ -17,8 +17,10 @@ import (
 	"thing-connect/internal/cache"
 	"thing-connect/internal/config"
 	"thing-connect/internal/db"
+	"thing-connect/internal/dynamicconfig"
 	"thing-connect/internal/logging"
 	"thing-connect/internal/service"
+	"thing-connect/internal/servicestatus"
 	"thing-connect/internal/store"
 	mysqlstore "thing-connect/internal/store/mysql"
 )
@@ -78,16 +80,43 @@ func main() {
 	devStore := mysqlstore.NewDeviceStore(sqlDB)
 	cacheStore := mysqlstore.NewCacheStore(rdb)
 	devSvc := service.NewDeviceService(devStore, cacheStore, cfg.JWTSecret, svcCfg)
+	var dynamicClient *dynamicconfig.Client
+	var dynamicRefs []dynamicconfig.Ref
+	if cfg.Admin.ServerURL != "" {
+		dynamicClient, dynamicRefs, err = deviceDynamicConfig(cfg, rdb, devSvc)
+		if err != nil {
+			log.Printf("dynamic config disabled: %v", err)
+			dynamicClient = nil
+		}
+	}
 
 	// Periodically reconcile global:pending_codes counter to correct drift
 	// caused by expired verification codes whose DelVerifyAndCode was never
 	// called (user didn't complete bind before TTL).
 	gcCtx, gcCancel := context.WithCancel(context.Background())
 	go globalPendingGC(gcCtx, cacheStore)
+	if dynamicClient != nil {
+		go dynamicClient.Run(gcCtx, dynamicRefs)
+	}
 
 	r := gin.New()
+	if err := r.SetTrustedProxies(cfg.Server.TrustedProxies); err != nil {
+		log.Fatalf("trusted proxies: %v", err)
+	}
 	r.Use(gin.Recovery(), logging.RequestID("device"), logging.BodyLog(), gin.Logger())
+	probes := map[string]servicestatus.DependencyProbe{"database": servicestatus.SQLProbe(sqlDB), "redis": servicestatus.RedisProbe(rdb)}
+	servicestatus.RegisterHealth(r, probes)
 	devhandler.NewServer(devSvc).Register(r)
+	statusCtx, statusCancel := context.WithCancel(context.Background())
+	var revisions func() map[string]int64
+	if dynamicClient != nil {
+		revisions = dynamicClient.Revisions
+	}
+	reporter, err := servicestatus.NewReporter(rdb, "device-server", probes, revisions)
+	if err != nil {
+		log.Fatalf("service status: %v", err)
+	}
+	go reporter.Run(statusCtx)
 
 	addr := fmt.Sprintf(":%d", cfg.Server.HTTPPort)
 	srv := &http.Server{
@@ -116,7 +145,12 @@ func main() {
 		log.Printf("device-server shutdown: %v", err)
 	}
 	gcCancel()
-	rdb.Close()
-	sqlDB.Close()
+	statusCancel()
+	if err := rdb.Close(); err != nil {
+		log.Printf("device-server close redis: %v", err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		log.Printf("device-server close database: %v", err)
+	}
 	log.Printf("device-server stopped")
 }

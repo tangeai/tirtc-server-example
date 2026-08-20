@@ -18,5 +18,6 @@ func (s *Server) buildConnectToken(ctx context.Context, remoteDeviceID string) (
 	if pool == nil {
 		return "", fmt.Errorf("buildConnectToken: device %s has no key", remoteDeviceID)
 	}
-	return tirtcapi.BuildDeviceToken(s.cfg.Tirtc.AccessKeyID, s.cfg.Tirtc.SecretKeyID, pool.DeviceKey, remoteDeviceID)
+	cfg := s.Config()
+	return tirtcapi.BuildDeviceToken(cfg.Tirtc.AccessKeyID, cfg.Tirtc.SecretKeyID, pool.DeviceKey, remoteDeviceID)
 }

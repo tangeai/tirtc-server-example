@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
@@ -58,10 +59,10 @@ type Server struct {
 	passwordResetMailQueueCancel context.CancelFunc
 }
 
-func NewServer(userSvc *service.UserService, bindSvc *service.BindService, mqtt *mqttc.Broker, jwtSecret, callServerURL, internalKey string, roleStore store.RoleBindingStore, cleanup *UnbindCleanup) *Server {
+func NewServer(userSvc *service.UserService, bindSvc *service.BindService, mqtt *mqttc.Broker, db *sqlx.DB, redisClient *redis.Client, jwtSecret, callServerURL, internalKey string, roleStore store.RoleBindingStore, cleanup *UnbindCleanup) *Server {
 	return &Server{
 		userSvc: userSvc, bindSvc: bindSvc, mqtt: mqtt, jwtSecret: jwtSecret,
-		callServerURL: callServerURL, internalKey: internalKey, RoleStore: roleStore, UnbindCleanup: cleanup,
+		callServerURL: callServerURL, internalKey: internalKey, RoleStore: roleStore, UnbindCleanup: cleanup, DB: db, RDB: redisClient,
 	}
 }
 
@@ -75,12 +76,24 @@ type noopMailer struct{}
 
 func (noopMailer) Send(_ context.Context, _, _, _ string) error { return nil }
 
-// captchaID is exposed to the frontend so the widget knows which captcha to load.
-// Empty when yidun is not configured (dev mode).
-var captchaID string
+// CaptchaConfig is the non-secret provider configuration exposed to clients.
+// CaptchaID is kept in the response during the API migration so current 易盾
+// clients continue to work.
+type CaptchaConfig struct {
+	Provider     string
+	Enabled      bool
+	CaptchaID    string
+	PublicConfig map[string]string
+}
 
-// SetCaptchaID is called from main.go to pass the configured captcha_id to the handler.
-func SetCaptchaID(id string) { captchaID = id }
+var captchaConfig CaptchaConfig
+var captchaConfigMu sync.RWMutex
+
+func SetCaptchaConfig(cfg CaptchaConfig) {
+	captchaConfigMu.Lock()
+	captchaConfig = cfg
+	captchaConfigMu.Unlock()
+}
 
 func (s *Server) Register(r *gin.Engine) {
 	if s.userSvc == nil && s.DB != nil {
@@ -108,7 +121,22 @@ func (s *Server) Register(r *gin.Engine) {
 
 	// Public
 	v1.GET("/config/captcha", func(c *gin.Context) {
-		apiresp.OK(c, gin.H{"captcha_id": captchaID})
+		captchaConfigMu.RLock()
+		currentCaptcha := captchaConfig
+		captchaConfigMu.RUnlock()
+		publicConfig := make(map[string]string, len(currentCaptcha.PublicConfig)+1)
+		for key, value := range currentCaptcha.PublicConfig {
+			publicConfig[key] = value
+		}
+		if currentCaptcha.CaptchaID != "" {
+			publicConfig["captcha_id"] = currentCaptcha.CaptchaID
+		}
+		apiresp.OK(c, gin.H{
+			"provider":      currentCaptcha.Provider,
+			"enabled":       currentCaptcha.Enabled,
+			"public_config": publicConfig,
+			"captcha_id":    currentCaptcha.CaptchaID, // deprecated compatibility field
+		})
 	})
 	v1.POST("/user/send-code", s.postSendCode)
 	v1.POST("/user/register", s.postRegister)
@@ -117,7 +145,7 @@ func (s *Server) Register(r *gin.Engine) {
 	v1.POST("/user/password-reset", s.postPasswordReset)
 
 	// Authenticated
-	auth := v1.Group("", JWTAuth(s.jwtSecret))
+	auth := v1.Group("", JWTAuth(s.jwtSecret, s.RDB, s.DB))
 	auth.GET("/user/quota", s.getQuota)
 	auth.GET("/user/device/list", s.getDeviceList)
 	auth.PUT("/user/device/name", s.putDeviceName)
@@ -137,10 +165,11 @@ func (s *Server) Close() {
 }
 
 type sendCodeReq struct {
-	Email     string `json:"email"     binding:"required,email"`
-	CaptchaID string `json:"captcha_id"`
-	Validate  string `json:"validate"`
-	User      string `json:"user"`
+	Email     string          `json:"email"     binding:"required,email"`
+	Captcha   *captchaPayload `json:"captcha"`
+	CaptchaID string          `json:"captcha_id"`
+	Validate  string          `json:"validate"`
+	User      string          `json:"user"`
 }
 
 func (s *Server) postSendCode(c *gin.Context) {
@@ -149,8 +178,9 @@ func (s *Server) postSendCode(c *gin.Context) {
 		apiresp.BadParamError(c, err)
 		return
 	}
-	tok := captcha.CaptchaToken{CaptchaID: req.CaptchaID, Validate: req.Validate, User: req.User}
-	if err := s.userSvc.SendCode(c.Request.Context(), req.Email, tok); err != nil {
+	tok := req.captchaToken()
+	tok.UserIP = c.ClientIP()
+	if err := s.userSvc.SendCode(c.Request.Context(), req.Email, c.ClientIP(), tok); err != nil {
 		apiresp.FromError(c, err)
 		return
 	}
@@ -163,7 +193,8 @@ func (s *Server) postPasswordResetSendCode(c *gin.Context) {
 		apiresp.BadParamError(c, err)
 		return
 	}
-	tok := captcha.CaptchaToken{CaptchaID: req.CaptchaID, Validate: req.Validate, User: req.User}
+	tok := req.captchaToken()
+	tok.UserIP = c.ClientIP()
 	if err := s.userSvc.SendPasswordResetCode(c.Request.Context(), req.Email, c.ClientIP(), tok); err != nil {
 		apiresp.FromError(c, err)
 		return
@@ -192,11 +223,34 @@ func (s *Server) postRegister(c *gin.Context) {
 }
 
 type loginReq struct {
-	Email     string `json:"email"     binding:"required"`
-	Password  string `json:"password"  binding:"required"`
-	CaptchaID string `json:"captcha_id"`
-	Validate  string `json:"validate"`
-	User      string `json:"user"`
+	Email     string          `json:"email"     binding:"required"`
+	Password  string          `json:"password"  binding:"required"`
+	CaptchaID string          `json:"captcha_id"`
+	Validate  string          `json:"validate"`
+	User      string          `json:"user"`
+	Captcha   *captchaPayload `json:"captcha"`
+}
+
+type captchaPayload struct {
+	Provider string            `json:"provider"`
+	Token    string            `json:"token"`
+	Metadata map[string]string `json:"metadata"`
+}
+
+func (r sendCodeReq) captchaToken() captcha.CaptchaToken {
+	return makeCaptchaToken(r.Captcha, r.CaptchaID, r.Validate, r.User)
+}
+
+func (r loginReq) captchaToken() captcha.CaptchaToken {
+	return makeCaptchaToken(r.Captcha, r.CaptchaID, r.Validate, r.User)
+}
+
+func makeCaptchaToken(payload *captchaPayload, captchaID, validate, user string) captcha.CaptchaToken {
+	tok := captcha.CaptchaToken{CaptchaID: captchaID, Validate: validate, User: user}
+	if payload != nil {
+		tok.Provider, tok.Token, tok.Metadata = payload.Provider, payload.Token, payload.Metadata
+	}
+	return tok
 }
 
 func (s *Server) postLogin(c *gin.Context) {
@@ -205,7 +259,8 @@ func (s *Server) postLogin(c *gin.Context) {
 		apiresp.BadParamError(c, err)
 		return
 	}
-	tok := captcha.CaptchaToken{CaptchaID: req.CaptchaID, Validate: req.Validate, User: req.User}
+	tok := req.captchaToken()
+	tok.UserIP = c.ClientIP()
 	jwtTok, userID, err := s.userSvc.Login(c.Request.Context(), req.Email, req.Password, tok)
 	if err != nil {
 		apiresp.FromError(c, err)

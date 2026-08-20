@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
@@ -23,12 +24,21 @@ type mqttBroker interface {
 }
 
 type Server struct {
+	mu     sync.RWMutex
 	cfg    *config.Config
 	db     *sqlx.DB
 	rdb    *redis.Client
 	broker mqttBroker
 	dev    store.DeviceStore
 }
+
+func (s *Server) Config() *config.Config {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	copy := *s.cfg
+	return &copy
+}
+func (s *Server) UpdateConfig(cfg *config.Config) { s.mu.Lock(); s.cfg = cfg; s.mu.Unlock() }
 
 func NewServer(cfg *config.Config, db *sqlx.DB, rdb *redis.Client, broker mqttBroker, dev store.DeviceStore) *Server {
 	return &Server{cfg: cfg, db: db, rdb: rdb, broker: broker, dev: dev}
@@ -37,7 +47,7 @@ func NewServer(cfg *config.Config, db *sqlx.DB, rdb *redis.Client, broker mqttBr
 func (s *Server) Register(r *gin.Engine) {
 	v1 := r.Group("/v1")
 
-	callDev := v1.Group("/call", JWTAuth(s.cfg.JWTSecret))
+	callDev := v1.Group("/call", JWTAuth(s.Config().JWTSecret))
 	callDev.POST("/device/info", s.postDeviceInfo)
 	callDev.POST("/request", s.postCallRequest)
 	callDev.POST("/reject", s.postCallReject)
@@ -51,7 +61,7 @@ func (s *Server) Register(r *gin.Engine) {
 	callDev.PUT("/device/contacts/remark", s.putDeviceContactRemark)
 	callDev.DELETE("/device/contacts", s.deleteDeviceContact)
 
-	callUser := v1.Group("/call/user", UserJWTAuth(s.cfg.JWTSecret))
+	callUser := v1.Group("/call/user", UserJWTAuth(s.Config().JWTSecret))
 	callUser.GET("/contacts", s.getUserContacts)
 	callUser.GET("/contacts/pending", s.getUserContactsPending)
 	callUser.POST("/contacts/request", s.postUserContactRequest)

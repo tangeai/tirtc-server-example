@@ -95,7 +95,7 @@ func (f *fakeCacheForDevice) DelVerifyAndCode(_ context.Context, _, _ string) er
 	return nil
 }
 func (f *fakeCacheForDevice) DelEmailCode(_ context.Context, _ string) error { return nil }
-func (f *fakeCacheForDevice) IncrPasswordResetAttempt(_ context.Context, _ string, _ time.Duration) (int64, error) {
+func (f *fakeCacheForDevice) IncrRateLimitAttempt(_ context.Context, _ string, _ time.Duration) (int64, error) {
 	return 1, nil
 }
 func (f *fakeCacheForDevice) SetNonce(_ context.Context, _ string, _ time.Duration) (bool, error) {
@@ -577,7 +577,7 @@ func TestDeviceService_Token_TimestampErrorDetails(t *testing.T) {
 			if !errors.Is(err, ErrSigFail) {
 				t.Fatalf("timestamp error must remain code 6008: %v", err)
 			}
-			if tt.want != ErrSigTimestampInvalid && !errors.Is(err, ErrSigTimestampSkew) {
+			if !errors.Is(tt.want, ErrSigTimestampInvalid) && !errors.Is(err, ErrSigTimestampSkew) {
 				t.Fatalf("time offset detail must retain ErrSigTimestampSkew: %v", err)
 			}
 		})

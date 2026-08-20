@@ -1,0 +1,17 @@
+database:
+  dsn: "root:root@tcp(127.0.0.1:3306)/thing_connect_test?parseTime=true&charset=utf8mb4&loc=Local"
+
+redis:
+  addr: "127.0.0.1:6379"
+  password: ""
+  db: 15
+
+jwt_secret: "integration-test-jwt-secret-32-characters"
+
+internal:
+  key: "integration-test-internal-key-32-chars"
+
+service:
+  quota_per_user: 10
+  code_ttl: 5m
+  token_expiry: 168h

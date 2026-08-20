@@ -34,7 +34,7 @@ func (f *fakeUserStore) GetUserByEmail(_ context.Context, email string) (*model.
 	f.lookupEmail = email
 	return f.user, nil
 }
-func (f *fakeUserStore) CreateUser(_ context.Context, email, _ string) (int64, error) {
+func (f *fakeUserStore) CreateUser(_ context.Context, email, _ string, _ int) (int64, error) {
 	f.createdEmail = email
 	return f.createID, f.createErr
 }
@@ -125,7 +125,7 @@ func (f *fakeCacheStore) DelEmailCode(_ context.Context, email string) error {
 	delete(f.emailCodes, email)
 	return nil
 }
-func (f *fakeCacheStore) IncrPasswordResetAttempt(_ context.Context, scope string, _ time.Duration) (int64, error) {
+func (f *fakeCacheStore) IncrRateLimitAttempt(_ context.Context, scope string, _ time.Duration) (int64, error) {
 	f.passwordResetAttempts[scope]++
 	return f.passwordResetAttempts[scope], nil
 }
@@ -261,7 +261,7 @@ func TestUserService_Login_WrongPassword(t *testing.T) {
 func TestUserService_SendCode_CaptchaFail(t *testing.T) {
 	cache := newFakeCache()
 	svc := newSvc(&fakeUserStore{}, cache, true)
-	err := svc.SendCode(context.Background(), " A@B.COM ", captcha.CaptchaToken{})
+	err := svc.SendCode(context.Background(), " A@B.COM ", "127.0.0.1", captcha.CaptchaToken{})
 	if !errors.Is(err, ErrCaptchaFailed) {
 		t.Errorf("want ErrCaptchaFailed, got %v", err)
 	}
@@ -271,7 +271,7 @@ func TestUserService_SendCode_Success(t *testing.T) {
 	cache := newFakeCache()
 	ml := &fakeMailer{}
 	svc := NewUserService(&fakeUserStore{}, cache, &fakeCaptcha{}, ml, "secret", DefaultServiceConfig())
-	err := svc.SendCode(context.Background(), " A@B.COM ", captcha.CaptchaToken{})
+	err := svc.SendCode(context.Background(), " A@B.COM ", "127.0.0.1", captcha.CaptchaToken{})
 	if err != nil {
 		t.Fatalf("want nil error, got %v", err)
 	}
@@ -286,6 +286,27 @@ func TestUserService_SendCode_Success(t *testing.T) {
 		if !strings.Contains(mail.body, want) {
 			t.Errorf("registration email body missing %q: %q", want, mail.body)
 		}
+	}
+}
+
+func TestUserService_EmailSendLimitIsSharedByRegistrationAndPasswordReset(t *testing.T) {
+	cache := newFakeCache()
+	queue := &fakePasswordResetEmailQueue{}
+	svc := NewUserService(&fakeUserStore{}, cache, &fakeCaptcha{}, &fakeMailer{}, "secret", DefaultServiceConfig())
+	svc.SetPasswordResetEmailQueue(queue)
+	svc.UpdateEmailRateLimit(time.Minute, 1, 20)
+
+	if err := svc.SendCode(context.Background(), " A@B.COM ", "127.0.0.1", captcha.CaptchaToken{}); err != nil {
+		t.Fatalf("registration SendCode returned error: %v", err)
+	}
+	if got := cache.passwordResetAttempts["email-code:send:email:a@b.com"]; got != 1 {
+		t.Fatalf("registration did not increment normalized shared scope: %v", cache.passwordResetAttempts)
+	}
+	if err := svc.SendPasswordResetCode(context.Background(), "a@b.com", "127.0.0.2", captcha.CaptchaToken{}); !errors.Is(err, ErrRateLimit) {
+		t.Fatalf("password-reset request should share registration limit, got %v", err)
+	}
+	if len(queue.emails) != 0 {
+		t.Fatalf("shared-limit request was queued: %v", queue.emails)
 	}
 }
 
@@ -304,7 +325,7 @@ func TestUserService_SendPasswordResetCode(t *testing.T) {
 	if len(queue.emails) != 1 || queue.emails[0] != "a@b.com" {
 		t.Fatalf("want a queued reset email for a@b.com, got %v", queue.emails)
 	}
-	if cache.passwordResetAttempts["send:email:a@b.com"] != 1 {
+	if cache.passwordResetAttempts["email-code:send:email:a@b.com"] != 1 {
 		t.Fatalf("reset email rate-limit key was not normalized: %v", cache.passwordResetAttempts)
 	}
 	if len(mailer.sent) != 0 {
@@ -415,6 +436,7 @@ func TestUserService_SendPasswordResetCode_RateLimited(t *testing.T) {
 	queue := &fakePasswordResetEmailQueue{}
 	svc := NewUserService(&fakeUserStore{}, cache, &fakeCaptcha{}, &fakeMailer{}, "secret", DefaultServiceConfig())
 	svc.SetPasswordResetEmailQueue(queue)
+	svc.UpdateEmailRateLimit(time.Minute, 1, 10)
 
 	if err := svc.SendPasswordResetCode(context.Background(), "a@b.com", "127.0.0.1", captcha.CaptchaToken{}); err != nil {
 		t.Fatalf("first request returned error: %v", err)
@@ -429,7 +451,7 @@ func TestUserService_SendPasswordResetCode_RateLimited(t *testing.T) {
 
 func TestUserService_SendPasswordResetCode_IPRateLimited(t *testing.T) {
 	cache := newFakeCache()
-	cache.passwordResetAttempts["send:ip:127.0.0.1"] = passwordResetSendIPMaxAttempts
+	cache.passwordResetAttempts["email-code:send:ip:127.0.0.1"] = defaultEmailSendMaxPerIP
 	queue := &fakePasswordResetEmailQueue{}
 	svc := NewUserService(&fakeUserStore{}, cache, &fakeCaptcha{}, &fakeMailer{}, "secret", DefaultServiceConfig())
 	svc.SetPasswordResetEmailQueue(queue)
@@ -479,7 +501,7 @@ func TestUserService_ResetPassword_DoesNotAcceptRegistrationCode(t *testing.T) {
 
 func TestUserService_ResetPassword_RateLimited(t *testing.T) {
 	cache := newFakeCache()
-	cache.passwordResetAttempts["email:a@b.com"] = passwordResetEmailMaxAttempts
+	cache.passwordResetAttempts["password-reset:verify:email:a@b.com"] = passwordResetEmailMaxAttempts
 	svc := newSvc(&fakeUserStore{user: &model.User{ID: 7}}, cache, false)
 	if err := svc.ResetPassword(context.Background(), "a@b.com", "new-pass", "123456", "127.0.0.1"); !errors.Is(err, ErrRateLimit) {
 		t.Errorf("want ErrRateLimit, got %v", err)

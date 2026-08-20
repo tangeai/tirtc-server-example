@@ -3,6 +3,7 @@ package mysql
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/jmoiron/sqlx"
@@ -18,7 +19,7 @@ func (s *roleBindingStore) GetDeviceRole(ctx context.Context, deviceID string) (
 	var roleID string
 	err := s.db.GetContext(ctx, &roleID,
 		`SELECT role_id FROM ai_device_role WHERE device_id=?`, deviceID)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
 	if err != nil {

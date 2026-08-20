@@ -1,0 +1,38 @@
+server:
+  http_port: 9010
+  static_dir: "static"
+  trusted_proxies: []  # Add only the reverse-proxy CIDRs that set client IP headers.
+
+log:
+  level: info
+  format: text
+
+database:
+  dsn: "root:password@tcp(127.0.0.1:3306)/thing_connect?parseTime=true&charset=utf8mb4&loc=Local"
+
+redis:
+  addr: "127.0.0.1:6379"
+  password: ""
+  db: 0
+
+internal:
+  # Must match the five services; protects internal dynamic-config reads.
+  key: "replace-with-an-internal-key-at-least-32-characters"
+
+admin:
+  jwt_secret: "replace-with-a-separate-admin-jwt-secret-at-least-32-characters"
+  issuer: "ThingConnect Admin"
+  access_ttl: 15m
+  refresh_ttl: 168h
+  challenge_ttl: 5m
+  mfa_enabled: true
+  cookie_secure: true
+
+security:
+  config_encryption_key_id: "local-v1"
+  # Base64-encoded 32 random bytes. Keep it out of source control in production.
+  config_encryption_key: "replace-with-base64-32-byte-random-key"
+
+job:
+  storage_dir: "var/admin-jobs"
+  max_bytes: 10485760

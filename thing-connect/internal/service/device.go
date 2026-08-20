@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"math/big"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -26,22 +27,27 @@ const tokenReplayWindow = 300 * time.Second
 type DeviceService struct {
 	dev       store.DeviceStore
 	cache     store.CacheStore
-	cfg       ServiceConfig
+	cfg       atomic.Value
 	jwtSecret string
 }
 
 func NewDeviceService(dev store.DeviceStore, cache store.CacheStore, jwtSecret string, cfg ServiceConfig) *DeviceService {
-	return &DeviceService{dev: dev, cache: cache, jwtSecret: jwtSecret, cfg: cfg}
+	service := &DeviceService{dev: dev, cache: cache, jwtSecret: jwtSecret}
+	service.cfg.Store(cfg)
+	return service
 }
 
+func (s *DeviceService) Config() ServiceConfig          { return s.cfg.Load().(ServiceConfig) }
+func (s *DeviceService) UpdateConfig(cfg ServiceConfig) { s.cfg.Store(cfg) }
+
 // CodeTTL returns the verification code TTL for use in Retry-After headers.
-func (s *DeviceService) CodeTTL() time.Duration { return s.cfg.CodeTTL }
+func (s *DeviceService) CodeTTL() time.Duration { return s.Config().CodeTTL }
 
 // RateLimitWindow returns the L3 fingerprint rate-limit window for use in Retry-After headers.
-func (s *DeviceService) RateLimitWindow() time.Duration { return s.cfg.RateLimitWindow }
+func (s *DeviceService) RateLimitWindow() time.Duration { return s.Config().RateLimitWindow }
 
 // IPRateLimitWindow returns the L2 IP fingerprint-diversity window for use in Retry-After headers.
-func (s *DeviceService) IPRateLimitWindow() time.Duration { return s.cfg.IPRateLimitWindow }
+func (s *DeviceService) IPRateLimitWindow() time.Duration { return s.Config().IPRateLimitWindow }
 
 // AuthorizeTTS verifies that token is the temporary JWT issued in the same
 // Report response as code. Any code/record/token mismatch is deliberately
@@ -209,11 +215,12 @@ func (s *DeviceService) reportSigned(ctx context.Context, hdr ReportHeaders, mac
 	}
 
 	// ── Replay check (same physHash within CodeTTL, same as unsigned path) ─
-	attempt, err := s.cache.IncrReportAttempt(ctx, physHash, s.cfg.RateLimitWindow)
+	cfg := s.Config()
+	attempt, err := s.cache.IncrReportAttempt(ctx, physHash, cfg.RateLimitWindow)
 	if err != nil {
 		return nil, fmt.Errorf("service.reportSigned IncrReportAttempt: %w", err)
 	}
-	if attempt > int64(s.cfg.RateLimitMaxHits) {
+	if attempt > int64(cfg.RateLimitMaxHits) {
 		return nil, ErrRateLimit
 	}
 	if attempt > 1 {
@@ -255,7 +262,7 @@ func (s *DeviceService) reportSigned(ctx context.Context, hdr ReportHeaders, mac
 		return nil, fmt.Errorf("service.reportSigned reserveDeviceCode: %w", err)
 	}
 	tempClientID := "tmp_" + generateRandHex4()
-	tempToken, err := issueMQTTToken(tempClientID, s.jwtSecret, s.cfg.CodeTTL)
+	tempToken, err := issueMQTTToken(tempClientID, s.jwtSecret, cfg.CodeTTL)
 	if err != nil {
 		s.cache.DelDeviceCodeLookup(ctx, code) //nolint:errcheck
 		s.cache.DecrGlobalPending(ctx)         //nolint:errcheck
@@ -277,7 +284,7 @@ func (s *DeviceService) reportSigned(ctx context.Context, hdr ReportHeaders, mac
 		return nil, fmt.Errorf("service.reportSigned marshal verify: %w", err)
 	}
 
-	set, err := s.cache.SetVerifyRecord(ctx, physHash, verifyVal, s.cfg.CodeTTL)
+	set, err := s.cache.SetVerifyRecord(ctx, physHash, verifyVal, cfg.CodeTTL)
 	if err != nil {
 		s.cache.DelDeviceCodeLookup(ctx, code) //nolint:errcheck
 		s.cache.DecrGlobalPending(ctx)         //nolint:errcheck
@@ -290,12 +297,12 @@ func (s *DeviceService) reportSigned(ctx context.Context, hdr ReportHeaders, mac
 	}
 
 	// Store pending_bind so BindByDeviceID can find the temp MQTT client.
-	if err := s.cache.SetPendingBind(ctx, hdr.DeviceID, tempClientID, s.cfg.CodeTTL); err != nil {
+	if err := s.cache.SetPendingBind(ctx, hdr.DeviceID, tempClientID, cfg.CodeTTL); err != nil {
 		return nil, fmt.Errorf("service.reportSigned SetPendingBind: %w", err)
 	}
 
 	// Store baseline fingerprint for consistency checks on subsequent reports.
-	if err := s.cache.SetReportFingerprint(ctx, hdr.DeviceID, physHash, s.cfg.CodeTTL); err != nil {
+	if err := s.cache.SetReportFingerprint(ctx, hdr.DeviceID, physHash, cfg.CodeTTL); err != nil {
 		return nil, fmt.Errorf("service.reportSigned SetReportFingerprint: %w", err)
 	}
 
@@ -305,7 +312,7 @@ func (s *DeviceService) reportSigned(ctx context.Context, hdr ReportHeaders, mac
 	if err != nil {
 		return nil, fmt.Errorf("service.reportSigned marshal replay: %w", err)
 	}
-	if err := s.cache.SetReportReplay(ctx, physHash, replayVal, s.cfg.CodeTTL); err != nil {
+	if err := s.cache.SetReportReplay(ctx, physHash, replayVal, cfg.CodeTTL); err != nil {
 		return nil, fmt.Errorf("service.reportSigned SetReportReplay: %w", err)
 	}
 
@@ -323,20 +330,21 @@ func (s *DeviceService) reportUnsigned(ctx context.Context, clientIP, mac, devic
 	physicalID := physid.Physical(mac)
 
 	// ── L2: IP fingerprint diversity ──────────────────────────────────────
-	isNewFP, fpCount, err := s.cache.AddIPFingerprint(ctx, clientIP, physHash, s.cfg.IPRateLimitWindow)
+	cfg := s.Config()
+	isNewFP, fpCount, err := s.cache.AddIPFingerprint(ctx, clientIP, physHash, cfg.IPRateLimitWindow)
 	if err != nil {
 		return nil, fmt.Errorf("service.reportUnsigned AddIPFingerprint: %w", err)
 	}
-	if isNewFP && fpCount > int64(s.cfg.IPRateLimitMaxFingerprints) {
+	if isNewFP && fpCount > int64(cfg.IPRateLimitMaxFingerprints) {
 		return nil, ErrIPFingerprintLimit
 	}
 
 	// ── L3: fingerprint rate limit + replay ───────────────────────────────
-	attempt, err := s.cache.IncrReportAttempt(ctx, physHash, s.cfg.RateLimitWindow)
+	attempt, err := s.cache.IncrReportAttempt(ctx, physHash, cfg.RateLimitWindow)
 	if err != nil {
 		return nil, fmt.Errorf("service.reportUnsigned IncrReportAttempt: %w", err)
 	}
-	if attempt > int64(s.cfg.RateLimitMaxHits) {
+	if attempt > int64(cfg.RateLimitMaxHits) {
 		return nil, ErrRateLimit
 	}
 	if attempt > 1 {
@@ -356,7 +364,7 @@ func (s *DeviceService) reportUnsigned(ctx context.Context, clientIP, mac, devic
 	if err != nil {
 		return nil, fmt.Errorf("service.reportUnsigned IncrGlobalPending: %w", err)
 	}
-	if globalCount > int64(s.cfg.GlobalMaxPendingCodes) {
+	if globalCount > int64(cfg.GlobalMaxPendingCodes) {
 		s.cache.DecrGlobalPending(ctx) //nolint:errcheck
 		return nil, ErrGlobalBusy
 	}
@@ -368,7 +376,7 @@ func (s *DeviceService) reportUnsigned(ctx context.Context, clientIP, mac, devic
 		return nil, fmt.Errorf("service.reportUnsigned reserveDeviceCode: %w", err)
 	}
 	tempClientID := "tmp_" + generateRandHex4()
-	tempToken, err := issueMQTTToken(tempClientID, s.jwtSecret, s.cfg.CodeTTL)
+	tempToken, err := issueMQTTToken(tempClientID, s.jwtSecret, cfg.CodeTTL)
 	if err != nil {
 		s.cache.DelDeviceCodeLookup(ctx, code) //nolint:errcheck
 		s.cache.DecrGlobalPending(ctx)         //nolint:errcheck
@@ -388,7 +396,7 @@ func (s *DeviceService) reportUnsigned(ctx context.Context, clientIP, mac, devic
 		return nil, fmt.Errorf("service.reportUnsigned marshal verify: %w", err)
 	}
 
-	set, err := s.cache.SetVerifyRecord(ctx, physHash, verifyVal, s.cfg.CodeTTL)
+	set, err := s.cache.SetVerifyRecord(ctx, physHash, verifyVal, cfg.CodeTTL)
 	if err != nil {
 		s.cache.DelDeviceCodeLookup(ctx, code) //nolint:errcheck
 		s.cache.DecrGlobalPending(ctx)         //nolint:errcheck
@@ -409,7 +417,7 @@ func (s *DeviceService) reportUnsigned(ctx context.Context, clientIP, mac, devic
 	if err != nil {
 		return nil, fmt.Errorf("service.reportUnsigned marshal replay: %w", err)
 	}
-	if err := s.cache.SetReportReplay(ctx, physHash, replayVal, s.cfg.CodeTTL); err != nil {
+	if err := s.cache.SetReportReplay(ctx, physHash, replayVal, cfg.CodeTTL); err != nil {
 		return nil, fmt.Errorf("service.reportUnsigned SetReportReplay: %w", err)
 	}
 
@@ -479,7 +487,7 @@ func (s *DeviceService) Token(ctx context.Context, deviceID, tsStr, nonce, sigB6
 		}
 	}
 
-	tok, err := issueMQTTToken(pool.DeviceID, s.jwtSecret, s.cfg.TokenExpiry)
+	tok, err := issueMQTTToken(pool.DeviceID, s.jwtSecret, s.Config().TokenExpiry)
 	if err != nil {
 		return "", err
 	}
@@ -517,7 +525,7 @@ func (s *DeviceService) reserveDeviceCode(ctx context.Context, physHash string) 
 		if err != nil {
 			return "", err
 		}
-		reserved, err := s.cache.ReserveDeviceCode(ctx, code, physHash, s.cfg.CodeTTL)
+		reserved, err := s.cache.ReserveDeviceCode(ctx, code, physHash, s.Config().CodeTTL)
 		if err != nil {
 			return "", err
 		}

@@ -193,7 +193,8 @@ func TestCommitUnbind(t *testing.T) {
 		t.Errorf("after unbind bind_quota: want 2, got %d", quota)
 	}
 
-	// Verify: device_pool.status reset to 0 so device can be re-allocated.
+	// Verify: device_pool.status resets to the released state. The retained
+	// device_bind row prevents allocation to a different user.
 	var poolStatus int
 	sqlDB.QueryRow(`SELECT status FROM device_pool WHERE device_id=?`, gotID).Scan(&poolStatus)
 	if poolStatus != 0 {

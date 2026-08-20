@@ -2,6 +2,7 @@ package handler
 
 import (
 	"database/sql"
+	"errors"
 
 	"github.com/gin-gonic/gin"
 
@@ -124,7 +125,7 @@ func (s *Server) postDeviceContactRequest(c *gin.Context) {
 		apiresp.Fail(c, apiresp.ErrInternal, err.Error())
 		return
 	}
-	if n >= s.cfg.Service.MaxContactsPerDevice {
+	if n >= s.Config().Service.MaxContactsPerDevice {
 		apiresp.Fail(c, apiresp.ErrContactMax, "联系人数量已达上限")
 		return
 	}
@@ -222,7 +223,7 @@ func (s *Server) putDeviceContactRemark(c *gin.Context) {
 			  WHERE device_id=? AND wx_open_id=? AND auth_status='active'
 		  ORDER BY created_at DESC, id DESC LIMIT 1`,
 		self, body.PeerID); err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			apiresp.Fail(c, apiresp.ErrContactNotExist, "联系人不存在")
 		} else {
 			apiresp.Fail(c, apiresp.ErrInternal, err.Error())
@@ -256,16 +257,16 @@ func statusName(status int8) string {
 }
 
 func contactErrCode(err error) int {
-	switch err {
-	case errContactNotExist:
+	switch {
+	case errors.Is(err, errContactNotExist):
 		return apiresp.ErrContactNotExist
-	case errContactDuplicate:
+	case errors.Is(err, errContactDuplicate):
 		return apiresp.ErrContactDuplicate
-	case errContactPending:
+	case errors.Is(err, errContactPending):
 		return apiresp.ErrContactPending
-	case errContactProtected:
+	case errors.Is(err, errContactProtected):
 		return apiresp.ErrContactProtected
-	case errContactMax:
+	case errors.Is(err, errContactMax):
 		return apiresp.ErrContactMax
 	default:
 		return apiresp.ErrInternal

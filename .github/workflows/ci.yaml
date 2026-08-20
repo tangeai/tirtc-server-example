@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: thing_connect_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -proot"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: thing-connect/go.mod
+          cache-dependency-path: thing-connect/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            thing-connect/package-lock.json
+            thing-connect/admin/admin-web/package-lock.json
+      - name: Go lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.4.0
+          working-directory: thing-connect
+      - name: Go vet
+        working-directory: thing-connect
+        run: go vet ./...
+      - name: Go tests
+        working-directory: thing-connect
+        env:
+          THING_CONNECT_TEST_CONFIG: tests/testdata/config.yaml
+        run: go test ./... -p 1 -count=1
+      - name: Build web applications
+        working-directory: thing-connect
+        run: |
+          npm ci
+          npm run build:css
+          npm --prefix admin/admin-web ci
+          npm --prefix admin/admin-web run check

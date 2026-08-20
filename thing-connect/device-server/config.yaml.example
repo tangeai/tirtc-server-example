@@ -1,5 +1,6 @@
 server:
   http_port: 9001
+  trusted_proxies: []  # Add only the reverse-proxy CIDRs that set client IP headers.
 
 log:
   level: info  # debug|info|warn|error
@@ -12,6 +13,11 @@ redis:
   addr: "127.0.0.1:6379"
   password: ""
   db: 0
+
+internal:
+  key: "replace-with-an-internal-key-at-least-32-characters"
+admin:
+  server_url: "http://127.0.0.1:9010"
 
 mqtt:
   broker: "mqtts://mqtt-open.tangeopen.com:8883"
@@ -26,7 +32,7 @@ jwt_secret: "replace-with-a-strong-random-secret"
 
 # 业务参数（全部可选，缺省使用括号内默认值）
 service:
-  quota_per_user: 10                 # 兼容字段；当前注册不读取，配额来自 users.bind_quota 默认值
+  quota_per_user: 10                 # 保留的通用默认值；用户注册额度由 user-server 使用
   code_ttl: 190s                     # 验证码有效期（默认 190s）
   rate_limit_window: 190s            # L3 指纹请求计数窗口（默认 190s）
   rate_limit_max_hits: 10            # 单指纹窗口内最大请求数（默认 10）

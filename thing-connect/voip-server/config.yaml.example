@@ -1,12 +1,13 @@
 server:
   http_port: 9003
+  trusted_proxies: []  # Add only the reverse-proxy CIDRs that set client IP headers.
 
 log:
   level: info  # debug|info|warn|error
   format: text  # text|json
 
 database:
-  dsn: "user:password@tcp(127.0.0.1:3306)/tirtc_thing_connect?parseTime=true"
+  dsn: "root:password@tcp(127.0.0.1:3306)/thing_connect?parseTime=true&charset=utf8mb4&loc=Local"
 
 redis:
   addr: "127.0.0.1:6379"
@@ -15,13 +16,16 @@ redis:
 
 mqtt:
   broker: "mqtts://mqtt-open.tangeopen.com:8883"
-  client_id: "voipsrv_main"
-  password: "your-mqtt-password"
+  # 多实例推荐 username 模式；每个实例设置唯一 SERVICE_INSTANCE_ID。
+  username: "voipsrv"
+  password: "replace-with-mqtt-password"
 
-jwt_secret: "your-jwt-secret-shared-with-device-server"
+jwt_secret: "replace-with-the-same-strong-random-secret-as-other-services"
 
 internal:
-  key: "your-internal-service-key" # 须与 user/ai/call-server 一致
+  key: "replace-with-an-internal-key-at-least-32-characters" # 须与 admin 及其他服务一致
+admin:
+  server_url: "http://127.0.0.1:9010"
 
 tirtc:
   app_id: "your-tirtc-app-id"

@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strconv"
 
@@ -31,8 +32,8 @@ func (s *Server) deviceBelongsToUser(ctx context.Context, deviceID string, userI
 func (s *Server) getContactByID(ctx context.Context, id int64) (*deviceContact, error) {
 	var row deviceContact
 	if err := s.db.GetContext(ctx, &row, `SELECT * FROM call_contact WHERE id=?`, id); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil //nolint:nilnil // No row means the optional contact does not exist.
 		}
 		return nil, fmt.Errorf("getContactByID: %w", err)
 	}
@@ -214,7 +215,7 @@ func (s *Server) postUserContactRequest(c *gin.Context) {
 		apiresp.Fail(c, apiresp.ErrInternal, err.Error())
 		return
 	}
-	if n >= s.cfg.Service.MaxContactsPerDevice {
+	if n >= s.Config().Service.MaxContactsPerDevice {
 		apiresp.Fail(c, apiresp.ErrContactMax, "联系人数量已达上限")
 		return
 	}
@@ -328,7 +329,7 @@ func (s *Server) putUserContactRemark(c *gin.Context) {
 			  WHERE device_id=? AND wx_open_id=? AND auth_status='active'
 		  ORDER BY created_at DESC, id DESC LIMIT 1`,
 		body.DeviceID, body.PeerID); err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			apiresp.Fail(c, apiresp.ErrContactNotExist, "联系人不存在")
 		} else {
 			apiresp.Fail(c, apiresp.ErrInternal, err.Error())

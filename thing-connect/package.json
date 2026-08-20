@@ -1,6 +1,10 @@
 {
   "name": "thing-connect-ui",
   "private": true,
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0",
+    "npm": ">=10"
+  },
   "scripts": {
     "build:css": "tailwindcss -i ./user-server/static/tailwind-input.css -o ./user-server/static/css/tailwind.css --minify",
     "watch:css": "tailwindcss -i ./user-server/static/tailwind-input.css -o ./user-server/static/css/tailwind.css --watch"

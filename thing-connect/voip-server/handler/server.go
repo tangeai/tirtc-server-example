@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
@@ -22,11 +23,20 @@ type mqttOnlineChecker interface {
 }
 
 type Server struct {
+	mu     sync.RWMutex
 	cfg    *config.Config
 	db     *sqlx.DB
 	rdb    *redis.Client
 	broker MQTTPublisher
 }
+
+func (s *Server) Config() *config.Config {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	copy := *s.cfg
+	return &copy
+}
+func (s *Server) UpdateConfig(cfg *config.Config) { s.mu.Lock(); s.cfg = cfg; s.mu.Unlock() }
 
 func NewServer(cfg *config.Config, db *sqlx.DB, rdb *redis.Client, broker MQTTPublisher) *Server {
 	return &Server{cfg: cfg, db: db, rdb: rdb, broker: broker}
@@ -48,7 +58,7 @@ func (s *Server) Register(r *gin.Engine) {
 	v1.POST("/notification/:wx_app_id", s.notification)
 
 	// Device endpoints — JWT required (device_id claim)
-	dev := v1.Group("/device", JWTAuth(s.cfg.JWTSecret))
+	dev := v1.Group("/device", JWTAuth(s.Config().JWTSecret))
 	dev.POST("/profile", s.postDeviceProfile)
 	dev.GET("/contacts", s.getDeviceVoipContacts)
 	// Deprecated compatibility alias. New device clients should use /contacts.
@@ -56,7 +66,7 @@ func (s *Server) Register(r *gin.Engine) {
 	dev.POST("/call", s.postDeviceCall)
 
 	// User / mini-program endpoints — user JWT required (user_id claim)
-	usr := v1.Group("/user", UserJWTAuth(s.cfg.JWTSecret))
+	usr := v1.Group("/user", UserJWTAuth(s.Config().JWTSecret))
 	usr.POST("/sn-ticket", s.postSnTicket)
 	usr.POST("/wechat-mini-login", s.postWeChatMiniLogin)
 	usr.POST("/cancel", s.postUserCancel)

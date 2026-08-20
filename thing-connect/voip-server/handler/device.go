@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
@@ -58,7 +57,7 @@ func (s *Server) GetDeviceProfile(ctx context.Context, deviceID string) (string,
 	var profile string
 	err := s.db.QueryRowContext(ctx,
 		`SELECT profile FROM voip_device_profile WHERE device_id=?`, deviceID).Scan(&profile)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
 	return profile, err
@@ -82,7 +81,7 @@ func (s *Server) GetDeviceVoipContactRemark(
 			    AND auth.auth_status=?
 			  LIMIT 1`,
 		deviceID, wxOpenID, wxAppID, voipAuthStatusActive)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
 	return remark, err
@@ -266,7 +265,7 @@ func (s *Server) postDeviceCall(c *gin.Context) {
 	}
 	wxAppID := req.WxAppID
 	if wxAppID == "" {
-		wxAppID = s.cfg.DefaultVoipAppID()
+		wxAppID = s.Config().DefaultVoipAppID()
 	}
 	bound, err := s.isDeviceBound(c.Request.Context(), req.DeviceID)
 	if err != nil {
@@ -280,7 +279,7 @@ func (s *Server) postDeviceCall(c *gin.Context) {
 	auth, err := s.getActiveDeviceAuth(
 		c.Request.Context(), req.DeviceID, req.WxUserOpenid, wxAppID,
 	)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		apiresp.Fail(c, apiresp.ErrVoipAuthInvalid, "微信 VoIP 授权不存在或已失效，请让用户重新授权")
 		return
 	}
@@ -289,7 +288,7 @@ func (s *Server) postDeviceCall(c *gin.Context) {
 		return
 	}
 	wxAppID = auth.WxAppID
-	app, ok := s.cfg.WxAppFor(wxAppID)
+	app, ok := s.Config().WxAppFor(wxAppID)
 	if !ok {
 		apiresp.Fail(c, apiresp.ErrWechatCfg, "未配置微信应用")
 		return
@@ -522,16 +521,4 @@ func queryWithVideoUIConfig(rawQuery string, config videoUIConfig) string {
 		values[name] = items
 	}
 	return values.Encode()
-}
-
-// httpStatusForCode maps apiresp error codes to HTTP status.
-func httpStatusForCode(code int) int {
-	switch code {
-	case apiresp.ErrBadParam:
-		return http.StatusBadRequest
-	case apiresp.ErrNotFound:
-		return http.StatusNotFound
-	default:
-		return http.StatusOK
-	}
 }

@@ -9,7 +9,7 @@ import (
 func TestLoad_LogDefaults(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "config.yaml")
-	if err := os.WriteFile(p, []byte("server:\n  http_port: 9003\njwt_secret: test\n"), 0644); err != nil {
+	if err := os.WriteFile(p, []byte("server:\n  http_port: 9003\njwt_secret: test-secret\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	cfg := Load(p)
@@ -24,7 +24,7 @@ func TestLoad_LogDefaults(t *testing.T) {
 func TestLoad_LogOverride(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "config.yaml")
-	if err := os.WriteFile(p, []byte("server:\n  http_port: 9003\njwt_secret: test\nlog:\n  level: debug\n  format: json\n"), 0644); err != nil {
+	if err := os.WriteFile(p, []byte("server:\n  http_port: 9003\njwt_secret: test-secret\nlog:\n  level: debug\n  format: json\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	cfg := Load(p)
@@ -38,7 +38,7 @@ func TestLoad_LogOverride(t *testing.T) {
 
 func TestLoad_InternalAndCallConfig(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(p, []byte("jwt_secret: test\ninternal:\n  key: shared-key\ncall:\n  server_url: http://call:9005\n"), 0644); err != nil {
+	if err := os.WriteFile(p, []byte("jwt_secret: test-secret\ninternal:\n  key: shared-key\ncall:\n  server_url: http://call:9005\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	cfg := Load(p)
@@ -47,5 +47,37 @@ func TestLoad_InternalAndCallConfig(t *testing.T) {
 	}
 	if cfg.Call.ServerURL != "http://call:9005" {
 		t.Errorf("Call.ServerURL = %q, want http://call:9005", cfg.Call.ServerURL)
+	}
+}
+
+func TestLoad_CaptchaProvider(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	data := "jwt_secret: test-secret\ncaptcha:\n  provider: yidun\n  providers:\n    yidun:\n      captcha_id: site-id\n      secret_id: access-id\n      secret_key: access-key\n      public_config:\n        mode: popup\n"
+	if err := os.WriteFile(p, []byte(data), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Load(p)
+	if got := cfg.Captcha.Providers["yidun"].CaptchaID; got != "site-id" {
+		t.Errorf("captcha_id = %q, want site-id", got)
+	}
+}
+
+func TestLoadFileRejectsUnknownField(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(p, []byte("jwt_secret: test-secret\nserver:\n  http_prt: 9003\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadFile(p); err == nil {
+		t.Fatal("LoadFile accepted an unknown YAML field")
+	}
+}
+
+func TestLoadFileRejectsPlaceholderSecrets(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(p, []byte("jwt_secret: replace-with-a-strong-random-secret\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadFile(p); err == nil {
+		t.Fatal("LoadFile accepted a public placeholder secret")
 	}
 }

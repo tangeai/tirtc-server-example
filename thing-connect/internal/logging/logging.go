@@ -9,6 +9,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"os"
@@ -121,9 +122,9 @@ func newRequestID() string {
 }
 
 // BodyLog is a Gin middleware that logs every request and response at Debug
-// level. Request bodies are recorded for all methods except GET/HEAD/DELETE;
-// multipart uploads are skipped. Response bodies are only recorded for
-// application/json content types (files/binaries get a summary). Bodies are
+// level. Only JSON bodies are eligible and credential-bearing fields are
+// redacted recursively; authentication and configuration bodies are suppressed
+// entirely. Files, forms and binaries get request metadata only. Bodies are
 // truncated to 4KB. Below Debug level it is a no-op.
 func BodyLog() gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -142,7 +143,7 @@ func BodyLog() gin.HandlerFunc {
 			slog.String("headers", formatHeaders(c)),
 		}
 		if reqBody != "" {
-			reqAttrs = append(reqAttrs, slog.String("body", truncate(reqBody)))
+			reqAttrs = append(reqAttrs, slog.String("body", bodyForLog(c.Request.URL.Path, reqBody)))
 		}
 		logger.LogAttrs(ctx, slog.LevelDebug, "http request", reqAttrs...)
 
@@ -158,7 +159,7 @@ func BodyLog() gin.HandlerFunc {
 			slog.Int("dur_ms", int(time.Since(start).Milliseconds())),
 		}
 		if isJSON(c.Writer.Header().Get("Content-Type")) {
-			respAttrs = append(respAttrs, slog.String("body", truncate(rb.buf.String())))
+			respAttrs = append(respAttrs, slog.String("body", bodyForLog(c.Request.URL.Path, rb.buf.String())))
 		}
 		logger.LogAttrs(ctx, slog.LevelDebug, "http response", respAttrs...)
 	}
@@ -166,8 +167,10 @@ func BodyLog() gin.HandlerFunc {
 
 func queryForLog(c *gin.Context) string {
 	query := c.Request.URL.Query()
-	if c.Request.URL.Path == "/v1/device/tts" && query.Has("code") {
-		query.Set("code", "[REDACTED]")
+	for key := range query {
+		if isSensitiveKey(key) || c.Request.URL.Path == "/v1/device/tts" && strings.EqualFold(key, "code") {
+			query.Set(key, "[REDACTED]")
+		}
 	}
 	return query.Encode()
 }
@@ -176,11 +179,12 @@ func readAndRestoreBody(c *gin.Context) string {
 	if shouldSkipBody(c) || c.Request.Body == nil {
 		return ""
 	}
-	b, err := io.ReadAll(c.Request.Body)
+	original := c.Request.Body
+	b, err := io.ReadAll(io.LimitReader(original, maxBodyBytes+1))
+	c.Request.Body = &replayBody{Reader: io.MultiReader(bytes.NewReader(b), original), Closer: original}
 	if err != nil {
 		return ""
 	}
-	c.Request.Body = io.NopCloser(bytes.NewReader(b))
 	return string(b)
 }
 
@@ -194,7 +198,9 @@ func shouldSkipBody(c *gin.Context) bool {
 	case "GET", "HEAD", "DELETE":
 		return true
 	}
-	return strings.HasPrefix(c.GetHeader("Content-Type"), "multipart/form-data")
+	// Only structured JSON can be redacted safely. Multipart, form and binary
+	// payloads are summarized by the normal request metadata instead.
+	return !isJSON(c.GetHeader("Content-Type"))
 }
 
 func isJSON(contentType string) bool {
@@ -231,8 +237,12 @@ func formatHeaders(c *gin.Context) string {
 func maskHeader(name, val string) string {
 	switch {
 	case name == "Authorization" && strings.HasPrefix(val, "Bearer "):
-		return "Bearer ***" + val[len(val)-8:]
-	case name == "X-Signature" || name == "X-Internal-Key":
+		token := strings.TrimPrefix(val, "Bearer ")
+		if len(token) > 8 {
+			return "Bearer ***" + token[len(token)-8:]
+		}
+		return "Bearer ***"
+	case name == "X-Signature" || name == "X-Internal-Key" || name == "X-MAC":
 		if len(val) > 8 {
 			return "***" + val[len(val)-8:]
 		}
@@ -240,6 +250,81 @@ func maskHeader(name, val string) string {
 	default:
 		return val
 	}
+}
+
+// RedactJSON removes credential-bearing fields recursively before structured
+// data is written to logs or durable audit records. Invalid JSON is never
+// returned verbatim because it cannot be redacted reliably.
+func RedactJSON(raw string) string {
+	if strings.TrimSpace(raw) == "" {
+		return ""
+	}
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return "[UNAVAILABLE]"
+	}
+	redactValue(value)
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return "[UNAVAILABLE]"
+	}
+	return truncate(string(encoded))
+}
+
+func bodyForLog(path, raw string) string {
+	if sensitiveBodyPath(path) {
+		return "[REDACTED]"
+	}
+	return RedactJSON(raw)
+}
+
+func sensitiveBodyPath(path string) bool {
+	if strings.HasPrefix(path, "/v1/internal/configs/") || strings.HasPrefix(path, "/v1/admin/configs/") {
+		return true
+	}
+	switch path {
+	case "/v1/admin/auth/login",
+		"/v1/admin/auth/mfa/verify",
+		"/v1/admin/auth/refresh",
+		"/v1/admin/auth/logout",
+		"/v1/admin/me/password",
+		"/v1/admin/me/mfa/totp/enroll",
+		"/v1/admin/me/mfa/totp/confirm",
+		"/v1/admin/me/mfa/recovery-codes/regenerate":
+		return true
+	default:
+		return false
+	}
+}
+
+func redactValue(value any) {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, child := range typed {
+			if isSensitiveKey(key) {
+				typed[key] = "[REDACTED]"
+				continue
+			}
+			redactValue(child)
+		}
+	case []any:
+		for _, child := range typed {
+			redactValue(child)
+		}
+	}
+}
+
+func isSensitiveKey(key string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(key))
+	normalized = strings.ReplaceAll(normalized, "-", "_")
+	for _, fragment := range []string{"password", "secret", "token", "recovery_code", "mfa_code", "device_key", "internal_key", "authorization", "otpauth_uri"} {
+		if strings.Contains(normalized, fragment) {
+			return true
+		}
+	}
+	return normalized == "recovery_codes" || normalized == "access_key_id" || normalized == "secret_key_id"
 }
 
 func truncate(s string) string {
@@ -255,6 +340,16 @@ type responseBodyWriter struct {
 }
 
 func (w *responseBodyWriter) Write(b []byte) (int, error) {
-	w.buf.Write(b)
+	if remaining := maxBodyBytes + 1 - w.buf.Len(); remaining > 0 {
+		if remaining > len(b) {
+			remaining = len(b)
+		}
+		_, _ = w.buf.Write(b[:remaining])
+	}
 	return w.ResponseWriter.Write(b)
+}
+
+type replayBody struct {
+	io.Reader
+	io.Closer
 }

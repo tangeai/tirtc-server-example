@@ -18,7 +18,7 @@ type DeviceStore interface {
 // UserStore handles user account and quota persistence.
 type UserStore interface {
 	GetUserByEmail(ctx context.Context, email string) (*model.User, error)
-	CreateUser(ctx context.Context, email, passwordHash string) (int64, error)
+	CreateUser(ctx context.Context, email, passwordHash string, bindQuota int) (int64, error)
 	UpdatePassword(ctx context.Context, userID int64, passwordHash string) error
 	GetQuota(ctx context.Context, userID int64) (int, error)
 	GetDeviceList(ctx context.Context, userID int64) ([]model.UserDeviceRow, error)
@@ -79,9 +79,9 @@ type CacheStore interface {
 	// false when the code is missing, expired, or does not match.
 	ConsumeEmailCode(ctx context.Context, email, code string) (bool, error)
 	DelEmailCode(ctx context.Context, email string) error
-	// IncrPasswordResetAttempt counts a password-reset attempt in an isolated
-	// rate-limit scope (for example, an email or client IP).
-	IncrPasswordResetAttempt(ctx context.Context, scope string, window time.Duration) (int64, error)
+	// IncrRateLimitAttempt increments an isolated rate-limit scope such as an
+	// email address or client IP and expires the counter with the given window.
+	IncrRateLimitAttempt(ctx context.Context, scope string, window time.Duration) (int64, error)
 	IsDeviceOnline(ctx context.Context, deviceID string) (bool, error)
 
 	// IsInCall reports whether deviceID currently holds a call-server room lock

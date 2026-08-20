@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sync/atomic"
 
 	"github.com/gin-gonic/gin"
 
@@ -27,6 +28,32 @@ type AgentHandler struct {
 	internalKey       string                         // X-Internal-Key for service-to-service calls
 	resourceQuota     map[string]int                 // type -> per-user max (mcp/device_plugin/kb)
 	defaultResources  map[string][]model.ResourceRef // type -> configured default {id,name} visible to all
+	runtime           atomic.Pointer[agentRuntime]
+}
+
+type agentRuntime struct {
+	api              agentAPI
+	defaultRoleID    string
+	resourceQuota    map[string]int
+	defaultResources map[string][]model.ResourceRef
+}
+
+func (h *AgentHandler) SetRuntime(api agentAPI, defaultRoleID string, quota map[string]int, resources map[string][]model.ResourceRef) {
+	h.runtime.Store(&agentRuntime{api: api, defaultRoleID: defaultRoleID, resourceQuota: quota, defaultResources: resources})
+}
+
+func (h *AgentHandler) active() agentRuntime {
+	if current := h.runtime.Load(); current != nil {
+		return *current
+	}
+	return agentRuntime{api: h.agentAPI, defaultRoleID: h.defaultRoleID, resourceQuota: h.resourceQuota, defaultResources: h.defaultResources}
+}
+
+func (h *AgentHandler) api() agentAPI        { return h.active().api }
+func (h *AgentHandler) defaultRole() string  { return h.active().defaultRoleID }
+func (h *AgentHandler) quota(typ string) int { return h.active().resourceQuota[typ] }
+func (h *AgentHandler) defaults(typ string) []model.ResourceRef {
+	return h.active().defaultResources[typ]
 }
 
 func failAIUpstream(c *gin.Context, action string, err error) {
@@ -178,8 +205,8 @@ func (h *AgentHandler) internalUnbind(c *gin.Context) {
 		}
 	}
 	// Clean up cloud device-role bindings
-	if h.agentAPI != nil {
-		if err := h.agentAPI.BatchDeleteDeviceRoles(c.Request.Context(), tirtcapi.BatchDeviceRolesRequest{
+	if h.api() != nil {
+		if err := h.api().BatchDeleteDeviceRoles(c.Request.Context(), tirtcapi.BatchDeviceRolesRequest{
 			DeviceIDs: []string{body.DeviceID},
 		}); err != nil {
 			failAIUpstream(c, "解绑设备角色", err)
@@ -204,7 +231,7 @@ func (h *AgentHandler) listRoles(c *gin.Context) {
 	// Fetch details from cloud for each role
 	items := make([]*tirtcapi.Role, 0, len(ids))
 	for _, id := range ids {
-		role, err := h.agentAPI.GetRole(c.Request.Context(), id)
+		role, err := h.api().GetRole(c.Request.Context(), id)
 		if err != nil {
 			// Skip roles that fail to fetch (e.g. deleted on cloud)
 			continue
@@ -230,7 +257,7 @@ func (h *AgentHandler) createRole(c *gin.Context) {
 		return
 	}
 
-	created, err := h.agentAPI.CreateRole(c.Request.Context(), input)
+	created, err := h.api().CreateRole(c.Request.Context(), input)
 	if err != nil {
 		failAIUpstream(c, "创建角色", err)
 		return
@@ -243,7 +270,7 @@ func (h *AgentHandler) createRole(c *gin.Context) {
 	}
 
 	// Fetch full details for the response
-	role, err := h.agentAPI.GetRole(c.Request.Context(), created.ID)
+	role, err := h.api().GetRole(c.Request.Context(), created.ID)
 	if err != nil || role == nil {
 		// Return at least the ID
 		apiresp.OK(c, created)
@@ -262,7 +289,7 @@ func (h *AgentHandler) getRole(c *gin.Context) {
 		return
 	}
 
-	role, err := h.agentAPI.GetRole(c.Request.Context(), roleID)
+	role, err := h.api().GetRole(c.Request.Context(), roleID)
 	if err != nil {
 		failAIUpstream(c, "查询角色", err)
 		return
@@ -286,7 +313,7 @@ func (h *AgentHandler) updateRole(c *gin.Context) {
 		return
 	}
 
-	role, err := h.agentAPI.UpdateRole(c.Request.Context(), roleID, input)
+	role, err := h.api().UpdateRole(c.Request.Context(), roleID, input)
 	if err != nil {
 		failAIUpstream(c, "更新角色", err)
 		return
@@ -305,7 +332,7 @@ func (h *AgentHandler) deleteRole(c *gin.Context) {
 		return
 	}
 
-	if err := h.agentAPI.DeleteRole(c.Request.Context(), roleID); err != nil {
+	if err := h.api().DeleteRole(c.Request.Context(), roleID); err != nil {
 		failAIUpstream(c, "删除角色", err)
 		return
 	}
@@ -315,12 +342,12 @@ func (h *AgentHandler) deleteRole(c *gin.Context) {
 }
 
 func (h *AgentHandler) getDefaultRole(c *gin.Context) {
-	if h.defaultRoleID == "" {
+	if h.defaultRole() == "" {
 		apiresp.Fail(c, http.StatusNotFound, 40400, "未配置默认角色")
 		return
 	}
 
-	role, err := h.agentAPI.GetRole(c.Request.Context(), h.defaultRoleID)
+	role, err := h.api().GetRole(c.Request.Context(), h.defaultRole())
 	if err != nil {
 		failAIUpstream(c, "查询默认角色", err)
 		return
@@ -340,7 +367,7 @@ func (h *AgentHandler) getDeviceRole(c *gin.Context) {
 		return
 	}
 
-	resp := gin.H{"default_role_id": h.defaultRoleID}
+	resp := gin.H{"default_role_id": h.defaultRole()}
 
 	roleID, err := h.roleStore.GetDeviceRole(c.Request.Context(), deviceID)
 	if err != nil {
@@ -410,7 +437,7 @@ func (h *AgentHandler) batchCreateDeviceRoles(c *gin.Context) {
 	if !h.requireOwnedRole(c, req.RoleID) || !h.requireOwnedDevices(c, req.DeviceIDs) {
 		return
 	}
-	if err := h.agentAPI.BatchCreateDeviceRoles(c.Request.Context(), req); err != nil {
+	if err := h.api().BatchCreateDeviceRoles(c.Request.Context(), req); err != nil {
 		failAIUpstream(c, "批量绑定设备角色", err)
 		return
 	}
@@ -430,7 +457,7 @@ func (h *AgentHandler) batchQueryDeviceRoles(c *gin.Context) {
 	if !h.requireOwnedDevices(c, req.DeviceIDs) {
 		return
 	}
-	items, err := h.agentAPI.BatchQueryDeviceRoles(c.Request.Context(), req)
+	items, err := h.api().BatchQueryDeviceRoles(c.Request.Context(), req)
 	if err != nil {
 		failAIUpstream(c, "批量查询设备角色", err)
 		return
@@ -451,7 +478,7 @@ func (h *AgentHandler) batchDeleteDeviceRoles(c *gin.Context) {
 	if !h.requireOwnedDevices(c, req.DeviceIDs) {
 		return
 	}
-	if err := h.agentAPI.BatchDeleteDeviceRoles(c.Request.Context(), req); err != nil {
+	if err := h.api().BatchDeleteDeviceRoles(c.Request.Context(), req); err != nil {
 		failAIUpstream(c, "批量解绑设备角色", err)
 		return
 	}
@@ -497,7 +524,7 @@ func (h *AgentHandler) requireOwnedDevices(c *gin.Context, deviceIDs []string) b
 
 func (h *AgentHandler) listVoices(c *gin.Context) {
 	language := c.Query("language")
-	voices, err := h.agentAPI.ListVoices(c.Request.Context(), language)
+	voices, err := h.api().ListVoices(c.Request.Context(), language)
 	if err != nil {
 		failAIUpstream(c, "查询音色列表", err)
 		return
@@ -508,7 +535,7 @@ func (h *AgentHandler) listVoices(c *gin.Context) {
 // ── Global MCP Tool Handlers ──
 
 func (h *AgentHandler) listGlobalMCPTools(c *gin.Context) {
-	items, err := h.agentAPI.ListGlobalMCPTools(c.Request.Context())
+	items, err := h.api().ListGlobalMCPTools(c.Request.Context())
 	if err != nil {
 		failAIUpstream(c, "查询全局 MCP 工具", err)
 		return
@@ -522,7 +549,7 @@ func (h *AgentHandler) getGlobalMCPTool(c *gin.Context) {
 		apiresp.BadParam(c, "缺少 id")
 		return
 	}
-	item, err := h.agentAPI.GetGlobalMCPTool(c.Request.Context(), id)
+	item, err := h.api().GetGlobalMCPTool(c.Request.Context(), id)
 	if err != nil {
 		failAIUpstream(c, "查询全局 MCP 工具", err)
 		return
@@ -564,7 +591,7 @@ func (h *AgentHandler) listUserResources(ctx context.Context, userID int64, typ 
 		seen[r.ResourceID] = true
 		items = append(items, model.ResourceRef{ID: r.ResourceID, Name: r.Name})
 	}
-	for _, d := range h.defaultResources[typ] {
+	for _, d := range h.defaults(typ) {
 		if d.ID == "" || seen[d.ID] {
 			continue
 		}
@@ -577,7 +604,7 @@ func (h *AgentHandler) listUserResources(ctx context.Context, userID int64, typ 
 // checkQuota reports whether the user may create one more resource of typ.
 // A quota of 0 or an unconfigured type is treated as unlimited.
 func (h *AgentHandler) checkQuota(ctx context.Context, userID int64, typ string) (bool, error) {
-	if max := h.resourceQuota[typ]; max > 0 {
+	if max := h.quota(typ); max > 0 {
 		n, err := h.userResourceStore.Count(ctx, userID, typ)
 		if err != nil {
 			return false, err
@@ -615,7 +642,7 @@ func (h *AgentHandler) canAccess(ctx context.Context, userID int64, typ, id stri
 	if ok {
 		return true, nil
 	}
-	for _, d := range h.defaultResources[typ] {
+	for _, d := range h.defaults(typ) {
 		if d.ID == id {
 			return true, nil
 		}
@@ -643,7 +670,7 @@ func (h *AgentHandler) createAppMCPTool(c *gin.Context) {
 		apiresp.Fail(c, http.StatusTooManyRequests, 42900, "MCP 创建额度已用尽")
 		return
 	}
-	item, err := h.agentAPI.CreateAppMCPTool(c.Request.Context(), req)
+	item, err := h.api().CreateAppMCPTool(c.Request.Context(), req)
 	if err != nil {
 		failAIUpstream(c, "创建 MCP 工具", err)
 		return
@@ -669,7 +696,7 @@ func (h *AgentHandler) getAppMCPTool(c *gin.Context) {
 		apiresp.Fail(c, http.StatusForbidden, 40300, "无权访问该资源")
 		return
 	}
-	item, err := h.agentAPI.GetAppMCPTool(c.Request.Context(), id)
+	item, err := h.api().GetAppMCPTool(c.Request.Context(), id)
 	if err != nil {
 		failAIUpstream(c, "查询 MCP 工具", err)
 		return
@@ -696,7 +723,7 @@ func (h *AgentHandler) updateAppMCPTool(c *gin.Context) {
 		apiresp.BadParamError(c, err)
 		return
 	}
-	item, err := h.agentAPI.UpdateAppMCPTool(c.Request.Context(), id, req)
+	item, err := h.api().UpdateAppMCPTool(c.Request.Context(), id, req)
 	if err != nil {
 		failAIUpstream(c, "更新 MCP 工具", err)
 		return
@@ -718,7 +745,7 @@ func (h *AgentHandler) deleteAppMCPTool(c *gin.Context) {
 	if !h.requireOwnership(c, userID, model.ResourceTypeMCP, id) {
 		return
 	}
-	if err := h.agentAPI.DeleteAppMCPTool(c.Request.Context(), id); err != nil {
+	if err := h.api().DeleteAppMCPTool(c.Request.Context(), id); err != nil {
 		failAIUpstream(c, "删除 MCP 工具", err)
 		return
 	}
@@ -758,7 +785,7 @@ func (h *AgentHandler) createPlugin(c *gin.Context) {
 		apiresp.Fail(c, http.StatusTooManyRequests, 42900, "设备插件创建额度已用尽")
 		return
 	}
-	item, err := h.agentAPI.CreateDevicePlugin(c.Request.Context(), req)
+	item, err := h.api().CreateDevicePlugin(c.Request.Context(), req)
 	if err != nil {
 		failAIUpstream(c, "创建设备插件", err)
 		return
@@ -784,7 +811,7 @@ func (h *AgentHandler) getPlugin(c *gin.Context) {
 		apiresp.Fail(c, http.StatusForbidden, 40300, "无权访问该资源")
 		return
 	}
-	item, err := h.agentAPI.GetDevicePlugin(c.Request.Context(), id)
+	item, err := h.api().GetDevicePlugin(c.Request.Context(), id)
 	if err != nil {
 		failAIUpstream(c, "查询设备插件", err)
 		return
@@ -815,7 +842,7 @@ func (h *AgentHandler) updatePlugin(c *gin.Context) {
 		apiresp.BadParam(c, "缺少 name 或 action")
 		return
 	}
-	item, err := h.agentAPI.UpdateDevicePlugin(c.Request.Context(), id, req)
+	item, err := h.api().UpdateDevicePlugin(c.Request.Context(), id, req)
 	if err != nil {
 		failAIUpstream(c, "更新设备插件", err)
 		return
@@ -834,7 +861,7 @@ func (h *AgentHandler) deletePlugin(c *gin.Context) {
 	if !h.requireOwnership(c, userID, model.ResourceTypeDevicePlugin, id) {
 		return
 	}
-	if err := h.agentAPI.DeleteDevicePlugin(c.Request.Context(), id); err != nil {
+	if err := h.api().DeleteDevicePlugin(c.Request.Context(), id); err != nil {
 		failAIUpstream(c, "删除设备插件", err)
 		return
 	}
@@ -874,7 +901,7 @@ func (h *AgentHandler) createKnowledgeIndex(c *gin.Context) {
 		apiresp.Fail(c, http.StatusTooManyRequests, 42900, "知识库创建额度已用尽")
 		return
 	}
-	item, err := h.agentAPI.CreateKnowledgeIndex(c.Request.Context(), req)
+	item, err := h.api().CreateKnowledgeIndex(c.Request.Context(), req)
 	if err != nil {
 		failAIUpstream(c, "创建知识库", err)
 		return
@@ -900,7 +927,7 @@ func (h *AgentHandler) getKnowledgeIndex(c *gin.Context) {
 		apiresp.Fail(c, http.StatusForbidden, 40300, "无权访问该资源")
 		return
 	}
-	item, err := h.agentAPI.GetKnowledgeIndex(c.Request.Context(), id)
+	item, err := h.api().GetKnowledgeIndex(c.Request.Context(), id)
 	if err != nil {
 		failAIUpstream(c, "查询知识库", err)
 		return
@@ -927,7 +954,7 @@ func (h *AgentHandler) updateKnowledgeIndex(c *gin.Context) {
 		apiresp.BadParamError(c, err)
 		return
 	}
-	item, err := h.agentAPI.UpdateKnowledgeIndex(c.Request.Context(), id, req)
+	item, err := h.api().UpdateKnowledgeIndex(c.Request.Context(), id, req)
 	if err != nil {
 		failAIUpstream(c, "更新知识库", err)
 		return
@@ -948,7 +975,7 @@ func (h *AgentHandler) deleteKnowledgeIndex(c *gin.Context) {
 	if !h.requireOwnership(c, userID, model.ResourceTypeKB, id) {
 		return
 	}
-	if err := h.agentAPI.DeleteKnowledgeIndex(c.Request.Context(), id); err != nil {
+	if err := h.api().DeleteKnowledgeIndex(c.Request.Context(), id); err != nil {
 		failAIUpstream(c, "删除知识库", err)
 		return
 	}
@@ -973,7 +1000,7 @@ func (h *AgentHandler) listKnowledgeDocuments(c *gin.Context) {
 		return
 	}
 	page, pageSize := queryPagination(c)
-	items, total, err := h.agentAPI.ListKnowledgeDocuments(c.Request.Context(), indexID, page, pageSize)
+	items, total, err := h.api().ListKnowledgeDocuments(c.Request.Context(), indexID, page, pageSize)
 	if err != nil {
 		failAIUpstream(c, "查询知识库文档", err)
 		return
@@ -996,7 +1023,7 @@ func (h *AgentHandler) listKnowledgeFiles(c *gin.Context) {
 		return
 	}
 
-	items, err := h.agentAPI.ListKnowledgeFiles(c.Request.Context())
+	items, err := h.api().ListKnowledgeFiles(c.Request.Context())
 	if err != nil {
 		failAIUpstream(c, "查询知识文件", err)
 		return
@@ -1031,7 +1058,7 @@ func (h *AgentHandler) uploadKnowledgeFile(c *gin.Context) {
 		return
 	}
 
-	result, err := h.agentAPI.UploadKnowledgeFile(c.Request.Context(), header.Filename, fileData)
+	result, err := h.api().UploadKnowledgeFile(c.Request.Context(), header.Filename, fileData)
 	if err != nil {
 		failAIUpstream(c, "上传知识文件", err)
 		return
@@ -1049,7 +1076,7 @@ func (h *AgentHandler) uploadKnowledgeFile(c *gin.Context) {
 	); err != nil {
 		// Do not leave a cloud file without an owner record. The cleanup is
 		// best-effort; both errors remain server-side only.
-		if cleanupErr := h.agentAPI.DeleteKnowledgeFile(
+		if cleanupErr := h.api().DeleteKnowledgeFile(
 			c.Request.Context(), result.FileID); cleanupErr != nil {
 			slog.ErrorContext(
 				c.Request.Context(),
@@ -1076,7 +1103,7 @@ func (h *AgentHandler) deleteKnowledgeFile(c *gin.Context) {
 	if !h.requireOwnership(c, userID, model.ResourceTypeKBFile, id) {
 		return
 	}
-	if err := h.agentAPI.DeleteKnowledgeFile(c.Request.Context(), id); err != nil {
+	if err := h.api().DeleteKnowledgeFile(c.Request.Context(), id); err != nil {
 		failAIUpstream(c, "删除知识文件", err)
 		return
 	}

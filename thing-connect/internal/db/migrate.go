@@ -1,26 +1,24 @@
 package db
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/jmoiron/sqlx"
 )
 
-// IsIgnorableDDLError reports whether a DDL error can be safely ignored on a
-// repeated or DDL-less Migrate call:
-//   - 1060 Duplicate column name / 1061 Duplicate key name — the ALTER already
-//     applied, so re-running it is a no-op.
-//   - 1142 ALTER command denied — production app accounts often lack DDL grants;
-//     the schema is provisioned out-of-band by a DBA, so the app must not fail
-//     to start just because it cannot run an ALTER it doesn't need to.
+// IsIgnorableDDLError reports whether a DDL error means that an idempotent
+// migration statement has already been applied. Permission errors are never
+// ignored: production installations must provision the schema with a migration
+// account before starting services with a restricted application account.
 func IsIgnorableDDLError(err error) bool {
-	mysqlErr, ok := err.(*mysql.MySQLError)
-	if !ok {
+	var mysqlErr *mysql.MySQLError
+	if !errors.As(err, &mysqlErr) {
 		return false
 	}
 	switch mysqlErr.Number {
-	case 1060, 1061, 1142:
+	case 1060, 1061:
 		return true
 	default:
 		return false
@@ -29,7 +27,7 @@ func IsIgnorableDDLError(err error) bool {
 
 // execIgnoreDup executes a DDL statement and ignores errors that IsIgnorableDDLError
 // classifies as benign, so ALTER TABLE statements are idempotent on repeated Migrate
-// calls and tolerate app accounts without DDL privileges.
+// calls.
 func execIgnoreDup(db *sqlx.DB, stmt string) error {
 	_, err := db.Exec(stmt)
 	if err == nil || IsIgnorableDDLError(err) {
@@ -38,7 +36,7 @@ func execIgnoreDup(db *sqlx.DB, stmt string) error {
 	return err
 }
 
-func Migrate(db *sqlx.DB) error {
+func coreMigrationStatements() []string {
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS users (
 			id         BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -122,7 +120,7 @@ func Migrate(db *sqlx.DB) error {
 			role_id    VARCHAR(64) NOT NULL COMMENT "探鸽云端角色ID",
 			created_at DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			PRIMARY KEY (id),
-			UNIQUE KEY uq_user_role (user_id, role_id)
+			UNIQUE KEY uq_ai_user_role (user_id, role_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 
 		`CREATE TABLE IF NOT EXISTS ai_device_role (
@@ -165,7 +163,7 @@ func Migrate(db *sqlx.DB) error {
 			created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 			PRIMARY KEY (id),
-			UNIQUE KEY uq_call_pair (device_id_a, device_id_b),
+			UNIQUE KEY uq_pair (device_id_a, device_id_b),
 			KEY idx_call_a (device_id_a),
 			KEY idx_call_b (device_id_b)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
@@ -196,13 +194,14 @@ func Migrate(db *sqlx.DB) error {
 			KEY idx_cleanup_due (next_attempt_at)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 	}
-
-	// All DDL runs through execIgnoreDup: production app accounts may lack DDL
-	// grants (schema provisioned by a DBA), and ALTER statements are not
-	// idempotent in MySQL 5.7. See IsIgnorableDDLError for the tolerated errors.
+	// ALTER statements are not idempotent in MySQL 5.7. Duplicate column and
+	// duplicate key errors are handled by the migration runner.
 	stmts = append(stmts,
 		// ALTER statements — append after CREATEs so the tables exist first.
 		`ALTER TABLE users ADD COLUMN bind_quota INT NOT NULL DEFAULT 10 COMMENT '剩余可绑额度'`,
+		`ALTER TABLE users ADD COLUMN status TINYINT NOT NULL DEFAULT 1 COMMENT '1=active 0=disabled'`,
+		`ALTER TABLE users ADD COLUMN disabled_at DATETIME NULL`,
+		`ALTER TABLE users ADD COLUMN auth_revision BIGINT NOT NULL DEFAULT 1 COMMENT '密码或账号状态变更时递增'`,
 		`ALTER TABLE device_pool ADD KEY idx_alloc (status, id)`,
 		`ALTER TABLE device_bind ADD COLUMN assign VARCHAR(16) NOT NULL DEFAULT '' COMMENT 'dynamic=pool分配 preburn=出厂预烧' AFTER device_rand`,
 		`ALTER TABLE device_bind ADD COLUMN device_name VARCHAR(64) NOT NULL DEFAULT '' COMMENT '当前绑定用户设置的设备名称，解绑清空' AFTER assign`,
@@ -244,14 +243,73 @@ func Migrate(db *sqlx.DB) error {
 		// concurrent double-allocate, including cross-instance.
 		`ALTER TABLE device_bind
 		  ADD COLUMN mac_user_key VARCHAR(64)
-		  AS (IF(mac='' OR user_id=0, NULL, CONCAT(mac, ':', user_id))) VIRTUAL,
+		  AS (IF(mac='' OR user_id=0, NULL, CONCAT(mac, ':', user_id))) STORED,
 		  ADD UNIQUE KEY uq_mac_user (mac_user_key)`,
 	)
-	for _, stmt := range stmts {
+	return stmts
+}
+
+const (
+	coreSchemaVersion = 1
+)
+
+// Migrate applies the schema owned by the five business services. It is safe
+// for all business services to call this concurrently during rolling startup.
+func Migrate(db *sqlx.DB) error {
+	return runMigration(db, "core", coreSchemaVersion, coreMigrationStatements())
+}
+
+// MigrateAdmin applies the business schema followed by the tables owned by
+// admin-server. Keeping this entry point separate prevents business-only
+// deployments from creating Admin tables.
+func MigrateAdmin(db *sqlx.DB) error {
+	if err := Migrate(db); err != nil {
+		return err
+	}
+	if err := runMigration(db, "admin", 1, adminSchemaStatements()); err != nil {
+		return err
+	}
+	return runMigration(db, "admin", 2, adminMigrationV2Statements())
+}
+
+func runMigration(db *sqlx.DB, component string, version int, stmts []string) error {
+	if err := ensureMigrationTable(db); err != nil {
+		return fmt.Errorf("migrate %s: prepare schema_migrations: %w", component, err)
+	}
+	var applied int
+	if err := db.Get(&applied, `SELECT COUNT(*) FROM schema_migrations WHERE component=? AND version=?`, component, version); err != nil {
+		return fmt.Errorf("migrate %s: read version %d: %w", component, version, err)
+	}
+	if applied > 0 {
+		return nil
+	}
+	for index, stmt := range stmts {
 		if err := execIgnoreDup(db, stmt); err != nil {
-			return fmt.Errorf("migrate: %w", err)
+			return fmt.Errorf("migrate %s version %d statement %d: %w", component, version, index+1, err)
 		}
 	}
-
+	if _, err := db.Exec(`INSERT INTO schema_migrations (component,version) VALUES (?,?)`, component, version); err != nil {
+		var mysqlErr *mysql.MySQLError
+		if !errors.As(err, &mysqlErr) || mysqlErr.Number != 1062 {
+			return fmt.Errorf("migrate %s: record version %d: %w", component, version, err)
+		}
+	}
 	return nil
+}
+
+func ensureMigrationTable(db *sqlx.DB) error {
+	var exists int
+	if err := db.Get(&exists, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='schema_migrations'`); err != nil {
+		return err
+	}
+	if exists > 0 {
+		return nil
+	}
+	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
+		component VARCHAR(64) NOT NULL,
+		version BIGINT NOT NULL,
+		applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (component, version)
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`)
+	return err
 }

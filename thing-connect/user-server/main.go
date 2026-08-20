@@ -17,15 +17,17 @@ import (
 
 	"thing-connect/internal/cache"
 	captchapkg "thing-connect/internal/captcha"
-	"thing-connect/internal/captcha/yidun"
+	"thing-connect/internal/captcha/registry"
 	cleanupoutbox "thing-connect/internal/cleanup"
 	"thing-connect/internal/config"
 	"thing-connect/internal/db"
+	"thing-connect/internal/dynamicconfig"
 	"thing-connect/internal/logging"
 	mailerpkg "thing-connect/internal/mailer"
 	smtpmailer "thing-connect/internal/mailer/smtp"
 	"thing-connect/internal/mqttc"
 	"thing-connect/internal/service"
+	"thing-connect/internal/servicestatus"
 	mysqlstore "thing-connect/internal/store/mysql"
 	usrhandler "thing-connect/user-server/handler"
 )
@@ -51,10 +53,11 @@ func main() {
 		log.Fatalf("redis: %v", err)
 	}
 	var broker *mqttc.Broker
+	var mqttInitErr error
 	if cfg.MQTT.Broker != "" {
-		broker, err = mqttc.New(cfg.MQTT, rdb)
-		if err != nil {
-			log.Printf("mqtt: %v (continuing without MQTT)", err)
+		broker, mqttInitErr = mqttc.New(cfg.MQTT, rdb)
+		if mqttInitErr != nil {
+			log.Printf("mqtt: %v (continuing without MQTT)", mqttInitErr)
 		}
 	}
 
@@ -66,17 +69,26 @@ func main() {
 		TokenExpiry:      cfg.Service.TokenExpiry,
 		MQTTACKTimeout:   cfg.Service.MQTTACKTimeout,
 	}
+	// Email verification has its own policy and does not inherit the device
+	// binding code's historical 190-second lifetime.
+	svcCfg.CodeTTL = 5 * time.Minute
 
 	userStore := mysqlstore.NewUserStore(sqlDB)
 	bindStore := mysqlstore.NewBindStore(sqlDB)
 	cacheStore := mysqlstore.NewCacheStore(rdb)
 
-	var captchaVerifier captchapkg.Verifier
-	if cfg.Yidun.SecretID == "" {
-		log.Println("yidun.secret_id not set, captcha verification disabled (dev mode)")
-		captchaVerifier = captchapkg.DevVerifier{}
+	captchaProvider, captchaConfig := configuredCaptcha(cfg)
+	var captchaVerifier captchapkg.Verifier = captchapkg.DevVerifier{}
+	if captchaProvider == "" {
+		log.Println("captcha provider not set, captcha verification disabled (development mode)")
 	} else {
-		captchaVerifier = yidun.New(cfg.Yidun.SecretID, cfg.Yidun.SecretKey)
+		captchaVerifier, err = registry.New(captchaProvider, registry.Config{
+			CaptchaID: captchaConfig.CaptchaID, SecretID: captchaConfig.SecretID, SecretKey: captchaConfig.SecretKey,
+			AppSecretKey: captchaConfig.AppSecretKey, MiniProgramSecretKey: captchaConfig.MiniProgramSecretKey, PublicConfig: captchaConfig.PublicConfig,
+		})
+		if err != nil {
+			log.Fatalf("captcha: %v", err)
+		}
 	}
 
 	var emailMailer mailerpkg.Mailer
@@ -87,6 +99,7 @@ func main() {
 		emailMailer = smtpmailer.New(smtpmailer.Config{
 			Host:     cfg.SMTP.Host,
 			Port:     cfg.SMTP.Port,
+			TLSMode:  cfg.SMTP.TLSMode,
 			Username: cfg.SMTP.Username,
 			Password: cfg.SMTP.Password,
 			From:     cfg.SMTP.From,
@@ -102,11 +115,33 @@ func main() {
 		mqttPub = broker
 	}
 	bindSvc := service.NewBindService(bindStore, cacheStore, mqttPub, svcCfg)
+	var dynamicClient *dynamicconfig.Client
+	var dynamicRefs []dynamicconfig.Ref
+	if cfg.Admin.ServerURL != "" {
+		dynamicClient, dynamicRefs, err = userDynamicConfig(cfg, rdb, userSvc, bindSvc)
+		if err != nil {
+			log.Printf("dynamic config disabled: %v", err)
+			dynamicClient = nil
+		}
+	}
 
 	staticDir := findStaticDir()
 
 	r := gin.New()
+	if err := r.SetTrustedProxies(cfg.Server.TrustedProxies); err != nil {
+		log.Fatalf("trusted proxies: %v", err)
+	}
 	r.Use(gin.Recovery(), logging.RequestID("user"), logging.BodyLog(), gin.Logger())
+	probes := map[string]servicestatus.DependencyProbe{"database": servicestatus.SQLProbe(sqlDB), "redis": servicestatus.RedisProbe(rdb)}
+	if broker != nil {
+		probes["mqtt"] = broker.Ping
+	} else if mqttInitErr != nil {
+		probes["mqtt"] = func(context.Context) error { return mqttInitErr }
+	}
+	servicestatus.RegisterHealth(r, probes)
+	if err := registerServiceDiscovery(r, cfg.Discovery); err != nil {
+		log.Fatalf("service discovery: %v", err)
+	}
 	r.Static("/static", staticDir)
 	r.StaticFile("/", staticDir+"/index.html")
 	r.StaticFile("/login", staticDir+"/auth.html")
@@ -120,7 +155,10 @@ func main() {
 	r.StaticFile("/librender.wasm", staticDir+"/js/librender.wasm")
 	r.StaticFile("/plugin.wasm", staticDir+"/js/plugin.wasm")
 
-	usrhandler.SetCaptchaID(cfg.Yidun.CaptchaID)
+	usrhandler.SetCaptchaConfig(usrhandler.CaptchaConfig{
+		Provider: captchaProvider, Enabled: captchaProvider != "", PublicConfig: captchaConfig.PublicConfig,
+		CaptchaID: captchaConfig.CaptchaID,
+	})
 	usrhandler.SetTirtcCredentials(cfg.Tirtc.AppID, cfg.Tirtc.AccessKeyID, cfg.Tirtc.SecretKeyID, cfg.Tirtc.Endpoint)
 	roleStore := mysqlstore.NewRoleBindingStore(sqlDB)
 
@@ -142,8 +180,21 @@ func main() {
 	outboxCtx, outboxCancel := context.WithCancel(context.Background())
 	go outbox.Run(outboxCtx)
 	go passwordResetMailQueue.Run(outboxCtx)
+	go runAdminUserCommands(outboxCtx, rdb, userSvc)
+	if dynamicClient != nil {
+		go dynamicClient.Run(outboxCtx, dynamicRefs)
+	}
+	var revisions func() map[string]int64
+	if dynamicClient != nil {
+		revisions = dynamicClient.Revisions
+	}
+	reporter, err := servicestatus.NewReporter(rdb, "user-server", probes, revisions)
+	if err != nil {
+		log.Fatalf("service status: %v", err)
+	}
+	go reporter.Run(outboxCtx)
 
-	usrhandler.NewServer(userSvc, bindSvc, broker, cfg.JWTSecret, cfg.Call.ServerURL, cfg.Internal.Key, roleStore, cleanup).Register(r)
+	usrhandler.NewServer(userSvc, bindSvc, broker, sqlDB, rdb, cfg.JWTSecret, cfg.Call.ServerURL, cfg.Internal.Key, roleStore, cleanup).Register(r)
 
 	addr := fmt.Sprintf(":%d", cfg.Server.HTTPPort)
 	srv := &http.Server{
@@ -175,9 +226,26 @@ func main() {
 	if broker != nil {
 		broker.Close()
 	}
-	rdb.Close()
-	sqlDB.Close()
+	if err := rdb.Close(); err != nil {
+		log.Printf("user-server close redis: %v", err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		log.Printf("user-server close database: %v", err)
+	}
 	log.Printf("user-server stopped")
+}
+
+// configuredCaptcha prefers the provider-neutral captcha section and retains
+// yidun as a migration path for existing config files.
+func configuredCaptcha(cfg *config.Config) (string, config.CaptchaProviderCfg) {
+	provider := strings.ToLower(strings.TrimSpace(cfg.Captcha.Provider))
+	if provider != "" {
+		return provider, cfg.Captcha.Providers[provider]
+	}
+	if cfg.Yidun.CaptchaID != "" || cfg.Yidun.SecretID != "" || cfg.Yidun.SecretKey != "" {
+		return "yidun", config.CaptchaProviderCfg{CaptchaID: cfg.Yidun.CaptchaID, SecretID: cfg.Yidun.SecretID, SecretKey: cfg.Yidun.SecretKey}
+	}
+	return "", config.CaptchaProviderCfg{}
 }
 
 // findStaticDir locates the static/ directory relative to the executable so

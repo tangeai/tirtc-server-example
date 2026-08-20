@@ -93,7 +93,7 @@ func SHA256Hex(b []byte) string {
 }
 
 func buildCredentialScope(signing time.Time) string {
-	return signing.UTC().Add(7 * 24 * time.Hour).Format("20060102") + "/tgv1_request"
+	return signing.UTC().Add(7*24*time.Hour).Format("20060102") + "/tgv1_request"
 }
 
 func hmacSHA256(data string, key []byte) []byte {

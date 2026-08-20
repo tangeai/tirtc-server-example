@@ -3,6 +3,7 @@ package mysql
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/jmoiron/sqlx"
@@ -19,8 +20,8 @@ func (s *deviceStore) GetBindByDeviceID(ctx context.Context, deviceID string) (*
 	var r model.DeviceBind
 	err := s.db.GetContext(ctx, &r,
 		`SELECT * FROM device_bind WHERE device_id=? LIMIT 1`, deviceID)
-	if err == sql.ErrNoRows {
-		return nil, nil
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil //nolint:nilnil // absence is the DeviceStore lookup contract
 	}
 	if err != nil {
 		return nil, fmt.Errorf("deviceStore.GetBindByDeviceID: %w", err)
@@ -32,8 +33,8 @@ func (s *deviceStore) GetDeviceKey(ctx context.Context, deviceID string) (*model
 	var r model.DevicePool
 	err := s.db.GetContext(ctx, &r,
 		`SELECT device_id, device_key FROM device_pool WHERE device_id=?`, deviceID)
-	if err == sql.ErrNoRows {
-		return nil, nil
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil //nolint:nilnil // absence is the DeviceStore lookup contract
 	}
 	if err != nil {
 		return nil, fmt.Errorf("deviceStore.GetDeviceKey: %w", err)

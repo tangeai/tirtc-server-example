@@ -5,8 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="登录 TiRTC 体验平台，添加模拟器或真实设备，验证设备音视频能力。">
   <title>注册/登录 · TiRTC 体验平台</title>
-  <!-- 网易易盾验证码 SDK（配置了 captcha_id 时生效） -->
-  <script src="https://cstaticdun.126.net/load.min.js"></script>
   <style>
     :root {
       --ink: #172026;
@@ -575,20 +573,53 @@
 
 <script>
 const $ = id => document.getElementById(id);
-// ── Captcha (网易易盾) ────────────────────────────────────────────────────
-// CAPTCHA_ID 从后端 /v1/config/captcha 获取，未配置时为空字符串走 dev 模式
+// ── Captcha provider adapters ─────────────────────────────────────────────
+// 公共标识由后端返回；所有服务端密钥只保存在 admin-server。
 let CAPTCHA_ID = '';
-let loginCaptchaToken = null;   // { captcha_id, validate, user }
+let CAPTCHA_PROVIDER = '';
+let CAPTCHA_ENABLED = false;
+let CAPTCHA_PUBLIC_CONFIG = {};
+let loginCaptchaToken = null;
 let regCaptchaToken   = null;
 let captchaInitPromise = null;
+
+function loadScript(src) {
+  const existing = document.querySelector(`script[data-captcha-src="${src}"]`);
+  if (existing) return existing._ready || Promise.resolve();
+  const script = document.createElement('script');
+  script.src = src;
+  script.async = true;
+  script.dataset.captchaSrc = src;
+  script._ready = new Promise((resolve, reject) => {
+    script.onload = resolve;
+    script.onerror = () => reject(new Error('captcha script load failed'));
+  });
+  document.head.appendChild(script);
+  return script._ready;
+}
+
+function captchaToken(token, metadata = {}) {
+  return {
+    captcha_id: CAPTCHA_ID,
+    validate: token,
+    provider: CAPTCHA_PROVIDER,
+    token,
+    metadata: Object.assign({ captcha_id: CAPTCHA_ID }, metadata),
+  };
+}
 
 async function initCaptchaId() {
   try {
     const res = await fetch('/v1/config/captcha');
     if (!res.ok) throw new Error('captcha config request failed');
     const d = await res.json();
-    CAPTCHA_ID = d.data && d.data.captcha_id ? d.data.captcha_id : '';
-    if (CAPTCHA_ID) setupCaptcha();
+    const cfg = d.data || {};
+    CAPTCHA_PROVIDER = cfg.provider || '';
+    CAPTCHA_ENABLED = !!cfg.enabled;
+    CAPTCHA_ID = (cfg.public_config && cfg.public_config.captcha_id) || cfg.captcha_id || '';
+    CAPTCHA_PUBLIC_CONFIG = cfg.public_config || {};
+    if (CAPTCHA_ENABLED && !['yidun', 'geetest', 'aliyun', 'tencent'].includes(CAPTCHA_PROVIDER)) throw new Error('unsupported captcha provider');
+    if (CAPTCHA_ENABLED && CAPTCHA_ID) setupCaptcha();
     return true;
   } catch (_) {
     return false;
@@ -602,27 +633,68 @@ let regCaptchaInited   = false;
 // 注册流：验证通过后自动触发的回调
 let _regSendAfterVerify = null;
 
-function initCaptchaInstance(elementId, onVerified, onInstance) {
-  window.initNECaptcha(
-    {
-      captchaId: CAPTCHA_ID,
-      element: '#' + elementId,
-      mode: 'popup',
-      width: Math.min(320, window.innerWidth - 24) + 'px',
-      apiVersion: 2,
+async function initCaptchaInstance(elementId, onVerified, onInstance) {
+  const selector = '#' + elementId;
+  if (CAPTCHA_PROVIDER === 'yidun') {
+    await loadScript('https://cstaticdun.126.net/load.min.js');
+    window.initNECaptcha({
+      captchaId: CAPTCHA_ID, element: selector, mode: 'popup',
+      width: Math.min(320, window.innerWidth - 24) + 'px', apiVersion: 2,
       onVerify(err, data) {
-        if (err) return;
-        onVerified({ captcha_id: CAPTCHA_ID, validate: data.validate, user: '' });
+        if (!err && data && data.validate) onVerified(captchaToken(data.validate));
       },
-    },
-    function onload(instance) { onInstance(instance); },
-    function onerror(err) { console.warn('captcha init error', err); }
-  );
+    }, onInstance, err => console.warn('captcha init error', err));
+    return;
+  }
+  if (CAPTCHA_PROVIDER === 'geetest') {
+    await loadScript('https://static.geetest.com/v4/gt4.js');
+    window.initGeetest4({captchaId: CAPTCHA_ID, product: 'bind', language: 'zho'}, instance => {
+      instance.onSuccess(() => {
+        const result = instance.getValidate();
+        if (result) onVerified(captchaToken(result.lot_number, result));
+      });
+      onInstance({refresh: () => instance.reset(), verify: () => instance.showCaptcha()});
+    });
+    return;
+  }
+  if (CAPTCHA_PROVIDER === 'tencent') {
+    await loadScript('https://turing.captcha.qcloud.com/TJCaptcha.js');
+    const instance = new window.TencentCaptcha(CAPTCHA_ID, result => {
+      if (result && result.ret === 0 && result.ticket) {
+        onVerified(captchaToken(result.ticket, {randstr: result.randstr || ''}));
+      }
+    }, {userLanguage: 'zh-cn'});
+    onInstance({refresh: () => {}, verify: () => instance.show()});
+    return;
+  }
+  if (CAPTCHA_PROVIDER === 'aliyun') {
+    const prefix = CAPTCHA_PUBLIC_CONFIG.prefix || '';
+    const region = CAPTCHA_PUBLIC_CONFIG.region || 'cn';
+    if (!prefix) throw new Error('aliyun captcha prefix is required');
+    window.AliyunCaptchaConfig = {region, prefix};
+    await loadScript('https://o.alicdn.com/captcha-frontend/aliyunCaptcha/AliyunCaptcha.js');
+    let instance = null;
+    const wrapper = {refresh: () => {}, verify: () => {
+      if (!instance) throw new Error('aliyun captcha is not ready');
+      instance.show();
+      if (instance.startTracelessVerification) instance.startTracelessVerification();
+    }};
+    window.initAliyunCaptcha({
+      SceneId: CAPTCHA_ID, mode: 'popup', element: selector, button: selector,
+      success: verifyParam => onVerified(captchaToken(verifyParam, {captcha_verify_param: verifyParam})),
+      fail: result => console.warn('captcha verify failed', result),
+      onError: err => console.warn('captcha init error', err),
+      getInstance: value => { instance = value; onInstance(wrapper); },
+      slideStyle: {width: Math.max(320, Math.min(360, window.innerWidth - 24)), height: 40},
+      language: 'cn', delayBeforeSuccess: false,
+    });
+    return;
+  }
+  throw new Error('unsupported captcha provider');
 }
 
 function setupLoginCaptcha() {
   if (loginCaptchaInited) return;
-  if (!window.initNECaptcha) return;
   loginCaptchaInited = true;
   initCaptchaInstance('login-captcha-wrap',
     tok => {
@@ -630,12 +702,11 @@ function setupLoginCaptcha() {
       _submitLoginWithToken(tok);
     },
     ins => { loginCaptchaIns = ins; }
-  );
+  ).catch(err => { loginCaptchaInited = false; console.warn(err); });
 }
 
 function setupRegCaptcha() {
   if (regCaptchaInited) return;
-  if (!window.initNECaptcha) return;
   regCaptchaInited = true;
   initCaptchaInstance('reg-captcha-wrap',
     tok => {
@@ -643,7 +714,7 @@ function setupRegCaptcha() {
       if (_regSendAfterVerify) { const fn = _regSendAfterVerify; _regSendAfterVerify = null; fn(tok); }
     },
     ins => { regCaptchaIns = ins; }
-  );
+  ).catch(err => { regCaptchaInited = false; console.warn(err); });
 }
 
 function setupCaptcha() {
@@ -729,6 +800,7 @@ async function _submitLoginWithToken(tok) {
         captcha_id: tok ? tok.captcha_id : '',
         validate:   tok ? tok.validate   : '',
         user:       '',
+        captcha: tok ? { provider: tok.provider, token: tok.token, metadata: tok.metadata } : null,
       }),
     });
     const data = await res.json();
@@ -785,6 +857,7 @@ async function _submitSendCode(email, tok) {
         captcha_id: tok ? tok.captcha_id : '',
         validate:   tok ? tok.validate   : '',
         user:       '',
+        captcha: tok ? { provider: tok.provider, token: tok.token, metadata: tok.metadata } : null,
       }),
     });
     const data = await res.json();
@@ -856,6 +929,7 @@ async function _submitResetCode(email, tok) {
         captcha_id: tok ? tok.captcha_id : '',
         validate: tok ? tok.validate : '',
         user: '',
+        captcha: tok ? { provider: tok.provider, token: tok.token, metadata: tok.metadata } : null,
       }),
     });
     const data = await res.json();
@@ -943,7 +1017,7 @@ if (localStorage.getItem('token') && location.pathname !== '/forgot-password') {
 }
 </script>
 
-<!-- 易盾人机验证挂载点 — 放在 body 直属层，脱离 backdrop-blur card 的 containing block -->
+<!-- 人机验证挂载点放在 body 直属层，避免弹层受卡片 containing block 影响 -->
 <div id="login-captcha-wrap"></div>
 <div id="reg-captcha-wrap"></div>
 </body>

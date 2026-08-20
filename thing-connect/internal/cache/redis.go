@@ -1,3 +1,4 @@
+// Package cache creates Redis clients and infrastructure adapters.
 package cache
 
 import (

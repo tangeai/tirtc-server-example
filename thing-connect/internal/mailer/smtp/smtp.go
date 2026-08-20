@@ -6,9 +6,12 @@ import (
 	"crypto/tls"
 	"fmt"
 	"mime"
+	"mime/multipart"
 	"mime/quotedprintable"
 	"net"
 	"net/smtp"
+	"net/textproto"
+	"strings"
 	"time"
 
 	"thing-connect/internal/mailer"
@@ -18,6 +21,7 @@ import (
 type Config struct {
 	Host     string
 	Port     int
+	TLSMode  string
 	Username string
 	Password string
 	From     string
@@ -32,19 +36,81 @@ func New(cfg Config) mailer.Mailer {
 }
 
 func (m *smtpMailer) Send(ctx context.Context, to, subject, body string) error {
+	return m.send(ctx, to, subject, body, "")
+}
+
+// SendMessage sends a multipart/alternative message when HTML is provided.
+func (m *smtpMailer) SendMessage(ctx context.Context, to, subject, textBody, htmlBody string) error {
+	return m.send(ctx, to, subject, textBody, htmlBody)
+}
+
+func (m *smtpMailer) send(ctx context.Context, to, subject, textBody, htmlBody string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	addr := fmt.Sprintf("%s:%d", m.cfg.Host, m.cfg.Port)
-	msg, err := buildMessage(m.cfg.From, to, subject, body)
+	var msg []byte
+	var err error
+	if strings.TrimSpace(htmlBody) == "" {
+		msg, err = buildMessage(m.cfg.From, to, subject, textBody)
+	} else {
+		msg, err = buildAlternativeMessage(m.cfg.From, to, subject, textBody, htmlBody)
+	}
 	if err != nil {
 		return fmt.Errorf("smtp build message: %w", err)
 	}
 
-	if m.cfg.Port == 465 {
+	mode := strings.ToLower(strings.TrimSpace(m.cfg.TLSMode))
+	if mode == "" || mode == "auto" {
+		if m.cfg.Port == 465 {
+			mode = "implicit_tls"
+		} else {
+			mode = "starttls"
+		}
+	}
+	if mode == "implicit_tls" {
 		return m.sendTLS(ctx, addr, to, msg)
 	}
-	return m.sendSTARTTLS(ctx, addr, to, msg)
+	if mode == "starttls" {
+		return m.sendSTARTTLS(ctx, addr, to, msg)
+	}
+	return fmt.Errorf("smtp: unsupported TLS mode %q", m.cfg.TLSMode)
+}
+
+func buildAlternativeMessage(from, to, subject, textBody, htmlBody string) ([]byte, error) {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	writePart := func(contentType, content string) error {
+		header := make(textproto.MIMEHeader)
+		header.Set("Content-Type", contentType+`; charset="UTF-8"`)
+		header.Set("Content-Transfer-Encoding", "quoted-printable")
+		part, err := writer.CreatePart(header)
+		if err != nil {
+			return err
+		}
+		encoded := quotedprintable.NewWriter(part)
+		if _, err := encoded.Write([]byte(content)); err != nil {
+			return err
+		}
+		return encoded.Close()
+	}
+	if strings.TrimSpace(textBody) != "" {
+		if err := writePart("text/plain", textBody); err != nil {
+			return nil, fmt.Errorf("build text MIME part: %w", err)
+		}
+	}
+	if err := writePart("text/html", htmlBody); err != nil {
+		return nil, fmt.Errorf("build HTML MIME part: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return nil, fmt.Errorf("close MIME writer: %w", err)
+	}
+	headers := "From: " + from + "\r\n" +
+		"To: " + to + "\r\n" +
+		"Subject: " + mime.BEncoding.Encode("UTF-8", subject) + "\r\n" +
+		"MIME-Version: 1.0\r\n" +
+		"Content-Type: multipart/alternative; boundary=\"" + writer.Boundary() + "\"\r\n\r\n"
+	return append([]byte(headers), body.Bytes()...), nil
 }
 
 func buildMessage(from, to, subject, body string) ([]byte, error) {
@@ -77,15 +143,15 @@ func (m *smtpMailer) sendTLS(ctx context.Context, addr, to string, msg []byte) e
 	defer stopContextWatch()
 	conn := tls.Client(rawConn, tlsCfg)
 	if err := conn.HandshakeContext(ctx); err != nil {
-		rawConn.Close()
+		_ = rawConn.Close()
 		return smtpOperationError(ctx, "smtp.sendTLS handshake", err)
 	}
 	client, err := smtp.NewClient(conn, m.cfg.Host)
 	if err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return smtpOperationError(ctx, "smtp.sendTLS new client", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	if err := client.Auth(smtp.PlainAuth("", m.cfg.Username, m.cfg.Password, m.cfg.Host)); err != nil {
 		return smtpOperationError(ctx, "smtp.sendTLS auth", err)
 	}
@@ -104,10 +170,10 @@ func (m *smtpMailer) sendSTARTTLS(ctx context.Context, addr, to string, msg []by
 	defer stopContextWatch()
 	client, err := smtp.NewClient(conn, host)
 	if err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return smtpOperationError(ctx, "smtp.sendSTARTTLS new client", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	if ok, _ := client.Extension("STARTTLS"); !ok {
 		return fmt.Errorf("smtp.sendSTARTTLS: server does not support STARTTLS")
 	}
@@ -131,7 +197,7 @@ func dialContext(ctx context.Context, addr string) (net.Conn, func(), error) {
 	}
 	if deadline, ok := ctx.Deadline(); ok {
 		if err := conn.SetDeadline(deadline); err != nil {
-			conn.Close()
+			_ = conn.Close()
 			return nil, func() {}, err
 		}
 	}

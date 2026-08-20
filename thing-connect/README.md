@@ -1,6 +1,6 @@
 # ThingConnect 开发者文档
 
-ThingConnect 展示设备如何接入 **H5 实时预览与对讲、AI 对讲、微信 IoT VoIP、设备间互呼** 四类能力。仓库包含 Linux 用户态 **「C 参考实现」**、Python 模拟器、H5/小程序前端和五个 Go 服务；真实产品设备不属于仓库已实现范围。
+ThingConnect 展示设备如何接入 **H5 实时预览与对讲、AI 对讲、微信 IoT VoIP、设备间互呼** 四类能力。仓库包含 Linux 用户态 **「C 参考实现」**、Python 模拟器、H5/小程序前端、五个业务服务及一个 Admin Server；真实产品设备不属于仓库已实现范围。
 
 本页按「业务流程 → H5 出图 → 扩展对讲」展开。首次体验请先按[项目快速体验](../README.md)跑通「上线 → 绑定 → H5 出图」。
 
@@ -124,7 +124,7 @@ sig[olen] = '\0';
 | Linux C 参考实现 | 上线、凭证、MQTT、TiRTC、会话控制，以及 `DeviceAdapterV1` 二次开发边界；默认仍为文件媒体/stdin 演示 |
 | 产品设备 | 平台与硬件适配、真实身份、采集编码、解码播放、视频显示、产品交互、资源仲裁、异常恢复和量产安全 |
 | H5 / 小程序 | 登录、绑定、取 token、发起 / 接听通话 |
-| 服务端（5 个 Go 服务） | 身份、绑定、签发各业务 token、MQTT 信令、微信回调、房间管理 |
+| 服务端（5 个业务服务 + Admin Server） | 身份、绑定、业务 token、MQTT 信令、微信回调、房间、配置与后台管理 |
 | MQTT Broker | 设备长连接、来电与通知下发 |
 | TiRTC | 实时音视频传输 |
 
@@ -618,7 +618,7 @@ await POST('/v1/voip/user/report-auth', { /* 微信返回结果 */ }); // 3. 回
 
 ## 服务端：功能与部署
 
-五个 Go 服务共用 MySQL、Redis、MQTT Broker；**五份配置的 `jwt_secret` 必须一致**（device-server 签发的 `mqtt_token` 由其余服务验证）。
+五个业务服务和 Admin Server 共用 MySQL、Redis；需要 MQTT 的服务连接同一个 Broker。**五个业务服务的 `jwt_secret` 必须一致**，六个服务的 `internal.key` 必须一致，Admin 使用独立的 `admin.jwt_secret`。
 
 | 服务 | 调用方 | 主要职责 |
 |---|---|---|
@@ -627,12 +627,14 @@ await POST('/v1/voip/user/report-auth', { /* 微信返回结果 */ }); // 3. 回
 | voip-server | 小程序、微信服务器、设备 | 微信 VoIP 回调、授权、来电 MQTT 通知 |
 | ai-server | 设备、H5 管理页 | AI 会话 token、AI 角色管理 |
 | call-server | 设备、H5 | 设备联系人、房间、设备互呼 token 与通知 |
+| admin-server | 管理员、五个业务服务 | Admin Web、RBAC、用户设备管理、动态配置、服务状态与审计 |
 
 **部署步骤：**
 
 ```bash
-# 1. 初始化数据库（schema.sql 与 internal/db/migrate.go 同步，服务启动也会自动迁移）
-mysql -u root -p < scripts/schema.sql
+# 1. 创建并初始化数据库
+mysql -u root -p -e "CREATE DATABASE thing_connect CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+mysql -u root -p thing_connect < scripts/schema.sql
 
 # 2. 各服务复制配置并填好 jwt_secret / database / redis / mqtt
 cp device-server/config.yaml.example  device-server/config.yaml
@@ -640,9 +642,10 @@ cp user-server/config.yaml.example    user-server/config.yaml
 cp voip-server/config.yaml.example    voip-server/config.yaml
 cp ai-server/config.yaml.example      ai-server/config.yaml
 cp call-server/config.yaml.example    call-server/config.yaml
+cp admin/admin-server/config.yaml.example admin/admin-server/config.yaml
 
 # 3. 构建
-bash build.sh
+./build.sh
 
 # 4. 启动（端口见各 config.yaml；config.yaml.example 默认 :9001-9005）
 ./bin/device-server -c device-server/config.yaml
@@ -650,13 +653,14 @@ bash build.sh
 ./bin/voip-server   -c voip-server/config.yaml
 ./bin/ai-server     -c ai-server/config.yaml
 ./bin/call-server   -c call-server/config.yaml
+./bin/admin-server  -c admin/admin-server/config.yaml
 ```
 
-访问 H5：`http://localhost:{user-server-port}/`。
+访问 H5：`http://localhost:9002/`。访问后台：`http://localhost:9010/admin/`；本机 HTTP 开发需把 `admin.cookie_secure` 设为 `false`。
 
-**完成标志：** 五个服务进程存活，H5 可登录、设备可上线绑定。
+**完成标志：** 六个服务进程存活，H5 可登录、设备可上线绑定，Admin 可登录并看到五个业务服务状态。
 
-**深入：** [deployment.md](deployment.md)（数据库、EMQX、微信公众平台、二次开发、测试）
+**深入：** [Admin Server 完整部署指南](admin/admin-server/README.md)；[deployment.md](deployment.md) 提供开发与部署速查。
 
 ---
 
@@ -664,7 +668,8 @@ bash build.sh
 
 所有 HTTP 接口的请求/返回字段、成功码、业务错误码、微信回调错误码统一维护在：
 
-- **[api-reference.md](api-reference.md)** — 按 `device-server / user-server / voip-server / ai-server / call-server` 分组，含错误码表。
+- **[api-reference.md](api-reference.md)** — 五个业务服务的接口与错误码。
+- **[admin/admin-server/API.md](admin/admin-server/API.md)** — Admin 登录、RBAC、配置和运维接口。
 
 各专题文档末尾的「问题排查」「协议速查」给出该能力的常见错误与定位；MQTT 断连原因码、TiRTC SDK 返回值约定见 [device-integration.md](device-integration.md)。
 

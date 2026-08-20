@@ -1,45 +1,44 @@
-# thing-connect 反向代理示例 —— 把 user-server、ai-server 和 call-server
-# 统一到同一个域名下，浏览器（H5 页面）全程同源访问。
-#
-# 部署时把下面三个 upstream 地址换成实际部署地址，域名换成自己的，然后：
-#   nginx -c /path/to/nginx.conf.example -t   # 先测语法
-#   把这段 server{} 合并进正式的 nginx 配置里
+# ThingConnect single-domain reverse-proxy example.
+# Replace the domain, certificate paths and upstream addresses before use.
+# When Nginx is on the same host, set trusted_proxies: ["127.0.0.1"] in every
+# service config so X-Forwarded-For is accepted only from this proxy.
 
-upstream user_server {
-    server 127.0.0.1:9002;
-}
-
-upstream ai_server {
-    server 127.0.0.1:9004;
-}
-
-upstream call_server {
-    server 127.0.0.1:9005;
-}
+upstream device_server { server 127.0.0.1:9001; }
+upstream user_server   { server 127.0.0.1:9002; }
+upstream voip_server   { server 127.0.0.1:9003; }
+upstream ai_server     { server 127.0.0.1:9004; }
+upstream call_server   { server 127.0.0.1:9005; }
+upstream admin_server  { server 127.0.0.1:9010; }
 
 server {
     listen 80;
     server_name your-domain.example.com;
+    return 301 https://$host$request_uri;
+}
 
-    # call-server 的所有对外接口均位于 /v1/call/ 下，
-    # 包括接听接口 /v1/call/device/info。
-    location /v1/call/ {
-        proxy_pass http://call_server;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
+server {
+    listen 443 ssl http2;
+    server_name your-domain.example.com;
 
-    # 智能体管理页面及其 API。
-    location /v1/ai/ {
-        proxy_pass http://ai_server;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
+    ssl_certificate     /etc/letsencrypt/live/your-domain.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/your-domain.example.com/privkey.pem;
+    client_max_body_size 12m;
 
-    # 剩下全部走 user-server：H5 静态页面和 /v1/user/*、/v1/config/*。
-    location / {
-        proxy_pass http://user_server;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+
+    location = /admin { return 301 /admin/; }
+    location /admin/ { proxy_pass http://admin_server; }
+    location /v1/admin/ { proxy_pass http://admin_server; }
+
+    location /v1/device/ { proxy_pass http://device_server; }
+    location /v1/voip/ { proxy_pass http://voip_server; }
+    location /v1/ai/ { proxy_pass http://ai_server; }
+    location /v1/call/ { proxy_pass http://call_server; }
+
+    # Public H5 pages and /v1/user/*, /v1/config/* are served by user-server.
+    location / { proxy_pass http://user_server; }
 }

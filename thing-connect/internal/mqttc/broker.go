@@ -48,10 +48,16 @@ func New(cfg config.MQTTCfg, rdb *redis.Client) (*Broker, error) {
 	var clientID, username string
 	switch cfg.AuthMode() {
 	case "username":
-		// username auth: fixed username, ClientID gets hostname suffix for multi-instance safety
+		// username auth: fixed username, ClientID gets an operator-controlled
+		// instance suffix. SERVICE_INSTANCE_ID is required when more than one
+		// copy of the same service runs on the same host.
 		hostname, _ := os.Hostname()
 		username = cfg.Username
-		clientID = cfg.Username + "-" + hostname
+		instanceID := strings.TrimSpace(os.Getenv("SERVICE_INSTANCE_ID"))
+		if instanceID == "" {
+			instanceID = hostname
+		}
+		clientID = cfg.Username + "-" + instanceID
 	default: // clientid
 		// clientid auth: fixed ClientID configured explicitly, username mirrors it
 		clientID = cfg.ClientID
@@ -115,7 +121,7 @@ func (b *Broker) handleSystemEvent(_ mqtt.Client, msg mqtt.Message) {
 		// Set instead of Expire so a broker-service restart can reconstruct
 		// presence from the next heartbeat even when the MQTT connection itself
 		// stays up and no new $SYS connected event is emitted.
-		b.rdb.Set(ctx, "online:"+parts[1], "1", onlineTTL)
+		b.rdb.Set(ctx, "online:"+parts[1], presenceValue(time.Now()), onlineTTL)
 		return
 	}
 
@@ -127,7 +133,7 @@ func (b *Broker) handleSystemEvent(_ mqtt.Client, msg mqtt.Message) {
 	key := "online:" + clientID
 	switch parts[5] {
 	case "connected":
-		b.rdb.Set(ctx, key, "1", onlineTTL)
+		b.rdb.Set(ctx, key, presenceValue(time.Now()), onlineTTL)
 	case "disconnected":
 		b.rdb.Del(ctx, key)
 	}
@@ -154,21 +160,35 @@ func (b *Broker) handleMessage(_ mqtt.Client, msg mqtt.Message) {
 // IsOnline checks device online status via Redis cache.
 func (b *Broker) IsOnline(ctx context.Context, clientID string) bool {
 	val, err := b.rdb.Get(ctx, "online:"+clientID).Result()
-	return err == nil && val == "1"
+	return err == nil && val != ""
+}
+
+func presenceValue(now time.Time) string {
+	return now.UTC().Format(time.RFC3339Nano)
+}
+
+// Ping reports whether this service instance currently has an open MQTT
+// connection. It matches servicestatus.DependencyProbe without coupling the
+// MQTT package to the status package.
+func (b *Broker) Ping(context.Context) error {
+	if b == nil || b.client == nil || !b.client.IsConnectionOpen() {
+		return errors.New("mqttc: connection is not open")
+	}
+	return nil
 }
 
 // Publish sends a message to a topic.
 func (b *Broker) Publish(topic string, qos byte, payload any) error {
 	data, err := json.Marshal(payload)
 	if err != nil {
-		return fmt.Errorf("%w: marshal: %v", ErrPublishFailed, err)
+		return fmt.Errorf("%w: marshal: %w", ErrPublishFailed, err)
 	}
 	tok := b.client.Publish(topic, qos, false, data)
 	if !tok.WaitTimeout(5 * time.Second) {
 		return ErrPublishTimeout
 	}
 	if err := tok.Error(); err != nil {
-		return fmt.Errorf("%w: %v", ErrPublishFailed, err)
+		return fmt.Errorf("%w: %w", ErrPublishFailed, err)
 	}
 	return nil
 }
@@ -193,7 +213,7 @@ func (b *Broker) PublishAndWaitACK(downTopic, ackTopic string, payload any, time
 	tok.Wait()
 	slog.Debug("mqttc subscribe ack", "ack_topic", ackTopic, "err", tok.Error())
 	if err := tok.Error(); err != nil {
-		return fmt.Errorf("%w: %v", ErrSubscribeFailed, err)
+		return fmt.Errorf("%w: %w", ErrSubscribeFailed, err)
 	}
 
 	if err := b.Publish(downTopic, 1, payload); err != nil {

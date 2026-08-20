@@ -21,6 +21,18 @@
     "captcha": {
       "version": "1.4.1",
       "provider": "wxb7c8f9ea9ceb4663"
+    },
+    "tencentCaptcha": {
+      "version": "2.1.4",
+      "provider": "wx1fe8d9a3cb067a75"
+    },
+    "captcha4": {
+      "version": "2.7.5",
+      "provider": "wx1629d117cf9be937"
+    },
+    "AliyunCaptcha": {
+      "version": "3.0.0",
+      "provider": "wxbe275ff84246f1a4"
     }
   }
 }

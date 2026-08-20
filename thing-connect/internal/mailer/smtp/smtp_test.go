@@ -46,6 +46,25 @@ func TestBuildMessageEncodesUTF8Subject(t *testing.T) {
 	}
 }
 
+func TestBuildAlternativeMessageContainsTextAndHTML(t *testing.T) {
+	messageBytes, err := buildAlternativeMessage(
+		"noreply@example.com",
+		"user@example.com",
+		"验证码",
+		"验证码：123456",
+		"<p>验证码：<b>123456</b></p>",
+	)
+	if err != nil {
+		t.Fatalf("buildAlternativeMessage returned error: %v", err)
+	}
+	message := string(messageBytes)
+	for _, expected := range []string{"Content-Type: multipart/alternative", "Content-Type: text/plain", "Content-Type: text/html"} {
+		if !strings.Contains(message, expected) {
+			t.Fatalf("message does not contain %q", expected)
+		}
+	}
+}
+
 func TestSendHonorsContextDeadline(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

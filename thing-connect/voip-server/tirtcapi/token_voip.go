@@ -135,4 +135,3 @@ func PostTokenService(ctx context.Context, client *http.Client, baseURL, accessI
 	}
 	return data.PeerID, data.Token, nil
 }
-

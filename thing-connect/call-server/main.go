@@ -17,9 +17,12 @@ import (
 	"thing-connect/internal/cache"
 	"thing-connect/internal/config"
 	"thing-connect/internal/db"
+	"thing-connect/internal/dynamicconfig"
 	"thing-connect/internal/logging"
 	"thing-connect/internal/mqttc"
+	"thing-connect/internal/servicestatus"
 	mysqlstore "thing-connect/internal/store/mysql"
+	"thing-connect/internal/userauth"
 )
 
 func main() {
@@ -48,9 +51,38 @@ func main() {
 	devStore := mysqlstore.NewDeviceStore(sqlDB)
 
 	r := gin.New()
+	if err := r.SetTrustedProxies(cfg.Server.TrustedProxies); err != nil {
+		log.Fatalf("trusted proxies: %v", err)
+	}
 	r.Use(gin.Recovery(), logging.RequestID("call"), logging.BodyLog(), gin.Logger())
+	r.Use(userauth.EnforceState(sqlDB, cfg.JWTSecret))
+	probes := map[string]servicestatus.DependencyProbe{"database": servicestatus.SQLProbe(sqlDB), "redis": servicestatus.RedisProbe(rdb), "mqtt": broker.Ping}
+	servicestatus.RegisterHealth(r, probes)
 
-	callhandler.NewServer(cfg, sqlDB, rdb, broker, devStore).Register(r)
+	callHTTP := callhandler.NewServer(cfg, sqlDB, rdb, broker, devStore)
+	callHTTP.Register(r)
+	var dynamicClient *dynamicconfig.Client
+	var dynamicRefs []dynamicconfig.Ref
+	if cfg.Admin.ServerURL != "" {
+		dynamicClient, dynamicRefs, err = callDynamicConfig(cfg, rdb, callHTTP)
+		if err != nil {
+			log.Printf("dynamic config disabled: %v", err)
+			dynamicClient = nil
+		}
+	}
+	statusCtx, statusCancel := context.WithCancel(context.Background())
+	if dynamicClient != nil {
+		go dynamicClient.Run(statusCtx, dynamicRefs)
+	}
+	var revisions func() map[string]int64
+	if dynamicClient != nil {
+		revisions = dynamicClient.Revisions
+	}
+	reporter, err := servicestatus.NewReporter(rdb, "call-server", probes, revisions)
+	if err != nil {
+		log.Fatalf("service status: %v", err)
+	}
+	go reporter.Run(statusCtx)
 
 	addr := fmt.Sprintf(":%d", cfg.Server.HTTPPort)
 	srv := &http.Server{
@@ -78,8 +110,13 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("call-server shutdown: %v", err)
 	}
+	statusCancel()
 	broker.Close()
-	rdb.Close()
-	sqlDB.Close()
+	if err := rdb.Close(); err != nil {
+		log.Printf("call-server close redis: %v", err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		log.Printf("call-server close database: %v", err)
+	}
 	log.Printf("call-server stopped")
 }

@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -30,7 +31,7 @@ type room struct {
 }
 
 func (s *Server) roomTTL() time.Duration {
-	return time.Duration(s.cfg.Service.RoomTTLHours) * time.Hour
+	return time.Duration(s.Config().Service.RoomTTLHours) * time.Hour
 }
 
 // createRoom persists the room hash and pre-marks offlineTargets as rejected
@@ -73,7 +74,7 @@ func (s *Server) getRoom(ctx context.Context, roomID string) (*room, error) {
 		return nil, fmt.Errorf("getRoom: %w", err)
 	}
 	if len(res) == 0 {
-		return nil, nil
+		return nil, nil //nolint:nilnil // An absent Redis hash means the optional room does not exist.
 	}
 	var targets []string
 	if err := json.Unmarshal([]byte(res["targets"]), &targets); err != nil {
@@ -102,7 +103,7 @@ func (s *Server) acquireLock(ctx context.Context, deviceID, roomID string) (ok b
 		return true, "", nil
 	}
 	existing, err := s.rdb.Get(ctx, lockKey(deviceID)).Result()
-	if err != nil && err != redis.Nil {
+	if err != nil && !errors.Is(err, redis.Nil) {
 		return false, "", fmt.Errorf("acquireLock: get existing: %w", err)
 	}
 	return false, existing, nil

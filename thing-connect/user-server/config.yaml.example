@@ -1,5 +1,6 @@
 server:
   http_port: 9002
+  trusted_proxies: []  # Add only the reverse-proxy CIDRs that set client IP headers.
 
 log:
   level: info  # debug|info|warn|error
@@ -26,15 +27,17 @@ jwt_secret: "replace-with-a-strong-random-secret"
 
 # 业务参数（全部可选，缺省使用括号内默认值）
 service:
-  quota_per_user: 10        # 兼容字段；当前注册不读取，配额来自 users.bind_quota 默认值
-  code_ttl: 190s            # 验证码有效期（默认 190s）
+  quota_per_user: 10        # 新注册用户的默认设备绑定额度
+  code_ttl: 5m              # 邮件验证码启动默认值；发布 email.code_ttl 后由后台接管
   rate_limit_window: 190s   # 设备上报限频窗口（默认 190s）
   rate_limit_max_hits: 10   # 设备上报窗口内最大请求数（默认 10）
   token_expiry: 168h        # JWT 有效期（默认 7 天）
   mqtt_ack_timeout: 5s      # MQTT 下发等待 ACK 超时（默认 5s）
 
 internal:
-  key: "your-internal-service-key" # 服务间解绑清理接口共用的 X-Internal-Key
+  key: "replace-with-an-internal-key-at-least-32-characters" # 服务间接口与动态配置读取共用
+admin:
+  server_url: "http://127.0.0.1:9010"
 
 call:
   server_url: "http://127.0.0.1:9005"
@@ -45,17 +48,56 @@ ai:
 voip:
   server_url: "http://127.0.0.1:9003"
 
-yidun:
-  captcha_id: "replace-with-captcha-id"
-  secret_id: "replace-with-secret-id"
-  secret_key: "replace-with-secret-key"
+# 设备启动服务发现。生产环境启用后填写设备实际可访问的公网地址。
+discovery:
+  enabled: false
+  device_server_url: "https://your-domain.example.com"
+  user_server_url: "https://your-domain.example.com"
+  voip_server_url: "https://your-domain.example.com"
+  ai_server_url: "https://your-domain.example.com"
+  call_server_url: "https://your-domain.example.com"
+  mqtt_url: "mqtts://mqtt.example.com:8883"
+  tirtc_endpoint: "https://your-tirtc-endpoint"
+
+captcha:
+  # 留空表示禁用；启用时填写 yidun、geetest、aliyun 或 tencent。
+  provider: ""
+  providers:
+    # yidun:
+    #   captcha_id: "replace-with-captcha-id"
+    #   secret_id: "replace-with-secret-id"
+    #   secret_key: "replace-with-secret-key"
+    # geetest:
+    #   captcha_id: "replace-with-web-captcha-id"
+    #   secret_key: "replace-with-web-captcha-key"
+    #   mini_program_secret_key: "replace-with-mini-program-captcha-key"
+    #   public_config:
+    #     mini_program_captcha_id: "replace-with-mini-program-captcha-id"
+    # aliyun:
+    #   captcha_id: "replace-with-web-scene-id"
+    #   secret_id: "replace-with-ram-access-key-id"
+    #   secret_key: "replace-with-ram-access-key-secret"
+    #   public_config:
+    #     prefix: "replace-with-captcha-instance-prefix"
+    #     region: "cn" # cn 或 sgp
+    #     mini_program_captcha_id: "replace-with-mini-program-scene-id"
+    # tencent:
+    #   captcha_id: "replace-with-web-captcha-app-id"
+    #   secret_id: "replace-with-cloud-api-secret-id"
+    #   secret_key: "replace-with-cloud-api-secret-key"
+    #   app_secret_key: "replace-with-web-app-secret-key"
+    #   mini_program_secret_key: "replace-with-mini-program-app-secret-key"
+    #   public_config:
+    #     mini_program_captcha_id: "replace-with-mini-program-captcha-app-id"
 
 smtp:
-  host: "smtp.example.com"
+  # host 留空时邮件验证码写入服务日志，仅适用于本地开发。
+  host: ""
   port: 465
-  username: "no-reply@example.com"
-  password: "replace-with-smtp-password"
-  from: "no-reply@example.com"
+  tls_mode: "auto" # auto、implicit_tls 或 starttls
+  username: ""
+  password: ""
+  from: ""
 
 tirtc:
   app_id: "replace-with-app-id"

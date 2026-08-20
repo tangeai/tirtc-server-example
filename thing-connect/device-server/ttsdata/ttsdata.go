@@ -58,8 +58,8 @@ func WAV(pcm []byte) []byte {
 
 	// fmt chunk
 	copy(out[12:16], "fmt ")
-	binary.LittleEndian.PutUint32(out[16:20], 16)          // chunk size
-	binary.LittleEndian.PutUint16(out[20:22], 1)            // PCM format
+	binary.LittleEndian.PutUint32(out[16:20], 16) // chunk size
+	binary.LittleEndian.PutUint16(out[20:22], 1)  // PCM format
 	binary.LittleEndian.PutUint16(out[22:24], PCMChannels)
 	binary.LittleEndian.PutUint32(out[24:28], PCMRate)
 	binary.LittleEndian.PutUint32(out[28:32], uint32(byteRate))

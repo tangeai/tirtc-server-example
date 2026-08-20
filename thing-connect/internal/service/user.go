@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/big"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -56,6 +57,19 @@ type UserService struct {
 	passwordResetEmailQueue PasswordResetEmailQueue
 	jwtSecret               string
 	cfg                     ServiceConfig
+	runtimeMu               sync.RWMutex
+	templates               map[string]EmailTemplate
+	emailSendWindow         time.Duration
+	emailSendMaxPerEmail    int
+	emailSendMaxPerIP       int
+	defaultBindQuota        int
+}
+
+type EmailTemplate struct {
+	Enabled  bool
+	Subject  string
+	HTMLBody string
+	TextBody string
 }
 
 // PasswordResetEmailQueue accepts a public reset request for asynchronous
@@ -69,9 +83,9 @@ const (
 	passwordResetMailQueueSize = 256
 	passwordResetMailWorkers   = 2
 
-	passwordResetSendCodeWindow       = time.Minute
-	passwordResetSendEmailMaxAttempts = 1
-	passwordResetSendIPMaxAttempts    = 10
+	defaultEmailSendWindow      = 15 * time.Minute
+	defaultEmailSendMaxPerEmail = 5
+	defaultEmailSendMaxPerIP    = 20
 )
 
 // InMemoryPasswordResetEmailQueue keeps the public request path independent
@@ -151,13 +165,70 @@ func NewUserService(
 	cfg ServiceConfig,
 ) *UserService {
 	return &UserService{
-		user:      user,
-		cache:     cache,
-		captcha:   captcha,
-		mailer:    mailer,
-		jwtSecret: jwtSecret,
-		cfg:       cfg,
+		user:                 user,
+		cache:                cache,
+		captcha:              captcha,
+		mailer:               mailer,
+		jwtSecret:            jwtSecret,
+		cfg:                  cfg,
+		templates:            map[string]EmailTemplate{},
+		emailSendWindow:      defaultEmailSendWindow,
+		emailSendMaxPerEmail: defaultEmailSendMaxPerEmail,
+		emailSendMaxPerIP:    defaultEmailSendMaxPerIP,
+		defaultBindQuota:     cfg.QuotaPerUser,
 	}
+}
+
+func (s *UserService) UpdateCaptcha(value captcha.Verifier) {
+	s.runtimeMu.Lock()
+	s.captcha = value
+	s.runtimeMu.Unlock()
+}
+
+func (s *UserService) UpdateMailer(value mailer.Mailer) {
+	s.runtimeMu.Lock()
+	s.mailer = value
+	s.runtimeMu.Unlock()
+}
+
+func (s *UserService) UpdateEmailCodeTTL(value time.Duration) {
+	s.runtimeMu.Lock()
+	s.cfg.CodeTTL = value
+	s.runtimeMu.Unlock()
+}
+
+func (s *UserService) UpdateTokenTTL(value time.Duration) {
+	s.runtimeMu.Lock()
+	s.cfg.TokenExpiry = value
+	s.runtimeMu.Unlock()
+}
+
+func (s *UserService) UpdateDefaultBindQuota(value int) {
+	s.runtimeMu.Lock()
+	s.defaultBindQuota = value
+	s.runtimeMu.Unlock()
+}
+
+func (s *UserService) UpdateEmailRateLimit(window time.Duration, maxPerEmail, maxPerIP int) {
+	s.runtimeMu.Lock()
+	s.emailSendWindow, s.emailSendMaxPerEmail, s.emailSendMaxPerIP = window, maxPerEmail, maxPerIP
+	s.runtimeMu.Unlock()
+}
+
+func (s *UserService) UpdateEmailTemplate(key string, value EmailTemplate) {
+	s.runtimeMu.Lock()
+	s.templates[key] = value
+	s.runtimeMu.Unlock()
+}
+
+func (s *UserService) runtimeSnapshot() (captcha.Verifier, mailer.Mailer, ServiceConfig, map[string]EmailTemplate, time.Duration, int, int) {
+	s.runtimeMu.RLock()
+	defer s.runtimeMu.RUnlock()
+	templates := make(map[string]EmailTemplate, len(s.templates))
+	for key, value := range s.templates {
+		templates[key] = value
+	}
+	return s.captcha, s.mailer, s.cfg, templates, s.emailSendWindow, s.emailSendMaxPerEmail, s.emailSendMaxPerIP
 }
 
 // SetPasswordResetEmailQueue enables asynchronous reset-email delivery. It
@@ -166,14 +237,19 @@ func (s *UserService) SetPasswordResetEmailQueue(queue PasswordResetEmailQueue) 
 	s.passwordResetEmailQueue = queue
 }
 
-// SendCode verifies the captcha token, then sends a 6-digit email code.
+// SendCode verifies the captcha token, applies the shared email/IP send limit,
+// then sends a 6-digit registration code.
 // The code is stored in Redis under key "email_code:{email}" with TTL = cfg.CodeTTL.
-func (s *UserService) SendCode(ctx context.Context, email string, tok captcha.CaptchaToken) error {
+func (s *UserService) SendCode(ctx context.Context, email, clientIP string, tok captcha.CaptchaToken) error {
 	email = normalizeEmail(email)
-	if err := s.captcha.Verify(ctx, tok); err != nil {
+	verifier, _, _, _, _, _, _ := s.runtimeSnapshot()
+	if err := verifier.Verify(ctx, tok); err != nil {
 		return ErrCaptchaFailed
 	}
-	return s.sendEmailCode(ctx, email, email, registrationCodeEmail)
+	if err := s.limitEmailCodeSend(ctx, email, clientIP); err != nil {
+		return err
+	}
+	return s.sendEmailCode(ctx, email, email, "registration", registrationCodeEmail)
 }
 
 // SendPasswordResetCode validates and rate-limits the public request, then queues it for
@@ -182,10 +258,11 @@ func (s *UserService) SendCode(ctx context.Context, email string, tok captcha.Ca
 // registered.
 func (s *UserService) SendPasswordResetCode(ctx context.Context, email, clientIP string, tok captcha.CaptchaToken) error {
 	email = normalizeEmail(email)
-	if err := s.captcha.Verify(ctx, tok); err != nil {
+	verifier, _, _, _, _, _, _ := s.runtimeSnapshot()
+	if err := verifier.Verify(ctx, tok); err != nil {
 		return ErrCaptchaFailed
 	}
-	if err := s.limitPasswordResetSendCode(ctx, email, clientIP); err != nil {
+	if err := s.limitEmailCodeSend(ctx, email, clientIP); err != nil {
 		return err
 	}
 	if s.passwordResetEmailQueue == nil {
@@ -212,17 +289,19 @@ func (s *UserService) DeliverPasswordResetCode(ctx context.Context, email string
 	if user == nil {
 		return nil
 	}
-	return s.sendEmailCode(ctx, email, passwordResetCodeKey(email), passwordResetCodeEmail)
+	return s.sendEmailCode(ctx, email, passwordResetCodeKey(email), "password_reset", passwordResetCodeEmail)
 }
 
 type emailCodeMessage struct {
 	subject string
 	body    string
+	html    string
 }
 
 func (s *UserService) sendEmailCode(
 	ctx context.Context,
 	email, cacheKey string,
+	templateKey string,
 	buildMessage func(code string, ttl time.Duration) emailCodeMessage,
 ) error {
 	n, err := rand.Int(rand.Reader, big.NewInt(1000000))
@@ -230,14 +309,28 @@ func (s *UserService) sendEmailCode(
 		return fmt.Errorf("service.SendCode rand: %w", err)
 	}
 	code := fmt.Sprintf("%06d", n.Int64())
-	if err := s.cache.SetEmailCode(ctx, cacheKey, code, s.cfg.CodeTTL); err != nil {
+	_, activeMailer, cfg, templates, _, _, _ := s.runtimeSnapshot()
+	if err := s.cache.SetEmailCode(ctx, cacheKey, code, cfg.CodeTTL); err != nil {
 		return fmt.Errorf("service.SendCode SetEmailCode: %w", err)
 	}
 
-	message := buildMessage(code, s.cfg.CodeTTL)
-	if err := s.mailer.Send(ctx, email, message.subject, message.body); err != nil {
+	message := buildMessage(code, cfg.CodeTTL)
+	if template, ok := templates[templateKey]; ok {
+		if !template.Enabled {
+			_ = s.cache.DelEmailCode(ctx, cacheKey)
+			return errors.New("email template is disabled")
+		}
+		message = renderEmailTemplate(template, code, cfg.CodeTTL)
+	}
+	var sendErr error
+	if richMailer, ok := activeMailer.(mailer.RichMailer); ok && strings.TrimSpace(message.html) != "" {
+		sendErr = richMailer.SendMessage(ctx, email, message.subject, message.body, message.html)
+	} else {
+		sendErr = activeMailer.Send(ctx, email, message.subject, message.body)
+	}
+	if sendErr != nil {
 		_ = s.cache.DelEmailCode(ctx, cacheKey)
-		return fmt.Errorf("service.SendCode Send: %w", err)
+		return fmt.Errorf("service.SendCode Send: %w", sendErr)
 	}
 	return nil
 }
@@ -287,6 +380,25 @@ func formatCodeTTL(ttl time.Duration) string {
 	return fmt.Sprintf("%d 分 %d 秒", minutes, seconds)
 }
 
+func renderEmailTemplate(template EmailTemplate, code string, ttl time.Duration) emailCodeMessage {
+	minutes := int((ttl + time.Minute - 1) / time.Minute)
+	replacements := map[string]string{"code": code, "expires_in_minutes": fmt.Sprint(minutes), "product_name": emailSource, "support_email": ""}
+	render := func(value string) string {
+		return emailTemplateToken.ReplaceAllStringFunc(value, func(token string) string {
+			parts := emailTemplateToken.FindStringSubmatch(token)
+			return replacements[parts[1]]
+		})
+	}
+	textBody := render(template.TextBody)
+	htmlBody := render(template.HTMLBody)
+	if textBody == "" {
+		textBody = htmlBody
+	}
+	return emailCodeMessage{subject: render(template.Subject), body: textBody, html: htmlBody}
+}
+
+var emailTemplateToken = regexp.MustCompile(`\{\{\s*(code|expires_in_minutes|product_name|support_email)\s*\}\}`)
+
 func normalizeEmail(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
 }
@@ -298,19 +410,20 @@ const (
 	passwordResetIPMaxAttempts    = 20
 )
 
-func (s *UserService) limitPasswordResetSendCode(ctx context.Context, email, clientIP string) error {
-	emailAttempts, err := s.cache.IncrPasswordResetAttempt(ctx, "send:email:"+email, passwordResetSendCodeWindow)
+func (s *UserService) limitEmailCodeSend(ctx context.Context, email, clientIP string) error {
+	_, _, _, _, window, maxEmail, maxIP := s.runtimeSnapshot()
+	emailAttempts, err := s.cache.IncrRateLimitAttempt(ctx, "email-code:send:email:"+email, window)
 	if err != nil {
-		return fmt.Errorf("service.SendPasswordResetCode email rate limit: %w", err)
+		return fmt.Errorf("service email-code send email rate limit: %w", err)
 	}
-	if emailAttempts > passwordResetSendEmailMaxAttempts {
+	if emailAttempts > int64(maxEmail) {
 		return ErrRateLimit
 	}
-	ipAttempts, err := s.cache.IncrPasswordResetAttempt(ctx, "send:ip:"+clientIP, passwordResetSendCodeWindow)
+	ipAttempts, err := s.cache.IncrRateLimitAttempt(ctx, "email-code:send:ip:"+strings.TrimSpace(clientIP), window)
 	if err != nil {
-		return fmt.Errorf("service.SendPasswordResetCode IP rate limit: %w", err)
+		return fmt.Errorf("service email-code send IP rate limit: %w", err)
 	}
-	if ipAttempts > passwordResetSendIPMaxAttempts {
+	if ipAttempts > int64(maxIP) {
 		return ErrRateLimit
 	}
 	return nil
@@ -341,7 +454,10 @@ func (s *UserService) Register(ctx context.Context, email, password, code string
 		return "", 0, fmt.Errorf("service.Register bcrypt: %w", err)
 	}
 
-	userID, err := s.user.CreateUser(ctx, email, string(hash))
+	s.runtimeMu.RLock()
+	defaultQuota := s.defaultBindQuota
+	s.runtimeMu.RUnlock()
+	userID, err := s.user.CreateUser(ctx, email, string(hash), defaultQuota)
 	if err != nil {
 		return "", 0, fmt.Errorf("service.Register CreateUser: %w", err)
 	}
@@ -349,7 +465,7 @@ func (s *UserService) Register(ctx context.Context, email, password, code string
 	// Consume the code (best-effort; ignore error).
 	_ = s.cache.DelEmailCode(ctx, email)
 
-	tok, err := s.issueJWT(userID)
+	tok, err := s.issueJWT(userID, 1)
 	if err != nil {
 		return "", 0, fmt.Errorf("service.Register issueJWT: %w", err)
 	}
@@ -359,7 +475,8 @@ func (s *UserService) Register(ctx context.Context, email, password, code string
 // Login verifies the captcha token, then authenticates the user.
 func (s *UserService) Login(ctx context.Context, email, password string, tok captcha.CaptchaToken) (string, int64, error) {
 	email = normalizeEmail(email)
-	if err := s.captcha.Verify(ctx, tok); err != nil {
+	verifier, _, _, _, _, _, _ := s.runtimeSnapshot()
+	if err := verifier.Verify(ctx, tok); err != nil {
 		return "", 0, ErrCaptchaFailed
 	}
 
@@ -374,7 +491,10 @@ func (s *UserService) Login(ctx context.Context, email, password string, tok cap
 		return "", 0, ErrInvalidCreds
 	}
 
-	jwtTok, err := s.issueJWT(user.ID)
+	if user.Status != 1 {
+		return "", 0, ErrInvalidCreds
+	}
+	jwtTok, err := s.issueJWT(user.ID, user.AuthRevision)
 	if err != nil {
 		return "", 0, fmt.Errorf("service.Login issueJWT: %w", err)
 	}
@@ -413,14 +533,15 @@ func (s *UserService) ResetPassword(ctx context.Context, email, password, code, 
 }
 
 func (s *UserService) limitPasswordResetAttempts(ctx context.Context, email, clientIP string) error {
-	emailAttempts, err := s.cache.IncrPasswordResetAttempt(ctx, "email:"+email, s.cfg.CodeTTL)
+	_, _, cfg, _, _, _, _ := s.runtimeSnapshot()
+	emailAttempts, err := s.cache.IncrRateLimitAttempt(ctx, "password-reset:verify:email:"+email, cfg.CodeTTL)
 	if err != nil {
 		return fmt.Errorf("service.ResetPassword email rate limit: %w", err)
 	}
 	if emailAttempts > passwordResetEmailMaxAttempts {
 		return ErrRateLimit
 	}
-	ipAttempts, err := s.cache.IncrPasswordResetAttempt(ctx, "ip:"+clientIP, s.cfg.CodeTTL)
+	ipAttempts, err := s.cache.IncrRateLimitAttempt(ctx, "password-reset:verify:ip:"+clientIP, cfg.CodeTTL)
 	if err != nil {
 		return fmt.Errorf("service.ResetPassword IP rate limit: %w", err)
 	}
@@ -589,11 +710,13 @@ func voipRoomType(upVideoMT, downVideoMT string) string {
 	return "voice"
 }
 
-func (s *UserService) issueJWT(userID int64) (string, error) {
+func (s *UserService) issueJWT(userID, authRevision int64) (string, error) {
+	_, _, cfg, _, _, _, _ := s.runtimeSnapshot()
 	claims := jwt.MapClaims{
-		"user_id": userID,
-		"exp":     time.Now().Add(s.cfg.TokenExpiry).Unix(),
-		"iat":     time.Now().Unix(),
+		"user_id":       userID,
+		"auth_revision": authRevision,
+		"exp":           time.Now().Add(cfg.TokenExpiry).Unix(),
+		"iat":           time.Now().Unix(),
 	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	signed, err := tok.SignedString([]byte(s.jwtSecret))

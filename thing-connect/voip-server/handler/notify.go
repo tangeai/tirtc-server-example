@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -43,7 +44,7 @@ func (s *Server) IsVoipNotificationComplete(
 	ctx context.Context, wxAppID, roomID string,
 ) (bool, error) {
 	value, err := s.rdb.Get(ctx, voipNotificationKey(wxAppID, roomID)).Result()
-	if err == redis.Nil {
+	if errors.Is(err, redis.Nil) {
 		return false, nil
 	}
 	return value == voipNotificationComplete, err
@@ -86,7 +87,8 @@ func (s *Server) ReleaseOutgoingCallGuards(
 
 func (s *Server) notification(c *gin.Context) {
 	wxAppID := c.Param("wx_app_id")
-	app, ok := s.cfg.WxAppFor(wxAppID)
+	cfg := s.Config()
+	app, ok := cfg.WxAppFor(wxAppID)
 	if !ok {
 		c.JSON(200, gin.H{"errcode": 3, "errmsg": "未配置微信应用"})
 		return
@@ -100,10 +102,10 @@ func (s *Server) notification(c *gin.Context) {
 		ModelID:        app.ModelID,
 	}
 	tirtcCfg := wechat.TirtcServerCfg{
-		BaseURL:   s.cfg.Tirtc.Endpoint,
-		AccessID:  s.cfg.Tirtc.AccessKeyID,
-		AppID:     s.cfg.Tirtc.AppID,
-		SecretKey: s.cfg.Tirtc.SecretKeyID,
+		BaseURL:   cfg.Tirtc.Endpoint,
+		AccessID:  cfg.Tirtc.AccessKeyID,
+		AppID:     cfg.Tirtc.AppID,
+		SecretKey: cfg.Tirtc.SecretKeyID,
 	}
-	wechat.HandleNotification(c, wxAppID, appCfg, tirtcCfg, s.broker, s, s.cfg.ProxyEndpointFor)
+	wechat.HandleNotification(c, wxAppID, appCfg, tirtcCfg, s.broker, s, cfg.ProxyEndpointFor)
 }

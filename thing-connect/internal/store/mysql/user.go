@@ -3,6 +3,7 @@ package mysql
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/jmoiron/sqlx"
@@ -18,8 +19,8 @@ func NewUserStore(db *sqlx.DB) store.UserStore { return &userStore{db} }
 func (s *userStore) GetUserByEmail(ctx context.Context, email string) (*model.User, error) {
 	var u model.User
 	err := s.db.GetContext(ctx, &u, `SELECT * FROM users WHERE email=?`, email)
-	if err == sql.ErrNoRows {
-		return nil, nil
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil //nolint:nilnil // absence is the UserStore lookup contract
 	}
 	if err != nil {
 		return nil, fmt.Errorf("userStore.GetUserByEmail: %w", err)
@@ -27,9 +28,9 @@ func (s *userStore) GetUserByEmail(ctx context.Context, email string) (*model.Us
 	return &u, nil
 }
 
-func (s *userStore) CreateUser(ctx context.Context, email, passwordHash string) (int64, error) {
+func (s *userStore) CreateUser(ctx context.Context, email, passwordHash string, bindQuota int) (int64, error) {
 	res, err := s.db.ExecContext(ctx,
-		`INSERT INTO users (email, password) VALUES (?, ?)`, email, passwordHash)
+		`INSERT INTO users (email, password, bind_quota) VALUES (?, ?, ?)`, email, passwordHash, bindQuota)
 	if err != nil {
 		return 0, fmt.Errorf("userStore.CreateUser: %w", err)
 	}
@@ -42,7 +43,7 @@ func (s *userStore) CreateUser(ctx context.Context, email, passwordHash string) 
 
 func (s *userStore) UpdatePassword(ctx context.Context, userID int64, passwordHash string) error {
 	if _, err := s.db.ExecContext(ctx,
-		`UPDATE users SET password=? WHERE id=?`, passwordHash, userID); err != nil {
+		`UPDATE users SET password=?,auth_revision=auth_revision+1 WHERE id=?`, passwordHash, userID); err != nil {
 		return fmt.Errorf("userStore.UpdatePassword: %w", err)
 	}
 	return nil

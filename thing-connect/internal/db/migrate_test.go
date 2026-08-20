@@ -10,9 +10,7 @@ import (
 	"thing-connect/internal/testenv"
 )
 
-// TestIsIgnorableDDLError verifies which MySQL errors execIgnoreDup tolerates:
-// duplicate column (1060), duplicate key (1061), and — for production app
-// accounts without DDL grants — ALTER command denied (1142).
+// TestIsIgnorableDDLError verifies that only already-applied DDL is ignored.
 func TestIsIgnorableDDLError(t *testing.T) {
 	cases := []struct {
 		name string
@@ -22,7 +20,7 @@ func TestIsIgnorableDDLError(t *testing.T) {
 		{"nil", nil, false},
 		{"dup column 1060", &mysql.MySQLError{Number: 1060}, true},
 		{"dup key 1061", &mysql.MySQLError{Number: 1061}, true},
-		{"alter denied 1142", &mysql.MySQLError{Number: 1142}, true},
+		{"alter denied 1142", &mysql.MySQLError{Number: 1142}, false},
 		{"other mysql error", &mysql.MySQLError{Number: 1146}, false},
 		{"non-mysql error", errors.New("boom"), false},
 	}
@@ -60,5 +58,17 @@ func TestMigrateNewTables(t *testing.T) {
 	// Idempotency: calling Migrate a second time must not return an error.
 	if err := db.Migrate(sqlDB); err != nil {
 		t.Fatalf("Migrate (second call, idempotency check): %v", err)
+	}
+	if err := db.MigrateAdmin(sqlDB); err != nil {
+		t.Fatalf("MigrateAdmin: %v", err)
+	}
+	if err := sqlDB.Get(&n, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='admin_users'`); err != nil || n == 0 {
+		t.Errorf("admin_users table missing: n=%d err=%v", n, err)
+	}
+	if err := sqlDB.Get(&n, `SELECT COUNT(*) FROM schema_migrations WHERE component IN ('core','admin')`); err != nil || n != 3 {
+		t.Errorf("schema_migrations entries: n=%d err=%v", n, err)
+	}
+	if err := sqlDB.Get(&n, `SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='admin_jobs' AND column_name IN ('worker_id','lease_until')`); err != nil || n != 2 {
+		t.Errorf("admin job lease columns missing: n=%d err=%v", n, err)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -22,11 +23,29 @@ type fetchFn func(ctx context.Context, deviceID, roleID string) (peerID, token s
 
 // Server holds handler dependencies.
 type Server struct {
+	mu            sync.RWMutex
 	jwtSecret     string
 	defaultRoleID string
 	roleStore     store.RoleBindingStore
 	cache         *gocache.Cache
 	fetch         fetchFn
+}
+
+func (s *Server) UpdateRuntime(defaultRoleID, baseURL, accessKeyID, appID, secretKeyID string) {
+	client := &http.Client{Timeout: 10 * time.Second}
+	s.mu.Lock()
+	s.defaultRoleID = defaultRoleID
+	s.fetch = func(ctx context.Context, deviceID, roleID string) (string, string, int32, string, error) {
+		return aichatapi.PostTokenAichat(ctx, client, baseURL, accessKeyID, appID, secretKeyID, deviceID, roleID)
+	}
+	s.cache.Flush()
+	s.mu.Unlock()
+}
+
+func (s *Server) runtime() (string, fetchFn) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.defaultRoleID, s.fetch
 }
 
 // NewServer creates a production Server wired to the real upstream.
@@ -79,7 +98,7 @@ func (s *Server) getAIToken(c *gin.Context) {
 		return
 	}
 
-	roleID := s.defaultRoleID
+	roleID, fetch := s.runtime()
 	if s.roleStore != nil {
 		if bound, err := s.roleStore.GetDeviceRole(c.Request.Context(), deviceID); err == nil && bound != "" {
 			roleID = bound
@@ -94,7 +113,7 @@ func (s *Server) getAIToken(c *gin.Context) {
 
 	// No singleflight: concurrent cache misses for the same key each call upstream.
 	// Acceptable for current scale; add golang.org/x/sync/singleflight if needed.
-	peerID, token, upstreamCode, upstreamMsg, err := s.fetch(c.Request.Context(), deviceID, roleID)
+	peerID, token, upstreamCode, upstreamMsg, err := fetch(c.Request.Context(), deviceID, roleID)
 	if err != nil {
 		slog.WarnContext(c.Request.Context(), "fetch AI chat token failed", "device_id", deviceID, "err", err)
 		c.JSON(http.StatusOK, apiresp.JSON{Code: -1, Msg: "获取 AI 会话凭证失败：AI 云服务请求异常，请稍后重试"})

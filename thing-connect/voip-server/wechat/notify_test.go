@@ -208,7 +208,7 @@ func TestPushJoinToDevice_ForwardsMediaFormats(t *testing.T) {
 	appCfg := WxAppCfg{ModelID: "model"}
 	msg := &voipMessage{
 		SessionKey:  "sk",
-		RoomId:      "room",
+		RoomID:      "room",
 		ServerToken: "st",
 		OpenID:      "openid",
 		PayloadData: &voipCallPayload{
@@ -279,7 +279,7 @@ func TestPushJoinToDevice_LegacyVideoMt(t *testing.T) {
 
 	tirtcCfg := TirtcServerCfg{BaseURL: srv.URL, AccessID: "id", AppID: "app", SecretKey: "secret"}
 	appCfg := WxAppCfg{ModelID: "model"}
-	msg := &voipMessage{SessionKey: "sk", RoomId: "room", ServerToken: "st", OpenID: "openid"}
+	msg := &voipMessage{SessionKey: "sk", RoomID: "room", ServerToken: "st", OpenID: "openid"}
 
 	if err := pushJoinToDevice(c, appCfg, tirtcCfg, "wxapp", "dev2", msg, &pub, &prof); err != nil {
 		t.Fatalf("pushJoinToDevice: %v", err)

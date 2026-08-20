@@ -16,8 +16,11 @@ import (
 	"thing-connect/internal/cache"
 	"thing-connect/internal/config"
 	"thing-connect/internal/db"
+	"thing-connect/internal/dynamicconfig"
 	"thing-connect/internal/logging"
 	"thing-connect/internal/mqttc"
+	"thing-connect/internal/servicestatus"
+	"thing-connect/internal/userauth"
 	"thing-connect/voip-server/handler"
 )
 
@@ -49,9 +52,40 @@ func main() {
 	}
 
 	r := gin.New()
+	if err := r.SetTrustedProxies(cfg.Server.TrustedProxies); err != nil {
+		slog.Error("invalid trusted proxies", "err", err)
+		os.Exit(1)
+	}
 	r.Use(gin.Recovery(), logging.RequestID("voip"), logging.BodyLog(), gin.Logger())
+	r.Use(userauth.EnforceState(sqlDB, cfg.JWTSecret))
+	probes := map[string]servicestatus.DependencyProbe{"database": servicestatus.SQLProbe(sqlDB), "redis": servicestatus.RedisProbe(rdb), "mqtt": broker.Ping}
+	servicestatus.RegisterHealth(r, probes)
 
-	handler.NewServer(cfg, sqlDB, rdb, broker).Register(r)
+	voipHTTP := handler.NewServer(cfg, sqlDB, rdb, broker)
+	voipHTTP.Register(r)
+	var dynamicClient *dynamicconfig.Client
+	var dynamicRefs []dynamicconfig.Ref
+	if cfg.Admin.ServerURL != "" {
+		dynamicClient, dynamicRefs, err = voipDynamicConfig(cfg, rdb, voipHTTP)
+		if err != nil {
+			slog.Warn("dynamic config disabled", "err", err)
+			dynamicClient = nil
+		}
+	}
+	statusCtx, statusCancel := context.WithCancel(context.Background())
+	if dynamicClient != nil {
+		go dynamicClient.Run(statusCtx, dynamicRefs)
+	}
+	var revisions func() map[string]int64
+	if dynamicClient != nil {
+		revisions = dynamicClient.Revisions
+	}
+	reporter, err := servicestatus.NewReporter(rdb, "voip-server", probes, revisions)
+	if err != nil {
+		slog.Error("service status init failed", "err", err)
+		os.Exit(1)
+	}
+	go reporter.Run(statusCtx)
 
 	addr := fmt.Sprintf(":%d", cfg.Server.HTTPPort)
 	srv := &http.Server{
@@ -80,8 +114,13 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("voip-server shutdown", "err", err)
 	}
+	statusCancel()
 	broker.Close()
-	rdb.Close()
-	sqlDB.Close()
+	if err := rdb.Close(); err != nil {
+		slog.Error("voip-server close redis", "err", err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		slog.Error("voip-server close database", "err", err)
+	}
 	slog.Info("voip-server stopped")
 }

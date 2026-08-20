@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync/atomic"
 	"time"
 
 	"thing-connect/internal/model"
@@ -27,12 +28,17 @@ type BindService struct {
 	bind  store.BindStore
 	cache store.CacheStore
 	mqtt  MQTTPublisher // nil = no MQTT (test / offline mode)
-	cfg   ServiceConfig
+	cfg   atomic.Value
 }
 
 func NewBindService(bind store.BindStore, cache store.CacheStore, mqtt MQTTPublisher, cfg ServiceConfig) *BindService {
-	return &BindService{bind: bind, cache: cache, mqtt: mqtt, cfg: cfg}
+	service := &BindService{bind: bind, cache: cache, mqtt: mqtt}
+	service.cfg.Store(cfg)
+	return service
 }
+
+func (s *BindService) Config() ServiceConfig          { return s.cfg.Load().(ServiceConfig) }
+func (s *BindService) UpdateConfig(cfg ServiceConfig) { s.cfg.Store(cfg) }
 
 // Bind processes a scan-code flow (no device_id).
 // Implements cases B, D, A from design §3.1.
@@ -457,7 +463,7 @@ func (s *BindService) notifyBindSuccess(ctx context.Context, deviceID, mac strin
 	// Empty payload — device proved credential ownership via signed report.
 	// It calls /token with its device_key to get a permanent JWT after receiving
 	// this confirmation signal.
-	s.publishAndKick(ctx, tempClientID, "", "")
+	_ = s.publishAndKick(ctx, tempClientID, "", "")
 	s.cache.DelPendingBind(ctx, deviceID)       //nolint:errcheck
 	s.cache.DelReportFingerprint(ctx, deviceID) //nolint:errcheck
 }
@@ -475,7 +481,7 @@ func (s *BindService) publishAndKick(ctx context.Context, tempClientID, deviceID
 	if deviceID != "" {
 		payload["payload"] = map[string]string{"device_id": deviceID, "device_key": deviceKey}
 	}
-	err := s.mqtt.PublishAndWaitACK("device/"+tempClientID+"/cmd", "device/"+tempClientID+"/ack", payload, s.cfg.MQTTACKTimeout)
+	err := s.mqtt.PublishAndWaitACK("device/"+tempClientID+"/cmd", "device/"+tempClientID+"/ack", payload, s.Config().MQTTACKTimeout)
 	s.mqtt.KickClient(tempClientID)
 	if err != nil {
 		slog.WarnContext(ctx, "bind auth_grant delivery failed", "temp_client_id", tempClientID, "device_id", deviceID, "err", err)

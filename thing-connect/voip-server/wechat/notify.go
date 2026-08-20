@@ -97,10 +97,10 @@ type voipMessage struct {
 	Event        string
 	Action       string
 	Payload      string
-	RoomId       string
+	RoomID       string `xml:"RoomId"`
 	SessionKey   string
 	ServerToken  string
-	ModelId      string
+	ModelID      string `xml:"ModelId"`
 	Sn           string
 	OpenID       string           `xml:"-"`
 	PayloadData  *voipCallPayload `xml:"-"`
@@ -165,7 +165,7 @@ func HandleNotification(
 	}
 	slog.InfoContext(c.Request.Context(), "voip notify parsed msg",
 		"wx_app_id", wxAppID, "msg_type", msg.MsgType, "event", msg.Event, "action", msg.Action,
-		"sn", msg.Sn, "openid", msg.OpenID, "room_id", msg.RoomId)
+		"sn", msg.Sn, "openid", msg.OpenID, "room_id", msg.RoomID)
 
 	if !msg.isVoipNotify() {
 		slog.InfoContext(c.Request.Context(), "voip notify not voip notify", "wx_app_id", wxAppID, "msg_type", msg.MsgType, "event", msg.Event)
@@ -186,23 +186,23 @@ func HandleNotification(
 		}
 	}
 	var deduper NotificationDeduper
-	if candidate, ok := profiler.(NotificationDeduper); ok && msg.RoomId != "" {
+	if candidate, ok := profiler.(NotificationDeduper); ok && msg.RoomID != "" {
 		acquired, acquireErr := candidate.AcquireVoipNotification(
-			c.Request.Context(), wxAppID, msg.RoomId,
+			c.Request.Context(), wxAppID, msg.RoomID,
 		)
 		if acquireErr != nil {
 			slog.ErrorContext(c.Request.Context(), "voip notify dedupe failed",
-				"wx_app_id", wxAppID, "room_id", msg.RoomId, "err", acquireErr)
+				"wx_app_id", wxAppID, "room_id", msg.RoomID, "err", acquireErr)
 			c.JSON(200, gin.H{"errcode": ErrCodeWxaPushToDeviceFailed, "errmsg": "记录 VoIP 回调处理状态失败"})
 			return
 		}
 		if !acquired {
 			complete, completeErr := candidate.IsVoipNotificationComplete(
-				c.Request.Context(), wxAppID, msg.RoomId,
+				c.Request.Context(), wxAppID, msg.RoomID,
 			)
 			if completeErr != nil {
 				slog.ErrorContext(c.Request.Context(), "voip notify dedupe state failed",
-					"wx_app_id", wxAppID, "room_id", msg.RoomId, "err", completeErr)
+					"wx_app_id", wxAppID, "room_id", msg.RoomID, "err", completeErr)
 				c.JSON(200, gin.H{
 					"errcode": ErrCodeWxaPushToDeviceFailed,
 					"errmsg":  "查询 VoIP 回调处理状态失败",
@@ -211,12 +211,12 @@ func HandleNotification(
 			}
 			if complete {
 				slog.InfoContext(c.Request.Context(), "voip notify completed duplicate ignored",
-					"wx_app_id", wxAppID, "room_id", msg.RoomId)
+					"wx_app_id", wxAppID, "room_id", msg.RoomID)
 				c.JSON(200, gin.H{"errcode": 0, "errmsg": "ok"})
 				return
 			}
 			slog.InfoContext(c.Request.Context(), "voip notify duplicate still processing",
-				"wx_app_id", wxAppID, "room_id", msg.RoomId)
+				"wx_app_id", wxAppID, "room_id", msg.RoomID)
 			c.JSON(200, gin.H{
 				"errcode": ErrCodeWxaPushToDeviceFailed,
 				"errmsg":  "回调仍在处理中，请稍后重试",
@@ -225,10 +225,10 @@ func HandleNotification(
 		}
 		deduper = candidate
 	}
-	slog.InfoContext(c.Request.Context(), "voip notify pushing to device", "sn", uuid, "room_id", msg.RoomId, "openid", msg.OpenID)
+	slog.InfoContext(c.Request.Context(), "voip notify pushing to device", "sn", uuid, "room_id", msg.RoomID, "openid", msg.OpenID)
 	if err := pushJoinToDevice(c, appCfg, tirtcCfg, wxAppID, uuid, msg, publisher, profiler); err != nil {
 		if deduper != nil {
-			deduper.ReleaseVoipNotification(c.Request.Context(), wxAppID, msg.RoomId)
+			deduper.ReleaseVoipNotification(c.Request.Context(), wxAppID, msg.RoomID)
 		}
 		slog.ErrorContext(c.Request.Context(), "voip notify push to device failed", "sn", uuid, "err", err)
 		c.JSON(200, gin.H{"errcode": ErrCodeWxaPushToDeviceFailed, "errmsg": "向设备下发 VoIP 通知失败"})
@@ -245,13 +245,13 @@ func HandleNotification(
 	}
 	if deduper != nil {
 		if completeErr := deduper.CompleteVoipNotification(
-			c.Request.Context(), wxAppID, msg.RoomId,
+			c.Request.Context(), wxAppID, msg.RoomID,
 		); completeErr != nil {
 			// MQTT publish already succeeded. Return success to WeChat so a
 			// transient Redis error does not create a second device session.
 			slog.ErrorContext(c.Request.Context(), "voip notify mark complete failed",
-				"wx_app_id", wxAppID, "room_id", msg.RoomId, "err", completeErr)
-			deduper.ReleaseVoipNotification(c.Request.Context(), wxAppID, msg.RoomId)
+				"wx_app_id", wxAppID, "room_id", msg.RoomID, "err", completeErr)
+			deduper.ReleaseVoipNotification(c.Request.Context(), wxAppID, msg.RoomID)
 		}
 	}
 	slog.InfoContext(c.Request.Context(), "voip notify push to device ok", "sn", uuid)
@@ -324,8 +324,11 @@ func wxDecryptMsg(appID, encryptedMsg, encodingAESKey string) (random, rawXMLByt
 		return nil, nil, fmt.Errorf("encodingAESKey length must be 43")
 	}
 	key, err := base64.StdEncoding.DecodeString(encodingAESKey + "=")
-	if err != nil || len(key) != 32 {
-		return nil, nil, fmt.Errorf("encodingAESKey decode error: %v", err)
+	if err != nil {
+		return nil, nil, fmt.Errorf("encodingAESKey decode error: %w", err)
+	}
+	if len(key) != 32 {
+		return nil, nil, fmt.Errorf("encodingAESKey decoded length must be 32, got %d", len(key))
 	}
 	ciphertext, err := base64.StdEncoding.DecodeString(encryptedMsg)
 	if err != nil {
@@ -439,7 +442,7 @@ func pushJoinToDevice(c *gin.Context, appCfg WxAppCfg, tirtcCfg TirtcServerCfg, 
 
 	voipReq := tirtcapi.TokenWxvoipRequest{
 		WxSessionKey:      m.SessionKey,
-		WxRoomID:          m.RoomId,
+		WxRoomID:          m.RoomID,
 		WxSessionToken:    m.ServerToken,
 		WxAppID:           wxAppID,
 		DeviceID:          deviceID,
@@ -467,7 +470,7 @@ func pushJoinToDevice(c *gin.Context, appCfg WxAppCfg, tirtcCfg TirtcServerCfg, 
 
 	slog.InfoContext(ctx, "voip notify calling tirtc token service",
 		"device_id", deviceID,
-		"room_id", m.RoomId,
+		"room_id", m.RoomID,
 		"audio_rate", media.AudioRate,
 		"audio_channels", media.AudioChannels,
 		"down_audio_mt", media.DownAudioMt,
@@ -492,7 +495,7 @@ func pushJoinToDevice(c *gin.Context, appCfg WxAppCfg, tirtcCfg TirtcServerCfg, 
 	push := map[string]any{
 		"wx_app_id":        wxAppID,
 		"wx_model_id":      modelID,
-		"wx_room_id":       m.RoomId,
+		"wx_room_id":       m.RoomID,
 		"wx_user_openid":   m.OpenID,
 		"wx_user_remark":   remark,
 		"wx_user_nickname": remark,
@@ -521,9 +524,7 @@ const localVoipPrefix = "/v1/voip"
 // endpoint 已由 ProxyEndpointFor 处理好路径前缀替换，直接拼 /notification/... 部分即可。
 func proxyNotification(c *gin.Context, endpoint string, body []byte) {
 	reqURI := c.Request.URL.RequestURI()
-	if strings.HasPrefix(reqURI, localVoipPrefix) {
-		reqURI = reqURI[len(localVoipPrefix):]
-	}
+	reqURI = strings.TrimPrefix(reqURI, localVoipPrefix)
 	target := strings.TrimRight(endpoint, "/") + reqURI
 	slog.DebugContext(c.Request.Context(), "voip notify proxy req", "target", target, "body", string(body))
 	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, target, bytes.NewReader(body))

@@ -98,7 +98,7 @@ type CustomComposeConfig struct {
 
 // AliTtsComponent is a TTS provider using Alibaba CosyVoice.
 type AliTtsComponent struct {
-	Provider       string              `json:"provider,omitempty"`
+	Provider       string               `json:"provider,omitempty"`
 	ProviderParams AliTtsProviderParams `json:"provider_params,omitempty"`
 }
 
@@ -152,12 +152,12 @@ type DeviceRoleBinding struct {
 
 // VoiceInfo is a TTS voice entry.
 type VoiceInfo struct {
-	ID         string   `json:"id"`
-	Name       string   `json:"name"`
-	Languages  []string `json:"languages,omitempty"`
-	Model      string   `json:"model,omitempty"`
-	Scene      string   `json:"scene,omitempty"`
-	SampleURL  string   `json:"sample_url,omitempty"`
+	ID        string   `json:"id"`
+	Name      string   `json:"name"`
+	Languages []string `json:"languages,omitempty"`
+	Model     string   `json:"model,omitempty"`
+	Scene     string   `json:"scene,omitempty"`
+	SampleURL string   `json:"sample_url,omitempty"`
 }
 
 // ── MCP Tool DTOs ──
@@ -177,12 +177,12 @@ type MCPAuthenticationConfig struct {
 
 // MCPToolExternalRuntimeConfig is the MCP tool runtime config (used in create/update/response).
 type MCPToolExternalRuntimeConfig struct {
-	Enable         bool                      `json:"enable,omitempty"`
-	Type           string                    `json:"type,omitempty"`
-	Name           string                    `json:"name"`
-	Description    string                    `json:"description,omitempty"`
-	URL            string                    `json:"url"`
-	Authentication *MCPAuthenticationConfig  `json:"authentication,omitempty"`
+	Enable         bool                     `json:"enable,omitempty"`
+	Type           string                   `json:"type,omitempty"`
+	Name           string                   `json:"name"`
+	Description    string                   `json:"description,omitempty"`
+	URL            string                   `json:"url"`
+	Authentication *MCPAuthenticationConfig `json:"authentication,omitempty"`
 }
 
 // AppMCPToolCreateRequest is the body for creating an app MCP tool.
@@ -219,33 +219,33 @@ type DevicePluginParam struct {
 
 // DevicePluginCreateRequest is the body for creating a device plugin.
 type DevicePluginCreateRequest struct {
-	Name        string              `json:"name"`
-	Description string              `json:"description,omitempty"`
-	Action      string              `json:"action"`
-	InputParams []DevicePluginParam `json:"input_params,omitempty"`
+	Name         string              `json:"name"`
+	Description  string              `json:"description,omitempty"`
+	Action       string              `json:"action"`
+	InputParams  []DevicePluginParam `json:"input_params,omitempty"`
 	ReturnParams []DevicePluginParam `json:"return_params,omitempty"`
 }
 
 // DevicePluginUpdateRequest is the body for updating a device plugin.
 type DevicePluginUpdateRequest struct {
-	Name        string              `json:"name"`
-	Description string              `json:"description,omitempty"`
-	Action      string              `json:"action"`
-	InputParams []DevicePluginParam `json:"input_params,omitempty"`
+	Name         string              `json:"name"`
+	Description  string              `json:"description,omitempty"`
+	Action       string              `json:"action"`
+	InputParams  []DevicePluginParam `json:"input_params,omitempty"`
 	ReturnParams []DevicePluginParam `json:"return_params,omitempty"`
 }
 
 // DevicePlugin is the full device plugin resource.
 type DevicePlugin struct {
-	ID          string              `json:"id"`
-	AppID       string              `json:"app_id,omitempty"`
-	Name        string              `json:"name"`
-	Description string              `json:"description,omitempty"`
-	Action      string              `json:"action"`
-	InputParams []DevicePluginParam `json:"input_params,omitempty"`
+	ID           string              `json:"id"`
+	AppID        string              `json:"app_id,omitempty"`
+	Name         string              `json:"name"`
+	Description  string              `json:"description,omitempty"`
+	Action       string              `json:"action"`
+	InputParams  []DevicePluginParam `json:"input_params,omitempty"`
 	ReturnParams []DevicePluginParam `json:"return_params,omitempty"`
-	CreatedAt   string              `json:"created_at,omitempty"`
-	UpdatedAt   string              `json:"updated_at,omitempty"`
+	CreatedAt    string              `json:"created_at,omitempty"`
+	UpdatedAt    string              `json:"updated_at,omitempty"`
 }
 
 // ── Knowledge DTOs ──
@@ -428,7 +428,7 @@ func (c *AgentAPIClient) doGet(ctx context.Context, path string) (*Role, error) 
 
 	// Data may be null when the role is not found.
 	if len(wrap.Data) == 0 || string(wrap.Data) == "null" {
-		return nil, nil
+		return nil, nil //nolint:nilnil // A null data value is the upstream not-found contract.
 	}
 
 	var role Role
@@ -875,7 +875,7 @@ func (c *AgentAPIClient) doGetMCPTool(ctx context.Context, path string) (*MCPToo
 		return nil, fmt.Errorf("agent: upstream error code=%d msg=%s", wrap.Code, wrap.Msg)
 	}
 	if len(wrap.Data) == 0 || string(wrap.Data) == "null" {
-		return nil, nil
+		return nil, nil //nolint:nilnil // A null data value is the upstream not-found contract.
 	}
 	var item MCPToolBrief
 	if err := json.Unmarshal(wrap.Data, &item); err != nil {
@@ -1055,7 +1055,7 @@ func (c *AgentAPIClient) doGetAppMCPTool(ctx context.Context, path string) (*App
 		return nil, fmt.Errorf("agent: upstream error code=%d msg=%s", wrap.Code, wrap.Msg)
 	}
 	if len(wrap.Data) == 0 || string(wrap.Data) == "null" {
-		return nil, nil
+		return nil, nil //nolint:nilnil // A null data value is the upstream not-found contract.
 	}
 	var item AppMCPTool
 	if err := json.Unmarshal(wrap.Data, &item); err != nil {
@@ -1261,7 +1261,7 @@ func (c *AgentAPIClient) doGetPlugin(ctx context.Context, path string) (*DeviceP
 		return nil, fmt.Errorf("agent: upstream error code=%d msg=%s", wrap.Code, wrap.Msg)
 	}
 	if len(wrap.Data) == 0 || string(wrap.Data) == "null" {
-		return nil, nil
+		return nil, nil //nolint:nilnil // A null data value is the upstream not-found contract.
 	}
 	var item DevicePlugin
 	if err := json.Unmarshal(wrap.Data, &item); err != nil {
@@ -1469,7 +1469,7 @@ func (c *AgentAPIClient) doGetKnowledge(ctx context.Context, path string) (*Know
 		return nil, fmt.Errorf("agent: upstream error code=%d msg=%s", wrap.Code, wrap.Msg)
 	}
 	if len(wrap.Data) == 0 || string(wrap.Data) == "null" {
-		return nil, nil
+		return nil, nil //nolint:nilnil // A null data value is the upstream not-found contract.
 	}
 	var item KnowledgeIndexInfo
 	if err := json.Unmarshal(wrap.Data, &item); err != nil {

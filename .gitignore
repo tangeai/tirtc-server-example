@@ -4,6 +4,8 @@
 superpowers
 *.test
 *.yaml
+!thing-connect/tests/testdata/config.yaml
+!.github/workflows/*.yaml
 *.log
 *.class
 *.mp4
@@ -12,12 +14,17 @@ build
 dist
 local
 docs
+!docs/
+!docs/**
 target
 received
 CLAUDE.md
 constitution.md
 # Node.js
 node_modules/
+*.tsbuildinfo
+thing-connect/admin/admin-web/vite.config.js
+thing-connect/admin/admin-web/vite.config.d.ts
 # Python     
 __pycache__/
 *.pyc
@@ -40,3 +47,5 @@ thing-connect/local-deploy.sh
 /thing-connect/device-sim/device-sim-c/device-sim
 /thing-connect/device-sim/device-sim-c/device-sim-product
 /thing-connect/device-sim/device-sim-c/libdevice-reference.a
+/output/
+/thing-connect/output/

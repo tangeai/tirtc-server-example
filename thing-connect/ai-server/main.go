@@ -15,11 +15,15 @@ import (
 	"github.com/gin-gonic/gin"
 
 	aihandler "thing-connect/ai-server/handler"
+	"thing-connect/internal/cache"
 	"thing-connect/internal/config"
 	"thing-connect/internal/db"
+	"thing-connect/internal/dynamicconfig"
 	"thing-connect/internal/logging"
+	"thing-connect/internal/servicestatus"
 	mysqlstore "thing-connect/internal/store/mysql"
 	"thing-connect/internal/tirtcapi"
+	"thing-connect/internal/userauth"
 )
 
 func main() {
@@ -40,6 +44,10 @@ func main() {
 	if err := db.Migrate(sqlDB); err != nil {
 		log.Fatalf("migrate: %v", err)
 	}
+	rdb, err := cache.New(cfg.Redis)
+	if err != nil {
+		log.Fatalf("redis: %v", err)
+	}
 
 	roleStore := mysqlstore.NewRoleBindingStore(sqlDB)
 	userRoleStore := mysqlstore.NewUserRoleStore(sqlDB)
@@ -48,12 +56,18 @@ func main() {
 	staticDir := findStaticDir()
 
 	r := gin.New()
+	if err := r.SetTrustedProxies(cfg.Server.TrustedProxies); err != nil {
+		log.Fatalf("trusted proxies: %v", err)
+	}
 	r.Use(gin.Recovery(), logging.RequestID("ai"), logging.BodyLog(), gin.Logger())
+	r.Use(userauth.EnforceState(sqlDB, cfg.JWTSecret))
+	probes := map[string]servicestatus.DependencyProbe{"database": servicestatus.SQLProbe(sqlDB), "redis": servicestatus.RedisProbe(rdb)}
+	servicestatus.RegisterHealth(r, probes)
 	r.Static("/static", staticDir)
 	r.StaticFile("/v1/ai/agent", staticDir+"/agent.html")
 
 	// AI token endpoint (legacy, device-facing)
-	aihandler.NewServer(
+	legacyAI := aihandler.NewServer(
 		cfg.JWTSecret,
 		cfg.TirtcAichat.DefaultRoleID,
 		cfg.TirtcAichat.BaseURL,
@@ -61,13 +75,15 @@ func main() {
 		cfg.Tirtc.AppID,
 		cfg.Tirtc.SecretKeyID,
 		roleStore,
-	).Register(r)
+	)
+	legacyAI.Register(r)
 
 	// Agent management (user-facing)
 	rolesBaseURL := cfg.TirtcAichat.RolesBaseURL
 	if rolesBaseURL == "" {
 		rolesBaseURL = cfg.TirtcAichat.BaseURL
 	}
+	var agentHTTP *aihandler.AgentHandler
 	if rolesBaseURL != "" {
 		agentCfg := tirtcapi.AgentAPIConfig{
 			BaseURL:     rolesBaseURL,
@@ -76,10 +92,33 @@ func main() {
 			SecretKeyID: cfg.Tirtc.SecretKeyID,
 		}
 		agentClient := tirtcapi.NewAgentAPIClient(agentCfg, &http.Client{Timeout: 10 * time.Second})
-		aihandler.NewAgentHandler(agentClient, roleStore, userRoleStore, userResourceStore, cfg.TirtcAichat.DefaultRoleID, cfg.Internal.Key, cfg.TirtcAichat.ResourceQuota, cfg.TirtcAichat.DefaultResources).Register(r, cfg.JWTSecret)
+		agentHTTP = aihandler.NewAgentHandler(agentClient, roleStore, userRoleStore, userResourceStore, cfg.TirtcAichat.DefaultRoleID, cfg.Internal.Key, cfg.TirtcAichat.ResourceQuota, cfg.TirtcAichat.DefaultResources)
+		agentHTTP.Register(r, cfg.JWTSecret)
 	} else {
 		log.Println("tirtc_aichat.base_url not set, agent API disabled")
 	}
+	var dynamicClient *dynamicconfig.Client
+	var dynamicRefs []dynamicconfig.Ref
+	if cfg.Admin.ServerURL != "" {
+		dynamicClient, dynamicRefs, err = aiDynamicConfig(cfg, rdb, legacyAI, agentHTTP)
+		if err != nil {
+			log.Printf("dynamic config disabled: %v", err)
+			dynamicClient = nil
+		}
+	}
+	statusCtx, statusCancel := context.WithCancel(context.Background())
+	if dynamicClient != nil {
+		go dynamicClient.Run(statusCtx, dynamicRefs)
+	}
+	var revisions func() map[string]int64
+	if dynamicClient != nil {
+		revisions = dynamicClient.Revisions
+	}
+	reporter, err := servicestatus.NewReporter(rdb, "ai-server", probes, revisions)
+	if err != nil {
+		log.Fatalf("service status: %v", err)
+	}
+	go reporter.Run(statusCtx)
 
 	addr := fmt.Sprintf(":%d", cfg.Server.HTTPPort)
 	srv := &http.Server{
@@ -107,7 +146,13 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("ai-server shutdown: %v", err)
 	}
-	sqlDB.Close()
+	statusCancel()
+	if err := rdb.Close(); err != nil {
+		log.Printf("ai-server close redis: %v", err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		log.Printf("ai-server close database: %v", err)
+	}
 	log.Printf("ai-server stopped")
 }
 

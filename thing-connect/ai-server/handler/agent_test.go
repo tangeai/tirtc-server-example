@@ -82,7 +82,7 @@ func (m *mockAgentAPI) UpdateRole(ctx context.Context, roleID string, input tirt
 	}
 	r := m.roles[roleID]
 	if r == nil {
-		return nil, nil
+		return nil, nil //nolint:nilnil // The mock mirrors the upstream not-found contract.
 	}
 	r.Name = input.Name
 	return r, nil
@@ -117,7 +117,7 @@ func (m *mockAgentAPI) ListGlobalMCPTools(ctx context.Context) ([]tirtcapi.MCPTo
 	return nil, nil
 }
 func (m *mockAgentAPI) GetGlobalMCPTool(ctx context.Context, id string) (*tirtcapi.MCPToolBrief, error) {
-	return nil, nil
+	return nil, nil //nolint:nilnil // The mock mirrors the upstream not-found contract.
 }
 func (m *mockAgentAPI) ListAppMCPTools(ctx context.Context) ([]tirtcapi.AppMCPTool, error) {
 	return nil, nil
@@ -136,11 +136,11 @@ func (m *mockAgentAPI) GetAppMCPTool(ctx context.Context, id string) (*tirtcapi.
 	if m.getAppMCPToolResult != nil {
 		return m.getAppMCPToolResult, nil
 	}
-	return nil, nil
+	return nil, nil //nolint:nilnil // The mock mirrors the upstream not-found contract.
 }
 func (m *mockAgentAPI) UpdateAppMCPTool(ctx context.Context, id string, req tirtcapi.AppMCPToolUpdateRequest) (*tirtcapi.AppMCPTool, error) {
 	m.updateAppMCPCalls++
-	return nil, nil
+	return nil, nil //nolint:nilnil // Tests that need a result configure the mock explicitly.
 }
 func (m *mockAgentAPI) DeleteAppMCPTool(ctx context.Context, id string) error {
 	m.deleteAppMCPCalls++
@@ -160,10 +160,10 @@ func (m *mockAgentAPI) CreateDevicePlugin(ctx context.Context, req tirtcapi.Devi
 	return &tirtcapi.DevicePlugin{ID: "new-plg"}, nil
 }
 func (m *mockAgentAPI) GetDevicePlugin(ctx context.Context, id string) (*tirtcapi.DevicePlugin, error) {
-	return nil, nil
+	return nil, nil //nolint:nilnil // The mock mirrors the upstream not-found contract.
 }
 func (m *mockAgentAPI) UpdateDevicePlugin(ctx context.Context, id string, req tirtcapi.DevicePluginUpdateRequest) (*tirtcapi.DevicePlugin, error) {
-	return nil, nil
+	return nil, nil //nolint:nilnil // Tests that need a result configure the mock explicitly.
 }
 func (m *mockAgentAPI) DeleteDevicePlugin(ctx context.Context, id string) error { return nil }
 func (m *mockAgentAPI) ListKnowledgeIndexes(ctx context.Context, page, pageSize int) ([]tirtcapi.KnowledgeIndexInfo, int, error) {
@@ -180,10 +180,10 @@ func (m *mockAgentAPI) CreateKnowledgeIndex(ctx context.Context, req tirtcapi.Cr
 	return &tirtcapi.KnowledgeIndexInfo{IndexID: "new-kb"}, nil
 }
 func (m *mockAgentAPI) GetKnowledgeIndex(ctx context.Context, indexID string) (*tirtcapi.KnowledgeIndexInfo, error) {
-	return nil, nil
+	return nil, nil //nolint:nilnil // The mock mirrors the upstream not-found contract.
 }
 func (m *mockAgentAPI) UpdateKnowledgeIndex(ctx context.Context, indexID string, req tirtcapi.UpdateKnowledgeIndexRequest) (*tirtcapi.KnowledgeIndexInfo, error) {
-	return nil, nil
+	return nil, nil //nolint:nilnil // Tests that need a result configure the mock explicitly.
 }
 func (m *mockAgentAPI) DeleteKnowledgeIndex(ctx context.Context, indexID string) error { return nil }
 func (m *mockAgentAPI) ListKnowledgeDocuments(ctx context.Context, indexID string, page, pageSize int) ([]tirtcapi.KnowledgeDocument, int, error) {

@@ -113,7 +113,7 @@ https://github.com/user-attachments/assets/80ee6d4c-35dc-4425-813f-476e63ab1b40
 
 #### [thing-connect/](./thing-connect)
 
-一套覆盖**远程实时查看、AI 对讲、微信 VoIP 呼叫、设备间互呼**的 IoT 系统，包含五个可独立部署的 Go 服务：
+一套覆盖**远程实时查看、AI 对讲、微信 VoIP 呼叫、设备间互呼和后台管理**的 IoT 系统，包含五个业务服务及一个 Admin Server：
 
 | 子项目 | 说明 |
 |---|---|
@@ -122,8 +122,9 @@ https://github.com/user-attachments/assets/80ee6d4c-35dc-4425-813f-476e63ab1b40
 | **voip-server** | 微信 VoIP 服务：接收微信回调、下发呼叫通知、管理 VoIP 授权 |
 | **ai-server** | AI 对话服务：签发 TiRTC AI 连接 token，供设备接入 AI 语音对话 |
 | **call-server** | 设备间音视频通话服务：联系人、呼叫信令和房间管理 |
+| **admin-server / admin-web** | 用户、设备、权限、菜单、字典、动态配置、服务状态和审计管理 |
 
-五个服务共用 MySQL + Redis + MQTT Broker，设备通过 MQTT 保持长连接，VoIP、AI 和设备间通话指令通过 MQTT 实时推送到设备。服务架构与接口详情见 [thing-connect/README.md](./thing-connect/README.md)。
+六个服务共用 MySQL 和 Redis，需要 MQTT 的业务服务连接同一个 Broker。设备通过 MQTT 保持长连接，VoIP、AI 和设备间通话指令通过 MQTT 实时推送到设备。服务架构与接口详情见 [thing-connect/README.md](./thing-connect/README.md)，完整自托管步骤见 [Admin Server 部署指南](./thing-connect/admin/admin-server/README.md)。
 
 ### 依赖平台
 
@@ -138,3 +139,5 @@ https://github.com/user-attachments/assets/80ee6d4c-35dc-4425-813f-476e63ab1b40
 ## License
 
 MIT © 探鸽智能
+
+参与开发见 [CONTRIBUTING.md](CONTRIBUTING.md)，安全问题见 [SECURITY.md](SECURITY.md)，第三方组件边界见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

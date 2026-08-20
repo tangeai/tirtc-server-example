@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -329,7 +330,7 @@ func (s *Server) getDeviceRoom(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	roomID, err := s.rdb.Get(ctx, lockKey(self)).Result()
-	if err == redis.Nil || roomID == "" {
+	if errors.Is(err, redis.Nil) || roomID == "" {
 		apiresp.OK(c, nil)
 		return
 	}

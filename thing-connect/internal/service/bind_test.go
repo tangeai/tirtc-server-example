@@ -132,7 +132,7 @@ func (f *fakeCache3) DelVerifyAndCode(_ context.Context, _, _ string) error {
 	return nil
 }
 func (f *fakeCache3) DelEmailCode(_ context.Context, _ string) error { return nil }
-func (f *fakeCache3) IncrPasswordResetAttempt(_ context.Context, _ string, _ time.Duration) (int64, error) {
+func (f *fakeCache3) IncrRateLimitAttempt(_ context.Context, _ string, _ time.Duration) (int64, error) {
 	return 1, nil
 }
 func (f *fakeCache3) SetNonce(_ context.Context, _ string, _ time.Duration) (bool, error) {

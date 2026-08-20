@@ -3,14 +3,14 @@
 set -Eeuo pipefail
 
 # ================== 配置 ==================
-REPO_URL="git@github.com:tangeai/tirtc-server-example.git"
+REPO_URL="${REPO_URL:-https://github.com/tangeai/tirtc-server-example.git}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="tirtc-server-example"
 WORK_DIR="thing-connect"
 
-# 生产发布根目录。日常执行无需传入 DEPLOY_ROOT；环境变量仅用于灾备或测试覆盖。
-PRODUCTION_DEPLOY_ROOT="/data/mqtt-demo.tange-ai.com"
+# 生产发布根目录。现有部署可继续通过 DEPLOY_ROOT 指向原目录。
+PRODUCTION_DEPLOY_ROOT="/opt/thing-connect"
 DEPLOY_ROOT_INPUT="${DEPLOY_ROOT:-$PRODUCTION_DEPLOY_ROOT}"
 if ! DEPLOY_ROOT="$(cd "$DEPLOY_ROOT_INPUT" 2>/dev/null && pwd)"; then
     echo "[ERROR] 部署目录不存在: ${DEPLOY_ROOT_INPUT}"
@@ -21,8 +21,8 @@ BUILD_DIR="${BUILD_DIR:-$REPO_PATH/$WORK_DIR}"
 
 # 生产服务仅由 Supervisor 托管。
 SUPERVISORCTL="${SUPERVISORCTL:-supervisorctl}"
-# 对应 supervisor/demo-open.tange-ai.com.conf 的 [group:demo-open]。
-SUPERVISOR_GROUP="${SUPERVISOR_GROUP:-demo-open}"
+# 对应 supervisor/thing-connect.conf.example 的 [group:thing-connect]。
+SUPERVISOR_GROUP="${SUPERVISOR_GROUP:-thing-connect}"
 SUPERVISOR_WAIT_SECONDS="${SUPERVISOR_WAIT_SECONDS:-15}"
 SUPERVISOR_STABLE_SECONDS="${SUPERVISOR_STABLE_SECONDS:-2}"
 BACKUP_KEEP_COUNT="${BACKUP_KEEP_COUNT:-10}"
@@ -36,7 +36,8 @@ if ! flock -n 9; then
     exit 1
 fi
 
-ALL_SERVICES=("device-server" "user-server" "voip-server" "ai-server" "call-server")
+BUSINESS_SERVICES=("device-server" "user-server" "voip-server" "ai-server" "call-server")
+ALL_SERVICES=("${BUSINESS_SERVICES[@]}" "admin-server")
 
 # ================== 工具函数 ==================
 log() { echo -e "[INFO] $1"; }
@@ -138,6 +139,7 @@ is_valid_service() {
     for svc in "${ALL_SERVICES[@]}"; do
         [ "$candidate" = "$svc" ] && return 0
     done
+
     return 1
 }
 
@@ -150,19 +152,46 @@ validate_services() {
 
 yaml_top_value() {
     local file="$1" key="$2"
-    awk -v key="$key" '{ sub(/\r$/, "") } $0 ~ "^" key ":[[:space:]]*" {
-        sub("^" key ":[[:space:]]*", ""); gsub(/^["[:space:]]+|["[:space:]]+$/, ""); print; exit
+    awk -v key="$key" '
+    function scalar_value(value, quote, end_quote) {
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+        quote = substr(value, 1, 1)
+        if (quote == "\"" || quote == sprintf("%c", 39)) {
+            value = substr(value, 2)
+            end_quote = quote "[[:space:]]*(#.*)?$"
+            sub(end_quote, "", value)
+        } else {
+            sub(/[[:space:]]+#.*$/, "", value)
+            gsub(/[[:space:]]+$/, "", value)
+        }
+        return value
+    }
+    { sub(/\r$/, "") } $0 ~ "^" key ":[[:space:]]*" {
+        sub("^" key ":[[:space:]]*", ""); print scalar_value($0); exit
     }' "$file"
 }
 
 yaml_section_value() {
     local file="$1" section="$2" key="$3"
     awk -v section="$section" -v key="$key" '
+        function scalar_value(value, quote, end_quote) {
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+            quote = substr(value, 1, 1)
+            if (quote == "\"" || quote == sprintf("%c", 39)) {
+                value = substr(value, 2)
+                end_quote = quote "[[:space:]]*(#.*)?$"
+                sub(end_quote, "", value)
+            } else {
+                sub(/[[:space:]]+#.*$/, "", value)
+                gsub(/[[:space:]]+$/, "", value)
+            }
+            return value
+        }
         { sub(/\r$/, "") }
         $0 == section ":" { inside=1; next }
         /^[^[:space:]]/ { inside=0 }
         inside && $0 ~ "^[[:space:]]+" key ":[[:space:]]*" {
-            sub("^[^:]+:[[:space:]]*", ""); gsub(/^["[:space:]]+|["[:space:]]+$/, ""); print; exit
+            sub("^[^:]+:[[:space:]]*", ""); print scalar_value($0); exit
         }
     ' "$file"
 }
@@ -180,7 +209,7 @@ yaml_has_section_key() {
 
 validate_configs() {
     local svc cfg jwt expected_jwt="" internal expected_internal="" url
-    for svc in "${ALL_SERVICES[@]}"; do
+    for svc in "${BUSINESS_SERVICES[@]}"; do
         cfg="$DEPLOY_ROOT/$svc/config.yaml"
         [ -f "$cfg" ] || { err "$svc: config.yaml 不存在"; return 1; }
         chmod 600 "$cfg"
@@ -190,7 +219,7 @@ validate_configs() {
         [ "$jwt" = "$expected_jwt" ] || { err "$svc: jwt_secret 与其他服务不一致"; return 1; }
     done
 
-    for svc in user-server voip-server ai-server call-server; do
+    for svc in "${ALL_SERVICES[@]}"; do
         cfg="$DEPLOY_ROOT/$svc/config.yaml"
         internal="$(yaml_section_value "$cfg" internal key)"
         [ -n "$internal" ] || { err "$svc: internal.key 未配置"; return 1; }
@@ -201,6 +230,10 @@ validate_configs() {
             return 1
         fi
     done
+
+    cfg="$DEPLOY_ROOT/admin-server/config.yaml"
+    [ -n "$(yaml_section_value "$cfg" admin jwt_secret)" ] || { err "admin-server: admin.jwt_secret 未配置"; return 1; }
+    [ -n "$(yaml_section_value "$cfg" security config_encryption_key)" ] || { err "admin-server: security.config_encryption_key 未配置"; return 1; }
 
     for svc in ai voip call; do
         url="$(yaml_section_value "$DEPLOY_ROOT/user-server/config.yaml" "$svc" server_url)"
@@ -227,13 +260,7 @@ pull_code() {
 # ================== 编译 ==================
 build_services() {
     [ -f "$BUILD_DIR/go.mod" ] || { err "源码目录未就绪（缺少 $BUILD_DIR/go.mod）"; return 1; }
-    cd "$BUILD_DIR"
-    mkdir -p bin
-
-    for svc in "$@"; do
-        log "编译 $svc ..."
-        CGO_ENABLED=0 go build -o "bin/$svc" "./$svc/"
-    done
+    "$BUILD_DIR/build.sh" "$@"
 }
 
 # ================== 停服务 ==================
@@ -277,15 +304,20 @@ deploy_one() {
     chmod +x "$target_dir/$svc"
 
     # 配置
-    if [ ! -f "$target_dir/config.yaml" ] && [ -f "$BUILD_DIR/$svc/config.yaml.example" ]; then
-        cp "$BUILD_DIR/$svc/config.yaml.example" "$target_dir/config.yaml"
+    local config_example="$BUILD_DIR/$svc/config.yaml.example"
+    [ "$svc" != "admin-server" ] || config_example="$BUILD_DIR/admin/admin-server/config.yaml.example"
+    if [ ! -f "$target_dir/config.yaml" ] && [ -f "$config_example" ]; then
+        cp "$config_example" "$target_dir/config.yaml"
+        chmod 600 "$target_dir/config.yaml"
     fi
 
     # 静态目录先完整复制到临时目录，再原子切换。
-    case "$svc" in user-server|ai-server)
-        if [ -d "$BUILD_DIR/$svc/static" ]; then
+    case "$svc" in user-server|ai-server|admin-server)
+        local static_source="$BUILD_DIR/$svc/static"
+        [ "$svc" != "admin-server" ] || static_source="$BUILD_DIR/admin/admin-web/dist"
+        if [ -d "$static_source" ]; then
             rm -rf "$target_dir/static.new"
-            cp -a "$BUILD_DIR/$svc/static" "$target_dir/static.new"
+            cp -a "$static_source" "$target_dir/static.new"
             rm -rf "$target_dir/static.old"
             [ ! -d "$target_dir/static" ] || mv "$target_dir/static" "$target_dir/static.old"
             mv "$target_dir/static.new" "$target_dir/static"
@@ -352,12 +384,15 @@ run_batch() {
     shift
 
     validate_services "$@"
+    if [ "$action" = "build" ]; then
+        build_services "$@"
+        return
+    fi
     case "$action" in
         deploy|start|stop|restart|status) validate_service_manager ;;
     esac
     for svc in "$@"; do
         case "$action" in
-            build) build_services "$svc" ;;
             deploy) deploy_one "$svc" ;;
             start) start_one "$svc" ;;
             stop) stop_one "$svc" ;;

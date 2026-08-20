@@ -1,17 +1,25 @@
 server:
   http_port: 9004
+  trusted_proxies: []  # Add only the reverse-proxy CIDRs that set client IP headers.
 
 log:
   level: info  # debug|info|warn|error
   format: text  # text|json
 
 database:
-  dsn: "root:111111@tcp(windows.hosts:3306)/tirtc_thing_connect?parseTime=true&charset=utf8mb4&loc=Local"
+  dsn: "root:password@tcp(127.0.0.1:3306)/thing_connect?parseTime=true&charset=utf8mb4&loc=Local"
+
+redis:
+  addr: "127.0.0.1:6379"
+  password: ""
+  db: 0
 
 jwt_secret: "replace-with-same-secret-as-device-server"
 
 internal:
-  key: "your-internal-service-key" # 须与 user/voip/call-server 一致
+  key: "replace-with-an-internal-key-at-least-32-characters" # 须与 admin 及其他服务一致
+admin:
+  server_url: "http://127.0.0.1:9010"
 
 tirtc:
   app_id: "your-app-id"

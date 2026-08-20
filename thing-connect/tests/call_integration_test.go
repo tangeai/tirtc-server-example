@@ -8,6 +8,7 @@ package tests
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -23,10 +24,10 @@ import (
 
 	"thing-connect/call-server/apiresp"
 	callhandler "thing-connect/call-server/handler"
-	"thing-connect/internal/cache"
 	"thing-connect/internal/config"
 	"thing-connect/internal/db"
 	mysqlstore "thing-connect/internal/store/mysql"
+	"thing-connect/internal/testenv"
 )
 
 // ── fake MQTT broker ─────────────────────────────────────────────────────────
@@ -110,17 +111,11 @@ func newCallSuite(t *testing.T) *callSuite {
 	gin.SetMode(gin.TestMode)
 
 	cfg := loadConfig(t)
-	sqlDB, err := db.Open(cfg.Database)
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
+	sqlDB := testenv.OpenDBOrSkip(t, cfg)
 	if err := db.Migrate(sqlDB); err != nil {
 		t.Fatalf("db.Migrate: %v", err)
 	}
-	rdb, err := cache.New(cfg.Redis)
-	if err != nil {
-		t.Fatalf("cache.New: %v", err)
-	}
+	rdb := testenv.OpenRedisOrSkip(t, cfg)
 
 	broker := newFakeBroker()
 	devStore := mysqlstore.NewDeviceStore(sqlDB)
@@ -293,7 +288,7 @@ func (cs *callSuite) seedContact(t *testing.T, a, b string, userA, userB int64, 
 func (cs *callSuite) roomIDForLock(t *testing.T, deviceID string) string {
 	t.Helper()
 	v, err := cs.rdb.Get(context.Background(), "room:lock:"+deviceID).Result()
-	if err == redis.Nil {
+	if errors.Is(err, redis.Nil) {
 		return ""
 	}
 	if err != nil {

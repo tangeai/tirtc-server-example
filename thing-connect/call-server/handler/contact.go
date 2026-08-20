@@ -78,8 +78,8 @@ func (s *Server) getContactRow(ctx context.Context, a, b string) (*deviceContact
 	var row deviceContact
 	err := s.db.GetContext(ctx, &row,
 		`SELECT * FROM call_contact WHERE device_id_a=? AND device_id_b=? LIMIT 1`, idA, idB)
-	if err == sql.ErrNoRows {
-		return nil, nil
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil //nolint:nilnil // No row means the optional contact does not exist.
 	}
 	if err != nil {
 		return nil, fmt.Errorf("getContactRow: %w", err)
@@ -110,7 +110,7 @@ func (s *Server) ensureContact(ctx context.Context, a, b string) (*deviceContact
 		return nil, fmt.Errorf("ensureContact: GetBindByDeviceID(%s): %w", b, err)
 	}
 	if bindA == nil || bindB == nil || bindA.UserID == 0 || bindB.UserID == 0 || bindA.UserID != bindB.UserID {
-		return nil, nil // not contacts and not same-account
+		return nil, nil //nolint:nilnil // Not contacts and not same-account is a valid absence.
 	}
 
 	idA, idB := normalizePair(a, b)
@@ -290,7 +290,7 @@ func (s *Server) respondRequest(ctx context.Context, responder, peer string, acc
 	err = tx.GetContext(ctx, &row,
 		`SELECT * FROM call_contact
 		 WHERE device_id_a=? AND device_id_b=? LIMIT 1 FOR UPDATE`, idA, idB)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, errContactNotExist
 	}
 	if err != nil {
@@ -316,7 +316,7 @@ func (s *Server) respondRequest(ctx context.Context, responder, peer string, acc
 				deviceID, deviceID, contactStatusAccepted); err != nil {
 				return nil, fmt.Errorf("respondRequest count contacts: %w", err)
 			}
-			if n >= s.cfg.Service.MaxContactsPerDevice {
+			if n >= s.Config().Service.MaxContactsPerDevice {
 				return nil, errContactMax
 			}
 		}
@@ -457,7 +457,7 @@ func (s *Server) setVoipRemark(ctx context.Context, id int64, remark string) ([]
 	}
 	if err := tx.GetContext(ctx, &identity,
 		`SELECT wx_open_id, wx_app_id FROM voip_device_auth WHERE id=? FOR UPDATE`, id); err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, errContactNotExist
 		}
 		return nil, fmt.Errorf("setVoipRemark identity: %w", err)

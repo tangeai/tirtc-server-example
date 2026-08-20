@@ -149,8 +149,12 @@ func TestAddAndListUserRoles(t *testing.T) {
 	// Check both IDs present; order isn't guaranteed within same second.
 	foundA, foundB := false, false
 	for _, id := range ids {
-		if id == "role-a" { foundA = true }
-		if id == "role-b" { foundB = true }
+		if id == "role-a" {
+			foundA = true
+		}
+		if id == "role-b" {
+			foundB = true
+		}
 	}
 	if !foundA || !foundB {
 		t.Errorf("ListUserRoleIDs: missing IDs, got %v", ids)

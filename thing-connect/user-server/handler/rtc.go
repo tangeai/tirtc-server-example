@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"sync"
+
 	"thing-connect/internal/apiresp"
 	"thing-connect/internal/tirtcapi"
 
@@ -11,8 +13,11 @@ var tirtcAppID string
 var tirtcAccessKeyID string
 var tirtcSecretKeyID string
 var tirtcEndpoint string
+var tirtcMu sync.RWMutex
 
 func SetTirtcCredentials(appID, accessKeyID, secretKeyID, endpoint string) {
+	tirtcMu.Lock()
+	defer tirtcMu.Unlock()
 	tirtcAppID = appID
 	tirtcAccessKeyID = accessKeyID
 	tirtcSecretKeyID = secretKeyID
@@ -28,6 +33,9 @@ func (s *Server) getRtcToken(c *gin.Context) {
 	}
 
 	userID := currentUserID(c)
+	tirtcMu.RLock()
+	appID, accessKeyID, secretKeyID, endpoint := tirtcAppID, tirtcAccessKeyID, tirtcSecretKeyID, tirtcEndpoint
+	tirtcMu.RUnlock()
 
 	ok, err := s.bindSvc.ExistsUserDevice(c.Request.Context(), deviceID, userID)
 	if err != nil {
@@ -45,7 +53,7 @@ func (s *Server) getRtcToken(c *gin.Context) {
 		return
 	}
 
-	token, err := tirtcapi.BuildDeviceToken(tirtcAccessKeyID, tirtcSecretKeyID, gpool.DeviceKey, deviceID)
+	token, err := tirtcapi.BuildDeviceToken(accessKeyID, secretKeyID, gpool.DeviceKey, deviceID)
 	if err != nil {
 		apiresp.Internal(c, "failed to build token")
 		return
@@ -62,8 +70,8 @@ func (s *Server) getRtcToken(c *gin.Context) {
 
 	apiresp.OK(c, gin.H{
 		"token":    token,
-		"app_id":   tirtcAppID,
-		"endpoint": tirtcEndpoint,
+		"app_id":   appID,
+		"endpoint": endpoint,
 		"in_call":  inCall,
 	})
 }

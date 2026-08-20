@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -58,7 +59,7 @@ func (s *Server) ownedDeviceName(
 
 func (s *Server) verifyWeChatLogin(ctx context.Context, userID int64, wxAppID, wxOpenID string) (bool, error) {
 	expected, err := s.rdb.Get(ctx, wxLoginBindingKey(userID, wxAppID)).Result()
-	if err == redis.Nil {
+	if errors.Is(err, redis.Nil) {
 		return false, nil
 	}
 	if err != nil {
@@ -104,9 +105,9 @@ func (s *Server) postSnTicket(c *gin.Context) {
 	}
 	wxAppID := req.WxAppID
 	if wxAppID == "" {
-		wxAppID = s.cfg.DefaultVoipAppID()
+		wxAppID = s.Config().DefaultVoipAppID()
 	}
-	app, ok := s.cfg.WxAppFor(wxAppID)
+	app, ok := s.Config().WxAppFor(wxAppID)
 	if !ok || app.Secret == "" || app.ModelID == "" {
 		apiresp.Fail(c, apiresp.ErrWechatCfg, "未配置微信应用或 model_id")
 		return
@@ -141,9 +142,9 @@ func (s *Server) postWeChatMiniLogin(c *gin.Context) {
 	}
 	wxAppID := req.WxAppID
 	if wxAppID == "" {
-		wxAppID = s.cfg.DefaultVoipAppID()
+		wxAppID = s.Config().DefaultVoipAppID()
 	}
-	app, ok := s.cfg.WxAppFor(wxAppID)
+	app, ok := s.Config().WxAppFor(wxAppID)
 	if !ok {
 		apiresp.Fail(c, apiresp.ErrWechatCfg, "未配置微信应用")
 		return
@@ -208,14 +209,14 @@ func (s *Server) getUserAuthList(c *gin.Context) {
 	userID := currentUserID(c)
 	wxAppID := c.Query("wx_app_id")
 	if wxAppID == "" {
-		wxAppID = s.cfg.DefaultVoipAppID()
+		wxAppID = s.Config().DefaultVoipAppID()
 	}
 
 	wxOpenID, err := s.rdb.Get(
 		c.Request.Context(),
 		wxLoginBindingKey(userID, wxAppID),
 	).Result()
-	if err == redis.Nil {
+	if errors.Is(err, redis.Nil) {
 		apiresp.Fail(c, apiresp.ErrWechatLoginInvalid, "需要先完成微信登录")
 		return
 	}
@@ -255,7 +256,7 @@ func (s *Server) globalVoipRemark(ctx context.Context, wxOpenID, wxAppID string)
 	if err == nil {
 		return remark, nil
 	}
-	if err != sql.ErrNoRows {
+	if !errors.Is(err, sql.ErrNoRows) {
 		return "", err
 	}
 
@@ -264,7 +265,7 @@ func (s *Server) globalVoipRemark(ctx context.Context, wxOpenID, wxAppID string)
 		  WHERE wx_open_id=? AND wx_app_id=? AND remark<>''
 		  ORDER BY created_at DESC, id DESC LIMIT 1`,
 		wxOpenID, wxAppID)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
 	return remark, err
@@ -310,10 +311,10 @@ func (s *Server) getUserContactRemark(c *gin.Context) {
 	userID := currentUserID(c)
 	wxAppID := c.Query("wx_app_id")
 	if wxAppID == "" {
-		wxAppID = s.cfg.DefaultVoipAppID()
+		wxAppID = s.Config().DefaultVoipAppID()
 	}
 	wxOpenID, err := s.currentWeChatOpenID(c.Request.Context(), userID, wxAppID)
-	if err == redis.Nil {
+	if errors.Is(err, redis.Nil) {
 		apiresp.Fail(c, apiresp.ErrWechatLoginInvalid, "需要先完成微信登录")
 		return
 	}
@@ -344,11 +345,11 @@ func (s *Server) putUserContactRemark(c *gin.Context) {
 		return
 	}
 	if req.WxAppID == "" {
-		req.WxAppID = s.cfg.DefaultVoipAppID()
+		req.WxAppID = s.Config().DefaultVoipAppID()
 	}
 	userID := currentUserID(c)
 	wxOpenID, err := s.currentWeChatOpenID(c.Request.Context(), userID, req.WxAppID)
-	if err == redis.Nil {
+	if errors.Is(err, redis.Nil) {
 		apiresp.Fail(c, apiresp.ErrWechatLoginInvalid, "需要先完成微信登录")
 		return
 	}
@@ -450,7 +451,7 @@ func (s *Server) postReportAuth(c *gin.Context) {
 	}
 	wxAppID := req.WxAppID
 	if wxAppID == "" {
-		wxAppID = s.cfg.DefaultVoipAppID()
+		wxAppID = s.Config().DefaultVoipAppID()
 	}
 	validLogin, err := s.verifyWeChatLogin(c.Request.Context(), userID, wxAppID, req.WxOpenID)
 	if err != nil {
@@ -463,7 +464,7 @@ func (s *Server) postReportAuth(c *gin.Context) {
 	}
 	wxModelID := req.WxModelID
 	if wxModelID == "" {
-		if app, ok := s.cfg.WxAppFor(wxAppID); ok {
+		if app, ok := s.Config().WxAppFor(wxAppID); ok {
 			wxModelID = app.ModelID
 		}
 	}
@@ -493,11 +494,11 @@ func (s *Server) postReportAuth(c *gin.Context) {
 			  WHERE wx_open_id=? AND wx_app_id=?
 			  FOR UPDATE`,
 			req.WxOpenID, wxAppID)
-		if globalRemarkErr != nil && globalRemarkErr != sql.ErrNoRows {
+		if globalRemarkErr != nil && !errors.Is(globalRemarkErr, sql.ErrNoRows) {
 			apiresp.Fail(c, apiresp.ErrInternal, "query existing contact remark: "+globalRemarkErr.Error())
 			return
 		}
-		globalRemarkChanged = globalRemarkErr == sql.ErrNoRows || currentGlobalRemark != remark
+		globalRemarkChanged = errors.Is(globalRemarkErr, sql.ErrNoRows) || currentGlobalRemark != remark
 
 		var staleRemarkAuthIDs []int64
 		if err := tx.SelectContext(c.Request.Context(), &staleRemarkAuthIDs,
@@ -525,7 +526,7 @@ func (s *Server) postReportAuth(c *gin.Context) {
 		  WHERE device_id=? AND wx_open_id=? AND wx_app_id=?
 		  FOR UPDATE`,
 		req.DeviceID, req.WxOpenID, wxAppID)
-	if existingAuthErr != nil && existingAuthErr != sql.ErrNoRows {
+	if existingAuthErr != nil && !errors.Is(existingAuthErr, sql.ErrNoRows) {
 		apiresp.Fail(c, apiresp.ErrInternal, "query existing auth: "+existingAuthErr.Error())
 		return
 	}
@@ -533,7 +534,7 @@ func (s *Server) postReportAuth(c *gin.Context) {
 	if req.AuthorizationCreated || desiredAuthorizedDeviceName == "" {
 		desiredAuthorizedDeviceName = deviceName
 	}
-	authChanged := existingAuthErr == sql.ErrNoRows ||
+	authChanged := errors.Is(existingAuthErr, sql.ErrNoRows) ||
 		existingAuth.WxModelID != wxModelID ||
 		existingAuth.Remark != remark ||
 		existingAuth.AuthorizedDeviceName != desiredAuthorizedDeviceName ||
@@ -609,7 +610,7 @@ func (s *Server) postDeleteAuth(c *gin.Context) {
 	}
 	wxAppID := req.WxAppID
 	if wxAppID == "" {
-		wxAppID = s.cfg.DefaultVoipAppID()
+		wxAppID = s.Config().DefaultVoipAppID()
 	}
 	validLogin, err := s.verifyWeChatLogin(c.Request.Context(), userID, wxAppID, req.WxOpenID)
 	if err != nil {

@@ -6,15 +6,16 @@
 
 ## 服务发现
 
-### `GET http://ep-open.tangeopen.com/services`
+### `GET /services`
 
-设备启动时获取各业务服务与 TiRTC 的当前入口地址。无需鉴权。若部署私有环境，向 `fetch_services()` 传入私有服务发现根地址；**「C 参考实现」**会请求该根地址加 `/services`。
+设备启动时获取各业务服务与 TiRTC 的当前入口地址。无需鉴权。自托管环境在 user-server 中启用 `discovery.enabled` 并配置设备可访问的公网地址；向 `fetch_services()` 传入该入口根地址，**「C 参考实现」**会请求根地址加 `/services`。演示环境入口为 `http://ep-open.tangeopen.com/services`。
 
 **成功响应** — HTTP 200，JSON 对象：
 
 | 字段 | 必填 | 说明 |
 |------|:--:|------|
 | `device-srv` | ✅ | device-server 根地址 |
+| `user-srv` | — | user-server 根地址，供支持用户端入口发现的客户端使用 |
 | `voip-srv` | ✅ | voip-server 根地址 |
 | `ai-srv` | ✅ | ai-server 根地址 |
 | `call-srv` | ✅ | call-server 根地址 |
@@ -71,8 +72,8 @@ JWT 缺失、无效、过期或缺少必要 claim 时返回 HTTP 401 + `code=401
 
 **设备 JWT**: 正式 `mqtt_token` 的 `device_id` claim 是设备 ID；临时 `temp_token` 的 `device_id` claim 是 `temp_client_id`。两者都有 `exp`，由 device-server 签发；TTS 只接受与验证码记录匹配的临时 token。
 
-**用户 JWT**: `user_id` claim = 用户 ID。由 user-server 签发，user-server /
-voip-server / ai-server / call-server 使用相同 `jwt_secret` 验证。
+**用户 JWT**: 包含 `user_id`、`auth_revision`、`iat` 和 `exp`。由 user-server 签发，user-server /
+voip-server / ai-server / call-server 使用相同 `jwt_secret` 验证。账号禁用、密码修改或认证版本递增后，只拒绝该用户的旧令牌；历史令牌缺少 `auth_revision` 时按版本 1 兼容。
 
 ### Content-Type
 
@@ -275,7 +276,7 @@ int device_sign(const char *device_id, const char *device_key,
 
 ### `GET /v1/config/captcha`
 
-获取易盾 captcha_id，前端初始化人机验证控件用。
+获取当前人机验证 Provider 及其可公开的控件配置，用于初始化客户端控件。
 
 **鉴权**: 无
 
@@ -284,10 +285,18 @@ int device_sign(const char *device_id, const char *device_key,
 **成功响应** — HTTP 200
 
 ```json
-{ "code": 200, "data": { "captcha_id": "xxx" } }
+{
+  "code": 200,
+  "data": {
+    "provider": "yidun",
+    "enabled": true,
+    "public_config": { "captcha_id": "xxx" },
+    "captcha_id": "xxx"
+  }
+}
 ```
 
-> captcha_id 为空字符串时表示未配置易盾，前端应跳过验证码步骤。
+`public_config` 仅包含可下发给客户端的配置，绝不包含密钥。`captcha_id` 为易盾兼容字段；新客户端应读取 `provider`、`enabled` 和 `public_config`。
 
 ---
 
@@ -308,9 +317,11 @@ int device_sign(const char *device_id, const char *device_key,
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|:--:|------|
 | email | string | ✅ | 接收验证码的邮箱地址 |
-| captcha_id | string | | 易盾 captcha_id，未配置时忽略 |
-| validate | string | | 易盾验证票据 |
-| user | string | | 易盾用户标识 |
+| captcha | object | | 通用人机验证载荷，启用 Provider 时由客户端控件返回 |
+| captcha.provider | string | | 签发验证票据的 Provider |
+| captcha.token | string | | Provider 返回的验证票据 |
+| captcha.metadata | object | | Provider 所需的非敏感附加字段 |
+| captcha_id / validate / user | string | | 易盾兼容字段；新接入请使用 `captcha` |
 
 **请求示例**
 
@@ -330,6 +341,7 @@ int device_sign(const char *device_id, const char *device_key,
 |------|------|------|
 | 40000 | 400 | 请求体 JSON 解析失败或 email 格式无效 |
 | 40012 | 400 | 人机验证失败 |
+| 429 | 429 | 触发邮件验证码统一限频；注册和找回密码共用同一邮箱、IP 计数，默认 15 分钟内同一邮箱 5 次、同一 IP 20 次，后台配置可调整 |
 | 50000 | 500 | 邮件发送失败或服务器内部错误 |
 
 ---
@@ -373,7 +385,7 @@ int device_sign(const char *device_id, const char *device_key,
 }
 ```
 
-> `token` 为后续鉴权接口的 Bearer JWT，含 `user_id` claim。新用户可绑设备配额取自 `users.bind_quota` 列默认值（schema 默认 10），注册时既不读取 `service.quota_per_user` 配置、也不从全局池分配。
+> `token` 为后续鉴权接口的 Bearer JWT，包含 `user_id`、`auth_revision`、`iat` 和 `exp`。新用户的设备绑定额度取注册时生效的 `user-server.service.quota_per_user`；未发布后台配置时读取 YAML，默认值为 10。账号状态、密码或认证版本变化时，仅该用户的旧令牌失效；缺少 `auth_revision` 的历史令牌按初始版本 1 兼容处理。
 
 **错误码**
 
@@ -404,9 +416,8 @@ int device_sign(const char *device_id, const char *device_key,
 |------|------|:--:|------|
 | email | string | ✅ | 邮箱地址 |
 | password | string | ✅ | 密码 |
-| captcha_id | string | | 易盾 captcha_id，未配置时忽略 |
-| validate | string | | 易盾验证票据 |
-| user | string | | 易盾用户标识 |
+| captcha | object | | 通用人机验证载荷，字段含义同发送验证码接口 |
+| captcha_id / validate / user | string | | 易盾兼容字段；新接入请使用 `captcha` |
 
 **请求示例**
 
@@ -456,9 +467,8 @@ int device_sign(const char *device_id, const char *device_key,
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|:--:|------|
 | email | string | ✅ | 注册邮箱地址 |
-| captcha_id | string | | 易盾 captcha_id，未配置时忽略 |
-| validate | string | | 易盾验证票据 |
-| user | string | | 易盾用户标识 |
+| captcha | object | | 通用人机验证载荷，字段含义同发送验证码接口 |
+| captcha_id / validate / user | string | | 易盾兼容字段；新接入请使用 `captcha` |
 
 **成功响应** — HTTP 200
 
@@ -472,7 +482,7 @@ int device_sign(const char *device_id, const char *device_key,
 |------|------|------|
 | 40000 | 400 | 请求体 JSON 解析失败或 email 格式无效 |
 | 40012 | 400 | 人机验证失败 |
-| 429 | 429 | 邮件处理繁忙，或触发发码频率限制（同一邮箱每分钟 1 次、同一 IP 每分钟 10 次） |
+| 429 | 429 | 邮件处理繁忙，或触发邮件验证码统一限频；注册和找回密码共用同一邮箱、IP 计数，默认 15 分钟内同一邮箱 5 次、同一 IP 20 次，后台配置可调整 |
 | 50000 | 500 | 服务器内部错误 |
 
 ---

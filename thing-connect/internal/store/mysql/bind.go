@@ -1,8 +1,10 @@
+// Package mysql implements MySQL and Redis adapters for shared service ports.
 package mysql
 
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -29,8 +31,8 @@ func getBindByMAC(ctx context.Context, db sqlx.ExtContext, mac string, userID in
 			 ORDER BY (user_id = ?) DESC, (user_id = 0 AND last_user_id = ?) DESC, (user_id = 0) DESC
 			 LIMIT 1`,
 		mac, userID, userID)
-	if err == sql.ErrNoRows {
-		return nil, nil
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil //nolint:nilnil // absence is the BindStore lookup contract
 	}
 	if err != nil {
 		return nil, fmt.Errorf("getBindByMAC: %w", err)
@@ -46,8 +48,8 @@ func (s *bindStore) GetBindByDeviceID(ctx context.Context, deviceID string) (*mo
 	var r model.DeviceBind
 	err := s.db.GetContext(ctx, &r,
 		`SELECT * FROM device_bind WHERE device_id=? LIMIT 1`, deviceID)
-	if err == sql.ErrNoRows {
-		return nil, nil
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil //nolint:nilnil // absence is the BindStore lookup contract
 	}
 	if err != nil {
 		return nil, fmt.Errorf("bindStore.GetBindByDeviceID: %w", err)
@@ -64,12 +66,25 @@ func (s *bindStore) CommitBindFromPool(ctx context.Context, fp model.Fingerprint
 	}
 	defer tx.Rollback()
 
-	// 0. Per-user MAC uniqueness: if (mac, user_id) is already bound, hand back
-	// the existing device_id instead of allocating a new one. SELECT ... FOR
-	// UPDATE locks the row (or the gap when none exists) so a concurrent bind of
-	// the same (mac, user) blocks until this tx commits, then sees the row and
-	// returns ErrMACAlreadyBound — no double-allocate. Done before quota deduction
-	// so a conflict never burns quota.
+	// 0. Atomic quota deduction also serializes concurrent binds for the same user.
+	// This lock must be acquired before the MAC gap lock below: taking the gap lock
+	// first lets two same-user requests hold compatible gap locks and then deadlock
+	// while one waits for the user row and the other tries to insert into the gap.
+	// Returning before commit rolls this deduction back, so conflicts do not burn
+	// quota.
+	res, err := tx.ExecContext(ctx,
+		`UPDATE users SET bind_quota = bind_quota - 1 WHERE id = ? AND bind_quota > 0`, userID)
+	if err != nil {
+		return "", fmt.Errorf("bindStore.CommitBindFromPool quota: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return "", store.ErrQuotaEmpty
+	}
+
+	// 1. Per-user MAC uniqueness: if (mac, user_id) is already bound, hand back
+	// the existing device_id instead of allocating a new one. The user-row lock
+	// above serializes same-user requests; SELECT ... FOR UPDATE additionally
+	// protects the matching row or gap until this transaction completes.
 	if fp.MAC != "" {
 		var existingID string
 		err = tx.QueryRowContext(ctx,
@@ -78,19 +93,9 @@ func (s *bindStore) CommitBindFromPool(ctx context.Context, fp model.Fingerprint
 		if err == nil {
 			return existingID, store.ErrMACAlreadyBound
 		}
-		if err != sql.ErrNoRows {
+		if !errors.Is(err, sql.ErrNoRows) {
 			return "", fmt.Errorf("bindStore.CommitBindFromPool mac check: %w", err)
 		}
-	}
-
-	// 1. Atomic quota deduction
-	res, err := tx.ExecContext(ctx,
-		`UPDATE users SET bind_quota = bind_quota - 1 WHERE id = ? AND bind_quota > 0`, userID)
-	if err != nil {
-		return "", fmt.Errorf("bindStore.CommitBindFromPool quota: %w", err)
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return "", store.ErrQuotaEmpty
 	}
 
 	// 2. Safely grab one free, never-bound device: lock the row first, then update.
@@ -107,7 +112,7 @@ func (s *bindStore) CommitBindFromPool(ctx context.Context, fp model.Fingerprint
 		  WHERE p.status = 0 AND b.device_id IS NULL
 		  ORDER BY p.id LIMIT 1 FOR UPDATE`,
 	).Scan(&poolID, &deviceID)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return "", store.ErrPoolEmpty
 	}
 	if err != nil {
@@ -119,9 +124,9 @@ func (s *bindStore) CommitBindFromPool(ctx context.Context, fp model.Fingerprint
 		return "", fmt.Errorf("bindStore.CommitBindFromPool update pool: %w", err)
 	}
 
-	// 3. Insert or update device_bind.
-	// ON DUPLICATE KEY UPDATE handles re-binding a device that was returned
-	// to the pool via CommitUnbind (device_pool.status back to 0).
+	// 3. Insert the never-bound device. The duplicate branch is a defensive
+	// concurrency guard; the selection above excludes every existing binding
+	// row, including released devices whose pool status is 0.
 	res2, err := tx.ExecContext(ctx,
 		`INSERT INTO device_bind (device_id, mac, chip_uid, device_rand, assign, user_id, last_user_id, bind_time)
 		 VALUES (?, ?, ?, ?, 'dynamic', ?, ?, NOW())
@@ -182,8 +187,11 @@ func (s *bindStore) CommitBindByDeviceID(ctx context.Context, deviceID string, f
 		return store.ErrQuotaEmpty
 	}
 
-	// Mark device_pool allocated (best-effort; ignore if not found)
-	tx.ExecContext(ctx, `UPDATE device_pool SET status=1, updated_at=NOW() WHERE device_id=?`, deviceID)
+	// The device must remain marked allocated in the same transaction as its
+	// binding row. Updating a missing pool row is valid for legacy pre-burn data.
+	if _, err := tx.ExecContext(ctx, `UPDATE device_pool SET status=1, updated_at=NOW() WHERE device_id=?`, deviceID); err != nil {
+		return fmt.Errorf("bindStore.CommitBindByDeviceID update pool: %w", err)
+	}
 
 	// INSERT OR skip if already bound
 	res, err = tx.ExecContext(ctx,
@@ -233,7 +241,12 @@ func (s *bindStore) CommitClaim(ctx context.Context, deviceID string, fp model.F
 
 	// Capture assign for log before the UPDATE overwrites (or row is claimed)
 	var oldAssign string
-	tx.QueryRowContext(ctx, `SELECT assign FROM device_bind WHERE device_id=?`, deviceID).Scan(&oldAssign)
+	if err := tx.QueryRowContext(ctx, `SELECT assign FROM device_bind WHERE device_id=?`, deviceID).Scan(&oldAssign); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return store.ErrSlotConflict
+		}
+		return fmt.Errorf("bindStore.CommitClaim read assign: %w", err)
+	}
 
 	// Optimistic claim: only succeeds if still unowned
 	res, err = tx.ExecContext(ctx,
@@ -292,62 +305,75 @@ func (s *bindStore) commitUnbind(ctx context.Context, deviceID string, userID in
 	}
 	defer tx.Rollback()
 
-	// Read current fingerprint + assign before the UPDATE so the log captures them
+	if err := ApplyUnbindTx(ctx, tx, deviceID, userID, targets); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// ApplyUnbindTx applies the canonical device-unbind mutation inside a caller-
+// owned transaction. It is shared by user-server and the Admin MySQL adapter
+// so quota, history, pool state and cleanup outbox semantics cannot diverge.
+func ApplyUnbindTx(ctx context.Context, tx *sqlx.Tx, deviceID string, userID int64, targets []string) error {
+	// Lock and read the row before mutation so concurrent ownership changes are
+	// detected and the history captures the original fingerprint.
+	var currentUserID int64
 	var mac, chipUID, devRand, oldAssign string
-	err = tx.QueryRowContext(ctx,
-		`SELECT mac, chip_uid, device_rand, assign FROM device_bind WHERE device_id=? AND user_id=?`,
-		deviceID, userID,
-	).Scan(&mac, &chipUID, &devRand, &oldAssign)
-	if err == sql.ErrNoRows {
-		return store.ErrSlotConflict
+	err := tx.QueryRowContext(ctx,
+		`SELECT user_id,mac,chip_uid,device_rand,assign FROM device_bind WHERE device_id=? FOR UPDATE`,
+		deviceID,
+	).Scan(&currentUserID, &mac, &chipUID, &devRand, &oldAssign)
+	if errors.Is(err, sql.ErrNoRows) {
+		return store.ErrDeviceNotFound
 	}
 	if err != nil {
-		return fmt.Errorf("bindStore.CommitUnbind read fp: %w", err)
+		return fmt.Errorf("bindStore.CommitUnbind read binding: %w", err)
+	}
+	if currentUserID != userID {
+		return store.ErrSlotConflict
 	}
 
-	// Zero out user_id; preserve last_user_id as-is
 	res, err := tx.ExecContext(ctx,
 		`UPDATE device_bind
-		    SET user_id=0, device_name='', unbind_time=NOW()
+		    SET user_id=0, device_name='', bind_time=NULL, unbind_time=NOW()
 		  WHERE device_id=? AND user_id=?`,
 		deviceID, userID)
 	if err != nil {
 		return fmt.Errorf("bindStore.CommitUnbind update: %w", err)
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
+	if n, _ := res.RowsAffected(); n != 1 {
 		return store.ErrSlotConflict
 	}
 
-	// Return quota
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE users SET bind_quota = bind_quota + 1 WHERE id = ?`, userID); err != nil {
+		`UPDATE users SET bind_quota=bind_quota+1 WHERE id=?`, userID); err != nil {
 		return fmt.Errorf("bindStore.CommitUnbind quota: %w", err)
 	}
 
-	// Return device to pool so it can be allocated again via CommitBindFromPool.
+	// status=0 means released. CommitBindFromPool also requires the absence of a
+	// device_bind row, so a previously owned device is not allocated to another
+	// user and remains available only for its explicit reclaim flow.
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE device_pool SET status=0, updated_at=NOW() WHERE device_id=?`, deviceID); err != nil {
+		`UPDATE device_pool SET status=0,updated_at=NOW() WHERE device_id=?`, deviceID); err != nil {
 		return fmt.Errorf("bindStore.CommitUnbind pool: %w", err)
 	}
 
-	// Write unbind log with the fingerprint + assign captured above
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO device_bind_log (device_id, user_id, action, mac, chip_uid, device_rand, assign)
-		 VALUES (?, ?, 2, ?, ?, ?, ?)`,
+		`INSERT INTO device_bind_log (device_id,user_id,action,mac,chip_uid,device_rand,assign)
+		 VALUES (?,?,2,?,?,?,?)`,
 		deviceID, userID, mac, chipUID, devRand, oldAssign); err != nil {
 		return fmt.Errorf("bindStore.CommitUnbind log: %w", err)
 	}
 
 	for _, target := range uniqueCleanupTargets(targets) {
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO cleanup_outbox (device_id, target, next_attempt_at)
-			VALUES (?, ?, NOW())
-			ON DUPLICATE KEY UPDATE next_attempt_at=NOW(), last_error=''`, deviceID, target); err != nil {
+			INSERT INTO cleanup_outbox (device_id,target,next_attempt_at)
+			VALUES (?,?,NOW())
+			ON DUPLICATE KEY UPDATE attempts=0,next_attempt_at=NOW(),last_error=''`, deviceID, target); err != nil {
 			return fmt.Errorf("bindStore.CommitUnbind cleanup outbox %s: %w", target, err)
 		}
 	}
-
-	return tx.Commit()
+	return nil
 }
 
 func uniqueCleanupTargets(targets []string) []string {
@@ -370,8 +396,8 @@ func (s *bindStore) GetDeviceKey(ctx context.Context, deviceID string) (*model.D
 	var r model.DevicePool
 	err := s.db.GetContext(ctx, &r,
 		`SELECT device_id, device_key FROM device_pool WHERE device_id=?`, deviceID)
-	if err == sql.ErrNoRows {
-		return nil, nil
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil //nolint:nilnil // absence is the BindStore lookup contract
 	}
 	if err != nil {
 		return nil, fmt.Errorf("bindStore.GetDeviceKey: %w", err)
@@ -418,7 +444,7 @@ func (s *cacheStore) SetReportReplay(ctx context.Context, physHash string, val [
 
 func (s *cacheStore) GetReportReplay(ctx context.Context, physHash string) ([]byte, error) {
 	val, err := s.rdb.Get(ctx, "rate_reply:"+physHash).Bytes()
-	if err == redis.Nil {
+	if errors.Is(err, redis.Nil) {
 		return nil, nil
 	}
 	if err != nil {
@@ -437,7 +463,7 @@ func (s *cacheStore) SetVerifyRecord(ctx context.Context, physHash string, val [
 
 func (s *cacheStore) GetVerifyRecord(ctx context.Context, physHash string) ([]byte, error) {
 	val, err := s.rdb.Get(ctx, "verify:"+physHash).Bytes()
-	if err == redis.Nil {
+	if errors.Is(err, redis.Nil) {
 		return nil, nil
 	}
 	if err != nil {
@@ -456,7 +482,7 @@ func (s *cacheStore) ReserveDeviceCode(ctx context.Context, code, physHash strin
 
 func (s *cacheStore) GetDeviceCodeLookup(ctx context.Context, code string) (string, error) {
 	val, err := s.rdb.Get(ctx, "device_code_lookup:"+code).Result()
-	if err == redis.Nil {
+	if errors.Is(err, redis.Nil) {
 		return "", nil // key not found — callers check for empty string
 	}
 	if err != nil {
@@ -481,7 +507,7 @@ func (s *cacheStore) SetEmailCode(ctx context.Context, email, code string, ttl t
 
 func (s *cacheStore) GetEmailCode(ctx context.Context, email string) (string, error) {
 	val, err := s.rdb.Get(ctx, "email_code:"+email).Result()
-	if err == redis.Nil {
+	if errors.Is(err, redis.Nil) {
 		return "", nil
 	}
 	if err != nil {
@@ -503,7 +529,7 @@ func (s *cacheStore) ConsumeEmailCode(ctx context.Context, email, code string) (
 	return result == 1, nil
 }
 
-func (s *cacheStore) IncrPasswordResetAttempt(ctx context.Context, scope string, window time.Duration) (int64, error) {
+func (s *cacheStore) IncrRateLimitAttempt(ctx context.Context, scope string, window time.Duration) (int64, error) {
 	key := "password_reset_attempt:" + scope
 	windowMS := window.Milliseconds()
 	if windowMS < 1 {
@@ -517,25 +543,27 @@ func (s *cacheStore) IncrPasswordResetAttempt(ctx context.Context, scope string,
 		return count
 	`, []string{key}, windowMS).Int64()
 	if err != nil {
-		return 0, fmt.Errorf("cacheStore.IncrPasswordResetAttempt: %w", err)
+		return 0, fmt.Errorf("cacheStore.IncrRateLimitAttempt: %w", err)
 	}
 	return count, nil
 }
 
 func (s *cacheStore) IsDeviceOnline(ctx context.Context, deviceID string) (bool, error) {
 	val, err := s.rdb.Get(ctx, "online:"+deviceID).Result()
-	if err == redis.Nil {
+	if errors.Is(err, redis.Nil) {
 		return false, nil
 	}
 	if err != nil {
 		return false, fmt.Errorf("cacheStore.IsDeviceOnline: %w", err)
 	}
-	return val == "1", nil
+	// Older deployments store "1" while current device heartbeats store the
+	// observation timestamp. Any non-empty value with an active TTL means online.
+	return val != "", nil
 }
 
 func (s *cacheStore) IsInCall(ctx context.Context, deviceID string) (bool, error) {
 	_, err := s.rdb.Get(ctx, "room:lock:"+deviceID).Result()
-	if err == redis.Nil {
+	if errors.Is(err, redis.Nil) {
 		return false, nil
 	}
 	if err != nil {
@@ -589,7 +617,7 @@ func (s *cacheStore) SetPendingBind(ctx context.Context, deviceID, tempClientID 
 
 func (s *cacheStore) GetPendingBind(ctx context.Context, deviceID string) (string, error) {
 	val, err := s.rdb.Get(ctx, "pending_bind:"+deviceID).Result()
-	if err == redis.Nil {
+	if errors.Is(err, redis.Nil) {
 		return "", nil
 	}
 	if err != nil {
@@ -666,7 +694,7 @@ func (s *cacheStore) SetReportFingerprint(ctx context.Context, deviceID, physHas
 
 func (s *cacheStore) GetReportFingerprint(ctx context.Context, deviceID string) (string, error) {
 	val, err := s.rdb.Get(ctx, "report_fp:"+deviceID).Result()
-	if err == redis.Nil {
+	if errors.Is(err, redis.Nil) {
 		return "", nil
 	}
 	if err != nil {
