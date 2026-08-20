@@ -221,7 +221,7 @@ yaml_section_value() {
             return value
         }
         { sub(/\r$/, "") }
-        $0 == section ":" { inside=1; next }
+        $0 ~ "^" section ":[[:space:]]*(#.*)?$" { inside=1; next }
         /^[^[:space:]]/ { inside=0 }
         inside && $0 ~ "^[[:space:]]+" key ":[[:space:]]*" {
             sub("^[^:]+:[[:space:]]*", ""); print scalar_value($0); exit
@@ -233,7 +233,7 @@ yaml_has_section_key() {
     local file="$1" section="$2" key="$3"
     awk -v section="$section" -v key="$key" '
         { sub(/\r$/, "") }
-        $0 == section ":" { inside=1; next }
+        $0 ~ "^" section ":[[:space:]]*(#.*)?$" { inside=1; next }
         /^[^[:space:]]/ { inside=0 }
         inside && $0 ~ "^[[:space:]]+" key ":[[:space:]]*" { found=1; exit }
         END { exit !found }
@@ -378,6 +378,99 @@ run_migrations() {
     log "执行数据库迁移..."
     "$BUILD_DIR/bin/admin-server" -c "$MIGRATION_CONFIG" -migrate-only || return 1
     log "数据库迁移完成"
+}
+
+# ================== 首个管理员 ==================
+restart_admin_after_init() {
+    local state
+    if ! command -v "$SUPERVISORCTL" >/dev/null 2>&1; then
+        warn "未找到 $SUPERVISORCTL；首个管理员已创建，请在启动 admin-server 时加载最新权限"
+        return
+    fi
+    state="$(supervisor_state "admin-server")"
+    case "$state" in
+        RUNNING|STARTING)
+            log "刷新 admin-server 内存权限..."
+            restart_one "admin-server" || return 1
+            ;;
+        STOPPED|EXITED|BACKOFF|FATAL)
+            log "admin-server 当前为 $state；下次启动时会加载首个管理员权限"
+            ;;
+        *)
+            warn "Supervisor 中未找到 $(supervisor_program "admin-server")；注册并启动后会加载首个管理员权限"
+            ;;
+    esac
+}
+
+initialize_first_admin() {
+    local email="${ADMIN_INIT_EMAIL:-}"
+    local nick_name="${ADMIN_INIT_NICK_NAME:-}"
+    local password="${ADMIN_INIT_PASSWORD:-}"
+    local confirmation=""
+    local admin_bin="$DEPLOY_ROOT/admin-server/admin-server"
+    local admin_cfg="$DEPLOY_ROOT/admin-server/config.yaml"
+
+    validate_paths || return 1
+    validate_release_options || return 1
+    validate_configs || return 1
+    [ -x "$admin_bin" ] || {
+        err "缺少初始化程序: $admin_bin；请先执行编译并发布文件"
+        return 1
+    }
+    [ -f "$admin_cfg" ] || {
+        err "缺少 Admin 配置: $admin_cfg"
+        return 1
+    }
+
+    if [ -z "$email" ]; then
+        [ -t 0 ] || {
+            err "非交互模式必须设置 ADMIN_INIT_EMAIL 和 ADMIN_INIT_PASSWORD"
+            return 1
+        }
+        read -r -p "首个管理员邮箱: " email
+    fi
+    [[ "$email" == *@* ]] || {
+        err "首个管理员邮箱格式无效"
+        return 1
+    }
+    if [ -z "$nick_name" ]; then
+        nick_name="${email%%@*}"
+    fi
+    if [ -z "$password" ]; then
+        [ -t 0 ] || {
+            err "非交互模式必须设置 ADMIN_INIT_PASSWORD"
+            return 1
+        }
+        read -r -s -p "首个管理员密码（至少 12 个字符）: " password
+        echo
+        read -r -s -p "再次输入密码: " confirmation
+        echo
+        [ "$password" = "$confirmation" ] || {
+            err "两次输入的管理员密码不一致"
+            return 1
+        }
+    fi
+    [ "${#password}" -ge 12 ] || {
+        err "管理员密码至少需要 12 个字符"
+        return 1
+    }
+
+    run_migrations || return 1
+    log "初始化首个管理员: $email"
+    if ! ADMIN_INIT_PASSWORD="$password" "$admin_bin" \
+        -c "$admin_cfg" \
+        -init-admin \
+        -init-email "$email" \
+        -init-nick-name "$nick_name"; then
+        password=""
+        confirmation=""
+        err "首个管理员初始化失败；数据库已有管理员时不会重复创建"
+        return 1
+    fi
+    password=""
+    confirmation=""
+    restart_admin_after_init || return 1
+    log "首个管理员初始化完成；常驻 Admin 权限已刷新"
 }
 
 # ================== 健康检查 ==================
@@ -717,6 +810,7 @@ full_deploy() (
     prune_successful_backups || warn "清理过期备份失败，请稍后人工清理"
     log "全流程发布成功: $(git -C "$REPO_PATH" rev-parse --short HEAD)"
     log "回滚备份保留在: $BACKUP_DIR"
+    log "首次部署如尚无管理员，请在菜单选择“初始化首个管理员”；运行中的 Admin 会自动刷新权限"
 )
 
 # ================== 选择 ==================
@@ -736,6 +830,8 @@ menu() {
     echo "7) 状态"
     echo "8) 全流程"
     echo "0) 仅执行数据库迁移"
+    echo "10) 仅校验配置"
+    echo "11) 初始化首个管理员"
     echo "9) 退出"
 
     read -p "选择: " c
@@ -752,6 +848,8 @@ menu() {
         7) run_batch status "${services[@]}" ;;
         8) full_deploy ;;
         0) validate_paths; validate_release_options; run_migrations ;;
+        10) validate_configs ;;
+        11) initialize_first_admin ;;
         9) exit 0 ;;
     esac
 }

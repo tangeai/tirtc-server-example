@@ -128,6 +128,20 @@ openssl rand -base64 32  # security.config_encryption_key，仅 admin-server 使
 
 Admin Server 初始化会执行数据库版本检查，并写入默认菜单、权限以及“超级管理员、运营管理员、技术支持、审计员”四个角色。首个账号使用一次性命令创建并授予超级管理员角色：
 
+生产目录使用 `deploy-prod.sh` 菜单中的“初始化首个管理员”。该流程先校验六份配置并执行数据库迁移，交互输入时隐藏密码；如果 Admin Server 已在 Supervisor 中运行，初始化后会重启该进程并等待 readiness，使新账号、角色和菜单权限立即进入内存。
+
+非交互发布可通过环境变量传入账号信息，密码只通过子进程环境传递：
+
+```bash
+sudo env \
+  ADMIN_INIT_EMAIL='admin@example.com' \
+  ADMIN_INIT_NICK_NAME='管理员' \
+  ADMIN_INIT_PASSWORD='replace-with-one-time-strong-password' \
+  /opt/thing-connect/deploy-prod.sh
+```
+
+进入菜单后选择“初始化首个管理员”。直接调用二进制时使用：
+
 ```bash
 sudo env ADMIN_INIT_PASSWORD='replace-with-one-time-strong-password' \
   /opt/thing-connect/admin-server/admin-server \
@@ -213,15 +227,16 @@ done
 
 仓库内的 `scripts/deploy-prod.sh` 提供基于 Supervisor 的构建、发布、备份和失败回滚流程。通过 `DEPLOY_ROOT`、`REPO_URL`、`SUPERVISOR_GROUP` 等环境变量适配部署目录和代码来源。
 
-全流程发布默认读取 `${DEPLOY_ROOT}/admin-server/migration-config.yaml`；当前生产脚本的 `DEPLOY_ROOT` 默认值为 `/data/demo-open.tangeai.cn`，可直接修改脚本顶部配置，也可通过同名环境变量临时覆盖。迁移配置也可通过 `MIGRATION_CONFIG` 指定其他绝对路径。该文件使用完整 Admin 配置格式，但 `database.dsn` 必须属于具备 DDL 权限的迁移账号，文件权限应为 `600`。迁移已由外部系统完成时才设置 `SKIP_MIGRATIONS=1`。脚本使用 `git pull --ff-only` 获取版本，并在每个服务重启后等待 `/health/ready`；等待时间可通过 `HEALTH_WAIT_SECONDS` 调整。
+全流程发布默认读取 `${DEPLOY_ROOT}/admin-server/migration-config.yaml`；当前生产脚本的 `DEPLOY_ROOT` 默认值为 `/data/demo-open.tangeai.cn`，可直接修改脚本顶部配置，也可通过同名环境变量临时覆盖。迁移配置也可通过 `MIGRATION_CONFIG` 指定其他绝对路径。该文件使用完整 Admin 配置格式，但 `database.dsn` 必须属于具备 DDL 权限的迁移账号，文件权限应为 `600`。迁移已由外部系统完成时才设置 `SKIP_MIGRATIONS=1`。脚本使用 `git pull --ff-only` 获取版本，并在每个服务重启后等待 `/health/ready`；等待时间可通过 `HEALTH_WAIT_SECONDS` 调整。发布前可选择“仅校验配置”，集中检查六个服务的共享密钥、DSN、端口及 Admin 专用配置。YAML 节标题允许合法的尾随空白和行尾注释，脚本不会改写生产配置。
 
-已有五服务部署首次接入 Admin Server 时，先准备六份配置，执行“编译”“仅执行数据库迁移”和“仅发布文件”，再把 Supervisor 配置中的 `admin-server` 加入服务组并执行 `reread`、`update`。Supervisor 能识别六个进程后才执行“全流程”。这样不会要求一个尚未安装的 Admin 进程先通过服务管理器校验。
+已有五服务部署首次接入 Admin Server 时，先准备六份配置并运行“仅校验配置”，再执行“编译”“仅执行数据库迁移”和“仅发布文件”，然后把 Supervisor 配置中的 `admin-server` 加入服务组并执行 `reread`、`update`。Supervisor 能识别六个进程后执行“初始化首个管理员”；后续版本使用“全流程”。这样不会要求一个尚未安装的 Admin 进程先通过服务管理器校验，也不会让常驻进程继续使用初始化前的权限快照。
 
 ## 故障排查
 
 - 启动提示占位密钥：按“密钥与配置”生成并替换对应值。
 - `schema_migrations` 或 DDL 权限失败：使用迁移账号导入或升级数据库，应用账号只保留 DML 权限。
 - Admin 页面可打开但刷新登录失败：HTTPS 环境保持 `cookie_secure: true`；本机 HTTP 开发设为 `false`。
+- Admin 登录成功但页面持续转圈、导航为空：确认首个管理员通过发布脚本初始化，并重启 Admin Server 以重新加载 RBAC；随后检查 `/v1/admin/me` 与 `/v1/admin/me/navigation`。
 - 管理页面 IP 都是代理地址：只把实际 Nginx 地址加入 `trusted_proxies`，并确认转发 `X-Forwarded-For`。
 - 服务状态离线：检查六个进程是否使用同一 Redis，以及节点到 Redis 的网络与认证。
 - MQTT 状态异常：检查 Broker TLS、认证模式和 `SERVICE_INSTANCE_ID` 是否唯一。

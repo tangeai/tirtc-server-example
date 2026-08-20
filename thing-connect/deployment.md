@@ -50,7 +50,7 @@ mysql -u root -p thing_connect < scripts/schema.sql
 
 服务启动先使用 YAML。某项配置在 Admin 后台首次发布后，由数据库值接管并动态同步。系统配置、通用配置和五个服务的业务配置使用不同命名空间。
 
-生产发布脚本的全流程要求 `admin-server/migration-config.yaml` 使用具备 DDL 权限的数据库账号。若迁移已由独立发布系统完成，可显式设置 `SKIP_MIGRATIONS=1`。脚本逐个重启服务，并以各服务 `server.http_port` 的 `/health/ready` 作为成功门槛；Supervisor 仅显示 `RUNNING` 不代表发布成功。
+生产发布脚本的全流程要求 `admin-server/migration-config.yaml` 使用具备 DDL 权限的数据库账号。若迁移已由独立发布系统完成，可显式设置 `SKIP_MIGRATIONS=1`。发布前使用菜单中的“仅校验配置”统一检查六个服务配置；首次安装使用“初始化首个管理员”，由脚本隐藏密码、执行迁移，并在 Admin Server 已运行时重启它以加载 RBAC。脚本逐个重启服务，并以各服务 `server.http_port` 的 `/health/ready` 作为成功门槛；Supervisor 仅显示 `RUNNING` 不代表发布成功。
 
 ## 开发运行
 
@@ -72,7 +72,7 @@ npm --prefix admin/admin-web ci
 npm --prefix admin/admin-web run dev
 ```
 
-首次管理员使用 `admin-server -init-admin` 初始化，具体命令见完整部署指南。
+首次管理员在生产环境使用 `deploy-prod.sh` 的“初始化首个管理员”，直接运行二进制的命令见完整部署指南。
 
 ## 测试
 

@@ -375,13 +375,17 @@ func (s *HTTPServer) getDevice(c *gin.Context) {
 	apiresp.OK(c, device)
 }
 
+// devicePresenceKey maps a permanent device ID to the Redis presence key
+// written from its formal MQTT ClientID (sn_{device_id}).
+func devicePresenceKey(deviceID string) string { return "online:sn_" + deviceID }
+
 func (s *HTTPServer) attachDevicePresence(ctx context.Context, devices []managedDevice) {
 	if len(devices) == 0 || s.redis == nil {
 		return
 	}
 	keys := make([]string, len(devices))
 	for i := range devices {
-		keys[i] = "online:" + devices[i].DeviceID
+		keys[i] = devicePresenceKey(devices[i].DeviceID)
 	}
 	values, err := s.redis.MGet(ctx, keys...).Result()
 	if err != nil {
