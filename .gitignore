@@ -1,51 +1,68 @@
-*.db
-.claude
-.superpowers
-superpowers
-*.test
-*.yaml
+# Local agent and workspace state
+/.claude/
+/.codex_tmp/
+/.playwright-cli/
+/.superpowers/
+/superpowers/
+/AGENTS.md
+/CLAUDE.md
+/constitution.md
+
+# Editor and operating-system files
+.DS_Store
+Thumbs.db
+*:Zone.Identifier
+.idea/
+.vscode/
+*.swp
+
+# Local documentation, deployment files, and credentials
+/docs/
+/local/
+/thing-connect/local-deploy.sh
+.env
+.env.*
+!.env.example
+config.yaml
+config.*.yaml
+migration-config.yaml
 !thing-connect/tests/testdata/config.yaml
-!.github/workflows/*.yaml
+*.db
+device_creds.json
+
+# Logs and runtime output
 *.log
+output/
+received/
+
+# Build and test artifacts
+bin/
+build/
+dist/
+obj/
+target/
 *.class
-*.mp4
-bin
-build
-dist
-local
-docs
-!docs/
-!docs/**
-target
-received
-CLAUDE.md
-constitution.md
+*.test
+*.tsbuildinfo
+
 # Node.js
 node_modules/
-*.tsbuildinfo
-thing-connect/admin/admin-web/vite.config.js
-thing-connect/admin/admin-web/vite.config.d.ts
-# Python     
-__pycache__/
-*.pyc
-*.pyo
-AGENTS.md
-obj
-thing-connect/device-sim/sdk/macos-arm64/lib/libTiRTC.dylib
-thing-connect/device-sim/.venv-macos-build/
-device_creds.json
-# 生成的测试素材（gen_assets.sh 产生）
-thing-connect/device-sim/assets/number.*
-thing-connect/device-sim/assets/numbers_chinese_*
-thing-connect/device-sim/scripts/numbers_chinese_*
+/thing-connect/admin/admin-web/vite.config.js
+/thing-connect/admin/admin-web/vite.config.d.ts
 
-# Local development deployment script (environment-specific, not open source).
-thing-connect/local-deploy.sh
-/.codex_tmp
+# Python
+__pycache__/
+*.py[cod]
+
+# Generated media and simulator artifacts
+*.mp4
+/thing-connect/device-sim/.venv-macos-build/
+/thing-connect/device-sim/assets/number.*
+/thing-connect/device-sim/assets/numbers_chinese_*
 /thing-connect/device-sim/assets/*.mjpeg
 /thing-connect/device-sim/assets/video_h264_annexb_*.h264
+/thing-connect/device-sim/scripts/numbers_chinese_*
+/thing-connect/device-sim/sdk/macos-arm64/lib/libTiRTC.dylib
 /thing-connect/device-sim/device-sim-c/device-sim
 /thing-connect/device-sim/device-sim-c/device-sim-product
 /thing-connect/device-sim/device-sim-c/libdevice-reference.a
-/output/
-/thing-connect/output/

@@ -143,20 +143,20 @@ sudo env ADMIN_INIT_PASSWORD='replace-with-one-time-strong-password' \
 
 ## Supervisor
 
-复制通用模板并替换目录及运行用户：
+复制 Supervisor 模板。模板默认对应 `/data/demo-open.tangeai.cn` 和 `demo-open` 服务组；部署到其他目录或服务组时，同步修改模板与 `deploy-prod.sh` 顶部配置：
 
 ```bash
-sudo cp scripts/supervisor/thing-connect.conf.example /etc/supervisor/conf.d/thing-connect.conf
+sudo cp deploy/supervisor/demo-open.supervisor.conf /etc/supervisor/conf.d/demo-open.supervisor.conf
 sudo supervisorctl reread
 sudo supervisorctl update
-sudo supervisorctl status thing-connect:*
+sudo supervisorctl status demo-open:*
 ```
 
 同一服务运行多个实例时，每个实例使用独立端口和唯一 `SERVICE_INSTANCE_ID`。MQTT 推荐 `username` 认证模式；同一主机上的同类实例必须使用不同的 `SERVICE_INSTANCE_ID`，避免 MQTT ClientID 冲突。MySQL、Redis、Admin 地址必须能从每台服务节点访问。
 
 ## Nginx 与访问地址
 
-以 [nginx.conf.example](../../nginx.conf.example) 为基础设置域名、证书和各服务地址，然后检查并加载：
+以 [demo-open.nginx.conf](../../deploy/nginx/demo-open.nginx.conf) 为基础设置域名、证书和各服务地址，然后检查并加载：
 
 ```bash
 sudo nginx -t
@@ -212,6 +212,10 @@ done
 5. 不修改业务 `jwt_secret` 时，普通用户无需重新登录；只有密码、账号状态或用户认证版本变化时，对应用户令牌失效。
 
 仓库内的 `scripts/deploy-prod.sh` 提供基于 Supervisor 的构建、发布、备份和失败回滚流程。通过 `DEPLOY_ROOT`、`REPO_URL`、`SUPERVISOR_GROUP` 等环境变量适配部署目录和代码来源。
+
+全流程发布默认读取 `${DEPLOY_ROOT}/admin-server/migration-config.yaml`；当前生产脚本的 `DEPLOY_ROOT` 默认值为 `/data/demo-open.tangeai.cn`，可直接修改脚本顶部配置，也可通过同名环境变量临时覆盖。迁移配置也可通过 `MIGRATION_CONFIG` 指定其他绝对路径。该文件使用完整 Admin 配置格式，但 `database.dsn` 必须属于具备 DDL 权限的迁移账号，文件权限应为 `600`。迁移已由外部系统完成时才设置 `SKIP_MIGRATIONS=1`。脚本使用 `git pull --ff-only` 获取版本，并在每个服务重启后等待 `/health/ready`；等待时间可通过 `HEALTH_WAIT_SECONDS` 调整。
+
+已有五服务部署首次接入 Admin Server 时，先准备六份配置，执行“编译”“仅执行数据库迁移”和“仅发布文件”，再把 Supervisor 配置中的 `admin-server` 加入服务组并执行 `reread`、`update`。Supervisor 能识别六个进程后才执行“全流程”。这样不会要求一个尚未安装的 Admin 进程先通过服务管理器校验。
 
 ## 故障排查
 

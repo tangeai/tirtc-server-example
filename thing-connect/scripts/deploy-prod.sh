@@ -3,14 +3,19 @@
 set -Eeuo pipefail
 
 # ================== 配置 ==================
-REPO_URL="${REPO_URL:-https://github.com/tangeai/tirtc-server-example.git}"
+# 常规部署只需按实际环境修改下面三行；同名环境变量可临时覆盖。
+PRODUCTION_DEPLOY_ROOT="/data/demo-open.tangeai.cn"
+DEFAULT_REPO_URL="git@github.com:tangeai/tirtc-server-example.git"
+DEFAULT_SUPERVISOR_GROUP="demo-open"
+
+REPO_URL="${REPO_URL:-$DEFAULT_REPO_URL}"
+SUPERVISOR_GROUP="${SUPERVISOR_GROUP:-$DEFAULT_SUPERVISOR_GROUP}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="tirtc-server-example"
 WORK_DIR="thing-connect"
 
 # 生产发布根目录。现有部署可继续通过 DEPLOY_ROOT 指向原目录。
-PRODUCTION_DEPLOY_ROOT="/opt/thing-connect"
 DEPLOY_ROOT_INPUT="${DEPLOY_ROOT:-$PRODUCTION_DEPLOY_ROOT}"
 if ! DEPLOY_ROOT="$(cd "$DEPLOY_ROOT_INPUT" 2>/dev/null && pwd)"; then
     echo "[ERROR] 部署目录不存在: ${DEPLOY_ROOT_INPUT}"
@@ -21,11 +26,16 @@ BUILD_DIR="${BUILD_DIR:-$REPO_PATH/$WORK_DIR}"
 
 # 生产服务仅由 Supervisor 托管。
 SUPERVISORCTL="${SUPERVISORCTL:-supervisorctl}"
-# 对应 supervisor/thing-connect.conf.example 的 [group:thing-connect]。
-SUPERVISOR_GROUP="${SUPERVISOR_GROUP:-thing-connect}"
+# 对应 deploy/supervisor/demo-open.supervisor.conf 的 [group:demo-open]。
 SUPERVISOR_WAIT_SECONDS="${SUPERVISOR_WAIT_SECONDS:-15}"
 SUPERVISOR_STABLE_SECONDS="${SUPERVISOR_STABLE_SECONDS:-2}"
+HEALTH_WAIT_SECONDS="${HEALTH_WAIT_SECONDS:-30}"
+HEALTH_REQUEST_TIMEOUT_SECONDS="${HEALTH_REQUEST_TIMEOUT_SECONDS:-3}"
+HEALTH_HOST="${HEALTH_HOST:-127.0.0.1}"
 BACKUP_KEEP_COUNT="${BACKUP_KEEP_COUNT:-10}"
+MIGRATION_CONFIG="${MIGRATION_CONFIG:-$DEPLOY_ROOT/admin-server/migration-config.yaml}"
+SKIP_MIGRATIONS="${SKIP_MIGRATIONS:-0}"
+ALLOW_INSECURE_ADMIN_COOKIE="${ALLOW_INSECURE_ADMIN_COOKIE:-0}"
 
 mkdir -p "$DEPLOY_ROOT/logs"
 
@@ -121,6 +131,18 @@ validate_service_manager() {
         err "SUPERVISOR_STABLE_SECONDS 必须是非负整数"
         return 1
     }
+    [[ "$HEALTH_WAIT_SECONDS" =~ ^[1-9][0-9]*$ ]] || {
+        err "HEALTH_WAIT_SECONDS 必须是正整数"
+        return 1
+    }
+    [[ "$HEALTH_REQUEST_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]] || {
+        err "HEALTH_REQUEST_TIMEOUT_SECONDS 必须是正整数"
+        return 1
+    }
+    command -v curl >/dev/null 2>&1 || {
+        err "找不到 curl；生产发布必须执行 readiness 检查"
+        return 1
+    }
     for svc in "${ALL_SERVICES[@]}"; do
         require_supervisor_service "$svc" || return 1
     done
@@ -130,6 +152,17 @@ validate_service_manager() {
 validate_backup_retention() {
     [[ "$BACKUP_KEEP_COUNT" =~ ^[1-9][0-9]*$ ]] || {
         err "BACKUP_KEEP_COUNT 必须是正整数"
+        return 1
+    }
+}
+
+validate_release_options() {
+    [[ "$SKIP_MIGRATIONS" =~ ^[01]$ ]] || {
+        err "SKIP_MIGRATIONS 只能是 0 或 1"
+        return 1
+    }
+    [[ "$ALLOW_INSECURE_ADMIN_COOKIE" =~ ^[01]$ ]] || {
+        err "ALLOW_INSECURE_ADMIN_COOKIE 只能是 0 或 1"
         return 1
     }
 }
@@ -207,14 +240,51 @@ yaml_has_section_key() {
     ' "$file"
 }
 
+is_placeholder_secret() {
+    local normalized="${1,,}"
+    normalized="${normalized//[[:space:]]/}"
+    case "$normalized" in
+        change-me-in-production|replace-with-*|your-*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 validate_configs() {
     local svc cfg jwt expected_jwt="" internal expected_internal="" url
-    for svc in "${BUSINESS_SERVICES[@]}"; do
+    local database_dsn
+    local redis_addr redis_password redis_db
+    local expected_redis_addr="" expected_redis_password="" expected_redis_db=""
+
+    for svc in "${ALL_SERVICES[@]}"; do
         cfg="$DEPLOY_ROOT/$svc/config.yaml"
         [ -f "$cfg" ] || { err "$svc: config.yaml 不存在"; return 1; }
-        chmod 600 "$cfg"
+        chmod 600 "$cfg" || return 1
+
+        database_dsn="$(yaml_section_value "$cfg" database dsn)"
+        [ -n "$database_dsn" ] || { err "$svc: database.dsn 未配置"; return 1; }
+
+        redis_addr="$(yaml_section_value "$cfg" redis addr)"
+        redis_password="$(yaml_section_value "$cfg" redis password)"
+        redis_db="$(yaml_section_value "$cfg" redis db)"
+        [ -n "$redis_addr" ] || { err "$svc: redis.addr 未配置"; return 1; }
+        [ -n "$redis_db" ] || { err "$svc: redis.db 未配置"; return 1; }
+        if [ -z "$expected_redis_addr" ]; then
+            expected_redis_addr="$redis_addr"
+            expected_redis_password="$redis_password"
+            expected_redis_db="$redis_db"
+        elif [ "$redis_addr" != "$expected_redis_addr" ] ||
+             [ "$redis_password" != "$expected_redis_password" ] ||
+             [ "$redis_db" != "$expected_redis_db" ]; then
+            err "$svc: Redis 配置与其他服务不一致"
+            return 1
+        fi
+    done
+
+    for svc in "${BUSINESS_SERVICES[@]}"; do
+        cfg="$DEPLOY_ROOT/$svc/config.yaml"
         jwt="$(yaml_top_value "$cfg" jwt_secret)"
         [ -n "$jwt" ] || { err "$svc: jwt_secret 未配置"; return 1; }
+        ! is_placeholder_secret "$jwt" || { err "$svc: jwt_secret 仍是公开占位值"; return 1; }
         [ -z "$expected_jwt" ] && expected_jwt="$jwt"
         [ "$jwt" = "$expected_jwt" ] || { err "$svc: jwt_secret 与其他服务不一致"; return 1; }
     done
@@ -223,6 +293,7 @@ validate_configs() {
         cfg="$DEPLOY_ROOT/$svc/config.yaml"
         internal="$(yaml_section_value "$cfg" internal key)"
         [ -n "$internal" ] || { err "$svc: internal.key 未配置"; return 1; }
+        ! is_placeholder_secret "$internal" || { err "$svc: internal.key 仍是公开占位值"; return 1; }
         [ -z "$expected_internal" ] && expected_internal="$internal"
         [ "$internal" = "$expected_internal" ] || { err "$svc: internal.key 与其他服务不一致"; return 1; }
         if yaml_has_section_key "$cfg" call internal_key; then
@@ -232,8 +303,27 @@ validate_configs() {
     done
 
     cfg="$DEPLOY_ROOT/admin-server/config.yaml"
-    [ -n "$(yaml_section_value "$cfg" admin jwt_secret)" ] || { err "admin-server: admin.jwt_secret 未配置"; return 1; }
-    [ -n "$(yaml_section_value "$cfg" security config_encryption_key)" ] || { err "admin-server: security.config_encryption_key 未配置"; return 1; }
+    local admin_jwt config_key cookie_secure
+    admin_jwt="$(yaml_section_value "$cfg" admin jwt_secret)"
+    config_key="$(yaml_section_value "$cfg" security config_encryption_key)"
+    cookie_secure="$(yaml_section_value "$cfg" admin cookie_secure)"
+    [ -n "$admin_jwt" ] || { err "admin-server: admin.jwt_secret 未配置"; return 1; }
+    ! is_placeholder_secret "$admin_jwt" || { err "admin-server: admin.jwt_secret 仍是公开占位值"; return 1; }
+    [ -n "$config_key" ] || { err "admin-server: security.config_encryption_key 未配置"; return 1; }
+    ! is_placeholder_secret "$config_key" || { err "admin-server: security.config_encryption_key 仍是公开占位值"; return 1; }
+    if [ "$cookie_secure" != "true" ]; then
+        if [ "$ALLOW_INSECURE_ADMIN_COOKIE" = "1" ]; then
+            warn "admin-server: admin.cookie_secure 未启用，仅允许用于明确的非 HTTPS 环境"
+        else
+            err "admin-server: 生产环境必须设置 admin.cookie_secure: true"
+            return 1
+        fi
+    fi
+
+    for svc in "${BUSINESS_SERVICES[@]}"; do
+        url="$(yaml_section_value "$DEPLOY_ROOT/$svc/config.yaml" admin server_url)"
+        [ -n "$url" ] || { err "$svc: admin.server_url 未配置"; return 1; }
+    done
 
     for svc in ai voip call; do
         url="$(yaml_section_value "$DEPLOY_ROOT/user-server/config.yaml" "$svc" server_url)"
@@ -248,19 +338,78 @@ validate_configs() {
 
 # ================== 拉代码 ==================
 pull_code() {
+    local worktree_status
     log "拉取代码..."
     if [ -d "$REPO_PATH/.git" ]; then
-        git -C "$REPO_PATH" pull
+        worktree_status="$(git -C "$REPO_PATH" status --porcelain --untracked-files=normal)" || return 1
+        if [ -n "$worktree_status" ]; then
+            err "源码目录存在未提交修改，拒绝覆盖: $REPO_PATH"
+            return 1
+        fi
+        git -C "$REPO_PATH" pull --ff-only || return 1
     else
-        git clone "$REPO_URL" "$REPO_PATH"
+        git clone "$REPO_URL" "$REPO_PATH" || return 1
     fi
-    log "待发布版本: $(git -C "$REPO_PATH" rev-parse --short HEAD)"
+    log "待发布版本: $(git -C "$REPO_PATH" rev-parse HEAD)"
 }
 
 # ================== 编译 ==================
 build_services() {
     [ -f "$BUILD_DIR/go.mod" ] || { err "源码目录未就绪（缺少 $BUILD_DIR/go.mod）"; return 1; }
-    "$BUILD_DIR/build.sh" "$@"
+    "$BUILD_DIR/build.sh" "$@" || return 1
+}
+
+# ================== 数据库迁移 ==================
+run_migrations() {
+    if [ "$SKIP_MIGRATIONS" = "1" ]; then
+        warn "已按 SKIP_MIGRATIONS=1 跳过数据库迁移；仅应在迁移已独立完成时使用"
+        return
+    fi
+    [ -f "$MIGRATION_CONFIG" ] || {
+        err "缺少迁移配置: $MIGRATION_CONFIG"
+        err "请复制 admin-server/config.yaml，使用具备 DDL 权限的 database.dsn，并设置权限 600"
+        return 1
+    }
+    chmod 600 "$MIGRATION_CONFIG" || return 1
+    [ -x "$BUILD_DIR/bin/admin-server" ] || {
+        err "缺少迁移程序: $BUILD_DIR/bin/admin-server"
+        return 1
+    }
+    log "执行数据库迁移..."
+    "$BUILD_DIR/bin/admin-server" -c "$MIGRATION_CONFIG" -migrate-only || return 1
+    log "数据库迁移完成"
+}
+
+# ================== 健康检查 ==================
+service_health_url() {
+    local svc="$1" port
+    port="$(yaml_section_value "$DEPLOY_ROOT/$svc/config.yaml" server http_port)"
+    [[ "$port" =~ ^[1-9][0-9]*$ ]] || {
+        err "$svc: server.http_port 无效"
+        return 1
+    }
+    printf 'http://%s:%s/health/ready\n' "$HEALTH_HOST" "$port"
+}
+
+wait_for_readiness() {
+    local svc="$1" url elapsed=0 state
+    url="$(service_health_url "$svc")" || return 1
+    while [ "$elapsed" -lt "$HEALTH_WAIT_SECONDS" ]; do
+        if curl -fsS --max-time "$HEALTH_REQUEST_TIMEOUT_SECONDS" "$url" >/dev/null 2>&1; then
+            log "$svc readiness 检查通过"
+            return
+        fi
+        state="$(supervisor_state "$svc")"
+        if [ "$state" != "RUNNING" ] && [ "$state" != "STARTING" ]; then
+            err "$svc readiness 检查期间 Supervisor 状态变为 ${state:-UNKNOWN}"
+            return 1
+        fi
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+    err "$svc 在 ${HEALTH_WAIT_SECONDS}s 内未通过 $url"
+    curl -sS --max-time "$HEALTH_REQUEST_TIMEOUT_SECONDS" "$url" || true
+    return 1
 }
 
 # ================== 停服务 ==================
@@ -270,14 +419,14 @@ stop_one() {
     log "停止 $svc ..."
 
     local state
-    require_supervisor_service "$svc"
+    require_supervisor_service "$svc" || return 1
     state="$(supervisor_state "$svc")"
     if [ "$state" = "STOPPED" ]; then
         log "$svc 已停止（Supervisor）"
         return
     fi
     "$SUPERVISORCTL" stop "$(supervisor_program "$svc")" || true
-    wait_for_supervisor_state "$svc" "STOPPED"
+    wait_for_supervisor_state "$svc" "STOPPED" || return 1
     log "$svc 已停止（Supervisor）"
 }
 
@@ -296,34 +445,36 @@ deploy_one() {
         return 1
     fi
 
-    mkdir -p "$target_dir"
+    mkdir -p "$target_dir" || return 1
 
-    cp "$src_bin" "$target_dir/$svc.tmp"
-    mv -f "$target_dir/$svc.tmp" "$target_dir/$svc"
+    cp "$src_bin" "$target_dir/$svc.tmp" || return 1
+    mv -f "$target_dir/$svc.tmp" "$target_dir/$svc" || return 1
 
-    chmod +x "$target_dir/$svc"
+    chmod +x "$target_dir/$svc" || return 1
 
     # 配置
     local config_example="$BUILD_DIR/$svc/config.yaml.example"
     [ "$svc" != "admin-server" ] || config_example="$BUILD_DIR/admin/admin-server/config.yaml.example"
     if [ ! -f "$target_dir/config.yaml" ] && [ -f "$config_example" ]; then
-        cp "$config_example" "$target_dir/config.yaml"
-        chmod 600 "$target_dir/config.yaml"
+        cp "$config_example" "$target_dir/config.yaml" || return 1
+        chmod 600 "$target_dir/config.yaml" || return 1
     fi
 
     # 静态目录先完整复制到临时目录，再原子切换。
     case "$svc" in user-server|ai-server|admin-server)
         local static_source="$BUILD_DIR/$svc/static"
         [ "$svc" != "admin-server" ] || static_source="$BUILD_DIR/admin/admin-web/dist"
-        if [ -d "$static_source" ]; then
-            rm -rf "$target_dir/static.new"
-            cp -a "$static_source" "$target_dir/static.new"
-            rm -rf "$target_dir/static.old"
-            [ ! -d "$target_dir/static" ] || mv "$target_dir/static" "$target_dir/static.old"
-            mv "$target_dir/static.new" "$target_dir/static"
-            rm -rf "$target_dir/static.old"
-            log "$svc: static/ 已同步"
-        fi
+        [ -d "$static_source" ] || {
+            err "$svc: 静态资源不存在: $static_source"
+            return 1
+        }
+        rm -rf "$target_dir/static.new" || return 1
+        cp -a "$static_source" "$target_dir/static.new" || return 1
+        rm -rf "$target_dir/static.old" || return 1
+        [ ! -d "$target_dir/static" ] || mv "$target_dir/static" "$target_dir/static.old" || return 1
+        mv "$target_dir/static.new" "$target_dir/static" || return 1
+        rm -rf "$target_dir/static.old" || return 1
+        log "$svc: static/ 已同步"
         ;;
     esac
 
@@ -348,15 +499,17 @@ start_one() {
     fi
 
     local state
-    require_supervisor_service "$svc"
+    require_supervisor_service "$svc" || return 1
     state="$(supervisor_state "$svc")"
     if [ "$state" = "RUNNING" ]; then
-        log "$svc 已在运行（Supervisor）"
+        wait_for_readiness "$svc" || return 1
+        log "$svc 已在运行且就绪（Supervisor）"
         return
     fi
     log "启动 $svc（Supervisor）..."
-    "$SUPERVISORCTL" start "$(supervisor_program "$svc")"
-    wait_for_supervisor_state "$svc" "RUNNING"
+    "$SUPERVISORCTL" start "$(supervisor_program "$svc")" || return 1
+    wait_for_supervisor_state "$svc" "RUNNING" || return 1
+    wait_for_readiness "$svc" || return 1
     log "$svc 启动成功（Supervisor）"
 }
 
@@ -364,18 +517,19 @@ start_one() {
 restart_one() {
     local svc="$1"
 
-    require_supervisor_service "$svc"
+    require_supervisor_service "$svc" || return 1
     log "重启 $svc（Supervisor）..."
-    "$SUPERVISORCTL" restart "$(supervisor_program "$svc")"
-    wait_for_supervisor_state "$svc" "RUNNING"
+    "$SUPERVISORCTL" restart "$(supervisor_program "$svc")" || return 1
+    wait_for_supervisor_state "$svc" "RUNNING" || return 1
+    wait_for_readiness "$svc" || return 1
     log "$svc 重启成功（Supervisor）"
 }
 
 # ================== 状态 ==================
 status_one() {
     local svc="$1"
-    require_supervisor_service "$svc"
-    "$SUPERVISORCTL" status "$(supervisor_program "$svc")"
+    require_supervisor_service "$svc" || return 1
+    "$SUPERVISORCTL" status "$(supervisor_program "$svc")" || return 1
 }
 
 # ================== 批量 ==================
@@ -385,19 +539,19 @@ run_batch() {
 
     validate_services "$@"
     if [ "$action" = "build" ]; then
-        build_services "$@"
+        build_services "$@" || return 1
         return
     fi
     case "$action" in
-        deploy|start|stop|restart|status) validate_service_manager ;;
+        start|stop|restart|status) validate_service_manager ;;
     esac
     for svc in "$@"; do
         case "$action" in
-            deploy) deploy_one "$svc" ;;
-            start) start_one "$svc" ;;
-            stop) stop_one "$svc" ;;
-            restart) restart_one "$svc" ;;
-            status) status_one "$svc" ;;
+            deploy) deploy_one "$svc" || return 1 ;;
+            start) start_one "$svc" || return 1 ;;
+            stop) stop_one "$svc" || return 1 ;;
+            restart) restart_one "$svc" || return 1 ;;
+            status) status_one "$svc" || return 1 ;;
         esac
     done
 }
@@ -410,26 +564,26 @@ backup_release() {
     local release_id svc target backup
     release_id="$(date +%Y%m%d-%H%M%S)-$(git -C "$REPO_PATH" rev-parse --short HEAD)"
     BACKUP_DIR="$DEPLOY_ROOT/releases/$release_id"
-    mkdir -p "$BACKUP_DIR"
-    : > "$BACKUP_DIR/.deploying"
+    mkdir -p "$BACKUP_DIR" || return 1
+    : > "$BACKUP_DIR/.deploying" || return 1
     for svc in "$@"; do
         target="$DEPLOY_ROOT/$svc"
         backup="$BACKUP_DIR/$svc"
-        mkdir -p "$backup"
-        [ ! -f "$target/$svc" ] || cp -a "$target/$svc" "$backup/$svc"
-        [ ! -d "$target/static" ] || cp -a "$target/static" "$backup/static"
+        mkdir -p "$backup" || return 1
+        [ ! -f "$target/$svc" ] || cp -a "$target/$svc" "$backup/$svc" || return 1
+        [ ! -d "$target/static" ] || cp -a "$target/static" "$backup/static" || return 1
     done
     log "当前版本已备份到 $BACKUP_DIR"
 }
 
 mark_backup_successful() {
-    rm -f "$BACKUP_DIR/.deploying"
-    : > "$BACKUP_DIR/.successful"
+    rm -f "$BACKUP_DIR/.deploying" || return 1
+    : > "$BACKUP_DIR/.successful" || return 1
 }
 
 mark_backup_failed() {
-    rm -f "$BACKUP_DIR/.deploying"
-    : > "$BACKUP_DIR/.failed"
+    rm -f "$BACKUP_DIR/.deploying" || return 1
+    : > "$BACKUP_DIR/.failed" || return 1
 }
 
 prune_successful_backups() {
@@ -456,68 +610,114 @@ prune_successful_backups() {
 }
 
 rollback_release() {
-    local svc backup target
+    local svc backup target rollback_failed=0
     err "发布失败，开始回滚"
     for svc in "${DEPLOYED_SERVICES[@]}"; do
         backup="$BACKUP_DIR/$svc"
         target="$DEPLOY_ROOT/$svc"
-        stop_one "$svc" || true
+        stop_one "$svc" || rollback_failed=1
         if [ -f "$backup/$svc" ]; then
-            cp -a "$backup/$svc" "$target/$svc.rollback"
-            mv -f "$target/$svc.rollback" "$target/$svc"
-            chmod +x "$target/$svc"
+            if ! cp -a "$backup/$svc" "$target/$svc.rollback" ||
+               ! mv -f "$target/$svc.rollback" "$target/$svc" ||
+               ! chmod +x "$target/$svc"; then
+                err "$svc 二进制回滚失败"
+                rollback_failed=1
+                continue
+            fi
         else
             # 首次发布时没有可恢复的旧版本，不能保留失败的新二进制。
-            rm -f "$target/$svc"
+            rm -f "$target/$svc" || rollback_failed=1
         fi
         if [ -d "$backup/static" ]; then
-            rm -rf "$target/static.rollback"
-            cp -a "$backup/static" "$target/static.rollback"
-            rm -rf "$target/static"
-            mv "$target/static.rollback" "$target/static"
+            if ! rm -rf "$target/static.rollback" ||
+               ! cp -a "$backup/static" "$target/static.rollback" ||
+               ! rm -rf "$target/static" ||
+               ! mv "$target/static.rollback" "$target/static"; then
+                err "$svc 静态资源回滚失败"
+                rollback_failed=1
+            fi
         elif [ -d "$target/static" ]; then
-            rm -rf "$target/static"
+            rm -rf "$target/static" || rollback_failed=1
         fi
         if [ -f "$backup/$svc" ]; then
-            start_one "$svc" || err "$svc 回滚后启动失败，请人工处理"
+            if ! start_one "$svc"; then
+                err "$svc 回滚后启动失败，请人工处理"
+                rollback_failed=1
+            fi
         else
             warn "$svc 没有可回滚版本，已保持停止状态"
         fi
     done
-    mark_backup_failed
+    mark_backup_failed || rollback_failed=1
     err "回滚完成；失败版本备份目录: $BACKUP_DIR"
+    [ "$rollback_failed" -eq 0 ]
 }
 
-full_deploy() {
+rollback_active_release() {
+    local status="$1"
+    trap - ERR INT TERM
+    if ! rollback_release; then
+        err "自动回滚未完整执行，请立即人工检查"
+    fi
+    return "$status"
+}
+
+abort_active_release() {
+    local status="$1"
+    trap - ERR INT TERM
+    rollback_release || true
+    exit "$status"
+}
+
+full_deploy() (
     local services=("${ALL_SERVICES[@]}") svc
-    validate_deploy_root
-    validate_service_manager
-    validate_backup_retention
-    pull_code
-    validate_paths
-    run_batch build "${services[@]}"
-    validate_configs
-    backup_release "${services[@]}"
+    local status
+    validate_deploy_root || return 1
+    validate_service_manager || return 1
+    validate_backup_retention || return 1
+    validate_release_options || return 1
+    pull_code || return 1
+    validate_paths || return 1
+    run_batch build "${services[@]}" || return 1
+    validate_configs || return 1
+    run_migrations || return 1
+    backup_release "${services[@]}" || return 1
     DEPLOYED_SERVICES=()
+    trap 'status=$?; rollback_active_release "$status"; exit "$status"' ERR
+    trap 'abort_active_release 130' INT
+    trap 'abort_active_release 143' TERM
 
     for svc in "${services[@]}"; do
         # Include the current service before touching it so a mid-deploy error
         # also restores and restarts that service.
         DEPLOYED_SERVICES+=("$svc")
-        if ! deploy_one "$svc"; then
-            rollback_release
-            return 1
+        if deploy_one "$svc"; then
+            :
+        else
+            status=$?
+            rollback_active_release "$status"
+            return "$status"
         fi
-        if ! restart_one "$svc"; then
-            rollback_release
-            return 1
+        if restart_one "$svc"; then
+            :
+        else
+            status=$?
+            rollback_active_release "$status"
+            return "$status"
         fi
     done
-    mark_backup_successful
-    prune_successful_backups
+    if mark_backup_successful; then
+        :
+    else
+        status=$?
+        rollback_active_release "$status"
+        return "$status"
+    fi
+    trap - ERR INT TERM
+    prune_successful_backups || warn "清理过期备份失败，请稍后人工清理"
     log "全流程发布成功: $(git -C "$REPO_PATH" rev-parse --short HEAD)"
     log "回滚备份保留在: $BACKUP_DIR"
-}
+)
 
 # ================== 选择 ==================
 select_all() {
@@ -529,12 +729,13 @@ menu() {
     echo ""
     echo "1) 拉代码"
     echo "2) 编译"
-    echo "3) 发布"
+    echo "3) 仅发布文件（不迁移、不重启）"
     echo "4) 启动"
     echo "5) 停止"
     echo "6) 重启"
     echo "7) 状态"
     echo "8) 全流程"
+    echo "0) 仅执行数据库迁移"
     echo "9) 退出"
 
     read -p "选择: " c
@@ -550,11 +751,14 @@ menu() {
         6) validate_configs; run_batch restart "${services[@]}" ;;
         7) run_batch status "${services[@]}" ;;
         8) full_deploy ;;
+        0) validate_paths; validate_release_options; run_migrations ;;
         9) exit 0 ;;
     esac
 }
 
 # ================== 主循环 ==================
-while true; do
-    menu
-done
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+    while true; do
+        menu
+    done
+fi

@@ -50,6 +50,8 @@ mysql -u root -p thing_connect < scripts/schema.sql
 
 服务启动先使用 YAML。某项配置在 Admin 后台首次发布后，由数据库值接管并动态同步。系统配置、通用配置和五个服务的业务配置使用不同命名空间。
 
+生产发布脚本的全流程要求 `admin-server/migration-config.yaml` 使用具备 DDL 权限的数据库账号。若迁移已由独立发布系统完成，可显式设置 `SKIP_MIGRATIONS=1`。脚本逐个重启服务，并以各服务 `server.http_port` 的 `/health/ready` 作为成功门槛；Supervisor 仅显示 `RUNNING` 不代表发布成功。
+
 ## 开发运行
 
 准备 MySQL、Redis、MQTT 和六份 `config.yaml` 后，可分别运行：
@@ -86,7 +88,7 @@ npm --prefix admin/admin-web run build
 
 ## 对外路由
 
-生产环境使用 [nginx.conf.example](nginx.conf.example) 统一入口：
+生产环境使用 [demo-open.nginx.conf](deploy/nginx/demo-open.nginx.conf) 统一入口：
 
 - `/`：用户 H5 与 user-server
 - `/v1/device/`：device-server
