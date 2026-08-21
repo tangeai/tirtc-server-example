@@ -142,7 +142,7 @@ func adminSchemaStatements() []string {
 		`CREATE TABLE IF NOT EXISTS config_entries (
 			id BIGINT NOT NULL AUTO_INCREMENT, namespace VARCHAR(64) NOT NULL,
 			config_key VARCHAR(128) NOT NULL, scope_type VARCHAR(16) NOT NULL DEFAULT 'global',
-			scope_id VARCHAR(128) NOT NULL DEFAULT '', value TEXT NOT NULL, secret_value_enc TEXT NULL,
+			scope_id VARCHAR(128) NOT NULL DEFAULT '', value TEXT NOT NULL, secret_value TEXT NULL,
 			status TINYINT NOT NULL DEFAULT 1, revision BIGINT NOT NULL DEFAULT 1,
 			updated_by BIGINT NOT NULL DEFAULT 0, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -169,5 +169,15 @@ func adminMigrationV2Statements() []string {
 		`ALTER TABLE admin_jobs ADD KEY idx_admin_job_lease (status, lease_until)`,
 		`ALTER TABLE admin_job_items ADD KEY idx_admin_job_item_resource (resource_id, status, job_id)`,
 		`UPDATE admin_jobs SET status=0,worker_id='',lease_until=NULL,next_attempt_at=NOW(),last_error='服务升级后自动重新排队' WHERE status=1`,
+	}
+}
+
+// adminMigrationV3Statements introduces plaintext storage for configuration
+// secrets. The legacy encrypted column is retained temporarily so the
+// application can decrypt existing rows with the deployment key and copy them
+// into secret_value without losing data.
+func adminMigrationV3Statements() []string {
+	return []string{
+		`ALTER TABLE config_entries ADD COLUMN secret_value TEXT NULL AFTER value`,
 	}
 }

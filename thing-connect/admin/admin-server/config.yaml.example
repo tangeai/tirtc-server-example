@@ -30,7 +30,7 @@ admin:
 
 security:
   config_encryption_key_id: "local-v1"
-  # Base64-encoded 32 random bytes. Keep it out of source control in production.
+  # Base64-encoded 32 random bytes for administrator MFA data and legacy config migration.
   config_encryption_key: "replace-with-base64-32-byte-random-key"
 
 job:

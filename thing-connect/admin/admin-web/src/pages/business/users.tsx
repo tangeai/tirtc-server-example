@@ -32,14 +32,15 @@ export function UsersPage() {
   const [status, setStatus] = useState('');
   const [createdFrom, setCreatedFrom] = useState('');
   const [createdTo, setCreatedTo] = useState('');
+  const [createdOrder, setCreatedOrder] = useState<'asc' | 'desc'>('desc');
   const [page, setPage] = useState(1);
   const pageSize = 20;
   const [data, loading, reload] = useLoad(
     () =>
       api<PageData>(
-        `/users?page=${page}&page_size=${pageSize}&keyword=${encodeURIComponent(query)}&status=${status}&created_from=${createdFrom}&created_to=${createdTo}`,
+        `/users?page=${page}&page_size=${pageSize}&keyword=${encodeURIComponent(query)}&status=${status}&created_from=${createdFrom}&created_to=${createdTo}&sort_by=created_at&sort_order=${createdOrder}`,
       ),
-    [query, status, createdFrom, createdTo, page],
+    [query, status, createdFrom, createdTo, createdOrder, page],
   );
   const [quota, setQuota] = useState<AnyRow>();
   const [detail, setDetail] = useState<AnyRow>();
@@ -136,6 +137,12 @@ export function UsersPage() {
           loading={loading}
           dataSource={data?.items}
           pagination={pagination}
+          onChange={(_, __, sorter, extra) => {
+            if (extra.action !== 'sort') return;
+            const order = Array.isArray(sorter) ? sorter[0]?.order : sorter.order;
+            setPage(1);
+            setCreatedOrder(order === 'ascend' ? 'asc' : 'desc');
+          }}
           columns={[
             {
               title: '用户',
@@ -154,7 +161,14 @@ export function UsersPage() {
             },
             { title: '已绑定设备', dataIndex: 'device_count' },
             { title: '剩余绑定额度', dataIndex: 'bind_quota' },
-            { title: '注册时间', dataIndex: 'created_at', render: formatTime },
+            {
+              title: '注册时间',
+              dataIndex: 'created_at',
+              render: formatTime,
+              sorter: true,
+              sortOrder: createdOrder === 'asc' ? 'ascend' : 'descend',
+              sortDirections: ['descend', 'ascend'],
+            },
             {
               title: '操作',
               render: (_, r) => (

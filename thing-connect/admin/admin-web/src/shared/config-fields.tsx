@@ -1,15 +1,18 @@
-import { Alert, Form, Input, InputNumber, Select, Switch } from 'antd';
+import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons';
+import { Alert, Button, Form, Input, InputNumber, Select, Space, Switch, Tag } from 'antd';
 import type { AnyRow } from './admin-ui';
 
 export type ConfigField = {
   path: string[];
   label: string;
   description?: string;
-  kind: 'text' | 'number' | 'boolean' | 'select' | 'tags' | 'password';
+  kind: 'text' | 'number' | 'boolean' | 'select' | 'tags' | 'password' | 'resource_refs';
   options?: { label: string; value: string }[];
   secret?: boolean;
   providers?: string[];
   required?: boolean;
+  required_when_enabled?: boolean;
+  blocking?: boolean;
   min?: number;
 };
 
@@ -35,7 +38,7 @@ const configFieldInput = (field: ConfigField) =>
   ) : field.kind === 'tags' ? (
     <Select mode="tags" tokenSeparators={[',']} placeholder="输入后按回车添加" />
   ) : field.kind === 'password' ? (
-    <Input.Password placeholder="留空保留当前密钥" />
+    <Input.Password placeholder="请输入密钥" />
   ) : (
     <Input />
   );
@@ -47,14 +50,62 @@ const captchaProviderDescriptions: Record<string, string> = {
   tencent: '仅显示腾讯云 CaptchaAppId、云 API 密钥和应用密钥；小程序参数可选。',
 };
 
+function ResourceRefsField({ field }: { field: ConfigField }) {
+  return (
+    <Form.Item label={field.label} extra={field.description}>
+      <Form.List name={['config', ...field.path]}>
+        {(items, { add, remove }) => (
+          <Space direction="vertical" style={{ width: '100%' }}>
+            {items.map(({ key, name, ...restField }) => (
+              <Space key={key} align="baseline" style={{ display: 'flex' }}>
+                <Form.Item
+                  {...restField}
+                  name={[name, 'id']}
+                  rules={[{ required: true, whitespace: true, message: '请填写资源 ID' }]}
+                  style={{ marginBottom: 0 }}
+                >
+                  <Input placeholder="资源 ID" />
+                </Form.Item>
+                <Form.Item
+                  {...restField}
+                  name={[name, 'name']}
+                  rules={[{ required: true, whitespace: true, message: '请填写资源名称' }]}
+                  style={{ marginBottom: 0 }}
+                >
+                  <Input placeholder="资源名称" />
+                </Form.Item>
+                <Button
+                  type="text"
+                  danger
+                  aria-label={`删除${field.label}`}
+                  icon={<MinusCircleOutlined />}
+                  onClick={() => remove(name)}
+                />
+              </Space>
+            ))}
+            <Button type="dashed" icon={<PlusOutlined />} onClick={() => add({ id: '', name: '' })}>
+              添加{field.label}
+            </Button>
+          </Space>
+        )}
+      </Form.List>
+    </Form.Item>
+  );
+}
+
 export function FriendlyConfigFields({
   configKey,
   fields,
+  secretConfigured,
+  secretValuesAvailable,
 }: {
   configKey: string;
   fields: ConfigField[];
+  secretConfigured: boolean;
+  secretValuesAvailable: boolean;
 }) {
   const provider = Form.useWatch(['config', 'provider']) || 'yidun';
+  const enabled = !!Form.useWatch(['config', 'enabled']);
   const visibleFields = fields.filter(
     (field) => !field.providers || field.providers.includes(provider),
   );
@@ -69,27 +120,43 @@ export function FriendlyConfigFields({
           description="切换服务商后请填写新服务商对应的密钥；隐藏字段不会随表单提交。"
         />
       )}
-      {visibleFields.map((field) => (
-        <Form.Item
-          key={`${field.secret ? 'secret' : 'config'}/${field.path.join('.')}/${field.providers?.join(',') || 'all'}`}
-          name={[field.secret ? 'secrets' : 'config', ...field.path]}
-          label={field.label}
-          valuePropName={field.kind === 'boolean' ? 'checked' : 'value'}
-          preserve={!field.providers}
-          extra={field.description}
-          required={!field.secret && field.required}
-          rules={[
-            ...(!field.secret && field.required
-              ? [{ required: true, message: `请填写${field.label}` }]
-              : []),
-            ...(field.kind === 'number' && field.min !== undefined
-              ? [{ type: 'number' as const, min: field.min }]
-              : []),
-          ]}
-        >
-          {configFieldInput(field)}
-        </Form.Item>
-      ))}
+      {visibleFields.map((field) => {
+        if (field.kind === 'resource_refs') {
+          return (
+            <ResourceRefsField
+              key={`config/${field.path.join('.')}/${field.providers?.join(',') || 'all'}`}
+              field={field}
+            />
+          );
+        }
+        const required = !!field.required || (!!field.required_when_enabled && enabled);
+        const enforceRequired =
+          required && (!field.secret || !secretConfigured || secretValuesAvailable);
+        return (
+          <Form.Item
+            key={`${field.secret ? 'secret' : 'config'}/${field.path.join('.')}/${field.providers?.join(',') || 'all'}`}
+            name={[field.secret ? 'secrets' : 'config', ...field.path]}
+            label={
+              <>
+                {field.label}
+                {field.blocking && <Tag color="error">阻塞项</Tag>}
+              </>
+            }
+            valuePropName={field.kind === 'boolean' ? 'checked' : 'value'}
+            preserve={!field.providers}
+            extra={field.description}
+            required={required}
+            rules={[
+              ...(enforceRequired ? [{ required: true, message: `请填写${field.label}` }] : []),
+              ...(field.kind === 'number' && field.min !== undefined
+                ? [{ type: 'number' as const, min: field.min }]
+                : []),
+            ]}
+          >
+            {configFieldInput(field)}
+          </Form.Item>
+        );
+      })}
     </>
   );
 }

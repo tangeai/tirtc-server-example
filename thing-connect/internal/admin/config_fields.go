@@ -19,16 +19,16 @@ func defaultConfigFields(namespace, key string) []ConfigFieldDefinition {
 		definitionID("user-server", "mqtt.ack_policy"):   mqttACKFields(),
 		definitionID("user-server", "smtp"): {
 			booleanConfigField("enabled", "启用邮件服务", ""),
-			textConfigField("host", "SMTP 服务器地址", ""),
-			numberConfigField("port", "端口"),
-			selectConfigField("tls_mode", "加密方式", []ConfigFieldOption{
+			requiredWhenEnabled(textConfigField("host", "SMTP 服务器地址", "")),
+			requiredWhenEnabled(numberConfigField("port", "端口")),
+			requiredWhenEnabled(selectConfigField("tls_mode", "加密方式", []ConfigFieldOption{
 				{Label: "自动选择", Value: "auto"},
 				{Label: "直接使用 TLS", Value: "implicit_tls"},
 				{Label: "连接后升级为 TLS（STARTTLS）", Value: "starttls"},
-			}),
-			textConfigField("username", "登录账号", ""),
-			textConfigField("from", "发件人地址", "例如 ThingConnect <noreply@example.com>"),
-			secretConfigField("password", "登录密码或授权码", "留空表示保留当前密码"),
+			})),
+			optionalConfigField(textConfigField("username", "登录账号", "")),
+			requiredWhenEnabled(textConfigField("from", "发件人地址", "例如 ThingConnect <noreply@example.com>")),
+			requiredWhenEnabled(secretConfigField("password", "登录密码或授权码", "默认隐藏，点击眼睛查看原值")),
 		},
 		definitionID("user-server", "captcha"): captchaConfigFields(),
 		definitionID("user-server", "email.code_ttl"): {
@@ -54,9 +54,9 @@ func defaultConfigFields(namespace, key string) []ConfigFieldDefinition {
 			numberConfigField("resource_quota.mcp", "每台设备 MCP 资源上限"),
 			numberConfigField("resource_quota.device_plugin", "每台设备插件上限"),
 			numberConfigField("resource_quota.kb", "每台设备知识库上限"),
-			tagsConfigField("default_resources.mcp", "默认 MCP 资源 ID", "输入一个 ID 后按回车，可添加多个"),
-			tagsConfigField("default_resources.device_plugin", "默认设备插件 ID", "输入一个 ID 后按回车，可添加多个"),
-			tagsConfigField("default_resources.kb", "默认知识库 ID", "输入一个 ID 后按回车，可添加多个"),
+			resourceRefsConfigField("default_resources.mcp", "默认 MCP 资源", "每项同时填写云端资源 ID 和后台展示名称"),
+			resourceRefsConfigField("default_resources.device_plugin", "默认设备插件", "每项同时填写云端资源 ID 和后台展示名称"),
+			resourceRefsConfigField("default_resources.kb", "默认知识库", "每项同时填写云端资源 ID 和后台展示名称"),
 		},
 		definitionID("call-server", "call.contact_policy"): {
 			numberConfigField("max_contacts_per_device", "每台设备最多联系人数量"),
@@ -65,10 +65,10 @@ func defaultConfigFields(namespace, key string) []ConfigFieldDefinition {
 			numberConfigField("room_ttl_hours", "呼叫房间保留时间（小时）"),
 		},
 		definitionID("common", "tirtc"): {
-			textConfigField("endpoint", "服务地址", "使用默认地址时可留空"),
-			textConfigField("app_id", "应用 ID", ""),
-			secretConfigField("access_key_id", "Access Key ID", "留空保留原值"),
-			secretConfigField("secret_key_id", "Secret Key ID", "留空保留原值"),
+			optionalConfigField(textConfigField("endpoint", "服务地址", "使用默认地址时可留空")),
+			blockingConfigField(textConfigField("app_id", "应用 ID", "")),
+			blockingConfigField(requiredSecretConfigField("access_key_id", "Access Key ID", "默认隐藏，点击眼睛查看原值")),
+			blockingConfigField(requiredSecretConfigField("secret_key_id", "Secret Key ID", "默认隐藏，点击眼睛查看原值")),
 		},
 		definitionID("system", "mfa.policy"): {
 			booleanConfigField("enabled", "启用管理员双重验证", "启用后，未绑定的管理员下次登录时需要绑定身份验证器"),
@@ -93,25 +93,25 @@ func mqttACKFields() []ConfigFieldDefinition {
 func captchaConfigFields() []ConfigFieldDefinition {
 	return []ConfigFieldDefinition{
 		booleanConfigField("enabled", "启用人机验证", ""),
-		selectConfigField("provider", "验证服务商", captchaProviderOptions()),
-		providerConfigField(textConfigField("captcha_id", "CaptchaID", "网易易盾控制台中的验证码 ID"), "yidun"),
-		providerConfigField(secretConfigField("secret_id", "Secret ID", "留空保留当前值"), "yidun"),
-		providerConfigField(secretConfigField("secret_key", "Secret Key", "留空保留当前值"), "yidun"),
-		providerConfigField(textConfigField("captcha_id", "Web 验证码 ID（Captcha ID）", ""), "geetest"),
-		providerConfigField(secretConfigField("secret_key", "Web 验证码密钥（Captcha Key）", "留空保留当前值"), "geetest"),
-		providerConfigField(textConfigField("public_config.mini_program_captcha_id", "小程序验证码 ID", "不使用极验小程序验证时留空"), "geetest"),
-		providerConfigField(secretConfigField("mini_program_secret_key", "小程序验证码密钥", "填写小程序验证码 ID 时必填；留空保留当前值"), "geetest"),
-		providerConfigField(textConfigField("captcha_id", "场景 ID（SceneId）", ""), "aliyun"),
-		providerConfigField(textConfigField("public_config.prefix", "身份标（Prefix）", ""), "aliyun"),
-		providerConfigField(selectConfigField("public_config.region", "服务地域", []ConfigFieldOption{{Label: "中国站", Value: "cn"}, {Label: "国际站", Value: "sgp"}}), "aliyun"),
-		providerConfigField(secretConfigField("secret_id", "AccessKey ID", "留空保留当前值"), "aliyun"),
-		providerConfigField(secretConfigField("secret_key", "AccessKey Secret", "留空保留当前值"), "aliyun"),
-		providerConfigField(textConfigField("captcha_id", "验证码应用 ID（CaptchaAppId）", ""), "tencent"),
-		providerConfigField(secretConfigField("secret_id", "腾讯云 SecretId", "留空保留当前值"), "tencent"),
-		providerConfigField(secretConfigField("secret_key", "腾讯云 SecretKey", "留空保留当前值"), "tencent"),
-		providerConfigField(secretConfigField("app_secret_key", "验证码应用密钥（AppSecretKey）", "留空保留当前值"), "tencent"),
-		providerConfigField(textConfigField("public_config.mini_program_captcha_id", "小程序验证码 AppID", "不使用腾讯云小程序验证时留空"), "tencent"),
-		providerConfigField(secretConfigField("mini_program_secret_key", "小程序验证码 AppSecretKey", "填写小程序验证码 AppID 时必填；留空保留当前值"), "tencent"),
+		requiredWhenEnabled(selectConfigField("provider", "验证服务商", captchaProviderOptions())),
+		providerConfigField(requiredWhenEnabled(textConfigField("captcha_id", "CaptchaID", "网易易盾控制台中的验证码 ID")), "yidun"),
+		providerConfigField(requiredWhenEnabled(secretConfigField("secret_id", "Secret ID", "默认隐藏，点击眼睛查看原值")), "yidun"),
+		providerConfigField(requiredWhenEnabled(secretConfigField("secret_key", "Secret Key", "默认隐藏，点击眼睛查看原值")), "yidun"),
+		providerConfigField(requiredWhenEnabled(textConfigField("captcha_id", "Web 验证码 ID（Captcha ID）", "")), "geetest"),
+		providerConfigField(requiredWhenEnabled(secretConfigField("secret_key", "Web 验证码密钥（Captcha Key）", "默认隐藏，点击眼睛查看原值")), "geetest"),
+		providerConfigField(optionalConfigField(textConfigField("public_config.mini_program_captcha_id", "小程序验证码 ID", "不使用极验小程序验证时留空")), "geetest"),
+		providerConfigField(optionalConfigField(secretConfigField("mini_program_secret_key", "小程序验证码密钥", "填写小程序验证码 ID 时必填")), "geetest"),
+		providerConfigField(requiredWhenEnabled(textConfigField("captcha_id", "场景 ID（SceneId）", "")), "aliyun"),
+		providerConfigField(requiredWhenEnabled(textConfigField("public_config.prefix", "身份标（Prefix）", "")), "aliyun"),
+		providerConfigField(requiredWhenEnabled(selectConfigField("public_config.region", "服务地域", []ConfigFieldOption{{Label: "中国站", Value: "cn"}, {Label: "国际站", Value: "sgp"}})), "aliyun"),
+		providerConfigField(requiredWhenEnabled(secretConfigField("secret_id", "AccessKey ID", "默认隐藏，点击眼睛查看原值")), "aliyun"),
+		providerConfigField(requiredWhenEnabled(secretConfigField("secret_key", "AccessKey Secret", "默认隐藏，点击眼睛查看原值")), "aliyun"),
+		providerConfigField(requiredWhenEnabled(textConfigField("captcha_id", "验证码应用 ID（CaptchaAppId）", "")), "tencent"),
+		providerConfigField(requiredWhenEnabled(secretConfigField("secret_id", "腾讯云 SecretId", "默认隐藏，点击眼睛查看原值")), "tencent"),
+		providerConfigField(requiredWhenEnabled(secretConfigField("secret_key", "腾讯云 SecretKey", "默认隐藏，点击眼睛查看原值")), "tencent"),
+		providerConfigField(requiredWhenEnabled(secretConfigField("app_secret_key", "验证码应用密钥（AppSecretKey）", "默认隐藏，点击眼睛查看原值")), "tencent"),
+		providerConfigField(optionalConfigField(textConfigField("public_config.mini_program_captcha_id", "小程序验证码 AppID", "不使用腾讯云小程序验证时留空")), "tencent"),
+		providerConfigField(optionalConfigField(secretConfigField("mini_program_secret_key", "小程序验证码 AppSecretKey", "填写小程序验证码 AppID 时必填")), "tencent"),
 	}
 }
 
@@ -147,6 +147,13 @@ func tagsConfigField(path, label, description string) ConfigFieldDefinition {
 	return field
 }
 
+func resourceRefsConfigField(path, label, description string) ConfigFieldDefinition {
+	field := textConfigField(path, label, description)
+	field.Kind = "resource_refs"
+	field.Required = false
+	return field
+}
+
 func secretConfigField(path, label, description string) ConfigFieldDefinition {
 	field := textConfigField(path, label, description)
 	field.Kind = "password"
@@ -155,8 +162,29 @@ func secretConfigField(path, label, description string) ConfigFieldDefinition {
 	return field
 }
 
+func requiredSecretConfigField(path, label, description string) ConfigFieldDefinition {
+	field := secretConfigField(path, label, description)
+	field.Required = true
+	return field
+}
+
+func optionalConfigField(field ConfigFieldDefinition) ConfigFieldDefinition {
+	field.Required = false
+	return field
+}
+
+func requiredWhenEnabled(field ConfigFieldDefinition) ConfigFieldDefinition {
+	field.Required = false
+	field.RequiredWhenEnabled = true
+	return field
+}
+
+func blockingConfigField(field ConfigFieldDefinition) ConfigFieldDefinition {
+	field.Blocking = true
+	return field
+}
+
 func providerConfigField(field ConfigFieldDefinition, providers ...string) ConfigFieldDefinition {
 	field.Providers = providers
-	field.Required = false
 	return field
 }

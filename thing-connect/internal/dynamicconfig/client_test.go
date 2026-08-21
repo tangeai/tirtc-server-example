@@ -108,14 +108,17 @@ func TestApplyOnlyCommitsSuccessfulIncreasingRevisions(t *testing.T) {
 		return nil
 	}}
 
+	if err := client.ApplyInitial(context.Background(), []Ref{ref}); err != nil {
+		t.Fatal(err)
+	}
 	client.apply(context.Background(), ref, true)
-	if applyCount != 0 {
-		t.Fatal("registry default revision was applied over YAML")
+	if applyCount != 1 || client.Revisions()["system/mfa.policy"] != 0 {
+		t.Fatalf("registry default was not applied exactly once: count=%d revisions=%v", applyCount, client.Revisions())
 	}
 	snapshot.Revision = 2
 	client.apply(context.Background(), ref, false)
 	client.apply(context.Background(), ref, false)
-	if applyCount != 1 || client.Revisions()["system/mfa.policy"] != 2 {
+	if applyCount != 2 || client.Revisions()["system/mfa.policy"] != 2 {
 		t.Fatalf("revision deduplication failed: count=%d revisions=%v", applyCount, client.Revisions())
 	}
 	failApply = true
@@ -128,7 +131,7 @@ func TestApplyOnlyCommitsSuccessfulIncreasingRevisions(t *testing.T) {
 	snapshot.Revision = 4
 	client.apply(context.Background(), ref, false)
 	revisions := client.Revisions()
-	if applyCount != 3 || revisions["system/mfa.policy"] != 4 {
+	if applyCount != 4 || revisions["system/mfa.policy"] != 4 {
 		t.Fatalf("later valid revision was not applied: count=%d revisions=%v", applyCount, revisions)
 	}
 	delete(revisions, "system/mfa.policy")
@@ -137,5 +140,20 @@ func TestApplyOnlyCommitsSuccessfulIncreasingRevisions(t *testing.T) {
 	}
 	if !strings.Contains(client.baseURL, "127.0.0.1") {
 		t.Fatal("test server URL was not retained")
+	}
+}
+
+func TestApplyInitialReturnsLoadFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	client, err := New(server.URL, testInternalKey, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = client.ApplyInitial(context.Background(), []Ref{{Namespace: "common", Key: "tirtc", Apply: func(Snapshot) error { return nil }}})
+	if err == nil || !strings.Contains(err.Error(), "common/tirtc") {
+		t.Fatalf("initial load failure did not identify the config: %v", err)
 	}
 }

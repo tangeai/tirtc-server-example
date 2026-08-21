@@ -65,6 +65,7 @@ export function VoIPPage() {
     config_key: 'wechat.apps',
     value: { default_app_id: '', apps: {} },
     secret_configured: false,
+    using_default: true,
     revision: 0,
     status: 1,
   };
@@ -297,6 +298,15 @@ export function VoIPPage() {
               is_default: appEdit.app_id
                 ? appEdit.is_default
                 : Object.keys((entry.value as AnyRow).apps || {}).length === 0,
+              secret: appEdit.app_id
+                ? (entry.secrets?.apps as AnyRow | undefined)?.[appEdit.app_id]?.secret
+                : '',
+              token: appEdit.app_id
+                ? (entry.secrets?.apps as AnyRow | undefined)?.[appEdit.app_id]?.token
+                : '',
+              encoding_aes_key: appEdit.app_id
+                ? (entry.secrets?.apps as AnyRow | undefined)?.[appEdit.app_id]?.encoding_aes_key
+                : '',
             }}
           >
             <Form.Item
@@ -320,7 +330,7 @@ export function VoIPPage() {
               className="form-alert"
               type="info"
               showIcon
-              message="密钥不会回显；留空保留现有值。新增应用至少填写 AppSecret。"
+              message="密钥默认隐藏，点击眼睛可查看原值；新增并启用应用时必须填写 AppSecret。"
             />
             <Form.Item name="secret" label="小程序密钥（AppSecret）">
               <Input.Password />

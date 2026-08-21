@@ -27,8 +27,8 @@ func TestRegistryDefinitionsAndUsableInitialValues(t *testing.T) {
 	}
 	for _, definition := range definitions {
 		value := definition.Default
-		// TiRTC credentials and app ID are copied from each deployment's YAML,
-		// so the registry intentionally has no environment-specific app ID.
+		// TiRTC has no runnable default because its credentials are
+		// environment-specific and must be published through Admin.
 		if definition.Namespace == "common" && definition.Key == "tirtc" {
 			value = json.RawMessage(`{"endpoint":"https://api.example.com","app_id":"test-app"}`)
 		}
@@ -52,6 +52,46 @@ func TestRegistryDefinitionsAndUsableInitialValues(t *testing.T) {
 		if len(registry.List(namespace)) == 0 {
 			t.Errorf("namespace %s has no registered configuration", namespace)
 		}
+	}
+	tirtc, ok := registry.Lookup("common", "tirtc")
+	if !ok || !tirtc.Required || !tirtc.Blocking || tirtc.Description == "" {
+		t.Fatalf("TiRTC blocking metadata is incomplete: %+v", tirtc)
+	}
+	blockingFields := 0
+	for _, field := range tirtc.Fields {
+		if field.Blocking {
+			blockingFields++
+		}
+	}
+	if blockingFields != 3 {
+		t.Fatalf("TiRTC blocking fields = %d, want 3", blockingFields)
+	}
+}
+
+func TestAIResourcePolicyRequiresIDAndNamePairs(t *testing.T) {
+	registry := DefaultConfigRegistry()
+	valid := json.RawMessage(`{"resource_quota":{"mcp":4,"device_plugin":20,"kb":5},"default_resources":{"mcp":[{"id":"fo4ho7e618n4","name":"高德地图1"},{"id":"fo4hpeez2qyo","name":"百度地图"}],"device_plugin":[],"kb":[]}}`)
+	if err := registry.Validate("ai-server", "ai.resource_policy", valid); err != nil {
+		t.Fatalf("valid resource references rejected: %v", err)
+	}
+	for _, invalid := range []string{
+		`{"resource_quota":{"mcp":4,"device_plugin":20,"kb":5},"default_resources":{"mcp":["fo4ho7e618n4"],"device_plugin":[],"kb":[]}}`,
+		`{"resource_quota":{"mcp":4,"device_plugin":20,"kb":5},"default_resources":{"mcp":[{"id":"fo4ho7e618n4","name":""}],"device_plugin":[],"kb":[]}}`,
+		`{"resource_quota":{"mcp":4,"device_plugin":20,"kb":5},"default_resources":{"mcp":[{"id":"same","name":"甲"},{"id":"same","name":"乙"}],"device_plugin":[],"kb":[]}}`,
+	} {
+		if err := registry.Validate("ai-server", "ai.resource_policy", json.RawMessage(invalid)); err == nil {
+			t.Fatalf("invalid resource references accepted: %s", invalid)
+		}
+	}
+	definition, _ := registry.Lookup("ai-server", "ai.resource_policy")
+	resourceFields := 0
+	for _, field := range definition.Fields {
+		if field.Kind == "resource_refs" {
+			resourceFields++
+		}
+	}
+	if resourceFields != 3 {
+		t.Fatalf("resource reference editors = %d, want 3", resourceFields)
 	}
 }
 

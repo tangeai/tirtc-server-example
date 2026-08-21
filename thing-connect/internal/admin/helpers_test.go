@@ -184,6 +184,9 @@ func TestConfigScopeAndSecretHelpers(t *testing.T) {
 	if err := validateSecretShape("voip-server", "wechat.apps", map[string]any{"apps": map[string]any{"wx": map[string]any{"secret": "secret", "bad": "x"}}}); err == nil {
 		t.Fatal("unknown WeChat secret field accepted")
 	}
+	if err := validateExistingSecretRequirement("common", "tirtc", json.RawMessage(`{"app_id":"app"}`), false); err == nil {
+		t.Fatal("TiRTC config without credentials was accepted")
+	}
 
 	merged, err := mergeSecretJSON(
 		json.RawMessage(`{"apps":{"wx":{"secret":"old","token":"keep"}}}`),
@@ -315,5 +318,19 @@ func TestHTTPParsingHelpers(t *testing.T) {
 	}
 	if !validExtra(nil) || !validExtra(json.RawMessage(`{"a":1}`)) || validExtra(json.RawMessage(`[1]`)) {
 		t.Fatal("dictionary extra JSON validation returned an unexpected result")
+	}
+
+	sortRequest := httptest.NewRequest("GET", "/?sort_by=active_time&sort_order=asc", nil)
+	sortContext, _ := gin.CreateTestContext(httptest.NewRecorder())
+	sortContext.Request = sortRequest
+	order, err := listOrder(sortContext, map[string]string{"id": "d.id", "active_time": "d.active_time"}, "id", "d.id")
+	if err != nil || order != " ORDER BY d.active_time ASC,d.id ASC" {
+		t.Fatalf("unexpected stable list order: %q %v", order, err)
+	}
+	invalidSort := httptest.NewRequest("GET", "/?sort_by=active_time&sort_order=sideways", nil)
+	invalidSortContext, _ := gin.CreateTestContext(httptest.NewRecorder())
+	invalidSortContext.Request = invalidSort
+	if _, err := listOrder(invalidSortContext, map[string]string{"active_time": "d.active_time"}, "active_time", "d.id"); err == nil {
+		t.Fatal("invalid sort order accepted")
 	}
 }

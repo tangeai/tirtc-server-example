@@ -38,7 +38,7 @@ var PermissionDefinitions = []PermissionDefinition{
 	{Code: "device.import", Name: "导入设备池", Group: "设备管理", Description: "批量导入设备 ID 和设备密钥"},
 	{Code: "config.read", Name: "查看业务配置", Group: "配置管理", Description: "查看通用配置、系统配置和各服务配置"},
 	{Code: "config.write", Name: "修改业务配置", Group: "配置管理", Description: "校验、测试和发布非密钥配置"},
-	{Code: "config.secret.write", Name: "修改配置密钥", Group: "配置管理", Description: "写入 SMTP、验证码、TiRTC 等敏感配置"},
+	{Code: "config.secret.write", Name: "查看与修改配置密钥", Group: "配置管理", Description: "查看并写入 SMTP、验证码、TiRTC 等敏感配置原值"},
 	{Code: "voip.app.read", Name: "查看微信 VoIP 应用", Group: "微信 VoIP", Description: "查看小程序、设备和上报属性"},
 	{Code: "voip.app.write", Name: "修改微信 VoIP 应用", Group: "微信 VoIP", Description: "维护小程序及其密钥配置"},
 	{Code: "voip.profile.read", Name: "查看 VoIP 设备属性", Group: "微信 VoIP", Description: "查看设备上报的音视频能力"},

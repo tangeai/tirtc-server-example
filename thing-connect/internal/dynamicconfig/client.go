@@ -90,7 +90,7 @@ func (c *Client) Run(ctx context.Context, refs []Ref) {
 	byID := make(map[string]Ref, len(refs))
 	for _, ref := range refs {
 		byID[ref.Namespace+"/"+ref.Key] = ref
-		c.apply(ctx, ref, true)
+		_ = c.apply(ctx, ref, true)
 	}
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
@@ -103,7 +103,7 @@ func (c *Client) Run(ctx context.Context, refs []Ref) {
 			return
 		case <-ticker.C:
 			for _, ref := range refs {
-				c.apply(ctx, ref, false)
+				_ = c.apply(ctx, ref, false)
 			}
 		case message, ok := <-channel:
 			if !ok {
@@ -116,41 +116,48 @@ func (c *Client) Run(ctx context.Context, refs []Ref) {
 			}
 			if json.Unmarshal([]byte(message.Payload), &event) == nil {
 				if ref, exists := byID[event.Namespace+"/"+event.ConfigKey]; exists {
-					c.apply(ctx, ref, false)
+					_ = c.apply(ctx, ref, false)
 				}
 			}
 		}
 	}
 }
 
-func (c *Client) apply(ctx context.Context, ref Ref, initial bool) {
+// ApplyInitial loads every registered value before a service starts serving
+// requests. This prevents a missing or slow Admin connection from silently
+// falling back to similarly named values in config.yaml.
+func (c *Client) ApplyInitial(ctx context.Context, refs []Ref) error {
+	for _, ref := range refs {
+		if err := c.apply(ctx, ref, true); err != nil {
+			return fmt.Errorf("load initial config %s/%s: %w", ref.Namespace, ref.Key, err)
+		}
+	}
+	return nil
+}
+
+func (c *Client) apply(ctx context.Context, ref Ref, initial bool) error {
 	snapshot, err := c.Load(ctx, ref.Namespace, ref.Key)
 	if err != nil {
 		if !initial {
 			slog.WarnContext(ctx, "reload dynamic config failed", "namespace", ref.Namespace, "config_key", ref.Key, "err", err)
 		}
-		return
-	}
-	// revision=0 is the registry default and means no database override exists;
-	// keep the service's config.yaml bootstrap value until an administrator
-	// explicitly publishes the entry.
-	if snapshot.Revision == 0 {
-		return
+		return err
 	}
 	id := ref.Namespace + "/" + ref.Key
 	c.mu.RLock()
-	current := c.applied[id]
+	current, applied := c.applied[id]
 	c.mu.RUnlock()
-	if snapshot.Revision != 0 && snapshot.Revision <= current {
-		return
+	if applied && snapshot.Revision <= current {
+		return nil
 	}
 	if err := ref.Apply(snapshot); err != nil {
 		slog.ErrorContext(ctx, "apply dynamic config failed", "namespace", ref.Namespace, "config_key", ref.Key, "revision", snapshot.Revision, "err", err)
-		return
+		return err
 	}
 	c.mu.Lock()
 	c.applied[id] = snapshot.Revision
 	c.mu.Unlock()
+	return nil
 }
 
 func (c *Client) Revisions() map[string]int64 {

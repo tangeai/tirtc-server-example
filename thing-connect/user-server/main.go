@@ -17,14 +17,11 @@ import (
 
 	"thing-connect/internal/cache"
 	captchapkg "thing-connect/internal/captcha"
-	"thing-connect/internal/captcha/registry"
 	cleanupoutbox "thing-connect/internal/cleanup"
 	"thing-connect/internal/config"
 	"thing-connect/internal/db"
-	"thing-connect/internal/dynamicconfig"
 	"thing-connect/internal/logging"
 	mailerpkg "thing-connect/internal/mailer"
-	smtpmailer "thing-connect/internal/mailer/smtp"
 	"thing-connect/internal/mqttc"
 	"thing-connect/internal/service"
 	"thing-connect/internal/servicestatus"
@@ -77,36 +74,7 @@ func main() {
 	bindStore := mysqlstore.NewBindStore(sqlDB)
 	cacheStore := mysqlstore.NewCacheStore(rdb)
 
-	captchaProvider, captchaConfig := configuredCaptcha(cfg)
-	var captchaVerifier captchapkg.Verifier = captchapkg.DevVerifier{}
-	if captchaProvider == "" {
-		log.Println("captcha provider not set, captcha verification disabled (development mode)")
-	} else {
-		captchaVerifier, err = registry.New(captchaProvider, registry.Config{
-			CaptchaID: captchaConfig.CaptchaID, SecretID: captchaConfig.SecretID, SecretKey: captchaConfig.SecretKey,
-			AppSecretKey: captchaConfig.AppSecretKey, MiniProgramSecretKey: captchaConfig.MiniProgramSecretKey, PublicConfig: captchaConfig.PublicConfig,
-		})
-		if err != nil {
-			log.Fatalf("captcha: %v", err)
-		}
-	}
-
-	var emailMailer mailerpkg.Mailer
-	if cfg.SMTP.Host == "" {
-		log.Println("smtp.host not set, emails will be logged to stdout (dev mode)")
-		emailMailer = mailerpkg.DevMailer{}
-	} else {
-		emailMailer = smtpmailer.New(smtpmailer.Config{
-			Host:     cfg.SMTP.Host,
-			Port:     cfg.SMTP.Port,
-			TLSMode:  cfg.SMTP.TLSMode,
-			Username: cfg.SMTP.Username,
-			Password: cfg.SMTP.Password,
-			From:     cfg.SMTP.From,
-		})
-	}
-
-	userSvc := service.NewUserService(userStore, cacheStore, captchaVerifier, emailMailer, cfg.JWTSecret, svcCfg)
+	userSvc := service.NewUserService(userStore, cacheStore, captchapkg.DevVerifier{}, mailerpkg.DisabledMailer{}, cfg.JWTSecret, svcCfg)
 	passwordResetMailQueue := service.NewInMemoryPasswordResetEmailQueue(userSvc.DeliverPasswordResetCode)
 	userSvc.SetPasswordResetEmailQueue(passwordResetMailQueue)
 
@@ -115,15 +83,16 @@ func main() {
 		mqttPub = broker
 	}
 	bindSvc := service.NewBindService(bindStore, cacheStore, mqttPub, svcCfg)
-	var dynamicClient *dynamicconfig.Client
-	var dynamicRefs []dynamicconfig.Ref
-	if cfg.Admin.ServerURL != "" {
-		dynamicClient, dynamicRefs, err = userDynamicConfig(cfg, rdb, userSvc, bindSvc)
-		if err != nil {
-			log.Printf("dynamic config disabled: %v", err)
-			dynamicClient = nil
-		}
+	dynamicClient, dynamicRefs, err := userDynamicConfig(cfg, rdb, userSvc, bindSvc)
+	if err != nil {
+		log.Fatalf("dynamic config: %v", err)
 	}
+	configCtx, cancelConfig := context.WithTimeout(context.Background(), 10*time.Second)
+	if err := dynamicClient.ApplyInitial(configCtx, dynamicRefs); err != nil {
+		cancelConfig()
+		log.Fatalf("dynamic config: %v", err)
+	}
+	cancelConfig()
 
 	staticDir := findStaticDir()
 
@@ -155,11 +124,6 @@ func main() {
 	r.StaticFile("/librender.wasm", staticDir+"/js/librender.wasm")
 	r.StaticFile("/plugin.wasm", staticDir+"/js/plugin.wasm")
 
-	usrhandler.SetCaptchaConfig(usrhandler.CaptchaConfig{
-		Provider: captchaProvider, Enabled: captchaProvider != "", PublicConfig: captchaConfig.PublicConfig,
-		CaptchaID: captchaConfig.CaptchaID,
-	})
-	usrhandler.SetTirtcCredentials(cfg.Tirtc.AppID, cfg.Tirtc.AccessKeyID, cfg.Tirtc.SecretKeyID, cfg.Tirtc.Endpoint)
 	roleStore := mysqlstore.NewRoleBindingStore(sqlDB)
 
 	targets := []cleanupoutbox.Target{}
@@ -181,14 +145,8 @@ func main() {
 	go outbox.Run(outboxCtx)
 	go passwordResetMailQueue.Run(outboxCtx)
 	go runAdminUserCommands(outboxCtx, rdb, userSvc)
-	if dynamicClient != nil {
-		go dynamicClient.Run(outboxCtx, dynamicRefs)
-	}
-	var revisions func() map[string]int64
-	if dynamicClient != nil {
-		revisions = dynamicClient.Revisions
-	}
-	reporter, err := servicestatus.NewReporter(rdb, "user-server", probes, revisions)
+	go dynamicClient.Run(outboxCtx, dynamicRefs)
+	reporter, err := servicestatus.NewReporter(rdb, "user-server", probes, dynamicClient.Revisions)
 	if err != nil {
 		log.Fatalf("service status: %v", err)
 	}
@@ -233,19 +191,6 @@ func main() {
 		log.Printf("user-server close database: %v", err)
 	}
 	log.Printf("user-server stopped")
-}
-
-// configuredCaptcha prefers the provider-neutral captcha section and retains
-// yidun as a migration path for existing config files.
-func configuredCaptcha(cfg *config.Config) (string, config.CaptchaProviderCfg) {
-	provider := strings.ToLower(strings.TrimSpace(cfg.Captcha.Provider))
-	if provider != "" {
-		return provider, cfg.Captcha.Providers[provider]
-	}
-	if cfg.Yidun.CaptchaID != "" || cfg.Yidun.SecretID != "" || cfg.Yidun.SecretKey != "" {
-		return "yidun", config.CaptchaProviderCfg{CaptchaID: cfg.Yidun.CaptchaID, SecretID: cfg.Yidun.SecretID, SecretKey: cfg.Yidun.SecretKey}
-	}
-	return "", config.CaptchaProviderCfg{}
 }
 
 // findStaticDir locates the static/ directory relative to the executable so

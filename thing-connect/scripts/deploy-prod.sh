@@ -47,7 +47,9 @@ if ! flock -n 9; then
 fi
 
 BUSINESS_SERVICES=("device-server" "user-server" "voip-server" "ai-server" "call-server")
-ALL_SERVICES=("${BUSINESS_SERVICES[@]}" "admin-server")
+# Business services must load their initial registry values from Admin before
+# listening, so a full deployment starts/restarts Admin first.
+ALL_SERVICES=("admin-server" "${BUSINESS_SERVICES[@]}")
 
 # ================== 工具函数 ==================
 log() { echo -e "[INFO] $1"; }

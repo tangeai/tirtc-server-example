@@ -29,15 +29,3 @@ mqtt:
   password: "replace-with-mqtt-password"
 
 jwt_secret: "replace-with-a-strong-random-secret"
-
-# 业务参数（全部可选，缺省使用括号内默认值）
-service:
-  quota_per_user: 10                 # 保留的通用默认值；用户注册额度由 user-server 使用
-  code_ttl: 190s                     # 验证码有效期（默认 190s）
-  rate_limit_window: 190s            # L3 指纹请求计数窗口（默认 190s）
-  rate_limit_max_hits: 10            # 单指纹窗口内最大请求数（默认 10）
-  ip_rate_limit_window: 60s          # L2 IP 指纹计数窗口（默认 60s）
-  ip_rate_limit_max_fingerprints: 50 # 单 IP 窗口内最多不同指纹数（默认 50）
-  global_max_pending_codes: 10000    # 全局同时最多未使用验证码（默认 10000）
-  token_expiry: 168h                 # JWT 有效期（默认 7 天）
-  mqtt_ack_timeout: 5s               # MQTT 下发等待 ACK 超时（默认 5s）

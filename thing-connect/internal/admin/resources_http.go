@@ -61,6 +61,29 @@ func appendDateRange(c *gin.Context, column string, where *string, args *[]any) 
 	return nil
 }
 
+func listOrder(c *gin.Context, allowed map[string]string, defaultField, tieColumn string) (string, error) {
+	field := strings.TrimSpace(c.Query("sort_by"))
+	if field == "" {
+		field = defaultField
+	}
+	column, ok := allowed[field]
+	if !ok {
+		return "", errors.New("sort_by is not supported")
+	}
+	direction := strings.ToLower(strings.TrimSpace(c.Query("sort_order")))
+	if direction == "" {
+		direction = "desc"
+	}
+	if direction != "asc" && direction != "desc" {
+		return "", errors.New("sort_order must be asc or desc")
+	}
+	direction = strings.ToUpper(direction)
+	if column == tieColumn {
+		return " ORDER BY " + column + " " + direction, nil
+	}
+	return " ORDER BY " + column + " " + direction + "," + tieColumn + " " + direction, nil
+}
+
 type managedUser struct {
 	ID           int64      `db:"id" json:"id"`
 	Email        string     `db:"email" json:"email"`
@@ -90,6 +113,11 @@ func (s *HTTPServer) listUsers(c *gin.Context) {
 		apiresp.BadParam(c, err.Error())
 		return
 	}
+	order, err := listOrder(c, map[string]string{"created_at": "u.created_at"}, "created_at", "u.id")
+	if err != nil {
+		apiresp.BadParam(c, err.Error())
+		return
+	}
 	var total int
 	if err := s.store.db.GetContext(c, &total, `SELECT COUNT(*) FROM users u`+where, args...); err != nil {
 		apiresp.Internal(c, err.Error())
@@ -97,7 +125,7 @@ func (s *HTTPServer) listUsers(c *gin.Context) {
 	}
 	queryArgs := append(append([]any{}, args...), size, (page-1)*size)
 	var users []managedUser
-	err := s.store.db.SelectContext(c, &users, `SELECT u.id,u.email,u.bind_quota,u.status,u.disabled_at,u.auth_revision,u.created_at,u.updated_at,COUNT(d.id) device_count FROM users u LEFT JOIN device_bind d ON d.user_id=u.id`+where+` GROUP BY u.id ORDER BY u.id DESC LIMIT ? OFFSET ?`, queryArgs...)
+	err = s.store.db.SelectContext(c, &users, `SELECT u.id,u.email,u.bind_quota,u.status,u.disabled_at,u.auth_revision,u.created_at,u.updated_at,(SELECT COUNT(*) FROM device_bind d WHERE d.user_id=u.id) device_count FROM users u`+where+order+` LIMIT ? OFFSET ?`, queryArgs...)
 	if err != nil {
 		apiresp.Internal(c, err.Error())
 		return
@@ -279,14 +307,25 @@ func (s *HTTPServer) listDevices(c *gin.Context) {
 	case "false":
 		where += ` AND d.user_id=0`
 	}
+	order, err := listOrder(c, map[string]string{
+		"id": "d.id", "active_time": "d.active_time", "bind_time": "d.bind_time",
+	}, "id", "d.id")
+	if err != nil {
+		apiresp.BadParam(c, err.Error())
+		return
+	}
 	var total int
-	if err := s.store.db.GetContext(c, &total, `SELECT COUNT(*) FROM device_bind d LEFT JOIN users u ON u.id=d.user_id`+where, args...); err != nil {
+	countFrom := ` FROM device_bind d`
+	if keyword != "" {
+		countFrom += ` LEFT JOIN users u ON u.id=d.user_id`
+	}
+	if err := s.store.db.GetContext(c, &total, `SELECT COUNT(*)`+countFrom+where, args...); err != nil {
 		apiresp.Internal(c, err.Error())
 		return
 	}
 	var devices []managedDevice
 	queryArgs := append(append([]any{}, args...), size, (page-1)*size)
-	if err := s.store.db.SelectContext(c, &devices, managedDeviceSelect+where+` ORDER BY d.id DESC LIMIT ? OFFSET ?`, queryArgs...); err != nil {
+	if err := s.store.db.SelectContext(c, &devices, managedDeviceSelect+where+order+` LIMIT ? OFFSET ?`, queryArgs...); err != nil {
 		apiresp.Internal(c, err.Error())
 		return
 	}

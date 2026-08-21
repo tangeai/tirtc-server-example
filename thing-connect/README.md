@@ -620,6 +620,8 @@ await POST('/v1/voip/user/report-auth', { /* 微信返回结果 */ }); // 3. 回
 
 五个业务服务和 Admin Server 共用 MySQL、Redis；需要 MQTT 的服务连接同一个 Broker。**五个业务服务的 `jwt_secret` 必须一致**，六个服务的 `internal.key` 必须一致，Admin 使用独立的 `admin.jwt_secret`。
 
+`config.yaml` 保存数据库、Redis、MQTT、服务地址和进程认证密钥等启动引导参数。Admin 注册表中的业务配置使用数据库发布值；没有发布记录时使用注册表默认值。五个业务服务必须在启动时连接 Admin 完成首次配置加载。通用配置中的 TiRTC 应用 ID 和访问密钥是必填阻塞项，需要在 Admin Web 中配置。
+
 | 服务 | 调用方 | 主要职责 |
 |---|---|---|
 | device-server | 设备 | Report、Token、设备上线 |

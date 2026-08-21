@@ -112,7 +112,9 @@ func coreMigrationStatements() []string {
 			PRIMARY KEY (id),
 			UNIQUE KEY uq_device_id (device_id),
 			KEY idx_user_id (user_id),
-			KEY idx_mac     (mac)
+			KEY idx_mac     (mac),
+			KEY idx_device_active_time (active_time, id),
+			KEY idx_device_bind_time (bind_time, id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 		`CREATE TABLE IF NOT EXISTS ai_user_role (
 			id         BIGINT      NOT NULL AUTO_INCREMENT,
@@ -249,14 +251,22 @@ func coreMigrationStatements() []string {
 	return stmts
 }
 
-const (
-	coreSchemaVersion = 1
-)
+func coreMigrationV2Statements() []string {
+	return []string{
+		`ALTER TABLE users ADD KEY idx_users_created (created_at, id)`,
+		`ALTER TABLE users ADD KEY idx_users_status_created (status, created_at, id)`,
+		`ALTER TABLE device_bind ADD KEY idx_device_active_time (active_time, id)`,
+		`ALTER TABLE device_bind ADD KEY idx_device_bind_time (bind_time, id)`,
+	}
+}
 
 // Migrate applies the schema owned by the five business services. It is safe
 // for all business services to call this concurrently during rolling startup.
 func Migrate(db *sqlx.DB) error {
-	return runMigration(db, "core", coreSchemaVersion, coreMigrationStatements())
+	if err := runMigration(db, "core", 1, coreMigrationStatements()); err != nil {
+		return err
+	}
+	return runMigration(db, "core", 2, coreMigrationV2Statements())
 }
 
 // MigrateAdmin applies the business schema followed by the tables owned by
@@ -269,7 +279,10 @@ func MigrateAdmin(db *sqlx.DB) error {
 	if err := runMigration(db, "admin", 1, adminSchemaStatements()); err != nil {
 		return err
 	}
-	return runMigration(db, "admin", 2, adminMigrationV2Statements())
+	if err := runMigration(db, "admin", 2, adminMigrationV2Statements()); err != nil {
+		return err
+	}
+	return runMigration(db, "admin", 3, adminMigrationV3Statements())
 }
 
 func runMigration(db *sqlx.DB, component string, version int, stmts []string) error {

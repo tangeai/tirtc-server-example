@@ -217,15 +217,17 @@ export function DevicesPage() {
 function UserDevicesPanel() {
   const [query, setQuery] = useState('');
   const [bound, setBound] = useState('');
+  const [sortBy, setSortBy] = useState('');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [page, setPage] = useState(1);
   const [detail, setDetail] = useState<{ device: ManagedDevice; logs: BindLog[] }>();
   const pageSize = 20;
   const [data, loading, reload] = useLoad(
     () =>
       api<PageData<ManagedDevice>>(
-        `/devices?page=${page}&page_size=${pageSize}&keyword=${encodeURIComponent(query)}&bound=${bound}`,
+        `/devices?page=${page}&page_size=${pageSize}&keyword=${encodeURIComponent(query)}&bound=${bound}&sort_by=${sortBy}&sort_order=${sortOrder}`,
       ),
-    [query, bound, page],
+    [query, bound, sortBy, sortOrder, page],
   );
   const unbind = async (row: ManagedDevice) => {
     try {
@@ -284,6 +286,21 @@ function UserDevicesPanel() {
         rowKey="id"
         loading={loading}
         dataSource={data?.items}
+        onChange={(_, __, sorter, extra) => {
+          if (extra.action !== 'sort') return;
+          const selected = Array.isArray(sorter) ? sorter[0] : sorter;
+          setPage(1);
+          if (
+            selected?.order &&
+            (selected.field === 'active_time' || selected.field === 'bind_time')
+          ) {
+            setSortBy(String(selected.field));
+            setSortOrder(selected.order === 'ascend' ? 'asc' : 'desc');
+          } else {
+            setSortBy('');
+            setSortOrder('desc');
+          }
+        }}
         pagination={{
           current: page,
           pageSize,
@@ -325,8 +342,23 @@ function UserDevicesPanel() {
           { title: '所属用户', dataIndex: 'user_email', render: (value) => value || '未绑定' },
           { title: '设备名称', dataIndex: 'device_name', render: (value) => value || '—' },
           { title: '设备来源', dataIndex: 'assign', render: assignmentName },
-          { title: '首次活跃', dataIndex: 'active_time', render: formatTime },
-          { title: '绑定时间', dataIndex: 'bind_time', render: formatTime },
+          {
+            title: '首次活跃',
+            dataIndex: 'active_time',
+            render: formatTime,
+            sorter: true,
+            sortOrder:
+              sortBy === 'active_time' ? (sortOrder === 'asc' ? 'ascend' : 'descend') : null,
+            sortDirections: ['descend', 'ascend'],
+          },
+          {
+            title: '绑定时间',
+            dataIndex: 'bind_time',
+            render: formatTime,
+            sorter: true,
+            sortOrder: sortBy === 'bind_time' ? (sortOrder === 'asc' ? 'ascend' : 'descend') : null,
+            sortDirections: ['descend', 'ascend'],
+          },
           {
             title: '操作',
             fixed: 'right',

@@ -115,12 +115,12 @@ openssl rand -base64 32  # security.config_encryption_key，仅 admin-server 使
 - 五个业务服务的 `jwt_secret` 完全相同。变更它会使现有用户令牌失效。
 - 六份 `internal.key` 完全相同，且仅允许服务间网络访问。
 - `admin.jwt_secret` 与业务 JWT 分离。变更它只影响管理员会话。
-- `security.config_encryption_key` 是 Base64 编码的 32 字节随机值；数据库只保存配置密文。轮换前应使用未来的密钥轮换工具或 KMS，不可直接覆盖旧密钥。
+- `security.config_encryption_key` 是 Base64 编码的 32 字节随机值，用于管理员 MFA 因子加密，并在升级时把旧版配置密钥解密迁移为明文。轮换前应使用未来的密钥轮换工具或 KMS，不可直接覆盖旧密钥。
 - HTTPS 部署设置 `admin.cookie_secure: true`；仅本机 HTTP 开发时可设为 `false`。
 - Nginx 与服务同机时设置 `trusted_proxies: ["127.0.0.1"]`。不要使用 `0.0.0.0/0`。
 - 自托管设备引导在 user-server 中启用 `discovery.enabled`，并把各 URL 配成设备实际可访问的 HTTPS/MQTTS 地址；`GET /services` 由 user-server 提供。
 
-`user-server` 的 `captcha.provider` 留空表示关闭人机验证，可切换为 `yidun`、`geetest`、`aliyun` 或 `tencent`。选择供应商后只填写对应 `providers` 节点的标识和密钥。`smtp.host` 留空时验证码邮件写入日志，仅适用于本地开发；生产环境必须配置真实 SMTP。
+人机验证和 SMTP 默认关闭。在 Admin Web 中启用人机验证时选择 `yidun`、`geetest`、`aliyun` 或 `tencent` 并填写该服务商的必填字段；启用邮件服务时填写 SMTP 地址、发件人和密码。未启用 SMTP 时邮件发送被禁用，不会把验证码写入日志。
 
 注册验证码和找回密码验证码分别由后台的邮件配置管理，缺省有效期均为 5 分钟。邮件模板、SMTP、人机验证、微信 VoIP 应用及各服务业务参数均可在 Admin Web 发布。
 
@@ -187,9 +187,9 @@ sudo systemctl reload nginx
 
 ## 动态配置规则
 
-服务启动时先读取本机 `config.yaml`。某个配置项在数据库中尚未发布时，YAML 值继续生效；Admin 页面中的定义默认值不是当前 YAML 值。管理员首次发布后，该项由数据库接管并通过内部接口及 Redis 事件同步到各实例。
+本机 `config.yaml` 提供数据库、Redis、MQTT、Admin 地址和进程认证密钥等启动引导参数。注册配置项只使用数据库发布值；数据库中没有记录时，内部接口返回后端注册表默认值并同步到各实例，不读取各服务 YAML 中的同名业务值。五个业务服务启动时必须从 `admin.server_url` 完成首次加载，Admin 不可达或响应无效时不开始监听；运行中的短暂故障继续使用内存中的最后有效值并周期重试。后台把默认值、必填项和缺失后会阻塞相关能力的配置分开标注。TiRTC 应用 ID、Access Key ID 和 Secret Key ID 没有可运行的默认值，是当前的必填阻塞项。
 
-配置命名空间包括 `device-server`、`user-server`、`voip-server`、`ai-server`、`call-server`、`common` 和 `system`。业务配置与系统配置分开授权。密钥字段在 API 中只返回是否已配置和掩码，不返回明文。
+配置命名空间包括 `device-server`、`user-server`、`voip-server`、`ai-server`、`call-server`、`common` 和 `system`。业务配置与系统配置分开授权。配置中心的普通字段和密钥字段均以明文 JSON 存储；Admin Web 使用密码控件隐藏密钥，具备对应密钥写权限的管理员可点击眼睛查看原值。应通过数据库账号、网络、备份和审计控制明文凭证的访问范围。
 
 Admin Web 的内置配置使用中文业务表单，管理员无需手写 JSON。服务名、权限、角色、日志动作、任务类型、设备来源、VoIP 状态和设备上报属性均以中文名称为主；权限码、配置键和属性键作为二次开发标识保留在次要位置。新增代码级扩展配置时，应同时登记中文名称、说明和前端字段定义，否则页面只提供标注为“高级配置”的 JSON 编辑入口。
 
@@ -227,7 +227,7 @@ done
 
 仓库内的 `scripts/deploy-prod.sh` 提供基于 Supervisor 的构建、发布、备份和失败回滚流程。通过 `DEPLOY_ROOT`、`REPO_URL`、`SUPERVISOR_GROUP` 等环境变量适配部署目录和代码来源。
 
-全流程发布默认读取 `${DEPLOY_ROOT}/admin-server/migration-config.yaml`；当前生产脚本的 `DEPLOY_ROOT` 默认值为 `/data/demo-open.tangeai.cn`，可直接修改脚本顶部配置，也可通过同名环境变量临时覆盖。迁移配置也可通过 `MIGRATION_CONFIG` 指定其他绝对路径。该文件使用完整 Admin 配置格式，但 `database.dsn` 必须属于具备 DDL 权限的迁移账号，文件权限应为 `600`。迁移已由外部系统完成时才设置 `SKIP_MIGRATIONS=1`。脚本使用 `git pull --ff-only` 获取版本，并在每个服务重启后等待 `/health/ready`；等待时间可通过 `HEALTH_WAIT_SECONDS` 调整。发布前可选择“仅校验配置”，集中检查六个服务的共享密钥、DSN、端口及 Admin 专用配置。YAML 节标题允许合法的尾随空白和行尾注释，脚本不会改写生产配置。
+全流程发布默认读取 `${DEPLOY_ROOT}/admin-server/migration-config.yaml`；当前生产脚本的 `DEPLOY_ROOT` 默认值为 `/data/demo-open.tangeai.cn`，可直接修改脚本顶部配置，也可通过同名环境变量临时覆盖。迁移配置也可通过 `MIGRATION_CONFIG` 指定其他绝对路径。该文件使用完整 Admin 配置格式，但 `database.dsn` 必须属于具备 DDL 权限的迁移账号，文件权限应为 `600`。迁移已由外部系统完成时才设置 `SKIP_MIGRATIONS=1`。脚本使用 `git pull --ff-only` 获取版本，先重启 Admin，再逐个重启业务服务，并在每次重启后等待 `/health/ready`；等待时间可通过 `HEALTH_WAIT_SECONDS` 调整。发布前可选择“仅校验配置”，集中检查六个服务的共享密钥、DSN、端口及 Admin 专用配置。YAML 节标题允许合法的尾随空白和行尾注释，脚本不会改写生产配置。
 
 已有五服务部署首次接入 Admin Server 时，先准备六份配置并运行“仅校验配置”，再执行“编译”“仅执行数据库迁移”和“仅发布文件”，然后把 Supervisor 配置中的 `admin-server` 加入服务组并执行 `reread`、`update`。Supervisor 能识别六个进程后执行“初始化首个管理员”；后续版本使用“全流程”。这样不会要求一个尚未安装的 Admin 进程先通过服务管理器校验，也不会让常驻进程继续使用初始化前的权限快照。
 

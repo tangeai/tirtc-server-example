@@ -16,7 +16,6 @@ import (
 	"thing-connect/internal/cache"
 	"thing-connect/internal/config"
 	"thing-connect/internal/db"
-	"thing-connect/internal/dynamicconfig"
 	"thing-connect/internal/logging"
 	"thing-connect/internal/mqttc"
 	"thing-connect/internal/servicestatus"
@@ -63,24 +62,21 @@ func main() {
 
 	voipHTTP := handler.NewServer(cfg, sqlDB, rdb, broker)
 	voipHTTP.Register(r)
-	var dynamicClient *dynamicconfig.Client
-	var dynamicRefs []dynamicconfig.Ref
-	if cfg.Admin.ServerURL != "" {
-		dynamicClient, dynamicRefs, err = voipDynamicConfig(cfg, rdb, voipHTTP)
-		if err != nil {
-			slog.Warn("dynamic config disabled", "err", err)
-			dynamicClient = nil
-		}
+	dynamicClient, dynamicRefs, err := voipDynamicConfig(cfg, rdb, voipHTTP)
+	if err != nil {
+		slog.Error("dynamic config init failed", "err", err)
+		os.Exit(1)
 	}
 	statusCtx, statusCancel := context.WithCancel(context.Background())
-	if dynamicClient != nil {
-		go dynamicClient.Run(statusCtx, dynamicRefs)
+	configCtx, cancelConfig := context.WithTimeout(context.Background(), 10*time.Second)
+	if err := dynamicClient.ApplyInitial(configCtx, dynamicRefs); err != nil {
+		cancelConfig()
+		slog.Error("dynamic config load failed", "err", err)
+		os.Exit(1)
 	}
-	var revisions func() map[string]int64
-	if dynamicClient != nil {
-		revisions = dynamicClient.Revisions
-	}
-	reporter, err := servicestatus.NewReporter(rdb, "voip-server", probes, revisions)
+	cancelConfig()
+	go dynamicClient.Run(statusCtx, dynamicRefs)
+	reporter, err := servicestatus.NewReporter(rdb, "voip-server", probes, dynamicClient.Revisions)
 	if err != nil {
 		slog.Error("service status init failed", "err", err)
 		os.Exit(1)

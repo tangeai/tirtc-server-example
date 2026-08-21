@@ -26,6 +26,8 @@ type ConfigDefinition struct {
 	Default     json.RawMessage         `json:"default"`
 	SecretPaths []string                `json:"secret_paths,omitempty"`
 	Fields      []ConfigFieldDefinition `json:"fields,omitempty"`
+	Required    bool                    `json:"required"`
+	Blocking    bool                    `json:"blocking"`
 	Targets     []string                `json:"targets"`
 	Reload      string                  `json:"reload"`
 	validator   func(json.RawMessage) error
@@ -41,15 +43,17 @@ type ConfigFieldOption struct {
 // metadata lets Admin Web and downstream extensions render the same registry
 // without maintaining a second config-key switch.
 type ConfigFieldDefinition struct {
-	Path        []string            `json:"path"`
-	Label       string              `json:"label"`
-	Description string              `json:"description,omitempty"`
-	Kind        string              `json:"kind"`
-	Options     []ConfigFieldOption `json:"options,omitempty"`
-	Secret      bool                `json:"secret,omitempty"`
-	Providers   []string            `json:"providers,omitempty"`
-	Required    bool                `json:"required,omitempty"`
-	Min         *float64            `json:"min,omitempty"`
+	Path                []string            `json:"path"`
+	Label               string              `json:"label"`
+	Description         string              `json:"description,omitempty"`
+	Kind                string              `json:"kind"`
+	Options             []ConfigFieldOption `json:"options,omitempty"`
+	Secret              bool                `json:"secret,omitempty"`
+	Providers           []string            `json:"providers,omitempty"`
+	Required            bool                `json:"required,omitempty"`
+	RequiredWhenEnabled bool                `json:"required_when_enabled,omitempty"`
+	Blocking            bool                `json:"blocking,omitempty"`
+	Min                 *float64            `json:"min,omitempty"`
 }
 
 type ConfigRegistry struct{ definitions map[string]ConfigDefinition }
@@ -73,7 +77,7 @@ func DefaultConfigRegistry() *ConfigRegistry {
 		def("ai-server", "ai.resource_policy", "ai", "AI 资源策略", `{"resource_quota":{"mcp":4,"device_plugin":20,"kb":5},"default_resources":{"mcp":[],"device_plugin":[],"kb":[]}}`, nil, []string{"ai-server"}, validateAIResourcePolicy),
 		def("call-server", "call.contact_policy", "call", "联系人策略", `{"max_contacts_per_device":200}`, nil, []string{"call-server"}, validatePositiveFields("max_contacts_per_device")),
 		def("call-server", "call.room_policy", "call", "房间策略", `{"room_ttl_hours":12}`, nil, []string{"call-server"}, validatePositiveFields("room_ttl_hours")),
-		def("common", "tirtc", "tirtc", "TiRTC", `{"endpoint":"","app_id":""}`, []string{"access_key_id", "secret_key_id"}, []string{"user-server", "voip-server", "ai-server", "call-server"}, validateTiRTC),
+		blockingDef(def("common", "tirtc", "tirtc", "TiRTC", `{"endpoint":"","app_id":""}`, []string{"access_key_id", "secret_key_id"}, []string{"user-server", "voip-server", "ai-server", "call-server"}, validateTiRTC), "TiRTC 凭证缺失时，登录令牌、呼叫和 AI 能力不可用"),
 		def("system", "mfa.policy", "security", "MFA 策略", `{"enabled":true}`, nil, []string{"admin-server"}, validateMFAPolicy),
 		def("system", "admin.session_policy", "security", "管理员会话策略", `{"access_ttl":"15m","refresh_ttl":"168h","max_sessions":10,"login_window":"15m","login_max_attempts":5,"mfa_window":"5m","mfa_max_attempts":5}`, nil, []string{"admin-server"}, validateSessionPolicy),
 	}
@@ -87,6 +91,13 @@ func DefaultConfigRegistry() *ConfigRegistry {
 
 func def(namespace, key, group, name, defaultValue string, secrets, targets []string, validator func(json.RawMessage) error) ConfigDefinition {
 	return ConfigDefinition{Namespace: namespace, Key: key, Group: group, Name: name, Default: json.RawMessage(defaultValue), SecretPaths: secrets, Targets: targets, Reload: "runtime", validator: validator}
+}
+
+func blockingDef(definition ConfigDefinition, description string) ConfigDefinition {
+	definition.Required = true
+	definition.Blocking = true
+	definition.Description = description
+	return definition
 }
 
 func (r *ConfigRegistry) Lookup(namespace, key string) (ConfigDefinition, bool) {
@@ -379,6 +390,36 @@ func validateAIResourcePolicy(raw json.RawMessage) error {
 	for _, key := range []string{"mcp", "device_plugin", "kb"} {
 		if _, err := positiveIntField(quota, key); err != nil {
 			return err
+		}
+	}
+	resources, ok := object["default_resources"].(map[string]any)
+	if !ok {
+		return errors.New("AI 默认资源 default_resources 必须是对象")
+	}
+	if len(resources) != 3 {
+		return errors.New("AI 默认资源只能包含 mcp、device_plugin 和 kb")
+	}
+	for _, resourceType := range []string{"mcp", "device_plugin", "kb"} {
+		items, ok := resources[resourceType].([]any)
+		if !ok {
+			return fmt.Errorf("默认资源 %s 必须是数组", resourceType)
+		}
+		seen := make(map[string]bool, len(items))
+		for index, rawItem := range items {
+			item, ok := rawItem.(map[string]any)
+			if !ok || len(item) != 2 {
+				return fmt.Errorf("默认资源 %s 第 %d 项必须只包含 id 和 name", resourceType, index+1)
+			}
+			id, idOK := item["id"].(string)
+			name, nameOK := item["name"].(string)
+			id, name = strings.TrimSpace(id), strings.TrimSpace(name)
+			if !idOK || !nameOK || id == "" || name == "" {
+				return fmt.Errorf("默认资源 %s 第 %d 项必须填写 id 和 name", resourceType, index+1)
+			}
+			if seen[id] {
+				return fmt.Errorf("默认资源 %s 的 id %q 重复", resourceType, id)
+			}
+			seen[id] = true
 		}
 	}
 	return nil

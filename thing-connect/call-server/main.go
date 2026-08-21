@@ -17,7 +17,6 @@ import (
 	"thing-connect/internal/cache"
 	"thing-connect/internal/config"
 	"thing-connect/internal/db"
-	"thing-connect/internal/dynamicconfig"
 	"thing-connect/internal/logging"
 	"thing-connect/internal/mqttc"
 	"thing-connect/internal/servicestatus"
@@ -61,24 +60,19 @@ func main() {
 
 	callHTTP := callhandler.NewServer(cfg, sqlDB, rdb, broker, devStore)
 	callHTTP.Register(r)
-	var dynamicClient *dynamicconfig.Client
-	var dynamicRefs []dynamicconfig.Ref
-	if cfg.Admin.ServerURL != "" {
-		dynamicClient, dynamicRefs, err = callDynamicConfig(cfg, rdb, callHTTP)
-		if err != nil {
-			log.Printf("dynamic config disabled: %v", err)
-			dynamicClient = nil
-		}
+	dynamicClient, dynamicRefs, err := callDynamicConfig(cfg, rdb, callHTTP)
+	if err != nil {
+		log.Fatalf("dynamic config: %v", err)
 	}
 	statusCtx, statusCancel := context.WithCancel(context.Background())
-	if dynamicClient != nil {
-		go dynamicClient.Run(statusCtx, dynamicRefs)
+	configCtx, cancelConfig := context.WithTimeout(context.Background(), 10*time.Second)
+	if err := dynamicClient.ApplyInitial(configCtx, dynamicRefs); err != nil {
+		cancelConfig()
+		log.Fatalf("dynamic config: %v", err)
 	}
-	var revisions func() map[string]int64
-	if dynamicClient != nil {
-		revisions = dynamicClient.Revisions
-	}
-	reporter, err := servicestatus.NewReporter(rdb, "call-server", probes, revisions)
+	cancelConfig()
+	go dynamicClient.Run(statusCtx, dynamicRefs)
+	reporter, err := servicestatus.NewReporter(rdb, "call-server", probes, dynamicClient.Revisions)
 	if err != nil {
 		log.Fatalf("service status: %v", err)
 	}

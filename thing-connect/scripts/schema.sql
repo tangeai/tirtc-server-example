@@ -23,7 +23,9 @@ CREATE TABLE IF NOT EXISTS users (
     disabled_at DATETIME    NULL,
     auth_revision BIGINT    NOT NULL DEFAULT 1 COMMENT '密码或账号状态变更时递增',
     created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    updated_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    KEY idx_users_created (created_at, id),
+    KEY idx_users_status_created (status, created_at, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS device_pool (
@@ -57,6 +59,8 @@ CREATE TABLE IF NOT EXISTS device_bind (
     UNIQUE KEY uq_device_id (device_id),
     KEY idx_user_id (user_id),
     KEY idx_mac     (mac),
+    KEY idx_device_active_time (active_time, id),
+    KEY idx_device_bind_time (bind_time, id),
     UNIQUE KEY uq_mac_user (mac_user_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -325,7 +329,7 @@ CREATE TABLE IF NOT EXISTS admin_job_items (
 CREATE TABLE IF NOT EXISTS config_entries (
     id BIGINT NOT NULL AUTO_INCREMENT, namespace VARCHAR(64) NOT NULL, config_key VARCHAR(128) NOT NULL,
     scope_type VARCHAR(16) NOT NULL DEFAULT 'global', scope_id VARCHAR(128) NOT NULL DEFAULT '', value TEXT NOT NULL,
-    secret_value_enc TEXT NULL, status TINYINT NOT NULL DEFAULT 1, revision BIGINT NOT NULL DEFAULT 1,
+    secret_value TEXT NULL, status TINYINT NOT NULL DEFAULT 1, revision BIGINT NOT NULL DEFAULT 1,
     updated_by BIGINT NOT NULL DEFAULT 0, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id), UNIQUE KEY uq_config_scope (namespace, config_key, scope_type, scope_id), KEY idx_config_namespace (namespace, status)
@@ -342,5 +346,7 @@ CREATE TABLE IF NOT EXISTS config_publish_outbox (
 
 INSERT IGNORE INTO schema_migrations (component, version) VALUES
     ('core', 1),
+    ('core', 2),
     ('admin', 1),
-    ('admin', 2);
+    ('admin', 2),
+    ('admin', 3);

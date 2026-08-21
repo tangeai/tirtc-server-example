@@ -532,6 +532,16 @@ func (s *HTTPServer) listConfigs(c *gin.Context) {
 		apiresp.BadParam(c, err.Error())
 		return
 	}
+	identity, _ := identityFromContext(c)
+	for index := range entries {
+		if !s.canAccessConfigSecrets(identity, entries[index].Namespace, entries[index].ConfigKey) {
+			continue
+		}
+		if err := s.configs.PopulateSecrets(c.Request.Context(), &entries[index]); err != nil {
+			apiresp.Internal(c, err.Error())
+			return
+		}
+	}
 	apiresp.OK(c, gin.H{"items": entries})
 }
 
@@ -541,7 +551,21 @@ func (s *HTTPServer) getConfig(c *gin.Context) {
 		s.writeConfigError(c, err)
 		return
 	}
+	identity, _ := identityFromContext(c)
+	if s.canAccessConfigSecrets(identity, entry.Namespace, entry.ConfigKey) {
+		if err := s.configs.PopulateSecrets(c.Request.Context(), &entry); err != nil {
+			apiresp.Internal(c, err.Error())
+			return
+		}
+	}
 	apiresp.OK(c, entry)
+}
+
+func (s *HTTPServer) canAccessConfigSecrets(identity AccessIdentity, namespace, key string) bool {
+	if namespace == "voip-server" && key == "wechat.apps" {
+		return s.access.Enforce(identity.UserID, "voip.app.write")
+	}
+	return s.access.Enforce(identity.UserID, "config.secret.write")
 }
 
 type configWriteRequest struct {
@@ -685,7 +709,7 @@ func (s *HTTPServer) putConfig(c *gin.Context) {
 	secrets, secretsProvided := rawPointer(request.Secrets)
 	if secretsProvided {
 		identity, _ := identityFromContext(c)
-		if !s.access.Enforce(identity.UserID, "config.secret.write") {
+		if !s.canAccessConfigSecrets(identity, c.Param("namespace"), c.Param("config_key")) {
 			c.JSON(http.StatusForbidden, apiresp.JSON{Code: 403, Msg: "无权修改密钥"})
 			return
 		}

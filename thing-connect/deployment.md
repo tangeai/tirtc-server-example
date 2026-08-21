@@ -44,13 +44,15 @@ mysql -u root -p thing_connect < scripts/schema.sql
 - 五个业务服务共享 `jwt_secret`。
 - 六个服务共享 `internal.key`。
 - Admin 使用独立的 `admin.jwt_secret`。
-- Admin 使用 Base64 编码的 32 字节 `security.config_encryption_key` 加密数据库中的配置密钥。
+- Admin 使用 Base64 编码的 32 字节 `security.config_encryption_key` 加密管理员 MFA 因子，并用于升级时解密旧版配置密钥。
 - 多实例共享 MySQL 和 Redis，并设置唯一 `SERVICE_INSTANCE_ID`。
 - Nginx 同机部署时设置 `trusted_proxies: ["127.0.0.1"]`。
 
-服务启动先使用 YAML。某项配置在 Admin 后台首次发布后，由数据库值接管并动态同步。系统配置、通用配置和五个服务的业务配置使用不同命名空间。
+`config.yaml` 只提供数据库、Redis、MQTT、服务地址和进程认证密钥等启动引导参数。注册到 Admin 配置中心的系统配置、通用配置和五个服务业务配置使用数据库值；数据库中没有发布记录时使用后端注册表默认值，不回退到各服务 YAML 中的同名业务值。五个业务服务启动时必须通过 `admin.server_url` 完成首次配置加载，Admin 不可达或返回无效配置时服务拒绝监听端口；启动完成后的短暂故障继续使用内存中的最后有效值并重试。TiRTC 应用 ID 和访问密钥没有可运行的默认值，必须在通用配置中填写，后台将其标注为阻塞项。
 
-生产发布脚本的全流程要求 `admin-server/migration-config.yaml` 使用具备 DDL 权限的数据库账号。若迁移已由独立发布系统完成，可显式设置 `SKIP_MIGRATIONS=1`。发布前使用菜单中的“仅校验配置”统一检查六个服务配置；首次安装使用“初始化首个管理员”，由脚本隐藏密码、执行迁移，并在 Admin Server 已运行时重启它以加载 RBAC。脚本逐个重启服务，并以各服务 `server.http_port` 的 `/health/ready` 作为成功门槛；Supervisor 仅显示 `RUNNING` 不代表发布成功。
+配置中心的普通字段和密钥字段均以明文 JSON 存储。Admin Web 对密钥使用密码控件，默认隐藏字符，具备密钥修改权限的管理员可点击眼睛查看原值。数据库权限、备份和访问审计需要覆盖这些明文凭证。
+
+生产发布脚本的全流程要求 `admin-server/migration-config.yaml` 使用具备 DDL 权限的数据库账号。若迁移已由独立发布系统完成，可显式设置 `SKIP_MIGRATIONS=1`。发布前使用菜单中的“仅校验配置”统一检查六个服务配置；首次安装使用“初始化首个管理员”，由脚本隐藏密码、执行迁移，并在 Admin Server 已运行时重启它以加载 RBAC。脚本先启动 Admin，再逐个重启五个业务服务，并以各服务 `server.http_port` 的 `/health/ready` 作为成功门槛；Supervisor 仅显示 `RUNNING` 不代表发布成功。
 
 ## 开发运行
 

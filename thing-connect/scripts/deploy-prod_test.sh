@@ -81,7 +81,13 @@ BASH
     fi
 )
 
+test_full_deploy_starts_admin_before_business_services() {
+    assert_eq "admin-server device-server user-server voip-server ai-server call-server" "$(select_all)" \
+        "full deploy must make Admin available before business service startup"
+}
+
 test_yaml_section_headers_allow_valid_whitespace
 test_running_admin_is_restarted_after_init
 test_initialize_admin_is_noninteractive_and_refreshes_running_service
+test_full_deploy_starts_admin_before_business_services
 echo "PASS: deploy-prod.sh"

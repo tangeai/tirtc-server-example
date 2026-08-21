@@ -15,8 +15,9 @@ import (
 
 const configEventChannel = "thingconnect:admin:config-events"
 
-// ConfigEntry is the safe representation returned to administrators. Secret
-// values are deliberately never included in API responses or publish events.
+// ConfigEntry is the administrator read model. Secrets are populated only by
+// HTTP handlers after a separate permission check; audit records and publish
+// events continue to use entries without Secrets.
 type ConfigEntry struct {
 	ID               int64           `db:"id" json:"id,omitempty"`
 	Namespace        string          `db:"namespace" json:"namespace"`
@@ -24,7 +25,9 @@ type ConfigEntry struct {
 	ScopeType        string          `db:"scope_type" json:"scope_type"`
 	ScopeID          string          `db:"scope_id" json:"scope_id"`
 	Value            json.RawMessage `db:"value" json:"value"`
+	Secrets          json.RawMessage `db:"-" json:"secrets,omitempty"`
 	SecretConfigured bool            `db:"-" json:"secret_configured"`
+	UsingDefault     bool            `db:"-" json:"using_default"`
 	Status           int8            `db:"status" json:"status"`
 	Revision         int64           `db:"revision" json:"revision"`
 	UpdatedBy        int64           `db:"updated_by" json:"updated_by"`
@@ -52,13 +55,13 @@ type ConfigWrite struct {
 }
 
 type ConfigService struct {
-	db       *sqlx.DB
-	registry *ConfigRegistry
-	cipher   *Cipher
+	db           *sqlx.DB
+	registry     *ConfigRegistry
+	legacyCipher *Cipher
 }
 
 func NewConfigService(db *sqlx.DB, registry *ConfigRegistry, cipher *Cipher) *ConfigService {
-	return &ConfigService{db: db, registry: registry, cipher: cipher}
+	return &ConfigService{db: db, registry: registry, legacyCipher: cipher}
 }
 
 func (s *ConfigService) Definitions(namespace string) ([]ConfigDefinition, error) {
@@ -72,7 +75,7 @@ func (s *ConfigService) List(ctx context.Context, namespace string) ([]ConfigEnt
 	if namespace != "" && !validNamespaces[namespace] {
 		return nil, fmt.Errorf("未知配置命名空间 %q", namespace)
 	}
-	query := `SELECT id,namespace,config_key,scope_type,scope_id,value,secret_value_enc,status,revision,updated_by,created_at,updated_at FROM config_entries`
+	query := `SELECT id,namespace,config_key,scope_type,scope_id,value,secret_value,status,revision,updated_by,created_at,updated_at FROM config_entries`
 	args := []any{}
 	if namespace != "" {
 		query += ` WHERE namespace=?`
@@ -83,9 +86,23 @@ func (s *ConfigService) List(ctx context.Context, namespace string) ([]ConfigEnt
 	if err := s.db.SelectContext(ctx, &rows, query, args...); err != nil {
 		return nil, err
 	}
-	entries := make([]ConfigEntry, 0, len(rows))
+	byID := make(map[string]ConfigEntry, len(rows))
 	for _, row := range rows {
-		entries = append(entries, row.safe())
+		entry := row.safe()
+		byID[definitionID(entry.Namespace, entry.ConfigKey)] = entry
+	}
+	definitions := s.registry.List(namespace)
+	entries := make([]ConfigEntry, 0, len(definitions))
+	for _, definition := range definitions {
+		if entry, ok := byID[definitionID(definition.Namespace, definition.Key)]; ok {
+			entries = append(entries, entry)
+			continue
+		}
+		entries = append(entries, ConfigEntry{
+			Namespace: definition.Namespace, ConfigKey: definition.Key,
+			ScopeType: "global", Value: cloneJSON(definition.Default), Status: 1,
+			UsingDefault: true,
+		})
 	}
 	return entries, nil
 }
@@ -99,10 +116,10 @@ func (s *ConfigService) Get(ctx context.Context, namespace, key, scopeType, scop
 		return ConfigEntry{}, err
 	}
 	var row configRow
-	err = s.db.GetContext(ctx, &row, `SELECT id,namespace,config_key,scope_type,scope_id,value,secret_value_enc,status,revision,updated_by,created_at,updated_at FROM config_entries WHERE namespace=? AND config_key=? AND scope_type=? AND scope_id=?`, namespace, key, scopeType, scopeID)
+	err = s.db.GetContext(ctx, &row, `SELECT id,namespace,config_key,scope_type,scope_id,value,secret_value,status,revision,updated_by,created_at,updated_at FROM config_entries WHERE namespace=? AND config_key=? AND scope_type=? AND scope_id=?`, namespace, key, scopeType, scopeID)
 	if errors.Is(err, sql.ErrNoRows) {
 		definition, _ := s.registry.Lookup(namespace, key)
-		return ConfigEntry{Namespace: namespace, ConfigKey: key, ScopeType: scopeType, ScopeID: scopeID, Value: cloneJSON(definition.Default), Status: 1}, nil
+		return ConfigEntry{Namespace: namespace, ConfigKey: key, ScopeType: scopeType, ScopeID: scopeID, Value: cloneJSON(definition.Default), Status: 1, UsingDefault: true}, nil
 	}
 	if err != nil {
 		return ConfigEntry{}, err
@@ -162,7 +179,7 @@ func (s *ConfigService) Put(ctx context.Context, input ConfigWrite) (ConfigEntry
 	defer tx.Rollback()
 
 	var before configRow
-	err = tx.GetContext(ctx, &before, `SELECT id,namespace,config_key,scope_type,scope_id,value,secret_value_enc,status,revision,updated_by,created_at,updated_at FROM config_entries WHERE namespace=? AND config_key=? AND scope_type=? AND scope_id=? FOR UPDATE`, input.Namespace, input.ConfigKey, input.ScopeType, input.ScopeID)
+	err = tx.GetContext(ctx, &before, `SELECT id,namespace,config_key,scope_type,scope_id,value,secret_value,status,revision,updated_by,created_at,updated_at FROM config_entries WHERE namespace=? AND config_key=? AND scope_type=? AND scope_id=? FOR UPDATE`, input.Namespace, input.ConfigKey, input.ScopeType, input.ScopeID)
 	creating := errors.Is(err, sql.ErrNoRows)
 	if err != nil && !creating {
 		return ConfigEntry{}, err
@@ -182,15 +199,11 @@ func (s *ConfigService) Put(ctx context.Context, input ConfigWrite) (ConfigEntry
 		mfaPolicyChanged = beforeOK && afterOK && beforeEnabled != afterEnabled
 	}
 	providerChanged := !creating && definitionID(input.Namespace, input.ConfigKey) == "user-server/captcha" && captchaProvider(before.Value) != captchaProvider(string(input.Value))
-	secretEnc := before.SecretValueEnc
+	secretValue := before.SecretValue
 	if input.SecretsProvided {
 		mergedSecrets := input.Secrets
-		if before.SecretValueEnc.Valid && !providerChanged {
-			plain, err := s.cipher.Decrypt(before.SecretValueEnc.String, configAAD(input.Namespace, input.ConfigKey, input.ScopeType, input.ScopeID))
-			if err != nil {
-				return ConfigEntry{}, err
-			}
-			mergedSecrets, err = mergeSecretJSON(plain, input.Secrets)
+		if before.SecretValue.Valid && !providerChanged {
+			mergedSecrets, err = mergeSecretJSON(json.RawMessage(before.SecretValue.String), input.Secrets)
 			if err != nil {
 				return ConfigEntry{}, err
 			}
@@ -198,26 +211,17 @@ func (s *ConfigService) Put(ctx context.Context, input ConfigWrite) (ConfigEntry
 		if err := validateRequiredSecrets(input.Namespace, input.ConfigKey, input.Value, mergedSecrets); err != nil {
 			return ConfigEntry{}, err
 		}
-		aad := configAAD(input.Namespace, input.ConfigKey, input.ScopeType, input.ScopeID)
-		encrypted, err := s.cipher.Encrypt(mergedSecrets, aad)
-		if err != nil {
-			return ConfigEntry{}, err
-		}
-		secretEnc = sql.NullString{String: encrypted, Valid: true}
+		secretValue = sql.NullString{String: string(mergedSecrets), Valid: true}
 	} else if providerChanged {
 		// Captcha vendors use overlapping field names for unrelated credentials.
-		// Never reuse the previous vendor's encrypted values after a provider
+		// Never reuse the previous vendor's values after a provider
 		// switch; an enabled provider must receive its own complete credentials.
-		secretEnc = sql.NullString{}
+		secretValue = sql.NullString{}
 		if err := validateExistingSecretRequirement(input.Namespace, input.ConfigKey, input.Value, false); err != nil {
 			return ConfigEntry{}, err
 		}
-	} else if secretEnc.Valid {
-		plain, err := s.cipher.Decrypt(secretEnc.String, configAAD(input.Namespace, input.ConfigKey, input.ScopeType, input.ScopeID))
-		if err != nil {
-			return ConfigEntry{}, err
-		}
-		if err := validateRequiredSecrets(input.Namespace, input.ConfigKey, input.Value, plain); err != nil {
+	} else if secretValue.Valid {
+		if err := validateRequiredSecrets(input.Namespace, input.ConfigKey, input.Value, json.RawMessage(secretValue.String)); err != nil {
 			return ConfigEntry{}, err
 		}
 	} else if err := validateExistingSecretRequirement(input.Namespace, input.ConfigKey, input.Value, false); err != nil {
@@ -227,7 +231,7 @@ func (s *ConfigService) Put(ctx context.Context, input ConfigWrite) (ConfigEntry
 	var id, revision int64
 	if creating {
 		revision = 1
-		result, err := tx.ExecContext(ctx, `INSERT INTO config_entries (namespace,config_key,scope_type,scope_id,value,secret_value_enc,status,revision,updated_by) VALUES (?,?,?,?,?,?,?,?,?)`, input.Namespace, input.ConfigKey, input.ScopeType, input.ScopeID, string(input.Value), nullableSQLString(secretEnc), input.Status, revision, input.Actor.UserID)
+		result, err := tx.ExecContext(ctx, `INSERT INTO config_entries (namespace,config_key,scope_type,scope_id,value,secret_value,status,revision,updated_by) VALUES (?,?,?,?,?,?,?,?,?)`, input.Namespace, input.ConfigKey, input.ScopeType, input.ScopeID, string(input.Value), nullableSQLString(secretValue), input.Status, revision, input.Actor.UserID)
 		if err != nil {
 			return ConfigEntry{}, err
 		}
@@ -237,7 +241,7 @@ func (s *ConfigService) Put(ctx context.Context, input ConfigWrite) (ConfigEntry
 		}
 	} else {
 		id, revision = before.ID, before.Revision+1
-		result, err := tx.ExecContext(ctx, `UPDATE config_entries SET value=?,secret_value_enc=?,status=?,revision=?,updated_by=? WHERE id=? AND revision=?`, string(input.Value), nullableSQLString(secretEnc), input.Status, revision, input.Actor.UserID, id, before.Revision)
+		result, err := tx.ExecContext(ctx, `UPDATE config_entries SET value=?,secret_value=?,status=?,revision=?,updated_by=? WHERE id=? AND revision=?`, string(input.Value), nullableSQLString(secretValue), input.Status, revision, input.Actor.UserID, id, before.Revision)
 		if err != nil {
 			return ConfigEntry{}, err
 		}
@@ -261,7 +265,7 @@ func (s *ConfigService) Put(ctx context.Context, input ConfigWrite) (ConfigEntry
 		beforeJSON, _ := json.Marshal(before.safe())
 		beforeSafe = string(beforeJSON)
 	}
-	after := ConfigEntry{ID: id, Namespace: input.Namespace, ConfigKey: input.ConfigKey, ScopeType: input.ScopeType, ScopeID: input.ScopeID, Value: cloneJSON(input.Value), SecretConfigured: secretEnc.Valid, Status: input.Status, Revision: revision, UpdatedBy: input.Actor.UserID}
+	after := ConfigEntry{ID: id, Namespace: input.Namespace, ConfigKey: input.ConfigKey, ScopeType: input.ScopeType, ScopeID: input.ScopeID, Value: cloneJSON(input.Value), SecretConfigured: secretConfigured(secretValue), Status: input.Status, Revision: revision, UpdatedBy: input.Actor.UserID}
 	afterJSON, _ := json.Marshal(after)
 	if err := insertAuditTx(ctx, tx, AuditEvent{AdminUserID: input.Actor.UserID, RoleCodes: strings.Join(input.Actor.Roles, ","), RequestID: input.RequestID, Method: input.Method, Path: input.Path, HTTPStatus: 200, Action: "config.write", Resource: "config", ResourceID: definitionID(input.Namespace, input.ConfigKey), Reason: input.Reason, Before: beforeSafe, After: string(afterJSON), ClientIP: input.ClientIP, UserAgent: input.UserAgent, Success: true}); err != nil {
 		return ConfigEntry{}, err
@@ -292,9 +296,10 @@ func captchaProvider(raw string) string {
 	return strings.ToLower(strings.TrimSpace(value.Provider))
 }
 
-// Resolved returns a value for a trusted service consumer. It is intentionally
-// separate from the administrator read model so callers cannot accidentally
-// expose decrypted credentials.
+// Resolved returns the effective database value, or the registered default
+// when no row has been published. Secret values are stored as plaintext JSON
+// and are returned only to trusted internal consumers or explicitly authorized
+// administrator handlers.
 func (s *ConfigService) Resolved(ctx context.Context, namespace, key, scopeType, scopeID string) (json.RawMessage, json.RawMessage, int64, error) {
 	entry, err := s.Get(ctx, namespace, key, scopeType, scopeID)
 	if err != nil {
@@ -303,22 +308,41 @@ func (s *ConfigService) Resolved(ctx context.Context, namespace, key, scopeType,
 	if entry.ID == 0 {
 		return entry.Value, nil, 0, nil
 	}
-	var encrypted sql.NullString
-	if err := s.db.GetContext(ctx, &encrypted, `SELECT secret_value_enc FROM config_entries WHERE id=?`, entry.ID); err != nil {
+	var stored sql.NullString
+	if err := s.db.GetContext(ctx, &stored, `SELECT secret_value FROM config_entries WHERE id=?`, entry.ID); err != nil {
 		return nil, nil, 0, err
 	}
-	var secrets json.RawMessage
-	if encrypted.Valid {
-		plain, err := s.cipher.Decrypt(encrypted.String, configAAD(namespace, key, entry.ScopeType, entry.ScopeID))
-		if err != nil {
-			return nil, nil, 0, err
+	if stored.Valid {
+		var object map[string]any
+		if json.Unmarshal([]byte(stored.String), &object) != nil || object == nil {
+			return nil, nil, 0, errors.New("已保存的配置密钥格式无效")
 		}
-		secrets = plain
+		return entry.Value, json.RawMessage(stored.String), entry.Revision, nil
 	}
-	return entry.Value, secrets, entry.Revision, nil
+	return entry.Value, nil, entry.Revision, nil
 }
 
-// EffectiveSecrets returns the encrypted value merged with a candidate patch.
+// PopulateSecrets adds the stored plaintext secret object to an administrator
+// read model after the HTTP layer has authorized secret access.
+func (s *ConfigService) PopulateSecrets(ctx context.Context, entry *ConfigEntry) error {
+	if entry == nil || entry.ID == 0 || !entry.SecretConfigured {
+		return nil
+	}
+	var stored sql.NullString
+	if err := s.db.GetContext(ctx, &stored, `SELECT secret_value FROM config_entries WHERE id=?`, entry.ID); err != nil {
+		return err
+	}
+	if stored.Valid {
+		var object map[string]any
+		if json.Unmarshal([]byte(stored.String), &object) != nil || object == nil {
+			return errors.New("已保存的密钥数据无效")
+		}
+		entry.Secrets = json.RawMessage(stored.String)
+	}
+	return nil
+}
+
+// EffectiveSecrets returns the stored value merged with a candidate patch.
 // It is used only by server-side integration tests and never by a read API.
 func (s *ConfigService) EffectiveSecrets(ctx context.Context, namespace, key string, candidate json.RawMessage, provided bool) (json.RawMessage, error) {
 	_, stored, _, err := s.Resolved(ctx, namespace, key, "global", "")
@@ -335,22 +359,78 @@ func (s *ConfigService) EffectiveSecrets(ctx context.Context, namespace, key str
 }
 
 type configRow struct {
-	ID             int64          `db:"id"`
-	Namespace      string         `db:"namespace"`
-	ConfigKey      string         `db:"config_key"`
-	ScopeType      string         `db:"scope_type"`
-	ScopeID        string         `db:"scope_id"`
-	Value          string         `db:"value"`
-	SecretValueEnc sql.NullString `db:"secret_value_enc"`
-	Status         int8           `db:"status"`
-	Revision       int64          `db:"revision"`
-	UpdatedBy      int64          `db:"updated_by"`
-	CreatedAt      time.Time      `db:"created_at"`
-	UpdatedAt      time.Time      `db:"updated_at"`
+	ID          int64          `db:"id"`
+	Namespace   string         `db:"namespace"`
+	ConfigKey   string         `db:"config_key"`
+	ScopeType   string         `db:"scope_type"`
+	ScopeID     string         `db:"scope_id"`
+	Value       string         `db:"value"`
+	SecretValue sql.NullString `db:"secret_value"`
+	Status      int8           `db:"status"`
+	Revision    int64          `db:"revision"`
+	UpdatedBy   int64          `db:"updated_by"`
+	CreatedAt   time.Time      `db:"created_at"`
+	UpdatedAt   time.Time      `db:"updated_at"`
 }
 
 func (r configRow) safe() ConfigEntry {
-	return ConfigEntry{ID: r.ID, Namespace: r.Namespace, ConfigKey: r.ConfigKey, ScopeType: r.ScopeType, ScopeID: r.ScopeID, Value: json.RawMessage(r.Value), SecretConfigured: r.SecretValueEnc.Valid && r.SecretValueEnc.String != "", Status: r.Status, Revision: r.Revision, UpdatedBy: r.UpdatedBy, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+	return ConfigEntry{ID: r.ID, Namespace: r.Namespace, ConfigKey: r.ConfigKey, ScopeType: r.ScopeType, ScopeID: r.ScopeID, Value: json.RawMessage(r.Value), SecretConfigured: secretConfigured(r.SecretValue), Status: r.Status, Revision: r.Revision, UpdatedBy: r.UpdatedBy, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+}
+
+// MigratePlaintextSecrets converts values written by releases that encrypted
+// configuration secrets. The schema keeps the legacy column only for this
+// lossless transition; all reads and new writes use secret_value.
+func (s *ConfigService) MigratePlaintextSecrets(ctx context.Context) error {
+	var legacyColumn int
+	if err := s.db.GetContext(ctx, &legacyColumn, `SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='config_entries' AND column_name='secret_value_enc'`); err != nil {
+		return fmt.Errorf("inspect legacy config secret column: %w", err)
+	}
+	if legacyColumn == 0 {
+		return nil
+	}
+	var rows []struct {
+		ID             int64          `db:"id"`
+		Namespace      string         `db:"namespace"`
+		ConfigKey      string         `db:"config_key"`
+		ScopeType      string         `db:"scope_type"`
+		ScopeID        string         `db:"scope_id"`
+		SecretValueEnc sql.NullString `db:"secret_value_enc"`
+	}
+	if err := s.db.SelectContext(ctx, &rows, `SELECT id,namespace,config_key,scope_type,scope_id,secret_value_enc FROM config_entries WHERE secret_value IS NULL AND secret_value_enc IS NOT NULL AND secret_value_enc<>''`); err != nil {
+		return fmt.Errorf("read legacy config secrets: %w", err)
+	}
+	for _, row := range rows {
+		if s.legacyCipher == nil {
+			return errors.New("legacy configuration secrets require the configured data encryption key")
+		}
+		plain, err := s.legacyCipher.Decrypt(row.SecretValueEnc.String, configAAD(row.Namespace, row.ConfigKey, row.ScopeType, row.ScopeID))
+		if err != nil {
+			return fmt.Errorf("decrypt legacy config secret %s/%s: %w", row.Namespace, row.ConfigKey, err)
+		}
+		var object map[string]any
+		if json.Unmarshal(plain, &object) != nil || object == nil {
+			return fmt.Errorf("legacy config secret %s/%s is not valid JSON", row.Namespace, row.ConfigKey)
+		}
+		result, err := s.db.ExecContext(ctx, `UPDATE config_entries SET secret_value=?,secret_value_enc=NULL WHERE id=? AND secret_value IS NULL`, string(plain), row.ID)
+		if err != nil {
+			return fmt.Errorf("store plaintext config secret %s/%s: %w", row.Namespace, row.ConfigKey, err)
+		}
+		if affected, _ := result.RowsAffected(); affected > 1 {
+			return fmt.Errorf("migrate config secret %s/%s updated %d rows", row.Namespace, row.ConfigKey, affected)
+		}
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE config_entries SET secret_value_enc=NULL WHERE secret_value IS NOT NULL AND secret_value_enc IS NOT NULL`); err != nil {
+		return fmt.Errorf("clear migrated encrypted config secrets: %w", err)
+	}
+	return nil
+}
+
+func secretConfigured(value sql.NullString) bool {
+	if !value.Valid || strings.TrimSpace(value.String) == "" {
+		return false
+	}
+	var object map[string]any
+	return json.Unmarshal([]byte(value.String), &object) == nil && len(object) > 0
 }
 
 func normalizeScope(scopeType, scopeID string) (string, string, error) {
@@ -445,7 +525,7 @@ func validateSecretShape(namespace, key string, object map[string]any) error {
 func mergeSecretJSON(oldRaw, newRaw json.RawMessage) (json.RawMessage, error) {
 	var oldValue, newValue map[string]any
 	if err := json.Unmarshal(oldRaw, &oldValue); err != nil {
-		return nil, errors.New("已保存的密钥数据无效，请检查加密密钥配置")
+		return nil, errors.New("已保存的密钥数据无效")
 	}
 	if err := json.Unmarshal(newRaw, &newValue); err != nil {
 		return nil, errors.New("新密钥数据格式无效")
@@ -469,6 +549,9 @@ func mergeSecretObjects(target, updates map[string]any) {
 func validateExistingSecretRequirement(namespace, key string, value json.RawMessage, configured bool) error {
 	var public map[string]any
 	_ = json.Unmarshal(value, &public)
+	if definitionID(namespace, key) == "common/tirtc" && !configured {
+		return errors.New("TiRTC 必须填写 Access Key ID 和 Secret Key ID")
+	}
 	if enabled, _ := public["enabled"].(bool); enabled && !configured && (definitionID(namespace, key) == "user-server/smtp" || definitionID(namespace, key) == "user-server/captcha") {
 		return errors.New("启用该服务前必须先配置所需密钥")
 	}

@@ -58,6 +58,7 @@ function EmailTemplatesPage() {
         config_key: definition.config_key,
         value: definition.default,
         secret_configured: false,
+        using_default: true,
         revision: 0,
         status: 1,
       },

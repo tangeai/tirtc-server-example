@@ -25,15 +25,6 @@ mqtt:
 
 jwt_secret: "replace-with-a-strong-random-secret"
 
-# 业务参数（全部可选，缺省使用括号内默认值）
-service:
-  quota_per_user: 10        # 新注册用户的默认设备绑定额度
-  code_ttl: 5m              # 邮件验证码启动默认值；发布 email.code_ttl 后由后台接管
-  rate_limit_window: 190s   # 设备上报限频窗口（默认 190s）
-  rate_limit_max_hits: 10   # 设备上报窗口内最大请求数（默认 10）
-  token_expiry: 168h        # JWT 有效期（默认 7 天）
-  mqtt_ack_timeout: 5s      # MQTT 下发等待 ACK 超时（默认 5s）
-
 internal:
   key: "replace-with-an-internal-key-at-least-32-characters" # 服务间接口与动态配置读取共用
 admin:
@@ -58,55 +49,3 @@ discovery:
   call_server_url: "https://your-domain.example.com"
   mqtt_url: "mqtts://mqtt.example.com:8883"
   tirtc_endpoint: "https://your-tirtc-endpoint"
-
-captcha:
-  # 留空表示禁用；启用时填写 yidun、geetest、aliyun 或 tencent。
-  provider: ""
-  providers:
-    # yidun:
-    #   captcha_id: "replace-with-captcha-id"
-    #   secret_id: "replace-with-secret-id"
-    #   secret_key: "replace-with-secret-key"
-    # geetest:
-    #   captcha_id: "replace-with-web-captcha-id"
-    #   secret_key: "replace-with-web-captcha-key"
-    #   mini_program_secret_key: "replace-with-mini-program-captcha-key"
-    #   public_config:
-    #     mini_program_captcha_id: "replace-with-mini-program-captcha-id"
-    # aliyun:
-    #   captcha_id: "replace-with-web-scene-id"
-    #   secret_id: "replace-with-ram-access-key-id"
-    #   secret_key: "replace-with-ram-access-key-secret"
-    #   public_config:
-    #     prefix: "replace-with-captcha-instance-prefix"
-    #     region: "cn" # cn 或 sgp
-    #     mini_program_captcha_id: "replace-with-mini-program-scene-id"
-    # tencent:
-    #   captcha_id: "replace-with-web-captcha-app-id"
-    #   secret_id: "replace-with-cloud-api-secret-id"
-    #   secret_key: "replace-with-cloud-api-secret-key"
-    #   app_secret_key: "replace-with-web-app-secret-key"
-    #   mini_program_secret_key: "replace-with-mini-program-app-secret-key"
-    #   public_config:
-    #     mini_program_captcha_id: "replace-with-mini-program-captcha-app-id"
-
-smtp:
-  # host 留空时邮件验证码写入服务日志，仅适用于本地开发。
-  host: ""
-  port: 465
-  tls_mode: "auto" # auto、implicit_tls 或 starttls
-  username: ""
-  password: ""
-  from: ""
-
-tirtc:
-  app_id: "replace-with-app-id"
-  access_key_id: "replace-with-access-key-id"
-  secret_key_id: "replace-with-secret-key-id"
-  endpoint: ""   # 留空则使用 SDK 默认 endpoint
-
-# Agent 角色管理（可选，不配则 /v1/roles 等路由不启用）
-tirtc_aichat:
-  base_url: "https://api-tirtc.tange365.com"
-  default_role_id: "fin63bby1og0"
-  # base_role_url: "https://openapi-cn01.tange365.com"  # 可选，角色 CRUD API 独立地址；留空则回退到 base_url

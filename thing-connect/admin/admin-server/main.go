@@ -108,7 +108,10 @@ func main() {
 		log.Fatalf("admin RBAC: %v", err)
 	}
 	configService := adminapp.NewConfigService(sqlDB, adminapp.DefaultConfigRegistry(), cipher)
-	if value, _, revision, loadErr := configService.Resolved(context.Background(), "system", "mfa.policy", "global", ""); loadErr == nil && revision > 0 {
+	if err := configService.MigratePlaintextSecrets(context.Background()); err != nil {
+		log.Fatalf("migrate configuration secrets: %v", err)
+	}
+	if value, _, _, loadErr := configService.Resolved(context.Background(), "system", "mfa.policy", "global", ""); loadErr == nil {
 		var policy struct {
 			Enabled bool `json:"enabled"`
 		}
@@ -116,7 +119,7 @@ func main() {
 			authService.SetMFAEnabled(policy.Enabled)
 		}
 	}
-	if value, _, revision, loadErr := configService.Resolved(context.Background(), "system", "admin.session_policy", "global", ""); loadErr == nil && revision > 0 {
+	if value, _, _, loadErr := configService.Resolved(context.Background(), "system", "admin.session_policy", "global", ""); loadErr == nil {
 		var policy struct {
 			AccessTTL   string `json:"access_ttl"`
 			RefreshTTL  string `json:"refresh_ttl"`
@@ -160,7 +163,7 @@ func main() {
 	})
 	deviceService := adminapp.NewDeviceService(adminmysql.NewDeviceCommandStore(sqlDB))
 	adminHTTP := adminapp.NewHTTPServer(store, authService, access, configService, servicestatus.NewAggregator(redisClient), redisClient, jobService, deviceService, cfg.Admin.CookieSecure)
-	if value, _, revision, loadErr := configService.Resolved(context.Background(), "system", "admin.session_policy", "global", ""); loadErr == nil && revision > 0 {
+	if value, _, _, loadErr := configService.Resolved(context.Background(), "system", "admin.session_policy", "global", ""); loadErr == nil {
 		var policy struct {
 			LoginWindow string `json:"login_window"`
 			LoginMax    int64  `json:"login_max_attempts"`

@@ -26,18 +26,3 @@ internal:
   key: "replace-with-an-internal-key-at-least-32-characters" # 须与 admin 及其他服务一致
 admin:
   server_url: "http://127.0.0.1:9010"
-
-tirtc:
-  app_id: "your-tirtc-app-id"
-  access_key_id: "your-access-key-id"
-  secret_key_id: "your-secret-key-id"
-  endpoint: "https://your-tirtc-endpoint"
-
-wechat:
-  default_app_id: "wxYOUR_APP_ID"
-  apps:
-    wxYOUR_APP_ID:
-      secret: "your-wechat-app-secret"
-      token: "your-wechat-server-token"
-      encoding_aes_key: ""
-      model_id: "your-voip-model-id"

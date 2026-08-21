@@ -22,16 +22,6 @@ mqtt:
 
 jwt_secret: "replace-with-the-same-strong-random-secret-as-other-services"
 
-tirtc:
-  app_id: "your-tirtc-app-id"
-  access_key_id: "your-access-key-id"
-  secret_key_id: "your-secret-key-id"
-  endpoint: "https://your-tirtc-endpoint"
-
-service:
-  max_contacts_per_device: 200
-  room_ttl_hours: 12
-
 internal:
   key: "replace-with-an-internal-key-at-least-32-characters" # 须与 admin 及其他服务一致
 admin:

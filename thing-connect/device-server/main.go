@@ -17,7 +17,6 @@ import (
 	"thing-connect/internal/cache"
 	"thing-connect/internal/config"
 	"thing-connect/internal/db"
-	"thing-connect/internal/dynamicconfig"
 	"thing-connect/internal/logging"
 	"thing-connect/internal/service"
 	"thing-connect/internal/servicestatus"
@@ -80,24 +79,23 @@ func main() {
 	devStore := mysqlstore.NewDeviceStore(sqlDB)
 	cacheStore := mysqlstore.NewCacheStore(rdb)
 	devSvc := service.NewDeviceService(devStore, cacheStore, cfg.JWTSecret, svcCfg)
-	var dynamicClient *dynamicconfig.Client
-	var dynamicRefs []dynamicconfig.Ref
-	if cfg.Admin.ServerURL != "" {
-		dynamicClient, dynamicRefs, err = deviceDynamicConfig(cfg, rdb, devSvc)
-		if err != nil {
-			log.Printf("dynamic config disabled: %v", err)
-			dynamicClient = nil
-		}
+	dynamicClient, dynamicRefs, err := deviceDynamicConfig(cfg, rdb, devSvc)
+	if err != nil {
+		log.Fatalf("dynamic config: %v", err)
 	}
+	configCtx, cancelConfig := context.WithTimeout(context.Background(), 10*time.Second)
+	if err := dynamicClient.ApplyInitial(configCtx, dynamicRefs); err != nil {
+		cancelConfig()
+		log.Fatalf("dynamic config: %v", err)
+	}
+	cancelConfig()
 
 	// Periodically reconcile global:pending_codes counter to correct drift
 	// caused by expired verification codes whose DelVerifyAndCode was never
 	// called (user didn't complete bind before TTL).
 	gcCtx, gcCancel := context.WithCancel(context.Background())
 	go globalPendingGC(gcCtx, cacheStore)
-	if dynamicClient != nil {
-		go dynamicClient.Run(gcCtx, dynamicRefs)
-	}
+	go dynamicClient.Run(gcCtx, dynamicRefs)
 
 	r := gin.New()
 	if err := r.SetTrustedProxies(cfg.Server.TrustedProxies); err != nil {
@@ -108,11 +106,7 @@ func main() {
 	servicestatus.RegisterHealth(r, probes)
 	devhandler.NewServer(devSvc).Register(r)
 	statusCtx, statusCancel := context.WithCancel(context.Background())
-	var revisions func() map[string]int64
-	if dynamicClient != nil {
-		revisions = dynamicClient.Revisions
-	}
-	reporter, err := servicestatus.NewReporter(rdb, "device-server", probes, revisions)
+	reporter, err := servicestatus.NewReporter(rdb, "device-server", probes, dynamicClient.Revisions)
 	if err != nil {
 		log.Fatalf("service status: %v", err)
 	}

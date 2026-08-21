@@ -65,8 +65,14 @@ func TestMigrateNewTables(t *testing.T) {
 	if err := sqlDB.Get(&n, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='admin_users'`); err != nil || n == 0 {
 		t.Errorf("admin_users table missing: n=%d err=%v", n, err)
 	}
-	if err := sqlDB.Get(&n, `SELECT COUNT(*) FROM schema_migrations WHERE component IN ('core','admin')`); err != nil || n != 3 {
+	if err := sqlDB.Get(&n, `SELECT COUNT(*) FROM schema_migrations WHERE component IN ('core','admin')`); err != nil || n != 5 {
 		t.Errorf("schema_migrations entries: n=%d err=%v", n, err)
+	}
+	if err := sqlDB.Get(&n, `SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='config_entries' AND column_name='secret_value'`); err != nil || n != 1 {
+		t.Errorf("config plaintext secret column missing: n=%d err=%v", n, err)
+	}
+	if err := sqlDB.Get(&n, `SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema=DATABASE() AND ((table_name='users' AND index_name IN ('idx_users_created','idx_users_status_created')) OR (table_name='device_bind' AND index_name IN ('idx_device_active_time','idx_device_bind_time')))`); err != nil || n < 8 {
+		t.Errorf("admin list sorting indexes missing: rows=%d err=%v", n, err)
 	}
 	if err := sqlDB.Get(&n, `SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='admin_jobs' AND column_name IN ('worker_id','lease_until')`); err != nil || n != 2 {
 		t.Errorf("admin job lease columns missing: n=%d err=%v", n, err)

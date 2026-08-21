@@ -6,14 +6,13 @@ import {
   Form,
   Input,
   Modal,
-  Select,
   Space,
   Table,
   Tag,
   Typography,
   message,
 } from 'antd';
-import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
+import { ReloadOutlined } from '@ant-design/icons';
 import { api, json } from '../../api';
 import {
   StepUpFields,
@@ -40,6 +39,8 @@ export type Definition = {
   default: unknown;
   secret_paths?: string[];
   fields?: ConfigField[];
+  required: boolean;
+  blocking: boolean;
   targets: string[];
 };
 export type ConfigEntry = {
@@ -47,7 +48,9 @@ export type ConfigEntry = {
   namespace: string;
   config_key: string;
   value: unknown;
+  secrets?: AnyRow;
   secret_configured: boolean;
+  using_default: boolean;
   revision: number;
   status: number;
 };
@@ -60,6 +63,20 @@ const namespaceNames: Record<string, string> = {
   common: '通用配置',
   system: '系统配置',
 };
+
+const editableConfigValue = (configKey: string, value: unknown) => {
+  if (configKey !== 'ai.resource_policy' || !value || typeof value !== 'object') return value;
+  const copy = JSON.parse(JSON.stringify(value)) as AnyRow;
+  const resources = copy.default_resources as AnyRow | undefined;
+  for (const type of ['mcp', 'device_plugin', 'kb']) {
+    if (!Array.isArray(resources?.[type])) continue;
+    resources[type] = resources[type].map((item: unknown) =>
+      typeof item === 'string' ? { id: item, name: '' } : item,
+    );
+  }
+  return copy;
+};
+
 export function ConfigPage({
   namespace,
   embedded = false,
@@ -78,7 +95,6 @@ export function ConfigPage({
     [namespace],
   );
   const [editing, setEditing] = useState<{ definition: Definition; entry: ConfigEntry }>();
-  const [adding, setAdding] = useState(false);
   const rows = useMemo(
     () =>
       defs?.items
@@ -90,13 +106,13 @@ export function ConfigPage({
             config_key: definition.config_key,
             value: definition.default,
             secret_configured: false,
+            using_default: true,
             revision: 0,
             status: 1,
           },
         })) || [],
     [defs, entries, namespace, excludeGroups.join(',')],
   );
-  const uncreated = rows.filter((row) => !row.entry.id);
   const save = async (v: AnyRow) => {
     try {
       const fields = editing!.definition.fields;
@@ -112,8 +128,8 @@ export function ConfigPage({
       };
       const secrets = fields
         ? compactSecrets(v.secrets)
-        : v.secrets?.trim()
-          ? JSON.parse(v.secrets)
+        : v.secretJSON?.trim()
+          ? JSON.parse(v.secretJSON)
           : undefined;
       if (secrets) body.secrets = secrets;
       if (namespace === 'system' && editing!.definition.config_key === 'mfa.policy')
@@ -143,14 +159,6 @@ export function ConfigPage({
       >
         刷新
       </Button>
-      <Button
-        type="primary"
-        icon={<PlusOutlined />}
-        disabled={!uncreated.length}
-        onClick={() => setAdding(true)}
-      >
-        接管配置
-      </Button>
     </Space>
   );
   return (
@@ -177,6 +185,8 @@ export function ConfigPage({
               render: (_, r) => (
                 <>
                   <b>{r.definition.name}</b>
+                  {r.definition.required && <Tag color="gold">必填</Tag>}
+                  {r.definition.blocking && <Tag color="error">缺失会阻塞业务</Tag>}
                   {r.definition.description && (
                     <>
                       <br />
@@ -196,8 +206,11 @@ export function ConfigPage({
             },
             {
               title: '状态',
-              render: (_, r) =>
-                r.entry.id ? <Tag color="success">后台已接管</Tag> : <Tag>使用本地配置</Tag>,
+              render: (_, r) => {
+                if (r.entry.id) return <Tag color="success">数据库配置</Tag>;
+                if (r.definition.blocking) return <Tag color="error">等待必填配置</Tag>;
+                return <Tag color="blue">使用默认值</Tag>;
+              },
             },
             {
               title: '密钥',
@@ -230,42 +243,6 @@ export function ConfigPage({
         />
       </Card>
       <Modal
-        open={adding}
-        title="由后台接管配置"
-        footer={null}
-        destroyOnClose
-        onCancel={() => setAdding(false)}
-      >
-        <Form
-          layout="vertical"
-          onFinish={(v: AnyRow) => {
-            const row = uncreated.find((x) => x.definition.config_key === v.config_key);
-            if (row) {
-              setAdding(false);
-              setEditing(row);
-            }
-          }}
-        >
-          <Alert
-            className="form-alert"
-            type="info"
-            showIcon
-            message="发布后服务优先使用后台值；未接管的配置继续使用各服务 config.yaml。"
-          />
-          <Form.Item name="config_key" label="选择配置项" rules={[{ required: true }]}>
-            <Select
-              options={uncreated.map((x) => ({
-                label: x.definition.name,
-                value: x.definition.config_key,
-              }))}
-            />
-          </Form.Item>
-          <Button type="primary" htmlType="submit">
-            填写配置
-          </Button>
-        </Form>
-      </Modal>
-      <Modal
         width={760}
         open={!!editing}
         title={editing?.definition.name}
@@ -278,21 +255,30 @@ export function ConfigPage({
             layout="vertical"
             onFinish={save}
             initialValues={{
-              config: editing.entry.value,
-              secrets: {},
+              config: editableConfigValue(editing.definition.config_key, editing.entry.value),
+              secrets: editing.entry.secrets || {},
               value: JSON.stringify(editing.entry.value, null, 2),
+              secretJSON: editing.entry.secrets
+                ? JSON.stringify(editing.entry.secrets, null, 2)
+                : '',
             }}
           >
             <Alert
               className="form-alert"
               type="info"
               showIcon
-              message={`当前配置版本 r${editing.entry.revision}。密钥留空会保留原值，后台不会回显已保存的密钥。`}
+              message={
+                editing.entry.id
+                  ? `当前数据库配置版本 r${editing.entry.revision}。密钥默认隐藏，点击眼睛可查看原值。`
+                  : '当前使用系统默认值；发布后写入数据库。密钥默认隐藏，点击眼睛可查看原值。'
+              }
             />
             {editing.definition.fields?.length ? (
               <FriendlyConfigFields
                 configKey={editing.definition.config_key}
                 fields={editing.definition.fields}
+                secretConfigured={editing.entry.secret_configured}
+                secretValuesAvailable={!!editing.entry.secrets}
               />
             ) : (
               <>
@@ -306,8 +292,8 @@ export function ConfigPage({
                   <Input.TextArea rows={12} className="code" />
                 </Form.Item>
                 {editing.definition.secret_paths?.length && (
-                  <Form.Item name="secrets" label="高级密钥配置（JSON）">
-                    <Input.TextArea rows={5} className="code" placeholder="留空保留原密钥" />
+                  <Form.Item name="secretJSON" label="高级密钥配置（JSON）">
+                    <Input.Password placeholder="请输入 JSON 密钥对象" />
                   </Form.Item>
                 )}
               </>
@@ -337,12 +323,12 @@ const revisionText = (value: AnyRow) =>
     <Space wrap>
       {Object.entries(value).map(([key, revision]) => (
         <Tag key={key} title={key}>
-          {configNames[key] || key} r{String(revision)}
+          {configNames[key] || key} {Number(revision) === 0 ? '默认值' : `r${String(revision)}`}
         </Tag>
       ))}
     </Space>
   ) : (
-    '使用本地配置'
+    '等待配置同步'
   );
 const dependencyText = (value: AnyRow) =>
   Object.entries(value || {}).map(([key, status]) => (

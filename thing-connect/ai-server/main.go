@@ -18,7 +18,6 @@ import (
 	"thing-connect/internal/cache"
 	"thing-connect/internal/config"
 	"thing-connect/internal/db"
-	"thing-connect/internal/dynamicconfig"
 	"thing-connect/internal/logging"
 	"thing-connect/internal/servicestatus"
 	mysqlstore "thing-connect/internal/store/mysql"
@@ -83,38 +82,28 @@ func main() {
 	if rolesBaseURL == "" {
 		rolesBaseURL = cfg.TirtcAichat.BaseURL
 	}
-	var agentHTTP *aihandler.AgentHandler
-	if rolesBaseURL != "" {
-		agentCfg := tirtcapi.AgentAPIConfig{
-			BaseURL:     rolesBaseURL,
-			AppID:       cfg.Tirtc.AppID,
-			AccessKeyID: cfg.Tirtc.AccessKeyID,
-			SecretKeyID: cfg.Tirtc.SecretKeyID,
-		}
-		agentClient := tirtcapi.NewAgentAPIClient(agentCfg, &http.Client{Timeout: 10 * time.Second})
-		agentHTTP = aihandler.NewAgentHandler(agentClient, roleStore, userRoleStore, userResourceStore, cfg.TirtcAichat.DefaultRoleID, cfg.Internal.Key, cfg.TirtcAichat.ResourceQuota, cfg.TirtcAichat.DefaultResources)
-		agentHTTP.Register(r, cfg.JWTSecret)
-	} else {
-		log.Println("tirtc_aichat.base_url not set, agent API disabled")
+	agentCfg := tirtcapi.AgentAPIConfig{
+		BaseURL:     rolesBaseURL,
+		AppID:       cfg.Tirtc.AppID,
+		AccessKeyID: cfg.Tirtc.AccessKeyID,
+		SecretKeyID: cfg.Tirtc.SecretKeyID,
 	}
-	var dynamicClient *dynamicconfig.Client
-	var dynamicRefs []dynamicconfig.Ref
-	if cfg.Admin.ServerURL != "" {
-		dynamicClient, dynamicRefs, err = aiDynamicConfig(cfg, rdb, legacyAI, agentHTTP)
-		if err != nil {
-			log.Printf("dynamic config disabled: %v", err)
-			dynamicClient = nil
-		}
+	agentClient := tirtcapi.NewAgentAPIClient(agentCfg, &http.Client{Timeout: 10 * time.Second})
+	agentHTTP := aihandler.NewAgentHandler(agentClient, roleStore, userRoleStore, userResourceStore, cfg.TirtcAichat.DefaultRoleID, cfg.Internal.Key, cfg.TirtcAichat.ResourceQuota, cfg.TirtcAichat.DefaultResources)
+	agentHTTP.Register(r, cfg.JWTSecret)
+	dynamicClient, dynamicRefs, err := aiDynamicConfig(cfg, rdb, legacyAI, agentHTTP)
+	if err != nil {
+		log.Fatalf("dynamic config: %v", err)
 	}
 	statusCtx, statusCancel := context.WithCancel(context.Background())
-	if dynamicClient != nil {
-		go dynamicClient.Run(statusCtx, dynamicRefs)
+	configCtx, cancelConfig := context.WithTimeout(context.Background(), 10*time.Second)
+	if err := dynamicClient.ApplyInitial(configCtx, dynamicRefs); err != nil {
+		cancelConfig()
+		log.Fatalf("dynamic config: %v", err)
 	}
-	var revisions func() map[string]int64
-	if dynamicClient != nil {
-		revisions = dynamicClient.Revisions
-	}
-	reporter, err := servicestatus.NewReporter(rdb, "ai-server", probes, revisions)
+	cancelConfig()
+	go dynamicClient.Run(statusCtx, dynamicRefs)
+	reporter, err := servicestatus.NewReporter(rdb, "ai-server", probes, dynamicClient.Revisions)
 	if err != nil {
 		log.Fatalf("service status: %v", err)
 	}
