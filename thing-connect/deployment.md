@@ -89,7 +89,6 @@ TiRTC App ID、Access Key ID、Secret Key ID 没有可用默认值。未填写�
 ```bash
 git clone https://github.com/tangeai/tirtc-server-example.git
 cd tirtc-server-example/thing-connect
-chmod +x build.sh scripts/deploy-prod.sh
 ```
 
 私有仓库需要给实际执行脚本的账号配置只读 Deploy Key，并通过 `REPO_URL` 传入仓库地址；本文使用 `sudo` 执行，因此对应账号是 root。
@@ -130,10 +129,12 @@ sudo env \
 
 脚本会拉取代码、完整构建、发布文件、停止未配置的业务服务，并启动 Admin 安装模式。终端只显示一次安装令牌，不要把令牌写入聊天、工单或日志。
 
+脚本同时把当前版本原子发布为 `/opt/thing-connect/deploy-prod.sh`。首次安装后的更新、迁移和服务管理统一使用这个入口；只有文件发布成功或完整更新完成后才刷新，拉取、构建或发布失败不会覆盖上一版。
+
 安装模式默认只监听 `127.0.0.1:9000`。Nginx 尚未配置时，在本地电脑建立隧道：
 
 ```bash
-ssh -L 9000:127.0.0.1:9000 deployer@server.example.com
+ssh -L 9000:127.0.0.1:9000 deployer@thing.example.com
 ```
 
 打开 `http://127.0.0.1:9000/admin/`。不要把安装端口直接开放到公网。
@@ -187,7 +188,7 @@ sudo editor /opt/thing-connect/admin-server/migration-config.yaml
 ### 3.6 配置 Nginx
 
 ```bash
-sudo cp deploy/nginx/demo-open.nginx.conf \
+sudo cp deploy/nginx/thing-connect.nginx.conf \
   /etc/nginx/conf.d/thing-connect.conf
 sudo editor /etc/nginx/conf.d/thing-connect.conf
 sudo nginx -t
@@ -198,9 +199,9 @@ sudo systemctl reload nginx
 
 对外入口：
 
-- 用户端：`https://server.example.com/`
-- 管理后台：`https://server.example.com/admin/`
-- 管理 API：`https://server.example.com/v1/admin/`
+- 用户端：`https://thing.example.com/`
+- 管理后台：`https://thing.example.com/admin/`
+- 管理 API：`https://thing.example.com/v1/admin/`
 
 Nginx 与服务同机时，`trusted_proxies` 通常只填 `127.0.0.1`，不要填写 `0.0.0.0/0`。
 
@@ -233,14 +234,10 @@ curl -fsS http://127.0.0.1:9005/health/ready  # Call
 
 ## 5. 日常更新与迁移
 
-首次安装后，生产源码默认位于 `${DEPLOY_ROOT}/tirtc-server-example`。更新前备份 MySQL，并确认备份可恢复。
+更新前备份 MySQL，并确认备份可恢复。
 
 ```bash
-cd /opt/thing-connect/tirtc-server-example/thing-connect
-sudo env \
-  DEPLOY_ROOT=/opt/thing-connect \
-  SUPERVISOR_GROUP=thing-connect \
-  ./scripts/deploy-prod.sh update
+sudo /opt/thing-connect/deploy-prod.sh update
 ```
 
 `update` 会依次执行：快进拉取、完整构建、文件备份、数据库迁移、发布、按顺序重启和逐服务 readiness 检查。没有配置的可选服务不会发布或启动。
@@ -248,10 +245,7 @@ sudo env \
 只执行迁移：
 
 ```bash
-sudo env \
-  DEPLOY_ROOT=/opt/thing-connect \
-  SUPERVISOR_GROUP=thing-connect \
-  ./scripts/deploy-prod.sh migrate
+sudo /opt/thing-connect/deploy-prod.sh migrate
 ```
 
 只有外部迁移系统已经完成相同版本迁移时，才可设置 `SKIP_MIGRATIONS=1`。不要用它绕过迁移错误。
@@ -266,12 +260,12 @@ sudo env \
 ## 6. 常用命令
 
 ```bash
-./scripts/deploy-prod.sh help
-./scripts/deploy-prod.sh status
-./scripts/deploy-prod.sh validate
-./scripts/deploy-prod.sh start
-./scripts/deploy-prod.sh stop
-./scripts/deploy-prod.sh restart
+/opt/thing-connect/deploy-prod.sh help
+/opt/thing-connect/deploy-prod.sh status
+/opt/thing-connect/deploy-prod.sh validate
+/opt/thing-connect/deploy-prod.sh start
+/opt/thing-connect/deploy-prod.sh stop
+/opt/thing-connect/deploy-prod.sh restart
 ```
 
 | 环境变量 | 作用 | 默认值 |

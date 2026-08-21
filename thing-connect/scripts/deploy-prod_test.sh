@@ -35,6 +35,35 @@ YAML
     }
 }
 
+test_publish_deploy_script_replaces_root_entry_atomically() (
+    BUILD_DIR="$TEST_ROOT/build"
+    mkdir -p "$BUILD_DIR/scripts"
+    cat >"$BUILD_DIR/scripts/deploy-prod.sh" <<'BASH'
+#!/usr/bin/env bash
+echo current
+BASH
+    printf '%s\n' '#!/usr/bin/env bash' 'echo old' >"$DEPLOY_ROOT/deploy-prod.sh"
+
+    publish_deploy_script
+
+    cmp -s "$BUILD_DIR/scripts/deploy-prod.sh" "$DEPLOY_ROOT/deploy-prod.sh"
+    [ -x "$DEPLOY_ROOT/deploy-prod.sh" ]
+    [ ! -e "$DEPLOY_ROOT/.deploy-prod.sh.new" ]
+)
+
+test_publish_deploy_script_keeps_previous_entry_on_invalid_source() (
+    BUILD_DIR="$TEST_ROOT/invalid-build"
+    mkdir -p "$BUILD_DIR/scripts"
+    printf '%s\n' '#!/usr/bin/env bash' 'if' >"$BUILD_DIR/scripts/deploy-prod.sh"
+    printf '%s\n' '#!/usr/bin/env bash' 'echo stable' >"$DEPLOY_ROOT/deploy-prod.sh"
+
+    if publish_deploy_script; then
+        echo "FAIL: invalid deployment script was published" >&2
+        exit 1
+    fi
+    grep -qx 'echo stable' "$DEPLOY_ROOT/deploy-prod.sh"
+)
+
 test_running_admin_is_restarted_after_init() (
     local capture="$TEST_ROOT/admin-restart.capture"
     SUPERVISORCTL="true"
@@ -298,6 +327,8 @@ test_daily_update_backs_up_files_before_database_migration() {
 }
 
 test_yaml_section_headers_allow_valid_whitespace
+test_publish_deploy_script_replaces_root_entry_atomically
+test_publish_deploy_script_keeps_previous_entry_on_invalid_source
 test_running_admin_is_restarted_after_init
 test_initialize_admin_is_noninteractive_and_refreshes_running_service
 test_full_deploy_starts_admin_before_business_services

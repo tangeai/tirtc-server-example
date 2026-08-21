@@ -45,7 +45,7 @@ func main() {
 	setupBind := flag.String("setup-bind", "127.0.0.1", "listen address used only during first-run setup")
 	setupStaticDir := flag.String("setup-static-dir", "static", "Admin Web static directory used during first-run setup")
 	supervisorCTL := flag.String("supervisorctl", "supervisorctl", "Supervisor control client")
-	supervisorGroup := flag.String("supervisor-group", "demo-open", "Supervisor service group")
+	supervisorGroup := flag.String("supervisor-group", "thing-connect", "Supervisor service group")
 	flag.Parse()
 
 	root, err := resolveDeployRoot(*deployRoot, *configPath)

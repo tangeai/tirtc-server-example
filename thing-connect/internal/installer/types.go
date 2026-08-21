@@ -71,7 +71,7 @@ func (o Options) normalize() Options {
 		o.SupervisorCTL = "supervisorctl"
 	}
 	if strings.TrimSpace(o.SupervisorGroup) == "" {
-		o.SupervisorGroup = "demo-open"
+		o.SupervisorGroup = "thing-connect"
 	}
 	return o
 }

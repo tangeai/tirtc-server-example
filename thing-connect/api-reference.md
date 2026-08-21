@@ -1673,7 +1673,7 @@ H5 查询指定设备的小程序 VoIP 联系人。此接口与设备接口分�
 
 H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 HTML，
 不是 JSON API；同源部署时需将 `/v1/ai/*` 代理到 ai-server，参见
-[`demo-open.nginx.conf`](deploy/nginx/demo-open.nginx.conf)。
+[`thing-connect.nginx.conf`](deploy/nginx/thing-connect.nginx.conf)。
 
 ### `GET /v1/ai/token`
 
@@ -2454,7 +2454,7 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 > `40301`。所有端点都可能返回 HTTP 200 + `code=50000`（服务器内部错误），
 > 下列端点不再重复列出该通用错误。
 >
-> **跨域**: call-server 不加 CORS。H5 联系人页面通过 nginx 反向代理跟 user-server 统一到同一个域名下（见 [`demo-open.nginx.conf`](deploy/nginx/demo-open.nginx.conf)：`/v1/call/*` 转发到 call-server，其余转发到 user-server），浏览器全程同源。
+> **跨域**: call-server 不加 CORS。H5 联系人页面通过 nginx 反向代理跟 user-server 统一到同一个域名下（见 [`thing-connect.nginx.conf`](deploy/nginx/thing-connect.nginx.conf)：`/v1/call/*` 转发到 call-server，其余转发到 user-server），浏览器全程同源。
 
 ### `POST /v1/call/request`
 

@@ -42,10 +42,10 @@ voip:
 # 设备启动服务发现。生产环境启用后填写设备实际可访问的公网地址。
 discovery:
   enabled: false
-  device_server_url: "https://your-domain.example.com"
-  user_server_url: "https://your-domain.example.com"
-  voip_server_url: "https://your-domain.example.com"
-  ai_server_url: "https://your-domain.example.com"
-  call_server_url: "https://your-domain.example.com"
+  device_server_url: "https://thing.example.com"
+  user_server_url: "https://thing.example.com"
+  voip_server_url: "https://thing.example.com"
+  ai_server_url: "https://thing.example.com"
+  call_server_url: "https://thing.example.com"
   mqtt_url: "mqtts://mqtt.example.com:8883"
   tirtc_endpoint: "https://your-tirtc-endpoint"

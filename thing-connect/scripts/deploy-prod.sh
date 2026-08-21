@@ -537,6 +537,33 @@ build_services() {
     "$BUILD_DIR/build.sh" "$@" || return 1
 }
 
+# 将通过语法检查的部署脚本原子发布到部署根目录。根目录脚本始终代表
+# 最近一次成功发布使用的运维入口；源码拉取或构建失败时不会覆盖它。
+publish_deploy_script() {
+    local source="$BUILD_DIR/scripts/deploy-prod.sh"
+    local target="$DEPLOY_ROOT/deploy-prod.sh"
+    local pending="$DEPLOY_ROOT/.deploy-prod.sh.new"
+
+    [ -f "$source" ] || {
+        err "缺少部署脚本: $source"
+        return 1
+    }
+    bash -n "$source" || {
+        err "部署脚本语法检查失败: $source"
+        return 1
+    }
+    rm -f -- "$pending" || return 1
+    if ! cp -- "$source" "$pending"; then
+        rm -f -- "$pending"
+        return 1
+    fi
+    if ! chmod 0755 "$pending" || ! mv -f -- "$pending" "$target"; then
+        rm -f -- "$pending"
+        return 1
+    fi
+    log "部署脚本已发布: $target"
+}
+
 validate_build_release() {
     local expected_commit built_commit svc worktree_status
     [ -f "$BUILD_DIR/bin/.release-commit" ] || {
@@ -1156,6 +1183,7 @@ full_deploy() (
         return "$status"
     fi
     trap - ERR INT TERM
+    publish_deploy_script || warn "服务已发布成功，但根目录部署脚本刷新失败；请继续使用 $BUILD_DIR/scripts/deploy-prod.sh"
     prune_successful_backups || warn "清理过期备份失败，请稍后人工清理"
     log "全流程发布成功: $(git -C "$REPO_PATH" rev-parse --short HEAD)"
     log "回滚备份保留在: $BACKUP_DIR"
@@ -1184,6 +1212,7 @@ prepare_first_run() (
     run_batch build "${ALL_SERVICES[@]}" || return 1
     validate_build_release "${ALL_SERVICES[@]}" || return 1
     FIRST_RUN_DEPLOY=1 run_batch deploy "${ALL_SERVICES[@]}" || return 1
+    publish_deploy_script || warn "根目录部署脚本发布失败；可继续使用 $BUILD_DIR/scripts/deploy-prod.sh"
 
     for svc in "${BUSINESS_SERVICES[@]}"; do
         stop_one "$svc" || return 1
@@ -1232,7 +1261,8 @@ build_action() {
 deploy_files_action() {
     validate_paths || return 1
     validate_configs || return 1
-    run_batch deploy "${ACTIVE_SERVICES[@]}"
+    run_batch deploy "${ACTIVE_SERVICES[@]}" || return 1
+    publish_deploy_script
 }
 
 start_action() {
