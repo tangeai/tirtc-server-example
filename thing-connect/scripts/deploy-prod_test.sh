@@ -16,6 +16,11 @@ assert_eq() {
     fi
 }
 
+test_http_admin_cookie_is_allowed_by_default() {
+    assert_eq "1" "$ALLOW_INSECURE_ADMIN_COOKIE" \
+        "default HTTP deployment must allow a non-Secure Admin cookie"
+}
+
 test_yaml_section_headers_allow_valid_whitespace() {
     local cfg="$TEST_ROOT/whitespace.yaml"
     cat >"$cfg" <<'YAML'
@@ -115,6 +120,17 @@ test_full_deploy_starts_admin_before_business_services() {
         "full deploy must make Admin available before business service startup"
 }
 
+test_supervisor_boot_order_starts_admin_first() {
+    local config
+    config="$(cd "$(dirname "$0")/.." && pwd)/deploy/supervisor/thing-connect.supervisor.conf"
+    grep -A1 '^\[program:admin-server\]$' "$config" | grep -qx 'priority=10'
+    grep -A1 '^\[program:device-server\]$' "$config" | grep -qx 'priority=20'
+    grep -A1 '^\[program:user-server\]$' "$config" | grep -qx 'priority=20'
+    grep -A1 '^\[program:voip-server\]$' "$config" | grep -qx 'priority=30'
+    grep -A1 '^\[program:ai-server\]$' "$config" | grep -qx 'priority=30'
+    grep -A1 '^\[program:call-server\]$' "$config" | grep -qx 'priority=30'
+}
+
 test_activated_bundle_is_resolved_and_not_overwritten() (
     local root="$TEST_ROOT/bundle-deploy"
     DEPLOY_ROOT="$root"
@@ -133,6 +149,21 @@ test_activated_bundle_is_resolved_and_not_overwritten() (
         echo "FAIL: deploy created a direct config over the activated bundle" >&2
         exit 1
     fi
+)
+
+test_file_publish_never_creates_configuration() (
+    local root="$TEST_ROOT/no-config-publish"
+    DEPLOY_ROOT="$root"
+    BUILD_DIR="$root/source"
+    mkdir -p "$BUILD_DIR/bin"
+    printf '#!/usr/bin/env bash\n' >"$BUILD_DIR/bin/device-server"
+
+    deploy_one device-server
+
+    [ ! -e "$DEPLOY_ROOT/device-server/config.yaml" ] || {
+        echo "FAIL: daily file publish created a configuration" >&2
+        exit 1
+    }
 )
 
 test_deploy_requires_complete_current_build() (
@@ -174,18 +205,44 @@ test_deploy_lock_is_scoped_to_one_mutating_command() (
     }
 )
 
-test_menu_orders_lifecycle_actions_first() {
+test_menu_starts_with_daily_update() {
     local output
     output="$(menu <<<'invalid')"
-    [[ "$output" == *$'1) 首次 Web 安装（仅空部署）\n2) 日常更新部署'* ]] || {
-        echo "FAIL: first install and daily update are not the first menu actions" >&2
+    [[ "$output" == *$'1) 日常更新部署（拉取、构建、备份、迁移、发布、就绪检查）\n2) 仅执行数据库迁移'* ]] || {
+        echo "FAIL: daily update and migration are not the first menu actions" >&2
         exit 1
     }
-    [[ "$output" == *$'11) 重启已安装服务\n12) 查看全部服务状态\n0) 退出'* ]] || {
+    [[ "$output" == *$'4) 查看全部服务状态\n5) 重启并检查已安装服务\n6) 启动并检查已安装服务\n7) 停止已安装服务\n0) 退出'* ]] || {
         echo "FAIL: operations and exit are not in a coherent menu order" >&2
         exit 1
     }
+    [[ "$output" != *"仅发布文件"* ]] || {
+        echo "FAIL: unsafe partial publish command was exposed in the daily menu" >&2
+        exit 1
+    }
 }
+
+test_first_install_is_not_a_deploy_command() {
+    local result=0 output
+    output="$(run_named_command first-install 2>&1)" || result=$?
+    assert_eq "2" "$result" "daily deploy script must reject first-install"
+    [[ "$output" == *"未知命令: first-install"* ]] || {
+        echo "FAIL: removed first-install command was not reported clearly" >&2
+        exit 1
+    }
+}
+
+test_pull_never_clones_missing_daily_source() (
+    local result=0 output
+    REPO_PATH="$TEST_ROOT/missing-source"
+    output="$(pull_code 2>&1)" || result=$?
+    assert_eq "1" "$result" "daily pull must fail when its managed source is missing"
+    [[ "$output" == *"运行 install.sh 完成首次安装"* ]] || {
+        echo "FAIL: missing daily source did not point to install.sh" >&2
+        exit 1
+    }
+    [ ! -e "$REPO_PATH" ]
+)
 
 test_status_reports_every_service_even_when_one_is_missing() (
     local capture="$TEST_ROOT/status.capture" result=0
@@ -326,16 +383,21 @@ test_daily_update_backs_up_files_before_database_migration() {
     }
 }
 
+test_http_admin_cookie_is_allowed_by_default
 test_yaml_section_headers_allow_valid_whitespace
 test_publish_deploy_script_replaces_root_entry_atomically
 test_publish_deploy_script_keeps_previous_entry_on_invalid_source
 test_running_admin_is_restarted_after_init
 test_initialize_admin_is_noninteractive_and_refreshes_running_service
 test_full_deploy_starts_admin_before_business_services
+test_supervisor_boot_order_starts_admin_first
 test_activated_bundle_is_resolved_and_not_overwritten
+test_file_publish_never_creates_configuration
 test_deploy_requires_complete_current_build
 test_deploy_lock_is_scoped_to_one_mutating_command
-test_menu_orders_lifecycle_actions_first
+test_menu_starts_with_daily_update
+test_first_install_is_not_a_deploy_command
+test_pull_never_clones_missing_daily_source
 test_optional_services_are_not_treated_as_installed_without_config
 test_status_reports_every_service_even_when_one_is_missing
 test_migration_requires_runtime_target_match_and_reports_schema_change

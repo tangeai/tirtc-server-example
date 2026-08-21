@@ -71,11 +71,11 @@ func (s *SupervisorController) StartAndWait(ctx context.Context, optional []stri
 func (s *SupervisorController) status(ctx context.Context, service string) (string, error) {
 	output, err := s.run(ctx, "status", s.program(service))
 	if err != nil {
-		return "", fmt.Errorf("读取 %s Supervisor 状态失败: %w", service, err)
+		return "", fmt.Errorf("读取 %s 服务控制器状态失败: %w", service, err)
 	}
 	fields := strings.Fields(output)
 	if len(fields) < 2 {
-		return "", fmt.Errorf("%s Supervisor 状态响应无效", service)
+		return "", fmt.Errorf("%s 服务控制器状态响应无效", service)
 	}
 	return fields[1], nil
 }

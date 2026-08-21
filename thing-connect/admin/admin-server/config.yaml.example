@@ -26,7 +26,7 @@ admin:
   refresh_ttl: 168h
   challenge_ttl: 5m
   mfa_enabled: true
-  cookie_secure: true
+  cookie_secure: false  # Set true only when Admin is accessed through HTTPS.
 
 security:
   config_encryption_key_id: "local-v1"

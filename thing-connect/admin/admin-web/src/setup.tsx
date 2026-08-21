@@ -325,7 +325,7 @@ export function SetupPage({ initial }: { initial: SetupSnapshot }) {
               database: { host: '127.0.0.1', port: 3306, name: 'thing_connect', tls: 'false' },
               redis: { host: '127.0.0.1', port: 6379, db: 0 },
               mqtt: { broker: 'mqtts://mqtt.example.com:8883' },
-              network: { cookie_secure: true },
+              network: { cookie_secure: false, trusted_proxies: '127.0.0.1' },
             }}
             onFinish={preview}
           >
@@ -529,8 +529,11 @@ export function SetupPage({ initial }: { initial: SetupSnapshot }) {
                 </Form.Item>
               </Col>
             </Row>
-            <Form.Item name={['network', 'public_base_url']} label="对外访问地址（可选）">
-              <Input placeholder="https://example.com" />
+            <Form.Item
+              name={['network', 'public_base_url']}
+              label="统一对外访问地址（配置反向代理时填写，可选）"
+            >
+              <Input placeholder="http://example.com" />
             </Form.Item>
             <Form.Item
               name={['network', 'trusted_proxies']}

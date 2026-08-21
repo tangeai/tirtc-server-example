@@ -3,17 +3,11 @@
 set -Eeuo pipefail
 
 # ================== 配置 ==================
-# 常规部署只需按实际环境修改下面三行；同名环境变量可临时覆盖。
+# 常规部署只需按实际环境修改下面两行；同名环境变量可临时覆盖。
 PRODUCTION_DEPLOY_ROOT="/opt/thing-connect"
-DEFAULT_REPO_URL="git@github.com:tangeai/tirtc-server-example.git"
 DEFAULT_SUPERVISOR_GROUP="thing-connect"
 
-REPO_URL="${REPO_URL:-$DEFAULT_REPO_URL}"
 SUPERVISOR_GROUP="${SUPERVISOR_GROUP:-$DEFAULT_SUPERVISOR_GROUP}"
-
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_DIR="tirtc-server-example"
-WORK_DIR="thing-connect"
 
 # 生产发布根目录。现有部署可继续通过 DEPLOY_ROOT 指向原目录。
 DEPLOY_ROOT_INPUT="${DEPLOY_ROOT:-$PRODUCTION_DEPLOY_ROOT}"
@@ -33,8 +27,8 @@ if ! mkdir -p -- "$DEPLOY_ROOT_INPUT"; then
     exit 1
 fi
 DEPLOY_ROOT="$(cd "$DEPLOY_ROOT_INPUT" && pwd)"
-REPO_PATH="${REPO_PATH:-$DEPLOY_ROOT/$REPO_DIR}"
-BUILD_DIR="${BUILD_DIR:-$REPO_PATH/$WORK_DIR}"
+REPO_PATH="${REPO_PATH:-$DEPLOY_ROOT/tirtc-server-example}"
+BUILD_DIR="${BUILD_DIR:-$REPO_PATH/thing-connect}"
 
 # 生产服务仅由 Supervisor 托管。
 SUPERVISORCTL="${SUPERVISORCTL:-supervisorctl}"
@@ -44,11 +38,10 @@ SUPERVISOR_STABLE_SECONDS="${SUPERVISOR_STABLE_SECONDS:-2}"
 HEALTH_WAIT_SECONDS="${HEALTH_WAIT_SECONDS:-30}"
 HEALTH_REQUEST_TIMEOUT_SECONDS="${HEALTH_REQUEST_TIMEOUT_SECONDS:-3}"
 HEALTH_HOST="${HEALTH_HOST:-127.0.0.1}"
-SETUP_PORT="${SETUP_PORT:-9000}"
 BACKUP_KEEP_COUNT="${BACKUP_KEEP_COUNT:-10}"
 MIGRATION_CONFIG="${MIGRATION_CONFIG:-$DEPLOY_ROOT/admin-server/migration-config.yaml}"
 SKIP_MIGRATIONS="${SKIP_MIGRATIONS:-0}"
-ALLOW_INSECURE_ADMIN_COOKIE="${ALLOW_INSECURE_ADMIN_COOKIE:-0}"
+ALLOW_INSECURE_ADMIN_COOKIE="${ALLOW_INSECURE_ADMIN_COOKIE:-1}"
 MIGRATION_CHANGED=0
 MIGRATION_OUTPUT_FILE=""
 MIGRATION_PID=""
@@ -70,8 +63,7 @@ log() { echo -e "[INFO] $1"; }
 warn() { echo -e "[WARN] $1"; }
 err() { echo -e "[ERROR] $1"; }
 
-# 锁只覆盖一次会修改代码、文件、数据库或进程状态的操作。交互菜单本身
-# 不持锁，否则首次安装页面会永远等不到安装器所需的同一把部署锁。
+# 锁只覆盖一次会修改代码、文件、数据库或进程状态的操作。交互菜单本身不持锁。
 with_deploy_lock() (
     command -v flock >/dev/null 2>&1 || {
         err "找不到 flock；无法保证部署与安装任务互斥"
@@ -217,10 +209,6 @@ validate_service_manager() {
     }
     [[ "$HEALTH_REQUEST_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]] || {
         err "HEALTH_REQUEST_TIMEOUT_SECONDS 必须是正整数"
-        return 1
-    }
-    [[ "$SETUP_PORT" =~ ^[1-9][0-9]*$ ]] && [ "$SETUP_PORT" -le 65535 ] || {
-        err "SETUP_PORT 必须是 1-65535 的整数"
         return 1
     }
     command -v curl >/dev/null 2>&1 || {
@@ -480,7 +468,7 @@ validate_configs() {
     }
     if [ "$cookie_secure" != "true" ]; then
         if [ "$ALLOW_INSECURE_ADMIN_COOKIE" = "1" ]; then
-            warn "admin-server: admin.cookie_secure 未启用，仅允许用于明确的非 HTTPS 环境"
+            warn "admin-server: 当前使用非 Secure Cookie；仅适用于 HTTP，启用 HTTPS 后必须设置 admin.cookie_secure: true"
         else
             err "admin-server: 生产环境必须设置 admin.cookie_secure: true"
             return 1
@@ -512,16 +500,17 @@ validate_configs() {
 pull_code() {
     local worktree_status
     log "拉取代码..."
-    if [ -d "$REPO_PATH/.git" ]; then
-        worktree_status="$(git -C "$REPO_PATH" status --porcelain --untracked-files=normal)" || return 1
-        if [ -n "$worktree_status" ]; then
-            err "源码目录存在未提交修改，拒绝覆盖: $REPO_PATH"
-            return 1
-        fi
-        git -C "$REPO_PATH" pull --ff-only || return 1
-    else
-        git clone "$REPO_URL" "$REPO_PATH" || return 1
+    [ -d "$REPO_PATH/.git" ] || {
+        err "日常发布源码不存在: $REPO_PATH"
+        err "请先按 deployment.md 运行 install.sh 完成首次安装"
+        return 1
+    }
+    worktree_status="$(git -C "$REPO_PATH" status --porcelain --untracked-files=normal)" || return 1
+    if [ -n "$worktree_status" ]; then
+        err "源码目录存在未提交修改，拒绝覆盖: $REPO_PATH"
+        return 1
     fi
+    git -C "$REPO_PATH" pull --ff-only || return 1
     log "待发布版本: $(git -C "$REPO_PATH" rev-parse HEAD)"
 }
 
@@ -816,26 +805,6 @@ wait_for_readiness() {
     return 1
 }
 
-wait_for_setup_liveness() {
-    local url="http://${HEALTH_HOST}:${SETUP_PORT}/health/live" elapsed=0 body state
-    while [ "$elapsed" -lt "$HEALTH_WAIT_SECONDS" ]; do
-        body="$(curl -fsS --max-time "$HEALTH_REQUEST_TIMEOUT_SECONDS" "$url" 2>/dev/null || true)"
-        if [[ "$body" == *'"mode":"setup"'* ]]; then
-            log "首次安装服务 liveness 检查通过"
-            return
-        fi
-        state="$(supervisor_state "admin-server")"
-        if [ "$state" != "RUNNING" ] && [ "$state" != "STARTING" ]; then
-            err "首次安装服务检查期间 Supervisor 状态变为 ${state:-UNKNOWN}"
-            return 1
-        fi
-        sleep 1
-        elapsed=$((elapsed + 1))
-    done
-    err "首次安装服务在 ${HEALTH_WAIT_SECONDS}s 内未通过 $url"
-    return 1
-}
-
 # ================== 停服务 ==================
 stop_one() {
     local svc="$1"
@@ -877,16 +846,6 @@ deploy_one() {
     mv -f "$target_dir/$svc.tmp" "$target_dir/$svc" || return 1
 
     chmod +x "$target_dir/$svc" || return 1
-
-    # 配置
-    local config_example="$BUILD_DIR/$svc/config.yaml.example"
-    [ "$svc" != "admin-server" ] || config_example="$BUILD_DIR/admin/admin-server/config.yaml.example"
-    if [ "${FIRST_RUN_DEPLOY:-0}" != "1" ] &&
-       ! service_config_path "$svc" >/dev/null 2>&1 &&
-       [ -f "$config_example" ]; then
-        cp "$config_example" "$target_dir/config.yaml" || return 1
-        chmod 600 "$target_dir/config.yaml" || return 1
-    fi
 
     # 静态目录先完整复制到临时目录，再原子切换。
     case "$svc" in user-server|ai-server|admin-server)
@@ -1190,59 +1149,6 @@ full_deploy() (
     log "手工配置部署如尚无管理员，可执行 init-admin；Web 首次安装会在安装流程中创建"
 )
 
-prepare_first_run() (
-    local svc state setup_output
-    validate_deploy_root || return 1
-    validate_service_manager || return 1
-    pull_code || return 1
-    validate_paths || return 1
-
-    if [ -e "$DEPLOY_ROOT/config-current" ] || [ -L "$DEPLOY_ROOT/config-current" ] ||
-       [ -e "$DEPLOY_ROOT/var/installer/installed.json" ]; then
-        err "检测到已安装配置，拒绝重新开放首次安装入口"
-        return 1
-    fi
-    for svc in "${ALL_SERVICES[@]}"; do
-        if [ -e "$DEPLOY_ROOT/$svc/config.yaml" ]; then
-            err "$svc 已存在 config.yaml；请使用正常发布或离线恢复流程"
-            return 1
-        fi
-    done
-
-    run_batch build "${ALL_SERVICES[@]}" || return 1
-    validate_build_release "${ALL_SERVICES[@]}" || return 1
-    FIRST_RUN_DEPLOY=1 run_batch deploy "${ALL_SERVICES[@]}" || return 1
-    publish_deploy_script || warn "根目录部署脚本发布失败；可继续使用 $BUILD_DIR/scripts/deploy-prod.sh"
-
-    for svc in "${BUSINESS_SERVICES[@]}"; do
-        stop_one "$svc" || return 1
-    done
-
-    setup_output="$("$DEPLOY_ROOT/admin-server/admin-server" \
-        -c "$DEPLOY_ROOT/admin-server/config.yaml" \
-        -deploy-root "$DEPLOY_ROOT" \
-        -setup-port "$SETUP_PORT" \
-        -supervisorctl "$SUPERVISORCTL" \
-        -supervisor-group "$SUPERVISOR_GROUP" \
-        -prepare-setup)" || return 1
-
-    # 即使后续 Supervisor 启动失败，也先把一次性令牌交给当前终端；再次
-    # 执行 first-install 会在仍未提交配置时安全轮换令牌。
-    printf '%s\n' "$setup_output"
-    warn "安装令牌只显示这一次；不要发送到聊天、工单或监控系统"
-
-    state="$(supervisor_state "admin-server")"
-    if [ "$state" = "RUNNING" ]; then
-        "$SUPERVISORCTL" restart "$(supervisor_program "admin-server")" || return 1
-    else
-        "$SUPERVISORCTL" start "$(supervisor_program "admin-server")" || return 1
-    fi
-    wait_for_supervisor_state "admin-server" "RUNNING" || return 1
-    wait_for_setup_liveness || return 1
-
-    log "首次安装页面已启动：http://${HEALTH_HOST}:${SETUP_PORT}/admin/"
-)
-
 # ================== 操作入口 ==================
 select_all() {
     echo "${ALL_SERVICES[@]}"
@@ -1314,18 +1220,19 @@ usage() {
 用法: deploy-prod.sh [命令]
 
 命令：
-  first-install  首次部署：构建、发布并打开一次性 Web 安装页（仅空部署）
   update         日常更新：拉取、构建、备份、迁移、逐服务发布与就绪检查
   migrate        仅执行版本化数据库迁移
-  init-admin     手工配置部署时初始化首个管理员
   validate       校验必需服务及已启用可选服务的生产配置
-  pull           仅快进拉取代码
-  build          仅编译全部服务
-  deploy         仅发布已编译文件，不迁移、不重启
+  status         查看全部服务状态
   start          启动并检查已安装服务
   stop           停止已安装服务
   restart        重启并检查已安装服务
-  status         查看全部服务状态
+
+高级命令：
+  init-admin     仅手工配置部署时初始化首个管理员
+  pull           仅快进拉取代码
+  build          仅编译全部服务
+  deploy         仅发布已编译文件，不迁移、不重启
   help           显示此帮助
 
 不带命令时进入交互菜单。数据库迁移账号读取 MIGRATION_CONFIG；由外部迁移
@@ -1341,7 +1248,6 @@ run_named_command() {
         return 2
     fi
     case "$command_name" in
-        first-install) with_deploy_lock prepare_first_run ;;
         update) with_deploy_lock full_deploy ;;
         migrate) with_deploy_lock migrate_action ;;
         init-admin) with_deploy_lock initialize_first_admin ;;
@@ -1366,18 +1272,13 @@ run_named_command() {
 menu() {
     local choice command_name
     echo ""
-    echo "1) 首次 Web 安装（仅空部署）"
-    echo "2) 日常更新部署（拉取、构建、备份、迁移、发布、就绪检查）"
-    echo "3) 仅执行数据库迁移"
-    echo "4) 初始化首个管理员（手工配置部署）"
-    echo "5) 校验生产配置"
-    echo "6) 仅拉取代码"
-    echo "7) 仅编译"
-    echo "8) 仅发布文件（不迁移、不重启）"
-    echo "9) 启动已安装服务"
-    echo "10) 停止已安装服务"
-    echo "11) 重启已安装服务"
-    echo "12) 查看全部服务状态"
+    echo "1) 日常更新部署（拉取、构建、备份、迁移、发布、就绪检查）"
+    echo "2) 仅执行数据库迁移"
+    echo "3) 校验生产配置"
+    echo "4) 查看全部服务状态"
+    echo "5) 重启并检查已安装服务"
+    echo "6) 启动并检查已安装服务"
+    echo "7) 停止已安装服务"
     echo "0) 退出"
 
     if ! read -r -p "选择: " choice; then
@@ -1385,18 +1286,13 @@ menu() {
         exit 0
     fi
     case "$choice" in
-        1) command_name="first-install" ;;
-        2) command_name="update" ;;
-        3) command_name="migrate" ;;
-        4) command_name="init-admin" ;;
-        5) command_name="validate" ;;
-        6) command_name="pull" ;;
-        7) command_name="build" ;;
-        8) command_name="deploy" ;;
-        9) command_name="start" ;;
-        10) command_name="stop" ;;
-        11) command_name="restart" ;;
-        12) command_name="status" ;;
+        1) command_name="update" ;;
+        2) command_name="migrate" ;;
+        3) command_name="validate" ;;
+        4) command_name="status" ;;
+        5) command_name="restart" ;;
+        6) command_name="start" ;;
+        7) command_name="stop" ;;
         0) exit 0 ;;
         *) warn "无效选择: $choice"; return ;;
     esac
