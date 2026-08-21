@@ -41,7 +41,7 @@ func main() {
 	prepareSetup := flag.Bool("prepare-setup", false, "authorize a new empty deployment for one-time web setup")
 	validateConfigBundle := flag.Bool("validate-config-bundle", false, "strictly validate required and configured optional service configs and exit")
 	deployRoot := flag.String("deploy-root", "", "deployment root used by first-run setup")
-	setupPort := flag.Int("setup-port", 9010, "HTTP port used before the Admin config exists")
+	setupPort := flag.Int("setup-port", 9000, "HTTP port used before the Admin config exists")
 	setupBind := flag.String("setup-bind", "127.0.0.1", "listen address used only during first-run setup")
 	setupStaticDir := flag.String("setup-static-dir", "static", "Admin Web static directory used during first-run setup")
 	supervisorCTL := flag.String("supervisorctl", "supervisorctl", "Supervisor control client")

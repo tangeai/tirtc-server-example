@@ -238,7 +238,7 @@ func renderBundle(draft Draft, secrets generatedSecrets, options Options) (map[s
 			"mqtt":       mqtt,
 			"jwt_secret": secrets.JWT,
 			"internal":   map[string]any{"key": secrets.Internal},
-			"admin":      map[string]any{"server_url": "http://127.0.0.1:9010"},
+			"admin":      map[string]any{"server_url": "http://127.0.0.1:9000"},
 		}
 	}
 	services, err := enabledBusinessServices(draft.OptionalServices)

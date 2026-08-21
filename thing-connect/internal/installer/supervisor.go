@@ -25,7 +25,7 @@ func NewSupervisorController(command, group string, adminPorts ...int) *Supervis
 	if strings.TrimSpace(group) == "" {
 		group = "demo-open"
 	}
-	adminPort := 9010
+	adminPort := 9000
 	if len(adminPorts) > 0 && adminPorts[0] > 0 {
 		adminPort = adminPorts[0]
 	}

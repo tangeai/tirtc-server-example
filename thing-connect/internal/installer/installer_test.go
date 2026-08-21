@@ -16,7 +16,7 @@ func testOptions(t *testing.T) Options {
 	root := t.TempDir()
 	return Options{
 		DeployRoot: root, ConfigPath: filepath.Join(root, "admin-server", "config.yaml"),
-		StaticDir: "static", HTTPPort: 9010,
+		StaticDir: "static", HTTPPort: 9000,
 	}
 }
 

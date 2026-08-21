@@ -22,12 +22,12 @@ test_yaml_section_headers_allow_valid_whitespace() {
 internal:  
   key: "shared-key"
 admin:  # valid YAML comment
-  server_url: "http://127.0.0.1:9010"
+  server_url: "http://127.0.0.1:9000"
 YAML
 
     assert_eq "shared-key" "$(yaml_section_value "$cfg" internal key)" \
         "section parser must accept trailing spaces"
-    assert_eq "http://127.0.0.1:9010" "$(yaml_section_value "$cfg" admin server_url)" \
+    assert_eq "http://127.0.0.1:9000" "$(yaml_section_value "$cfg" admin server_url)" \
         "section parser must accept an inline comment"
     yaml_has_section_key "$cfg" internal key || {
         echo "FAIL: section-key detection must accept trailing spaces" >&2

@@ -17,7 +17,7 @@ redis:
 internal:
   key: "replace-with-an-internal-key-at-least-32-characters"
 admin:
-  server_url: "http://127.0.0.1:9010"
+  server_url: "http://127.0.0.1:9000"
 
 mqtt:
   broker: "mqtts://mqtt-open.tangeopen.com:8883"

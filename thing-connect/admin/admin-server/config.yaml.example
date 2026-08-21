@@ -1,5 +1,5 @@
 server:
-  http_port: 9010
+  http_port: 9000
   static_dir: "static"
   trusted_proxies: []  # Add only the reverse-proxy CIDRs that set client IP headers.
 

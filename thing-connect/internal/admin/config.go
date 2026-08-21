@@ -62,7 +62,7 @@ func LoadAppConfig(path string) (*AppConfig, error) {
 		return nil, fmt.Errorf("parse admin config: %w", err)
 	}
 	if cfg.Server.HTTPPort == 0 {
-		cfg.Server.HTTPPort = 9010
+		cfg.Server.HTTPPort = 9000
 	}
 	if cfg.Server.StaticDir == "" {
 		cfg.Server.StaticDir = "admin/admin-web/dist"

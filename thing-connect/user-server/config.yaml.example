@@ -28,7 +28,7 @@ jwt_secret: "replace-with-a-strong-random-secret"
 internal:
   key: "replace-with-an-internal-key-at-least-32-characters" # 服务间接口与动态配置读取共用
 admin:
-  server_url: "http://127.0.0.1:9010"
+  server_url: "http://127.0.0.1:9000"
 
 call:
   server_url: "http://127.0.0.1:9005"

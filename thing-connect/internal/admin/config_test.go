@@ -20,7 +20,7 @@ func writeAdminConfig(t *testing.T, body string) string {
 }
 
 func TestLoadAppConfigRejectsUnknownField(t *testing.T) {
-	_, err := LoadAppConfig(writeAdminConfig(t, "server:\n  http_prt: 9010\n"))
+	_, err := LoadAppConfig(writeAdminConfig(t, "server:\n  http_prt: 9000\n"))
 	if err == nil || !strings.Contains(err.Error(), "http_prt") {
 		t.Fatalf("expected unknown-field error, got %v", err)
 	}

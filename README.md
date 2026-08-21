@@ -124,7 +124,7 @@ https://github.com/user-attachments/assets/80ee6d4c-35dc-4425-813f-476e63ab1b40
 | **call-server** | 设备间音视频通话服务：联系人、呼叫信令和房间管理 |
 | **admin-server / admin-web** | 用户、设备、权限、菜单、字典、动态配置、服务状态和审计管理 |
 
-六个服务共用 MySQL 和 Redis，需要 MQTT 的业务服务连接同一个 Broker。设备通过 MQTT 保持长连接，VoIP、AI 和设备间通话指令通过 MQTT 实时推送到设备。服务架构与接口详情见 [thing-connect/README.md](./thing-connect/README.md)，完整自托管步骤见 [Admin Server 部署指南](./thing-connect/admin/admin-server/README.md)。
+六个服务共用 MySQL 和 Redis，需要 MQTT 的业务服务连接同一个 Broker。设备通过 MQTT 保持长连接，VoIP、AI 和设备间通话指令通过 MQTT 实时推送到设备。服务架构与接口详情见 [thing-connect/README.md](./thing-connect/README.md)，完整自托管步骤见 [部署指南](./thing-connect/deployment.md)。
 
 ### 依赖平台
 

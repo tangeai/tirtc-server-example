@@ -14,7 +14,7 @@ type serviceSpec struct {
 }
 
 var serviceCatalog = []serviceSpec{
-	{Name: "admin-server", HTTPPort: 9010, Required: true, DisplayName: "管理后台"},
+	{Name: "admin-server", HTTPPort: 9000, Required: true, DisplayName: "管理后台"},
 	{Name: "device-server", HTTPPort: 9001, Business: true, Required: true, DisplayName: "设备服务"},
 	{Name: "user-server", HTTPPort: 9002, Business: true, Required: true, DisplayName: "用户服务"},
 	{Name: "voip-server", HTTPPort: 9003, Business: true, DisplayName: "VoIP 服务"},

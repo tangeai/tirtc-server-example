@@ -4,9 +4,9 @@ set -Eeuo pipefail
 
 # ================== 配置 ==================
 # 常规部署只需按实际环境修改下面三行；同名环境变量可临时覆盖。
-PRODUCTION_DEPLOY_ROOT="/data/demo-open.tangeai.cn"
+PRODUCTION_DEPLOY_ROOT="/opt/thing-connect"
 DEFAULT_REPO_URL="git@github.com:tangeai/tirtc-server-example.git"
-DEFAULT_SUPERVISOR_GROUP="demo-open"
+DEFAULT_SUPERVISOR_GROUP="thing-connect"
 
 REPO_URL="${REPO_URL:-$DEFAULT_REPO_URL}"
 SUPERVISOR_GROUP="${SUPERVISOR_GROUP:-$DEFAULT_SUPERVISOR_GROUP}"
@@ -38,13 +38,13 @@ BUILD_DIR="${BUILD_DIR:-$REPO_PATH/$WORK_DIR}"
 
 # 生产服务仅由 Supervisor 托管。
 SUPERVISORCTL="${SUPERVISORCTL:-supervisorctl}"
-# 对应 deploy/supervisor/demo-open.supervisor.conf 的 [group:demo-open]。
+# 对应 deploy/supervisor/thing-connect.supervisor.conf 的 [group:thing-connect]。
 SUPERVISOR_WAIT_SECONDS="${SUPERVISOR_WAIT_SECONDS:-15}"
 SUPERVISOR_STABLE_SECONDS="${SUPERVISOR_STABLE_SECONDS:-2}"
 HEALTH_WAIT_SECONDS="${HEALTH_WAIT_SECONDS:-30}"
 HEALTH_REQUEST_TIMEOUT_SECONDS="${HEALTH_REQUEST_TIMEOUT_SECONDS:-3}"
 HEALTH_HOST="${HEALTH_HOST:-127.0.0.1}"
-SETUP_PORT="${SETUP_PORT:-9010}"
+SETUP_PORT="${SETUP_PORT:-9000}"
 BACKUP_KEEP_COUNT="${BACKUP_KEEP_COUNT:-10}"
 MIGRATION_CONFIG="${MIGRATION_CONFIG:-$DEPLOY_ROOT/admin-server/migration-config.yaml}"
 SKIP_MIGRATIONS="${SKIP_MIGRATIONS:-0}"

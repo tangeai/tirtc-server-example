@@ -631,38 +631,7 @@ await POST('/v1/voip/user/report-auth', { /* 微信返回结果 */ }); // 3. 回
 | call-server | 设备、H5 | 设备联系人、房间、设备互呼 token 与通知 |
 | admin-server | 管理员、五个业务服务 | Admin Web、RBAC、用户设备管理、动态配置、服务状态与审计 |
 
-**部署步骤：**
-
-```bash
-# 1. 创建并初始化数据库
-mysql -u root -p -e "CREATE DATABASE thing_connect CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
-mysql -u root -p thing_connect < scripts/schema.sql
-
-# 2. 各服务复制配置并填好 jwt_secret / database / redis / mqtt
-cp device-server/config.yaml.example  device-server/config.yaml
-cp user-server/config.yaml.example    user-server/config.yaml
-cp voip-server/config.yaml.example    voip-server/config.yaml
-cp ai-server/config.yaml.example      ai-server/config.yaml
-cp call-server/config.yaml.example    call-server/config.yaml
-cp admin/admin-server/config.yaml.example admin/admin-server/config.yaml
-
-# 3. 构建
-./build.sh
-
-# 4. 启动（端口见各 config.yaml；config.yaml.example 默认 :9001-9005）
-./bin/device-server -c device-server/config.yaml
-./bin/user-server   -c user-server/config.yaml
-./bin/voip-server   -c voip-server/config.yaml
-./bin/ai-server     -c ai-server/config.yaml
-./bin/call-server   -c call-server/config.yaml
-./bin/admin-server  -c admin/admin-server/config.yaml
-```
-
-访问 H5：`http://localhost:9002/`。访问后台：`http://localhost:9010/admin/`；本机 HTTP 开发需把 `admin.cookie_secure` 设为 `false`。
-
-**完成标志：** 六个服务进程存活，H5 可登录、设备可上线绑定，Admin 可登录并看到五个业务服务状态。
-
-**深入：** [Admin Server 完整部署指南](admin/admin-server/README.md)；[deployment.md](deployment.md) 提供开发与部署速查。
+生产环境固定安装 Admin、Device、User，VoIP、AI、Call 按需选择。服务器准备、MySQL 权限、首次 Web 安装、Supervisor、Nginx、验收、更新和迁移统一见 [部署指南](deployment.md)。Admin 功能和使用约束见 [Admin Server README](admin/admin-server/README.md)。
 
 ---
 

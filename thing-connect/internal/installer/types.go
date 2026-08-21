@@ -62,7 +62,7 @@ func (o Options) DeployLockPath() string { return filepath.Join(o.DeployRoot, "d
 
 func (o Options) normalize() Options {
 	if o.HTTPPort == 0 {
-		o.HTTPPort = 9010
+		o.HTTPPort = 9000
 	}
 	if strings.TrimSpace(o.SetupBind) == "" {
 		o.SetupBind = "127.0.0.1"

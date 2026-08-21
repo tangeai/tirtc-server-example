@@ -19,4 +19,4 @@ jwt_secret: "replace-with-same-secret-as-device-server"
 internal:
   key: "replace-with-an-internal-key-at-least-32-characters" # 须与 admin 及其他服务一致
 admin:
-  server_url: "http://127.0.0.1:9010"
+  server_url: "http://127.0.0.1:9000"

@@ -58,7 +58,7 @@ security:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Server.HTTPPort != 9010 || cfg.Server.StaticDir != "admin/admin-web/dist" {
+	if cfg.Server.HTTPPort != 9000 || cfg.Server.StaticDir != "admin/admin-web/dist" {
 		t.Fatalf("unexpected server defaults: %+v", cfg.Server)
 	}
 	if cfg.Redis.Addr != "127.0.0.1:6379" || cfg.Job.MaxBytes != 10*1024*1024 {
