@@ -191,6 +191,28 @@ func TestNormalizeMQTTAuthKeepsLegacyUsernamePayloadCompatible(t *testing.T) {
 	}
 }
 
+func TestPreviewRequiresAdminPasswordPolicyWhenCreatingFirstAdmin(t *testing.T) {
+	assessment := DatabaseAssessment{Class: DatabaseAbsent, Versions: map[string]int{}, CreateAdmin: true}
+	bootstrap := New(testOptions(t), Dependencies{
+		Database: &fakeProvisioner{inspect: assessment},
+		Probes:   noopProbe{},
+	})
+
+	for _, password := range []string{"Abcdef1", "abcdefgh", "ABCDEFG1", "Abcdefgh"} {
+		draft := testDraft()
+		draft.Admin.Password = password
+		if _, err := bootstrap.Preview(context.Background(), draft); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("Preview password %q = %v, want ErrInvalidInput", password, err)
+		}
+	}
+
+	draft := testDraft()
+	draft.Admin.Password = "Abcdefg1"
+	if _, err := bootstrap.Preview(context.Background(), draft); err != nil {
+		t.Fatalf("Preview valid eight-character password: %v", err)
+	}
+}
+
 func TestNormalizeMQTTAuthRequiresDistinctClientIDsForEnabledServices(t *testing.T) {
 	input := MQTTInput{
 		Broker: "mqtt://127.0.0.1:1883", AuthMode: mqttAuthClientID, Password: "mqtt-password",

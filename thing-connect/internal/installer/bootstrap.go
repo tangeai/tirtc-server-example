@@ -14,6 +14,8 @@ import (
 	"strings"
 	"syscall"
 
+	adminapp "thing-connect/internal/admin"
+
 	"github.com/google/uuid"
 )
 
@@ -32,8 +34,10 @@ func (b *Bootstrap) Preview(ctx context.Context, draft Draft) (Plan, error) {
 	if err != nil {
 		return Plan{}, fmt.Errorf("%w: %w", ErrMySQLUnavailable, err)
 	}
-	if assessment.CreateAdmin && len(draft.Admin.Password) < 12 {
-		return Plan{}, fmt.Errorf("%w: 首个管理员密码至少 12 个字符", ErrInvalidInput)
+	if assessment.CreateAdmin {
+		if err := adminapp.ValidateAdminPassword(draft.Admin.Password); err != nil {
+			return Plan{}, fmt.Errorf("%w: %w", ErrInvalidInput, err)
+		}
 	}
 	plan := Plan{Database: assessment}
 	switch assessment.Class {

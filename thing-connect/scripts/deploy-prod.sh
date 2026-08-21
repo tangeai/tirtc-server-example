@@ -737,7 +737,7 @@ initialize_first_admin() {
             err "非交互模式必须设置 ADMIN_INIT_PASSWORD"
             return 1
         }
-        read -r -s -p "首个管理员密码（至少 12 个字符）: " password
+        read -r -s -p "首个管理员密码（至少 8 位，包含英文大小写字母和数字）: " password
         echo
         read -r -s -p "再次输入密码: " confirmation
         echo
@@ -746,10 +746,13 @@ initialize_first_admin() {
             return 1
         }
     fi
-    [ "${#password}" -ge 12 ] || {
-        err "管理员密码至少需要 12 个字符"
+    if [ "${#password}" -lt 8 ] ||
+        [[ "$password" != *[A-Z]* ]] ||
+        [[ "$password" != *[a-z]* ]] ||
+        [[ "$password" != *[0-9]* ]]; then
+        err "管理员密码至少 8 位，且必须包含英文大写字母、英文小写字母和数字"
         return 1
-    }
+    fi
 
     migrate_action || return 1
     log "初始化首个管理员: $email"

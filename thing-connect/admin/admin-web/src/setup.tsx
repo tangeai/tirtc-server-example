@@ -20,6 +20,7 @@ import {
   Typography,
   message,
 } from 'antd';
+import { ADMIN_PASSWORD_POLICY_MESSAGE, validateAdminPassword } from './password-policy';
 
 type SetupMode = 'fresh' | 'recovery' | 'installed' | 'normal';
 type MQTTAuthMode = 'username' | 'clientid';
@@ -355,7 +356,7 @@ export function SetupPage({ initial }: { initial: SetupSnapshot }) {
               database: { host: '127.0.0.1', port: 3306, name: 'thing_connect', tls: 'false' },
               redis: { host: '127.0.0.1', port: 6379, db: 0 },
               mqtt: {
-                broker: 'mqtts://mqtt.example.com:8883',
+                broker: 'mqtt://127.0.0.1:1883',
                 auth_mode: 'username',
                 client_ids: {
                   'device-server': 'devicesrv',
@@ -509,7 +510,7 @@ export function SetupPage({ initial }: { initial: SetupSnapshot }) {
             <Row gutter={16}>
               <Col xs={24} md={14}>
                 <Form.Item name={['mqtt', 'broker']} label="Broker" rules={[{ required: true }]}>
-                  <Input placeholder="mqtts://mqtt.example.com:8883" />
+                  <Input placeholder="mqtt://127.0.0.1:1883" />
                 </Form.Item>
               </Col>
               <Col xs={24} md={10}>
@@ -617,7 +618,11 @@ export function SetupPage({ initial }: { initial: SetupSnapshot }) {
                 <Form.Item
                   name={['admin', 'password']}
                   label="管理员密码"
-                  rules={[{ required: true, min: 12 }]}
+                  rules={[
+                    { required: true, message: '请输入管理员密码' },
+                    { validator: validateAdminPassword },
+                  ]}
+                  extra={ADMIN_PASSWORD_POLICY_MESSAGE}
                 >
                   <Input.Password autoComplete="new-password" />
                 </Form.Item>

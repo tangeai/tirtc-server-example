@@ -33,6 +33,7 @@ import {
 } from '@ant-design/icons';
 import { BrowserRouter, useLocation, useNavigate } from 'react-router-dom';
 import { api, json, restoreSession, setAccessToken } from './api';
+import { ADMIN_PASSWORD_POLICY_MESSAGE, validateAdminPassword } from './password-policy';
 import { StepUpFields } from './shared/admin-ui';
 import { loadSetupStatus, SetupPage, type SetupSnapshot } from './setup';
 
@@ -445,8 +446,11 @@ function Shell({ onLogout }: { onLogout: () => void }) {
           <Form.Item
             name="new_password"
             label="新密码"
-            rules={[{ required: true, min: 12 }]}
-            extra="至少 12 个字符"
+            rules={[
+              { required: true, message: '请输入新密码' },
+              { validator: validateAdminPassword },
+            ]}
+            extra={ADMIN_PASSWORD_POLICY_MESSAGE}
           >
             <Input.Password autoComplete="new-password" />
           </Form.Item>

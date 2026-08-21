@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -125,11 +126,25 @@ func TestAuthAndTokenPrimitives(t *testing.T) {
 		t.Fatalf("session policy did not update: %+v", service.cfg)
 	}
 
-	if _, err := HashAdminPassword("too-short"); err == nil {
-		t.Fatal("short administrator password accepted")
+	invalidPasswords := []string{
+		"Abcdef1",
+		"abcdefg1",
+		"ABCDEFG1",
+		"Abcdefgh",
+		"中文大写A123",
 	}
-	hash, err := HashAdminPassword("Admin123456!")
-	if err != nil || bcrypt.CompareHashAndPassword([]byte(hash), []byte("Admin123456!")) != nil {
+	for _, password := range invalidPasswords {
+		if _, err := HashAdminPassword(password); !errors.Is(err, ErrInvalidAdminPassword) {
+			t.Fatalf("invalid administrator password %q was accepted: %v", password, err)
+		}
+	}
+	for _, password := range []string{"Abcdefg1", "中文Abcde1"} {
+		if err := ValidateAdminPassword(password); err != nil {
+			t.Fatalf("valid administrator password %q was rejected: %v", password, err)
+		}
+	}
+	hash, err := HashAdminPassword("Abcdefg1")
+	if err != nil || bcrypt.CompareHashAndPassword([]byte(hash), []byte("Abcdefg1")) != nil {
 		t.Fatalf("valid administrator password was not hashed correctly: %v", err)
 	}
 	if _, err := RandomToken(15); err == nil {

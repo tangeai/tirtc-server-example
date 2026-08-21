@@ -8,19 +8,24 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 )
 
 var (
-	ErrInvalidCredentials = errors.New("admin: invalid credentials")
-	ErrAccountDisabled    = errors.New("admin: account disabled")
-	ErrInvalidToken       = errors.New("admin: invalid token")
-	ErrMFARequired        = errors.New("admin: MFA required")
-	ErrInvalidMFA         = errors.New("admin: invalid MFA code")
-	ErrAuthUnavailable    = errors.New("admin: authentication state unavailable")
+	ErrInvalidCredentials   = errors.New("admin: invalid credentials")
+	ErrAccountDisabled      = errors.New("admin: account disabled")
+	ErrInvalidToken         = errors.New("admin: invalid token")
+	ErrMFARequired          = errors.New("admin: MFA required")
+	ErrInvalidMFA           = errors.New("admin: invalid MFA code")
+	ErrAuthUnavailable      = errors.New("admin: authentication state unavailable")
+	ErrInvalidAdminPassword = errors.New(AdminPasswordPolicyMessage)
 )
+
+// AdminPasswordPolicyMessage is the stable user-facing administrator password requirement.
+const AdminPasswordPolicyMessage = "管理员密码至少 8 位，且必须包含英文大写字母、英文小写字母和数字"
 
 // MFAChallengeStore atomically tracks whether a short-lived MFA login
 // challenge has already been consumed. The authentication module owns this
@@ -107,11 +112,33 @@ func NewAuthService(store *Store, cipher *Cipher, challengeStore MFAChallengeSto
 }
 
 func HashAdminPassword(password string) (string, error) {
-	if len(password) < 12 {
-		return "", errors.New("admin password must be at least 12 characters")
+	if err := ValidateAdminPassword(password); err != nil {
+		return "", err
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	return string(hash), err
+}
+
+// ValidateAdminPassword applies the shared policy used by every administrator entry point.
+func ValidateAdminPassword(password string) error {
+	if utf8.RuneCountInString(password) < 8 {
+		return ErrInvalidAdminPassword
+	}
+	var hasUpper, hasLower, hasDigit bool
+	for _, character := range password {
+		switch {
+		case character >= 'A' && character <= 'Z':
+			hasUpper = true
+		case character >= 'a' && character <= 'z':
+			hasLower = true
+		case character >= '0' && character <= '9':
+			hasDigit = true
+		}
+	}
+	if !hasUpper || !hasLower || !hasDigit {
+		return ErrInvalidAdminPassword
+	}
+	return nil
 }
 
 func (a *AuthService) Login(ctx context.Context, email, password string, meta LoginMeta) (AuthResult, error) {

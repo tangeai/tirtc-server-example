@@ -313,7 +313,7 @@ func (s *HTTPServer) createAdminUser(c *gin.Context) {
 	}
 	hash, err := HashAdminPassword(request.Password)
 	if err != nil {
-		apiresp.BadParam(c, "管理员密码至少 12 位")
+		apiresp.BadParam(c, AdminPasswordPolicyMessage)
 		return
 	}
 	status := int8(1)
@@ -407,7 +407,7 @@ func (s *HTTPServer) updateAdminUser(c *gin.Context) {
 	if request.Password != "" {
 		password, err = HashAdminPassword(request.Password)
 		if err != nil {
-			apiresp.BadParam(c, "管理员密码至少 12 位")
+			apiresp.BadParam(c, AdminPasswordPolicyMessage)
 			return
 		}
 		changed = true

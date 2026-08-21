@@ -16,6 +16,7 @@ import {
 } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { api, json } from '../../api';
+import { ADMIN_PASSWORD_POLICY_MESSAGE, validateAdminPassword } from '../../password-policy';
 import {
   StepUpFields,
   formatTime,
@@ -210,8 +211,11 @@ export function AdminUsersPage() {
             <Form.Item
               name="password"
               label={editing.id ? '新密码（留空不修改）' : '初始密码'}
-              rules={editing.id ? [] : [{ required: true, min: 12 }]}
-              extra="至少 12 个字符"
+              rules={[
+                ...(editing.id ? [] : [{ required: true, message: '请输入初始密码' }]),
+                { validator: validateAdminPassword },
+              ]}
+              extra={ADMIN_PASSWORD_POLICY_MESSAGE}
             >
               <Input.Password />
             </Form.Item>

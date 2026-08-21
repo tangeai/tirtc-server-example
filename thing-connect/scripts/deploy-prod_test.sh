@@ -95,7 +95,7 @@ BASH
     export ADMIN_INIT_CAPTURE
     ADMIN_INIT_EMAIL="admin@example.com"
     ADMIN_INIT_NICK_NAME="管理员"
-    ADMIN_INIT_PASSWORD="diagnostic-password-123"
+    ADMIN_INIT_PASSWORD="Diagnostic-password-123"
     validate_paths() { :; }
     validate_release_options() { :; }
     validate_configs() { :; }
@@ -109,7 +109,7 @@ BASH
     grep -qx 'arg=-init-email' "$capture"
     grep -qx 'arg=admin@example.com' "$capture"
     grep -qx 'restarted' "$capture"
-    if grep -q 'diagnostic-password-123' "$capture"; then
+    if grep -q 'Diagnostic-password-123' "$capture"; then
         echo "FAIL: administrator password leaked into command arguments" >&2
         exit 1
     fi

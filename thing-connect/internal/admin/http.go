@@ -471,7 +471,7 @@ func (s *HTTPServer) changeOwnPassword(c *gin.Context) {
 	}
 	hash, err := HashAdminPassword(request.NewPassword)
 	if err != nil {
-		apiresp.BadParam(c, "新密码至少 12 位且不能与当前密码相同")
+		apiresp.BadParam(c, AdminPasswordPolicyMessage)
 		return
 	}
 	tx, err := s.store.db.BeginTxx(c, nil)

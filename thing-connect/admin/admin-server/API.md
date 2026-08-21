@@ -25,6 +25,8 @@ Content-Type: application/json
 
 `draft.database` 必须同时提供迁移账号和独立的 DML 运行账号，两者用户名不能相同。迁移账号用于建库和版本化 DDL；运行账号写入生成的服务配置，并在安装锁定前验证对 `schema_migrations` 的 SELECT，以及对其余受管表的 SELECT、INSERT、UPDATE、DELETE。`draft.optional_services` 只接受 `voip-server`、`ai-server`、`call-server` 的无重复数组；`device-server` 和 `user-server` 固定启用，不在该数组中。未选择的可选服务不生成配置、不启动，也不参与 readiness。任何密码字段均为只写输入，不在计划或状态中返回。
 
+首次安装、创建管理员和修改管理员密码使用同一密码策略：按 Unicode 字符计数至少 8 位，并同时包含 ASCII 大写字母、小写字母和数字；中文和特殊字符可以作为其余字符使用。
+
 `draft.mqtt.auth_mode` 接受 `username` 或 `clientid`。Username 模式提交共享的 `username` 和 `password`；为兼容旧客户端，省略 `auth_mode` 且只提供 `username` 时仍按 Username 模式处理。ClientID 模式提交共享的 `password` 以及按服务名索引的 `client_ids`，固定要求 `device-server` 和 `user-server`，选择 VoIP 或 Call 时还要求对应服务；所有启用服务的 ClientID 必须非空且互不相同。例如：
 
 ```json
