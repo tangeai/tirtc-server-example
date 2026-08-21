@@ -82,7 +82,7 @@
 
 - MySQL 8.0+ 地址、端口、目标数据库名和两个账号。
 - Redis 7+ 地址、端口、密码和 DB 编号。
-- 支持 MQTT 3.1.1 的 Broker 地址、用户名和密码。
+- 支持 MQTT 3.1.1 的 Broker 地址，以及 Username 或 ClientID 认证凭据。
 - 应用服务器 IP；配置反向代理时再准备域名。
 - 首个管理员邮箱和至少 12 位密码。
 
@@ -161,7 +161,9 @@ CREATE DATABASE thing_connect
 )
 ```
 
-无密码 Redis 应删除 `REDISCLI_AUTH` 的设置。MQTT 的通用 CLI 发布测试需要一个明确获准的 Topic，不能假设任意 Topic 都有权限；安装页面会使用所填账号执行不发布消息的连接认证。生产 MQTT 使用 TLS 时，应填写 `mqtts://` 地址并按 Broker 要求配置受信 CA。
+无密码 Redis 应删除 `REDISCLI_AUTH` 的设置。MQTT 的通用 CLI 发布测试需要一个明确获准的 Topic，不能假设任意 Topic 都有权限；安装页面会使用所填凭据执行不发布消息的连接认证。`mosquitto_sub -C 1 -W 1` 在连接和订阅成功后仍可能因为主题没有消息而输出 `Timed out`，应以 `CONNACK (0)` 和 `SUBACK` 判断认证与订阅成功。
+
+Username 模式允许所有服务共享一个认证用户名，实际连接 ClientID 会结合各进程的 `SERVICE_INSTANCE_ID` 生成，适合单机和多副本部署。ClientID 模式要求为 Device、User 以及选中的 VoIP、Call 分别准备不同的已注册 ClientID；安装器会逐一连接验证，并把对应 ClientID 写入各服务配置。固定 ClientID 不能被多个服务或多个副本共享，因此需要扩容时使用 Username 模式。生产 MQTT 使用 TLS 时，应填写 `mqtts://` 地址并按 Broker 要求配置受信 CA。
 
 TiRTC、SMTP、人机验证、微信和 AI 资源可在首次安装后从 Admin Web 配置。TiRTC App ID、Access Key ID、Secret Key ID 没有可用默认值；不填写不会阻止进程启动，但相关音视频、呼叫和 AI 功能不可用。
 
@@ -216,7 +218,7 @@ http://192.0.2.10:9000/admin/
 1. 可选服务：VoIP、AI、Call；Device 和 User 固定启用。
 2. MySQL 主机、端口、数据库名、迁移账号和 DML 运行账号。
 3. Redis 主机、端口、密码和 DB。
-4. MQTT Broker 地址、端口、用户名和密码。
+4. MQTT Broker 地址、认证方式和密码。Username 模式填写共享用户名；ClientID 模式分别填写各 MQTT 服务的固定 ClientID。
 5. 首个管理员账号。
 6. 统一对外访问地址、可信代理和 HTTPS Cookie。尚未配置反向代理时，统一对外访问地址可留空；这不影响各服务通过独立端口启动和访问。同机 Nginx 使用默认可信代理 `127.0.0.1`。
 

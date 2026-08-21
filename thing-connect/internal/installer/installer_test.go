@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 func testOptions(t *testing.T) Options {
@@ -176,6 +178,82 @@ func TestFileBundleStoreIncludesOnlySelectedOptionalServices(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(receipt.Path, "voip-server", "config.yaml")); !os.IsNotExist(err) {
 		t.Fatalf("unselected voip-server config exists: %v", err)
+	}
+}
+
+func TestNormalizeMQTTAuthKeepsLegacyUsernamePayloadCompatible(t *testing.T) {
+	auth, err := normalizeMQTTAuth(testDraft().MQTT, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if auth.mode != mqttAuthUsername || auth.username != "services" {
+		t.Fatalf("normalized auth = %+v", auth)
+	}
+}
+
+func TestNormalizeMQTTAuthRequiresDistinctClientIDsForEnabledServices(t *testing.T) {
+	input := MQTTInput{
+		Broker: "mqtt://127.0.0.1:1883", AuthMode: mqttAuthClientID, Password: "mqtt-password",
+		ClientIDs: map[string]string{
+			"device-server": "devicesrv", "user-server": "usrsrv", "voip-server": "usrsrv",
+		},
+	}
+	if _, err := normalizeMQTTAuth(input, []string{"voip-server"}); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("duplicate client IDs error = %v", err)
+	}
+	delete(input.ClientIDs, "voip-server")
+	if _, err := normalizeMQTTAuth(input, []string{"voip-server"}); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("missing client ID error = %v", err)
+	}
+}
+
+func TestFileBundleStoreRendersPerServiceClientIDAuthentication(t *testing.T) {
+	options := testOptions(t)
+	draft := testDraft()
+	draft.OptionalServices = []string{"voip-server", "ai-server", "call-server"}
+	draft.MQTT = MQTTInput{
+		Broker: "mqtt://127.0.0.1:1883", AuthMode: mqttAuthClientID, Password: "mqtt-password",
+		ClientIDs: map[string]string{
+			"device-server": "devicesrv", "user-server": "usrsrv",
+			"voip-server": "voipsrv", "call-server": "callsrv",
+		},
+	}
+	receipt, err := NewFileBundleStore(options).Publish(context.Background(), draft, "operation-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"device-server": "devicesrv", "user-server": "usrsrv",
+		"voip-server": "voipsrv", "call-server": "callsrv",
+	}
+	for service, clientID := range want {
+		raw, err := os.ReadFile(filepath.Join(receipt.Path, service, "config.yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var config struct {
+			MQTT struct {
+				ClientID string `yaml:"client_id"`
+				Username string `yaml:"username"`
+			} `yaml:"mqtt"`
+		}
+		if err := yaml.Unmarshal(raw, &config); err != nil {
+			t.Fatal(err)
+		}
+		if config.MQTT.ClientID != clientID || config.MQTT.Username != "" {
+			t.Fatalf("%s mqtt auth = %+v", service, config.MQTT)
+		}
+	}
+	aiRaw, err := os.ReadFile(filepath.Join(receipt.Path, "ai-server", "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var aiConfig map[string]any
+	if err := yaml.Unmarshal(aiRaw, &aiConfig); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := aiConfig["mqtt"]; exists {
+		t.Fatal("ai-server config unexpectedly contains MQTT credentials")
 	}
 }
 

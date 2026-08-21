@@ -38,6 +38,9 @@ var (
 	ErrUnknownDatabase  = errors.New("installer: unknown non-empty database")
 	ErrSchemaFuture     = errors.New("installer: schema is newer than this binary")
 	ErrSchemaDrift      = errors.New("installer: schema does not match its migration ledger")
+	ErrRedisUnavailable = errors.New("installer: redis unavailable")
+	ErrMQTTUnavailable  = errors.New("installer: mqtt unavailable")
+	ErrMySQLUnavailable = errors.New("installer: mysql unavailable")
 )
 
 type Mode string
@@ -95,9 +98,11 @@ type RedisInput struct {
 }
 
 type MQTTInput struct {
-	Broker   string `json:"broker"`
-	Username string `json:"username"`
-	Password string `json:"password"`
+	Broker    string            `json:"broker"`
+	AuthMode  string            `json:"auth_mode,omitempty"`
+	Username  string            `json:"username,omitempty"`
+	ClientIDs map[string]string `json:"client_ids,omitempty"`
+	Password  string            `json:"password"`
 }
 
 type NetworkInput struct {

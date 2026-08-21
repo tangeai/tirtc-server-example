@@ -22,6 +22,7 @@ import {
 } from 'antd';
 
 type SetupMode = 'fresh' | 'recovery' | 'installed' | 'normal';
+type MQTTAuthMode = 'username' | 'clientid';
 
 export type SetupSnapshot = {
   mode: SetupMode;
@@ -50,7 +51,13 @@ type SetupDraft = {
     tls: string;
   };
   redis: { host: string; port: number; password?: string; db: number };
-  mqtt: { broker: string; username: string; password: string };
+  mqtt: {
+    broker: string;
+    auth_mode: MQTTAuthMode;
+    username?: string;
+    client_ids?: Record<string, string>;
+    password: string;
+  };
   network: { public_base_url?: string; cookie_secure: boolean; trusted_proxies?: string };
   admin: { email: string; nick_name?: string; password: string };
 };
@@ -117,6 +124,8 @@ export function SetupPage({ initial }: { initial: SetupSnapshot }) {
   const [token, setToken] = useState('');
   const [busy, setBusy] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const mqttAuthMode = Form.useWatch(['mqtt', 'auth_mode'], form) || 'username';
+  const optionalServices = Form.useWatch('optional_services', form) || [];
   const running = Boolean(snapshot.operation_id && snapshot.phase !== 'installed');
 
   useEffect(() => {
@@ -140,10 +149,31 @@ export function SetupPage({ initial }: { initial: SetupSnapshot }) {
       setup_token: _setupToken,
       admin_password_confirm: _adminPasswordConfirm,
       network,
+      mqtt,
       ...rest
     } = values;
+    const mqttServices = ['device-server', 'user-server'];
+    if (rest.optional_services?.includes('voip-server')) mqttServices.push('voip-server');
+    if (rest.optional_services?.includes('call-server')) mqttServices.push('call-server');
+    const normalizedMQTT =
+      mqtt.auth_mode === 'clientid'
+        ? {
+            broker: mqtt.broker,
+            auth_mode: mqtt.auth_mode,
+            client_ids: Object.fromEntries(
+              mqttServices.map((service) => [service, mqtt.client_ids?.[service] || '']),
+            ),
+            password: mqtt.password,
+          }
+        : {
+            broker: mqtt.broker,
+            auth_mode: 'username' as const,
+            username: mqtt.username || '',
+            password: mqtt.password,
+          };
     return {
       ...rest,
+      mqtt: normalizedMQTT,
       network: {
         ...network,
         trusted_proxies: (network.trusted_proxies || '')
@@ -324,7 +354,16 @@ export function SetupPage({ initial }: { initial: SetupSnapshot }) {
               optional_services: [],
               database: { host: '127.0.0.1', port: 3306, name: 'thing_connect', tls: 'false' },
               redis: { host: '127.0.0.1', port: 6379, db: 0 },
-              mqtt: { broker: 'mqtts://mqtt.example.com:8883' },
+              mqtt: {
+                broker: 'mqtts://mqtt.example.com:8883',
+                auth_mode: 'username',
+                client_ids: {
+                  'device-server': 'devicesrv',
+                  'user-server': 'usrsrv',
+                  'voip-server': 'voipsrv',
+                  'call-server': 'callsrv',
+                },
+              },
               network: { cookie_secure: false, trusted_proxies: '127.0.0.1' },
             }}
             onFinish={preview}
@@ -468,19 +507,93 @@ export function SetupPage({ initial }: { initial: SetupSnapshot }) {
             </Row>
             <Typography.Title level={4}>MQTT</Typography.Title>
             <Row gutter={16}>
-              <Col xs={24} md={12}>
+              <Col xs={24} md={14}>
                 <Form.Item name={['mqtt', 'broker']} label="Broker" rules={[{ required: true }]}>
                   <Input placeholder="mqtts://mqtt.example.com:8883" />
                 </Form.Item>
               </Col>
-              <Col xs={24} md={6}>
-                <Form.Item name={['mqtt', 'username']} label="用户名" rules={[{ required: true }]}>
-                  <Input />
+              <Col xs={24} md={10}>
+                <Form.Item
+                  name={['mqtt', 'auth_mode']}
+                  label="认证方式"
+                  rules={[{ required: true }]}
+                >
+                  <Select
+                    options={[
+                      { value: 'username', label: 'Username（推荐）' },
+                      { value: 'clientid', label: 'ClientID（单实例）' },
+                    ]}
+                  />
                 </Form.Item>
               </Col>
-              <Col xs={24} md={6}>
-                <Form.Item name={['mqtt', 'password']} label="密码" rules={[{ required: true }]}>
-                  <Input.Password />
+            </Row>
+            {mqttAuthMode === 'username' ? (
+              <Form.Item
+                name={['mqtt', 'username']}
+                label="MQTT 用户名"
+                rules={[{ required: true }]}
+              >
+                <Input autoComplete="username" />
+              </Form.Item>
+            ) : (
+              <>
+                <Alert
+                  type="warning"
+                  showIcon
+                  message="ClientID 模式要求每个服务使用不同的已注册 ClientID；扩容多副本时请改用 Username 模式。"
+                />
+                <Row gutter={16}>
+                  <Col xs={24} md={12}>
+                    <Form.Item
+                      name={['mqtt', 'client_ids', 'device-server']}
+                      label="设备服务 ClientID"
+                      rules={[{ required: true }]}
+                    >
+                      <Input />
+                    </Form.Item>
+                  </Col>
+                  <Col xs={24} md={12}>
+                    <Form.Item
+                      name={['mqtt', 'client_ids', 'user-server']}
+                      label="用户服务 ClientID"
+                      rules={[{ required: true }]}
+                    >
+                      <Input />
+                    </Form.Item>
+                  </Col>
+                  {optionalServices.includes('voip-server') ? (
+                    <Col xs={24} md={12}>
+                      <Form.Item
+                        name={['mqtt', 'client_ids', 'voip-server']}
+                        label="VoIP 服务 ClientID"
+                        rules={[{ required: true }]}
+                      >
+                        <Input />
+                      </Form.Item>
+                    </Col>
+                  ) : null}
+                  {optionalServices.includes('call-server') ? (
+                    <Col xs={24} md={12}>
+                      <Form.Item
+                        name={['mqtt', 'client_ids', 'call-server']}
+                        label="设备通话服务 ClientID"
+                        rules={[{ required: true }]}
+                      >
+                        <Input />
+                      </Form.Item>
+                    </Col>
+                  ) : null}
+                </Row>
+              </>
+            )}
+            <Row gutter={16}>
+              <Col xs={24} md={12}>
+                <Form.Item
+                  name={['mqtt', 'password']}
+                  label="MQTT 密码"
+                  rules={[{ required: true }]}
+                >
+                  <Input.Password autoComplete="current-password" />
                 </Form.Item>
               </Col>
             </Row>

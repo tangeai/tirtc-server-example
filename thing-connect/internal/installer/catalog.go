@@ -10,25 +10,17 @@ type serviceSpec struct {
 	HTTPPort    int
 	Business    bool
 	Required    bool
+	UsesMQTT    bool
 	DisplayName string
 }
 
 var serviceCatalog = []serviceSpec{
 	{Name: "admin-server", HTTPPort: 9000, Required: true, DisplayName: "管理后台"},
-	{Name: "device-server", HTTPPort: 9001, Business: true, Required: true, DisplayName: "设备服务"},
-	{Name: "user-server", HTTPPort: 9002, Business: true, Required: true, DisplayName: "用户服务"},
-	{Name: "voip-server", HTTPPort: 9003, Business: true, DisplayName: "VoIP 服务"},
+	{Name: "device-server", HTTPPort: 9001, Business: true, Required: true, UsesMQTT: true, DisplayName: "设备服务"},
+	{Name: "user-server", HTTPPort: 9002, Business: true, Required: true, UsesMQTT: true, DisplayName: "用户服务"},
+	{Name: "voip-server", HTTPPort: 9003, Business: true, UsesMQTT: true, DisplayName: "VoIP 服务"},
 	{Name: "ai-server", HTTPPort: 9004, Business: true, DisplayName: "AI 服务"},
-	{Name: "call-server", HTTPPort: 9005, Business: true, DisplayName: "设备通话服务"},
-}
-
-func servicePort(name string) (int, bool) {
-	for _, service := range serviceCatalog {
-		if service.Name == name {
-			return service.HTTPPort, true
-		}
-	}
-	return 0, false
+	{Name: "call-server", HTTPPort: 9005, Business: true, UsesMQTT: true, DisplayName: "设备通话服务"},
 }
 
 func enabledServices(optional []string) ([]serviceSpec, error) {
@@ -66,6 +58,20 @@ func enabledBusinessServices(optional []string) ([]serviceSpec, error) {
 	result := make([]serviceSpec, 0, len(services))
 	for _, service := range services {
 		if service.Business {
+			result = append(result, service)
+		}
+	}
+	return result, nil
+}
+
+func enabledMQTTServices(optional []string) ([]serviceSpec, error) {
+	services, err := enabledServices(optional)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]serviceSpec, 0, len(services))
+	for _, service := range services {
+		if service.UsesMQTT {
 			result = append(result, service)
 		}
 	}

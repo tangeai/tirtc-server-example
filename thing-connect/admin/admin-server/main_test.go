@@ -1,12 +1,16 @@
 package main
 
 import (
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
+
+	"thing-connect/internal/installer"
 )
 
 func TestSecurityHeaders(t *testing.T) {
@@ -25,6 +29,37 @@ func TestSecurityHeaders(t *testing.T) {
 		if got := recorder.Header().Get(name); !strings.Contains(got, want) {
 			t.Errorf("%s = %q, want to contain %q", name, got, want)
 		}
+	}
+}
+
+func TestSetupErrorReportsDependencyWithoutLeakingRawCause(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		err     error
+		message string
+	}{
+		{name: "redis", err: installer.ErrRedisUnavailable, message: "Redis 连接检查失败"},
+		{name: "mqtt", err: installer.ErrMQTTUnavailable, message: "MQTT 连接或认证失败"},
+		{name: "mysql", err: installer.ErrMySQLUnavailable, message: "MySQL 连接检查失败"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			router := gin.New()
+			router.GET("/setup", func(c *gin.Context) {
+				setupError(c, fmt.Errorf("%w: %v", test.err, errors.New("sensitive raw dependency cause")))
+			})
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/setup", nil))
+			if recorder.Code != http.StatusServiceUnavailable {
+				t.Fatalf("status = %d", recorder.Code)
+			}
+			if !strings.Contains(recorder.Body.String(), test.message) {
+				t.Fatalf("body = %s", recorder.Body.String())
+			}
+			if strings.Contains(recorder.Body.String(), "sensitive raw dependency cause") {
+				t.Fatalf("raw dependency error leaked: %s", recorder.Body.String())
+			}
+		})
 	}
 }
 

@@ -222,24 +222,24 @@ func renderBundle(draft Draft, secrets generatedSecrets, options Options) (map[s
 	runtimePassword := draft.Database.RuntimePassword
 	runtimeDSN := formatDSN(draft.Database, runtimeUser, runtimePassword)
 	redisAddr := net.JoinHostPort(strings.TrimSpace(draft.Redis.Host), strconv.Itoa(draft.Redis.Port))
-	mqtt := map[string]any{
-		"broker": draft.MQTT.Broker, "username": draft.MQTT.Username, "password": draft.MQTT.Password,
+	mqttAuth, err := normalizeMQTTAuth(draft.MQTT, draft.OptionalServices)
+	if err != nil {
+		return nil, err
 	}
-	common := func(service string) map[string]any {
-		port, ok := servicePort(service)
-		if !ok {
-			panic("installer service catalog is incomplete: " + service)
-		}
-		return map[string]any{
-			"server":     map[string]any{"http_port": port, "trusted_proxies": draft.Network.TrustedProxies},
+	common := func(service serviceSpec) map[string]any {
+		config := map[string]any{
+			"server":     map[string]any{"http_port": service.HTTPPort, "trusted_proxies": draft.Network.TrustedProxies},
 			"log":        map[string]any{"level": "info", "format": "text"},
 			"database":   map[string]any{"dsn": runtimeDSN},
 			"redis":      map[string]any{"addr": redisAddr, "password": draft.Redis.Password, "db": draft.Redis.DB},
-			"mqtt":       mqtt,
 			"jwt_secret": secrets.JWT,
 			"internal":   map[string]any{"key": secrets.Internal},
 			"admin":      map[string]any{"server_url": "http://127.0.0.1:9000"},
 		}
+		if service.UsesMQTT {
+			config["mqtt"] = mqttAuth.configFor(service.Name)
+		}
+		return config
 	}
 	services, err := enabledBusinessServices(draft.OptionalServices)
 	if err != nil {
@@ -247,7 +247,7 @@ func renderBundle(draft Draft, secrets generatedSecrets, options Options) (map[s
 	}
 	configs := map[string]map[string]any{}
 	for _, service := range services {
-		configs[service.Name] = common(service.Name)
+		configs[service.Name] = common(service)
 	}
 	for _, service := range services {
 		switch service.Name {
@@ -267,7 +267,7 @@ func renderBundle(draft Draft, secrets generatedSecrets, options Options) (map[s
 		configs["user-server"]["discovery"] = map[string]any{
 			"enabled": true, "device_server_url": base, "user_server_url": base,
 			"voip_server_url": base, "ai_server_url": base, "call_server_url": base,
-			"mqtt_url": draft.MQTT.Broker, "tirtc_endpoint": base,
+			"mqtt_url": mqttAuth.broker, "tirtc_endpoint": base,
 		}
 	}
 	adminConfig := map[string]any{
@@ -384,12 +384,8 @@ func validateDraft(draft Draft) error {
 	if draft.Redis.DB < 0 {
 		return fmt.Errorf("%w: Redis DB 不能为负数", ErrInvalidInput)
 	}
-	broker, err := url.Parse(strings.TrimSpace(draft.MQTT.Broker))
-	if err != nil || (broker.Scheme != "mqtt" && broker.Scheme != "mqtts" && broker.Scheme != "tcp" && broker.Scheme != "ssl") || broker.Host == "" || broker.User != nil {
-		return fmt.Errorf("%w: MQTT Broker 必须是 mqtt:// 或 mqtts:// 地址且不能包含账号", ErrInvalidInput)
-	}
-	if strings.TrimSpace(draft.MQTT.Username) == "" {
-		return fmt.Errorf("%w: MQTT 用户名不能为空", ErrInvalidInput)
+	if _, err := normalizeMQTTAuth(draft.MQTT, draft.OptionalServices); err != nil {
+		return err
 	}
 	if strings.TrimSpace(draft.Network.PublicBaseURL) != "" {
 		publicURL, err := url.Parse(draft.Network.PublicBaseURL)

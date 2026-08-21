@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -130,6 +131,7 @@ func sameOrigin(request *http.Request) bool {
 }
 
 func setupError(c *gin.Context, err error) {
+	slog.WarnContext(c.Request.Context(), "setup request failed", "path", c.FullPath(), "err", err)
 	status, code, message := http.StatusInternalServerError, 500, "安装服务暂时不可用"
 	switch {
 	case errors.Is(err, installer.ErrInvalidInput):
@@ -148,6 +150,12 @@ func setupError(c *gin.Context, err error) {
 		status, code, message = http.StatusConflict, 409, "数据库版本高于当前程序，请使用相同或更高版本"
 	case errors.Is(err, installer.ErrSchemaDrift):
 		status, code, message = http.StatusConflict, 409, "数据库结构与迁移记录不一致，已停止自动处理"
+	case errors.Is(err, installer.ErrRedisUnavailable):
+		status, code, message = http.StatusServiceUnavailable, 503, "Redis 连接检查失败，请检查地址、端口、密码和 DB"
+	case errors.Is(err, installer.ErrMQTTUnavailable):
+		status, code, message = http.StatusServiceUnavailable, 503, "MQTT 连接或认证失败，请检查 Broker、认证方式和凭据"
+	case errors.Is(err, installer.ErrMySQLUnavailable):
+		status, code, message = http.StatusServiceUnavailable, 503, "MySQL 连接检查失败，请检查地址、TLS、迁移账号密码和来源授权"
 	}
 	c.JSON(status, apiresp.JSON{Code: code, Msg: message})
 }
