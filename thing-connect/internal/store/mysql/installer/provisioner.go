@@ -1,3 +1,5 @@
+// Package installer implements the MySQL provisioning adapter used by the
+// first-run installation workflow.
 package installer
 
 import (
@@ -70,7 +72,7 @@ func (p *Provisioner) InspectDSN(ctx context.Context, dsn string) (installapp.Da
 	if err != nil {
 		return installapp.DatabaseAssessment{}, err
 	}
-	defer server.Close()
+	defer func() { _ = server.Close() }()
 	return inspect(ctx, server, name, true)
 }
 
@@ -82,7 +84,7 @@ func (p *Provisioner) RecordConfiguration(ctx context.Context, dsn, operationID,
 	if err != nil {
 		return err
 	}
-	defer target.Close()
+	defer func() { _ = target.Close() }()
 	result, err := target.ExecContext(ctx, `UPDATE thingconnect_installation_state
 		SET stage='config_committed',status='installing',config_digest=?,last_error_code=''
 		WHERE id=1 AND product=? AND operation_id=? AND status<>'installed'
@@ -118,7 +120,7 @@ func (p *Provisioner) VerifyConfigurationIntent(ctx context.Context, dsn, operat
 	if err != nil {
 		return err
 	}
-	defer target.Close()
+	defer func() { _ = target.Close() }()
 	var count int
 	if err := target.GetContext(ctx, &count, `SELECT COUNT(*) FROM thingconnect_installation_state
 		WHERE id=1 AND product=? AND operation_id=? AND status='installing'
@@ -140,7 +142,7 @@ func (p *Provisioner) Seal(ctx context.Context, dsn, operationID, configDigest s
 	if err != nil {
 		return err
 	}
-	defer target.Close()
+	defer func() { _ = target.Close() }()
 	result, err := target.ExecContext(ctx, `UPDATE thingconnect_installation_state
 		SET status='installed',stage='installed',config_digest=?,last_error_code=''
 		WHERE id=1 AND product=? AND operation_id=? AND config_digest=?`,
@@ -172,7 +174,7 @@ func (p *Provisioner) Inspect(ctx context.Context, input installapp.DatabaseInpu
 	if err != nil {
 		return installapp.DatabaseAssessment{}, err
 	}
-	defer server.Close()
+	defer func() { _ = server.Close() }()
 	return inspect(ctx, server, input.Name, false)
 }
 
@@ -183,27 +185,27 @@ func (p *Provisioner) Claim(ctx context.Context, input installapp.DatabaseInput,
 	}
 	conn, err := server.Connx(ctx)
 	if err != nil {
-		server.Close()
+		_ = server.Close()
 		return nil, fmt.Errorf("保留 MySQL 安装连接失败: %w", err)
 	}
 	digest := sha256.Sum256([]byte(input.Name))
 	lockName := fmt.Sprintf("thingconnect:install:%x", digest[:16])
 	var acquired int
 	if err := conn.GetContext(ctx, &acquired, `SELECT GET_LOCK(?, 10)`, lockName); err != nil {
-		conn.Close()
-		server.Close()
+		_ = conn.Close()
+		_ = server.Close()
 		return nil, fmt.Errorf("获取 MySQL 安装锁失败: %w", err)
 	}
 	if acquired != 1 {
-		conn.Close()
-		server.Close()
+		_ = conn.Close()
+		_ = server.Close()
 		return nil, installapp.ErrInstallBusy
 	}
 	assessment, err := inspect(ctx, server, input.Name, false)
 	if err != nil {
 		release(conn, lockName)
-		conn.Close()
-		server.Close()
+		_ = conn.Close()
+		_ = server.Close()
 		return nil, err
 	}
 	return &claim{
@@ -295,7 +297,7 @@ func (c *claim) Prepare(ctx context.Context, firstAdmin installapp.FirstAdminInp
 		}
 		hash, err := adminapp.HashAdminPassword(firstAdmin.Password)
 		if err != nil {
-			return fmt.Errorf("%w: %v", installapp.ErrInvalidInput, err)
+			return fmt.Errorf("%w: %w", installapp.ErrInvalidInput, err)
 		}
 		nickName := strings.TrimSpace(firstAdmin.NickName)
 		if nickName == "" {
@@ -313,7 +315,7 @@ func (c *claim) verifyRuntimeDML(ctx context.Context, optionalServices []string)
 	if err != nil {
 		return fmt.Errorf("运行账号连接检查失败: %w", err)
 	}
-	defer runtimeDB.Close()
+	defer func() { _ = runtimeDB.Close() }()
 	tx, err := runtimeDB.BeginTxx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("运行账号事务检查失败: %w", err)
@@ -615,7 +617,14 @@ func validateCompleteVersionedShape(
 		GenerationExpression string         `db:"generation_expression"`
 	}
 	var columns []columnRow
-	if err := server.SelectContext(ctx, &columns, `SELECT table_name,column_name,column_type,is_nullable,column_default,extra,generation_expression
+	if err := server.SelectContext(ctx, &columns, `SELECT
+		TABLE_NAME AS table_name,
+		COLUMN_NAME AS column_name,
+		COLUMN_TYPE AS column_type,
+		IS_NULLABLE AS is_nullable,
+		COLUMN_DEFAULT AS column_default,
+		EXTRA AS extra,
+		GENERATION_EXPRESSION AS generation_expression
 		FROM information_schema.columns WHERE table_schema=?`, databaseName); err != nil {
 		return fmt.Errorf("读取完整字段结构失败: %w", err)
 	}
@@ -641,7 +650,16 @@ func validateCompleteVersionedShape(
 		IsVisible  string         `db:"is_visible"`
 	}
 	var indexes []indexRow
-	if err := server.SelectContext(ctx, &indexes, `SELECT table_name,index_name,non_unique,seq_in_index,column_name,sub_part,collation,index_type,is_visible
+	if err := server.SelectContext(ctx, &indexes, `SELECT
+		TABLE_NAME AS table_name,
+		INDEX_NAME AS index_name,
+		NON_UNIQUE AS non_unique,
+		SEQ_IN_INDEX AS seq_in_index,
+		COLUMN_NAME AS column_name,
+		SUB_PART AS sub_part,
+		COLLATION AS collation,
+		INDEX_TYPE AS index_type,
+		IS_VISIBLE AS is_visible
 		FROM information_schema.statistics WHERE table_schema=? ORDER BY table_name,index_name,seq_in_index`, databaseName); err != nil {
 		return fmt.Errorf("读取完整索引结构失败: %w", err)
 	}

@@ -57,7 +57,7 @@ func probeRedis(ctx context.Context, input RedisInput) error {
 	client := redis.NewClient(&redis.Options{
 		Addr: net.JoinHostPort(input.Host, strconv.Itoa(input.Port)), Password: input.Password, DB: input.DB,
 	})
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	return client.Ping(ctx).Err()
 }
 

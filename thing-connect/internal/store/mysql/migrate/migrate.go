@@ -292,7 +292,7 @@ func withMigrationLock(ctx context.Context, db *sqlx.DB, migrate func(*sqlx.Conn
 	if err != nil {
 		return fmt.Errorf("migrate: reserve connection: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	var database string
 	if err := conn.GetContext(lockCtx, &database, `SELECT DATABASE()`); err != nil {
 		return fmt.Errorf("migrate: read database: %w", err)

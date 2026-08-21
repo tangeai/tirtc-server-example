@@ -419,11 +419,11 @@ func writeSynced(path string, data []byte, mode os.FileMode) error {
 		return fmt.Errorf("创建 %s 失败: %w", path, err)
 	}
 	if _, err := file.Write(data); err != nil {
-		file.Close()
+		_ = file.Close()
 		return fmt.Errorf("写入 %s 失败: %w", path, err)
 	}
 	if err := file.Sync(); err != nil {
-		file.Close()
+		_ = file.Close()
 		return fmt.Errorf("同步 %s 失败: %w", path, err)
 	}
 	return file.Close()

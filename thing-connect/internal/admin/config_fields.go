@@ -140,13 +140,6 @@ func selectConfigField(path, label string, options []ConfigFieldOption) ConfigFi
 	return field
 }
 
-func tagsConfigField(path, label, description string) ConfigFieldDefinition {
-	field := textConfigField(path, label, description)
-	field.Kind = "tags"
-	field.Required = false
-	return field
-}
-
 func resourceRefsConfigField(path, label, description string) ConfigFieldDefinition {
 	field := textConfigField(path, label, description)
 	field.Kind = "resource_refs"

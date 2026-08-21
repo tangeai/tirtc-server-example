@@ -335,7 +335,7 @@ func definitionFields(value string) []string {
 
 func normalizeDefault(value string) string {
 	trimmed := strings.TrimSpace(value)
-	if strings.EqualFold(trimmed, "NULL") || trimmed == "" {
+	if strings.EqualFold(trimmed, "NULL") {
 		return nullColumnDefault
 	}
 	if len(trimmed) >= 2 && ((trimmed[0] == '\'' && trimmed[len(trimmed)-1] == '\'') || (trimmed[0] == '"' && trimmed[len(trimmed)-1] == '"')) {
@@ -351,6 +351,7 @@ func normalizeExpression(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
 	value = strings.ReplaceAll(value, "`", "")
 	value = strings.ReplaceAll(value, "_utf8mb4", "")
+	value = strings.ReplaceAll(value, `\'`, `'`)
 	value = strings.ReplaceAll(value, "(", "")
 	value = strings.ReplaceAll(value, ")", "")
 	return strings.Join(strings.Fields(value), "")

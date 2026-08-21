@@ -158,7 +158,7 @@ func (b *Bootstrap) runInstall(ctx context.Context, draft Draft, expected Plan, 
 		b.fail(state, problemCode(err), safeMessage(err), true, err)
 		return
 	}
-	defer claim.Close()
+	defer func() { _ = claim.Close() }()
 	if !sameAssessment(expected.Database, claim.Assessment()) {
 		b.fail(state, "PLAN_STALE", "数据库状态已经变化，请重新预检", true, ErrPlanStale)
 		return
@@ -609,7 +609,7 @@ func acquireFileLock(path string) (*os.File, error) {
 		return nil, err
 	}
 	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		file.Close()
+		_ = file.Close()
 		return nil, err
 	}
 	return file, nil

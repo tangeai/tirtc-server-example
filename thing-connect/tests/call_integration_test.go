@@ -1249,6 +1249,7 @@ func TestDeviceInfoPublishesCalleeAnswered(t *testing.T) {
 	msg := cs.broker.findPublished("callee_answered", "sn_"+caller)
 	if msg == nil {
 		t.Fatal("expected callee_answered published to caller")
+		return
 	}
 	if msg.Msg["room_id"] != roomID {
 		t.Errorf("callee_answered room_id = %v, want %s", msg.Msg["room_id"], roomID)
@@ -1426,6 +1427,7 @@ func TestHangupAnsweredRoomSendsQoS0Cancel(t *testing.T) {
 	msg := cs.broker.findPublished("room_cancel", "sn_"+callee)
 	if msg == nil {
 		t.Fatal("expected room_cancel published to callee after hangup")
+		return
 	}
 	if msg.Msg["reason"] != "hangup" {
 		t.Errorf("room_cancel reason = %v, want hangup", msg.Msg["reason"])

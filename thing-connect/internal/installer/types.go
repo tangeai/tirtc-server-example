@@ -373,9 +373,10 @@ func (b *Bootstrap) Status(context.Context) (Snapshot, error) {
 		return state.Snapshot, nil
 	}
 	message := "ThingConnect 正常运行"
-	if mode == ModeFresh {
+	switch mode {
+	case ModeFresh:
 		message = "等待首次安装"
-	} else if mode == ModeRecovery {
+	case ModeRecovery:
 		message = "等待恢复未完成的安装"
 	}
 	return Snapshot{Mode: mode, Message: message, NeedsToken: mode == ModeFresh || mode == ModeRecovery}, nil
@@ -416,11 +417,11 @@ func writeExclusive(path string, data []byte, mode os.FileMode) error {
 		return fmt.Errorf("create %s: %w", path, err)
 	}
 	if _, err := file.Write(data); err != nil {
-		file.Close()
+		_ = file.Close()
 		return fmt.Errorf("write %s: %w", path, err)
 	}
 	if err := file.Sync(); err != nil {
-		file.Close()
+		_ = file.Close()
 		return fmt.Errorf("sync %s: %w", path, err)
 	}
 	if err := file.Close(); err != nil {
@@ -436,17 +437,17 @@ func writeAtomicSecret(path string, data []byte, mode os.FileMode) error {
 		return fmt.Errorf("create token temp file: %w", err)
 	}
 	tempPath := temp.Name()
-	defer os.Remove(tempPath)
+	defer func() { _ = os.Remove(tempPath) }()
 	if err := temp.Chmod(mode); err != nil {
-		temp.Close()
+		_ = temp.Close()
 		return fmt.Errorf("protect token temp file: %w", err)
 	}
 	if _, err := temp.Write(data); err != nil {
-		temp.Close()
+		_ = temp.Close()
 		return fmt.Errorf("write token temp file: %w", err)
 	}
 	if err := temp.Sync(); err != nil {
-		temp.Close()
+		_ = temp.Close()
 		return fmt.Errorf("sync token temp file: %w", err)
 	}
 	if err := temp.Close(); err != nil {
@@ -463,6 +464,6 @@ func syncDir(path string) error {
 	if err != nil {
 		return err
 	}
-	defer dir.Close()
+	defer func() { _ = dir.Close() }()
 	return dir.Sync()
 }

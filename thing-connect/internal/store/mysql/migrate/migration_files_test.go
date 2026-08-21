@@ -122,6 +122,27 @@ func TestInformationSchemaColumnShapeNormalizesMySQLGeneratedMetadata(t *testing
 	}
 }
 
+func TestInformationSchemaColumnShapeKeepsEmptyStringDefaultDistinctFromNull(t *testing.T) {
+	empty := InformationSchemaColumnShape("varchar(64)", "NO", true, "", "", "")
+	if empty.Default != "" {
+		t.Fatalf("empty string default = %q, want an empty string", empty.Default)
+	}
+	null := InformationSchemaColumnShape("varchar(64)", "YES", false, "", "", "")
+	if null.Default != nullColumnDefault {
+		t.Fatalf("NULL default = %q, want %q", null.Default, nullColumnDefault)
+	}
+}
+
+func TestInformationSchemaColumnShapeNormalizesEscapedGeneratedLiterals(t *testing.T) {
+	got := InformationSchemaColumnShape(
+		"varchar(64)", "YES", false, "", "STORED GENERATED",
+		`if((mac = \'\') or (user_id = 0),NULL,concat(mac,\':\',user_id))`,
+	)
+	if got.GenerationExpression != "ifmac=''oruser_id=0,null,concatmac,':',user_id" {
+		t.Fatalf("generation expression = %q", got.GenerationExpression)
+	}
+}
+
 type unknownTargetConn struct{}
 
 func (unknownTargetConn) ExecContext(context.Context, string, ...any) (sql.Result, error) {
