@@ -10,7 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"thing-connect/internal/db"
+	mysqlmigrate "thing-connect/internal/store/mysql/migrate"
 	"thing-connect/internal/testenv"
 )
 
@@ -18,7 +18,7 @@ func TestLoginLogsFallbackToAdminEmail(t *testing.T) {
 	cfg := testenv.LoadConfigOrSkip(t, "../../tests/testdata/config.yaml")
 	sqlDB := testenv.OpenDBOrSkip(t, cfg)
 	defer sqlDB.Close()
-	if err := db.MigrateAdmin(sqlDB); err != nil {
+	if err := mysqlmigrate.MigrateAdmin(sqlDB); err != nil {
 		t.Fatalf("MigrateAdmin: %v", err)
 	}
 

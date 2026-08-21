@@ -50,6 +50,7 @@ type AppConfig struct {
 }
 
 func LoadAppConfig(path string) (*AppConfig, error) {
+	path = baseconfig.ResolvePath(path)
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read admin config %s: %w", path, err)

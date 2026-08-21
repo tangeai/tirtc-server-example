@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"thing-connect/internal/db"
+	mysqlmigrate "thing-connect/internal/store/mysql/migrate"
 	"thing-connect/internal/testenv"
 )
 
@@ -15,7 +15,7 @@ func TestMFAChallengeSingleUseAndPendingFactorReenrollment(t *testing.T) {
 	cfg := testenv.LoadConfigOrSkip(t, "../../tests/testdata/config.yaml")
 	sqlDB := testenv.OpenDBOrSkip(t, cfg)
 	t.Cleanup(func() { _ = sqlDB.Close() })
-	if err := db.MigrateAdmin(sqlDB); err != nil {
+	if err := mysqlmigrate.MigrateAdmin(sqlDB); err != nil {
 		t.Fatalf("MigrateAdmin: %v", err)
 	}
 

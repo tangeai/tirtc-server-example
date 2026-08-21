@@ -35,6 +35,12 @@ for service in "${SERVICES[@]}"; do
     fi
 done
 
+# Invalidate the deployable release before any frontend or Go build starts.
+# A failed build can therefore never leave an older completeness marker next
+# to partially refreshed static assets.
+mkdir -p bin
+rm -f bin/.release-commit
+
 if contains_service user-server; then
     npm ci
     npm run build:css
@@ -49,12 +55,37 @@ version="${BUILD_VERSION:-$(git describe --tags --always --dirty 2>/dev/null || 
 commit="${BUILD_COMMIT:-$(git rev-parse --short HEAD 2>/dev/null || printf 'unknown')}"
 ldflags="-s -w -X thing-connect/internal/servicestatus.BuildVersion=$version -X thing-connect/internal/servicestatus.BuildCommit=$commit"
 
-mkdir -p bin
+BUILD_STAGE="$(mktemp -d "$ROOT_DIR/.build-stage.XXXXXX")"
+cleanup_build_stage() {
+    case "$BUILD_STAGE" in
+        "$ROOT_DIR"/.build-stage.*) rm -rf -- "$BUILD_STAGE" ;;
+        *) echo "[ERROR] refusing to clean unexpected build stage: $BUILD_STAGE" >&2 ;;
+    esac
+}
+trap cleanup_build_stage EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 for service in "${SERVICES[@]}"; do
     package="./$service"
     [ "$service" != "admin-server" ] || package="./admin/admin-server"
     echo "[INFO] building $service ($version, $commit)"
-    CGO_ENABLED=0 go build -trimpath -ldflags "$ldflags" -o "bin/$service" "$package"
+    CGO_ENABLED=0 go build -trimpath -ldflags "$ldflags" -o "$BUILD_STAGE/$service" "$package"
 done
+
+# No build artifact becomes deployable until every requested target succeeds.
+for service in "${SERVICES[@]}"; do
+    mv "$BUILD_STAGE/$service" "bin/$service.tmp"
+    mv -f "bin/$service.tmp" "bin/$service"
+done
+
+full_build=1
+for service in "${ALL_SERVICES[@]}"; do
+    contains_service "$service" || full_build=0
+done
+if [ "$full_build" = "1" ]; then
+    full_commit="$(git rev-parse HEAD 2>/dev/null || printf 'unknown')"
+    printf '%s\n' "$full_commit" >bin/.release-commit.tmp
+    mv -f bin/.release-commit.tmp bin/.release-commit
+fi
 
 echo "[INFO] build artifacts: $ROOT_DIR/bin"

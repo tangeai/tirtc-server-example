@@ -5,6 +5,33 @@ body,
   min-height: 100%;
   background: #f5f7fa;
 }
+.setup-shell {
+  min-height: 100vh;
+  padding: 40px 20px;
+  background: #f3f6fb;
+}
+.setup-card {
+  width: min(920px, 100%);
+  margin: 0 auto;
+}
+.setup-form-card .ant-alert,
+.setup-card .ant-progress,
+.setup-card .ant-steps,
+.setup-services,
+.setup-resume,
+.setup-actions {
+  margin-top: 20px;
+}
+.setup-service-selection {
+  margin-bottom: 20px;
+}
+.setup-service-selection .ant-checkbox-group {
+  display: grid;
+  gap: 8px;
+}
+.full-width {
+  width: 100%;
+}
 .shell {
   min-height: 100vh;
 }

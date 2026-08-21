@@ -81,3 +81,36 @@ func TestLoadFileRejectsPlaceholderSecrets(t *testing.T) {
 		t.Fatal("LoadFile accepted a public placeholder secret")
 	}
 }
+
+func TestResolvePathUsesActivatedBundleOnlyWhenConfiguredFileIsMissing(t *testing.T) {
+	root := t.TempDir()
+	configured := filepath.Join(root, "device-server", "config.yaml")
+	bundled := filepath.Join(root, "config-current", "device-server", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(bundled), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bundled, []byte("jwt_secret: bundled-secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := ResolvePath(configured); got != bundled {
+		t.Fatalf("ResolvePath missing = %q, want %q", got, bundled)
+	}
+	if err := os.MkdirAll(filepath.Dir(configured), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configured, []byte("damaged: ["), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := ResolvePath(configured); got != configured {
+		t.Fatalf("ResolvePath existing = %q, want %q", got, configured)
+	}
+	if err := os.Remove(configured); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("missing-target.yaml", configured); err != nil {
+		t.Fatal(err)
+	}
+	if got := ResolvePath(configured); got != configured {
+		t.Fatalf("ResolvePath broken symlink = %q, want fail-closed %q", got, configured)
+	}
+}

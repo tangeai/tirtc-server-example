@@ -19,6 +19,7 @@ import (
 	"thing-connect/internal/logging"
 	"thing-connect/internal/mqttc"
 	"thing-connect/internal/servicestatus"
+	mysqlmigrate "thing-connect/internal/store/mysql/migrate"
 	"thing-connect/internal/userauth"
 	"thing-connect/voip-server/handler"
 )
@@ -34,8 +35,8 @@ func main() {
 		slog.Error("db open failed", "err", err)
 		os.Exit(1)
 	}
-	if err := db.Migrate(sqlDB); err != nil {
-		slog.Error("db migrate failed", "err", err)
+	if err := mysqlmigrate.RequireSchemaCurrent(sqlDB); err != nil {
+		slog.Error("db schema check failed", "err", err)
 		os.Exit(1)
 	}
 

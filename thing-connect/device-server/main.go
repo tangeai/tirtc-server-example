@@ -22,6 +22,7 @@ import (
 	"thing-connect/internal/servicestatus"
 	"thing-connect/internal/store"
 	mysqlstore "thing-connect/internal/store/mysql"
+	mysqlmigrate "thing-connect/internal/store/mysql/migrate"
 )
 
 // globalPendingGC periodically reconciles the global:pending_codes counter
@@ -56,8 +57,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("db: %v", err)
 	}
-	if err := db.Migrate(sqlDB); err != nil {
-		log.Fatalf("migrate: %v", err)
+	if err := mysqlmigrate.RequireSchemaCurrent(sqlDB); err != nil {
+		log.Fatalf("schema: %v", err)
 	}
 
 	rdb, err := cache.New(cfg.Redis)

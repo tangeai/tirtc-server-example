@@ -34,6 +34,7 @@ import {
 import { BrowserRouter, useLocation, useNavigate } from 'react-router-dom';
 import { api, json, restoreSession, setAccessToken } from './api';
 import { StepUpFields } from './shared/admin-ui';
+import { loadSetupStatus, SetupPage, type SetupSnapshot } from './setup';
 
 const OverviewPage = lazy(() =>
   import('./pages/overview').then((module) => ({ default: module.OverviewPage })),
@@ -460,12 +461,25 @@ function Shell({ onLogout }: { onLogout: () => void }) {
 }
 function Root() {
   const [logged, setLogged] = useState<boolean>();
+  const [setup, setSetup] = useState<SetupSnapshot>();
+  const [setupChecked, setSetupChecked] = useState(false);
   useEffect(() => {
     const unauthorized = () => setLogged(false);
     window.addEventListener('admin:unauthorized', unauthorized);
-    restoreSession().then(setLogged);
+    loadSetupStatus()
+      .then((status) => {
+        if (status && (status.mode === 'fresh' || status.mode === 'recovery')) {
+          setSetup(status);
+          return;
+        }
+        return restoreSession().then(setLogged);
+      })
+      .catch(() => restoreSession().then(setLogged))
+      .finally(() => setSetupChecked(true));
     return () => window.removeEventListener('admin:unauthorized', unauthorized);
   }, []);
+  if (!setupChecked) return <Spin fullscreen />;
+  if (setup) return <SetupPage initial={setup} />;
   if (logged === undefined) return <Spin fullscreen />;
   return logged ? (
     <BrowserRouter basename="/admin">

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -207,6 +208,7 @@ func Load(path string) *Config {
 // Returning an error makes validation reusable by tests and deployment tools,
 // while Load retains the existing fail-fast server API.
 func LoadFile(path string) (*Config, error) {
+	path = ResolvePath(path)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("config: read %s: %w", path, err)
@@ -272,6 +274,25 @@ func LoadFile(path string) (*Config, error) {
 		cfg.Service.MQTTACKTimeout = 5 * time.Second
 	}
 	return &cfg, nil
+}
+
+// ResolvePath keeps existing per-service config files compatible while also
+// supporting the first-run installer's atomically activated config bundle.
+// A configured path always wins. The bundle fallback is used only when the
+// configured file does not exist, so a damaged or unreadable production file
+// can never silently switch to another configuration revision.
+func ResolvePath(path string) string {
+	// Lstat makes even a broken symlink an explicitly configured path. Falling
+	// through to the bundle in that case would hide a damaged deployment.
+	if _, err := os.Lstat(path); err == nil || !os.IsNotExist(err) {
+		return path
+	}
+	serviceDir := filepath.Dir(path)
+	serviceName := filepath.Base(serviceDir)
+	if serviceName == "." || serviceName == string(filepath.Separator) || serviceName == "" {
+		return path
+	}
+	return filepath.Join(filepath.Dir(serviceDir), "config-current", serviceName, filepath.Base(path))
 }
 
 // IsPlaceholderSecret identifies example values that must never be accepted

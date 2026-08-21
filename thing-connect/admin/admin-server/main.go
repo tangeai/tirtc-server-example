@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -22,24 +23,75 @@ import (
 	"thing-connect/internal/apiresp"
 	"thing-connect/internal/cache"
 	"thing-connect/internal/db"
+	"thing-connect/internal/installer"
 	"thing-connect/internal/logging"
 	"thing-connect/internal/servicestatus"
 	adminmysql "thing-connect/internal/store/mysql/admin"
+	installermysql "thing-connect/internal/store/mysql/installer"
+	mysqlmigrate "thing-connect/internal/store/mysql/migrate"
 )
 
 func main() {
 	configPath := flag.String("c", "config.yaml", "admin-server config file")
 	initAdmin := flag.Bool("init-admin", false, "create the first super administrator and exit")
 	migrateOnly := flag.Bool("migrate-only", false, "apply core and admin database migrations and exit")
+	requireRuntimeTarget := flag.Bool("require-runtime-target", false, "require migration DSN to match every configured runtime service")
 	initEmail := flag.String("init-email", "", "email for the first super administrator")
 	initNickName := flag.String("init-nick-name", "", "nick name for the first super administrator")
+	prepareSetup := flag.Bool("prepare-setup", false, "authorize a new empty deployment for one-time web setup")
+	validateConfigBundle := flag.Bool("validate-config-bundle", false, "strictly validate required and configured optional service configs and exit")
+	deployRoot := flag.String("deploy-root", "", "deployment root used by first-run setup")
+	setupPort := flag.Int("setup-port", 9010, "HTTP port used before the Admin config exists")
+	setupBind := flag.String("setup-bind", "127.0.0.1", "listen address used only during first-run setup")
+	setupStaticDir := flag.String("setup-static-dir", "static", "Admin Web static directory used during first-run setup")
+	supervisorCTL := flag.String("supervisorctl", "supervisorctl", "Supervisor control client")
+	supervisorGroup := flag.String("supervisor-group", "demo-open", "Supervisor service group")
 	flag.Parse()
+
+	root, err := resolveDeployRoot(*deployRoot, *configPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	setupOptions := installer.Options{
+		DeployRoot: root, ConfigPath: *configPath, StaticDir: *setupStaticDir, HTTPPort: *setupPort, SetupBind: *setupBind,
+		SupervisorCTL: *supervisorCTL, SupervisorGroup: *supervisorGroup,
+	}
+	if *validateConfigBundle {
+		if err := installer.ValidateConfiguredServiceBundle(root); err != nil {
+			log.Fatalf("validate configs: %v", err)
+		}
+		log.Print("all service configs are valid")
+		return
+	}
+	if *prepareSetup {
+		token, err := installer.PrepareFirstRun(setupOptions)
+		if err != nil {
+			log.Fatalf("prepare first-run setup: %v", err)
+		}
+		fmt.Printf("ThingConnect setup token (shown once): %s\n", token)
+		return
+	}
+	mode, err := installer.DetectMode(setupOptions)
+	if err != nil {
+		log.Fatalf("detect first-run mode: %v", err)
+	}
+	if mode == installer.ModeFresh || mode == installer.ModeRecovery {
+		if err := runSetupServer(setupOptions); err != nil {
+			log.Fatalf("first-run setup: %v", err)
+		}
+		return
+	}
 
 	cfg, err := adminapp.LoadAppConfig(*configPath)
 	if err != nil {
 		log.Fatal(err)
 	}
 	logging.Init(cfg.Log.Level, cfg.Log.Format)
+	if *migrateOnly {
+		if err := validateMigrationPreflight(context.Background(), root, cfg.Database.DSN, *requireRuntimeTarget); err != nil {
+			log.Fatalf("migration preflight: %v", err)
+		}
+	}
 
 	sqlDB, err := db.Open(cfg.Database)
 	if err != nil {
@@ -50,12 +102,31 @@ func main() {
 			log.Printf("close database: %v", err)
 		}
 	}()
-	if err := db.MigrateAdmin(sqlDB); err != nil {
-		log.Fatalf("migrate: %v", err)
-	}
 	if *migrateOnly {
-		log.Print("database migrations applied")
+		migrationCtx, stopMigration := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer stopMigration()
+		pending, err := mysqlmigrate.AdminMigrationsPending(sqlDB)
+		if err != nil {
+			log.Fatalf("inspect pending migrations: %v", err)
+		}
+		if pending {
+			// MySQL DDL commits implicitly. Emit this marker before the first
+			// possible DDL so deployment automation treats even a failed,
+			// partially applied migration as a schema-changing attempt.
+			log.Print("migration_result=change_possible pending migrations detected")
+		}
+		if err := mysqlmigrate.MigrateAdminContext(migrationCtx, sqlDB); err != nil {
+			log.Fatalf("migrate: %v", err)
+		}
+		if pending {
+			log.Print("migration_result=changed database migrations applied")
+		} else {
+			log.Print("migration_result=unchanged database schema already current")
+		}
 		return
+	}
+	if err := mysqlmigrate.RequireAdminSchemaCurrent(sqlDB); err != nil {
+		log.Fatalf("schema: %v", err)
 	}
 	store := adminapp.NewStore(sqlDB)
 	if err := store.SeedDefaults(context.Background()); err != nil {
@@ -181,6 +252,10 @@ func main() {
 	go reconcileAdminRuntimeConfig(workerCtx, configService, authService, adminHTTP)
 	adminHTTP.Register(r)
 	adminHTTP.RegisterInternal(r, cfg.Internal.Key)
+	setupOptions.StaticDir = cfg.Server.StaticDir
+	setupOptions.RuntimeDatabaseDSN = cfg.Database.DSN
+	bootstrap := newInstaller(setupOptions)
+	newSetupHTTP(bootstrap).Register(r)
 	serveStatic(r, cfg.Server.StaticDir)
 
 	server := &http.Server{
@@ -195,6 +270,9 @@ func main() {
 			log.Fatalf("admin-server: %v", err)
 		}
 	}()
+	if _, err := bootstrap.ResumeRuntime(context.Background()); err != nil && !errors.Is(err, installer.ErrPlanStale) && !errors.Is(err, installer.ErrInstallBusy) {
+		log.Printf("resume first-run services: %v", err)
+	}
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
@@ -203,6 +281,110 @@ func main() {
 	if err := server.Shutdown(ctx); err != nil {
 		log.Printf("admin-server shutdown: %v", err)
 	}
+	if err := bootstrap.Shutdown(ctx); err != nil {
+		log.Printf("installer shutdown: %v", err)
+	}
+}
+
+func validateMigrationPreflight(ctx context.Context, root, migrationDSN string, requireRuntime bool) error {
+	assessment, err := installermysql.New().InspectDSN(ctx, migrationDSN)
+	if err != nil {
+		return err
+	}
+	switch assessment.Class {
+	case installer.DatabaseEmpty, installer.DatabaseManagedOlder, installer.DatabaseManagedCurrent:
+	default:
+		return fmt.Errorf("target database class %s is not safe for explicit migration", assessment.Class)
+	}
+	if !requireRuntime {
+		return nil
+	}
+	return installer.ValidateConfiguredRuntimeTarget(root, migrationDSN)
+}
+
+func newInstaller(options installer.Options) *installer.Bootstrap {
+	return installer.New(options, installer.Dependencies{
+		Database: installermysql.New(),
+		Bundles:  installer.NewFileBundleStore(options),
+		Probes:   installer.NewStandardProber(),
+		Runtime:  installer.NewSupervisorController(options.SupervisorCTL, options.SupervisorGroup, options.HTTPPort),
+	})
+}
+
+func runSetupServer(options installer.Options) error {
+	bootstrap := newInstaller(options)
+	router := gin.New()
+	if err := router.SetTrustedProxies(nil); err != nil {
+		return err
+	}
+	router.Use(gin.Recovery(), securityHeaders(), requestBodyLimit(128*1024), gin.Logger())
+	router.GET("/health/live", func(c *gin.Context) { apiresp.OK(c, gin.H{"status": "live", "mode": "setup"}) })
+	router.GET("/health/ready", func(c *gin.Context) {
+		c.JSON(http.StatusServiceUnavailable, apiresp.JSON{Code: 503, Msg: "等待首次安装完成"})
+	})
+	newSetupHTTP(bootstrap).Register(router)
+	serveStatic(router, options.StaticDir)
+	server := &http.Server{
+		Addr: net.JoinHostPort(options.SetupBind, fmt.Sprintf("%d", options.HTTPPort)), Handler: router,
+		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second,
+		WriteTimeout: 60 * time.Second, IdleTimeout: 90 * time.Second,
+		MaxHeaderBytes: 1 << 20,
+	}
+	serverErrors := make(chan error, 1)
+	go func() {
+		log.Printf("admin-server first-run setup listening on %s", server.Addr)
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serverErrors <- err
+		}
+	}()
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	select {
+	case err := <-serverErrors:
+		return err
+	case <-quit:
+	case <-bootstrap.RestartRequested():
+		log.Print("first-run configuration committed; restarting into normal Admin mode")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	shutdownErr := server.Shutdown(ctx)
+	if err := bootstrap.Shutdown(ctx); err != nil && shutdownErr == nil {
+		shutdownErr = err
+	}
+	return shutdownErr
+}
+
+func resolveDeployRoot(configured, configPath string) (string, error) {
+	if strings.TrimSpace(configured) != "" {
+		root, err := filepath.Abs(configured)
+		if err != nil {
+			return "", err
+		}
+		if root == string(filepath.Separator) {
+			return "", fmt.Errorf("deploy-root cannot be the filesystem root")
+		}
+		return root, nil
+	}
+	absConfig, err := filepath.Abs(configPath)
+	if err != nil {
+		return "", err
+	}
+	serviceDir := filepath.Dir(absConfig)
+	if filepath.Base(serviceDir) == "admin-server" {
+		parent := filepath.Dir(serviceDir)
+		if filepath.Base(parent) == "admin" {
+			return filepath.Dir(parent), nil
+		}
+		return parent, nil
+	}
+	if executable, execErr := os.Executable(); execErr == nil {
+		execDir := filepath.Dir(executable)
+		if filepath.Base(execDir) == "admin-server" {
+			return filepath.Dir(execDir), nil
+		}
+	}
+	return filepath.Dir(absConfig), nil
 }
 
 func securityHeaders() gin.HandlerFunc {

@@ -10,10 +10,10 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
-	"thing-connect/internal/db"
 	"thing-connect/internal/model"
 	"thing-connect/internal/store"
 	mysqlstore "thing-connect/internal/store/mysql"
+	mysqlmigrate "thing-connect/internal/store/mysql/migrate"
 	"thing-connect/internal/testenv"
 )
 
@@ -21,8 +21,8 @@ func openTestDB(t *testing.T) *sqlx.DB {
 	t.Helper()
 	cfg := testenv.LoadConfigOrSkip(t, "../../../tests/testdata/config.yaml")
 	sqlDB := testenv.OpenDBOrSkip(t, cfg)
-	if err := db.Migrate(sqlDB); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
+	if err := mysqlmigrate.Migrate(sqlDB); err != nil {
+		t.Fatalf("migrate.Migrate: %v", err)
 	}
 	// Reset device pool so each test starts with all devices fresh/unbound.
 	// 禁止流转 means a device with any device_bind row is never re-allocated, and

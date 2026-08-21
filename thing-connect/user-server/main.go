@@ -26,6 +26,7 @@ import (
 	"thing-connect/internal/service"
 	"thing-connect/internal/servicestatus"
 	mysqlstore "thing-connect/internal/store/mysql"
+	mysqlmigrate "thing-connect/internal/store/mysql/migrate"
 	usrhandler "thing-connect/user-server/handler"
 )
 
@@ -41,8 +42,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("db: %v", err)
 	}
-	if err := db.Migrate(sqlDB); err != nil {
-		log.Fatalf("migrate: %v", err)
+	if err := mysqlmigrate.RequireSchemaCurrent(sqlDB); err != nil {
+		log.Fatalf("schema: %v", err)
 	}
 
 	rdb, err := cache.New(cfg.Redis)

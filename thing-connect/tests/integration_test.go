@@ -25,8 +25,8 @@ import (
 	devhandler "thing-connect/device-server/handler"
 	"thing-connect/internal/apiresp"
 	"thing-connect/internal/config"
-	"thing-connect/internal/db"
 	mysqlstore "thing-connect/internal/store/mysql"
+	mysqlmigrate "thing-connect/internal/store/mysql/migrate"
 	"thing-connect/internal/testenv"
 	usrhandler "thing-connect/user-server/handler"
 )
@@ -52,8 +52,8 @@ func newSuite(t *testing.T) *suite {
 	cfg := loadConfig(t)
 
 	sqlDB := testenv.OpenDBOrSkip(t, cfg)
-	if err := db.Migrate(sqlDB); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
+	if err := mysqlmigrate.Migrate(sqlDB); err != nil {
+		t.Fatalf("migrate.Migrate: %v", err)
 	}
 	resetPool(t, sqlDB)
 

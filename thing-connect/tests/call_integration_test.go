@@ -25,8 +25,8 @@ import (
 	"thing-connect/call-server/apiresp"
 	callhandler "thing-connect/call-server/handler"
 	"thing-connect/internal/config"
-	"thing-connect/internal/db"
 	mysqlstore "thing-connect/internal/store/mysql"
+	mysqlmigrate "thing-connect/internal/store/mysql/migrate"
 	"thing-connect/internal/testenv"
 )
 
@@ -112,8 +112,8 @@ func newCallSuite(t *testing.T) *callSuite {
 
 	cfg := loadConfig(t)
 	sqlDB := testenv.OpenDBOrSkip(t, cfg)
-	if err := db.Migrate(sqlDB); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
+	if err := mysqlmigrate.Migrate(sqlDB); err != nil {
+		t.Fatalf("migrate.Migrate: %v", err)
 	}
 	rdb := testenv.OpenRedisOrSkip(t, cfg)
 

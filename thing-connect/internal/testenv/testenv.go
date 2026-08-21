@@ -89,6 +89,16 @@ func OpenRedisOrSkip(t testing.TB, cfg *config.Config) *redis.Client {
 	return rdb
 }
 
+// DependencyUnavailable applies the repository's local-skip/CI-fail policy to
+// integration dependencies opened with custom server-level credentials.
+func DependencyUnavailable(t testing.TB, name string, err error) {
+	t.Helper()
+	if os.Getenv("CI") != "" {
+		t.Fatalf("integration test %s unavailable in CI: %v", name, err)
+	}
+	t.Skipf("integration test %s unavailable: %v", name, err)
+}
+
 func findConfigPath(candidates ...string) (string, error) {
 	paths := make([]string, 0, len(candidates)+1)
 	if envPath := os.Getenv("THING_CONNECT_TEST_CONFIG"); envPath != "" {

@@ -1,10 +1,10 @@
 -- thing-connect 数据库建表语句
 --
--- 权威来源：internal/db/migrate.go（服务启动时自动执行）
+-- 权威来源：internal/store/mysql/migrate/migrations/（仅安装/显式迁移执行）
 -- 本文件供全新安装直接导入：mysql -u root -p thing_connect < scripts/schema.sql
 --
 -- 使用说明：
---   如果你手上已经有旧数据库，不要直接导入此文件——高版本 migrate.go 会自动补到最新。
+--   如果你手上已经有旧数据库，不要直接导入此文件——使用 deploy-prod.sh migrate 补到最新。
 --   此文件用于全新环境建库，每个 CREATE TABLE 都是表的最终形态，不走 ALTER。
 
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -13,6 +13,27 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
     applied_at DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (component, version)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS thingconnect_installation_state (
+    id TINYINT NOT NULL,
+    product VARCHAR(64) NOT NULL,
+    instance_id CHAR(36) NOT NULL,
+    operation_id CHAR(36) NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    stage VARCHAR(64) NOT NULL,
+    generation BIGINT NOT NULL DEFAULT 1,
+    config_digest CHAR(64) NOT NULL DEFAULT '',
+    last_error_code VARCHAR(64) NOT NULL DEFAULT '',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_install_instance (instance_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO thingconnect_installation_state
+    (id, product, instance_id, operation_id, status, stage, generation)
+VALUES
+    (1, 'thingconnect', UUID(), UUID(), 'migration_only', 'migration_claimed', 1);
 
 CREATE TABLE IF NOT EXISTS users (
     id         BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -54,7 +75,7 @@ CREATE TABLE IF NOT EXISTS device_bind (
     unbind_time  DATETIME     DEFAULT NULL,
     created_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    mac_user_key VARCHAR(64) GENERATED ALWAYS AS (IF((user_id > 0 AND mac <> ''), CONCAT(mac, ':', user_id), NULL)) STORED,
+    mac_user_key VARCHAR(64) AS (IF(mac='' OR user_id=0, NULL, CONCAT(mac, ':', user_id))) STORED,
     PRIMARY KEY (id),
     UNIQUE KEY uq_device_id (device_id),
     KEY idx_user_id (user_id),
@@ -94,8 +115,8 @@ CREATE TABLE IF NOT EXISTS call_contact (
     updated_at  DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     UNIQUE KEY uq_pair (device_id_a, device_id_b),
-    KEY idx_device_a (device_id_a),
-    KEY idx_device_b (device_id_b)
+    KEY idx_call_a (device_id_a),
+    KEY idx_call_b (device_id_b)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS voip_device_profile (
@@ -349,4 +370,5 @@ INSERT IGNORE INTO schema_migrations (component, version) VALUES
     ('core', 2),
     ('admin', 1),
     ('admin', 2),
-    ('admin', 3);
+    ('admin', 3),
+    ('admin', 4);

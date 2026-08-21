@@ -11,7 +11,7 @@ import (
 
 	mysqldriver "github.com/go-sql-driver/mysql"
 
-	"thing-connect/internal/db"
+	mysqlmigrate "thing-connect/internal/store/mysql/migrate"
 	"thing-connect/internal/testenv"
 )
 
@@ -19,7 +19,7 @@ func TestDeviceImportResultContainsEveryInputRow(t *testing.T) {
 	cfg := testenv.LoadConfigOrSkip(t, "../../tests/testdata/config.yaml")
 	sqlDB := testenv.OpenDBOrSkip(t, cfg)
 	t.Cleanup(func() { _ = sqlDB.Close() })
-	if err := db.MigrateAdmin(sqlDB); err != nil {
+	if err := mysqlmigrate.MigrateAdmin(sqlDB); err != nil {
 		t.Fatal(err)
 	}
 	root := filepath.Join(t.TempDir(), "jobs")
@@ -65,7 +65,7 @@ func TestDeviceImportRowIsPersistedWithItsJobMarker(t *testing.T) {
 	cfg := testenv.LoadConfigOrSkip(t, "../../tests/testdata/config.yaml")
 	sqlDB := testenv.OpenDBOrSkip(t, cfg)
 	t.Cleanup(func() { _ = sqlDB.Close() })
-	if err := db.MigrateAdmin(sqlDB); err != nil {
+	if err := mysqlmigrate.MigrateAdmin(sqlDB); err != nil {
 		t.Fatal(err)
 	}
 	service, err := NewJobService(sqlDB, filepath.Join(t.TempDir(), "jobs"), 1024*1024)
@@ -107,7 +107,7 @@ func TestRecoverExpiredJobsLeavesActiveLeasesUntouched(t *testing.T) {
 	cfg := testenv.LoadConfigOrSkip(t, "../../tests/testdata/config.yaml")
 	sqlDB := testenv.OpenDBOrSkip(t, cfg)
 	t.Cleanup(func() { _ = sqlDB.Close() })
-	if err := db.MigrateAdmin(sqlDB); err != nil {
+	if err := mysqlmigrate.MigrateAdmin(sqlDB); err != nil {
 		t.Fatal(err)
 	}
 	insert := func(offset time.Duration) int64 {
@@ -149,7 +149,7 @@ func TestClaimLeaseUsesDatabaseClockAcrossTimezones(t *testing.T) {
 	databaseConfig.DSN = dsn.FormatDSN()
 	sqlDB := testenv.OpenDatabaseOrSkip(t, databaseConfig)
 	t.Cleanup(func() { _ = sqlDB.Close() })
-	if err := db.MigrateAdmin(sqlDB); err != nil {
+	if err := mysqlmigrate.MigrateAdmin(sqlDB); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := sqlDB.Exec(`DELETE FROM admin_jobs WHERE created_by=0 AND source_name IN ('test.csv','timezone.csv')`); err != nil {

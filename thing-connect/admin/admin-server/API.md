@@ -6,6 +6,27 @@ Admin API 默认前缀为 `/v1/admin`，响应使用统一结构：
 {"code":200,"msg":"ok","data":{}}
 ```
 
+## 首次安装 API
+
+首次安装接口使用独立前缀 `/v1/setup`，只在部署目录具有显式 `first-run.allowed` 或存在未完成安装状态时工作。除状态查询外，请求必须携带启动时生成的一次性令牌：
+
+```http
+X-Setup-Token: <one-time-setup-token>
+Content-Type: application/json
+```
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/v1/setup/status` | 读取 `fresh/recovery/installed/normal` 模式和脱敏进度 |
+| POST | `/v1/setup/preview` | 测试 MySQL、Redis、MQTT 并只读生成数据库计划 |
+| POST | `/v1/setup/execute` | 携带 `draft` 和 `plan_digest` 启动安装；空请求用于重放已提交的配置激活意图或继续服务启动 |
+
+`preview` 不执行建库、建表、配置写入或进程控制。`execute` 在取得锁后重新分类数据库；预检事实变化时返回 `409`，陌生非空库、结构漂移和未来版本同样返回 `409` 且不执行自动写入。安装任务在后台运行，客户端轮询 `status`，浏览器断开不会取消已经持久化的任务。
+
+`draft.database` 必须同时提供迁移账号和独立的 DML 运行账号，两者用户名不能相同。迁移账号用于建库和版本化 DDL；运行账号写入生成的服务配置，并在安装锁定前验证对 `schema_migrations` 的 SELECT，以及对其余受管表的 SELECT、INSERT、UPDATE、DELETE。`draft.optional_services` 只接受 `voip-server`、`ai-server`、`call-server` 的无重复数组；`device-server` 和 `user-server` 固定启用，不在该数组中。未选择的可选服务不生成配置、不启动，也不参与 readiness。任何密码字段均为只写输入，不在计划或状态中返回。
+
+所有响应设置 `Cache-Control: no-store`。安装令牌、数据库/Redis/MQTT 密码、首个管理员密码和生成密钥不出现在状态响应中。安装完成后写接口返回 `410`；重新授权只能在服务器本地执行部署流程，普通配置错误不会重新开放这些接口。
+
 除登录、MFA 验证、刷新和退出外，请求使用 `Authorization: Bearer <access_token>`。刷新令牌保存在 HttpOnly Cookie `admin_refresh` 中，Admin Web 只在页面内存中保存短期访问令牌，页面重新加载时通过刷新 Cookie 恢复会话。Admin Web 和二次开发客户端发送 `X-Admin-Request: 1`；使用 Cookie 的刷新与退出接口缺少该请求头时拒绝请求，以阻止跨站表单触发会话操作。列表接口通常接受 `page`、`page_size` 和页面对应的筛选参数。
 
 ## 认证
