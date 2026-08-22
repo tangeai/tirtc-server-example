@@ -35,6 +35,8 @@ var (
 	ErrInstallBusy      = errors.New("installer: installation is running")
 	ErrAlreadyInstalled = errors.New("installer: already installed")
 	ErrUnauthorized     = errors.New("installer: invalid setup token")
+	ErrInvalidOrigin    = errors.New("installer: invalid setup origin")
+	ErrTooManyAttempts  = errors.New("installer: too many setup attempts")
 	ErrUnknownDatabase  = errors.New("installer: unknown non-empty database")
 	ErrSchemaFuture     = errors.New("installer: schema is newer than this binary")
 	ErrSchemaDrift      = errors.New("installer: schema does not match its migration ledger")
@@ -159,13 +161,15 @@ type ExecuteRequest struct {
 }
 
 type Problem struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
+	Code        string   `json:"code"`
+	Message     string   `json:"message"`
+	Suggestions []string `json:"suggestions,omitempty"`
 }
 
 type ServiceState struct {
-	Name  string `json:"name"`
-	State string `json:"state"`
+	Name    string   `json:"name"`
+	State   string   `json:"state"`
+	Problem *Problem `json:"problem,omitempty"`
 }
 
 type Snapshot struct {

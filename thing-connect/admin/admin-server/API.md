@@ -47,6 +47,25 @@ ClientID 模式只适用于每个服务单实例运行；固定 ClientID 不能�
 
 Redis、MQTT 或 MySQL 连接预检失败时返回 `503`，`msg` 只标识失败依赖和检查方向，不包含上游原始错误、内网地址、账号或密码；原始原因只写入 Admin 服务日志，日志不记录安装请求体。
 
+安装错误响应的 `data` 提供结构化诊断信息：`code` 是安装器诊断码，`message` 是页面主提示，`suggestions` 是可直接执行的处理建议。客户端仍按响应顶层的数值 `code` 判断 HTTP 业务结果，不按诊断文案分支。例如：
+
+```json
+{
+  "code": 503,
+  "msg": "MySQL 连接检查失败",
+  "data": {
+    "code": "MYSQL_UNAVAILABLE",
+    "message": "MySQL 连接检查失败",
+    "suggestions": [
+      "确认 MySQL 地址和端口可从安装服务器访问",
+      "检查 TLS 模式、迁移账号密码，以及 MySQL 对安装服务器来源地址的授权"
+    ]
+  }
+}
+```
+
+安装状态中的顶层 `problem` 使用相同结构；`services[]` 在单个服务启动失败时也包含对应的 `problem`。端口占用、进程管理器失败、服务启动失败和 readiness 超时会指出具体服务，并提供日志位置、端口排查或依赖检查建议。原始进程输出和依赖错误不进入状态响应。
+
 所有响应设置 `Cache-Control: no-store`。安装令牌、数据库/Redis/MQTT 密码、首个管理员密码和生成密钥不出现在状态响应中。安装完成后写接口返回 `410`；重新授权只能在服务器本地执行部署流程，普通配置错误不会重新开放这些接口。
 
 除登录、MFA 验证、刷新和退出外，请求使用 `Authorization: Bearer <access_token>`。刷新令牌保存在 HttpOnly Cookie `admin_refresh` 中，Admin Web 只在页面内存中保存短期访问令牌，页面重新加载时通过刷新 Cookie 恢复会话。Admin Web 和二次开发客户端发送 `X-Admin-Request: 1`；使用 Cookie 的刷新与退出接口缺少该请求头时拒绝请求，以阻止跨站表单触发会话操作。列表接口通常接受 `page`、`page_size` 和页面对应的筛选参数。

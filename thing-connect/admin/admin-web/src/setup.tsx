@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   Alert,
+  App as AntApp,
   Button,
   Card,
   Checkbox,
@@ -18,7 +19,6 @@ import {
   Steps,
   Tag,
   Typography,
-  message,
 } from 'antd';
 import { ADMIN_PASSWORD_POLICY_MESSAGE, validateAdminPassword } from './password-policy';
 
@@ -33,8 +33,14 @@ export type SetupSnapshot = {
   message?: string;
   retryable?: boolean;
   needs_token?: boolean;
-  services?: { name: string; state: string }[];
-  problem?: { code: string; message: string };
+  services?: { name: string; state: string; problem?: SetupProblem }[];
+  problem?: SetupProblem;
+};
+
+export type SetupProblem = {
+  code: string;
+  message: string;
+  suggestions?: string[];
 };
 
 type SetupDraft = {
@@ -75,9 +81,28 @@ type SetupPlan = {
   warnings?: string[];
 };
 
-type Envelope<T> = { code: number; msg: string; data: T };
+type Envelope<T> = { code: number; msg: string; data?: T };
 
-async function setupAPI<T>(path: string, init: RequestInit = {}, token = ''): Promise<T> {
+export class SetupRequestError extends Error {
+  problem: SetupProblem;
+
+  constructor(problem: SetupProblem) {
+    super(problem.message);
+    this.name = 'SetupRequestError';
+    this.problem = problem;
+  }
+}
+
+function fallbackProblem(error: unknown): SetupProblem {
+  if (error instanceof SetupRequestError) return error.problem;
+  return {
+    code: 'REQUEST_FAILED',
+    message: error instanceof Error ? error.message : '安装请求失败',
+    suggestions: ['检查网络连接后重试；如果问题持续，请保留当前页面并检查 Admin 服务日志'],
+  };
+}
+
+export async function setupAPI<T>(path: string, init: RequestInit = {}, token = ''): Promise<T> {
   const headers = new Headers(init.headers);
   if (init.body) headers.set('Content-Type', 'application/json');
   if (token) headers.set('X-Setup-Token', token);
@@ -90,9 +115,27 @@ async function setupAPI<T>(path: string, init: RequestInit = {}, token = ''): Pr
   try {
     body = (await response.json()) as Envelope<T>;
   } catch {
-    throw new Error(`安装服务返回了无效响应（HTTP ${response.status}）`);
+    throw new SetupRequestError({
+      code: 'INVALID_RESPONSE',
+      message: `安装服务返回了无效响应（HTTP ${response.status}）`,
+      suggestions: ['确认请求到达 Admin Server，且反向代理没有替换 JSON 响应'],
+    });
   }
-  if (!response.ok || body.code !== 200) throw new Error(body.msg || `HTTP ${response.status}`);
+  if (!response.ok || body.code !== 200) {
+    const detail = body.data as SetupProblem | undefined;
+    throw new SetupRequestError({
+      code: detail?.code || `HTTP_${response.status}`,
+      message: detail?.message || body.msg || `HTTP ${response.status}`,
+      suggestions: detail?.suggestions,
+    });
+  }
+  if (body.data === undefined) {
+    throw new SetupRequestError({
+      code: 'INVALID_RESPONSE',
+      message: '安装服务响应缺少 data',
+      suggestions: ['确认 Admin Server 与 Admin Web 来自同一版本，然后重新加载页面'],
+    });
+  }
   return body.data;
 }
 
@@ -102,6 +145,37 @@ export async function loadSetupStatus(): Promise<SetupSnapshot | undefined> {
   const body = (await response.json()) as Envelope<SetupSnapshot>;
   if (!response.ok || body.code !== 200) throw new Error(body.msg || `HTTP ${response.status}`);
   return body.data;
+}
+
+export function SetupProblemAlert({
+  problem,
+  onClose,
+}: {
+  problem: SetupProblem;
+  onClose?: () => void;
+}) {
+  const suggestions = problem.suggestions?.filter(Boolean) || [];
+  return (
+    <Alert
+      type="error"
+      showIcon
+      closable={Boolean(onClose)}
+      onClose={onClose}
+      message={problem.message}
+      description={
+        suggestions.length ? (
+          <div>
+            <Typography.Text strong>处理建议</Typography.Text>
+            <ul>
+              {suggestions.map((suggestion) => (
+                <li key={suggestion}>{suggestion}</li>
+              ))}
+            </ul>
+          </div>
+        ) : undefined
+      }
+    />
+  );
 }
 
 function phaseIndex(phase?: string) {
@@ -117,17 +191,37 @@ function phaseIndex(phase?: string) {
   return Math.max(0, phases.indexOf(phase || 'validating'));
 }
 
+const serviceNames: Record<string, string> = {
+  'admin-server': '管理后台',
+  'device-server': '设备服务',
+  'user-server': '用户服务',
+  'voip-server': 'VoIP 服务',
+  'ai-server': 'AI 服务',
+  'call-server': '设备通话服务',
+};
+
+const serviceStates: Record<string, { label: string; color: string }> = {
+  checking: { label: '正在检查', color: 'processing' },
+  starting: { label: '正在启动', color: 'processing' },
+  ready: { label: '已就绪', color: 'success' },
+  failed: { label: '启动失败', color: 'error' },
+  not_ready: { label: '未就绪', color: 'error' },
+};
+
 export function SetupPage({ initial }: { initial: SetupSnapshot }) {
   const [form] = Form.useForm<SetupDraft>();
+  const { message: messageAPI } = AntApp.useApp();
   const [snapshot, setSnapshot] = useState(initial);
   const [plan, setPlan] = useState<SetupPlan>();
   const [draft, setDraft] = useState<SetupDraft>();
   const [token, setToken] = useState('');
   const [busy, setBusy] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const [requestProblem, setRequestProblem] = useState<SetupProblem>();
   const mqttAuthMode = Form.useWatch(['mqtt', 'auth_mode'], form) || 'username';
   const optionalServices = Form.useWatch('optional_services', form) || [];
   const running = Boolean(snapshot.operation_id && snapshot.phase !== 'installed');
+  const formProblem = requestProblem || (showForm && !plan ? snapshot.problem : undefined);
 
   useEffect(() => {
     if (!running) return;
@@ -187,6 +281,7 @@ export function SetupPage({ initial }: { initial: SetupSnapshot }) {
 
   const preview = async (values: SetupDraft) => {
     setBusy(true);
+    setRequestProblem(undefined);
     try {
       const result = await setupAPI<SetupPlan>(
         '/preview',
@@ -197,7 +292,9 @@ export function SetupPage({ initial }: { initial: SetupSnapshot }) {
       setDraft(values);
       setPlan(result);
     } catch (error) {
-      message.error((error as Error).message);
+      const problem = fallbackProblem(error);
+      setRequestProblem(problem);
+      messageAPI.error(problem.message);
     } finally {
       setBusy(false);
     }
@@ -206,6 +303,7 @@ export function SetupPage({ initial }: { initial: SetupSnapshot }) {
   const execute = async () => {
     if (!plan || !draft) return;
     setBusy(true);
+    setRequestProblem(undefined);
     try {
       const result = await setupAPI<SetupSnapshot>(
         '/execute',
@@ -218,7 +316,9 @@ export function SetupPage({ initial }: { initial: SetupSnapshot }) {
       setSnapshot(result);
       setPlan(undefined);
     } catch (error) {
-      message.error((error as Error).message);
+      const problem = fallbackProblem(error);
+      setRequestProblem(problem);
+      messageAPI.error(problem.message);
     } finally {
       setBusy(false);
     }
@@ -226,6 +326,7 @@ export function SetupPage({ initial }: { initial: SetupSnapshot }) {
 
   const resume = async () => {
     setBusy(true);
+    setRequestProblem(undefined);
     try {
       const result = await setupAPI<SetupSnapshot>(
         '/execute',
@@ -234,7 +335,9 @@ export function SetupPage({ initial }: { initial: SetupSnapshot }) {
       );
       setSnapshot(result);
     } catch (error) {
-      message.error((error as Error).message);
+      const problem = fallbackProblem(error);
+      setRequestProblem(problem);
+      messageAPI.error(problem.message);
     } finally {
       setBusy(false);
     }
@@ -270,21 +373,41 @@ export function SetupPage({ initial }: { initial: SetupSnapshot }) {
             percent={snapshot.percent || 0}
             status={snapshot.problem ? 'exception' : 'active'}
           />
-          <Alert
-            type={snapshot.problem ? 'error' : 'info'}
-            showIcon
-            message={snapshot.message || '正在处理'}
-            description={snapshot.problem?.message}
-          />
+          {requestProblem ? (
+            <SetupProblemAlert
+              problem={requestProblem}
+              onClose={() => setRequestProblem(undefined)}
+            />
+          ) : snapshot.problem ? (
+            <SetupProblemAlert problem={snapshot.problem} />
+          ) : (
+            <Alert type="info" showIcon message={snapshot.message || '正在处理'} />
+          )}
           {snapshot.services?.length ? (
             <List
               className="setup-services"
               dataSource={snapshot.services}
               renderItem={(service) => (
                 <List.Item>
-                  <Typography.Text>{service.name}</Typography.Text>
-                  <Tag color={service.state === 'ready' ? 'success' : 'processing'}>
-                    {service.state}
+                  <List.Item.Meta
+                    title={`${serviceNames[service.name] || service.name}（${service.name}）`}
+                    description={
+                      service.problem ? (
+                        <div>
+                          <Typography.Text type="danger">{service.problem.message}</Typography.Text>
+                          {service.problem.suggestions?.length ? (
+                            <ul>
+                              {service.problem.suggestions.map((suggestion) => (
+                                <li key={suggestion}>{suggestion}</li>
+                              ))}
+                            </ul>
+                          ) : null}
+                        </div>
+                      ) : undefined
+                    }
+                  />
+                  <Tag color={serviceStates[service.state]?.color || 'default'}>
+                    {serviceStates[service.state]?.label || service.state}
                   </Tag>
                 </List.Item>
               )}
@@ -323,6 +446,12 @@ export function SetupPage({ initial }: { initial: SetupSnapshot }) {
         <Typography.Paragraph type="secondary">
           连接信息通过预检后才会执行安装。陌生非空数据库、未来版本或结构不一致的数据库不会被修改。
         </Typography.Paragraph>
+        {formProblem ? (
+          <SetupProblemAlert
+            problem={formProblem}
+            onClose={requestProblem ? () => setRequestProblem(undefined) : undefined}
+          />
+        ) : null}
         {plan ? (
           <>
             <Alert

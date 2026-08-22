@@ -80,22 +80,27 @@ func (h *setupHTTP) execute(c *gin.Context) {
 
 func (h *setupHTTP) authorize(c *gin.Context) {
 	if state, err := h.bootstrap.Status(c.Request.Context()); err == nil && (state.Mode == installer.ModeInstalled || state.Mode == installer.ModeNormal) {
-		c.AbortWithStatusJSON(http.StatusGone, apiresp.JSON{Code: 410, Msg: "首次安装入口已永久关闭"})
+		abortSetupProblem(c, http.StatusGone, 410, installer.ErrAlreadyInstalled)
 		return
 	}
 	if !sameOrigin(c.Request) {
-		c.AbortWithStatusJSON(http.StatusForbidden, apiresp.JSON{Code: 403, Msg: "安装请求来源无效"})
+		abortSetupProblem(c, http.StatusForbidden, 403, installer.ErrInvalidOrigin)
 		return
 	}
 	if !h.allowAttempt(c.ClientIP()) {
-		c.AbortWithStatusJSON(http.StatusTooManyRequests, apiresp.JSON{Code: 429, Msg: "安装验证请求过于频繁，请稍后重试"})
+		abortSetupProblem(c, http.StatusTooManyRequests, 429, installer.ErrTooManyAttempts)
 		return
 	}
 	if err := h.bootstrap.Authenticate(c.GetHeader("X-Setup-Token")); err != nil {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, apiresp.JSON{Code: 401, Msg: "安装令牌无效"})
+		abortSetupProblem(c, http.StatusUnauthorized, 401, installer.ErrUnauthorized)
 		return
 	}
 	c.Next()
+}
+
+func abortSetupProblem(c *gin.Context, status, code int, err error) {
+	problem := installer.Explain(err)
+	c.AbortWithStatusJSON(status, apiresp.JSON{Code: code, Msg: problem.Message, Data: problem})
 }
 
 func (h *setupHTTP) allowAttempt(client string) bool {
@@ -132,30 +137,31 @@ func sameOrigin(request *http.Request) bool {
 
 func setupError(c *gin.Context, err error) {
 	slog.WarnContext(c.Request.Context(), "setup request failed", "path", c.FullPath(), "err", err)
-	status, code, message := http.StatusInternalServerError, 500, "安装服务暂时不可用"
+	problem := installer.Explain(err)
+	status, code := http.StatusInternalServerError, 500
 	switch {
 	case errors.Is(err, installer.ErrInvalidInput):
-		status, code, message = http.StatusBadRequest, 400, err.Error()
+		status, code = http.StatusBadRequest, 400
 	case errors.Is(err, installer.ErrUnauthorized):
-		status, code, message = http.StatusUnauthorized, 401, "安装令牌无效"
+		status, code = http.StatusUnauthorized, 401
 	case errors.Is(err, installer.ErrInstallBusy):
-		status, code, message = http.StatusConflict, 409, "另一个安装或发布任务正在运行"
+		status, code = http.StatusConflict, 409
 	case errors.Is(err, installer.ErrPlanStale):
-		status, code, message = http.StatusConflict, 409, "数据库状态或安装计划已经变化，请重新预检"
+		status, code = http.StatusConflict, 409
 	case errors.Is(err, installer.ErrAlreadyInstalled):
-		status, code, message = http.StatusGone, 410, "首次安装入口已永久关闭"
+		status, code = http.StatusGone, 410
 	case errors.Is(err, installer.ErrUnknownDatabase):
-		status, code, message = http.StatusConflict, 409, "目标数据库非空且无法确认属于 ThingConnect，未执行任何写入"
+		status, code = http.StatusConflict, 409
 	case errors.Is(err, installer.ErrSchemaFuture):
-		status, code, message = http.StatusConflict, 409, "数据库版本高于当前程序，请使用相同或更高版本"
+		status, code = http.StatusConflict, 409
 	case errors.Is(err, installer.ErrSchemaDrift):
-		status, code, message = http.StatusConflict, 409, "数据库结构与迁移记录不一致，已停止自动处理"
+		status, code = http.StatusConflict, 409
 	case errors.Is(err, installer.ErrRedisUnavailable):
-		status, code, message = http.StatusServiceUnavailable, 503, "Redis 连接检查失败，请检查地址、端口、密码和 DB"
+		status, code = http.StatusServiceUnavailable, 503
 	case errors.Is(err, installer.ErrMQTTUnavailable):
-		status, code, message = http.StatusServiceUnavailable, 503, "MQTT 连接或认证失败，请检查 Broker、认证方式和凭据"
+		status, code = http.StatusServiceUnavailable, 503
 	case errors.Is(err, installer.ErrMySQLUnavailable):
-		status, code, message = http.StatusServiceUnavailable, 503, "MySQL 连接检查失败，请检查地址、TLS、迁移账号密码和来源授权"
+		status, code = http.StatusServiceUnavailable, 503
 	}
-	c.JSON(status, apiresp.JSON{Code: code, Msg: message})
+	c.JSON(status, apiresp.JSON{Code: code, Msg: problem.Message, Data: problem})
 }

@@ -29,6 +29,11 @@ body,
   display: grid;
   gap: 8px;
 }
+.setup-card .ant-alert-description ul,
+.setup-services ul {
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
 .full-width {
   width: 100%;
 }

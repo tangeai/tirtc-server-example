@@ -68,6 +68,9 @@ TC-DEVICE-000001,replace-with-device-secret
 
 - `/health/live`：只表示 Admin 进程存活。
 - `/health/ready`：检查 MySQL、Redis 和 Admin 数据库迁移版本。
+
+首次安装页面持续显示结构化失败原因和处理建议。依赖预检失败时按页面检查地址、认证、TLS 和来源授权；业务服务启动失败时按页面列出的服务日志、端口或进程管理器建议处理。客户可见响应不包含 SQL、Redis、MQTT 客户端原始错误、内网连接串或凭据，详细原因只进入受保护的服务日志。
+
 - Admin 首页按实例展示五个业务服务的版本、提交号、依赖状态和配置 revision。
 
 常见检查：

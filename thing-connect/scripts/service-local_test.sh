@@ -83,6 +83,23 @@ test_runner_restarts_failed_child() {
     DEPLOY_ROOT="$DEPLOY_ROOT" "$CONTROLLER" stop thing-connect:device-server >/dev/null
 }
 
+test_start_rejects_occupied_port_with_guidance() (
+    DEPLOY_ROOT="$TEST_ROOT/occupied-port-deploy"
+    source "$SOURCE_SCRIPT"
+    mkdir -p "$DEPLOY_ROOT/call-server"
+    printf '#!/usr/bin/env bash\n' >"$DEPLOY_ROOT/call-server/call-server"
+    chmod +x "$DEPLOY_ROOT/call-server/call-server"
+    printf 'fixture: true\n' >"$DEPLOY_ROOT/call-server/config.yaml"
+    port_in_use() { return 0; }
+
+    local output
+    if output="$(start_one call-server 2>&1)"; then
+        fail "occupied call-server port was accepted"
+    fi
+    [[ "$output" == *"端口 9005 已被占用"* ]] || fail "port conflict reason is missing: $output"
+    [[ "$output" == *"处理建议"*"停止旧实例"* ]] || fail "port conflict guidance is missing: $output"
+)
+
 test_admin_receives_setup_listener() {
     local elapsed=0 args=""
     rm -rf -- "$DEPLOY_ROOT/var/local-services"
@@ -148,6 +165,7 @@ test_unknown_service_is_rejected() {
 prepare_controller
 test_status_protocol_and_lifecycle
 test_runner_restarts_failed_child
+test_start_rejects_occupied_port_with_guidance
 test_admin_receives_setup_listener
 test_start_all_only_uses_existing_configs
 test_start_all_stops_service_that_never_becomes_ready

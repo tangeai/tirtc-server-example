@@ -78,6 +78,11 @@ service_port() {
     esac
 }
 
+port_in_use() {
+    local port="$1"
+    (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null
+}
+
 run_service() {
     local service="$1" binary="$DEPLOY_ROOT/$service/$service"
     local config="$DEPLOY_ROOT/$service/config.yaml" stopping=0 child=""
@@ -112,7 +117,7 @@ run_service() {
 }
 
 start_one() (
-    local service="$1" file pid runner
+    local service="$1" file pid runner port
     local binary="$DEPLOY_ROOT/$service/$service"
     mkdir -p "$STATE_DIR" "$LOG_DIR"
     exec 9>"$STATE_DIR/$service.lock"
@@ -124,6 +129,12 @@ start_one() (
     [ -x "$binary" ] || { err "服务尚未发布: $binary"; return 1; }
     if [ "$service" != "admin-server" ]; then
         config_exists "$service" || { err "$service 配置不存在"; return 1; }
+    fi
+    port="$(service_port "$service")" || return 1
+    if port_in_use "$port"; then
+        err "$service 无法启动：端口 $port 已被占用"
+        err "处理建议：执行 ss -ltnp | grep ':$port' 确认占用进程；停止旧实例或重复的进程管理器后重试"
+        return 1
     fi
     file="$(pid_file "$service")"
     nohup setsid "$DEPLOY_ROOT/service-local.sh" run "$service" \

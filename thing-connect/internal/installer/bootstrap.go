@@ -398,9 +398,14 @@ func (b *Bootstrap) runInstalledServices(ctx context.Context, state journal) {
 	}
 	if err := b.runtime.StartAndWait(ctx, state.EnabledServices, update); err != nil {
 		log.Printf("resume installed services failed: operation_id=%s err=%v", state.OperationID, err)
-		state.Message = "ThingConnect 已安装，但部分所选服务尚未就绪"
+		problem := Explain(err)
+		if problem.Code == "INSTALL_FAILED" {
+			problem.Code = "BUSINESS_NOT_READY"
+			problem.Message = "ThingConnect 已安装，但部分所选服务尚未就绪"
+		}
+		state.Message = problem.Message
 		state.Retryable = true
-		state.Problem = &Problem{Code: "BUSINESS_NOT_READY", Message: state.Message}
+		state.Problem = &problem
 	} else {
 		state.Message = "ThingConnect 已安装，所选服务均已就绪"
 		state.Retryable = false
@@ -497,11 +502,16 @@ func (b *Bootstrap) progress(state *journal, phase string, percent int, message 
 
 func (b *Bootstrap) fail(state journal, code, message string, retryable bool, cause error) {
 	log.Printf("installer operation failed: operation_id=%s phase=%s code=%s err=%v", state.OperationID, state.Phase, code, cause)
+	problem := Explain(cause)
+	if problem.Code == "INSTALL_FAILED" {
+		problem.Code = code
+		problem.Message = message
+	}
 	state.Mode = ModeRecovery
-	state.Message = message
+	state.Message = problem.Message
 	state.Retryable = retryable
 	state.NeedsToken = true
-	state.Problem = &Problem{Code: code, Message: message}
+	state.Problem = &problem
 	state.UpdatedAt = b.now().UTC()
 	_ = b.writeJournal(state)
 }
@@ -587,37 +597,11 @@ func classificationProblem(class DatabaseClass) error {
 }
 
 func problemCode(err error) string {
-	switch {
-	case errors.Is(err, ErrUnknownDatabase):
-		return "DATABASE_UNKNOWN_NONEMPTY"
-	case errors.Is(err, ErrSchemaFuture):
-		return "SCHEMA_NEWER_THAN_BINARY"
-	case errors.Is(err, ErrSchemaDrift):
-		return "SCHEMA_DRIFT"
-	case errors.Is(err, ErrInstallBusy):
-		return "INSTALL_BUSY"
-	case errors.Is(err, ErrInvalidInput):
-		return "INVALID_INPUT"
-	default:
-		return "INSTALL_FAILED"
-	}
+	return Explain(err).Code
 }
 
 func safeMessage(err error) string {
-	switch {
-	case errors.Is(err, ErrUnknownDatabase):
-		return "目标数据库非空且无法确认属于 ThingConnect，未执行任何写入"
-	case errors.Is(err, ErrSchemaFuture):
-		return "数据库版本高于当前程序，请使用相同或更高版本"
-	case errors.Is(err, ErrSchemaDrift):
-		return "数据库结构与迁移记录不一致，已停止自动处理"
-	case errors.Is(err, ErrInstallBusy):
-		return "另一个安装或发布任务正在运行"
-	case errors.Is(err, ErrInvalidInput):
-		return "安装信息校验失败"
-	default:
-		return "安装未完成，请查看服务端脱敏日志后重试"
-	}
+	return Explain(err).Message
 }
 
 func acquireFileLock(path string) (*os.File, error) {

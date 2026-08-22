@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -58,6 +59,19 @@ func TestSetupErrorReportsDependencyWithoutLeakingRawCause(t *testing.T) {
 			}
 			if strings.Contains(recorder.Body.String(), "sensitive raw dependency cause") {
 				t.Fatalf("raw dependency error leaked: %s", recorder.Body.String())
+			}
+			var body struct {
+				Data struct {
+					Code        string   `json:"code"`
+					Message     string   `json:"message"`
+					Suggestions []string `json:"suggestions"`
+				} `json:"data"`
+			}
+			if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if body.Data.Code == "" || body.Data.Message == "" || len(body.Data.Suggestions) == 0 {
+				t.Fatalf("dependency error has no customer guidance: %s", recorder.Body.String())
 			}
 		})
 	}
