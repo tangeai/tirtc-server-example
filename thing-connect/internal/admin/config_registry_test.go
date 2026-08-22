@@ -75,7 +75,7 @@ func TestMQTTConnectionIsBlockingAndRequiresUnambiguousAuthentication(t *testing
 	registry := DefaultConfigRegistry()
 	for _, namespace := range []string{"user-server", "voip-server", "call-server"} {
 		definition, ok := registry.Lookup(namespace, "mqtt.connection")
-		if !ok || !definition.Required || !definition.Blocking || definition.Reload != "restart" {
+		if !ok || !definition.Required || !definition.Blocking || definition.TestKind != "mqtt" || definition.Reload != "restart" {
 			t.Fatalf("%s MQTT definition = %+v", namespace, definition)
 		}
 		valid := json.RawMessage(`{"broker":"mqtts://broker.example.com:8883","auth_mode":"username","username":"service","client_id":""}`)
@@ -85,6 +85,10 @@ func TestMQTTConnectionIsBlockingAndRequiresUnambiguousAuthentication(t *testing
 		if err := validateRequiredSecrets(namespace, "mqtt.connection", valid, json.RawMessage(`{"password":"secret"}`)); err != nil {
 			t.Fatalf("%s valid MQTT secret rejected: %v", namespace, err)
 		}
+	}
+	tirtc, _ := registry.Lookup("common", "tirtc")
+	if tirtc.TestKind != "" {
+		t.Fatal("TiRTC must not advertise an online test without a safe authoritative probe")
 	}
 	invalid := json.RawMessage(`{"broker":"mqtt://broker.example.com:1883/path","auth_mode":"username","username":"service","client_id":"duplicate"}`)
 	if err := registry.Validate("user-server", "mqtt.connection", invalid); err == nil {

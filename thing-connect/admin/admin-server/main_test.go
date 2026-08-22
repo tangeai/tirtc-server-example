@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	adminapp "thing-connect/internal/admin"
 	"thing-connect/internal/installer"
 )
 
@@ -86,5 +87,21 @@ func TestAdminAPIIsNotCacheable(t *testing.T) {
 	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/v1/admin/me", nil))
 	if got := recorder.Header().Get("Cache-Control"); got != "no-store" {
 		t.Fatalf("Cache-Control = %q", got)
+	}
+}
+
+func TestAdminMQTTProbeUsesTemporaryClientID(t *testing.T) {
+	username := adminMQTTProbeConfig(adminapp.MQTTConnection{
+		Broker: "mqtt://broker.example.com:1883", Username: "usersrv", Password: "secret",
+	})
+	if username.AuthMode() != "username" || username.Username != "usersrv" || username.ClientID != "" {
+		t.Fatalf("username probe config = %+v", username)
+	}
+
+	fixed := adminMQTTProbeConfig(adminapp.MQTTConnection{
+		Broker: "mqtt://broker.example.com:1883", ClientID: "voipsrv", Password: "secret",
+	})
+	if fixed.AuthMode() != "username" || fixed.Username != "voipsrv" || fixed.ClientID != "" {
+		t.Fatalf("fixed ClientID probe could disconnect the live client: %+v", fixed)
 	}
 }

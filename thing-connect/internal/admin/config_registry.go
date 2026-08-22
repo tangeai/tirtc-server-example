@@ -28,6 +28,7 @@ type ConfigDefinition struct {
 	Fields      []ConfigFieldDefinition `json:"fields,omitempty"`
 	Required    bool                    `json:"required"`
 	Blocking    bool                    `json:"blocking"`
+	TestKind    string                  `json:"test_kind,omitempty"`
 	Targets     []string                `json:"targets"`
 	Reload      string                  `json:"reload"`
 	validator   func(json.RawMessage) error
@@ -72,14 +73,14 @@ func DefaultConfigRegistry() *ConfigRegistry {
 		def("user-server", "user.default_bind_quota", "user", "新用户默认绑定额度", `{"quota":10}`, nil, []string{"user-server"}, validatePositiveFields("quota")),
 		def("user-server", "user.token_policy", "user", "用户 Token 策略", `{"token_expiry":"168h"}`, nil, []string{"user-server"}, validateDurationFields("token_expiry")),
 		def("user-server", "mqtt.ack_policy", "mqtt", "绑定 MQTT ACK 策略", `{"timeout":"5s"}`, nil, []string{"user-server"}, validateDurationFields("timeout")),
-		restartDef(blockingDef(def("user-server", "mqtt.connection", "mqtt", "MQTT 连接", `{"broker":"","auth_mode":"username","username":"","client_id":""}`, []string{"password"}, []string{"user-server"}, validateMQTTConnection), "用户服务需要 MQTT 才能完成设备绑定消息交互")),
+		testDef(restartDef(blockingDef(def("user-server", "mqtt.connection", "mqtt", "MQTT 连接", `{"broker":"","auth_mode":"username","username":"","client_id":""}`, []string{"password"}, []string{"user-server"}, validateMQTTConnection), "用户服务需要 MQTT 才能完成设备绑定消息交互")), "mqtt"),
 		def("voip-server", "wechat.apps", "wechat", "微信小程序", `{"default_app_id":"","apps":{}}`, []string{"apps.*.secret", "apps.*.token", "apps.*.encoding_aes_key"}, []string{"voip-server"}, validateWechatApps),
-		restartDef(blockingDef(def("voip-server", "mqtt.connection", "mqtt", "MQTT 连接", `{"broker":"","auth_mode":"username","username":"","client_id":""}`, []string{"password"}, []string{"voip-server"}, validateMQTTConnection), "VoIP 服务启动前必须配置可用的 MQTT 连接")),
+		testDef(restartDef(blockingDef(def("voip-server", "mqtt.connection", "mqtt", "MQTT 连接", `{"broker":"","auth_mode":"username","username":"","client_id":""}`, []string{"password"}, []string{"voip-server"}, validateMQTTConnection), "VoIP 服务启动前必须配置可用的 MQTT 连接")), "mqtt"),
 		def("ai-server", "ai.role_policy", "ai", "AI 角色策略", `{"default_role_id":"fin63bby1og0","base_url":"https://api-tirtc.tange365.com","base_role_url":"https://openapi-cn01.tange365.com"}`, nil, []string{"ai-server"}, validateAIRolePolicy),
 		def("ai-server", "ai.resource_policy", "ai", "AI 资源策略", `{"resource_quota":{"mcp":4,"device_plugin":20,"kb":5},"default_resources":{"mcp":[],"device_plugin":[],"kb":[]}}`, nil, []string{"ai-server"}, validateAIResourcePolicy),
 		def("call-server", "call.contact_policy", "call", "联系人策略", `{"max_contacts_per_device":200}`, nil, []string{"call-server"}, validatePositiveFields("max_contacts_per_device")),
 		def("call-server", "call.room_policy", "call", "房间策略", `{"room_ttl_hours":12}`, nil, []string{"call-server"}, validatePositiveFields("room_ttl_hours")),
-		restartDef(blockingDef(def("call-server", "mqtt.connection", "mqtt", "MQTT 连接", `{"broker":"","auth_mode":"username","username":"","client_id":""}`, []string{"password"}, []string{"call-server"}, validateMQTTConnection), "设备通话服务启动前必须配置可用的 MQTT 连接")),
+		testDef(restartDef(blockingDef(def("call-server", "mqtt.connection", "mqtt", "MQTT 连接", `{"broker":"","auth_mode":"username","username":"","client_id":""}`, []string{"password"}, []string{"call-server"}, validateMQTTConnection), "设备通话服务启动前必须配置可用的 MQTT 连接")), "mqtt"),
 		restartDef(blockingDef(def("common", "tirtc", "tirtc", "TiRTC", `{"endpoint":"","app_id":""}`, []string{"access_key_id", "secret_key_id"}, []string{"user-server", "voip-server", "ai-server", "call-server"}, validateTiRTC), "TiRTC 凭证缺失时，登录令牌、呼叫和 AI 能力不可用")),
 		def("system", "mfa.policy", "security", "MFA 策略", `{"enabled":true}`, nil, []string{"admin-server"}, validateMFAPolicy),
 		def("system", "admin.session_policy", "security", "管理员会话策略", `{"access_ttl":"15m","refresh_ttl":"168h","max_sessions":10,"login_window":"15m","login_max_attempts":5,"mfa_window":"5m","mfa_max_attempts":5}`, nil, []string{"admin-server"}, validateSessionPolicy),
@@ -105,6 +106,11 @@ func blockingDef(definition ConfigDefinition, description string) ConfigDefiniti
 
 func restartDef(definition ConfigDefinition) ConfigDefinition {
 	definition.Reload = "restart"
+	return definition
+}
+
+func testDef(definition ConfigDefinition, kind string) ConfigDefinition {
+	definition.TestKind = kind
 	return definition
 }
 

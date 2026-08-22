@@ -41,6 +41,7 @@ Admin 配置中心管理 `device-server`、`user-server`、`voip-server`、`ai-s
 - 不读取业务服务 YAML 中的同名旧业务值。
 - TiRTC App ID、Access Key ID 和 Secret Key ID 没有可运行默认值，后台将其标记为必填阻塞项。
 - User、VoIP、Call 的 `mqtt.connection` 没有可运行默认值，三个服务分别发布独立账号。Admin、Device 和 AI 不连接 MQTT。
+- MQTT 表单可以先用尚未发布的值测试 Broker 网络、TLS 和账号认证；发布接口也会自动复检，失败时保持原配置不变。固定 ClientID 测试使用临时连接 ID，不会断开同名业务客户端；服务器启动预检再使用正式 ClientID 做最终检查。
 - User、VoIP、AI、Call 首次启动必须从 Admin 取得有效 TiRTC 配置；需要 MQTT 的服务还必须取得有效 MQTT 配置。Admin 不可达或响应无效时拒绝监听。
 - 普通配置在运行期热加载；MQTT 和 TiRTC 的 `reload` 为 `restart`，发布后通过服务器进程管理命令重启对应服务。
 - 运行期间 Admin 短暂不可达时，业务服务继续使用内存中的最后有效值并重试。

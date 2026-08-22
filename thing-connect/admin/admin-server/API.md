@@ -125,10 +125,12 @@ MFA 验证请求：
 | GET | `/configs` | 按命名空间和范围查询有效配置；未发布项返回注册表默认值 |
 | GET | `/configs/:namespace/:config_key` | 读取配置及修订号 |
 | POST | `/configs/:namespace/:config_key/validate` | 只验证，不发布 |
-| POST | `/configs/:namespace/:config_key/test` | 对 SMTP、人机验证等支持测试的配置执行连通性测试 |
-| PUT | `/configs/:namespace/:config_key` | 发布配置；需要提交当前修订号以避免并发覆盖 |
+| POST | `/configs/:namespace/:config_key/test` | 使用待发布值测试 MQTT 连接认证或发送 SMTP/模板测试邮件，不发布配置 |
+| PUT | `/configs/:namespace/:config_key` | 发布配置；需要提交当前修订号以避免并发覆盖，可测试配置会在写入前自动复检 |
 
-配置定义中的 `name`、`group`、`description`、`default`、`required`、`blocking`、`reload`、`secret_paths` 和 `fields` 用于生成管理表单。`required` 表示必须发布可运行值，`blocking` 表示缺失会阻塞定义中说明的业务能力，`reload=restart` 表示发布后需重启目标服务，其他配置按服务实现热加载。`fields` 是后端注册表提供的单一字段事实源，每项包含字段路径 `path`、中文名称 `label`、控件类型 `kind`，并可包含 `description`、`options`、`secret`、`providers`、`required`、`required_when_enabled`、`blocking` 和 `min`。`resource_refs` 控件编辑 `[{"id":"...","name":"..."}]` 结构，用于 AI 默认 MCP、设备插件和知识库资源。Admin Web 根据这些元数据生成输入控件和基础校验；只有明确使用自定义编辑器的复杂配置才维护独立页面。
+配置定义中的 `name`、`group`、`description`、`default`、`required`、`blocking`、`test_kind`、`reload`、`secret_paths` 和 `fields` 用于生成管理表单。`required` 表示必须发布可运行值，`blocking` 表示缺失会阻塞定义中说明的业务能力，非空 `test_kind` 表示表单提供对应类型的显式在线测试且发布接口自动执行同一测试；当前注册 `mqtt`。`reload=restart` 表示发布后需重启目标服务，其他配置按服务实现热加载。`fields` 是后端注册表提供的单一字段事实源，每项包含字段路径 `path`、中文名称 `label`、控件类型 `kind`，并可包含 `description`、`options`、`secret`、`providers`、`required`、`required_when_enabled`、`blocking` 和 `min`。`resource_refs` 控件编辑 `[{"id":"...","name":"..."}]` 结构，用于 AI 默认 MCP、设备插件和知识库资源。Admin Web 根据这些元数据生成输入控件和基础校验；只有明确使用自定义编辑器的复杂配置才维护独立页面。
+
+User、VoIP、Call 的 `mqtt.connection` 是可测试配置。测试使用请求中的 `value` 和可选 `secrets`；未提交 `secrets` 时沿用已发布密码。测试只建立临时 MQTT 连接，不订阅、不发布消息、不写 Redis，也不发布配置项。固定 ClientID 模式仍使用相同账号认证，但测试连接采用临时 ClientID，避免断开在线业务服务；正式 ClientID 由服务器启动预检确认。连接、TLS 或认证失败返回 `503` 和可操作的中文排查提示，Broker 客户端原始错误及内网地址只写入受保护日志。
 
 配置响应中的 `using_default=true` 表示数据库尚无发布记录，`value` 是当前有效的注册表默认值，`revision` 为 `0`。配置密钥以明文 JSON 存储。具有 `config.secret.write` 的管理员读取普通配置、具有 `voip.app.write` 的管理员读取微信应用配置时，响应额外包含 `secrets` 原值；其他管理员只看到 `secret_configured`。Admin Web 用默认隐藏且可点击眼睛切换的密码控件展示这些值。
 

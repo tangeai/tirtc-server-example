@@ -161,9 +161,16 @@ func (a *Aggregator) List(ctx context.Context) ([]ServiceSummary, error) {
 	if len(stale) > 0 {
 		_ = a.client.SRem(ctx, instanceIndex, stale...).Err()
 	}
+	return summarizeServices(byService), nil
+}
+
+func summarizeServices(byService map[string][]Instance) []ServiceSummary {
 	result := make([]ServiceSummary, 0, len(ExpectedServices))
 	for _, service := range ExpectedServices {
 		instances := byService[service]
+		if instances == nil {
+			instances = []Instance{}
+		}
 		sort.Slice(instances, func(i, j int) bool { return instances[i].InstanceID < instances[j].InstanceID })
 		healthy := 0
 		for _, instance := range instances {
@@ -179,7 +186,7 @@ func (a *Aggregator) List(ctx context.Context) ([]ServiceSummary, error) {
 		}
 		result = append(result, ServiceSummary{Service: service, Status: status, InstanceCount: len(instances), HealthyCount: healthy, Instances: instances})
 	}
-	return result, nil
+	return result
 }
 
 func RegisterHealth(r *gin.Engine, probes map[string]DependencyProbe) {

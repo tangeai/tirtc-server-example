@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "test": "node --experimental-strip-types --test src/api-client.test.ts src/password-policy.test.ts src/setup.test.ts",
+    "test": "node --experimental-strip-types --test src/api-client.test.ts src/password-policy.test.ts src/setup.test.ts src/pages/configuration/config-status.test.ts",
     "check": "npm run format:check && npm test && npm run build",
     "format": "prettier --write src vite.config.ts",
     "format:check": "prettier --check src vite.config.ts"

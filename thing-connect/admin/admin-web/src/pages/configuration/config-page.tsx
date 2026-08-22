@@ -29,6 +29,7 @@ import {
   dependencyNames,
   serviceName,
 } from '../../shared/admin-metadata';
+import { commonServiceRows } from './config-status';
 
 export type Definition = {
   namespace: string;
@@ -41,6 +42,7 @@ export type Definition = {
   fields?: ConfigField[];
   required: boolean;
   blocking: boolean;
+  test_kind?: string;
   targets: string[];
   reload: 'runtime' | 'restart';
 };
@@ -95,7 +97,14 @@ export function ConfigPage({
     () => api<{ items: ConfigEntry[] }>(`/configs?namespace=${namespace}`),
     [namespace],
   );
+  const [form] = Form.useForm();
   const [editing, setEditing] = useState<{ definition: Definition; entry: ConfigEntry }>();
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+  const [connectionFeedback, setConnectionFeedback] = useState<{
+    type: 'success' | 'error';
+    message: string;
+  }>();
   const rows = useMemo(
     () =>
       defs?.items
@@ -114,34 +123,57 @@ export function ConfigPage({
         })) || [],
     [defs, entries, namespace, excludeGroups.join(',')],
   );
-  const save = async (v: AnyRow) => {
+  const candidateBody = (v: AnyRow, definition: Definition) => {
+    const fields = definition.fields;
+    const configValue = fields?.length ? v.config : JSON.parse(v.value);
+    if (definition.config_key === 'captcha' && !configValue.public_config)
+      configValue.public_config = {};
+    const body: AnyRow = { value: configValue, status: 1, reason: v.reason };
+    const secrets = fields
+      ? compactSecrets(v.secrets)
+      : v.secretJSON?.trim()
+        ? JSON.parse(v.secretJSON)
+        : undefined;
+    if (secrets) body.secrets = secrets;
+    return body;
+  };
+  const testConnection = async () => {
+    if (!editing || testingConnection || publishing) return;
+    const current = editing;
+    setTestingConnection(true);
+    setConnectionFeedback(undefined);
     try {
-      const fields = editing!.definition.fields;
-      const configValue = fields?.length ? v.config : JSON.parse(v.value);
-      if (editing!.definition.config_key === 'captcha' && !configValue.public_config)
-        configValue.public_config = {};
-      const body: AnyRow = {
-        value: configValue,
-        status: 1,
-        expected_revision: editing!.entry.revision,
-        reason: v.reason,
+      const values = await form.validateFields();
+      const result = await api<{ message: string }>(
+        `/configs/${namespace}/${current.definition.config_key}/test`,
+        json('POST', candidateBody(values, current.definition)),
+      );
+      setConnectionFeedback({ type: 'success', message: result.message || '连接测试通过' });
+    } catch (e) {
+      setConnectionFeedback({ type: 'error', message: (e as Error).message });
+    } finally {
+      setTestingConnection(false);
+    }
+  };
+  const save = async (v: AnyRow) => {
+    if (!editing || publishing || testingConnection) return;
+    const current = editing;
+    setPublishing(true);
+    if (current.definition.test_kind) setConnectionFeedback(undefined);
+    try {
+      const body = candidateBody(v, current.definition);
+      Object.assign(body, {
+        expected_revision: current.entry.revision,
         confirm: true,
-      };
-      const secrets = fields
-        ? compactSecrets(v.secrets)
-        : v.secretJSON?.trim()
-          ? JSON.parse(v.secretJSON)
-          : undefined;
-      if (secrets) body.secrets = secrets;
-      if (namespace === 'system' && editing!.definition.config_key === 'mfa.policy')
+      });
+      if (namespace === 'system' && current.definition.config_key === 'mfa.policy')
         Object.assign(body, {
           current_password: v.current_password,
           current_mfa_code: v.current_mfa_code,
           current_recovery_code: v.current_recovery_code,
-          confirm: true,
         });
-      await api(`/configs/${namespace}/${editing!.definition.config_key}`, json('PUT', body));
-      if (editing!.definition.reload === 'restart') {
+      await api(`/configs/${namespace}/${current.definition.config_key}`, json('PUT', body));
+      if (current.definition.reload === 'restart') {
         message.warning('配置已发布；请按服务状态卡片中的服务器命令重启目标服务');
       } else {
         message.success('配置已发布');
@@ -149,7 +181,13 @@ export function ConfigPage({
       setEditing(undefined);
       loadEntries();
     } catch (e) {
-      message.error((e as Error).message);
+      if (current.definition.test_kind) {
+        setConnectionFeedback({ type: 'error', message: (e as Error).message });
+      } else {
+        message.error((e as Error).message);
+      }
+    } finally {
+      setPublishing(false);
     }
   };
   const actions = (
@@ -240,7 +278,13 @@ export function ConfigPage({
             {
               title: '操作',
               render: (_, r) => (
-                <Button type="link" onClick={() => setEditing(r)}>
+                <Button
+                  type="link"
+                  onClick={() => {
+                    setConnectionFeedback(undefined);
+                    setEditing(r);
+                  }}
+                >
                   配置
                 </Button>
               ),
@@ -253,11 +297,17 @@ export function ConfigPage({
         open={!!editing}
         title={editing?.definition.name}
         footer={null}
-        destroyOnClose
-        onCancel={() => setEditing(undefined)}
+        destroyOnHidden
+        onCancel={() => {
+          if (testingConnection || publishing) return;
+          setConnectionFeedback(undefined);
+          setEditing(undefined);
+        }}
       >
         {editing && (
           <Form
+            form={form}
+            clearOnDestroy
             layout="vertical"
             onFinish={save}
             initialValues={{
@@ -315,9 +365,30 @@ export function ConfigPage({
             <Form.Item name="reason" label="发布原因" rules={[{ required: true }]}>
               <Input placeholder="说明为什么调整此配置" />
             </Form.Item>
-            <Button type="primary" htmlType="submit">
-              校验并发布
-            </Button>
+            {editing.definition.test_kind && connectionFeedback && (
+              <Alert
+                className="form-alert"
+                type={connectionFeedback.type}
+                showIcon
+                message={connectionFeedback.type === 'success' ? '连接测试通过' : '连接测试失败'}
+                description={connectionFeedback.message}
+              />
+            )}
+            <Space>
+              {editing.definition.test_kind && (
+                <Button loading={testingConnection} disabled={publishing} onClick={testConnection}>
+                  测试连接
+                </Button>
+              )}
+              <Button
+                type="primary"
+                htmlType="submit"
+                loading={publishing}
+                disabled={testingConnection}
+              >
+                {editing.definition.test_kind ? '测试并发布' : '校验并发布'}
+              </Button>
+            </Space>
           </Form>
         )}
       </Modal>
@@ -434,15 +505,7 @@ function CommonServicePanel() {
     () => Promise.all(targets.map((service) => api<AnyRow>(`/services/${service}/status`))),
     [],
   );
-  const rows = data?.flatMap((service) =>
-    service.instances.length
-      ? service.instances.map((instance: AnyRow) => ({
-          ...instance,
-          service: service.service,
-          status: service.status,
-        }))
-      : [{ service: service.service, status: service.status, instance_id: '—', node: '—' }],
-  );
+  const rows = commonServiceRows(data);
   return (
     <Card
       className="service-card"

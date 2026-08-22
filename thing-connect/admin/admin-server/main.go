@@ -245,7 +245,8 @@ func main() {
 		apiresp.OK(c, gin.H{"status": "ready"})
 	})
 	deviceService := adminapp.NewDeviceService(adminmysql.NewDeviceCommandStore(sqlDB))
-	adminHTTP := adminapp.NewHTTPServer(store, authService, access, configService, servicestatus.NewAggregator(redisClient), redisClient, jobService, deviceService, cfg.Admin.CookieSecure)
+	configTester := adminapp.NewConfigTester(configService, adminMQTTConnectionProbe{})
+	adminHTTP := adminapp.NewHTTPServer(store, authService, access, configService, configTester, servicestatus.NewAggregator(redisClient), redisClient, jobService, deviceService, cfg.Admin.CookieSecure)
 	adminHTTP.SetServiceCommandRoot(root)
 	if value, _, _, loadErr := configService.Resolved(context.Background(), "system", "admin.session_policy", "global", ""); loadErr == nil {
 		var policy struct {
@@ -304,6 +305,27 @@ type directConfigLoader struct{ service *adminapp.ConfigService }
 func (loader directConfigLoader) Load(ctx context.Context, namespace, key string) (dynamicconfig.Snapshot, error) {
 	value, secrets, revision, err := loader.service.Resolved(ctx, namespace, key, "global", "")
 	return dynamicconfig.Snapshot{Value: value, Secrets: secrets, Revision: revision}, err
+}
+
+type adminMQTTConnectionProbe struct{}
+
+func (adminMQTTConnectionProbe) Probe(ctx context.Context, connection adminapp.MQTTConnection) error {
+	return mqttc.Probe(ctx, adminMQTTProbeConfig(connection))
+}
+
+func adminMQTTProbeConfig(connection adminapp.MQTTConnection) baseconfig.MQTTCfg {
+	probeConfig := baseconfig.MQTTCfg{
+		Broker: connection.Broker, Username: connection.Username,
+		ClientID: connection.ClientID, Password: connection.Password,
+	}
+	if probeConfig.ClientID != "" {
+		// Fixed ClientID mode authenticates with username=ClientID. The Admin
+		// probe keeps that username but lets mqttc.Probe generate a temporary
+		// ClientID so an online service is not disconnected by the test.
+		probeConfig.Username = probeConfig.ClientID
+		probeConfig.ClientID = ""
+	}
+	return probeConfig
 }
 
 func checkBusinessServiceConfig(ctx context.Context, root, serviceName string, sqlDB *sqlx.DB) error {

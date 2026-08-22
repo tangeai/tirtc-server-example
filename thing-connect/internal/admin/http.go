@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/mail"
 	"strings"
@@ -28,6 +29,7 @@ type HTTPServer struct {
 	auth             *AuthService
 	access           *AccessController
 	configs          *ConfigService
+	configTester     *ConfigTester
 	statuses         *servicestatus.Aggregator
 	redis            *redis.Client
 	jobs             *JobService
@@ -47,8 +49,8 @@ func (s *HTTPServer) SetServiceCommandRoot(root string) {
 	}
 }
 
-func NewHTTPServer(store *Store, auth *AuthService, access *AccessController, configs *ConfigService, statuses *servicestatus.Aggregator, redisClient *redis.Client, jobs *JobService, devices *DeviceService, cookieSecure bool) *HTTPServer {
-	return &HTTPServer{store: store, auth: auth, access: access, configs: configs, statuses: statuses, redis: redisClient, jobs: jobs, devices: devices, cookieSecure: cookieSecure, loginWindow: 15 * time.Minute, loginMaxAttempts: 5, mfaWindow: 5 * time.Minute, mfaMaxAttempts: 5}
+func NewHTTPServer(store *Store, auth *AuthService, access *AccessController, configs *ConfigService, configTester *ConfigTester, statuses *servicestatus.Aggregator, redisClient *redis.Client, jobs *JobService, devices *DeviceService, cookieSecure bool) *HTTPServer {
+	return &HTTPServer{store: store, auth: auth, access: access, configs: configs, configTester: configTester, statuses: statuses, redis: redisClient, jobs: jobs, devices: devices, cookieSecure: cookieSecure, loginWindow: 15 * time.Minute, loginMaxAttempts: 5, mfaWindow: 5 * time.Minute, mfaMaxAttempts: 5}
 }
 
 func (s *HTTPServer) SetAuthRatePolicy(loginWindow time.Duration, loginMax int64, mfaWindow time.Duration, mfaMax int64) {
@@ -636,14 +638,38 @@ func (s *HTTPServer) testConfig(c *gin.Context) {
 		apiresp.BadParamError(c, err)
 		return
 	}
-	recipient := strings.TrimSpace(request.TestRecipient)
-	parsed, err := mail.ParseAddress(recipient)
-	if err != nil || parsed.Address != recipient || strings.TrimSpace(request.Reason) == "" {
-		apiresp.BadParam(c, "测试收件地址和操作原因不能为空")
+	if strings.TrimSpace(request.Reason) == "" {
+		apiresp.BadParam(c, "配置测试需要填写操作原因")
 		return
 	}
 	namespace, key := c.Param("namespace"), c.Param("config_key")
 	secrets, provided := rawPointer(request.Secrets)
+	identity, _ := identityFromContext(c)
+	if provided && !s.canAccessConfigSecrets(identity, namespace, key) {
+		c.JSON(http.StatusForbidden, apiresp.JSON{Code: 403, Msg: "无权使用待测试的密钥"})
+		return
+	}
+	if s.configTester != nil {
+		result, supported, testErr := s.configTester.Test(c.Request.Context(), ConfigTestInput{
+			Namespace: namespace, ConfigKey: key, Value: request.Value,
+			Secrets: secrets, SecretsProvided: provided,
+		})
+		if supported {
+			if testErr != nil {
+				s.writeConfigTestError(c, namespace, key, testErr)
+				return
+			}
+			_ = s.store.Audit(c, requestAudit(c, identity, "config.test", "config", definitionID(namespace, key), request.Reason, "", `{"connected":true}`))
+			apiresp.OK(c, result)
+			return
+		}
+	}
+	recipient := strings.TrimSpace(request.TestRecipient)
+	parsed, err := mail.ParseAddress(recipient)
+	if err != nil || parsed.Address != recipient {
+		apiresp.BadParam(c, "测试收件地址格式无效")
+		return
+	}
 	if err := s.configs.Validate(namespace, key, request.Value, secrets, provided); err != nil {
 		apiresp.BadParam(c, err.Error())
 		return
@@ -717,12 +743,35 @@ func (s *HTTPServer) testConfig(c *gin.Context) {
 		sendErr = mailer.Send(ctx, recipient, subject, body)
 	}
 	if sendErr != nil {
-		apiresp.BadParam(c, "测试邮件发送失败: "+sendErr.Error())
+		slog.WarnContext(c.Request.Context(), "SMTP configuration test failed", "config", definitionID(namespace, key), "err", sendErr)
+		c.JSON(http.StatusServiceUnavailable, apiresp.JSON{
+			Code: 503,
+			Msg:  "测试邮件发送失败，请检查 SMTP 地址、端口、TLS 模式、账号密码、发件地址和来源授权",
+		})
 		return
 	}
-	identity, _ := identityFromContext(c)
 	_ = s.store.Audit(c, requestAudit(c, identity, "config.test", "config", definitionID(namespace, key), request.Reason, "", `{"sent":true}`))
 	apiresp.OK(c, gin.H{"sent": true})
+}
+
+func (s *HTTPServer) writeConfigTestError(c *gin.Context, namespace, key string, err error) {
+	if !errors.Is(err, ErrConfigConnectionTestFailed) {
+		s.writeConfigError(c, err)
+		return
+	}
+	var probeErr *configConnectionTestError
+	if errors.As(err, &probeErr) {
+		slog.WarnContext(c.Request.Context(), "config connection test failed", "config", definitionID(namespace, key), "err", probeErr.Cause())
+	}
+	c.JSON(http.StatusServiceUnavailable, apiresp.JSON{
+		Code: 503,
+		Msg:  "MQTT 连接或认证测试失败，请检查 Broker 地址、TLS 证书、认证方式、用户名/ClientID、密码和来源授权",
+		Data: gin.H{"suggestions": []string{
+			"确认 Admin 服务器可访问 Broker 端口",
+			"使用 mqtts:// 时确认系统信任库可验证 Broker 证书链",
+			"确认账号、密码、ClientID 和 Broker 来源授权一致",
+		}},
+	})
 }
 
 func (s *HTTPServer) putConfig(c *gin.Context) {
@@ -752,6 +801,16 @@ func (s *HTTPServer) putConfig(c *gin.Context) {
 	if isMFAPolicy {
 		if !s.access.Enforce(identity.UserID, "security.mfa.write") || s.auth.VerifyPassword(c, identity.UserID, request.CurrentPassword) != nil || s.auth.VerifyStepUp(c, identity.UserID, request.CurrentMFACode, request.CurrentRecovery) != nil {
 			apiresp.BadParam(c, "修改 MFA 策略需要权限、当前密码、二次验证、原因和确认")
+			return
+		}
+	}
+	if s.configTester != nil {
+		_, supported, testErr := s.configTester.Test(c.Request.Context(), ConfigTestInput{
+			Namespace: c.Param("namespace"), ConfigKey: c.Param("config_key"), Value: request.Value,
+			Secrets: secrets, SecretsProvided: secretsProvided,
+		})
+		if supported && testErr != nil {
+			s.writeConfigTestError(c, c.Param("namespace"), c.Param("config_key"), testErr)
 			return
 		}
 	}

@@ -2,6 +2,7 @@ package servicestatus
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -81,5 +82,19 @@ func TestServiceStatusHelpers(t *testing.T) {
 	want := errors.New("db down")
 	if err := SQLProbe(testPinger{err: want})(context.Background()); !errors.Is(err, want) {
 		t.Fatalf("SQL probe did not preserve the dependency error: %v", err)
+	}
+}
+
+func TestOfflineServiceSummarySerializesInstancesAsArray(t *testing.T) {
+	summaries := summarizeServices(nil)
+	if len(summaries) != len(ExpectedServices) {
+		t.Fatalf("summary count = %d", len(summaries))
+	}
+	payload, err := json.Marshal(summaries[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(payload), `"instances":null`) || !strings.Contains(string(payload), `"instances":[]`) {
+		t.Fatalf("offline service response must use an empty array: %s", payload)
 	}
 }
