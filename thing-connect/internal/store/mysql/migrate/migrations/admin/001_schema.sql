@@ -1,12 +1,23 @@
+-- 历史版本 001 的结构定义保持不可变；当前表和字段的完整中文 COMMENT
+-- 由 005_schema_comments.sql 统一补齐，scripts/schema.sql 展示最终结构。
 CREATE TABLE IF NOT EXISTS admin_users (
-    id BIGINT NOT NULL AUTO_INCREMENT, email VARCHAR(255) NOT NULL, password VARCHAR(255) NOT NULL,
-    nick_name VARCHAR(64) NOT NULL DEFAULT '', status TINYINT NOT NULL DEFAULT 1,
-    auth_revision BIGINT NOT NULL DEFAULT 1, must_change_password TINYINT NOT NULL DEFAULT 0,
-    password_updated_at DATETIME NULL, last_login_ip VARCHAR(45) NOT NULL DEFAULT '', last_login_at DATETIME NULL,
-    remark VARCHAR(256) NOT NULL DEFAULT '', created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    PRIMARY KEY (id), UNIQUE KEY uq_admin_email (email), KEY idx_admin_status (status)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT '管理员主键',
+    email VARCHAR(255) NOT NULL COMMENT '管理员登录邮箱，系统内唯一',
+    password VARCHAR(255) NOT NULL COMMENT '密码哈希，不存储明文',
+    nick_name VARCHAR(64) NOT NULL DEFAULT '' COMMENT '管理员显示名称',
+    status TINYINT NOT NULL DEFAULT 1 COMMENT '账号状态：1=启用，0=禁用',
+    auth_revision BIGINT NOT NULL DEFAULT 1 COMMENT '认证版本；安全属性变化时递增并撤销旧会话',
+    must_change_password TINYINT NOT NULL DEFAULT 0 COMMENT '是否要求下次登录修改密码：1=是，0=否',
+    password_updated_at DATETIME NULL COMMENT '最近一次修改密码时间',
+    last_login_ip VARCHAR(45) NOT NULL DEFAULT '' COMMENT '最近一次成功登录客户端 IP',
+    last_login_at DATETIME NULL COMMENT '最近一次成功登录时间',
+    remark VARCHAR(256) NOT NULL DEFAULT '' COMMENT '管理员备注',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_admin_email (email),
+    KEY idx_admin_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='后台管理员账号';
 
 CREATE TABLE IF NOT EXISTS admin_roles (
     id BIGINT NOT NULL AUTO_INCREMENT, code VARCHAR(64) NOT NULL, name VARCHAR(64) NOT NULL,

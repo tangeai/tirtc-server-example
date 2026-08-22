@@ -49,14 +49,6 @@ func execIgnoreDup(ctx context.Context, db migrationConn, stmt string) error {
 	return err
 }
 
-var coreV1MigrationFiles = []string{
-	"migrations/core/001_user.sql",
-	"migrations/core/001_device.sql",
-	"migrations/core/001_voip.sql",
-	"migrations/core/001_ai.sql",
-	"migrations/core/001_call.sql",
-}
-
 func runMigrationFiles(ctx context.Context, conn migrationConn, component string, version int, paths ...string) error {
 	statements, err := statementsFromFiles(paths...)
 	if err != nil {
@@ -101,10 +93,7 @@ func MigrateContext(ctx context.Context, db *sqlx.DB) error {
 		if err := claimEmptyMigrationTarget(ctx, conn); err != nil {
 			return err
 		}
-		if err := runMigrationFiles(ctx, conn, "core", 1, coreV1MigrationFiles...); err != nil {
-			return err
-		}
-		return runMigrationFiles(ctx, conn, "core", 2, "migrations/core/002_user_device_sorting.sql")
+		return runComponentMigrations(ctx, conn, "core")
 	})
 }
 
@@ -123,22 +112,10 @@ func MigrateAdminContext(ctx context.Context, db *sqlx.DB) error {
 		if err := claimEmptyMigrationTarget(ctx, conn); err != nil {
 			return err
 		}
-		if err := runMigrationFiles(ctx, conn, "core", 1, coreV1MigrationFiles...); err != nil {
+		if err := runComponentMigrations(ctx, conn, "core"); err != nil {
 			return err
 		}
-		if err := runMigrationFiles(ctx, conn, "core", 2, "migrations/core/002_user_device_sorting.sql"); err != nil {
-			return err
-		}
-		if err := runMigrationFiles(ctx, conn, "admin", 1, "migrations/admin/001_schema.sql"); err != nil {
-			return err
-		}
-		if err := runMigrationFiles(ctx, conn, "admin", 2, "migrations/admin/002_job_leases.sql"); err != nil {
-			return err
-		}
-		if err := runMigrationFiles(ctx, conn, "admin", 3, "migrations/admin/003_plaintext_secrets.sql"); err != nil {
-			return err
-		}
-		return runMigrationFiles(ctx, conn, "admin", 4, "migrations/admin/004_installation_state.sql")
+		return runComponentMigrations(ctx, conn, "admin")
 	})
 }
 
@@ -157,18 +134,13 @@ func requireOwnedMigrationTarget(ctx context.Context, conn migrationConn) error 
 	}
 	hasLedger := false
 	hasMarker := false
-	known := map[string]bool{
-		"schema_migrations": true, "thingconnect_installation_state": true,
-		"users": true, "device_pool": true, "device_bind": true, "device_bind_log": true,
-		"voip_device_profile": true, "voip_device_auth": true, "voip_user_profile": true,
-		"ai_user_role": true, "ai_device_role": true, "ai_user_resource": true,
-		"call_contact": true, "cleanup_outbox": true, "admin_users": true,
-		"admin_roles": true, "admin_user_roles": true, "admin_role_permissions": true,
-		"admin_menus": true, "admin_role_menus": true, "admin_sessions": true,
-		"admin_mfa_factors": true, "admin_mfa_recovery_codes": true,
-		"admin_login_log": true, "admin_dict_types": true, "admin_dict_items": true,
-		"admin_audit_log": true, "admin_jobs": true, "admin_job_items": true,
-		"config_entries": true, "config_publish_outbox": true,
+	shape, err := CurrentSchemaShape()
+	if err != nil {
+		return fmt.Errorf("migrate: derive owned tables: %w", err)
+	}
+	known := map[string]bool{"schema_migrations": true, "thingconnect_installation_state": true}
+	for table := range shape {
+		known[table] = true
 	}
 	for _, table := range tables {
 		if !known[table] {
@@ -324,7 +296,11 @@ func withMigrationLock(ctx context.Context, db *sqlx.DB, migrate func(*sqlx.Conn
 // CurrentMigrationVersions is the compatibility ceiling used by the installer
 // before it is allowed to touch an existing database.
 func CurrentMigrationVersions() map[string]int {
-	return map[string]int{"core": 2, "admin": 4}
+	result := make(map[string]int, len(migrationCatalog))
+	for component, migrations := range migrationCatalog {
+		result[component] = migrations[len(migrations)-1].Version
+	}
+	return result
 }
 
 // AdminMigrationsPending reports whether MigrateAdmin would add at least one

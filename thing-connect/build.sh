@@ -5,7 +5,9 @@ set -Eeuo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT_DIR"
 
-ALL_SERVICES=(device-server user-server voip-server ai-server call-server admin-server)
+# shellcheck source=scripts/service-catalog.sh
+source "$ROOT_DIR/scripts/service-catalog.sh"
+load_service_catalog "$ROOT_DIR/internal/installer/service_catalog.tsv"
 if [ "$#" -eq 0 ]; then
     SERVICES=("${ALL_SERVICES[@]}")
 else

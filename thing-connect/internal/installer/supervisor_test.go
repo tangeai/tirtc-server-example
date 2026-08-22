@@ -64,6 +64,40 @@ fi
 	}
 }
 
+func TestSupervisorReportsDuplicateLocalRunners(t *testing.T) {
+	controllerScript := filepath.Join(t.TempDir(), "controller")
+	if err := os.WriteFile(controllerScript, []byte(`#!/usr/bin/env bash
+if [ "$1" = status ]; then
+  case "$2" in
+    *:call-server) printf '%s CONFLICT pids 10 20\n' "$2" ;;
+    *) printf '%s RUNNING\n' "$2" ;;
+  esac
+fi
+`), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	controller := NewSupervisorController(controllerScript, "thing-connect", 9000)
+	controller.client = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("ok")), Header: make(http.Header)}, nil
+	})}
+	controller.portAvailable = func(int) error {
+		t.Fatal("duplicate runners must be reported before probing the port")
+		return nil
+	}
+	var states []ServiceState
+	err := controller.StartAndWait(context.Background(), []string{"call-server"}, func(state ServiceState) {
+		states = append(states, state)
+	})
+	if err == nil || len(states) == 0 {
+		t.Fatalf("duplicate runners were accepted: err=%v states=%+v", err, states)
+	}
+	last := states[len(states)-1]
+	if last.State != "conflict" || last.Problem == nil || last.Problem.Code != "SERVICE_PROCESS_CONFLICT" ||
+		!strings.Contains(strings.Join(last.Problem.Suggestions, " "), "stop thing-connect:call-server") {
+		t.Fatalf("duplicate runner guidance = %+v", last)
+	}
+}
+
 func TestRuntimeFailurePersistsCustomerGuidance(t *testing.T) {
 	bootstrap := New(testOptions(t), Dependencies{})
 	state := journal{Snapshot: Snapshot{

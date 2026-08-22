@@ -58,33 +58,25 @@ func CurrentSchemaShape() (map[string]TableShape, error) {
 func SchemaShapeForVersions(versions map[string]int, includeInstallationState bool) (map[string]TableShape, error) {
 	current := CurrentMigrationVersions()
 	for component, version := range versions {
-		if version < 0 || version > current[component] {
+		maximum, known := current[component]
+		if !known || version < 0 || version > maximum {
 			return nil, fmt.Errorf("unsupported %s schema version %d", component, version)
 		}
 	}
 	paths := []string{"migrations/shared/schema_migrations.sql"}
-	if versions["core"] >= 1 {
-		paths = append(paths, coreV1MigrationFiles...)
-	}
-	if versions["core"] >= 2 {
-		paths = append(paths, "migrations/core/002_user_device_sorting.sql")
-	}
-	if versions["admin"] >= 1 {
-		paths = append(paths, "migrations/admin/001_schema.sql")
-	}
-	if versions["admin"] >= 2 {
-		paths = append(paths, "migrations/admin/002_job_leases.sql")
-	}
-	if versions["admin"] >= 3 {
-		paths = append(paths, "migrations/admin/003_plaintext_secrets.sql")
-	}
-	if versions["admin"] >= 4 || includeInstallationState {
+	paths = append(paths, migrationPathsThrough("core", versions["core"])...)
+	paths = append(paths, migrationPathsThrough("admin", versions["admin"])...)
+	if versions["admin"] < 4 && includeInstallationState {
 		paths = append(paths, "migrations/admin/004_installation_state.sql")
 	}
 	statements, err := statementsFromFiles(paths...)
 	if err != nil {
 		return nil, err
 	}
+	return schemaShapeFromStatements(statements)
+}
+
+func schemaShapeFromStatements(statements []string) (map[string]TableShape, error) {
 	result := map[string]TableShape{}
 	for _, statement := range statements {
 		name, shape, ok, parseErr := parseCreateTableShape(statement)
@@ -188,6 +180,15 @@ func applyAlterTableShape(tables map[string]TableShape, statement string) error 
 				return fmt.Errorf("%s: %w", name, err)
 			}
 			shape.Indexes[indexName] = index
+		case strings.HasPrefix(upper, "MODIFY COLUMN "):
+			column, columnShape, _, _, err := parseColumnClause(strings.TrimSpace(clause[len("MODIFY COLUMN "):]))
+			if err != nil {
+				return fmt.Errorf("%s: %w", name, err)
+			}
+			if _, exists := shape.Columns[column]; !exists {
+				return fmt.Errorf("%s: MODIFY COLUMN references unknown column %s", name, column)
+			}
+			shape.Columns[column] = columnShape
 		}
 	}
 	tables[name] = shape

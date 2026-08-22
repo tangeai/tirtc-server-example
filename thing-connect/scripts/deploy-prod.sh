@@ -29,6 +29,33 @@ fi
 DEPLOY_ROOT="$(cd "$DEPLOY_ROOT_INPUT" && pwd)"
 REPO_PATH="${REPO_PATH:-$DEPLOY_ROOT/tirtc-server-example}"
 BUILD_DIR="${BUILD_DIR:-$REPO_PATH/thing-connect}"
+DEPLOY_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+load_deployment_service_catalog() {
+    local loader catalog
+    if [ -f "$BUILD_DIR/scripts/service-catalog.sh" ] &&
+       [ -f "$BUILD_DIR/internal/installer/service_catalog.tsv" ]; then
+        loader="$BUILD_DIR/scripts/service-catalog.sh"
+        catalog="$BUILD_DIR/internal/installer/service_catalog.tsv"
+    elif [ -f "$DEPLOY_SCRIPT_DIR/service-catalog.sh" ] &&
+         [ -f "$DEPLOY_SCRIPT_DIR/../internal/installer/service_catalog.tsv" ]; then
+        loader="$DEPLOY_SCRIPT_DIR/service-catalog.sh"
+        catalog="$DEPLOY_SCRIPT_DIR/../internal/installer/service_catalog.tsv"
+    else
+        loader="$DEPLOY_ROOT/service-catalog.sh"
+        catalog="$DEPLOY_ROOT/service-catalog.tsv"
+    fi
+    [ -f "$loader" ] && [ -f "$catalog" ] || {
+        echo "[ERROR] 服务清单或加载器不存在" >&2
+        return 1
+    }
+    # shellcheck source=service-catalog.sh
+    source "$loader"
+    load_service_catalog "$catalog"
+    STOP_ORDER=("${BUSINESS_SERVICES[@]}" "$ADMIN_SERVICE")
+}
+
+load_deployment_service_catalog || exit 1
 
 # 生产服务仅由 Supervisor 托管。
 SUPERVISORCTL="${SUPERVISORCTL:-supervisorctl}"
@@ -48,12 +75,8 @@ MIGRATION_PID=""
 
 mkdir -p "$DEPLOY_ROOT/logs"
 
-BUSINESS_SERVICES=("device-server" "user-server" "voip-server" "ai-server" "call-server")
-REQUIRED_SERVICES=("admin-server" "device-server" "user-server")
 # Business services must load their initial registry values from Admin before
 # listening, so a full deployment starts/restarts Admin first.
-ALL_SERVICES=("admin-server" "${BUSINESS_SERVICES[@]}")
-STOP_ORDER=("${BUSINESS_SERVICES[@]}" "admin-server")
 ACTIVE_SERVICES=()
 ACTIVE_BUSINESS_SERVICES=()
 ACTIVE_STOP_ORDER=()
@@ -105,9 +128,8 @@ service_config_path() {
     return 1
 }
 
-# A service is installed when it has an active config. Admin, device and user
-# are mandatory; VoIP, AI and call are included only when the installer (or a
-# manual operator) provided their configs.
+# A service is installed when it has an active config. Required/optional
+# membership comes from the shared service catalog.
 resolve_active_services() {
     local svc
     ACTIVE_SERVICES=()
@@ -119,14 +141,14 @@ resolve_active_services() {
             return 1
         }
     done
-    ACTIVE_SERVICES=("admin-server")
+    ACTIVE_SERVICES=("$ADMIN_SERVICE")
     for svc in "${BUSINESS_SERVICES[@]}"; do
         if service_config_path "$svc" >/dev/null; then
             ACTIVE_SERVICES+=("$svc")
             ACTIVE_BUSINESS_SERVICES+=("$svc")
         fi
     done
-    ACTIVE_STOP_ORDER=("${ACTIVE_BUSINESS_SERVICES[@]}" "admin-server")
+    ACTIVE_STOP_ORDER=("${ACTIVE_BUSINESS_SERVICES[@]}" "$ADMIN_SERVICE")
 }
 
 # ================== 服务管理器 ==================
@@ -415,7 +437,7 @@ validate_configs() {
                 err "$svc: mqtt.broker 与其他 MQTT 服务不一致"
                 return 1
             }
-        elif [ "$svc" != "admin-server" ] && [ "$svc" != "ai-server" ]; then
+        elif [ "${SERVICE_USES_MQTT[$svc]}" = "true" ]; then
             err "$svc: mqtt.broker 未配置"
             return 1
         fi
@@ -551,6 +573,22 @@ publish_deploy_script() {
         return 1
     fi
     log "部署脚本已发布: $target"
+}
+
+publish_service_catalog() {
+    local loader_source="$BUILD_DIR/scripts/service-catalog.sh"
+    local catalog_source="$BUILD_DIR/internal/installer/service_catalog.tsv"
+    local loader_pending="$DEPLOY_ROOT/.service-catalog.sh.new"
+    local catalog_pending="$DEPLOY_ROOT/.service-catalog.tsv.new"
+
+    bash -n "$loader_source" || return 1
+    cp -- "$loader_source" "$loader_pending" || return 1
+    cp -- "$catalog_source" "$catalog_pending" || return 1
+    chmod 0644 "$loader_pending" || return 1
+    chmod 0644 "$catalog_pending" || return 1
+    mv -f -- "$loader_pending" "$DEPLOY_ROOT/service-catalog.sh" || return 1
+    mv -f -- "$catalog_pending" "$DEPLOY_ROOT/service-catalog.tsv" || return 1
+    log "服务清单已发布: $DEPLOY_ROOT/service-catalog.tsv"
 }
 
 validate_build_release() {
@@ -834,6 +872,8 @@ deploy_one() {
 
     local target_dir="$DEPLOY_ROOT/$svc"
     local src_bin="$BUILD_DIR/bin/$svc"
+    local static_dir="${SERVICE_STATIC_DIR[$svc]}"
+    local static_source=""
 
     # Linux 的 rename 可安全替换正在运行的可执行文件；运行中的 Supervisor
     # 子进程继续使用旧 inode，直到后续 restart_one 切换到新版本。
@@ -850,10 +890,10 @@ deploy_one() {
 
     chmod +x "$target_dir/$svc" || return 1
 
-    # 静态目录先完整复制到临时目录，再原子切换。
-    case "$svc" in user-server|ai-server|admin-server)
-        local static_source="$BUILD_DIR/$svc/static"
-        [ "$svc" != "admin-server" ] || static_source="$BUILD_DIR/admin/admin-web/dist"
+    # 静态目录先完整复制到临时目录，再原子切换。是否包含静态资源以及
+    # 源目录位置由共享服务清单决定。
+    if [ "$static_dir" != "-" ]; then
+        static_source="$BUILD_DIR/$static_dir"
         [ -d "$static_source" ] || {
             err "$svc: 静态资源不存在: $static_source"
             return 1
@@ -865,8 +905,7 @@ deploy_one() {
         mv "$target_dir/static.new" "$target_dir/static" || return 1
         rm -rf "$target_dir/static.old" || return 1
         log "$svc: static/ 已同步"
-        ;;
-    esac
+    fi
 
     log "发布完成 $svc"
 }
@@ -1096,6 +1135,8 @@ full_deploy() (
     validate_release_options || return 1
     pull_code || return 1
     validate_paths || return 1
+	load_deployment_service_catalog || return 1
+	validate_service_manager || return 1
 	resolve_active_services || return 1
 	services=("${ACTIVE_SERVICES[@]}")
     run_batch build "${ALL_SERVICES[@]}" || return 1
@@ -1145,6 +1186,7 @@ full_deploy() (
         return "$status"
     fi
     trap - ERR INT TERM
+    publish_service_catalog || warn "服务已发布成功，但服务清单刷新失败"
     publish_deploy_script || warn "服务已发布成功，但根目录部署脚本刷新失败；请继续使用 $BUILD_DIR/scripts/deploy-prod.sh"
     prune_successful_backups || warn "清理过期备份失败，请稍后人工清理"
     log "全流程发布成功: $(git -C "$REPO_PATH" rev-parse --short HEAD)"
@@ -1171,6 +1213,7 @@ deploy_files_action() {
     validate_paths || return 1
     validate_configs || return 1
     run_batch deploy "${ACTIVE_SERVICES[@]}" || return 1
+    publish_service_catalog || return 1
     publish_deploy_script
 }
 

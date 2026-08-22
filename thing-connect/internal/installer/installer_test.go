@@ -63,6 +63,26 @@ func TestPrepareFirstRunStoresOnlyTokenHash(t *testing.T) {
 	}
 }
 
+func TestSetupStatusPublishesSharedServiceCatalog(t *testing.T) {
+	options := testOptions(t)
+	if _, err := PrepareFirstRun(options); err != nil {
+		t.Fatal(err)
+	}
+	state, err := New(options, Dependencies{}).Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.AvailableServices) != len(serviceCatalog) {
+		t.Fatalf("available services = %d, want %d", len(state.AvailableServices), len(serviceCatalog))
+	}
+	for index, service := range serviceCatalog {
+		got := state.AvailableServices[index]
+		if got.Name != service.Name || got.Required != service.Required || got.UsesMQTT != service.UsesMQTT {
+			t.Fatalf("available service %d = %+v, want %+v", index, got, service)
+		}
+	}
+}
+
 func TestPrepareFirstRunRotatesLostTokenBeforeConfigCommit(t *testing.T) {
 	options := testOptions(t)
 	first, err := PrepareFirstRun(options)
@@ -434,7 +454,42 @@ func (runtime capturingRuntime) StartAndWait(_ context.Context, optional []strin
 	return nil
 }
 
-func TestResumeRuntimeRestartsOnlyInstalledOptionalServices(t *testing.T) {
+type forbiddenRuntime struct{ called bool }
+
+func (runtime *forbiddenRuntime) StartAndWait(_ context.Context, _ []string, _ func(ServiceState)) error {
+	runtime.called = true
+	return errors.New("business runtime must wait for explicit confirmation")
+}
+
+func TestReconcileRuntimeWaitsForExplicitServiceStart(t *testing.T) {
+	options := testOptions(t)
+	options.RuntimeDatabaseDSN = "runtime-dsn"
+	store := NewFileBundleStore(options)
+	receipt, err := store.Publish(context.Background(), testDraft(), "operation-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := &forbiddenRuntime{}
+	bootstrap := New(options, Dependencies{Database: &fakeProvisioner{}, Bundles: store, Runtime: runtime})
+	if err := bootstrap.writeJournal(journal{Snapshot: Snapshot{
+		Mode: ModeRecovery, OperationID: "operation-1", Phase: "config_activated", Percent: 68,
+	}, InstanceID: "instance-id", ConfigDigest: receipt.Digest}); err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot, err := bootstrap.ReconcileRuntime(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.called {
+		t.Fatal("Admin reconciliation started business services without confirmation")
+	}
+	if snapshot.Phase != "awaiting_service_start" || !snapshot.CanResume {
+		t.Fatalf("snapshot = %+v, want explicit service-start confirmation", snapshot)
+	}
+}
+
+func TestReconcileRuntimeDoesNotRestartInstalledServices(t *testing.T) {
 	options := testOptions(t)
 	draft := testDraft()
 	draft.OptionalServices = []string{"ai-server"}
@@ -443,59 +498,47 @@ func TestResumeRuntimeRestartsOnlyInstalledOptionalServices(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	started := make(chan []string, 1)
-	bootstrap := New(options, Dependencies{Bundles: store, Runtime: capturingRuntime{started: started}})
+	runtime := &forbiddenRuntime{}
+	bootstrap := New(options, Dependencies{Bundles: store, Runtime: runtime})
 	if err := bootstrap.writeJournal(journal{Snapshot: Snapshot{
 		Mode: ModeInstalled, OperationID: "operation-1", Phase: "installed", Percent: 100,
 	}, ConfigDigest: receipt.Digest, EnabledServices: []string{"ai-server"}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := bootstrap.ResumeRuntime(context.Background()); err != nil {
+	snapshot, err := bootstrap.ReconcileRuntime(context.Background())
+	if err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case optional := <-started:
-		if !sameStrings(optional, []string{"ai-server"}) {
-			t.Fatalf("started optional services = %v", optional)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("installed optional services were not restarted")
+	if runtime.called {
+		t.Fatal("Admin restart also restarted installed business services")
 	}
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	if err := bootstrap.Shutdown(shutdownCtx); err != nil {
-		t.Fatal(err)
+	if snapshot.Mode != ModeInstalled || snapshot.CanResume {
+		t.Fatalf("snapshot = %+v", snapshot)
 	}
 }
 
-func TestResumeRuntimeStartsConfiguredOptionalServicesWithoutInstallerJournal(t *testing.T) {
+func TestReconcileRuntimeDoesNotStartConfiguredServicesWithoutInstallerJournal(t *testing.T) {
 	options := testOptions(t)
 	draft := testDraft()
 	draft.OptionalServices = []string{"voip-server", "call-server"}
 	if _, err := NewFileBundleStore(options).Publish(context.Background(), draft, "operation-1"); err != nil {
 		t.Fatal(err)
 	}
-	started := make(chan []string, 1)
-	bootstrap := New(options, Dependencies{Runtime: capturingRuntime{started: started}})
-	if _, err := bootstrap.ResumeRuntime(context.Background()); err != nil {
+	runtime := &forbiddenRuntime{}
+	bootstrap := New(options, Dependencies{Runtime: runtime})
+	snapshot, err := bootstrap.ReconcileRuntime(context.Background())
+	if err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case optional := <-started:
-		if !sameStrings(optional, []string{"voip-server", "call-server"}) {
-			t.Fatalf("started optional services = %v", optional)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("configured optional services were not restarted")
+	if runtime.called {
+		t.Fatal("Admin restart also started configured business services")
 	}
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	if err := bootstrap.Shutdown(shutdownCtx); err != nil {
-		t.Fatal(err)
+	if snapshot.Mode != ModeNormal {
+		t.Fatalf("snapshot = %+v", snapshot)
 	}
 }
 
-func TestResumeRuntimeRepairsDatabaseRecordFromVerifiedActiveBundle(t *testing.T) {
+func TestReconcileRuntimeRepairsDatabaseRecordThenWaitsForExecute(t *testing.T) {
 	options := testOptions(t)
 	options.RuntimeDatabaseDSN = "runtime-dsn"
 	store := NewFileBundleStore(options)
@@ -510,16 +553,23 @@ func TestResumeRuntimeRepairsDatabaseRecordFromVerifiedActiveBundle(t *testing.T
 	}, InstanceID: "instance-id", ConfigDigest: receipt.Digest}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := bootstrap.ResumeRuntime(context.Background()); err != nil {
+	snapshot, err := bootstrap.ReconcileRuntime(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !provisioner.configRecorded || snapshot.Phase != "awaiting_service_start" || !snapshot.CanResume {
+		t.Fatalf("snapshot=%+v configRecorded=%v", snapshot, provisioner.configRecorded)
+	}
+	if _, err := os.Stat(options.InstalledPath()); !os.IsNotExist(err) {
+		t.Fatalf("reconciliation sealed installation before confirmation: %v", err)
+	}
+	if _, err := bootstrap.Execute(context.Background(), ExecuteRequest{}); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		state, _ := bootstrap.Status(context.Background())
 		if state.Mode == ModeInstalled {
-			if !provisioner.configRecorded {
-				t.Fatal("runtime recovery did not repair the database config record")
-			}
 			var installed map[string]any
 			raw, readErr := os.ReadFile(options.InstalledPath())
 			if readErr != nil || json.Unmarshal(raw, &installed) != nil || installed["config_digest"] != receipt.Digest {
@@ -537,7 +587,7 @@ func TestResumeRuntimeRepairsDatabaseRecordFromVerifiedActiveBundle(t *testing.T
 	t.Fatal("runtime recovery did not finish")
 }
 
-func TestResumeRuntimeReplaysCommittedPendingActivationWithoutDraft(t *testing.T) {
+func TestExecuteReplaysCommittedPendingActivationWithoutDraft(t *testing.T) {
 	options := testOptions(t)
 	store := NewFileBundleStore(options)
 	receipt, err := store.Prepare(context.Background(), testDraft(), "operation-1")
@@ -569,7 +619,7 @@ func TestResumeRuntimeReplaysCommittedPendingActivationWithoutDraft(t *testing.T
 	}
 }
 
-func TestResumeRuntimeRejectsTamperedOrForeignBundle(t *testing.T) {
+func TestReconcileRuntimeRejectsTamperedOrForeignBundle(t *testing.T) {
 	for _, test := range []struct {
 		name      string
 		journalID string
@@ -597,8 +647,8 @@ func TestResumeRuntimeRejectsTamperedOrForeignBundle(t *testing.T) {
 			}}); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := bootstrap.ResumeRuntime(context.Background()); !errors.Is(err, ErrPlanStale) {
-				t.Fatalf("ResumeRuntime = %v, want ErrPlanStale", err)
+			if _, err := bootstrap.ReconcileRuntime(context.Background()); !errors.Is(err, ErrPlanStale) {
+				t.Fatalf("ReconcileRuntime = %v, want ErrPlanStale", err)
 			}
 		})
 	}
@@ -621,7 +671,10 @@ func TestBootstrapShutdownCancelsAndWaitsForRuntimeWork(t *testing.T) {
 	}, ConfigDigest: receipt.Digest}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := bootstrap.ResumeRuntime(context.Background()); err != nil {
+	if _, err := bootstrap.ReconcileRuntime(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bootstrap.Execute(context.Background(), ExecuteRequest{}); err != nil {
 		t.Fatal(err)
 	}
 	select {

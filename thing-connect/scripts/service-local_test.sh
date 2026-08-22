@@ -6,6 +6,8 @@ TEST_ROOT="$(mktemp -d)"
 DEPLOY_ROOT="$TEST_ROOT/deploy"
 CONTROLLER="$DEPLOY_ROOT/service-local.sh"
 SOURCE_SCRIPT="$(cd "$(dirname "$0")" && pwd)/service-local.sh"
+SOURCE_LOADER="$(cd "$(dirname "$0")" && pwd)/service-catalog.sh"
+SOURCE_CATALOG="$(cd "$(dirname "$0")/.." && pwd)/internal/installer/service_catalog.tsv"
 
 cleanup() {
     if [ -x "$CONTROLLER" ]; then
@@ -23,6 +25,8 @@ fail() {
 prepare_controller() {
     mkdir -p "$DEPLOY_ROOT"
     cp "$SOURCE_SCRIPT" "$CONTROLLER"
+    cp "$SOURCE_LOADER" "$DEPLOY_ROOT/service-catalog.sh"
+    cp "$SOURCE_CATALOG" "$DEPLOY_ROOT/service-catalog.tsv"
     chmod 0755 "$CONTROLLER"
 }
 
@@ -39,6 +43,7 @@ write_fake_service() {
         '[ ! -f "$count_file" ] || count="$(<"$count_file")"' \
         'count=$((count + 1))' \
         'printf "%s\n" "$count" >"$count_file"' \
+        'if [ "${FAKE_ALWAYS_FAIL:-0}" = "1" ]; then exit 1; fi' \
         'if [ "${FAKE_FAIL_FIRST:-0}" = "1" ] && [ "$count" -eq 1 ]; then exit 1; fi' \
         'trap "exit 0" INT TERM' \
         'while :; do sleep 1; done' \
@@ -51,11 +56,11 @@ test_status_protocol_and_lifecycle() {
     local output
     write_fake_service device-server
     output="$(DEPLOY_ROOT="$DEPLOY_ROOT" "$CONTROLLER" start thing-connect:device-server)"
-    [[ "$output" == "thing-connect:device-server RUNNING pid "* ]] || \
+    [[ "$output" == "thing-connect:device-server STARTING pid "* ]] || \
         fail "start output is not supervisorctl-compatible: $output"
     output="$(DEPLOY_ROOT="$DEPLOY_ROOT" "$CONTROLLER" status thing-connect:device-server)"
-    [[ "$output" == "thing-connect:device-server RUNNING pid "* ]] || \
-        fail "status did not report RUNNING: $output"
+    [[ "$output" == "thing-connect:device-server STARTING pid "* ]] || \
+        fail "status did not report STARTING for a non-listening child: $output"
     output="$(DEPLOY_ROOT="$DEPLOY_ROOT" "$CONTROLLER" stop thing-connect:device-server)"
     [ "$output" = "thing-connect:device-server STOPPED" ] || \
         fail "stop did not report STOPPED: $output"
@@ -79,8 +84,39 @@ test_runner_restarts_failed_child() {
     done
     [ "$count" -ge 2 ] || fail "failed child was not restarted"
     DEPLOY_ROOT="$DEPLOY_ROOT" "$CONTROLLER" status thing-connect:device-server |
-        grep -q ' RUNNING ' || fail "runner exited after child failure"
+        grep -q ' STARTING ' || fail "restarting child did not remain STARTING"
     DEPLOY_ROOT="$DEPLOY_ROOT" "$CONTROLLER" stop thing-connect:device-server >/dev/null
+}
+
+test_missing_pid_does_not_spawn_duplicate_runner() {
+    local first_pid output runner_count
+    local -a runners=()
+    rm -rf -- "$DEPLOY_ROOT/var/local-services"
+    write_fake_service device-server
+    DEPLOY_ROOT="$DEPLOY_ROOT" "$CONTROLLER" start thing-connect:device-server >/dev/null
+    first_pid="$(<"$DEPLOY_ROOT/var/local-services/device-server.pid")"
+    rm -f -- "$DEPLOY_ROOT/var/local-services/device-server.pid"
+    output="$(DEPLOY_ROOT="$DEPLOY_ROOT" "$CONTROLLER" start thing-connect:device-server)"
+    mapfile -t runners < <(pgrep -f "^bash $CONTROLLER run device-server$" || true)
+    runner_count="${#runners[@]}"
+    for pid in "${runners[@]}"; do
+        kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+    done
+    sleep 1
+    [ "$runner_count" -eq 1 ] || fail "missing PID file spawned $runner_count runners"
+    [[ "$output" == *" pid $first_pid" ]] || fail "orphan runner was not adopted: $output"
+}
+
+test_crashing_child_is_not_reported_running() {
+    local output
+    rm -rf -- "$DEPLOY_ROOT/var/local-services"
+    write_fake_service device-server
+    FAKE_ALWAYS_FAIL=1 DEPLOY_ROOT="$DEPLOY_ROOT" \
+        "$CONTROLLER" start thing-connect:device-server >/dev/null
+    sleep 2
+    output="$(DEPLOY_ROOT="$DEPLOY_ROOT" "$CONTROLLER" status thing-connect:device-server)"
+    DEPLOY_ROOT="$DEPLOY_ROOT" "$CONTROLLER" stop thing-connect:device-server >/dev/null
+    [[ "$output" != *" RUNNING "* ]] || fail "crashing service reported RUNNING: $output"
 }
 
 test_start_rejects_occupied_port_with_guidance() (
@@ -165,6 +201,8 @@ test_unknown_service_is_rejected() {
 prepare_controller
 test_status_protocol_and_lifecycle
 test_runner_restarts_failed_child
+test_missing_pid_does_not_spawn_duplicate_runner
+test_crashing_child_is_not_reported_running
 test_start_rejects_occupied_port_with_guidance
 test_admin_receives_setup_listener
 test_start_all_only_uses_existing_configs

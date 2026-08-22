@@ -270,8 +270,8 @@ func main() {
 			log.Fatalf("admin-server: %v", err)
 		}
 	}()
-	if _, err := bootstrap.ResumeRuntime(context.Background()); err != nil && !errors.Is(err, installer.ErrPlanStale) && !errors.Is(err, installer.ErrInstallBusy) {
-		log.Printf("resume first-run services: %v", err)
+	if _, err := bootstrap.ReconcileRuntime(context.Background()); err != nil && !errors.Is(err, installer.ErrPlanStale) && !errors.Is(err, installer.ErrInstallBusy) {
+		log.Printf("reconcile first-run state: %v", err)
 	}
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)

@@ -1,0 +1,7 @@
+# name	http_port	kind	required	uses_mqtt	static_dir	display_name
+admin-server	9000	admin	true	false	admin/admin-web/dist	管理后台
+device-server	9001	business	true	true	-	设备服务
+user-server	9002	business	true	true	user-server/static	用户服务
+voip-server	9003	business	false	true	-	VoIP 服务
+ai-server	9004	business	false	false	ai-server/static	AI 服务
+call-server	9005	business	false	true	-	设备通话服务

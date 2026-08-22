@@ -89,6 +89,7 @@ test('recovery page shows the failed service and its suggested resolution', asyn
             phase: 'starting_services',
             percent: 75,
             retryable: true,
+            can_resume: true,
             problem: portProblem,
             services: [{ name: 'call-server', state: 'failed', problem: portProblem }],
           },
@@ -100,6 +101,91 @@ test('recovery page shows the failed service and its suggested resolution', asyn
     assert.match(html, /端口 9005 已被占用/);
     assert.match(html, /停止占用端口的旧实例，然后重试/);
     assert.match(html, /启动失败/);
+  } finally {
+    await vite.close();
+  }
+});
+
+test('reconciled Admin waits for explicit business service confirmation', async () => {
+  const vite = await createServer({
+    appType: 'custom',
+    logLevel: 'silent',
+    server: { middlewareMode: true },
+  });
+  try {
+    const setup = await vite.ssrLoadModule('/src/setup.tsx');
+    const html = renderToStaticMarkup(
+      createElement(
+        AntApp,
+        null,
+        createElement(setup.SetupPage, {
+          initial: {
+            mode: 'recovery',
+            operation_id: 'operation-1',
+            phase: 'awaiting_service_start',
+            percent: 72,
+            message: 'Admin 已就绪，等待确认启动业务服务',
+            can_resume: true,
+            needs_token: true,
+          },
+        }),
+      ),
+    );
+
+    assert.match(html, /Admin 已就绪，等待确认启动业务服务/);
+    assert.match(html, /启动业务服务并继续/);
+    assert.doesNotMatch(html, /ant-spin-spinning/);
+  } finally {
+    await vite.close();
+  }
+});
+
+test('setup form renders services supplied by the shared catalog', async () => {
+  const vite = await createServer({
+    appType: 'custom',
+    logLevel: 'silent',
+    server: { middlewareMode: true },
+  });
+  try {
+    const setup = await vite.ssrLoadModule('/src/setup.tsx');
+    const html = renderToStaticMarkup(
+      createElement(
+        AntApp,
+        null,
+        createElement(setup.SetupPage, {
+          initial: {
+            mode: 'fresh',
+            available_services: [
+              {
+                name: 'admin-server',
+                display_name: '管理后台',
+                business: false,
+                required: true,
+                uses_mqtt: false,
+              },
+              {
+                name: 'device-server',
+                display_name: '设备服务',
+                business: true,
+                required: true,
+                uses_mqtt: true,
+              },
+              {
+                name: 'metrics-server',
+                display_name: '指标服务',
+                business: true,
+                required: false,
+                uses_mqtt: false,
+              },
+            ],
+          },
+        }),
+      ),
+    );
+
+    assert.match(html, /设备服务（必需）/);
+    assert.match(html, /指标服务（可选）/);
+    assert.doesNotMatch(html, /VoIP 服务（可选）/);
   } finally {
     await vite.close();
   }

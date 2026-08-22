@@ -11,7 +11,7 @@
 - HTTP 端口和可信代理。
 - MySQL 运行账号 DSN。
 - Redis 地址、密码和 DB。
-- 六个服务共享的 `internal.key`。
+- 所有已安装服务共享的 `internal.key`。
 - 独立的 `admin.jwt_secret`。
 - MFA 数据使用的 `security.config_encryption_key`。
 - Admin 任务文件目录。
@@ -71,6 +71,8 @@ TC-DEVICE-000001,replace-with-device-secret
 
 首次安装页面持续显示结构化失败原因和处理建议。依赖预检失败时按页面检查地址、认证、TLS 和来源授权；业务服务启动失败时按页面列出的服务日志、端口或进程管理器建议处理。客户可见响应不包含 SQL、Redis、MQTT 客户端原始错误、内网连接串或凭据，详细原因只进入受保护的服务日志。
 
+配置激活后，正常 Admin 启动只对账安装记录和配置 revision，不自动启动业务服务。安装页面显示“启动业务服务并继续”后，由持有一次性安装令牌的管理员显式确认；这样 Admin 始终可以先用于修改依赖配置和查看诊断。
+
 - Admin 首页按实例展示五个业务服务的版本、提交号、依赖状态和配置 revision。
 
 常见检查：
@@ -78,7 +80,7 @@ TC-DEVICE-000001,replace-with-device-secret
 - 页面刷新后无法登录：确认 HTTPS 环境使用安全 Cookie，本机 HTTP 开发关闭安全 Cookie。
 - 登录后没有导航：确认首个管理员初始化成功，并重启 Admin 重新加载权限。
 - 页面显示的客户端 IP 是代理地址：只配置真实代理 IP/CIDR，并确认代理传递 `X-Forwarded-For`。
-- 业务服务离线：检查各服务到 Redis、Admin 的网络，以及六服务 `internal.key` 是否一致。
+- 业务服务离线：检查各服务到 Redis、Admin 的网络，以及所有已安装服务的 `internal.key` 是否一致。
 - 动态配置未生效：检查配置是否已经发布、目标实例是否在线及其配置 revision。
 
 接口契约见 [Admin API](API.md)，业务接口见 [API Reference](../../api-reference.md)。

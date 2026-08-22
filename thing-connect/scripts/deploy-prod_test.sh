@@ -166,6 +166,20 @@ test_file_publish_never_creates_configuration() (
     }
 )
 
+test_deploy_uses_catalog_static_directory() (
+    local root="$TEST_ROOT/catalog-static"
+    DEPLOY_ROOT="$root"
+    BUILD_DIR="$root/source"
+    SERVICE_STATIC_DIR[metrics-server]="web/metrics-dist"
+    mkdir -p "$BUILD_DIR/bin" "$BUILD_DIR/web/metrics-dist"
+    printf '#!/usr/bin/env bash\n' >"$BUILD_DIR/bin/metrics-server"
+    printf 'metrics-ui\n' >"$BUILD_DIR/web/metrics-dist/index.html"
+
+    deploy_one metrics-server
+
+    grep -qx 'metrics-ui' "$DEPLOY_ROOT/metrics-server/static/index.html"
+)
+
 test_deploy_requires_complete_current_build() (
     BUILD_DIR="$TEST_ROOT/build-guard"
     mkdir -p "$BUILD_DIR/bin"
@@ -393,6 +407,7 @@ test_full_deploy_starts_admin_before_business_services
 test_supervisor_boot_order_starts_admin_first
 test_activated_bundle_is_resolved_and_not_overwritten
 test_file_publish_never_creates_configuration
+test_deploy_uses_catalog_static_directory
 test_deploy_requires_complete_current_build
 test_deploy_lock_is_scoped_to_one_mutating_command
 test_menu_starts_with_daily_update

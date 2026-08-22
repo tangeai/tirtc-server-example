@@ -43,13 +43,14 @@ func (s *SupervisorController) StartAndWait(ctx context.Context, optional []stri
 	if err != nil {
 		return err
 	}
-	progress(ServiceState{Name: "admin-server", State: "checking"})
-	if err := s.waitReady(ctx, "admin-server", s.adminPort); err != nil {
-		problem := serviceNotReadyProblem(serviceCatalog[0], s.timeout)
-		progress(ServiceState{Name: "admin-server", State: "not_ready", Problem: &problem})
+	admin := adminService()
+	progress(ServiceState{Name: admin.Name, State: "checking"})
+	if err := s.waitReady(ctx, admin.Name, s.adminPort); err != nil {
+		problem := serviceNotReadyProblem(admin, s.timeout)
+		progress(ServiceState{Name: admin.Name, State: "not_ready", Problem: &problem})
 		return runtimeFailure(problem, err)
 	}
-	progress(ServiceState{Name: "admin-server", State: "ready"})
+	progress(ServiceState{Name: admin.Name, State: "ready"})
 	for _, service := range enabled {
 		progress(ServiceState{Name: service.Name, State: "starting"})
 		state, err := s.status(ctx, service.Name)
@@ -57,6 +58,11 @@ func (s *SupervisorController) StartAndWait(ctx context.Context, optional []stri
 			problem := serviceControllerProblem(service)
 			progress(ServiceState{Name: service.Name, State: "failed", Problem: &problem})
 			return runtimeFailure(problem, err)
+		}
+		if state == "CONFLICT" {
+			problem := serviceConflictProblem(service, s.command, s.program(service.Name))
+			progress(ServiceState{Name: service.Name, State: "conflict", Problem: &problem})
+			return runtimeFailure(problem, fmt.Errorf("%s 存在多个守护进程", service.Name))
 		}
 		if state != "RUNNING" {
 			if err := s.portAvailable(service.HTTPPort); err != nil {
@@ -78,6 +84,17 @@ func (s *SupervisorController) StartAndWait(ctx context.Context, optional []stri
 		progress(ServiceState{Name: service.Name, State: "ready"})
 	}
 	return nil
+}
+
+func serviceConflictProblem(service serviceSpec, command, program string) Problem {
+	return Problem{
+		Code:    "SERVICE_PROCESS_CONFLICT",
+		Message: fmt.Sprintf("%s检测到多个本地守护进程", service.DisplayName),
+		Suggestions: []string{
+			fmt.Sprintf("在服务器执行 %s stop %s 清理该服务的重复守护进程", command, program),
+			"再次查看服务状态，确认只剩一个进程后返回此页继续安装",
+		},
+	}
 }
 
 func tcpPortAvailable(port int) error {

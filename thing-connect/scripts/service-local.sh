@@ -15,23 +15,28 @@ LOG_DIR="$DEPLOY_ROOT/logs"
 SETUP_PORT=9000
 SETUP_BIND="${SETUP_BIND:-0.0.0.0}"
 
-ALL_SERVICES=("admin-server" "device-server" "user-server" "voip-server" "ai-server" "call-server")
-BUSINESS_SERVICES=("device-server" "user-server" "voip-server" "ai-server" "call-server")
+if [ "$(basename "$SCRIPT_DIR")" = "scripts" ]; then
+    CATALOG_LOADER="$SCRIPT_DIR/service-catalog.sh"
+    SERVICE_CATALOG="$SCRIPT_DIR/../internal/installer/service_catalog.tsv"
+else
+    CATALOG_LOADER="$DEPLOY_ROOT/service-catalog.sh"
+    SERVICE_CATALOG="$DEPLOY_ROOT/service-catalog.tsv"
+fi
+# shellcheck source=service-catalog.sh
+source "$CATALOG_LOADER"
+load_service_catalog "$SERVICE_CATALOG"
 
 err() { echo "[ERROR] $1" >&2; }
 
 service_name() {
     local value="$1"
     value="${value#"$SERVICE_GROUP:"}"
-    case "$value" in
-        admin-server|device-server|user-server|voip-server|ai-server|call-server)
-            printf '%s\n' "$value"
-            ;;
-        *)
-            err "未知服务: $1"
-            return 2
-            ;;
-    esac
+    if [ -n "${SERVICE_PORT[$value]+present}" ]; then
+        printf '%s\n' "$value"
+        return
+    fi
+    err "未知服务: $1"
+    return 2
 }
 
 pid_file() {
@@ -39,25 +44,55 @@ pid_file() {
 }
 
 managed_pid() {
-    local service="$1" pid="$2" command_line
+    local service="$1" pid="$2"
+    local -a arguments=()
     [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
     kill -0 "$pid" 2>/dev/null || return 1
     [ -r "/proc/$pid/cmdline" ] || return 1
-    command_line="$(tr '\0' ' ' <"/proc/$pid/cmdline")"
-    [[ "$command_line" == *"$DEPLOY_ROOT/service-local.sh run $service"* ]]
+    mapfile -d '' -t arguments <"/proc/$pid/cmdline" || true
+    [ "${#arguments[@]}" -eq 4 ] &&
+        [[ "${arguments[0]}" == *bash ]] &&
+        [ "${arguments[1]}" = "$DEPLOY_ROOT/service-local.sh" ] &&
+        [ "${arguments[2]}" = "run" ] &&
+        [ "${arguments[3]}" = "$service" ]
+}
+
+managed_pids() {
+    local service="$1" process pid
+    for process in /proc/[0-9]*; do
+        pid="${process#/proc/}"
+        managed_pid "$service" "$pid" && printf '%s\n' "$pid"
+    done
+}
+
+write_pid() {
+    local service="$1" pid="$2" file temporary
+    file="$(pid_file "$service")"
+    temporary="$file.$pid.tmp"
+    printf '%s\n' "$pid" >"$temporary"
+    mv -f -- "$temporary" "$file"
 }
 
 current_pid() {
-    local service="$1" file pid
+    local service="$1" file
+    local -a pids=()
     file="$(pid_file "$service")"
-    [ -f "$file" ] || return 1
-    pid="$(tr -d '[:space:]' <"$file")"
-    if managed_pid "$service" "$pid"; then
-        printf '%s\n' "$pid"
-        return 0
-    fi
-    rm -f -- "$file"
-    return 1
+    mapfile -t pids < <(managed_pids "$service")
+    case "${#pids[@]}" in
+        0)
+            rm -f -- "$file"
+            return 1
+            ;;
+        1)
+            write_pid "$service" "${pids[0]}"
+            printf '%s\n' "${pids[0]}"
+            return 0
+            ;;
+        *)
+            printf '%s\n' "${pids[*]}"
+            return 2
+            ;;
+    esac
 }
 
 config_exists() {
@@ -67,15 +102,8 @@ config_exists() {
 }
 
 service_port() {
-    case "$1" in
-        admin-server) printf '9000\n' ;;
-        device-server) printf '9001\n' ;;
-        user-server) printf '9002\n' ;;
-        voip-server) printf '9003\n' ;;
-        ai-server) printf '9004\n' ;;
-        call-server) printf '9005\n' ;;
-        *) return 2 ;;
-    esac
+    [ -n "${SERVICE_PORT[$1]+present}" ] || return 2
+    printf '%s\n' "${SERVICE_PORT[$1]}"
 }
 
 port_in_use() {
@@ -86,8 +114,16 @@ port_in_use() {
 run_service() {
     local service="$1" binary="$DEPLOY_ROOT/$service/$service"
     local config="$DEPLOY_ROOT/$service/config.yaml" stopping=0 child=""
-    local file
+    local file lock_file
     file="$(pid_file "$service")"
+    lock_file="$STATE_DIR/$service.run.lock"
+    mkdir -p "$STATE_DIR" "$LOG_DIR"
+    exec 8>"$lock_file"
+    if ! flock -n 8; then
+        err "$service 已有守护进程，拒绝重复运行"
+        return 1
+    fi
+    write_pid "$service" "$$"
 
     stop_child() {
         stopping=1
@@ -96,15 +132,15 @@ run_service() {
     trap stop_child INT TERM
 
     while [ "$stopping" -eq 0 ]; do
-        if [ "$service" = "admin-server" ]; then
+        if [ "$service" = "$ADMIN_SERVICE" ]; then
             GIN_MODE=release SERVICE_INSTANCE_ID="local-$service" \
                 "$binary" -c "$config" -deploy-root "$DEPLOY_ROOT" \
                 -setup-bind "$SETUP_BIND" -setup-port "$SETUP_PORT" \
                 -supervisorctl "$DEPLOY_ROOT/service-local.sh" \
-                -supervisor-group "$SERVICE_GROUP" &
+                -supervisor-group "$SERVICE_GROUP" 8>&- &
         else
             GIN_MODE=release SERVICE_INSTANCE_ID="local-$service" \
-                "$binary" -c "$config" &
+                "$binary" -c "$config" 8>&- &
         fi
         child=$!
         wait "$child" || true
@@ -116,18 +152,40 @@ run_service() {
     fi
 }
 
+service_live() {
+    local service="$1" port
+    port="$(service_port "$service")" || return 1
+    curl -fsS --max-time 1 "http://127.0.0.1:$port/health/live" >/dev/null 2>&1
+}
+
+print_status() {
+    local service="$1" pid="$2"
+    if service_live "$service"; then
+        echo "$SERVICE_GROUP:$service RUNNING pid $pid"
+    else
+        echo "$SERVICE_GROUP:$service STARTING pid $pid"
+    fi
+}
+
 start_one() (
-    local service="$1" file pid runner port
+    local service="$1" pid port current_rc
     local binary="$DEPLOY_ROOT/$service/$service"
     mkdir -p "$STATE_DIR" "$LOG_DIR"
     exec 9>"$STATE_DIR/$service.lock"
     flock 9
     if pid="$(current_pid "$service")"; then
-        echo "$SERVICE_GROUP:$service RUNNING pid $pid"
+        print_status "$service" "$pid"
         return 0
+    else
+        current_rc=$?
+        if [ "$current_rc" -eq 2 ]; then
+            err "$service 检测到多个守护进程: $pid"
+            err "处理建议：执行 $DEPLOY_ROOT/service-local.sh stop $SERVICE_GROUP:$service 清理重复进程后重试"
+            return 1
+        fi
     fi
     [ -x "$binary" ] || { err "服务尚未发布: $binary"; return 1; }
-    if [ "$service" != "admin-server" ]; then
+    if [ "$service" != "$ADMIN_SERVICE" ]; then
         config_exists "$service" || { err "$service 配置不存在"; return 1; }
     fi
     port="$(service_port "$service")" || return 1
@@ -136,47 +194,61 @@ start_one() (
         err "处理建议：执行 ss -ltnp | grep ':$port' 确认占用进程；停止旧实例或重复的进程管理器后重试"
         return 1
     fi
-    file="$(pid_file "$service")"
     nohup setsid "$DEPLOY_ROOT/service-local.sh" run "$service" \
         >>"$LOG_DIR/$service.out.log" 2>>"$LOG_DIR/$service.err.log" </dev/null 9>&- &
-    runner=$!
-    printf '%s\n' "$runner" >"$file.tmp"
-    mv -f -- "$file.tmp" "$file"
     sleep 1
-    pid="$(current_pid "$service")" || {
+    if ! pid="$(current_pid "$service")"; then
         err "$service 本地启动失败，请检查 $LOG_DIR/$service.err.log"
         return 1
-    }
-    echo "$SERVICE_GROUP:$service RUNNING pid $pid"
+    fi
+    print_status "$service" "$pid"
 )
 
 stop_one() (
-    local service="$1" pid elapsed=0
+    local service="$1" pid pgid elapsed=0
+    local -a pids=() remaining=()
     mkdir -p "$STATE_DIR"
     exec 9>"$STATE_DIR/$service.lock"
     flock 9
-    if ! pid="$(current_pid "$service")"; then
+    mapfile -t pids < <(managed_pids "$service")
+    if [ "${#pids[@]}" -eq 0 ]; then
+        rm -f -- "$(pid_file "$service")"
         echo "$SERVICE_GROUP:$service STOPPED"
         return 0
     fi
-    kill -TERM "$pid" 2>/dev/null || true
-    while managed_pid "$service" "$pid" && [ "$elapsed" -lt 15 ]; do
+    for pid in "${pids[@]}"; do
+        kill -TERM "$pid" 2>/dev/null || true
+    done
+    while [ "$elapsed" -lt 15 ]; do
+        mapfile -t remaining < <(managed_pids "$service")
+        [ "${#remaining[@]}" -ne 0 ] || break
         sleep 1
         elapsed=$((elapsed + 1))
     done
-    if managed_pid "$service" "$pid"; then
-        kill -KILL -- "-$pid" 2>/dev/null || true
-    fi
+    mapfile -t remaining < <(managed_pids "$service")
+    for pid in "${remaining[@]}"; do
+        pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d '[:space:]')"
+        if [ "$pgid" = "$pid" ]; then
+            kill -KILL -- "-$pid" 2>/dev/null || true
+        else
+            kill -KILL "$pid" 2>/dev/null || true
+        fi
+    done
     rm -f -- "$(pid_file "$service")"
     echo "$SERVICE_GROUP:$service STOPPED"
 )
 
 status_one() {
-    local service="$1" pid
+    local service="$1" pid current_rc
     if pid="$(current_pid "$service")"; then
-        echo "$SERVICE_GROUP:$service RUNNING pid $pid"
+        print_status "$service" "$pid"
     else
-        echo "$SERVICE_GROUP:$service STOPPED"
+        current_rc=$?
+        if [ "$current_rc" -eq 2 ]; then
+            echo "$SERVICE_GROUP:$service CONFLICT pids $pid"
+        else
+            echo "$SERVICE_GROUP:$service STOPPED"
+        fi
     fi
 }
 
@@ -195,9 +267,9 @@ wait_ready() {
 
 start_all() {
     local service port
-    start_one admin-server >/dev/null || return 1
-    if ! wait_ready admin-server "$SETUP_PORT"; then
-        stop_one admin-server >/dev/null || true
+    start_one "$ADMIN_SERVICE" >/dev/null || return 1
+    if ! wait_ready "$ADMIN_SERVICE" "$SETUP_PORT"; then
+        stop_one "$ADMIN_SERVICE" >/dev/null || true
         return 1
     fi
     for service in "${BUSINESS_SERVICES[@]}"; do
@@ -217,7 +289,7 @@ stop_all() {
     for ((index = ${#BUSINESS_SERVICES[@]} - 1; index >= 0; index--)); do
         stop_one "${BUSINESS_SERVICES[$index]}" >/dev/null
     done
-    stop_one admin-server >/dev/null
+    stop_one "$ADMIN_SERVICE" >/dev/null
 }
 
 usage() {

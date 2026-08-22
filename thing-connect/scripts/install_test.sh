@@ -8,7 +8,10 @@ trap 'rm -rf -- "$TEST_ROOT"' EXIT
 DEPLOY_ROOT="$TEST_ROOT/deploy"
 REPO_PATH="$TEST_ROOT/repository"
 BUILD_DIR="$REPO_PATH/thing-connect"
-source "$(cd "$(dirname "$0")" && pwd)/install.sh"
+SOURCE_SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
+source "$SOURCE_SCRIPTS/install.sh"
+source "$SOURCE_SCRIPTS/service-catalog.sh"
+load_service_catalog "$SOURCE_SCRIPTS/../internal/installer/service_catalog.tsv"
 
 assert_eq() {
     local want="$1" got="$2" message="$3"
@@ -38,6 +41,20 @@ test_install_help_is_single_purpose() {
     [[ "$output" == *"deploy-prod.sh"* ]]
     [[ "$output" != *"日常更新："* ]]
 }
+
+test_service_catalog_addition_updates_install_inventory() (
+    local catalog="$TEST_ROOT/extended-service-catalog.tsv"
+    cp "$SOURCE_SCRIPTS/../internal/installer/service_catalog.tsv" "$catalog"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        metrics-server 9010 business false false - 指标服务 >>"$catalog"
+
+    load_service_catalog "$catalog"
+
+    [ "${ALL_SERVICES[-1]}" = "metrics-server" ]
+    [ "${OPTIONAL_SERVICES[-1]}" = "metrics-server" ]
+    [ "${SERVICE_PORT[metrics-server]}" = "9010" ]
+    [ "${SERVICE_DISPLAY_NAME[metrics-server]}" = "指标服务" ]
+)
 
 test_installed_deployment_is_never_reopened() (
     DEPLOY_ROOT="$TEST_ROOT/already-installed"
@@ -145,14 +162,20 @@ test_operational_scripts_are_published_atomically() (
     cp "$source_scripts/install.sh" "$BUILD_DIR/scripts/install.sh"
     cp "$source_scripts/deploy-prod.sh" "$BUILD_DIR/scripts/deploy-prod.sh"
     cp "$source_scripts/service-local.sh" "$BUILD_DIR/scripts/service-local.sh"
+    cp "$source_scripts/service-catalog.sh" "$BUILD_DIR/scripts/service-catalog.sh"
+    mkdir -p "$BUILD_DIR/internal/installer"
+    cp "$source_scripts/../internal/installer/service_catalog.tsv" "$BUILD_DIR/internal/installer/service_catalog.tsv"
 
     publish_install_script
     publish_deploy_script
+    publish_service_catalog
     publish_local_controller
 
     [ -x "$DEPLOY_ROOT/install.sh" ]
     [ -x "$DEPLOY_ROOT/deploy-prod.sh" ]
     [ -x "$DEPLOY_ROOT/service-local.sh" ]
+    [ -f "$DEPLOY_ROOT/service-catalog.sh" ]
+    [ -f "$DEPLOY_ROOT/service-catalog.tsv" ]
     bash -n "$DEPLOY_ROOT/install.sh"
     bash -n "$DEPLOY_ROOT/deploy-prod.sh"
     bash -n "$DEPLOY_ROOT/service-local.sh"
@@ -182,21 +205,24 @@ test_install_flow_stays_short_and_publishes_daily_entry() (
     require_commands() { printf 'commands\n' >>"$capture"; }
     validate_empty_deployment() { printf 'empty\n' >>"$capture"; }
     pull_source() { printf 'pull\n' >>"$capture"; }
+    load_install_catalog() { printf 'catalog\n' >>"$capture"; }
     build_release() { printf 'build\n' >>"$capture"; }
     publish_release() { printf 'publish\n' >>"$capture"; }
     publish_deploy_script() { printf 'deploy-entry\n' >>"$capture"; }
     publish_install_script() { printf 'install-entry\n' >>"$capture"; }
+    publish_service_catalog() { printf 'catalog-entry\n' >>"$capture"; }
     publish_local_controller() { printf 'local-entry\n' >>"$capture"; }
     prepare_setup() { printf 'token\n'; printf 'prepare\n' >>"$capture"; }
     start_setup_server() { printf 'start-setup\n' >>"$capture"; }
 
     run_install >/dev/null
 
-    assert_eq $'commands\nempty\npull\nbuild\npublish\ndeploy-entry\ninstall-entry\nlocal-entry\nprepare\nstart-setup' \
+    assert_eq $'commands\nempty\npull\ncatalog\nempty\nbuild\npublish\ndeploy-entry\ninstall-entry\ncatalog-entry\nlocal-entry\nprepare\nstart-setup' \
         "$(<"$capture")" "first install flow"
 )
 
 test_install_help_is_single_purpose
+test_service_catalog_addition_updates_install_inventory
 test_installed_deployment_is_never_reopened
 test_broken_installed_marker_fails_closed
 test_active_bundle_is_sent_to_recovery_instead_of_reinstall

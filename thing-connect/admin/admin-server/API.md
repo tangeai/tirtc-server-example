@@ -19,11 +19,13 @@ Content-Type: application/json
 |---|---|---|
 | GET | `/v1/setup/status` | 读取 `fresh/recovery/installed/normal` 模式和脱敏进度 |
 | POST | `/v1/setup/preview` | 测试 MySQL、Redis、MQTT 并只读生成数据库计划 |
-| POST | `/v1/setup/execute` | 携带 `draft` 和 `plan_digest` 启动安装；空请求用于重放已提交的配置激活意图或继续服务启动 |
+| POST | `/v1/setup/execute` | 携带 `draft` 和 `plan_digest` 启动安装；配置对账后由管理员提交空请求，显式启动业务服务 |
 
 `preview` 不执行建库、建表、配置写入或进程控制。`execute` 在取得锁后重新分类数据库；预检事实变化时返回 `409`，陌生非空库、结构漂移和未来版本同样返回 `409` 且不执行自动写入。安装任务在后台运行，客户端轮询 `status`，浏览器断开不会取消已经持久化的任务。
 
-`draft.database` 必须同时提供迁移账号和独立的 DML 运行账号，两者用户名不能相同。迁移账号用于建库和版本化 DDL；运行账号写入生成的服务配置，并在安装锁定前验证对 `schema_migrations` 的 SELECT，以及对其余受管表的 SELECT、INSERT、UPDATE、DELETE。`draft.optional_services` 只接受 `voip-server`、`ai-server`、`call-server` 的无重复数组；`device-server` 和 `user-server` 固定启用，不在该数组中。未选择的可选服务不生成配置、不启动，也不参与 readiness。任何密码字段均为只写输入，不在计划或状态中返回。
+`draft.database` 必须同时提供迁移账号和独立的 DML 运行账号，两者用户名不能相同。迁移账号用于建库和版本化 DDL；运行账号写入生成的服务配置，并在安装锁定前验证对 `schema_migrations` 的 SELECT，以及对其余受管表的 SELECT、INSERT、UPDATE、DELETE。`draft.optional_services` 接受状态响应 `available_services` 中 `business=true,required=false` 的服务名，数组不得重复；必需业务服务固定启用，不在该数组中。未选择的可选服务不生成配置、不启动，也不参与 readiness。任何密码字段均为只写输入，不在计划或状态中返回。
+
+`GET /v1/setup/status` 的 `available_services[]` 是安装页面的服务事实源，包含 `name`、`display_name`、`business`、`required` 和 `uses_mqtt`。恢复状态中的 `can_resume=true` 表示 Admin 已完成配置与数据库状态对账，可以提交带安装令牌的空 `execute` 请求启动业务服务。Admin 进程启动本身不会执行该进程控制动作。
 
 首次安装、创建管理员和修改管理员密码使用同一密码策略：按 Unicode 字符计数至少 8 位，并同时包含 ASCII 大写字母、小写字母和数字；中文和特殊字符可以作为其余字符使用。
 

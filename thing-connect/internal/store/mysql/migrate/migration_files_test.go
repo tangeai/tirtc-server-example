@@ -34,13 +34,93 @@ func TestEmbeddedMigrationFilesAreNonEmpty(t *testing.T) {
 		"migrations/core/001_user.sql", "migrations/core/001_device.sql",
 		"migrations/core/001_voip.sql", "migrations/core/001_ai.sql",
 		"migrations/core/001_call.sql", "migrations/core/002_user_device_sorting.sql",
+		"migrations/core/003_schema_comments.sql",
 		"migrations/admin/001_schema.sql", "migrations/admin/002_job_leases.sql",
 		"migrations/admin/003_plaintext_secrets.sql", "migrations/admin/004_installation_state.sql",
+		"migrations/admin/005_schema_comments.sql",
 	}
 	for _, path := range paths {
 		statements, err := statementsFromFiles(path)
 		if err != nil || len(statements) == 0 {
 			t.Fatalf("%s: statements=%d err=%v", path, len(statements), err)
+		}
+	}
+}
+
+func TestMigrationCatalogDiscoversOrderedContiguousVersions(t *testing.T) {
+	catalog, err := buildMigrationCatalog([]string{
+		"migrations/core/002_change.sql",
+		"migrations/admin/001_schema.sql",
+		"migrations/core/001_user.sql",
+		"migrations/core/001_device.sql",
+		"migrations/admin/002_change.sql",
+		"migrations/shared/schema_migrations.sql",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := catalog["core"]; !reflect.DeepEqual(got, []migrationVersion{
+		{Version: 1, Paths: []string{"migrations/core/001_device.sql", "migrations/core/001_user.sql"}},
+		{Version: 2, Paths: []string{"migrations/core/002_change.sql"}},
+	}) {
+		t.Fatalf("core migration catalog = %#v", got)
+	}
+	if _, err := buildMigrationCatalog([]string{
+		"migrations/core/001_schema.sql",
+		"migrations/core/003_gap.sql",
+		"migrations/admin/001_schema.sql",
+	}); err == nil || !strings.Contains(err.Error(), "gap at version 2") {
+		t.Fatalf("migration gap was accepted: %v", err)
+	}
+}
+
+func TestNewSchemaMigrationsDocumentTablesAndColumns(t *testing.T) {
+	commentBaseline := map[string]int{"core": 2, "admin": 4}
+	for component, migrations := range migrationCatalog {
+		for _, migration := range migrations {
+			if migration.Version <= commentBaseline[component] {
+				continue
+			}
+			statements, err := statementsFromFiles(migration.Paths...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, statement := range statements {
+				upper := strings.ToUpper(strings.TrimSpace(statement))
+				switch {
+				case strings.HasPrefix(upper, "CREATE TABLE "):
+					if !strings.Contains(upper, " COMMENT=") && !strings.Contains(upper, " COMMENT =") {
+						t.Errorf("%s migration %d CREATE TABLE lacks a table COMMENT", component, migration.Version)
+					}
+					open := strings.IndexByte(statement, '(')
+					close := strings.LastIndex(strings.ToUpper(statement), ") ENGINE")
+					if open < 0 || close <= open {
+						t.Fatalf("unsupported CREATE TABLE in %s migration %d", component, migration.Version)
+					}
+					for _, rawClause := range splitTopLevel(statement[open+1 : close]) {
+						clause := strings.TrimSpace(rawClause)
+						clauseUpper := strings.ToUpper(clause)
+						if strings.HasPrefix(clauseUpper, "PRIMARY ") || strings.HasPrefix(clauseUpper, "KEY ") ||
+							strings.HasPrefix(clauseUpper, "INDEX ") || strings.HasPrefix(clauseUpper, "UNIQUE ") {
+							continue
+						}
+						if !strings.Contains(clauseUpper, " COMMENT ") {
+							t.Errorf("%s migration %d column lacks COMMENT: %s", component, migration.Version, clause)
+						}
+					}
+				case strings.HasPrefix(upper, "ALTER TABLE "):
+					for _, rawClause := range splitTopLevel(statement) {
+						clauseUpper := strings.ToUpper(strings.TrimSpace(rawClause))
+						columnChange := strings.HasPrefix(clauseUpper, "ADD COLUMN ") ||
+							strings.HasPrefix(clauseUpper, "MODIFY COLUMN ") ||
+							strings.Contains(clauseUpper, " ADD COLUMN ") || strings.Contains(clauseUpper, " MODIFY COLUMN ")
+						if columnChange &&
+							!strings.Contains(clauseUpper, " COMMENT ") {
+							t.Errorf("%s migration %d column change lacks COMMENT: %s", component, migration.Version, rawClause)
+						}
+					}
+				}
+			}
 		}
 	}
 }
@@ -248,6 +328,21 @@ func TestEmbeddedMigrationsAndBootstrapSchemaHaveSameObjects(t *testing.T) {
 				t.Errorf("embedded migrations are missing %q", object)
 			}
 		}
+	}
+	bootstrapStatements, err := splitSQLStatements(string(bootstrap))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bootstrapShape, err := schemaShapeFromStatements(bootstrapStatements)
+	if err != nil {
+		t.Fatal(err)
+	}
+	embeddedShape, err := CurrentSchemaShape()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(bootstrapShape, embeddedShape) {
+		t.Fatal("scripts/schema.sql shape differs from the current embedded migration shape")
 	}
 }
 

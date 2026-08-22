@@ -19,8 +19,8 @@ HEALTH_WAIT_SECONDS="${HEALTH_WAIT_SECONDS:-30}"
 HEALTH_REQUEST_TIMEOUT_SECONDS="${HEALTH_REQUEST_TIMEOUT_SECONDS:-3}"
 LOCAL_SERVICE_WAIT_SECONDS="${LOCAL_SERVICE_WAIT_SECONDS:-15}"
 
-ALL_SERVICES=("admin-server" "device-server" "user-server" "voip-server" "ai-server" "call-server")
-BUSINESS_SERVICES=("device-server" "user-server" "voip-server" "ai-server" "call-server")
+ALL_SERVICES=()
+BUSINESS_SERVICES=()
 
 export DEPLOY_ROOT SERVICE_GROUP SETUP_PORT SETUP_BIND
 
@@ -140,7 +140,7 @@ pull_source() {
 }
 
 validate_empty_deployment() {
-    local service
+    local service config_path
     if [ -e "$DEPLOY_ROOT/var/installer/installed.json" ] ||
        [ -L "$DEPLOY_ROOT/var/installer/installed.json" ]; then
         err "系统已经完成安装；后续发布请使用 $DEPLOY_ROOT/deploy-prod.sh"
@@ -150,12 +150,25 @@ validate_empty_deployment() {
         err "检测到已激活配置；请启动 Admin 让安装器自动恢复，不要重新安装"
         return 1
     fi
-    for service in "${ALL_SERVICES[@]}"; do
-        if [ -e "$DEPLOY_ROOT/$service/config.yaml" ] || [ -L "$DEPLOY_ROOT/$service/config.yaml" ]; then
+    for config_path in "$DEPLOY_ROOT"/*-server/config.yaml; do
+        if [ -e "$config_path" ] || [ -L "$config_path" ]; then
+            service="$(basename "$(dirname "$config_path")")"
             err "$service 已存在 config.yaml；首次安装不会覆盖现有配置"
             return 1
         fi
     done
+}
+
+load_install_catalog() {
+    local loader="$BUILD_DIR/scripts/service-catalog.sh"
+    local catalog="$BUILD_DIR/internal/installer/service_catalog.tsv"
+    [ -f "$loader" ] && [ -f "$catalog" ] || {
+        err "源码缺少服务清单或加载器"
+        return 1
+    }
+    # shellcheck source=service-catalog.sh
+    source "$loader"
+    load_service_catalog "$catalog"
 }
 
 with_install_lock() (
@@ -169,7 +182,7 @@ with_install_lock() (
 
 build_release() {
     local expected_commit built_commit worktree_status
-    log "构建六个服务和 Web 静态资源..."
+    log "构建 ${#ALL_SERVICES[@]} 个服务和 Web 静态资源..."
     "$BUILD_DIR/build.sh" || return 1
     [ -f "$BUILD_DIR/bin/.release-commit" ] || {
         err "完整构建标记不存在"
@@ -211,7 +224,7 @@ publish_static() {
 }
 
 publish_release() {
-    local service source target pending
+    local service source target pending static_dir
     for service in "${ALL_SERVICES[@]}"; do
         source="$BUILD_DIR/bin/$service"
         target="$DEPLOY_ROOT/$service/$service"
@@ -225,10 +238,25 @@ publish_release() {
         chmod 0755 "$pending" || return 1
         mv -f -- "$pending" "$target" || return 1
     done
-    publish_static "user-server" "$BUILD_DIR/user-server/static" || return 1
-    publish_static "ai-server" "$BUILD_DIR/ai-server/static" || return 1
-    publish_static "admin-server" "$BUILD_DIR/admin/admin-web/dist" || return 1
+    for service in "${ALL_SERVICES[@]}"; do
+        static_dir="${SERVICE_STATIC_DIR[$service]}"
+        [ "$static_dir" = "-" ] || publish_static "$service" "$BUILD_DIR/$static_dir" || return 1
+    done
     log "首次安装文件已发布到 $DEPLOY_ROOT"
+}
+
+publish_service_catalog() {
+    local loader_source="$BUILD_DIR/scripts/service-catalog.sh"
+    local catalog_source="$BUILD_DIR/internal/installer/service_catalog.tsv"
+    local loader_pending="$DEPLOY_ROOT/.service-catalog.sh.new"
+    local catalog_pending="$DEPLOY_ROOT/.service-catalog.tsv.new"
+    bash -n "$loader_source" || { err "服务清单加载器语法检查失败"; return 1; }
+    cp -- "$loader_source" "$loader_pending" || return 1
+    cp -- "$catalog_source" "$catalog_pending" || return 1
+    chmod 0644 "$loader_pending" || return 1
+    chmod 0644 "$catalog_pending" || return 1
+    mv -f -- "$loader_pending" "$DEPLOY_ROOT/service-catalog.sh" || return 1
+    mv -f -- "$catalog_pending" "$DEPLOY_ROOT/service-catalog.tsv" || return 1
 }
 
 publish_deploy_script() {
@@ -266,25 +294,25 @@ publish_local_controller() {
 local_service_state() {
     local status
     status="$("$LOCAL_CONTROLLER" status "$SERVICE_GROUP:$1" 2>&1 || true)"
-    awk '$2 ~ /^(STOPPED|STARTING|BACKOFF|RUNNING|EXITED|FATAL|UNKNOWN)$/ { print $2; exit }' <<<"$status"
+    awk '$2 ~ /^(STOPPED|STARTING|BACKOFF|RUNNING|EXITED|FATAL|CONFLICT|UNKNOWN)$/ { print $2; exit }' <<<"$status"
 }
 
 wait_for_admin() {
     local elapsed=0 state body
     while [ "$elapsed" -lt "$LOCAL_SERVICE_WAIT_SECONDS" ]; do
-        state="$(local_service_state admin-server)"
+        state="$(local_service_state "$ADMIN_SERVICE")"
         if [ "$state" = "RUNNING" ]; then
             break
         fi
         if [ "$state" = "FATAL" ] || [ "$state" = "BACKOFF" ] || [ "$state" = "EXITED" ]; then
-            err "admin-server 本地启动失败，状态: $state"
+            err "$ADMIN_SERVICE 本地启动失败，状态: $state"
             return 1
         fi
         sleep 1
         elapsed=$((elapsed + 1))
     done
     [ "$state" = "RUNNING" ] || {
-        err "admin-server 在 ${LOCAL_SERVICE_WAIT_SECONDS}s 内未进入 RUNNING"
+        err "$ADMIN_SERVICE 在 ${LOCAL_SERVICE_WAIT_SECONDS}s 内未进入 RUNNING"
         return 1
     }
 
@@ -303,8 +331,8 @@ wait_for_admin() {
 }
 
 prepare_setup() {
-    "$DEPLOY_ROOT/admin-server/admin-server" \
-        -c "$DEPLOY_ROOT/admin-server/config.yaml" \
+    "$DEPLOY_ROOT/$ADMIN_SERVICE/$ADMIN_SERVICE" \
+        -c "$DEPLOY_ROOT/$ADMIN_SERVICE/config.yaml" \
         -deploy-root "$DEPLOY_ROOT" \
         -setup-bind "$SETUP_BIND" \
         -setup-port "$SETUP_PORT" \
@@ -318,14 +346,14 @@ start_setup_server() {
     for service in "${BUSINESS_SERVICES[@]}"; do
         "$LOCAL_CONTROLLER" stop "$SERVICE_GROUP:$service" >/dev/null 2>&1 || true
     done
-    state="$(local_service_state admin-server)"
-    if [ "$state" = "RUNNING" ] || [ "$state" = "STARTING" ]; then
-        "$LOCAL_CONTROLLER" restart "$SERVICE_GROUP:admin-server" || return 1
+    state="$(local_service_state "$ADMIN_SERVICE")"
+    if [ "$state" = "RUNNING" ] || [ "$state" = "STARTING" ] || [ "$state" = "CONFLICT" ]; then
+        "$LOCAL_CONTROLLER" restart "$SERVICE_GROUP:$ADMIN_SERVICE" || return 1
     else
-        "$LOCAL_CONTROLLER" start "$SERVICE_GROUP:admin-server" || return 1
+        "$LOCAL_CONTROLLER" start "$SERVICE_GROUP:$ADMIN_SERVICE" || return 1
     fi
     if ! wait_for_admin; then
-        "$LOCAL_CONTROLLER" stop "$SERVICE_GROUP:admin-server" >/dev/null 2>&1 || true
+        "$LOCAL_CONTROLLER" stop "$SERVICE_GROUP:$ADMIN_SERVICE" >/dev/null 2>&1 || true
         return 1
     fi
 }
@@ -335,10 +363,13 @@ run_install() {
     require_commands || return 1
     validate_empty_deployment || return 1
     pull_source || return 1
+    load_install_catalog || return 1
+    validate_empty_deployment || return 1
     build_release || return 1
     publish_release || return 1
     publish_deploy_script || return 1
     publish_install_script || return 1
+    publish_service_catalog || return 1
     publish_local_controller || return 1
     setup_output="$(prepare_setup)" || return 1
     printf '%s\n' "$setup_output"

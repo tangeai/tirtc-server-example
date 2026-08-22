@@ -1,11 +1,16 @@
 -- thing-connect 数据库建表语句
 --
 -- 权威来源：internal/store/mysql/migrate/migrations/（仅安装/显式迁移执行）
--- 本文件供全新安装直接导入：mysql -u root -p thing_connect < scripts/schema.sql
+-- 本文件是不被 install.sh / deploy-prod.sh 直接执行的当前结构基线，供 DBA 审阅、
+-- mysql 客户端或外部数据库平台初始化空库和迁移一致性测试使用。
 --
 -- 使用说明：
---   如果你手上已经有旧数据库，不要直接导入此文件——使用 deploy-prod.sh migrate 补到最新。
---   此文件用于全新环境建库，每个 CREATE TABLE 都是表的最终形态，不走 ALTER。
+--   默认安装不要手工导入本文件；使用 Web 安装器或 deploy-prod.sh migrate。
+--   旧数据库不得导入本文件覆盖，必须执行版本化迁移。
+--   完整字段释义同时见 core/003_schema_comments.sql 和 admin/005_schema_comments.sql；
+--   两份版本化迁移会把 COMMENT 回填到已经存在的数据库。
+--   使用 mysql 客户端直接导入时，先 cd 到 thing-connect 仓库目录，使文件末尾的
+--   SOURCE 相对路径可以加载字段 COMMENT；不支持 SOURCE 的平台需按顺序执行这两个文件。
 
 CREATE TABLE IF NOT EXISTS schema_migrations (
     component  VARCHAR(64) NOT NULL,
@@ -223,14 +228,23 @@ CREATE TABLE IF NOT EXISTS cleanup_outbox (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS admin_users (
-    id BIGINT NOT NULL AUTO_INCREMENT, email VARCHAR(255) NOT NULL, password VARCHAR(255) NOT NULL,
-    nick_name VARCHAR(64) NOT NULL DEFAULT '', status TINYINT NOT NULL DEFAULT 1,
-    auth_revision BIGINT NOT NULL DEFAULT 1, must_change_password TINYINT NOT NULL DEFAULT 0,
-    password_updated_at DATETIME NULL, last_login_ip VARCHAR(45) NOT NULL DEFAULT '', last_login_at DATETIME NULL,
-    remark VARCHAR(256) NOT NULL DEFAULT '', created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    PRIMARY KEY (id), UNIQUE KEY uq_admin_email (email), KEY idx_admin_status (status)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT '管理员主键',
+    email VARCHAR(255) NOT NULL COMMENT '管理员登录邮箱，系统内唯一',
+    password VARCHAR(255) NOT NULL COMMENT '密码哈希，不存储明文',
+    nick_name VARCHAR(64) NOT NULL DEFAULT '' COMMENT '管理员显示名称',
+    status TINYINT NOT NULL DEFAULT 1 COMMENT '账号状态：1=启用，0=禁用',
+    auth_revision BIGINT NOT NULL DEFAULT 1 COMMENT '认证版本；安全属性变化时递增并撤销旧会话',
+    must_change_password TINYINT NOT NULL DEFAULT 0 COMMENT '是否要求下次登录修改密码：1=是，0=否',
+    password_updated_at DATETIME NULL COMMENT '最近一次修改密码时间',
+    last_login_ip VARCHAR(45) NOT NULL DEFAULT '' COMMENT '最近一次成功登录客户端 IP',
+    last_login_at DATETIME NULL COMMENT '最近一次成功登录时间',
+    remark VARCHAR(256) NOT NULL DEFAULT '' COMMENT '管理员备注',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_admin_email (email),
+    KEY idx_admin_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='后台管理员账号';
 
 CREATE TABLE IF NOT EXISTS admin_roles (
     id BIGINT NOT NULL AUTO_INCREMENT, code VARCHAR(64) NOT NULL, name VARCHAR(64) NOT NULL,
@@ -365,10 +379,16 @@ CREATE TABLE IF NOT EXISTS config_publish_outbox (
     PRIMARY KEY (id), UNIQUE KEY uq_config_publish_revision (config_entry_id, revision), KEY idx_config_publish_due (delivered_at, next_attempt_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- COMMENT 的单一事实源同时用于新库和既有库，避免在基线文件中复制数百条字段释义。
+SOURCE internal/store/mysql/migrate/migrations/core/003_schema_comments.sql
+SOURCE internal/store/mysql/migrate/migrations/admin/005_schema_comments.sql
+
 INSERT IGNORE INTO schema_migrations (component, version) VALUES
     ('core', 1),
     ('core', 2),
+    ('core', 3),
     ('admin', 1),
     ('admin', 2),
     ('admin', 3),
-    ('admin', 4);
+    ('admin', 4),
+    ('admin', 5);

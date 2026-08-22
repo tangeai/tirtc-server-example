@@ -172,18 +172,28 @@ type ServiceState struct {
 	Problem *Problem `json:"problem,omitempty"`
 }
 
+type ServiceDefinition struct {
+	Name        string `json:"name"`
+	DisplayName string `json:"display_name"`
+	Business    bool   `json:"business"`
+	Required    bool   `json:"required"`
+	UsesMQTT    bool   `json:"uses_mqtt"`
+}
+
 type Snapshot struct {
-	Mode        Mode           `json:"mode"`
-	OperationID string         `json:"operation_id,omitempty"`
-	Phase       string         `json:"phase,omitempty"`
-	Percent     int            `json:"percent"`
-	Message     string         `json:"message,omitempty"`
-	Retryable   bool           `json:"retryable"`
-	NeedsToken  bool           `json:"needs_token"`
-	AdminURL    string         `json:"admin_url,omitempty"`
-	Services    []ServiceState `json:"services,omitempty"`
-	Problem     *Problem       `json:"problem,omitempty"`
-	UpdatedAt   time.Time      `json:"updated_at,omitempty"`
+	Mode              Mode                `json:"mode"`
+	OperationID       string              `json:"operation_id,omitempty"`
+	Phase             string              `json:"phase,omitempty"`
+	Percent           int                 `json:"percent"`
+	Message           string              `json:"message,omitempty"`
+	Retryable         bool                `json:"retryable"`
+	CanResume         bool                `json:"can_resume"`
+	NeedsToken        bool                `json:"needs_token"`
+	AdminURL          string              `json:"admin_url,omitempty"`
+	AvailableServices []ServiceDefinition `json:"available_services,omitempty"`
+	Services          []ServiceState      `json:"services,omitempty"`
+	Problem           *Problem            `json:"problem,omitempty"`
+	UpdatedAt         time.Time           `json:"updated_at,omitempty"`
 }
 
 type journal struct {
@@ -379,6 +389,7 @@ func (b *Bootstrap) Status(context.Context) (Snapshot, error) {
 			state.Mode = ModeRecovery
 			state.NeedsToken = true
 		}
+		state.AvailableServices = publicServiceCatalog()
 		return state.Snapshot, nil
 	}
 	message := "ThingConnect 正常运行"
@@ -388,7 +399,10 @@ func (b *Bootstrap) Status(context.Context) (Snapshot, error) {
 	case ModeRecovery:
 		message = "等待恢复未完成的安装"
 	}
-	return Snapshot{Mode: mode, Message: message, NeedsToken: mode == ModeFresh || mode == ModeRecovery}, nil
+	return Snapshot{
+		Mode: mode, Message: message, NeedsToken: mode == ModeFresh || mode == ModeRecovery,
+		AvailableServices: publicServiceCatalog(),
+	}, nil
 }
 
 func (b *Bootstrap) loadJournal() (journal, error) {
@@ -412,8 +426,8 @@ func hasAnyServiceConfig(options Options) bool {
 	if fileExists(options.ConfigPath) {
 		return true
 	}
-	for _, service := range []string{"admin-server", "device-server", "user-server", "voip-server", "ai-server", "call-server"} {
-		if fileExists(filepath.Join(options.DeployRoot, service, "config.yaml")) {
+	for _, service := range serviceCatalog {
+		if fileExists(filepath.Join(options.DeployRoot, service.Name, "config.yaml")) {
 			return true
 		}
 	}

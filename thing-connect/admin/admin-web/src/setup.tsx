@@ -32,9 +32,19 @@ export type SetupSnapshot = {
   percent?: number;
   message?: string;
   retryable?: boolean;
+  can_resume?: boolean;
   needs_token?: boolean;
+  available_services?: SetupServiceDefinition[];
   services?: { name: string; state: string; problem?: SetupProblem }[];
   problem?: SetupProblem;
+};
+
+type SetupServiceDefinition = {
+  name: string;
+  display_name: string;
+  business: boolean;
+  required: boolean;
+  uses_mqtt: boolean;
 };
 
 export type SetupProblem = {
@@ -185,20 +195,57 @@ function phaseIndex(phase?: string) {
     'database_claimed',
     'admin_ready',
     'awaiting_admin_restart',
+    'awaiting_service_start',
     'starting_services',
     'installed',
   ];
   return Math.max(0, phases.indexOf(phase || 'validating'));
 }
 
-const serviceNames: Record<string, string> = {
-  'admin-server': '管理后台',
-  'device-server': '设备服务',
-  'user-server': '用户服务',
-  'voip-server': 'VoIP 服务',
-  'ai-server': 'AI 服务',
-  'call-server': '设备通话服务',
-};
+const fallbackServiceCatalog: SetupServiceDefinition[] = [
+  {
+    name: 'admin-server',
+    display_name: '管理后台',
+    business: false,
+    required: true,
+    uses_mqtt: false,
+  },
+  {
+    name: 'device-server',
+    display_name: '设备服务',
+    business: true,
+    required: true,
+    uses_mqtt: true,
+  },
+  {
+    name: 'user-server',
+    display_name: '用户服务',
+    business: true,
+    required: true,
+    uses_mqtt: true,
+  },
+  {
+    name: 'voip-server',
+    display_name: 'VoIP 服务',
+    business: true,
+    required: false,
+    uses_mqtt: true,
+  },
+  {
+    name: 'ai-server',
+    display_name: 'AI 服务',
+    business: true,
+    required: false,
+    uses_mqtt: false,
+  },
+  {
+    name: 'call-server',
+    display_name: '设备通话服务',
+    business: true,
+    required: false,
+    uses_mqtt: true,
+  },
+];
 
 const serviceStates: Record<string, { label: string; color: string }> = {
   checking: { label: '正在检查', color: 'processing' },
@@ -206,6 +253,7 @@ const serviceStates: Record<string, { label: string; color: string }> = {
   ready: { label: '已就绪', color: 'success' },
   failed: { label: '启动失败', color: 'error' },
   not_ready: { label: '未就绪', color: 'error' },
+  conflict: { label: '进程冲突', color: 'error' },
 };
 
 export function SetupPage({ initial }: { initial: SetupSnapshot }) {
@@ -220,11 +268,40 @@ export function SetupPage({ initial }: { initial: SetupSnapshot }) {
   const [requestProblem, setRequestProblem] = useState<SetupProblem>();
   const mqttAuthMode = Form.useWatch(['mqtt', 'auth_mode'], form) || 'username';
   const optionalServices = Form.useWatch('optional_services', form) || [];
-  const running = Boolean(snapshot.operation_id && snapshot.phase !== 'installed');
+  const catalog = initial.available_services?.length
+    ? initial.available_services
+    : fallbackServiceCatalog;
+  const businessServices = catalog.filter((service) => service.business);
+  const requiredBusinessServices = businessServices.filter((service) => service.required);
+  const optionalBusinessServices = businessServices.filter((service) => !service.required);
+  const enabledMQTTServices = businessServices.filter(
+    (service) => service.uses_mqtt && (service.required || optionalServices.includes(service.name)),
+  );
+  const serviceNames = Object.fromEntries(
+    catalog.map((service) => [service.name, service.display_name]),
+  );
+  const defaultClientIDs = Object.fromEntries(
+    catalog
+      .filter((service) => service.uses_mqtt)
+      .map((service) => {
+        const known: Record<string, string> = {
+          'device-server': 'devicesrv',
+          'user-server': 'usrsrv',
+          'voip-server': 'voipsrv',
+          'call-server': 'callsrv',
+        };
+        return [service.name, known[service.name] || `${service.name.replace(/-server$/, '')}srv`];
+      }),
+  );
+  const recovering = Boolean(snapshot.operation_id && snapshot.phase !== 'installed');
+  const canResume = Boolean(
+    snapshot.can_resume || (snapshot.retryable && (snapshot.percent || 0) >= 70),
+  );
+  const polling = recovering && !canResume && !snapshot.retryable;
   const formProblem = requestProblem || (showForm && !plan ? snapshot.problem : undefined);
 
   useEffect(() => {
-    if (!running) return;
+    if (!polling) return;
     const timer = window.setInterval(() => {
       loadSetupStatus()
         .then((next) => {
@@ -237,7 +314,7 @@ export function SetupPage({ initial }: { initial: SetupSnapshot }) {
         });
     }, 1500);
     return () => window.clearInterval(timer);
-  }, [running]);
+  }, [polling]);
 
   const normalize = (values: SetupDraft) => {
     const {
@@ -247,16 +324,16 @@ export function SetupPage({ initial }: { initial: SetupSnapshot }) {
       mqtt,
       ...rest
     } = values;
-    const mqttServices = ['device-server', 'user-server'];
-    if (rest.optional_services?.includes('voip-server')) mqttServices.push('voip-server');
-    if (rest.optional_services?.includes('call-server')) mqttServices.push('call-server');
     const normalizedMQTT =
       mqtt.auth_mode === 'clientid'
         ? {
             broker: mqtt.broker,
             auth_mode: mqtt.auth_mode,
             client_ids: Object.fromEntries(
-              mqttServices.map((service) => [service, mqtt.client_ids?.[service] || '']),
+              enabledMQTTServices.map((service) => [
+                service.name,
+                mqtt.client_ids?.[service.name] || '',
+              ]),
             ),
             password: mqtt.password,
           }
@@ -351,7 +428,7 @@ export function SetupPage({ initial }: { initial: SetupSnapshot }) {
     );
   }
 
-  if ((running || snapshot.mode === 'recovery') && !showForm) {
+  if ((recovering || snapshot.mode === 'recovery') && !showForm) {
     return (
       <div className="setup-shell">
         <Card className="setup-card">
@@ -413,7 +490,7 @@ export function SetupPage({ initial }: { initial: SetupSnapshot }) {
               )}
             />
           ) : null}
-          {snapshot.retryable ? (
+          {canResume ? (
             <>
               <Space.Compact block className="setup-resume">
                 <Input.Password
@@ -422,15 +499,14 @@ export function SetupPage({ initial }: { initial: SetupSnapshot }) {
                   onChange={(event) => setToken(event.target.value)}
                 />
                 <Button type="primary" loading={busy} disabled={!token} onClick={resume}>
-                  继续安装
+                  启动业务服务并继续
                 </Button>
               </Space.Compact>
-              {(snapshot.percent || 0) < 70 ? (
-                <Button block className="setup-actions" onClick={() => setShowForm(true)}>
-                  重新输入连接信息
-                </Button>
-              ) : null}
             </>
+          ) : snapshot.retryable ? (
+            <Button block className="setup-actions" onClick={() => setShowForm(true)}>
+              重新输入连接信息
+            </Button>
           ) : (
             <Spin />
           )}
@@ -487,12 +563,7 @@ export function SetupPage({ initial }: { initial: SetupSnapshot }) {
               mqtt: {
                 broker: 'mqtt://127.0.0.1:1883',
                 auth_mode: 'username',
-                client_ids: {
-                  'device-server': 'devicesrv',
-                  'user-server': 'usrsrv',
-                  'voip-server': 'voipsrv',
-                  'call-server': 'callsrv',
-                },
+                client_ids: defaultClientIDs,
               },
               network: { cookie_secure: false, trusted_proxies: '127.0.0.1' },
             }}
@@ -504,22 +575,20 @@ export function SetupPage({ initial }: { initial: SetupSnapshot }) {
             </Form.Item>
             <Typography.Title level={4}>业务服务</Typography.Title>
             <Typography.Paragraph type="secondary">
-              设备服务和用户服务是基础服务，固定安装。其他能力可按需启用，未选择的服务不会生成配置、启动或参与就绪检查。
+              必需服务固定安装。其他能力可按需启用，未选择的服务不会生成配置、启动或参与就绪检查。
             </Typography.Paragraph>
             <Space direction="vertical" className="setup-service-selection">
-              <Checkbox checked disabled>
-                设备服务（必需）
-              </Checkbox>
-              <Checkbox checked disabled>
-                用户服务（必需）
-              </Checkbox>
+              {requiredBusinessServices.map((service) => (
+                <Checkbox key={service.name} checked disabled>
+                  {service.display_name}（必需）
+                </Checkbox>
+              ))}
               <Form.Item name="optional_services" noStyle>
                 <Checkbox.Group
-                  options={[
-                    { label: 'VoIP 服务（可选）', value: 'voip-server' },
-                    { label: 'AI 服务（可选）', value: 'ai-server' },
-                    { label: '设备通话服务（可选）', value: 'call-server' },
-                  ]}
+                  options={optionalBusinessServices.map((service) => ({
+                    label: `${service.display_name}（可选）`,
+                    value: service.name,
+                  }))}
                 />
               </Form.Item>
             </Space>
@@ -673,46 +742,17 @@ export function SetupPage({ initial }: { initial: SetupSnapshot }) {
                   message="ClientID 模式要求每个服务使用不同的已注册 ClientID；扩容多副本时请改用 Username 模式。"
                 />
                 <Row gutter={16}>
-                  <Col xs={24} md={12}>
-                    <Form.Item
-                      name={['mqtt', 'client_ids', 'device-server']}
-                      label="设备服务 ClientID"
-                      rules={[{ required: true }]}
-                    >
-                      <Input />
-                    </Form.Item>
-                  </Col>
-                  <Col xs={24} md={12}>
-                    <Form.Item
-                      name={['mqtt', 'client_ids', 'user-server']}
-                      label="用户服务 ClientID"
-                      rules={[{ required: true }]}
-                    >
-                      <Input />
-                    </Form.Item>
-                  </Col>
-                  {optionalServices.includes('voip-server') ? (
-                    <Col xs={24} md={12}>
+                  {enabledMQTTServices.map((service) => (
+                    <Col key={service.name} xs={24} md={12}>
                       <Form.Item
-                        name={['mqtt', 'client_ids', 'voip-server']}
-                        label="VoIP 服务 ClientID"
+                        name={['mqtt', 'client_ids', service.name]}
+                        label={`${service.display_name} ClientID`}
                         rules={[{ required: true }]}
                       >
                         <Input />
                       </Form.Item>
                     </Col>
-                  ) : null}
-                  {optionalServices.includes('call-server') ? (
-                    <Col xs={24} md={12}>
-                      <Form.Item
-                        name={['mqtt', 'client_ids', 'call-server']}
-                        label="设备通话服务 ClientID"
-                        rules={[{ required: true }]}
-                      >
-                        <Input />
-                      </Form.Item>
-                    </Col>
-                  ) : null}
+                  ))}
                 </Row>
               </>
             )}

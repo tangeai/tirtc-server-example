@@ -234,7 +234,7 @@ func renderBundle(draft Draft, secrets generatedSecrets, options Options) (map[s
 			"redis":      map[string]any{"addr": redisAddr, "password": draft.Redis.Password, "db": draft.Redis.DB},
 			"jwt_secret": secrets.JWT,
 			"internal":   map[string]any{"key": secrets.Internal},
-			"admin":      map[string]any{"server_url": "http://127.0.0.1:9000"},
+			"admin":      map[string]any{"server_url": fmt.Sprintf("http://127.0.0.1:%d", adminService().HTTPPort)},
 		}
 		if service.UsesMQTT {
 			config["mqtt"] = mqttAuth.configFor(service.Name)
@@ -252,17 +252,18 @@ func renderBundle(draft Draft, secrets generatedSecrets, options Options) (map[s
 	for _, service := range services {
 		switch service.Name {
 		case "call-server":
-			configs["user-server"]["call"] = map[string]any{"server_url": "http://127.0.0.1:9005"}
+			configs["user-server"]["call"] = map[string]any{"server_url": fmt.Sprintf("http://127.0.0.1:%d", service.HTTPPort)}
 		case "ai-server":
-			configs["user-server"]["ai"] = map[string]any{"server_url": "http://127.0.0.1:9004"}
+			configs["user-server"]["ai"] = map[string]any{"server_url": fmt.Sprintf("http://127.0.0.1:%d", service.HTTPPort)}
 		case "voip-server":
-			configs["user-server"]["voip"] = map[string]any{"server_url": "http://127.0.0.1:9003"}
+			configs["user-server"]["voip"] = map[string]any{"server_url": fmt.Sprintf("http://127.0.0.1:%d", service.HTTPPort)}
 		}
 	}
 	// The existing /services protocol requires every optional business endpoint
 	// and TiRTC. Keep discovery disabled for a partial installation instead of
 	// advertising endpoints for services the operator deliberately omitted.
-	if strings.TrimSpace(draft.Network.PublicBaseURL) != "" && len(draft.OptionalServices) == 3 {
+	if strings.TrimSpace(draft.Network.PublicBaseURL) != "" &&
+		optionalServicesSelected(draft.OptionalServices, "voip-server", "ai-server", "call-server") {
 		base := strings.TrimRight(draft.Network.PublicBaseURL, "/")
 		configs["user-server"]["discovery"] = map[string]any{
 			"enabled": true, "device_server_url": base, "user_server_url": base,

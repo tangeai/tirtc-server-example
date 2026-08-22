@@ -62,7 +62,8 @@ func (b *Bootstrap) Preview(ctx context.Context, draft Draft) (Plan, error) {
 	for _, service := range enabled {
 		serviceNames = append(serviceNames, service.DisplayName)
 	}
-	if strings.TrimSpace(draft.Network.PublicBaseURL) != "" && len(draft.OptionalServices) != 3 {
+	if strings.TrimSpace(draft.Network.PublicBaseURL) != "" &&
+		!optionalServicesSelected(draft.OptionalServices, "voip-server", "ai-server", "call-server") {
 		plan.Warnings = append(plan.Warnings, "当前服务发现协议要求全部可选服务；本次部分安装不会启用 /services，可在补齐服务后配置")
 	}
 	plan.Actions = append(plan.Actions,
@@ -107,11 +108,11 @@ func (b *Bootstrap) Execute(ctx context.Context, request ExecuteRequest) (Snapsh
 			}
 		}
 		if request.Draft == nil {
-			return b.ResumeRuntime(ctx)
+			return b.startRuntime(ctx)
 		}
 	}
 	if request.Draft == nil {
-		return b.ResumeRuntime(ctx)
+		return b.startRuntime(ctx)
 	}
 	plan, err := b.Preview(ctx, *request.Draft)
 	if err != nil {
@@ -248,84 +249,123 @@ func (b *Bootstrap) requestRestart() {
 	}
 }
 
-// ResumeRuntime is safe to call automatically from the normal Admin startup
-// path. It only operates after a complete config bundle has been committed.
-func (b *Bootstrap) ResumeRuntime(ctx context.Context) (Snapshot, error) {
+// ReconcileRuntime repairs durable configuration state after Admin has loaded
+// the active runtime configuration. It never starts a business service; that
+// transition belongs to an authenticated, explicit Execute request.
+func (b *Bootstrap) ReconcileRuntime(ctx context.Context) (Snapshot, error) {
+	state, found, err := b.reconcileRuntimeState(ctx)
+	if err != nil {
+		return state.Snapshot, err
+	}
+	if !found {
+		return Snapshot{Mode: ModeNormal, Message: "Admin 已就绪；业务服务由部署环境独立管理"}, nil
+	}
+	return state.Snapshot, nil
+}
+
+func (b *Bootstrap) reconcileRuntimeState(ctx context.Context) (journal, bool, error) {
 	state, err := b.loadJournal()
 	if err != nil {
 		if os.IsNotExist(err) {
-			optional, inspectErr := configuredOptionalServiceNames(b.opts.DeployRoot)
-			if inspectErr != nil {
-				return Snapshot{Mode: ModeNormal}, inspectErr
-			}
-			return b.resumeConfiguredServices(optional)
+			return journal{}, false, nil
 		}
-		return Snapshot{}, err
+		return journal{}, false, err
 	}
 	if state.OperationID == "" {
-		return state.Snapshot, fmt.Errorf("%w: 安装任务标识缺失", ErrSchemaDrift)
+		return state, true, fmt.Errorf("%w: 安装任务标识缺失", ErrSchemaDrift)
 	}
 	if b.bundles == nil {
-		return state.Snapshot, fmt.Errorf("%w: 配置发布组件不可用", ErrSchemaDrift)
+		return state, true, fmt.Errorf("%w: 配置发布组件不可用", ErrSchemaDrift)
 	}
 	receipt, active := b.bundles.Active(state.OperationID)
 	if !active {
 		var prepared bool
 		receipt, prepared = b.bundles.Prepared(state.OperationID)
 		if !prepared {
-			return state.Snapshot, fmt.Errorf("%w: 找不到完整的配置 revision", ErrPlanStale)
+			return state, true, fmt.Errorf("%w: 找不到完整的配置 revision", ErrPlanStale)
 		}
 	}
 	if state.ConfigDigest == "" || state.ConfigDigest != receipt.Digest {
-		return state.Snapshot, fmt.Errorf("%w: 配置摘要与安装任务不一致", ErrSchemaDrift)
+		return state, true, fmt.Errorf("%w: 配置摘要与安装任务不一致", ErrSchemaDrift)
 	}
 	if !sameStrings(state.EnabledServices, receipt.OptionalServices) {
-		return state.Snapshot, fmt.Errorf("%w: 服务选择与配置 revision 不一致", ErrSchemaDrift)
+		return state, true, fmt.Errorf("%w: 服务选择与配置 revision 不一致", ErrSchemaDrift)
 	}
 	state.ConfigDigest = receipt.Digest
 	if state.Phase == "installed" {
-		return b.resumeInstalledServices(state)
+		state.Mode = ModeInstalled
+		state.NeedsToken = false
+		state.CanResume = false
+		return state, true, nil
 	}
 	if b.database == nil {
-		return state.Snapshot, fmt.Errorf("%w: 运行数据库连接不可用", ErrSchemaDrift)
+		return state, true, fmt.Errorf("%w: 运行数据库连接不可用", ErrSchemaDrift)
 	}
 	runtimeDSN := strings.TrimSpace(b.opts.RuntimeDatabaseDSN)
 	if runtimeDSN == "" {
 		runtimeDSN = strings.TrimSpace(receipt.RuntimeDatabaseDSN)
 	}
 	if runtimeDSN == "" {
-		return state.Snapshot, fmt.Errorf("%w: 配置 revision 缺少运行数据库连接", ErrSchemaDrift)
+		return state, true, fmt.Errorf("%w: 配置 revision 缺少运行数据库连接", ErrSchemaDrift)
 	}
 	if !active {
 		if err := b.database.VerifyConfigurationIntent(ctx, runtimeDSN, state.OperationID, state.ConfigDigest); err != nil {
-			return state.Snapshot, err
+			return state, true, err
 		}
 		if err := b.bundles.Activate(ctx, state.OperationID, state.ConfigDigest); err != nil {
-			return state.Snapshot, fmt.Errorf("重放配置激活意图失败: %w", err)
+			return state, true, fmt.Errorf("重放配置激活意图失败: %w", err)
 		}
 		state.Phase = "config_activated"
 		state.Percent = 68
 		state.Message = "数据库激活意图已验证，配置 revision 已恢复激活"
 		state.UpdatedAt = b.now().UTC()
 		if err := b.writeJournal(state); err != nil {
-			return state.Snapshot, err
+			return state, true, err
 		}
 	}
 	if err := b.database.RecordConfiguration(ctx, runtimeDSN, state.OperationID, state.ConfigDigest); err != nil {
-		return state.Snapshot, err
+		return state, true, err
 	}
-	state.Phase = "awaiting_admin_restart"
-	state.Percent = 70
-	state.Message = "配置与数据库安装状态已对账"
+	if strings.TrimSpace(b.opts.RuntimeDatabaseDSN) == "" {
+		state.Phase = "awaiting_admin_restart"
+		state.Percent = 70
+		state.Message = "配置与数据库安装状态已对账，正在切换到正常 Admin"
+		state.CanResume = false
+		state.UpdatedAt = b.now().UTC()
+		if err := b.writeJournal(state); err != nil {
+			return state, true, err
+		}
+		b.requestRestart()
+		return state, true, nil
+	}
+	state.Mode = ModeRecovery
+	state.Phase = "awaiting_service_start"
+	state.Percent = 72
+	state.CanResume = true
+	state.NeedsToken = true
+	if state.Problem == nil {
+		state.Message = "Admin 已就绪，等待确认启动业务服务"
+		state.Retryable = false
+	}
 	state.UpdatedAt = b.now().UTC()
 	if err := b.writeJournal(state); err != nil {
+		return state, true, err
+	}
+	return state, true, nil
+}
+
+func (b *Bootstrap) startRuntime(ctx context.Context) (Snapshot, error) {
+	state, found, err := b.reconcileRuntimeState(ctx)
+	if err != nil {
 		return state.Snapshot, err
 	}
-	// The setup process intentionally does not start services from credentials
-	// it just recovered. Restart into normal Admin so all runtime adapters load
-	// the active, strictly validated bundle through the regular composition root.
-	if strings.TrimSpace(b.opts.RuntimeDatabaseDSN) == "" {
-		b.requestRestart()
+	if !found {
+		return Snapshot{Mode: ModeNormal}, ErrPlanStale
+	}
+	if state.Phase == "installed" || state.Mode == ModeInstalled {
+		return state.Snapshot, ErrAlreadyInstalled
+	}
+	if !state.CanResume {
 		return state.Snapshot, nil
 	}
 	b.mu.Lock()
@@ -338,83 +378,6 @@ func (b *Bootstrap) ResumeRuntime(ctx context.Context) (Snapshot, error) {
 	b.mu.Unlock()
 	go b.runRuntime(b.ctx, state)
 	return state.Snapshot, nil
-}
-
-func (b *Bootstrap) resumeConfiguredServices(optional []string) (Snapshot, error) {
-	snapshot := Snapshot{Mode: ModeNormal, Message: "正在确认已配置服务的运行状态"}
-	if b.runtime == nil {
-		return snapshot, fmt.Errorf("服务管理器不可用")
-	}
-	b.mu.Lock()
-	if b.running || b.closed {
-		b.mu.Unlock()
-		return snapshot, ErrInstallBusy
-	}
-	b.running = true
-	b.wg.Add(1)
-	b.mu.Unlock()
-	go func() {
-		defer func() {
-			b.mu.Lock()
-			b.running = false
-			b.mu.Unlock()
-			b.wg.Done()
-		}()
-		if err := b.runtime.StartAndWait(b.ctx, optional, func(service ServiceState) {
-			log.Printf("configured service state: service=%s state=%s", service.Name, service.State)
-		}); err != nil {
-			log.Printf("resume configured services failed: err=%v", err)
-		}
-	}()
-	return snapshot, nil
-}
-
-func (b *Bootstrap) resumeInstalledServices(state journal) (Snapshot, error) {
-	if b.runtime == nil {
-		return state.Snapshot, fmt.Errorf("%w: 服务管理器不可用", ErrSchemaDrift)
-	}
-	b.mu.Lock()
-	if b.running || b.closed {
-		b.mu.Unlock()
-		return state.Snapshot, ErrInstallBusy
-	}
-	b.running = true
-	b.wg.Add(1)
-	b.mu.Unlock()
-	go b.runInstalledServices(b.ctx, state)
-	return state.Snapshot, nil
-}
-
-func (b *Bootstrap) runInstalledServices(ctx context.Context, state journal) {
-	defer func() {
-		b.mu.Lock()
-		b.running = false
-		b.mu.Unlock()
-		b.wg.Done()
-	}()
-	update := func(service ServiceState) {
-		updateServiceState(&state, service)
-		_ = b.writeJournal(state)
-	}
-	if err := b.runtime.StartAndWait(ctx, state.EnabledServices, update); err != nil {
-		log.Printf("resume installed services failed: operation_id=%s err=%v", state.OperationID, err)
-		problem := Explain(err)
-		if problem.Code == "INSTALL_FAILED" {
-			problem.Code = "BUSINESS_NOT_READY"
-			problem.Message = "ThingConnect 已安装，但部分所选服务尚未就绪"
-		}
-		state.Message = problem.Message
-		state.Retryable = true
-		state.Problem = &problem
-	} else {
-		state.Message = "ThingConnect 已安装，所选服务均已就绪"
-		state.Retryable = false
-		state.Problem = nil
-	}
-	state.UpdatedAt = b.now().UTC()
-	if err := b.writeJournal(state); err != nil {
-		log.Printf("resume installed services journal update failed: operation_id=%s err=%v", state.OperationID, err)
-	}
 }
 
 func (b *Bootstrap) runRuntime(ctx context.Context, state journal) {
@@ -495,6 +458,7 @@ func (b *Bootstrap) progress(state *journal, phase string, percent int, message 
 	state.Percent = percent
 	state.Message = message
 	state.Retryable = false
+	state.CanResume = false
 	state.Problem = nil
 	state.UpdatedAt = b.now().UTC()
 	_ = b.writeJournal(*state)
@@ -510,6 +474,7 @@ func (b *Bootstrap) fail(state journal, code, message string, retryable bool, ca
 	state.Mode = ModeRecovery
 	state.Message = problem.Message
 	state.Retryable = retryable
+	state.CanResume = retryable && state.ConfigDigest != ""
 	state.NeedsToken = true
 	state.Problem = &problem
 	state.UpdatedAt = b.now().UTC()
