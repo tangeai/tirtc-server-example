@@ -10,7 +10,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"syscall"
 
@@ -26,7 +25,6 @@ func (b *Bootstrap) Preview(ctx context.Context, draft Draft) (Plan, error) {
 	if err := validateDraft(draft); err != nil {
 		return Plan{}, err
 	}
-	draft.OptionalServices, _ = canonicalOptionalServices(draft.OptionalServices)
 	if err := b.probes.Probe(ctx, draft); err != nil {
 		return Plan{}, err
 	}
@@ -39,6 +37,10 @@ func (b *Bootstrap) Preview(ctx context.Context, draft Draft) (Plan, error) {
 			return Plan{}, fmt.Errorf("%w: %w", ErrInvalidInput, err)
 		}
 	}
+	if (assessment.Class == DatabaseManagedOlder || assessment.Class == DatabaseManagedCurrent) &&
+		!b.canResumeDatabase(draft.Database.Name, assessment) {
+		return Plan{}, ErrExistingDatabase
+	}
 	plan := Plan{Database: assessment}
 	switch assessment.Class {
 	case DatabaseAbsent:
@@ -46,9 +48,9 @@ func (b *Bootstrap) Preview(ctx context.Context, draft Draft) (Plan, error) {
 	case DatabaseEmpty:
 		plan.Actions = append(plan.Actions, "初始化空数据库中的 ThingConnect 表")
 	case DatabaseManagedOlder:
-		plan.Actions = append(plan.Actions, "执行缺失的 ThingConnect 版本化迁移")
+		plan.Actions = append(plan.Actions, "恢复本机同一未完成安装任务，并执行其缺失迁移")
 	case DatabaseManagedCurrent:
-		plan.Actions = append(plan.Actions, "校验现有 ThingConnect 表结构")
+		plan.Actions = append(plan.Actions, "恢复本机同一未完成安装任务；不修改已有业务数据")
 	default:
 		return Plan{}, classificationProblem(assessment.Class)
 	}
@@ -57,18 +59,9 @@ func (b *Bootstrap) Preview(ctx context.Context, draft Draft) (Plan, error) {
 	} else {
 		plan.Warnings = append(plan.Warnings, "数据库中已有管理员，安装器不会修改账号或密码")
 	}
-	enabled, _ := enabledBusinessServices(draft.OptionalServices)
-	serviceNames := make([]string, 0, len(enabled))
-	for _, service := range enabled {
-		serviceNames = append(serviceNames, service.DisplayName)
-	}
-	if strings.TrimSpace(draft.Network.PublicBaseURL) != "" &&
-		!optionalServicesSelected(draft.OptionalServices, "voip-server", "ai-server", "call-server") {
-		plan.Warnings = append(plan.Warnings, "当前服务发现协议要求全部可选服务；本次部分安装不会启用 /services，可在补齐服务后配置")
-	}
 	plan.Actions = append(plan.Actions,
-		fmt.Sprintf("生成并原子发布 Admin 与所选业务服务配置（%s）", strings.Join(serviceNames, "、")),
-		"重启 Admin 后只启动所选业务服务并检查就绪状态",
+		"生成并原子发布 Admin 与五个业务服务的基础配置",
+		"重启并验收 Admin；业务服务保持停止，待后台配置完成后由服务器脚本启动",
 	)
 	digest, err := planDigest(draft, assessment)
 	if err != nil {
@@ -83,12 +76,25 @@ func previewDatabaseError(err error) error {
 	case errors.Is(err, ErrInvalidInput),
 		errors.Is(err, ErrAlreadyInstalled),
 		errors.Is(err, ErrUnknownDatabase),
+		errors.Is(err, ErrExistingDatabase),
 		errors.Is(err, ErrSchemaFuture),
 		errors.Is(err, ErrSchemaDrift):
 		return err
 	default:
 		return fmt.Errorf("%w: %w", ErrMySQLUnavailable, err)
 	}
+}
+
+func (b *Bootstrap) canResumeDatabase(databaseName string, assessment DatabaseAssessment) bool {
+	operationID := strings.TrimSpace(assessment.RecoveryOperationID)
+	if operationID == "" {
+		return false
+	}
+	state, err := b.loadJournal()
+	if err != nil {
+		return false
+	}
+	return state.OperationID == operationID && state.DatabaseName == databaseName
 }
 
 func (b *Bootstrap) Execute(ctx context.Context, request ExecuteRequest) (Snapshot, error) {
@@ -108,11 +114,11 @@ func (b *Bootstrap) Execute(ctx context.Context, request ExecuteRequest) (Snapsh
 			}
 		}
 		if request.Draft == nil {
-			return b.startRuntime(ctx)
+			return b.ReconcileRuntime(ctx)
 		}
 	}
 	if request.Draft == nil {
-		return b.startRuntime(ctx)
+		return b.ReconcileRuntime(ctx)
 	}
 	plan, err := b.Preview(ctx, *request.Draft)
 	if err != nil {
@@ -139,12 +145,11 @@ func (b *Bootstrap) Execute(ctx context.Context, request ExecuteRequest) (Snapsh
 			return Snapshot{}, fmt.Errorf("%w: 数据库已经被安装流程领取，不能更换", ErrPlanStale)
 		}
 	}
-	canonicalOptional, _ := canonicalOptionalServices(request.Draft.OptionalServices)
 	state := journal{Snapshot: Snapshot{
 		Mode: ModeRecovery, OperationID: operationID, Phase: "validating", Percent: 5,
 		Message: "正在验证安装计划", NeedsToken: true, UpdatedAt: b.now().UTC(),
 	}, DatabaseName: request.Draft.Database.Name, InstanceID: instanceID,
-		EnabledServices: canonicalOptional}
+		EnabledServices: installOptionalServices()}
 	if err := b.writeJournalUnlocked(state); err != nil {
 		b.mu.Unlock()
 		return Snapshot{}, err
@@ -183,7 +188,7 @@ func (b *Bootstrap) runInstall(ctx context.Context, draft Draft, expected Plan, 
 	}
 	state.InstanceID = claim.InstanceID()
 	b.progress(&state, "database_claimed", 25, "已取得数据库安装所有权")
-	if err := claim.Prepare(ctx, draft.Admin, draft.OptionalServices); err != nil {
+	if err := claim.Prepare(ctx, draft.Admin, installOptionalServices()); err != nil {
 		b.fail(state, problemCode(err), safeMessage(err), true, err)
 		return
 	}
@@ -250,8 +255,8 @@ func (b *Bootstrap) requestRestart() {
 }
 
 // ReconcileRuntime repairs durable configuration state after Admin has loaded
-// the active runtime configuration. It never starts a business service; that
-// transition belongs to an authenticated, explicit Execute request.
+// the active runtime configuration. It seals the Admin-only installation but
+// never starts a business service; host-side process management owns that step.
 func (b *Bootstrap) ReconcileRuntime(ctx context.Context) (Snapshot, error) {
 	state, found, err := b.reconcileRuntimeState(ctx)
 	if err != nil {
@@ -338,119 +343,50 @@ func (b *Bootstrap) reconcileRuntimeState(ctx context.Context) (journal, bool, e
 		b.requestRestart()
 		return state, true, nil
 	}
-	state.Mode = ModeRecovery
-	state.Phase = "awaiting_service_start"
-	state.Percent = 72
-	state.CanResume = true
-	state.NeedsToken = true
-	if state.Problem == nil {
-		state.Message = "Admin 已就绪，等待确认启动业务服务"
-		state.Retryable = false
-	}
+	state.Phase = "sealing"
+	state.Percent = 90
+	state.Message = "Admin 已就绪，正在关闭首次安装入口"
+	state.CanResume = false
 	state.UpdatedAt = b.now().UTC()
 	if err := b.writeJournal(state); err != nil {
+		return state, true, err
+	}
+	if err := b.sealInstallation(ctx, &state); err != nil {
 		return state, true, err
 	}
 	return state, true, nil
 }
 
-func (b *Bootstrap) startRuntime(ctx context.Context) (Snapshot, error) {
-	state, found, err := b.reconcileRuntimeState(ctx)
-	if err != nil {
-		return state.Snapshot, err
-	}
-	if !found {
-		return Snapshot{Mode: ModeNormal}, ErrPlanStale
-	}
-	if state.Phase == "installed" || state.Mode == ModeInstalled {
-		return state.Snapshot, ErrAlreadyInstalled
-	}
-	if !state.CanResume {
-		return state.Snapshot, nil
-	}
-	b.mu.Lock()
-	if b.running || b.closed {
-		b.mu.Unlock()
-		return state.Snapshot, ErrInstallBusy
-	}
-	b.running = true
-	b.wg.Add(1)
-	b.mu.Unlock()
-	go b.runRuntime(b.ctx, state)
-	return state.Snapshot, nil
-}
-
-func (b *Bootstrap) runRuntime(ctx context.Context, state journal) {
-	defer func() {
-		b.mu.Lock()
-		b.running = false
-		b.mu.Unlock()
-		b.wg.Done()
-	}()
-	if b.runtime == nil {
-		b.fail(state, "RUNTIME_UNAVAILABLE", "服务管理器不可用，Admin 已可用于诊断", true, errors.New("runtime controller is nil"))
-		return
-	}
-	b.progress(&state, "starting_services", 75, "Admin 已就绪，正在启动业务服务")
-	err := b.runtime.StartAndWait(ctx, state.EnabledServices, func(service ServiceState) {
-		updateServiceState(&state, service)
-		_ = b.writeJournal(state)
-	})
-	if err != nil {
-		b.fail(state, "BUSINESS_NOT_READY", "部分业务服务尚未就绪，Admin 保持可用，可修复后继续", true, err)
-		return
-	}
-	state.Phase = "sealing"
-	state.Percent = 95
-	state.Message = "服务已就绪，正在永久关闭首次安装入口"
-	state.UpdatedAt = b.now().UTC()
-	if err := b.writeJournal(state); err != nil {
-		b.fail(state, "INSTALL_SEAL_FAILED", "服务已就绪，但安装锁定标记写入失败", true, err)
-		return
-	}
+func (b *Bootstrap) sealInstallation(ctx context.Context, state *journal) error {
 	if b.database == nil {
-		b.fail(state, "INSTALL_SEAL_FAILED", "服务已就绪，但数据库安装状态无法锁定", true, errors.New("database provisioner is nil"))
-		return
+		return errors.New("database provisioner is nil")
 	}
 	if err := b.database.Seal(ctx, b.opts.RuntimeDatabaseDSN, state.OperationID, state.ConfigDigest); err != nil {
-		b.fail(state, "INSTALL_SEAL_FAILED", "服务已就绪，但数据库安装状态无法锁定", true, err)
-		return
+		return err
 	}
 	installed := map[string]any{
 		"product": ProductName, "instance_id": state.InstanceID,
 		"operation_id": state.OperationID, "config_digest": state.ConfigDigest,
-		"optional_services": state.EnabledServices, "installed_at": b.now().UTC(),
+		"business_services": businessServiceNames(), "installed_at": b.now().UTC(),
 	}
 	if err := writeAtomicJSON(b.opts.InstalledPath(), installed, 0o400); err != nil {
-		b.fail(state, "INSTALL_SEAL_FAILED", "服务已就绪，但安装锁定标记写入失败", true, err)
-		return
+		return err
 	}
 	state.Mode = ModeInstalled
 	state.Phase = "installed"
 	state.Percent = 100
-	state.Message = "ThingConnect 安装完成"
+	state.Message = "Admin 安装完成；请登录后台配置业务服务后在服务器执行启动命令"
 	state.Retryable = false
+	state.CanResume = false
 	state.NeedsToken = false
 	state.Problem = nil
 	state.UpdatedAt = b.now().UTC()
-	if err := b.writeJournal(state); err != nil {
+	if err := b.writeJournal(*state); err != nil {
 		log.Printf("installer final journal update failed: operation_id=%s err=%v", state.OperationID, err)
 	}
 	_ = os.Remove(b.opts.TokenHashPath())
 	_ = os.Remove(b.opts.AllowPath())
-	_ = syncDir(b.opts.StateDir())
-}
-
-func updateServiceState(state *journal, service ServiceState) {
-	for index := range state.Services {
-		if state.Services[index].Name == service.Name {
-			state.Services[index] = service
-			sort.Slice(state.Services, func(i, j int) bool { return state.Services[i].Name < state.Services[j].Name })
-			return
-		}
-	}
-	state.Services = append(state.Services, service)
-	sort.Slice(state.Services, func(i, j int) bool { return state.Services[i].Name < state.Services[j].Name })
+	return syncDir(b.opts.StateDir())
 }
 
 func (b *Bootstrap) progress(state *journal, phase string, percent int, message string) {
@@ -512,7 +448,11 @@ func writeAtomicJSON(path string, value any, mode os.FileMode) error {
 }
 
 func planDigest(draft Draft, assessment DatabaseAssessment) (string, error) {
-	draft.OptionalServices, _ = canonicalOptionalServices(draft.OptionalServices)
+	// MQTT and historical optional-service selection are intentionally outside
+	// first-run installation. Keeping them out of the digest lets older clients
+	// submit their legacy fields without changing the Admin-only install plan.
+	draft.MQTT = MQTTInput{}
+	draft.OptionalServices = nil
 	payload := struct {
 		Draft      Draft
 		Assessment DatabaseAssessment
@@ -539,7 +479,8 @@ func sameStrings(left, right []string) bool {
 }
 
 func sameAssessment(left, right DatabaseAssessment) bool {
-	if left.Class != right.Class || left.TableCount != right.TableCount || left.CreateAdmin != right.CreateAdmin || len(left.Versions) != len(right.Versions) {
+	if left.Class != right.Class || left.TableCount != right.TableCount || left.CreateAdmin != right.CreateAdmin ||
+		left.RecoveryOperationID != right.RecoveryOperationID || len(left.Versions) != len(right.Versions) {
 		return false
 	}
 	for component, version := range left.Versions {

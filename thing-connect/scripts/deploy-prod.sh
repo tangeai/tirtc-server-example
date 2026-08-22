@@ -66,6 +66,11 @@ HEALTH_WAIT_SECONDS="${HEALTH_WAIT_SECONDS:-30}"
 HEALTH_REQUEST_TIMEOUT_SECONDS="${HEALTH_REQUEST_TIMEOUT_SECONDS:-3}"
 HEALTH_HOST="${HEALTH_HOST:-127.0.0.1}"
 BACKUP_KEEP_COUNT="${BACKUP_KEEP_COUNT:-10}"
+# Database migrations are irreversible by the binary rollback path. Operators
+# must provide a non-empty backup file whose restore has been tested before any
+# migration command is allowed to run.
+DATABASE_BACKUP_FILE="${DATABASE_BACKUP_FILE:-}"
+DATABASE_BACKUP_RESTORE_VERIFIED="${DATABASE_BACKUP_RESTORE_VERIFIED:-0}"
 MIGRATION_CONFIG="${MIGRATION_CONFIG:-$DEPLOY_ROOT/admin-server/migration-config.yaml}"
 SKIP_MIGRATIONS="${SKIP_MIGRATIONS:-0}"
 ALLOW_INSECURE_ADMIN_COOKIE="${ALLOW_INSECURE_ADMIN_COOKIE:-1}"
@@ -257,6 +262,42 @@ validate_release_options() {
         err "ALLOW_INSECURE_ADMIN_COOKIE 只能是 0 或 1"
         return 1
     }
+    [[ "$DATABASE_BACKUP_RESTORE_VERIFIED" =~ ^[01]$ ]] || {
+        err "DATABASE_BACKUP_RESTORE_VERIFIED 只能是 0 或 1"
+        return 1
+    }
+}
+
+validate_database_backup() {
+    local digest
+    [ "$SKIP_MIGRATIONS" != "1" ] || return 0
+    [ "$DATABASE_BACKUP_RESTORE_VERIFIED" = "1" ] || {
+        err "数据库迁移被拒绝：尚未确认备份已完成恢复演练"
+        err "先生成专用数据库备份并验证可恢复，再设置 DATABASE_BACKUP_FILE 和 DATABASE_BACKUP_RESTORE_VERIFIED=1"
+        return 1
+    }
+    case "$DATABASE_BACKUP_FILE" in
+        /*) ;;
+        *) err "DATABASE_BACKUP_FILE 必须是绝对路径"; return 1 ;;
+    esac
+    [ -f "$DATABASE_BACKUP_FILE" ] && [ -r "$DATABASE_BACKUP_FILE" ] && [ -s "$DATABASE_BACKUP_FILE" ] || {
+        err "数据库备份不存在、不可读或为空: $DATABASE_BACKUP_FILE"
+        return 1
+    }
+    command -v sha256sum >/dev/null 2>&1 || {
+        err "找不到 sha256sum，无法校验数据库备份文件"
+        return 1
+    }
+    digest="$(sha256sum -- "$DATABASE_BACKUP_FILE" | awk '{print $1}')" || return 1
+    [ "${#digest}" -eq 64 ] || {
+        err "数据库备份校验和生成失败"
+        return 1
+    }
+    if [ -n "${BACKUP_DIR:-}" ]; then
+        printf '%s  %s\n' "$digest" "$DATABASE_BACKUP_FILE" >"$BACKUP_DIR/database-backup.sha256" || return 1
+        chmod 0600 "$BACKUP_DIR/database-backup.sha256" || return 1
+    fi
+    log "数据库备份门槛通过: $DATABASE_BACKUP_FILE (sha256=$digest)"
 }
 
 is_valid_service() {
@@ -654,6 +695,7 @@ run_migrations() {
         warn "已按 SKIP_MIGRATIONS=1 跳过数据库迁移；仅应在迁移已独立完成时使用"
         return
     fi
+    validate_database_backup || return 1
     [ -f "$MIGRATION_CONFIG" ] || {
         err "缺少迁移配置: $MIGRATION_CONFIG"
         err "请复制 admin-server/config.yaml，使用具备 DDL 权限的 database.dsn，并设置权限 600"

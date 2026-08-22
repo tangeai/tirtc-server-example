@@ -33,6 +33,7 @@ type apiResponse struct {
 type Ref struct {
 	Namespace string
 	Key       string
+	Reload    string
 	Apply     func(Snapshot) error
 }
 
@@ -88,8 +89,13 @@ func (c *Client) Load(ctx context.Context, namespace, key string) (Snapshot, err
 
 func (c *Client) Run(ctx context.Context, refs []Ref) {
 	byID := make(map[string]Ref, len(refs))
+	runtimeRefs := make([]Ref, 0, len(refs))
 	for _, ref := range refs {
+		if ref.Reload == "restart" {
+			continue
+		}
 		byID[ref.Namespace+"/"+ref.Key] = ref
+		runtimeRefs = append(runtimeRefs, ref)
 		_ = c.apply(ctx, ref, true)
 	}
 	ticker := time.NewTicker(30 * time.Second)
@@ -102,7 +108,7 @@ func (c *Client) Run(ctx context.Context, refs []Ref) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			for _, ref := range refs {
+			for _, ref := range runtimeRefs {
 				_ = c.apply(ctx, ref, false)
 			}
 		case message, ok := <-channel:

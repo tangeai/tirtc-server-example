@@ -101,6 +101,22 @@ config_exists() {
         [ -f "$DEPLOY_ROOT/config-current/$service/config.yaml" ]
 }
 
+preflight_service() {
+    local service="$1" checker="$DEPLOY_ROOT/$ADMIN_SERVICE/$ADMIN_SERVICE"
+    [ "$service" != "$ADMIN_SERVICE" ] || return 0
+    [ -x "$checker" ] || {
+        err "无法检查 $service 配置：Admin 程序不存在或不可执行: $checker"
+        return 1
+    }
+    echo "检查 $service 的基础配置、必填配置和依赖连接..." >&2
+    if ! "$checker" -c "$DEPLOY_ROOT/$ADMIN_SERVICE/config.yaml" \
+        -deploy-root "$DEPLOY_ROOT" -check-service-config "$service"; then
+        err "$service 启动前检查失败，未启动服务"
+        err "处理建议：登录 Admin 完成页面列出的必填配置；修复后重新执行 $DEPLOY_ROOT/service-local.sh start $SERVICE_GROUP:$service"
+        return 1
+    fi
+}
+
 service_port() {
     [ -n "${SERVICE_PORT[$1]+present}" ] || return 2
     printf '%s\n' "${SERVICE_PORT[$1]}"
@@ -168,7 +184,7 @@ print_status() {
 }
 
 start_one() (
-    local service="$1" pid port current_rc
+    local service="$1" prechecked="${2:-0}" pid port current_rc
     local binary="$DEPLOY_ROOT/$service/$service"
     mkdir -p "$STATE_DIR" "$LOG_DIR"
     exec 9>"$STATE_DIR/$service.lock"
@@ -187,6 +203,7 @@ start_one() (
     [ -x "$binary" ] || { err "服务尚未发布: $binary"; return 1; }
     if [ "$service" != "$ADMIN_SERVICE" ]; then
         config_exists "$service" || { err "$service 配置不存在"; return 1; }
+        [ "$prechecked" = "1" ] || preflight_service "$service" || return 1
     fi
     port="$(service_port "$service")" || return 1
     if port_in_use "$port"; then
@@ -267,14 +284,19 @@ wait_ready() {
 
 start_all() {
     local service port
-    start_one "$ADMIN_SERVICE" >/dev/null || return 1
+    start_one "$ADMIN_SERVICE" || return 1
     if ! wait_ready "$ADMIN_SERVICE" "$SETUP_PORT"; then
         stop_one "$ADMIN_SERVICE" >/dev/null || true
         return 1
     fi
     for service in "${BUSINESS_SERVICES[@]}"; do
         if config_exists "$service"; then
-            start_one "$service" >/dev/null || return 1
+            preflight_service "$service" || return 1
+        fi
+    done
+    for service in "${BUSINESS_SERVICES[@]}"; do
+        if config_exists "$service"; then
+            start_one "$service" 1 || return 1
             port="$(service_port "$service")" || return 1
             if ! wait_ready "$service" "$port"; then
                 stop_one "$service" >/dev/null || true

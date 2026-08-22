@@ -106,7 +106,7 @@ test('recovery page shows the failed service and its suggested resolution', asyn
   }
 });
 
-test('reconciled Admin waits for explicit business service confirmation', async () => {
+test('legacy recovery completes Admin without starting business services', async () => {
   const vite = await createServer({
     appType: 'custom',
     logLevel: 'silent',
@@ -133,7 +133,8 @@ test('reconciled Admin waits for explicit business service confirmation', async 
     );
 
     assert.match(html, /Admin 已就绪，等待确认启动业务服务/);
-    assert.match(html, /启动业务服务并继续/);
+    assert.match(html, /完成 Admin 安装并关闭安装入口/);
+    assert.doesNotMatch(html, /启动业务服务并继续/);
     assert.doesNotMatch(html, /ant-spin-spinning/);
   } finally {
     await vite.close();
@@ -183,9 +184,52 @@ test('setup form renders services supplied by the shared catalog', async () => {
       ),
     );
 
-    assert.match(html, /设备服务（必需）/);
-    assert.match(html, /指标服务（可选）/);
-    assert.doesNotMatch(html, /VoIP 服务（可选）/);
+    assert.match(html, /设备服务（安装后配置）/);
+    assert.match(html, /指标服务（安装后配置）/);
+    assert.doesNotMatch(html, /VoIP 服务（安装后配置）/);
+  } finally {
+    await vite.close();
+  }
+});
+
+test('first-run form defers MQTT configuration until Admin is ready', async () => {
+  const vite = await createServer({
+    appType: 'custom',
+    logLevel: 'silent',
+    server: { middlewareMode: true },
+  });
+  try {
+    const setup = await vite.ssrLoadModule('/src/setup.tsx');
+    const html = renderToStaticMarkup(
+      createElement(
+        AntApp,
+        null,
+        createElement(setup.SetupPage, {
+          initial: {
+            mode: 'fresh',
+            available_services: [
+              {
+                name: 'admin-server',
+                display_name: '管理后台',
+                business: false,
+                required: true,
+                uses_mqtt: false,
+              },
+              {
+                name: 'device-server',
+                display_name: '设备服务',
+                business: true,
+                required: true,
+                uses_mqtt: true,
+              },
+            ],
+          },
+        }),
+      ),
+    );
+
+    assert.doesNotMatch(html, /MQTT/);
+    assert.doesNotMatch(html, /Broker/);
   } finally {
     await vite.close();
   }

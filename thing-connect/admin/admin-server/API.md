@@ -18,36 +18,18 @@ Content-Type: application/json
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/v1/setup/status` | 读取 `fresh/recovery/installed/normal` 模式和脱敏进度 |
-| POST | `/v1/setup/preview` | 测试 MySQL、Redis、MQTT 并只读生成数据库计划 |
-| POST | `/v1/setup/execute` | 携带 `draft` 和 `plan_digest` 启动安装；配置对账后由管理员提交空请求，显式启动业务服务 |
+| POST | `/v1/setup/preview` | 测试 MySQL 和 Redis，并只读生成数据库计划 |
+| POST | `/v1/setup/execute` | 携带 `draft` 和 `plan_digest` 执行 Admin 安装或对账本机同一未完成任务 |
 
-`preview` 不执行建库、建表、配置写入或进程控制。`execute` 在取得锁后重新分类数据库；预检事实变化时返回 `409`，陌生非空库、结构漂移和未来版本同样返回 `409` 且不执行自动写入。安装任务在后台运行，客户端轮询 `status`，浏览器断开不会取消已经持久化的任务。
+`preview` 不执行建库、建表、配置写入或进程控制。首次安装只接受不存在或完全无表的专用数据库；任何其他已有表的数据库只读识别后返回 `409`，不建表、迁移、补数据、清空或覆盖。只有数据库安装标记、本地 journal 和目标库名中的操作标识全部一致时，才允许恢复本机同一未完成任务。
 
-`draft.database` 必须同时提供迁移账号和独立的 DML 运行账号，两者用户名不能相同。迁移账号用于建库和版本化 DDL；运行账号写入生成的服务配置，并在安装锁定前验证对 `schema_migrations` 的 SELECT，以及对其余受管表的 SELECT、INSERT、UPDATE、DELETE。`draft.optional_services` 接受状态响应 `available_services` 中 `business=true,required=false` 的服务名，数组不得重复；必需业务服务固定启用，不在该数组中。未选择的可选服务不生成配置、不启动，也不参与 readiness。任何密码字段均为只写输入，不在计划或状态中返回。
+`draft.database` 必须同时提供迁移账号和独立的 DML 运行账号，两者用户名不能相同。迁移账号只用于初始化不存在或无表的专用库；运行账号写入生成的服务配置，并在安装锁定前以不写入业务数据的语句验证 DML 权限。安装器生成五个业务服务的基础配置，但不启动任何业务服务。`draft.optional_services` 和 `draft.mqtt` 只为旧客户端保留解码兼容，服务端忽略其值。任何密码字段均为只写输入，不在计划或状态中返回。
 
-`GET /v1/setup/status` 的 `available_services[]` 是安装页面的服务事实源，包含 `name`、`display_name`、`business`、`required` 和 `uses_mqtt`。恢复状态中的 `can_resume=true` 表示 Admin 已完成配置与数据库状态对账，可以提交带安装令牌的空 `execute` 请求启动业务服务。Admin 进程启动本身不会执行该进程控制动作。
+`GET /v1/setup/status` 的 `available_services[]` 来自服务清单，包含 `name`、`display_name`、`business`、`required` 和 `uses_mqtt`。页面只把业务服务显示为“安装后配置”。恢复状态中的 `can_resume=true` 表示 Admin 配置和数据库安装状态可以完成对账；不表示业务服务已就绪，也不触发进程控制。
 
 首次安装、创建管理员和修改管理员密码使用同一密码策略：按 Unicode 字符计数至少 8 位，并同时包含 ASCII 大写字母、小写字母和数字；中文和特殊字符可以作为其余字符使用。
 
-`draft.mqtt.auth_mode` 接受 `username` 或 `clientid`。Username 模式提交共享的 `username` 和 `password`；为兼容旧客户端，省略 `auth_mode` 且只提供 `username` 时仍按 Username 模式处理。ClientID 模式提交共享的 `password` 以及按服务名索引的 `client_ids`，固定要求 `device-server` 和 `user-server`，选择 VoIP 或 Call 时还要求对应服务；所有启用服务的 ClientID 必须非空且互不相同。例如：
-
-```json
-{
-  "broker": "mqtts://mqtt.example.com:8883",
-  "auth_mode": "clientid",
-  "client_ids": {
-    "device-server": "devicesrv",
-    "user-server": "usrsrv",
-    "voip-server": "voipsrv",
-    "call-server": "callsrv"
-  },
-  "password": "<write-only>"
-}
-```
-
-ClientID 模式只适用于每个服务单实例运行；固定 ClientID 不能跨服务或副本共享。需要多副本时使用 Username 模式，并为每个进程设置唯一的 `SERVICE_INSTANCE_ID`。
-
-Redis、MQTT 或 MySQL 连接预检失败时返回 `503`，`msg` 只标识失败依赖和检查方向，不包含上游原始错误、内网地址、账号或密码；原始原因只写入 Admin 服务日志，日志不记录安装请求体。
+Redis 或 MySQL 连接预检失败时返回 `503`，`msg` 只标识失败依赖和检查方向，不包含上游原始错误、内网地址、账号或密码；脱敏后的详细原因只写入 Admin 服务日志，日志不记录安装请求体。MQTT 由安装完成后的服务器启动预检验证。
 
 安装错误响应的 `data` 提供结构化诊断信息：`code` 是安装器诊断码，`message` 是页面主提示，`suggestions` 是可直接执行的处理建议。客户端仍按响应顶层的数值 `code` 判断 HTTP 业务结果，不按诊断文案分支。例如：
 
@@ -66,9 +48,9 @@ Redis、MQTT 或 MySQL 连接预检失败时返回 `503`，`msg` 只标识失败
 }
 ```
 
-安装状态中的顶层 `problem` 使用相同结构；`services[]` 在单个服务启动失败时也包含对应的 `problem`。端口占用、进程管理器失败、服务启动失败和 readiness 超时会指出具体服务，并提供日志位置、端口排查或依赖检查建议。原始进程输出和依赖错误不进入状态响应。
+安装状态中的顶层 `problem` 使用相同结构。`services[]` 表示安装器为五个业务服务生成基础配置的进度，不表示它们已启动。原始进程输出和依赖错误不进入状态响应。
 
-所有响应设置 `Cache-Control: no-store`。安装令牌、数据库/Redis/MQTT 密码、首个管理员密码和生成密钥不出现在状态响应中。安装完成后写接口返回 `410`；重新授权只能在服务器本地执行部署流程，普通配置错误不会重新开放这些接口。
+所有响应设置 `Cache-Control: no-store`。安装令牌、数据库/Redis 密码、首个管理员密码和生成密钥不出现在状态响应中。安装完成后写接口返回 `410`；重新授权只能在服务器本地执行部署流程，普通配置错误不会重新开放这些接口。
 
 除登录、MFA 验证、刷新和退出外，请求使用 `Authorization: Bearer <access_token>`。刷新令牌保存在 HttpOnly Cookie `admin_refresh` 中，Admin Web 只在页面内存中保存短期访问令牌，页面重新加载时通过刷新 Cookie 恢复会话。Admin Web 和二次开发客户端发送 `X-Admin-Request: 1`；使用 Cookie 的刷新与退出接口缺少该请求头时拒绝请求，以阻止跨站表单触发会话操作。列表接口通常接受 `page`、`page_size` 和页面对应的筛选参数。
 
@@ -113,6 +95,8 @@ MFA 验证请求：
 | 数据字典 | 字典类型、字典项增改查及 `GET /dictionaries/:code` |
 | 微信 VoIP | 应用列表、应用详情、应用设备及设备上报属性 |
 | 任务 | 设备池导入、任务列表、任务结果下载和失败任务重试 |
+
+`GET /services/:service/status` 在实例状态外返回 `configuration_ready`、`required_configurations[]`、`start_command` 和 `restart_command`。`required_configurations[]` 列出未发布或无效的启动阻断项。命令仅用于管理员复制到部署服务器执行，Admin 不执行主机进程控制。
 | 日志 | `GET /login-logs`、`GET /audit-logs` |
 
 写操作由权限码控制。超级管理员默认拥有 [permissions.go](../../internal/admin/permissions.go) 中列出的全部权限，其他角色按后台配置授权。
@@ -144,7 +128,7 @@ MFA 验证请求：
 | POST | `/configs/:namespace/:config_key/test` | 对 SMTP、人机验证等支持测试的配置执行连通性测试 |
 | PUT | `/configs/:namespace/:config_key` | 发布配置；需要提交当前修订号以避免并发覆盖 |
 
-配置定义中的 `name`、`group`、`description`、`default`、`required`、`blocking`、`secret_paths` 和 `fields` 用于生成管理表单。`required` 表示必须发布可运行值，`blocking` 表示缺失会阻塞定义中说明的业务能力。`fields` 是后端注册表提供的单一字段事实源，每项包含字段路径 `path`、中文名称 `label`、控件类型 `kind`，并可包含 `description`、`options`、`secret`、`providers`、`required`、`required_when_enabled`、`blocking` 和 `min`。`resource_refs` 控件编辑 `[{"id":"...","name":"..."}]` 结构，用于 AI 默认 MCP、设备插件和知识库资源。Admin Web 根据这些元数据生成输入控件和基础校验；只有明确使用自定义编辑器的复杂配置才维护独立页面。
+配置定义中的 `name`、`group`、`description`、`default`、`required`、`blocking`、`reload`、`secret_paths` 和 `fields` 用于生成管理表单。`required` 表示必须发布可运行值，`blocking` 表示缺失会阻塞定义中说明的业务能力，`reload=restart` 表示发布后需重启目标服务，其他配置按服务实现热加载。`fields` 是后端注册表提供的单一字段事实源，每项包含字段路径 `path`、中文名称 `label`、控件类型 `kind`，并可包含 `description`、`options`、`secret`、`providers`、`required`、`required_when_enabled`、`blocking` 和 `min`。`resource_refs` 控件编辑 `[{"id":"...","name":"..."}]` 结构，用于 AI 默认 MCP、设备插件和知识库资源。Admin Web 根据这些元数据生成输入控件和基础校验；只有明确使用自定义编辑器的复杂配置才维护独立页面。
 
 配置响应中的 `using_default=true` 表示数据库尚无发布记录，`value` 是当前有效的注册表默认值，`revision` 为 `0`。配置密钥以明文 JSON 存储。具有 `config.secret.write` 的管理员读取普通配置、具有 `voip.app.write` 的管理员读取微信应用配置时，响应额外包含 `secrets` 原值；其他管理员只看到 `secret_configured`。Admin Web 用默认隐藏且可点击眼睛切换的密码控件展示这些值。
 

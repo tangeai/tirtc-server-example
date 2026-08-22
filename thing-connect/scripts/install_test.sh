@@ -88,6 +88,28 @@ test_active_bundle_is_sent_to_recovery_instead_of_reinstall() (
     [[ "$output" == *"启动 Admin 让安装器自动恢复"* ]]
 )
 
+test_orphan_config_revision_is_never_overwritten() (
+    DEPLOY_ROOT="$TEST_ROOT/orphan-config-revision"
+    mkdir -p "$DEPLOY_ROOT/config-releases/revision-1"
+    printf 'keep\n' >"$DEPLOY_ROOT/config-releases/revision-1/operator-config"
+    if validate_empty_deployment >/dev/null 2>&1; then
+        echo "FAIL: orphan config revision was accepted as empty" >&2
+        exit 1
+    fi
+    grep -qx keep "$DEPLOY_ROOT/config-releases/revision-1/operator-config"
+)
+
+test_partial_installer_state_is_never_overwritten() (
+    DEPLOY_ROOT="$TEST_ROOT/partial-installer-state"
+    mkdir -p "$DEPLOY_ROOT/var/installer"
+    printf 'keep\n' >"$DEPLOY_ROOT/var/installer/state.json"
+    if validate_empty_deployment >/dev/null 2>&1; then
+        echo "FAIL: partial installer state was accepted as empty" >&2
+        exit 1
+    fi
+    grep -qx keep "$DEPLOY_ROOT/var/installer/state.json"
+)
+
 test_first_publish_never_creates_example_configs() (
     DEPLOY_ROOT="$TEST_ROOT/published"
     BUILD_DIR="$TEST_ROOT/release-fixture"
@@ -226,6 +248,8 @@ test_service_catalog_addition_updates_install_inventory
 test_installed_deployment_is_never_reopened
 test_broken_installed_marker_fails_closed
 test_active_bundle_is_sent_to_recovery_instead_of_reinstall
+test_orphan_config_revision_is_never_overwritten
+test_partial_installer_state_is_never_overwritten
 test_first_publish_never_creates_example_configs
 test_source_is_cloned_by_installer
 test_non_git_source_is_never_overwritten

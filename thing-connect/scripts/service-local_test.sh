@@ -28,6 +28,9 @@ prepare_controller() {
     cp "$SOURCE_LOADER" "$DEPLOY_ROOT/service-catalog.sh"
     cp "$SOURCE_CATALOG" "$DEPLOY_ROOT/service-catalog.tsv"
     chmod 0755 "$CONTROLLER"
+    mkdir -p "$DEPLOY_ROOT/admin-server"
+    printf '#!/usr/bin/env bash\nexit 0\n' >"$DEPLOY_ROOT/admin-server/admin-server"
+    chmod 0755 "$DEPLOY_ROOT/admin-server/admin-server"
 }
 
 write_fake_service() {
@@ -127,6 +130,7 @@ test_start_rejects_occupied_port_with_guidance() (
     chmod +x "$DEPLOY_ROOT/call-server/call-server"
     printf 'fixture: true\n' >"$DEPLOY_ROOT/call-server/config.yaml"
     port_in_use() { return 0; }
+    preflight_service() { return 0; }
 
     local output
     if output="$(start_one call-server 2>&1)"; then
@@ -134,6 +138,23 @@ test_start_rejects_occupied_port_with_guidance() (
     fi
     [[ "$output" == *"端口 9005 已被占用"* ]] || fail "port conflict reason is missing: $output"
     [[ "$output" == *"处理建议"*"停止旧实例"* ]] || fail "port conflict guidance is missing: $output"
+)
+
+test_start_rejects_failed_config_preflight() (
+    DEPLOY_ROOT="$TEST_ROOT/preflight-deploy"
+    source "$SOURCE_SCRIPT"
+    mkdir -p "$DEPLOY_ROOT/call-server" "$DEPLOY_ROOT/admin-server"
+    printf '#!/usr/bin/env bash\nexit 0\n' >"$DEPLOY_ROOT/call-server/call-server"
+    printf 'fixture: true\n' >"$DEPLOY_ROOT/call-server/config.yaml"
+    printf '#!/usr/bin/env bash\nexit 1\n' >"$DEPLOY_ROOT/admin-server/admin-server"
+    chmod +x "$DEPLOY_ROOT/call-server/call-server" "$DEPLOY_ROOT/admin-server/admin-server"
+
+    local output
+    if output="$(start_one call-server 2>&1)"; then
+        fail "failed service config preflight was accepted"
+    fi
+    [[ "$output" == *"启动前检查失败，未启动服务"* ]] || fail "preflight failure is not visible: $output"
+    [[ "$output" == *"登录 Admin"*"service-local.sh start thing-connect:call-server"* ]] || fail "preflight guidance is missing: $output"
 )
 
 test_admin_receives_setup_listener() {
@@ -163,6 +184,7 @@ test_start_all_only_uses_existing_configs() (
     source "$SOURCE_SCRIPT"
     start_one() { printf 'start=%s\n' "$1" >>"$capture"; }
     wait_ready() { printf 'ready=%s:%s\n' "$1" "$2" >>"$capture"; }
+    preflight_service() { return 0; }
     config_exists() {
         case "$1" in
             device-server|user-server|ai-server) return 0 ;;
@@ -183,6 +205,7 @@ test_start_all_stops_service_that_never_becomes_ready() (
     start_one() { printf 'start=%s\n' "$1" >>"$capture"; }
     stop_one() { printf 'stop=%s\n' "$1" >>"$capture"; }
     wait_ready() { [ "$1" = "admin-server" ]; }
+    preflight_service() { return 0; }
     config_exists() { [ "$1" = "device-server" ]; }
 
     if start_all; then
@@ -204,6 +227,7 @@ test_runner_restarts_failed_child
 test_missing_pid_does_not_spawn_duplicate_runner
 test_crashing_child_is_not_reported_running
 test_start_rejects_occupied_port_with_guidance
+test_start_rejects_failed_config_preflight
 test_admin_receives_setup_listener
 test_start_all_only_uses_existing_configs
 test_start_all_stops_service_that_never_becomes_ready

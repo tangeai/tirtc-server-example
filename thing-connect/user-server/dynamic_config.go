@@ -5,8 +5,6 @@ import (
 	"errors"
 	"time"
 
-	"github.com/redis/go-redis/v9"
-
 	captchapkg "thing-connect/internal/captcha"
 	"thing-connect/internal/captcha/registry"
 	"thing-connect/internal/config"
@@ -17,10 +15,9 @@ import (
 	usrhandler "thing-connect/user-server/handler"
 )
 
-func userDynamicConfig(cfg *config.Config, redisClient *redis.Client, users *service.UserService, binds *service.BindService) (*dynamicconfig.Client, []dynamicconfig.Ref, error) {
-	client, err := dynamicconfig.New(cfg.Admin.ServerURL, cfg.Internal.Key, redisClient)
-	if err != nil {
-		return nil, nil, err
+func userDynamicConfig(client *dynamicconfig.Client, fallbackTiRTC config.TirtcCfg, users *service.UserService, binds *service.BindService) (*dynamicconfig.Client, []dynamicconfig.Ref, error) {
+	if client == nil {
+		return nil, nil, errors.New("dynamic config client is unavailable")
 	}
 	refs := []dynamicconfig.Ref{
 		{Namespace: "user-server", Key: "smtp", Apply: func(snapshot dynamicconfig.Snapshot) error {
@@ -147,20 +144,12 @@ func userDynamicConfig(cfg *config.Config, redisClient *redis.Client, users *ser
 			binds.UpdateConfig(current)
 			return nil
 		}},
-		{Namespace: "common", Key: "tirtc", Apply: func(snapshot dynamicconfig.Snapshot) error {
-			var value struct {
-				Endpoint string `json:"endpoint"`
-				AppID    string `json:"app_id"`
-			}
-			var secrets struct {
-				AccessKeyID string `json:"access_key_id"`
-				SecretKeyID string `json:"secret_key_id"`
-			}
-			if err := json.Unmarshal(snapshot.Value, &value); err != nil {
+		{Namespace: "common", Key: "tirtc", Reload: "restart", Apply: func(snapshot dynamicconfig.Snapshot) error {
+			resolved, err := dynamicconfig.ResolveTiRTC(snapshot, fallbackTiRTC)
+			if err != nil {
 				return err
 			}
-			_ = json.Unmarshal(snapshot.Secrets, &secrets)
-			usrhandler.SetTirtcCredentials(value.AppID, secrets.AccessKeyID, secrets.SecretKeyID, value.Endpoint)
+			usrhandler.SetTirtcCredentials(resolved.AppID, resolved.AccessKeyID, resolved.SecretKeyID, resolved.Endpoint)
 			return nil
 		}},
 	}

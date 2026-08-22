@@ -150,6 +150,16 @@ validate_empty_deployment() {
         err "检测到已激活配置；请启动 Admin 让安装器自动恢复，不要重新安装"
         return 1
     fi
+    if [ -d "$DEPLOY_ROOT/config-releases" ] &&
+       find "$DEPLOY_ROOT/config-releases" -mindepth 1 -print -quit | grep -q .; then
+        err "检测到已有配置 revision；首次安装拒绝覆盖，请按恢复或升级流程处理"
+        return 1
+    fi
+    if [ -d "$DEPLOY_ROOT/var/installer" ] &&
+       find "$DEPLOY_ROOT/var/installer" -mindepth 1 -print -quit | grep -q .; then
+        err "检测到已有安装状态；请启动现有 Admin 恢复，首次安装拒绝覆盖或删除状态文件"
+        return 1
+    fi
     for config_path in "$DEPLOY_ROOT"/*-server/config.yaml; do
         if [ -e "$config_path" ] || [ -L "$config_path" ]; then
             service="$(basename "$(dirname "$config_path")")"

@@ -54,6 +54,15 @@ type ConfigWrite struct {
 	Reason           string
 }
 
+type ConfigRequirementStatus struct {
+	Namespace  string `json:"namespace"`
+	ConfigKey  string `json:"config_key"`
+	Name       string `json:"name"`
+	Reload     string `json:"reload"`
+	Configured bool   `json:"configured"`
+	Reason     string `json:"reason,omitempty"`
+}
+
 type ConfigService struct {
 	db           *sqlx.DB
 	registry     *ConfigRegistry
@@ -69,6 +78,42 @@ func (s *ConfigService) Definitions(namespace string) ([]ConfigDefinition, error
 		return nil, fmt.Errorf("未知配置命名空间 %q", namespace)
 	}
 	return s.registry.List(namespace), nil
+}
+
+// BlockingStatus is a read-only startup gate. A blocking configuration is
+// complete only after an administrator has explicitly published a valid value
+// and all required secrets; registry defaults never silently satisfy it.
+func (s *ConfigService) BlockingStatus(ctx context.Context, target string) ([]ConfigRequirementStatus, error) {
+	definitions := s.registry.BlockingForTarget(strings.TrimSpace(target))
+	statuses := make([]ConfigRequirementStatus, 0, len(definitions))
+	for _, definition := range definitions {
+		status := ConfigRequirementStatus{
+			Namespace: definition.Namespace, ConfigKey: definition.Key,
+			Name: definition.Name, Reload: definition.Reload,
+		}
+		value, secrets, revision, err := s.Resolved(ctx, definition.Namespace, definition.Key, "global", "")
+		if err != nil {
+			return nil, err
+		}
+		if revision == 0 {
+			status.Reason = "尚未在管理后台发布"
+			statuses = append(statuses, status)
+			continue
+		}
+		if err := s.registry.Validate(definition.Namespace, definition.Key, value); err != nil {
+			status.Reason = "已发布的配置值无效"
+			statuses = append(statuses, status)
+			continue
+		}
+		if err := validateRequiredSecrets(definition.Namespace, definition.Key, value, secrets); err != nil {
+			status.Reason = err.Error()
+			statuses = append(statuses, status)
+			continue
+		}
+		status.Configured = true
+		statuses = append(statuses, status)
+	}
+	return statuses, nil
 }
 
 func (s *ConfigService) List(ctx context.Context, namespace string) ([]ConfigEntry, error) {
@@ -473,6 +518,8 @@ func containsMaskedSecret(value any) bool {
 func validateSecretShape(namespace, key string, object map[string]any) error {
 	allowed := map[string]bool{}
 	switch definitionID(namespace, key) {
+	case "user-server/mqtt.connection", "voip-server/mqtt.connection", "call-server/mqtt.connection":
+		allowed["password"] = true
 	case "user-server/smtp":
 		allowed["password"] = true
 	case "user-server/captcha":
@@ -552,6 +599,9 @@ func validateExistingSecretRequirement(namespace, key string, value json.RawMess
 	if definitionID(namespace, key) == "common/tirtc" && !configured {
 		return errors.New("TiRTC 必须填写 Access Key ID 和 Secret Key ID")
 	}
+	if strings.HasSuffix(definitionID(namespace, key), "/mqtt.connection") && !configured {
+		return errors.New("MQTT 连接必须填写密码")
+	}
 	if enabled, _ := public["enabled"].(bool); enabled && !configured && (definitionID(namespace, key) == "user-server/smtp" || definitionID(namespace, key) == "user-server/captcha") {
 		return errors.New("启用该服务前必须先配置所需密钥")
 	}
@@ -574,6 +624,11 @@ func validateRequiredSecrets(namespace, key string, value, secrets json.RawMessa
 	var secretObject map[string]any
 	_ = json.Unmarshal(secrets, &secretObject)
 	switch definitionID(namespace, key) {
+	case "user-server/mqtt.connection", "voip-server/mqtt.connection", "call-server/mqtt.connection":
+		password, _ := secretObject["password"].(string)
+		if strings.TrimSpace(password) == "" {
+			return errors.New("MQTT 连接必须填写密码")
+		}
 	case "user-server/smtp":
 		var public map[string]any
 		_ = json.Unmarshal(value, &public)

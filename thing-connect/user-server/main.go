@@ -20,6 +20,7 @@ import (
 	cleanupoutbox "thing-connect/internal/cleanup"
 	"thing-connect/internal/config"
 	"thing-connect/internal/db"
+	"thing-connect/internal/dynamicconfig"
 	"thing-connect/internal/logging"
 	mailerpkg "thing-connect/internal/mailer"
 	"thing-connect/internal/mqttc"
@@ -50,13 +51,19 @@ func main() {
 	if err != nil {
 		log.Fatalf("redis: %v", err)
 	}
-	var broker *mqttc.Broker
-	var mqttInitErr error
-	if cfg.MQTT.Broker != "" {
-		broker, mqttInitErr = mqttc.New(cfg.MQTT, rdb)
-		if mqttInitErr != nil {
-			log.Printf("mqtt: %v (continuing without MQTT)", mqttInitErr)
-		}
+	dynamicClient, err := dynamicconfig.New(cfg.Admin.ServerURL, cfg.Internal.Key, rdb)
+	if err != nil {
+		log.Fatalf("dynamic config: %v", err)
+	}
+	startupConfigCtx, cancelStartupConfig := context.WithTimeout(context.Background(), 10*time.Second)
+	mqttConfig, _, err := dynamicconfig.ResolveMQTT(startupConfigCtx, dynamicClient, "user-server", cfg.MQTT)
+	cancelStartupConfig()
+	if err != nil {
+		log.Fatalf("mqtt config: %v", err)
+	}
+	broker, err := mqttc.New(mqttConfig, rdb)
+	if err != nil {
+		log.Fatalf("mqtt: %v", err)
 	}
 
 	svcCfg := service.ServiceConfig{
@@ -79,12 +86,8 @@ func main() {
 	passwordResetMailQueue := service.NewInMemoryPasswordResetEmailQueue(userSvc.DeliverPasswordResetCode)
 	userSvc.SetPasswordResetEmailQueue(passwordResetMailQueue)
 
-	var mqttPub service.MQTTPublisher
-	if broker != nil {
-		mqttPub = broker
-	}
-	bindSvc := service.NewBindService(bindStore, cacheStore, mqttPub, svcCfg)
-	dynamicClient, dynamicRefs, err := userDynamicConfig(cfg, rdb, userSvc, bindSvc)
+	bindSvc := service.NewBindService(bindStore, cacheStore, broker, svcCfg)
+	dynamicClient, dynamicRefs, err := userDynamicConfig(dynamicClient, cfg.Tirtc, userSvc, bindSvc)
 	if err != nil {
 		log.Fatalf("dynamic config: %v", err)
 	}
@@ -103,11 +106,7 @@ func main() {
 	}
 	r.Use(gin.Recovery(), logging.RequestID("user"), logging.BodyLog(), gin.Logger())
 	probes := map[string]servicestatus.DependencyProbe{"database": servicestatus.SQLProbe(sqlDB), "redis": servicestatus.RedisProbe(rdb)}
-	if broker != nil {
-		probes["mqtt"] = broker.Ping
-	} else if mqttInitErr != nil {
-		probes["mqtt"] = func(context.Context) error { return mqttInitErr }
-	}
+	probes["mqtt"] = broker.Ping
 	servicestatus.RegisterHealth(r, probes)
 	if err := registerServiceDiscovery(r, cfg.Discovery); err != nil {
 		log.Fatalf("service discovery: %v", err)
@@ -182,9 +181,7 @@ func main() {
 		log.Printf("user-server shutdown: %v", err)
 	}
 	outboxCancel()
-	if broker != nil {
-		broker.Close()
-	}
+	broker.Close()
 	if err := rdb.Close(); err != nil {
 		log.Printf("user-server close redis: %v", err)
 	}

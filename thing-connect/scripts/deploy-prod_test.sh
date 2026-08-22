@@ -7,6 +7,9 @@ trap 'rm -rf -- "$TEST_ROOT"' EXIT
 
 DEPLOY_ROOT="$TEST_ROOT"
 source "$(cd "$(dirname "$0")" && pwd)/deploy-prod.sh"
+DATABASE_BACKUP_FILE="$TEST_ROOT/database-backup.sql"
+DATABASE_BACKUP_RESTORE_VERIFIED=1
+printf 'verified test backup\n' >"$DATABASE_BACKUP_FILE"
 
 assert_eq() {
     local want="$1" got="$2" message="$3"
@@ -20,6 +23,22 @@ test_http_admin_cookie_is_allowed_by_default() {
     assert_eq "1" "$ALLOW_INSECURE_ADMIN_COOKIE" \
         "default HTTP deployment must allow a non-Secure Admin cookie"
 }
+
+test_migration_refuses_missing_or_unverified_database_backup() (
+    SKIP_MIGRATIONS=0
+    DATABASE_BACKUP_FILE=""
+    DATABASE_BACKUP_RESTORE_VERIFIED=0
+    if validate_database_backup >/dev/null 2>&1; then
+        echo "FAIL: migration accepted an unverified database backup" >&2
+        exit 1
+    fi
+    DATABASE_BACKUP_RESTORE_VERIFIED=1
+    DATABASE_BACKUP_FILE="$TEST_ROOT/missing-backup.sql"
+    if validate_database_backup >/dev/null 2>&1; then
+        echo "FAIL: migration accepted a missing database backup" >&2
+        exit 1
+    fi
+)
 
 test_yaml_section_headers_allow_valid_whitespace() {
     local cfg="$TEST_ROOT/whitespace.yaml"
@@ -398,6 +417,7 @@ test_daily_update_backs_up_files_before_database_migration() {
 }
 
 test_http_admin_cookie_is_allowed_by_default
+test_migration_refuses_missing_or_unverified_database_backup
 test_yaml_section_headers_allow_valid_whitespace
 test_publish_deploy_script_replaces_root_entry_atomically
 test_publish_deploy_script_keeps_previous_entry_on_invalid_source

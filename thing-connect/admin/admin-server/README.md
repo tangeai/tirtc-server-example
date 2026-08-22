@@ -40,7 +40,9 @@ Admin 配置中心管理 `device-server`、`user-server`、`voip-server`、`ai-s
 - 数据库没有发布值时使用后端注册表默认值。
 - 不读取业务服务 YAML 中的同名旧业务值。
 - TiRTC App ID、Access Key ID 和 Secret Key ID 没有可运行默认值，后台将其标记为必填阻塞项。
-- 五个业务服务首次启动必须从 Admin 取得有效配置；Admin 不可达或响应无效时拒绝监听。
+- User、VoIP、Call 的 `mqtt.connection` 没有可运行默认值，三个服务分别发布独立账号。Admin、Device 和 AI 不连接 MQTT。
+- User、VoIP、AI、Call 首次启动必须从 Admin 取得有效 TiRTC 配置；需要 MQTT 的服务还必须取得有效 MQTT 配置。Admin 不可达或响应无效时拒绝监听。
+- 普通配置在运行期热加载；MQTT 和 TiRTC 的 `reload` 为 `restart`，发布后通过服务器进程管理命令重启对应服务。
 - 运行期间 Admin 短暂不可达时，业务服务继续使用内存中的最后有效值并重试。
 
 普通字段和密钥字段都以明文 JSON 存储在 MySQL。Admin Web 对密钥使用密码控件，默认显示 `*`；具备相应权限的管理员可点击眼睛查看原值。数据库账号、备份、网络和审计必须覆盖这些明文凭据。
@@ -69,11 +71,11 @@ TC-DEVICE-000001,replace-with-device-secret
 - `/health/live`：只表示 Admin 进程存活。
 - `/health/ready`：检查 MySQL、Redis 和 Admin 数据库迁移版本。
 
-首次安装页面持续显示结构化失败原因和处理建议。依赖预检失败时按页面检查地址、认证、TLS 和来源授权；业务服务启动失败时按页面列出的服务日志、端口或进程管理器建议处理。客户可见响应不包含 SQL、Redis、MQTT 客户端原始错误、内网连接串或凭据，详细原因只进入受保护的服务日志。
+首次安装页面持续显示结构化失败原因和处理建议。MySQL 或 Redis 预检失败时按页面检查地址、认证、TLS 和来源授权。客户可见响应不包含 SQL、Redis、MQTT 客户端原始错误、内网连接串或凭据，详细原因只进入受保护的服务日志。
 
-配置激活后，正常 Admin 启动只对账安装记录和配置 revision，不自动启动业务服务。安装页面显示“启动业务服务并继续”后，由持有一次性安装令牌的管理员显式确认；这样 Admin 始终可以先用于修改依赖配置和查看诊断。
+首次安装只启动 Admin，并为五个业务服务生成基础配置。Admin 不执行主机进程命令。服务状态页展示五个业务服务的版本、提交号、依赖状态、配置 revision、缺少的阻断配置和可复制的服务器启动或重启命令。
 
-- Admin 首页按实例展示五个业务服务的版本、提交号、依赖状态和配置 revision。
+服务器上的 `service-local.sh` 在业务服务启动前运行 Admin 只读预检，检查基础配置、阻断动态配置、MySQL schema、Redis 和对应 MQTT 账号。失败时服务保持停止，终端显示可操作建议。预检不执行数据库迁移或数据修改。
 
 常见检查：
 

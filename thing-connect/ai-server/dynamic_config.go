@@ -65,20 +65,13 @@ func aiDynamicConfig(cfg *config.Config, redisClient *redis.Client, legacy *aiha
 			state.mu.Unlock()
 			return nil
 		}},
-		{Namespace: "common", Key: "tirtc", Apply: func(snapshot dynamicconfig.Snapshot) error {
-			var value struct {
-				AppID string `json:"app_id"`
-			}
-			var secrets struct {
-				AccessKeyID string `json:"access_key_id"`
-				SecretKeyID string `json:"secret_key_id"`
-			}
-			if err := json.Unmarshal(snapshot.Value, &value); err != nil {
+		{Namespace: "common", Key: "tirtc", Reload: "restart", Apply: func(snapshot dynamicconfig.Snapshot) error {
+			resolved, err := dynamicconfig.ResolveTiRTC(snapshot, cfg.Tirtc)
+			if err != nil {
 				return err
 			}
-			_ = json.Unmarshal(snapshot.Secrets, &secrets)
 			state.mu.Lock()
-			state.appID, state.accessKeyID, state.secretKeyID = value.AppID, secrets.AccessKeyID, secrets.SecretKeyID
+			state.appID, state.accessKeyID, state.secretKeyID = resolved.AppID, resolved.AccessKeyID, resolved.SecretKeyID
 			state.apply()
 			state.mu.Unlock()
 			return nil

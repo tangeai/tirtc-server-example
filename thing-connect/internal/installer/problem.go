@@ -5,35 +5,10 @@ import (
 	"strings"
 )
 
-// runtimeFailureError carries a customer-safe explanation across the runtime
-// adapter seam while preserving the original cause for server-side logs.
-type runtimeFailureError struct {
-	Problem Problem
-	cause   error
-}
-
-func (failure *runtimeFailureError) Error() string {
-	if failure.cause == nil {
-		return failure.Problem.Message
-	}
-	return failure.Problem.Message + ": " + failure.cause.Error()
-}
-
-func (failure *runtimeFailureError) Unwrap() error { return failure.cause }
-
-func runtimeFailure(problem Problem, cause error) error {
-	return &runtimeFailureError{Problem: problem, cause: cause}
-}
-
 // Explain returns the stable, customer-safe problem attached to setup HTTP
 // failures and persisted installation state. Raw dependency errors remain in
 // the wrapped cause and must only be written to protected server logs.
 func Explain(err error) Problem {
-	var runtime *runtimeFailureError
-	if errors.As(err, &runtime) {
-		return runtime.Problem
-	}
-
 	switch {
 	case errors.Is(err, ErrMySQLUnavailable):
 		return Problem{
@@ -69,6 +44,15 @@ func Explain(err error) Problem {
 			Suggestions: []string{
 				"改用空数据库，或先备份并由数据库管理员确认现有表的来源",
 				"不要删除未知表或手工伪造迁移记录后重试",
+			},
+		}
+	case errors.Is(err, ErrExistingDatabase):
+		return Problem{
+			Code:    "DATABASE_ALREADY_IN_USE",
+			Message: "目标数据库已有表，首次安装未执行任何写入",
+			Suggestions: []string{
+				"不要使用首次安装入口处理已有数据库；请先完成可验证备份，再按版本升级或恢复流程操作",
+				"如需全新安装，请填写一个不存在或确认完全为空的专用数据库",
 			},
 		}
 	case errors.Is(err, ErrSchemaFuture):

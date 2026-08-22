@@ -38,6 +38,7 @@ var (
 	ErrInvalidOrigin    = errors.New("installer: invalid setup origin")
 	ErrTooManyAttempts  = errors.New("installer: too many setup attempts")
 	ErrUnknownDatabase  = errors.New("installer: unknown non-empty database")
+	ErrExistingDatabase = errors.New("installer: existing database is read-only during first-run")
 	ErrSchemaFuture     = errors.New("installer: schema is newer than this binary")
 	ErrSchemaDrift      = errors.New("installer: schema does not match its migration ledger")
 	ErrRedisUnavailable = errors.New("installer: redis unavailable")
@@ -141,11 +142,12 @@ const (
 )
 
 type DatabaseAssessment struct {
-	Class       DatabaseClass  `json:"class"`
-	TableCount  int            `json:"table_count"`
-	Versions    map[string]int `json:"versions"`
-	CreateAdmin bool           `json:"create_admin"`
-	Description string         `json:"description"`
+	Class               DatabaseClass  `json:"class"`
+	TableCount          int            `json:"table_count"`
+	Versions            map[string]int `json:"versions"`
+	CreateAdmin         bool           `json:"create_admin"`
+	Description         string         `json:"description"`
+	RecoveryOperationID string         `json:"-"`
 }
 
 type Plan struct {
@@ -216,12 +218,7 @@ type Bootstrap struct {
 	database DatabaseProvisioner
 	bundles  BundlePublisher
 	probes   DependencyProbe
-	runtime  RuntimeController
 	now      func() time.Time
-}
-
-type RuntimeController interface {
-	StartAndWait(context.Context, []string, func(ServiceState)) error
 }
 
 type BundleReceipt struct {
@@ -262,14 +259,13 @@ type Dependencies struct {
 	Database DatabaseProvisioner
 	Bundles  BundlePublisher
 	Probes   DependencyProbe
-	Runtime  RuntimeController
 }
 
 func New(options Options, dependencies Dependencies) *Bootstrap {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Bootstrap{
 		opts: options.normalize(), database: dependencies.Database, bundles: dependencies.Bundles,
-		probes: dependencies.Probes, runtime: dependencies.Runtime,
+		probes:  dependencies.Probes,
 		restart: make(chan struct{}, 1), now: time.Now, ctx: ctx, cancel: cancel,
 	}
 }

@@ -105,7 +105,7 @@ func TestProvisionerCreatesOnlyAbsentOrEmptyDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 	assessment, err = provisioner.Inspect(context.Background(), input)
-	if err != nil || assessment.Class != installapp.DatabaseManagedCurrent || assessment.CreateAdmin {
+	if err != nil || assessment.Class != installapp.DatabaseManagedCurrent || assessment.CreateAdmin || assessment.RecoveryOperationID != operationID {
 		t.Fatalf("managed assessment = %+v, %v", assessment, err)
 	}
 	runtimeConfig := *parsed

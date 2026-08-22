@@ -96,6 +96,45 @@ func New(cfg config.MQTTCfg, rdb *redis.Client) (*Broker, error) {
 	return b, nil
 }
 
+// Probe checks broker reachability and authentication without subscriptions,
+// Redis writes or a persistent session. It is intended for an explicit
+// server-side startup preflight while the target service is stopped.
+func Probe(ctx context.Context, cfg config.MQTTCfg) error {
+	opts := mqtt.NewClientOptions()
+	opts.AddBroker(cfg.Broker)
+	hostname, _ := os.Hostname()
+	clientID, username := cfg.ClientID, cfg.ClientID
+	if cfg.AuthMode() == "username" {
+		username = cfg.Username
+		clientID = fmt.Sprintf("%s-config-check-%s-%d", cfg.Username, hostname, os.Getpid())
+	}
+	opts.SetClientID(clientID)
+	opts.SetUsername(username)
+	opts.SetPassword(cfg.Password)
+	opts.SetCleanSession(true)
+	opts.SetAutoReconnect(false)
+	opts.SetConnectTimeout(10 * time.Second)
+	if strings.HasPrefix(cfg.Broker, "mqtts://") || strings.HasPrefix(cfg.Broker, "ssl://") {
+		opts.SetTLSConfig(&tls.Config{MinVersion: tls.VersionTLS12})
+	}
+	client := mqtt.NewClient(opts)
+	token := client.Connect()
+	wait := 10 * time.Second
+	if deadline, ok := ctx.Deadline(); ok {
+		if remaining := time.Until(deadline); remaining < wait {
+			wait = remaining
+		}
+	}
+	if wait <= 0 || !token.WaitTimeout(wait) {
+		return errors.New("mqttc: connection check timeout")
+	}
+	if err := token.Error(); err != nil {
+		return fmt.Errorf("mqttc: connection check failed: %w", err)
+	}
+	client.Disconnect(100)
+	return nil
+}
+
 // subscribeSystemEvents listens for $SYS connect/disconnect events to maintain online cache.
 // TTL acts as safety net for missed disconnect events (e.g. broker restart).
 func (b *Broker) subscribeSystemEvents() {

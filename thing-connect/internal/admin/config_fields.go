@@ -17,6 +17,9 @@ func defaultConfigFields(namespace, key string) []ConfigFieldDefinition {
 		},
 		definitionID("device-server", "mqtt.ack_policy"): mqttACKFields(),
 		definitionID("user-server", "mqtt.ack_policy"):   mqttACKFields(),
+		definitionID("user-server", "mqtt.connection"):   mqttConnectionFields(),
+		definitionID("voip-server", "mqtt.connection"):   mqttConnectionFields(),
+		definitionID("call-server", "mqtt.connection"):   mqttConnectionFields(),
 		definitionID("user-server", "smtp"): {
 			booleanConfigField("enabled", "启用邮件服务", ""),
 			requiredWhenEnabled(textConfigField("host", "SMTP 服务器地址", "")),
@@ -88,6 +91,19 @@ func defaultConfigFields(namespace, key string) []ConfigFieldDefinition {
 
 func mqttACKFields() []ConfigFieldDefinition {
 	return []ConfigFieldDefinition{textConfigField("timeout", "消息确认超时时间", "例如 5s")}
+}
+
+func mqttConnectionFields() []ConfigFieldDefinition {
+	return []ConfigFieldDefinition{
+		blockingConfigField(textConfigField("broker", "Broker 地址", "例如 mqtt://broker.example.com:1883 或 mqtts://broker.example.com:8883")),
+		blockingConfigField(selectConfigField("auth_mode", "认证方式", []ConfigFieldOption{
+			{Label: "Username（推荐）", Value: "username"},
+			{Label: "固定 ClientID", Value: "clientid"},
+		})),
+		optionalConfigField(textConfigField("username", "MQTT 用户名", "Username 认证时填写；固定 ClientID 认证时留空")),
+		optionalConfigField(textConfigField("client_id", "固定 ClientID", "固定 ClientID 认证时填写；Username 认证时留空")),
+		blockingConfigField(requiredSecretConfigField("password", "MQTT 密码", "默认隐藏，点击眼睛查看原值")),
+	}
 }
 
 func captchaConfigFields() []ConfigFieldDefinition {

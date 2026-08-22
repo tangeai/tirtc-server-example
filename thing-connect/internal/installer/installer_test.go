@@ -161,7 +161,7 @@ func TestFileBundleStorePublishesOneAtomicRevision(t *testing.T) {
 	if current != filepath.Join("config-releases", "operation-1") {
 		t.Fatalf("current = %q", current)
 	}
-	for _, service := range []string{"admin-server", "device-server", "user-server"} {
+	for _, service := range []string{"admin-server", "device-server", "user-server", "voip-server", "ai-server", "call-server"} {
 		path := filepath.Join(receipt.Path, service, "config.yaml")
 		info, err := os.Stat(path)
 		if err != nil {
@@ -170,9 +170,6 @@ func TestFileBundleStorePublishesOneAtomicRevision(t *testing.T) {
 		if info.Mode().Perm() != 0o600 {
 			t.Fatalf("%s mode = %o", service, info.Mode().Perm())
 		}
-	}
-	if _, err := os.Stat(filepath.Join(receipt.Path, "ai-server", "config.yaml")); !os.IsNotExist(err) {
-		t.Fatalf("unselected ai-server config exists: %v", err)
 	}
 	repeated, err := store.Publish(context.Background(), testDraft(), "operation-1")
 	if err != nil || repeated.Digest != receipt.Digest {
@@ -183,7 +180,7 @@ func TestFileBundleStorePublishesOneAtomicRevision(t *testing.T) {
 	}
 }
 
-func TestFileBundleStoreIncludesOnlySelectedOptionalServices(t *testing.T) {
+func TestFileBundleStoreAlwaysIncludesEveryBusinessServiceBaseConfig(t *testing.T) {
 	options := testOptions(t)
 	draft := testDraft()
 	draft.OptionalServices = []string{"ai-server", "call-server"}
@@ -191,23 +188,10 @@ func TestFileBundleStoreIncludesOnlySelectedOptionalServices(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, service := range []string{"admin-server", "device-server", "user-server", "ai-server", "call-server"} {
+	for _, service := range []string{"admin-server", "device-server", "user-server", "voip-server", "ai-server", "call-server"} {
 		if _, err := os.Stat(filepath.Join(receipt.Path, service, "config.yaml")); err != nil {
 			t.Fatalf("selected service %s config: %v", service, err)
 		}
-	}
-	if _, err := os.Stat(filepath.Join(receipt.Path, "voip-server", "config.yaml")); !os.IsNotExist(err) {
-		t.Fatalf("unselected voip-server config exists: %v", err)
-	}
-}
-
-func TestNormalizeMQTTAuthKeepsLegacyUsernamePayloadCompatible(t *testing.T) {
-	auth, err := normalizeMQTTAuth(testDraft().MQTT, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if auth.mode != mqttAuthUsername || auth.username != "services" {
-		t.Fatalf("normalized auth = %+v", auth)
 	}
 }
 
@@ -271,28 +255,49 @@ func TestPreviewClassifiesDatabaseDependencyFailureAsUnavailable(t *testing.T) {
 	}
 }
 
-func TestNormalizeMQTTAuthRequiresDistinctClientIDsForEnabledServices(t *testing.T) {
-	input := MQTTInput{
-		Broker: "mqtt://127.0.0.1:1883", AuthMode: mqttAuthClientID, Password: "mqtt-password",
-		ClientIDs: map[string]string{
-			"device-server": "devicesrv", "user-server": "usrsrv", "voip-server": "usrsrv",
-		},
-	}
-	if _, err := normalizeMQTTAuth(input, []string{"voip-server"}); !errors.Is(err, ErrInvalidInput) {
-		t.Fatalf("duplicate client IDs error = %v", err)
-	}
-	delete(input.ClientIDs, "voip-server")
-	if _, err := normalizeMQTTAuth(input, []string{"voip-server"}); !errors.Is(err, ErrInvalidInput) {
-		t.Fatalf("missing client ID error = %v", err)
+func TestPreviewTreatsEveryExistingDatabaseAsReadOnly(t *testing.T) {
+	for _, class := range []DatabaseClass{DatabaseManagedOlder, DatabaseManagedCurrent} {
+		assessment := DatabaseAssessment{Class: class, TableCount: 23, Versions: map[string]int{"core": 1}}
+		bootstrap := New(testOptions(t), Dependencies{Database: &fakeProvisioner{inspect: assessment}, Probes: noopProbe{}})
+		_, err := bootstrap.Preview(context.Background(), testDraft())
+		if !errors.Is(err, ErrExistingDatabase) {
+			t.Fatalf("Preview %s = %v, want ErrExistingDatabase", class, err)
+		}
+		problem := Explain(err)
+		if problem.Code != "DATABASE_ALREADY_IN_USE" || !strings.Contains(problem.Message, "未执行任何写入") {
+			t.Fatalf("existing database problem = %+v", problem)
+		}
 	}
 }
 
-func TestFileBundleStoreRendersPerServiceClientIDAuthentication(t *testing.T) {
+func TestPreviewOnlyResumesMatchingLocalDatabaseOperation(t *testing.T) {
+	options := testOptions(t)
+	assessment := DatabaseAssessment{
+		Class: DatabaseManagedOlder, TableCount: 2, Versions: map[string]int{"admin": 1},
+		RecoveryOperationID: "operation-1",
+	}
+	bootstrap := New(options, Dependencies{Database: &fakeProvisioner{inspect: assessment}, Probes: noopProbe{}})
+	if err := bootstrap.writeJournal(journal{
+		Snapshot: Snapshot{Mode: ModeRecovery, OperationID: "operation-1"}, DatabaseName: "thing_connect",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bootstrap.Preview(context.Background(), testDraft()); err != nil {
+		t.Fatalf("matching recovery operation rejected: %v", err)
+	}
+	assessment.RecoveryOperationID = "foreign-operation"
+	bootstrap.database = &fakeProvisioner{inspect: assessment}
+	if _, err := bootstrap.Preview(context.Background(), testDraft()); !errors.Is(err, ErrExistingDatabase) {
+		t.Fatalf("foreign recovery operation = %v, want ErrExistingDatabase", err)
+	}
+}
+
+func TestFileBundleStoreDefersAllMQTTCredentialsToAdmin(t *testing.T) {
 	options := testOptions(t)
 	draft := testDraft()
 	draft.OptionalServices = []string{"voip-server", "ai-server", "call-server"}
 	draft.MQTT = MQTTInput{
-		Broker: "mqtt://127.0.0.1:1883", AuthMode: mqttAuthClientID, Password: "mqtt-password",
+		Broker: "mqtt://127.0.0.1:1883", AuthMode: "clientid", Password: "mqtt-password",
 		ClientIDs: map[string]string{
 			"device-server": "devicesrv", "user-server": "usrsrv",
 			"voip-server": "voipsrv", "call-server": "callsrv",
@@ -302,38 +307,18 @@ func TestFileBundleStoreRendersPerServiceClientIDAuthentication(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]string{
-		"device-server": "devicesrv", "user-server": "usrsrv",
-		"voip-server": "voipsrv", "call-server": "callsrv",
-	}
-	for service, clientID := range want {
+	for _, service := range []string{"device-server", "user-server", "voip-server", "ai-server", "call-server"} {
 		raw, err := os.ReadFile(filepath.Join(receipt.Path, service, "config.yaml"))
 		if err != nil {
 			t.Fatal(err)
 		}
-		var config struct {
-			MQTT struct {
-				ClientID string `yaml:"client_id"`
-				Username string `yaml:"username"`
-			} `yaml:"mqtt"`
-		}
-		if err := yaml.Unmarshal(raw, &config); err != nil {
+		var rendered map[string]any
+		if err := yaml.Unmarshal(raw, &rendered); err != nil {
 			t.Fatal(err)
 		}
-		if config.MQTT.ClientID != clientID || config.MQTT.Username != "" {
-			t.Fatalf("%s mqtt auth = %+v", service, config.MQTT)
+		if _, exists := rendered["mqtt"]; exists {
+			t.Fatalf("%s base config unexpectedly contains MQTT credentials", service)
 		}
-	}
-	aiRaw, err := os.ReadFile(filepath.Join(receipt.Path, "ai-server", "config.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var aiConfig map[string]any
-	if err := yaml.Unmarshal(aiRaw, &aiConfig); err != nil {
-		t.Fatal(err)
-	}
-	if _, exists := aiConfig["mqtt"]; exists {
-		t.Fatal("ai-server config unexpectedly contains MQTT credentials")
 	}
 }
 
@@ -416,7 +401,7 @@ type fakeBundle struct {
 }
 
 func (fakeBundle) Prepare(context.Context, Draft, string) (BundleReceipt, error) {
-	return BundleReceipt{Digest: strings.Repeat("a", 64), Path: "config"}, nil
+	return BundleReceipt{Digest: strings.Repeat("a", 64), Path: "config", OptionalServices: installOptionalServices()}, nil
 }
 func (bundle fakeBundle) Activate(context.Context, string, string) error {
 	if bundle.events != nil {
@@ -425,43 +410,13 @@ func (bundle fakeBundle) Activate(context.Context, string, string) error {
 	return nil
 }
 func (bundle fakeBundle) Active(string) (BundleReceipt, bool) {
-	return BundleReceipt{Digest: strings.Repeat("a", 64), RuntimeDatabaseDSN: "runtime-dsn"}, bundle.active
+	return BundleReceipt{Digest: strings.Repeat("a", 64), RuntimeDatabaseDSN: "runtime-dsn", OptionalServices: installOptionalServices()}, bundle.active
 }
 func (bundle fakeBundle) Prepared(string) (BundleReceipt, bool) {
-	return BundleReceipt{Digest: strings.Repeat("a", 64), RuntimeDatabaseDSN: "runtime-dsn"}, bundle.prepared
+	return BundleReceipt{Digest: strings.Repeat("a", 64), RuntimeDatabaseDSN: "runtime-dsn", OptionalServices: installOptionalServices()}, bundle.prepared
 }
 
-type readyRuntime struct{}
-
-func (readyRuntime) StartAndWait(_ context.Context, _ []string, progress func(ServiceState)) error {
-	progress(ServiceState{Name: "device-server", State: "ready"})
-	return nil
-}
-
-type blockingRuntime struct{ started chan struct{} }
-
-func (runtime blockingRuntime) StartAndWait(ctx context.Context, _ []string, _ func(ServiceState)) error {
-	close(runtime.started)
-	<-ctx.Done()
-	return ctx.Err()
-}
-
-type capturingRuntime struct{ started chan []string }
-
-func (runtime capturingRuntime) StartAndWait(_ context.Context, optional []string, progress func(ServiceState)) error {
-	runtime.started <- append([]string(nil), optional...)
-	progress(ServiceState{Name: "ai-server", State: "ready"})
-	return nil
-}
-
-type forbiddenRuntime struct{ called bool }
-
-func (runtime *forbiddenRuntime) StartAndWait(_ context.Context, _ []string, _ func(ServiceState)) error {
-	runtime.called = true
-	return errors.New("business runtime must wait for explicit confirmation")
-}
-
-func TestReconcileRuntimeWaitsForExplicitServiceStart(t *testing.T) {
+func TestReconcileRuntimeSealsAdminOnlyInstallWithoutStartingServices(t *testing.T) {
 	options := testOptions(t)
 	options.RuntimeDatabaseDSN = "runtime-dsn"
 	store := NewFileBundleStore(options)
@@ -469,11 +424,10 @@ func TestReconcileRuntimeWaitsForExplicitServiceStart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime := &forbiddenRuntime{}
-	bootstrap := New(options, Dependencies{Database: &fakeProvisioner{}, Bundles: store, Runtime: runtime})
+	bootstrap := New(options, Dependencies{Database: &fakeProvisioner{}, Bundles: store})
 	if err := bootstrap.writeJournal(journal{Snapshot: Snapshot{
 		Mode: ModeRecovery, OperationID: "operation-1", Phase: "config_activated", Percent: 68,
-	}, InstanceID: "instance-id", ConfigDigest: receipt.Digest}); err != nil {
+	}, InstanceID: "instance-id", ConfigDigest: receipt.Digest, EnabledServices: installOptionalServices()}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -481,11 +435,11 @@ func TestReconcileRuntimeWaitsForExplicitServiceStart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if runtime.called {
-		t.Fatal("Admin reconciliation started business services without confirmation")
+	if snapshot.Phase != "installed" || snapshot.Mode != ModeInstalled || snapshot.CanResume {
+		t.Fatalf("snapshot = %+v, want sealed Admin-only installation", snapshot)
 	}
-	if snapshot.Phase != "awaiting_service_start" || !snapshot.CanResume {
-		t.Fatalf("snapshot = %+v, want explicit service-start confirmation", snapshot)
+	if _, err := os.Stat(options.InstalledPath()); err != nil {
+		t.Fatalf("installed marker: %v", err)
 	}
 }
 
@@ -498,19 +452,15 @@ func TestReconcileRuntimeDoesNotRestartInstalledServices(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime := &forbiddenRuntime{}
-	bootstrap := New(options, Dependencies{Bundles: store, Runtime: runtime})
+	bootstrap := New(options, Dependencies{Bundles: store})
 	if err := bootstrap.writeJournal(journal{Snapshot: Snapshot{
 		Mode: ModeInstalled, OperationID: "operation-1", Phase: "installed", Percent: 100,
-	}, ConfigDigest: receipt.Digest, EnabledServices: []string{"ai-server"}}); err != nil {
+	}, ConfigDigest: receipt.Digest, EnabledServices: installOptionalServices()}); err != nil {
 		t.Fatal(err)
 	}
 	snapshot, err := bootstrap.ReconcileRuntime(context.Background())
 	if err != nil {
 		t.Fatal(err)
-	}
-	if runtime.called {
-		t.Fatal("Admin restart also restarted installed business services")
 	}
 	if snapshot.Mode != ModeInstalled || snapshot.CanResume {
 		t.Fatalf("snapshot = %+v", snapshot)
@@ -524,21 +474,17 @@ func TestReconcileRuntimeDoesNotStartConfiguredServicesWithoutInstallerJournal(t
 	if _, err := NewFileBundleStore(options).Publish(context.Background(), draft, "operation-1"); err != nil {
 		t.Fatal(err)
 	}
-	runtime := &forbiddenRuntime{}
-	bootstrap := New(options, Dependencies{Runtime: runtime})
+	bootstrap := New(options, Dependencies{})
 	snapshot, err := bootstrap.ReconcileRuntime(context.Background())
 	if err != nil {
 		t.Fatal(err)
-	}
-	if runtime.called {
-		t.Fatal("Admin restart also started configured business services")
 	}
 	if snapshot.Mode != ModeNormal {
 		t.Fatalf("snapshot = %+v", snapshot)
 	}
 }
 
-func TestReconcileRuntimeRepairsDatabaseRecordThenWaitsForExecute(t *testing.T) {
+func TestReconcileRuntimeRepairsDatabaseRecordAndCompletesAdminInstall(t *testing.T) {
 	options := testOptions(t)
 	options.RuntimeDatabaseDSN = "runtime-dsn"
 	store := NewFileBundleStore(options)
@@ -547,44 +493,24 @@ func TestReconcileRuntimeRepairsDatabaseRecordThenWaitsForExecute(t *testing.T) 
 		t.Fatal(err)
 	}
 	provisioner := &fakeProvisioner{}
-	bootstrap := New(options, Dependencies{Database: provisioner, Bundles: store, Runtime: readyRuntime{}})
+	bootstrap := New(options, Dependencies{Database: provisioner, Bundles: store})
 	if err := bootstrap.writeJournal(journal{Snapshot: Snapshot{
 		Mode: ModeRecovery, OperationID: "operation-1", Phase: "config_activated", Percent: 65,
-	}, InstanceID: "instance-id", ConfigDigest: receipt.Digest}); err != nil {
+	}, InstanceID: "instance-id", ConfigDigest: receipt.Digest, EnabledServices: installOptionalServices()}); err != nil {
 		t.Fatal(err)
 	}
 	snapshot, err := bootstrap.ReconcileRuntime(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !provisioner.configRecorded || snapshot.Phase != "awaiting_service_start" || !snapshot.CanResume {
+	if !provisioner.configRecorded || snapshot.Phase != "installed" || snapshot.Mode != ModeInstalled {
 		t.Fatalf("snapshot=%+v configRecorded=%v", snapshot, provisioner.configRecorded)
 	}
-	if _, err := os.Stat(options.InstalledPath()); !os.IsNotExist(err) {
-		t.Fatalf("reconciliation sealed installation before confirmation: %v", err)
+	var installed map[string]any
+	raw, readErr := os.ReadFile(options.InstalledPath())
+	if readErr != nil || json.Unmarshal(raw, &installed) != nil || installed["config_digest"] != receipt.Digest {
+		t.Fatalf("installed marker = %s, %v", raw, readErr)
 	}
-	if _, err := bootstrap.Execute(context.Background(), ExecuteRequest{}); err != nil {
-		t.Fatal(err)
-	}
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		state, _ := bootstrap.Status(context.Background())
-		if state.Mode == ModeInstalled {
-			var installed map[string]any
-			raw, readErr := os.ReadFile(options.InstalledPath())
-			if readErr != nil || json.Unmarshal(raw, &installed) != nil || installed["config_digest"] != receipt.Digest {
-				t.Fatalf("installed marker = %s, %v", raw, readErr)
-			}
-			shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
-			defer cancel()
-			if err := bootstrap.Shutdown(shutdownCtx); err != nil {
-				t.Fatal(err)
-			}
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatal("runtime recovery did not finish")
 }
 
 func TestExecuteReplaysCommittedPendingActivationWithoutDraft(t *testing.T) {
@@ -598,7 +524,7 @@ func TestExecuteReplaysCommittedPendingActivationWithoutDraft(t *testing.T) {
 	bootstrap := New(options, Dependencies{Database: provisioner, Bundles: store})
 	state := journal{Snapshot: Snapshot{
 		Mode: ModeRecovery, OperationID: "operation-1", Phase: "config_activation_pending", Percent: 64,
-	}, ConfigDigest: receipt.Digest, InstanceID: "instance-id"}
+	}, ConfigDigest: receipt.Digest, InstanceID: "instance-id", EnabledServices: installOptionalServices()}
 	if err := bootstrap.writeJournal(state); err != nil {
 		t.Fatal(err)
 	}
@@ -641,7 +567,7 @@ func TestReconcileRuntimeRejectsTamperedOrForeignBundle(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			bootstrap := New(options, Dependencies{Database: &fakeProvisioner{}, Bundles: store, Runtime: readyRuntime{}})
+			bootstrap := New(options, Dependencies{Database: &fakeProvisioner{}, Bundles: store})
 			if err := bootstrap.writeJournal(journal{Snapshot: Snapshot{
 				Mode: ModeRecovery, OperationID: test.journalID, Phase: "config_activated", Percent: 65,
 			}}); err != nil {
@@ -651,41 +577,6 @@ func TestReconcileRuntimeRejectsTamperedOrForeignBundle(t *testing.T) {
 				t.Fatalf("ReconcileRuntime = %v, want ErrPlanStale", err)
 			}
 		})
-	}
-}
-
-func TestBootstrapShutdownCancelsAndWaitsForRuntimeWork(t *testing.T) {
-	options := testOptions(t)
-	options.RuntimeDatabaseDSN = "runtime-dsn"
-	store := NewFileBundleStore(options)
-	receipt, err := store.Publish(context.Background(), testDraft(), "operation-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	started := make(chan struct{})
-	bootstrap := New(options, Dependencies{
-		Database: &fakeProvisioner{}, Bundles: store, Runtime: blockingRuntime{started: started},
-	})
-	if err := bootstrap.writeJournal(journal{Snapshot: Snapshot{
-		Mode: ModeRecovery, OperationID: "operation-1", Phase: "config_activated", Percent: 65,
-	}, ConfigDigest: receipt.Digest}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := bootstrap.ReconcileRuntime(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := bootstrap.Execute(context.Background(), ExecuteRequest{}); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case <-started:
-	case <-time.After(time.Second):
-		t.Fatal("runtime work did not start")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	if err := bootstrap.Shutdown(ctx); err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -728,40 +619,23 @@ func TestBootstrapExecuteRechecksPlanInsideClaim(t *testing.T) {
 	}
 }
 
-func TestExecuteRejectsChangedOptionalSelectionForPreparedRevision(t *testing.T) {
-	options := testOptions(t)
+func TestLegacyOptionalSelectionDoesNotChangeAdminOnlyInstallPlan(t *testing.T) {
 	assessment := DatabaseAssessment{Class: DatabaseAbsent, Versions: map[string]int{}, CreateAdmin: true}
-	claim := &fakeClaim{assessment: assessment, recordErr: errors.New("injected activation intent failure")}
-	bootstrap := New(options, Dependencies{
-		Database: &fakeProvisioner{inspect: assessment, claim: claim},
-		Bundles:  NewFileBundleStore(options), Probes: noopProbe{},
-	})
+	bootstrap := New(testOptions(t), Dependencies{Database: &fakeProvisioner{inspect: assessment}, Probes: noopProbe{}})
 	first := testDraft()
 	first.OptionalServices = []string{"ai-server"}
 	firstPlan, err := bootstrap.Preview(context.Background(), first)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := bootstrap.Execute(context.Background(), ExecuteRequest{Draft: &first, PlanDigest: firstPlan.Digest}); err != nil {
-		t.Fatal(err)
-	}
-	waitForProblemCode(t, bootstrap, "INSTALL_FAILED")
-
 	changed := testDraft()
+	changed.OptionalServices = []string{"voip-server", "call-server"}
 	changedPlan, err := bootstrap.Preview(context.Background(), changed)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := bootstrap.Execute(context.Background(), ExecuteRequest{Draft: &changed, PlanDigest: changedPlan.Digest}); err != nil {
-		t.Fatal(err)
-	}
-	waitForProblemCode(t, bootstrap, "PLAN_STALE")
-	saved, err := bootstrap.loadJournal()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !sameStrings(saved.EnabledServices, []string{"ai-server"}) {
-		t.Fatalf("journal selection = %v, want immutable manifest selection", saved.EnabledServices)
+	if firstPlan.Digest != changedPlan.Digest {
+		t.Fatalf("legacy optional selection changed plan digest: %s != %s", firstPlan.Digest, changedPlan.Digest)
 	}
 }
 

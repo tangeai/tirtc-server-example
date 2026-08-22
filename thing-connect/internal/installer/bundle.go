@@ -104,10 +104,7 @@ func (s *FileBundleStore) Prepare(ctx context.Context, draft Draft, operationID 
 	if err != nil {
 		return BundleReceipt{}, err
 	}
-	enabled, err := enabledServices(draft.OptionalServices)
-	if err != nil {
-		return BundleReceipt{}, err
-	}
+	enabled := append([]serviceSpec{adminService()}, installBusinessServices()...)
 	manifest := bundleManifest{Version: 1, OperationID: operationID, CreatedAt: time.Now().UTC(), Files: map[string]string{}}
 	for _, service := range enabled {
 		manifest.EnabledServices = append(manifest.EnabledServices, service.Name)
@@ -137,7 +134,7 @@ func (s *FileBundleStore) Prepare(ctx context.Context, draft Draft, operationID 
 	if err := writeSynced(filepath.Join(tempDir, "manifest.json"), manifestRaw, 0o600); err != nil {
 		return BundleReceipt{}, err
 	}
-	if err := validateRenderedBundle(tempDir, draft.OptionalServices); err != nil {
+	if err := validateRenderedBundle(tempDir); err != nil {
 		return BundleReceipt{}, fmt.Errorf("生成配置校验失败: %w", err)
 	}
 	if err := syncDir(tempDir); err != nil {
@@ -222,10 +219,6 @@ func renderBundle(draft Draft, secrets generatedSecrets, options Options) (map[s
 	runtimePassword := draft.Database.RuntimePassword
 	runtimeDSN := formatDSN(draft.Database, runtimeUser, runtimePassword)
 	redisAddr := net.JoinHostPort(strings.TrimSpace(draft.Redis.Host), strconv.Itoa(draft.Redis.Port))
-	mqttAuth, err := normalizeMQTTAuth(draft.MQTT, draft.OptionalServices)
-	if err != nil {
-		return nil, err
-	}
 	common := func(service serviceSpec) map[string]any {
 		config := map[string]any{
 			"server":     map[string]any{"http_port": service.HTTPPort, "trusted_proxies": draft.Network.TrustedProxies},
@@ -236,15 +229,9 @@ func renderBundle(draft Draft, secrets generatedSecrets, options Options) (map[s
 			"internal":   map[string]any{"key": secrets.Internal},
 			"admin":      map[string]any{"server_url": fmt.Sprintf("http://127.0.0.1:%d", adminService().HTTPPort)},
 		}
-		if service.UsesMQTT {
-			config["mqtt"] = mqttAuth.configFor(service.Name)
-		}
 		return config
 	}
-	services, err := enabledBusinessServices(draft.OptionalServices)
-	if err != nil {
-		return nil, err
-	}
+	services := installBusinessServices()
 	configs := map[string]map[string]any{}
 	for _, service := range services {
 		configs[service.Name] = common(service)
@@ -259,18 +246,9 @@ func renderBundle(draft Draft, secrets generatedSecrets, options Options) (map[s
 			configs["user-server"]["voip"] = map[string]any{"server_url": fmt.Sprintf("http://127.0.0.1:%d", service.HTTPPort)}
 		}
 	}
-	// The existing /services protocol requires every optional business endpoint
-	// and TiRTC. Keep discovery disabled for a partial installation instead of
-	// advertising endpoints for services the operator deliberately omitted.
-	if strings.TrimSpace(draft.Network.PublicBaseURL) != "" &&
-		optionalServicesSelected(draft.OptionalServices, "voip-server", "ai-server", "call-server") {
-		base := strings.TrimRight(draft.Network.PublicBaseURL, "/")
-		configs["user-server"]["discovery"] = map[string]any{
-			"enabled": true, "device_server_url": base, "user_server_url": base,
-			"voip_server_url": base, "ai_server_url": base, "call_server_url": base,
-			"mqtt_url": mqttAuth.broker, "tirtc_endpoint": base,
-		}
-	}
+	// Public discovery remains disabled until MQTT and TiRTC are configured in
+	// Admin. Advertising incomplete bootstrap endpoints would make an otherwise
+	// healthy base installation unusable to devices.
 	adminConfig := map[string]any{
 		"server":   map[string]any{"http_port": options.HTTPPort, "static_dir": options.StaticDir, "trusted_proxies": draft.Network.TrustedProxies},
 		"log":      map[string]any{"level": "info", "format": "text"},
@@ -301,11 +279,8 @@ func renderBundle(draft Draft, secrets generatedSecrets, options Options) (map[s
 	return result, nil
 }
 
-func validateRenderedBundle(root string, optional []string) error {
-	services, err := enabledBusinessServices(optional)
-	if err != nil {
-		return err
-	}
+func validateRenderedBundle(root string) error {
+	services := installBusinessServices()
 	for _, service := range services {
 		if _, err := baseconfig.LoadFile(filepath.Join(root, service.Name, "config.yaml")); err != nil {
 			return fmt.Errorf("%s: %w", service.Name, err)
@@ -365,9 +340,6 @@ func formatDSN(input DatabaseInput, user, password string) string {
 }
 
 func validateDraft(draft Draft) error {
-	if _, err := enabledServices(draft.OptionalServices); err != nil {
-		return err
-	}
 	migrationUser := strings.TrimSpace(draft.Database.MigrationUser)
 	runtimeUser := strings.TrimSpace(draft.Database.RuntimeUser)
 	if migrationUser == "" || draft.Database.MigrationPassword == "" {
@@ -384,9 +356,6 @@ func validateDraft(draft Draft) error {
 	}
 	if draft.Redis.DB < 0 {
 		return fmt.Errorf("%w: Redis DB 不能为负数", ErrInvalidInput)
-	}
-	if _, err := normalizeMQTTAuth(draft.MQTT, draft.OptionalServices); err != nil {
-		return err
 	}
 	if strings.TrimSpace(draft.Network.PublicBaseURL) != "" {
 		publicURL, err := url.Parse(draft.Network.PublicBaseURL)

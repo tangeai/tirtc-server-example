@@ -33,11 +33,18 @@ type HTTPServer struct {
 	jobs             *JobService
 	devices          *DeviceService
 	cookieSecure     bool
+	serviceRoot      string
 	policyMu         sync.RWMutex
 	loginWindow      time.Duration
 	loginMaxAttempts int64
 	mfaWindow        time.Duration
 	mfaMaxAttempts   int64
+}
+
+func (s *HTTPServer) SetServiceCommandRoot(root string) {
+	if strings.TrimSpace(root) != "" {
+		s.serviceRoot = strings.TrimRight(root, "/")
+	}
 }
 
 func NewHTTPServer(store *Store, auth *AuthService, access *AccessController, configs *ConfigService, statuses *servicestatus.Aggregator, redisClient *redis.Client, jobs *JobService, devices *DeviceService, cookieSecure bool) *HTTPServer {
@@ -193,7 +200,33 @@ func (s *HTTPServer) singleServiceStatus(c *gin.Context) {
 	}
 	for _, service := range services {
 		if service.Service == c.Param("service") {
-			apiresp.OK(c, service)
+			requirements, statusErr := s.configs.BlockingStatus(c.Request.Context(), service.Service)
+			if statusErr != nil {
+				apiresp.Internal(c, statusErr.Error())
+				return
+			}
+			ready := true
+			for _, requirement := range requirements {
+				if !requirement.Configured {
+					ready = false
+					break
+				}
+			}
+			root := s.serviceRoot
+			if root == "" {
+				root = "/opt/thing-connect"
+			}
+			apiresp.OK(c, struct {
+				servicestatus.ServiceSummary
+				ConfigurationReady bool                      `json:"configuration_ready"`
+				Requirements       []ConfigRequirementStatus `json:"required_configurations"`
+				StartCommand       string                    `json:"start_command"`
+				RestartCommand     string                    `json:"restart_command"`
+			}{
+				ServiceSummary: service, ConfigurationReady: ready, Requirements: requirements,
+				StartCommand:   root + "/service-local.sh start thing-connect:" + service.Service,
+				RestartCommand: root + "/service-local.sh restart thing-connect:" + service.Service,
+			})
 			return
 		}
 	}

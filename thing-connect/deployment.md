@@ -14,7 +14,7 @@ flowchart TB
 
     subgraph Host["ThingConnect 应用服务器"]
         direction LR
-        Services["服务进程<br/>Admin / Device / User / VoIP / AI / Call"]
+        Services["服务进程<br/>Admin 先运行 / 五个业务服务后启动"]
         Config["config-current/&lt;service&gt;/config.yaml<br/>各服务启动配置"]
         Services <-->|"安装器写入 / 服务启动读取"| Config
     end
@@ -35,26 +35,26 @@ flowchart TB
 
 - MySQL 保存用户、设备、Admin、业务数据、动态配置和安装状态。安装器使用迁移账号创建数据库与表；所有已安装服务共用一个独立于迁移账号的 DML 运行账号。
 - Redis 保存会话、验证码、限频、设备在线状态、短期任务状态和分布式协调数据。Admin 与已启用业务服务都需要访问同一个 Redis 实例和 DB。
-- MQTT Broker 承载设备长连接和实时指令。Device、User、VoIP、Call 服务连接 Broker；AI 服务不直接连接 MQTT。设备使用业务接口签发的凭据连接同一个 Broker。
-- `config-current/<service>/config.yaml` 由首次安装器生成，按服务保存其启动所需的 MySQL、Redis、MQTT、Admin 地址和共享密钥。普通业务配置在 Admin 中发布并存入 MySQL，业务服务启动后通过内部接口读取。
-- Admin 必须先启动并就绪，业务服务再启动。Nginx 和 HTTPS 位于公网访问路径前端，进程托管负责服务生命周期；三者都不是首次安装页面运行的前置条件。
+- MQTT Broker 承载设备长连接和实时指令。User、VoIP、Call 服务连接 Broker；Admin、Device、AI 不直接连接 MQTT。各服务的 MQTT 账号在 Admin 中分别发布，不属于首次安装依赖。
+- `config-current/<service>/config.yaml` 由首次安装器生成，只保存进程启动的基础配置和共享密钥。MQTT、TiRTC 及普通业务配置在 Admin 中发布并存入 MySQL；业务服务启动时读取阻断配置，运行期配置按注册表的 reload 策略应用。
+- 首次安装只启动 Admin。管理员在 Admin 完成各服务必填配置后，必须登录服务器执行页面给出的 `service-local.sh` 命令；Admin 不执行主机命令或进程控制。Nginx、HTTPS 和生产进程托管都不是首次安装页面运行的前置条件。
 
-因此，开始安装前需要准备：一台可构建并运行 Go/Node.js 的 Linux 应用服务器、一个 MySQL 8 实例及迁移/运行两个账号、一个 Redis 7+ 实例、一个支持 MQTT 3.1.1 的 Broker 及认证凭据，以及首个管理员邮箱和密码。生产环境还应提前确定最终域名和 HTTPS 方案；Nginx、证书、TiRTC、SMTP、人机验证、微信和 AI 资源可以在首次安装完成后接入。
+因此，开始安装前需要准备：一台可构建并运行 Go/Node.js 的 Linux 应用服务器、一个 MySQL 8 实例及迁移/运行两个账号、一个 Redis 7+ 实例，以及首个管理员邮箱和密码。MQTT、TiRTC、SMTP、人机验证、微信、AI 资源、Nginx 和证书均在 Admin 安装完成后配置。
 
 ## 1. 服务与端口
 
 | 服务 | 默认 HTTP 端口 | 安装要求 |
 |---|---:|---|
 | `admin-server` | 9000 | 必装，管理后台和配置中心 |
-| `device-server` | 9001 | 必装 |
-| `user-server` | 9002 | 必装，同时提供用户 H5 |
-| `voip-server` | 9003 | 可选 |
-| `ai-server` | 9004 | 可选 |
-| `call-server` | 9005 | 可选 |
+| `device-server` | 9001 | 生成基础配置，安装后由服务器命令启动 |
+| `user-server` | 9002 | 生成基础配置，完成 MQTT、TiRTC 后启动，同时提供用户 H5 |
+| `voip-server` | 9003 | 生成基础配置，完成 MQTT、TiRTC 后启动 |
+| `ai-server` | 9004 | 生成基础配置，完成 TiRTC 后启动 |
+| `call-server` | 9005 | 生成基础配置，完成 MQTT、TiRTC 后启动 |
 
-首次安装会构建服务清单中的全部服务。安装器固定配置 Admin、Device、User，只为安装页面勾选的 VoIP、AI、Call 生成配置。配置和数据库状态对账后，页面要求管理员显式确认，才启动业务服务并执行就绪检查；未选择的可选服务不参与启动和检查。
+首次安装会构建服务清单中的全部服务，并为 Admin 与五个业务服务生成基础配置。安装结束时只有 Admin 运行；安装器和 Admin 都不会自动启动业务服务。管理员可以逐个完成配置并启动，也可以全部配置完成后执行 `start-all`。
 
-应用端口使用上表默认值。安装页面填写的是 MySQL、Redis、MQTT 端口及部署访问地址，不在首次安装中任意重排应用端口。业务服务必须在 Admin 就绪后启动。
+应用端口使用上表默认值。安装页面只填写 MySQL、Redis 及部署访问地址，不在首次安装中任意重排应用端口。业务服务必须在 Admin 就绪且启动前检查通过后启动。
 
 服务清单的事实源是 [`internal/installer/service_catalog.tsv`](internal/installer/service_catalog.tsv)。构建脚本、首次安装、本地进程控制、日常发布和安装页面都读取这份清单；安装时还会把清单和加载器发布到部署根目录。增加业务服务时，在清单中登记名称、HTTP 端口、必装/可选、MQTT 依赖、静态资源目录和显示名称，并提供同名 Go 构建入口及可由安装器生成和校验的配置。服务有专用跨服务配置、动态配置或生产进程托管要求时，仍需同步实现对应 adapter、注册表和托管配置，不能只登记名称。
 
@@ -69,7 +69,7 @@ flowchart TB
   set -Eeuo pipefail
   sudo apt-get update
   sudo apt-get install -y \
-    ca-certificates curl default-mysql-client git mosquitto-clients \
+    ca-certificates curl default-mysql-client git \
     redis-tools snapd util-linux
   sudo systemctl enable --now snapd.socket
   sudo snap install go --classic
@@ -109,7 +109,7 @@ flowchart TB
     exit 1
   }
   command -v \
-    cp curl flock git go mosquitto_sub mv mysql mysqldump \
+    cp curl flock git go mv mysql mysqldump \
     node npm redis-cli setsid
 )
 ```
@@ -122,7 +122,6 @@ flowchart TB
 
 - MySQL 8.0+ 地址、端口、目标数据库名和两个账号。
 - Redis 7+ 地址、端口、密码和 DB 编号。
-- 支持 MQTT 3.1.1 的 Broker 地址，以及 Username 或 ClientID 认证凭据。
 - 应用服务器 IP；生产反向代理还需提前确定最终域名和 HTTPS 方案。
 - 首个管理员邮箱和密码。密码至少 8 位，且必须包含英文大写字母、英文小写字母和数字；允许同时使用中文和特殊字符。
 
@@ -165,7 +164,7 @@ ON thing_connect.* TO 'thingconnect_runtime'@'%';
 EXIT;
 ```
 
-目标数据库可以不存在。迁移账号的库级 `CREATE` 权限允许安装器创建该库；运行账号只有 DML 权限。如果数据库必须由 DBA 创建，在授权前执行：
+首次安装只接受不存在或完全无表的专用数据库。迁移账号的库级 `CREATE` 权限允许安装器创建不存在的库；运行账号只有 DML 权限。如果数据库必须由 DBA 创建，在授权前执行：
 
 ```sql
 CREATE DATABASE thing_connect
@@ -186,9 +185,9 @@ CREATE DATABASE thing_connect
 )
 ```
 
-不要手工导入 `scripts/schema.sql`。安装器会识别不存在的数据库、空库和可信旧版本，并按需初始化或迁移。运行账号权限会以不写入业务数据的语句逐表验证。
+不要手工导入 `scripts/schema.sql`。首次安装对已有表的数据库只执行识别和结构读取，随后停止，不会建表、迁移、补数据、清空或覆盖。旧版 ThingConnect 数据库也必须先做可恢复备份，再通过第 4.6 节的显式升级流程处理，不能交给首次安装入口。运行账号权限会以不写入业务数据的语句逐表验证。
 
-### 2.4 验证 Redis，并准备 MQTT 凭据
+### 2.4 验证 Redis
 
 ```bash
 (
@@ -203,11 +202,9 @@ CREATE DATABASE thing_connect
 )
 ```
 
-MQTT 的通用 CLI 发布测试需要一个明确获准的 Topic，不能假设任意 Topic 都有权限；安装页面会使用所填凭据执行不发布消息的连接认证。`mosquitto_sub -C 1 -W 1` 在连接和订阅成功后仍可能因为主题没有消息而输出 `Timed out`，应以 `CONNACK (0)` 和 `SUBACK` 判断认证与订阅成功。
+MQTT 凭据在 Admin 安装完成后按 User、VoIP、Call 三个服务分别配置。Username 模式下实际 ClientID 会结合各进程的 `SERVICE_INSTANCE_ID` 生成；固定 ClientID 模式不能被多个服务或副本共享。生产 MQTT 使用 `mqtts://` 时，应用服务器的系统信任库必须能够验证 Broker 证书链。服务端启动脚本会执行不订阅、不写 Redis的连接认证检查，失败时保持服务停止。
 
-Username 模式允许所有服务共享一个认证用户名，实际连接 ClientID 会结合各进程的 `SERVICE_INSTANCE_ID` 生成，适合单机和多副本部署。ClientID 模式要求为 Device、User 以及选中的 VoIP、Call 分别准备不同的已注册 ClientID；安装器会逐一连接验证，并把对应 ClientID 写入各服务配置。固定 ClientID 不能被多个服务或多个副本共享，因此需要扩容时使用 Username 模式。生产 MQTT 使用 TLS 时，应填写 `mqtts://` 地址，并确保应用服务器的系统信任库能够验证 Broker 证书链。
-
-TiRTC、SMTP、人机验证、微信和 AI 资源可在首次安装后从 Admin Web 配置。TiRTC App ID、Access Key ID、Secret Key ID 没有可用默认值；不填写不会阻止进程启动，但相关音视频、呼叫和 AI 功能不可用。
+TiRTC App ID、Access Key ID 和 Secret Key ID 同样没有可运行默认值。User、VoIP、AI、Call 在启动前要求该配置已经由 Admin 发布。
 
 ## 3. 首次安装
 
@@ -264,12 +261,12 @@ http://127.0.0.1:9000/admin/
 
 安装页面依次填写：
 
-1. 业务服务：页面按服务清单显示必需服务和可选服务；当前 VoIP、AI、Call 可选，Device 和 User 固定启用。
-2. MySQL 主机、端口、数据库名、迁移账号和 DML 运行账号。
-3. Redis 主机、端口、密码和 DB。
-4. MQTT Broker 地址、认证方式和密码。同机 Broker 默认使用 `mqtt://127.0.0.1:1883`；远程 Broker 替换为实际地址。Username 模式填写共享用户名；ClientID 模式分别填写各 MQTT 服务的固定 ClientID。
-5. 首个管理员账号。
-6. 统一对外访问地址、可信代理和 HTTPS Cookie。生产环境即使稍后才配置 Nginx，也应填写最终的 `https://` 地址并勾选 HTTPS Cookie；只做本机或可信内网直连验收时可以留空并关闭 HTTPS Cookie。同机 Nginx 使用默认可信代理 `127.0.0.1`。当前服务发现要求同时安装 VoIP、AI、Call；缺少任一可选服务时不会启用 `/services`。
+1. MySQL 主机、端口、专用数据库名、迁移账号和 DML 运行账号。
+2. Redis 主机、端口、密码和 DB。
+3. 首个管理员账号。
+4. 统一对外访问地址、可信代理和 HTTPS Cookie。生产环境即使稍后才配置 Nginx，也应填写最终的 `https://` 地址并勾选 HTTPS Cookie；只做本机或可信内网直连验收时可以留空并关闭 HTTPS Cookie。同机 Nginx 使用默认可信代理 `127.0.0.1`。
+
+页面不要求 MQTT、TiRTC 或业务服务选择。安装器始终生成五个业务服务的基础配置，但只启动 Admin。
 
 先执行“连接检查并生成安装计划”，核对数据库动作，再确认安装：
 
@@ -277,15 +274,10 @@ http://127.0.0.1:9000/admin/
 |---|---|
 | 不存在 | 创建数据库并初始化表 |
 | 已存在且无表 | 初始化表 |
-| 可信且已是当前版本 | 保留表和数据，校验结构并补齐安装状态和 Admin 默认数据 |
-| 可信旧版本 | 只执行缺失迁移，保留已有数据 |
-| 同一实例中断 | 从持久化步骤恢复 |
-| 已被其他已安装实例锁定 | 拒绝生成新共享密钥 |
-| 陌生非空库、结构漂移、未来版本 | 写入前拒绝，转人工处理 |
+| 本机同一操作标识的中断任务 | 只恢复该未完成任务，不接管其他数据库 |
+| 其他任何已有表的数据库 | 只读识别后拒绝，不建表、迁移、补数据、清空或覆盖 |
 
-预检或安装失败时，页面持续显示失败阶段、具体依赖或服务以及“处理建议”，不需要打开浏览器开发者工具。按页面建议修复地址、账号授权、TLS、端口占用、进程管理器或服务日志中的首个错误后再重试。服务端日志保留原始原因，页面不会显示密码、内网连接串或上游客户端原始错误。
-
-服务启动前会检查其固定端口。出现“端口已被占用”时，在安装服务器执行页面给出的 `ss -ltnp` 命令确认占用者，通过原进程管理器停止旧实例或重复启动项，再返回页面继续安装。不要用 readiness 成功替代端口归属检查，也不要让同一实例同时由本地脚本、Supervisor、systemd 或容器编排重复托管。
+预检或安装失败时，页面持续显示失败阶段、具体依赖和“处理建议”，不需要打开浏览器开发者工具。按页面建议修复地址、账号授权或 TLS 后再重试。服务端日志保留脱敏后的原始原因，页面不显示密码、内网连接串或上游客户端原始错误。
 
 安装器会生成共享业务 JWT、已安装服务共享的 `internal.key`、Admin JWT 和 MFA 加密密钥，以 `0600` 权限写入带摘要校验的一次性配置 revision。数据库提交和配置激活具有可恢复记录；中断后使用同一部署目录和数据库继续，不要删除表或手工改写 `config-current`。
 
@@ -297,13 +289,45 @@ sudo env \
   /opt/thing-connect/install.sh
 ```
 
-配置已经激活但安装未结束时，重启 Admin 会自动完成配置和数据库状态对账，但不会自动拉起业务服务。返回安装页面，确认错误已经处理后，输入一次性令牌并点击“启动业务服务并继续”。不要重新安装。
+配置已经激活但安装未结束时，重启 Admin 会自动完成本机同一安装任务的对账，但不会拉起业务服务。返回安装页面，输入一次性令牌并完成 Admin 安装。不要删表、删配置或重新安装。
 
 ## 4. 安装后必须完成
 
-### 4.1 验证进程和直接端口
+### 4.1 在 Admin 发布启动必需配置
 
-安装完成后检查进程和必需服务：
+首次登录 Admin Web 时绑定 TOTP，并把恢复码离线保存。然后在配置中心发布：
+
+- User、VoIP、AI、Call 共享的 `common / tirtc`。
+- User、VoIP、Call 各自的 `mqtt.connection`，每个服务使用独立账号或 ClientID。
+- Device 没有 MQTT 和 TiRTC 启动阻断配置，可以直接通过服务器预检。
+
+Admin 的服务状态页显示每个服务缺少的配置及原因；配置齐全时显示可复制的服务器启动或重启命令。Admin 只提供状态和指引，不执行主机进程命令。
+
+普通运行时配置在发布后热加载；MQTT 和 TiRTC 在页面标记为“需重启”，发布后按页面给出的重启命令操作。SMTP、人机验证、微信应用和 AI 资源按实际业务需求发布。
+
+动态配置没有数据库记录时使用后端注册表默认值。MQTT 和 TiRTC 没有可运行默认值，必须显式发布。普通配置和密钥以明文 JSON 存储在 MySQL；Admin Web 对密钥默认显示 `*`，具备权限的管理员可查看原值。必须限制数据库与备份访问，并启用审计。
+
+### 4.2 在服务器预检并启动业务服务
+
+需要的配置发布后，在安装服务器执行：
+
+```bash
+sudo /opt/thing-connect/service-local.sh start-all
+```
+
+`start-all` 先确认 Admin readiness，再对五个业务服务统一执行基础 YAML、Admin 阻断配置、MySQL 连接和 schema 版本、Redis 连接以及对应 MQTT 账号的实际认证检查。任一预检失败时五个服务都保持停止，终端直接显示原因和处理建议。检查不执行数据库迁移或业务数据修改。
+
+也可以逐个启动：
+
+```bash
+sudo /opt/thing-connect/service-local.sh start thing-connect:device-server
+sudo /opt/thing-connect/service-local.sh start thing-connect:user-server
+sudo /opt/thing-connect/service-local.sh start thing-connect:voip-server
+sudo /opt/thing-connect/service-local.sh start thing-connect:ai-server
+sudo /opt/thing-connect/service-local.sh start thing-connect:call-server
+```
+
+启动完成后检查全部进程和直接端口：
 
 ```bash
 (
@@ -312,22 +336,9 @@ sudo env \
   curl -fsS http://127.0.0.1:9000/health/ready
   curl -fsS http://127.0.0.1:9001/health/ready
   curl -fsS http://127.0.0.1:9002/health/ready
-)
-```
-
-只检查已配置的可选服务：
-
-```bash
-(
-  set -Eeuo pipefail
-  for target in voip-server:9003 ai-server:9004 call-server:9005; do
-    service="${target%%:*}"
-    port="${target##*:}"
-    if [ -f "/opt/thing-connect/config-current/$service/config.yaml" ] || \
-       [ -f "/opt/thing-connect/$service/config.yaml" ]; then
-      curl -fsS "http://127.0.0.1:$port/health/ready"
-    fi
-  done
+  curl -fsS http://127.0.0.1:9003/health/ready
+  curl -fsS http://127.0.0.1:9004/health/ready
+  curl -fsS http://127.0.0.1:9005/health/ready
 )
 ```
 
@@ -336,7 +347,7 @@ sudo env \
 - Admin Web：`http://127.0.0.1:9000/admin/`
 - 用户 H5：`http://127.0.0.1:9002/`
 - Device API 基础地址：`http://127.0.0.1:9001/v1/device`，验收时调用 API Reference 中的具体接口。
-- 已安装的 VoIP、AI、Call API：分别使用 9003、9004、9005。
+- VoIP、AI、Call API：分别使用 9003、9004、9005。
 
 从其他电脑验收时，把上述 `127.0.0.1` 替换为服务器实际 IP。
 
@@ -351,28 +362,22 @@ sudo /opt/thing-connect/service-local.sh stop-all
 sudo /opt/thing-connect/service-local.sh restart thing-connect:admin-server
 ```
 
-该脚本不注册开机服务，也不提供日志轮转。验收通过后仍需按 4.2 节接入部署环境自己的进程托管方式。
+该脚本不注册开机服务，也不提供日志轮转。验收通过后仍需按 4.3 节接入部署环境自己的进程托管方式。
 
 本地脚本以进程存活接口区分 `RUNNING` 和 `STARTING`；只有守护脚本存在但服务未监听时显示 `STARTING`。同一服务的守护进程使用独占锁，PID 文件丢失时会扫描并接管原守护进程，不会再启动一份。`CONFLICT` 表示检测到历史遗留的多个守护进程，应先执行对应服务的 `stop` 清理，再根据页面提示检查端口和日志。
 
-### 4.2 接入生产进程托管
+### 4.3 接入生产进程托管
 
 使用 systemd、Supervisor、容器平台或其他现有编排系统托管进程均可，本文不规定具体发布工具。托管配置必须满足以下约束：
 
 - 切换前执行 `sudo /opt/thing-connect/service-local.sh stop-all`，确认本地脚本管理的进程已停止，再启动新的进程管理器。
-- Admin 先启动并达到 `/health/ready`，再启动 Device、User 和已安装的可选服务。
+- Admin 先启动并达到 `/health/ready`，再预检并启动五个业务服务。
 - 每个进程使用安装器生成的对应 `config-current/<service>/config.yaml`，不要复制或手工拆分配置 revision。
 - 每个进程设置稳定且唯一的 `SERVICE_INSTANCE_ID`；Username MQTT 模式依赖它生成不冲突的连接 ClientID。
 - 向进程发送 `SIGTERM` 并留出优雅退出时间，不使用强制终止作为正常重启方式。
-- 只对已安装服务执行 readiness 检查；`/health/live` 不能替代 `/health/ready`。
+- 对全部业务服务执行 readiness 检查；`/health/live` 不能替代 `/health/ready`。
 - 部署环境负责异常重启、开机自启、日志收集和日志轮转，且同一服务同一实例不能同时被两个进程管理器拉起。
 - 安装产物默认归 `root` 所有。改用非 `root` 运行账号时，只调整该账号必需的配置读取、日志和任务目录权限，并继续保护 `0600` 配置中的数据库与服务密钥。
-
-### 4.3 完成 Admin 业务配置
-
-首次登录 Admin Web 时绑定 TOTP，并把恢复码离线保存。随后填写并发布 `common / tirtc`，再按已安装服务配置 SMTP、人机验证、微信应用和 AI 资源。TiRTC App ID、Access Key ID、Secret Key ID 没有可用默认值；未配置时相关音视频、呼叫和 AI 功能不可用。
-
-动态配置没有数据库记录时使用后端注册表默认值，不读取服务 YAML 中的同名业务值。普通配置和密钥以明文 JSON 存储在 MySQL；Admin Web 对密钥默认显示 `*`，具备权限的管理员可查看原值。必须限制数据库与备份访问，并启用审计。
 
 ### 4.4 可选：配置 Nginx 单一入口
 
@@ -399,7 +404,7 @@ sudo /opt/thing-connect/service-local.sh restart thing-connect:admin-server
 )
 ```
 
-[Nginx 模板](deploy/nginx/thing-connect.nginx.conf)把 `/admin/` 和 `/v1/admin/` 转发到 Admin，把各业务 API 转发到对应服务，其余路径转发到 User H5，并显式拒绝所有内部接口。模板属于运维配置，不由 `install.sh` 写入系统。未安装的可选服务应删除对应 upstream 和 location。Nginx 与服务同机时，安装页面中的 `trusted_proxies` 使用默认值 `127.0.0.1`，不要使用 `0.0.0.0/0`。
+[Nginx 模板](deploy/nginx/thing-connect.nginx.conf)把 `/admin/` 和 `/v1/admin/` 转发到 Admin，把各业务 API 转发到对应服务，其余路径转发到 User H5，并显式拒绝所有内部接口。模板属于运维配置，不由 `install.sh` 写入系统。Nginx 与服务同机时，安装页面中的 `trusted_proxies` 使用默认值 `127.0.0.1`，不要使用 `0.0.0.0/0`。
 
 模板只监听 80，不申请或管理证书。已有证书时自行增加 443、证书路径和 HTTP 跳转，再执行 `sudo nginx -t && sudo systemctl reload nginx`。安装页面填写的统一对外访问地址和 HTTPS Cookie 必须与最终入口一致，不能只改 Nginx。
 
@@ -414,22 +419,27 @@ HTTP 会明文传输管理员登录信息和会话 Cookie。公网生产环境�
 - 安装期间使用过的临时令牌、高权限数据库凭据和初始密码不进入聊天、工单、Shell 历史或监控；发生暴露时立即轮换。
 - `config-releases`、`config-current`、`var/installer`、Admin 任务目录和数据库备份只允许受信运维账号读取。
 - 为 MySQL 数据、激活配置和安装状态建立定期备份，并在隔离环境验证恢复；配置备份包含明文密钥，必须加密和限制访问。
-- 监控所有已安装服务的 `/health/ready`、进程重启次数、磁盘空间、MySQL/Redis/MQTT 可用性，并配置日志收集和轮转。
+- 监控全部服务的 `/health/ready`、进程重启次数、磁盘空间、MySQL/Redis/MQTT 可用性，并配置日志收集和轮转。
 - 使用非管理员账号完成一次用户注册、设备接入和已启用业务能力的端到端验收，不能只以进程存活作为安装完成标准。
 
 完成以上检查后，首次安装流程结束。
 
 ### 4.6 版本更新与数据库升级
 
-使用仓库自带 Supervisor 配置的部署，通过安装时发布的固定入口执行日常更新：
+升级不走首次安装入口。先使用 `mysqldump` 生成完整备份，在隔离 MySQL 实例完成恢复演练，再把绝对路径和恢复验证声明传给更新命令：
 
 ```bash
-sudo /opt/thing-connect/deploy-prod.sh update
+sudo env \
+  DATABASE_BACKUP_FILE=/secure/backups/thing-connect-before-update.sql \
+  DATABASE_BACKUP_RESTORE_VERIFIED=1 \
+  /opt/thing-connect/deploy-prod.sh update
 ```
 
-该命令取得部署锁后快进拉取源码，重新加载新版本服务清单，构建全部服务，备份当前文件，按嵌入迁移目录执行缺失数据库版本，再按 Admin 优先顺序发布并检查 readiness。迁移版本从 `core/NNN_*.sql` 和 `admin/NNN_*.sql` 自动发现；增加表或修改表时不需要改安装脚本中的版本号。数据库迁移不能随旧二进制自动回滚，更新前必须具备可恢复备份。
+脚本要求备份文件已存在、非空、可读，并记录 SHA-256；缺少备份或未声明恢复验证时，在执行任何迁移前停止。`SKIP_MIGRATIONS=1` 只用于 DBA 已通过独立受控流程执行了同一版本迁移的环境，不能用来绕过备份。
 
-新版本增加服务时，更新会先验证 Supervisor 已注册服务清单中的所有进程。先按仓库模板为新服务配置进程托管并执行 `supervisorctl reread`、`supervisorctl update`，再运行 `update`；缺少进程定义时发布会在修改文件和数据库前停止。使用 systemd、容器平台或其他编排系统时，由对应发布流水线完成同等的清单同步、显式迁移、Admin 优先启动和 readiness 门槛。
+该命令取得部署锁后快进拉取源码，重新加载新版本服务清单，构建全部服务，备份当前文件，按嵌入迁移目录执行缺失数据库版本，再按 Admin 优先顺序发布并检查 readiness。迁移版本从 `core/NNN_*.sql` 和 `admin/NNN_*.sql` 自动发现；增加表或修改表时不需要改安装脚本中的版本号。数据库迁移不能随旧二进制自动回滚。
+
+新版本增加服务时，同步更新服务清单、可生成和校验的基础配置、Admin 动态配置注册表、服务器预检、进程托管和 readiness。表结构变更同步增加有序可重入迁移并更新 `scripts/schema.sql`。Supervisor 部署还需在发布前执行 `supervisorctl reread` 和 `supervisorctl update`；缺少进程定义时发布会在修改文件和数据库前停止。使用 systemd、容器平台或其他编排系统时，由对应发布流水线完成同等的清单同步、显式迁移、Admin 优先启动和 readiness 门槛。
 
 ## 5. 相关文档
 

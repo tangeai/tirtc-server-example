@@ -17,12 +17,34 @@ type configuredService struct {
 	databaseDSN string
 }
 
-// ValidateConfiguredServiceBundle strictly validates the required services
-// and every optional service selected by the presence of an active config.
-// The service catalog and selection rules remain inside the installer module.
+// ValidateConfiguredServiceBundle strictly validates every service represented
+// by the active config revision. Catalog and compatibility selection rules stay
+// inside the installer module.
 func ValidateConfiguredServiceBundle(root string) error {
 	_, err := inspectConfiguredServiceBundle(root)
 	return err
+}
+
+// ValidateConfiguredBusinessService validates exactly one catalog-owned
+// business service without inspecting or changing any other service config.
+func ValidateConfiguredBusinessService(root, serviceName string) error {
+	for _, service := range serviceCatalog {
+		if service.Name != serviceName {
+			continue
+		}
+		if !service.Business {
+			return fmt.Errorf("%s is not a business service", serviceName)
+		}
+		configuredPath := filepath.Join(root, service.Name, "config.yaml")
+		if _, err := os.Lstat(baseconfig.ResolvePath(configuredPath)); err != nil {
+			return fmt.Errorf("%s config is missing: %w", service.Name, err)
+		}
+		if _, err := baseconfig.LoadFile(configuredPath); err != nil {
+			return fmt.Errorf("%s: %w", service.Name, err)
+		}
+		return nil
+	}
+	return fmt.Errorf("unknown business service %q", serviceName)
 }
 
 // ValidateConfiguredRuntimeTarget proves that the explicit migration account

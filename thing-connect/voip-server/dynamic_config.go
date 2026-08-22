@@ -2,18 +2,16 @@ package main
 
 import (
 	"encoding/json"
-
-	"github.com/redis/go-redis/v9"
+	"errors"
 
 	"thing-connect/internal/config"
 	"thing-connect/internal/dynamicconfig"
 	voiphandler "thing-connect/voip-server/handler"
 )
 
-func voipDynamicConfig(cfg *config.Config, redisClient *redis.Client, server *voiphandler.Server) (*dynamicconfig.Client, []dynamicconfig.Ref, error) {
-	client, err := dynamicconfig.New(cfg.Admin.ServerURL, cfg.Internal.Key, redisClient)
-	if err != nil {
-		return nil, nil, err
+func voipDynamicConfig(client *dynamicconfig.Client, fallbackTiRTC config.TirtcCfg, server *voiphandler.Server) (*dynamicconfig.Client, []dynamicconfig.Ref, error) {
+	if client == nil {
+		return nil, nil, errors.New("dynamic config client is unavailable")
 	}
 	refs := []dynamicconfig.Ref{
 		{Namespace: "voip-server", Key: "wechat.apps", Apply: func(snapshot dynamicconfig.Snapshot) error {
@@ -46,21 +44,13 @@ func voipDynamicConfig(cfg *config.Config, redisClient *redis.Client, server *vo
 			server.UpdateConfig(current)
 			return nil
 		}},
-		{Namespace: "common", Key: "tirtc", Apply: func(snapshot dynamicconfig.Snapshot) error {
-			var value struct {
-				Endpoint string `json:"endpoint"`
-				AppID    string `json:"app_id"`
-			}
-			var secrets struct {
-				AccessKeyID string `json:"access_key_id"`
-				SecretKeyID string `json:"secret_key_id"`
-			}
-			if err := json.Unmarshal(snapshot.Value, &value); err != nil {
+		{Namespace: "common", Key: "tirtc", Reload: "restart", Apply: func(snapshot dynamicconfig.Snapshot) error {
+			resolved, err := dynamicconfig.ResolveTiRTC(snapshot, fallbackTiRTC)
+			if err != nil {
 				return err
 			}
-			_ = json.Unmarshal(snapshot.Secrets, &secrets)
 			current := server.Config()
-			current.Tirtc = config.TirtcCfg{Endpoint: value.Endpoint, AppID: value.AppID, AccessKeyID: secrets.AccessKeyID, SecretKeyID: secrets.SecretKeyID}
+			current.Tirtc = resolved
 			server.UpdateConfig(current)
 			return nil
 		}},

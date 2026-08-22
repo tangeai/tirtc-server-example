@@ -208,6 +208,13 @@ func (p *Provisioner) Claim(ctx context.Context, input installapp.DatabaseInput,
 		_ = server.Close()
 		return nil, err
 	}
+	if (assessment.Class == installapp.DatabaseManagedOlder || assessment.Class == installapp.DatabaseManagedCurrent) &&
+		assessment.RecoveryOperationID != operationID {
+		release(conn, lockName)
+		_ = conn.Close()
+		_ = server.Close()
+		return nil, installapp.ErrExistingDatabase
+	}
 	return &claim{
 		input: input, operationID: operationID, instanceID: instanceID,
 		server: server, lockConn: conn, lockName: lockName, assessment: assessment,
@@ -479,16 +486,20 @@ func inspect(ctx context.Context, server *sqlx.DB, databaseName string, allowIns
 	hasMarker := tableSet["thingconnect_installation_state"]
 	installStatus := ""
 	if hasMarker {
-		var product string
-		query := `SELECT product,status FROM ` + quoteIdentifier(databaseName) + `.thingconnect_installation_state WHERE id=1`
-		if err := server.QueryRowxContext(ctx, query).Scan(&product, &installStatus); err != nil || product != installapp.ProductName {
+		var product, operationID string
+		query := `SELECT product,status,operation_id FROM ` + quoteIdentifier(databaseName) + `.thingconnect_installation_state WHERE id=1`
+		if err := server.QueryRowxContext(ctx, query).Scan(&product, &installStatus, &operationID); err != nil || product != installapp.ProductName {
 			assessment.Class = installapp.DatabaseDrift
 			assessment.Description = "安装状态标识无效"
 			return assessment, installapp.ErrSchemaDrift
 		}
 		if installStatus == "installed" && !allowInstalled {
+			assessment.Class = installapp.DatabaseManagedCurrent
 			assessment.Description = "数据库属于已安装实例，请导入该实例的原配置和共享密钥"
-			return assessment, installapp.ErrAlreadyInstalled
+			return assessment, installapp.ErrExistingDatabase
+		}
+		if installStatus == "installing" || installStatus == "migration_only" {
+			assessment.RecoveryOperationID = operationID
 		}
 	}
 	if !tableSet["schema_migrations"] {

@@ -42,6 +42,7 @@ export type Definition = {
   required: boolean;
   blocking: boolean;
   targets: string[];
+  reload: 'runtime' | 'restart';
 };
 export type ConfigEntry = {
   id?: number;
@@ -140,7 +141,11 @@ export function ConfigPage({
           confirm: true,
         });
       await api(`/configs/${namespace}/${editing!.definition.config_key}`, json('PUT', body));
-      message.success('配置已发布');
+      if (editing!.definition.reload === 'restart') {
+        message.warning('配置已发布；请按服务状态卡片中的服务器命令重启目标服务');
+      } else {
+        message.success('配置已发布');
+      }
       setEditing(undefined);
       loadEntries();
     } catch (e) {
@@ -187,6 +192,7 @@ export function ConfigPage({
                   <b>{r.definition.name}</b>
                   {r.definition.required && <Tag color="gold">必填</Tag>}
                   {r.definition.blocking && <Tag color="error">缺失会阻塞业务</Tag>}
+                  {r.definition.reload === 'restart' && <Tag color="processing">需服务器重启</Tag>}
                   {r.definition.description && (
                     <>
                       <br />
@@ -362,6 +368,46 @@ export function ServicePanel({ service }: { service: string }) {
     >
       {data && (
         <>
+          {!data.configuration_ready ? (
+            <Alert
+              type="error"
+              showIcon
+              message="必填配置未完成，服务应保持停止"
+              description={
+                <Space direction="vertical" size={2}>
+                  {(data.required_configurations || [])
+                    .filter((item: AnyRow) => !item.configured)
+                    .map((item: AnyRow) => (
+                      <Typography.Text key={`${item.namespace}/${item.config_key}`}>
+                        {item.name}（{item.namespace}/{item.config_key}）：{item.reason}
+                      </Typography.Text>
+                    ))}
+                </Space>
+              }
+            />
+          ) : data.status === 'offline' ? (
+            <Alert
+              type="info"
+              showIcon
+              message="必填配置已完成，请在服务器启动服务"
+              description={
+                <Typography.Text code copyable>
+                  {data.start_command}
+                </Typography.Text>
+              }
+            />
+          ) : (
+            <Alert
+              type="success"
+              showIcon
+              message="需要应用启动级配置时，请在服务器重启服务"
+              description={
+                <Typography.Text code copyable>
+                  {data.restart_command}
+                </Typography.Text>
+              }
+            />
+          )}
           <Space size="large">
             {statusTag(data.status)}
             <span>

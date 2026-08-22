@@ -17,14 +17,18 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jmoiron/sqlx"
 	"github.com/redis/go-redis/v9"
 
 	adminapp "thing-connect/internal/admin"
 	"thing-connect/internal/apiresp"
 	"thing-connect/internal/cache"
+	baseconfig "thing-connect/internal/config"
 	"thing-connect/internal/db"
+	"thing-connect/internal/dynamicconfig"
 	"thing-connect/internal/installer"
 	"thing-connect/internal/logging"
+	"thing-connect/internal/mqttc"
 	"thing-connect/internal/servicestatus"
 	adminmysql "thing-connect/internal/store/mysql/admin"
 	installermysql "thing-connect/internal/store/mysql/installer"
@@ -40,6 +44,7 @@ func main() {
 	initNickName := flag.String("init-nick-name", "", "nick name for the first super administrator")
 	prepareSetup := flag.Bool("prepare-setup", false, "authorize a new empty deployment for one-time web setup")
 	validateConfigBundle := flag.Bool("validate-config-bundle", false, "strictly validate required and configured optional service configs and exit")
+	checkServiceConfig := flag.String("check-service-config", "", "read-only startup preflight for one business service and exit")
 	deployRoot := flag.String("deploy-root", "", "deployment root used by first-run setup")
 	setupPort := flag.Int("setup-port", 9000, "HTTP port used before the Admin config exists")
 	setupBind := flag.String("setup-bind", "127.0.0.1", "listen address used only during first-run setup")
@@ -127,6 +132,13 @@ func main() {
 	}
 	if err := mysqlmigrate.RequireAdminSchemaCurrent(sqlDB); err != nil {
 		log.Fatalf("schema: %v", err)
+	}
+	if strings.TrimSpace(*checkServiceConfig) != "" {
+		if err := checkBusinessServiceConfig(context.Background(), root, strings.TrimSpace(*checkServiceConfig), sqlDB); err != nil {
+			log.Fatalf("service config check: %v", err)
+		}
+		log.Printf("service_config_check=passed service=%s", strings.TrimSpace(*checkServiceConfig))
+		return
 	}
 	store := adminapp.NewStore(sqlDB)
 	if err := store.SeedDefaults(context.Background()); err != nil {
@@ -234,6 +246,7 @@ func main() {
 	})
 	deviceService := adminapp.NewDeviceService(adminmysql.NewDeviceCommandStore(sqlDB))
 	adminHTTP := adminapp.NewHTTPServer(store, authService, access, configService, servicestatus.NewAggregator(redisClient), redisClient, jobService, deviceService, cfg.Admin.CookieSecure)
+	adminHTTP.SetServiceCommandRoot(root)
 	if value, _, _, loadErr := configService.Resolved(context.Background(), "system", "admin.session_policy", "global", ""); loadErr == nil {
 		var policy struct {
 			LoginWindow string `json:"login_window"`
@@ -286,6 +299,63 @@ func main() {
 	}
 }
 
+type directConfigLoader struct{ service *adminapp.ConfigService }
+
+func (loader directConfigLoader) Load(ctx context.Context, namespace, key string) (dynamicconfig.Snapshot, error) {
+	value, secrets, revision, err := loader.service.Resolved(ctx, namespace, key, "global", "")
+	return dynamicconfig.Snapshot{Value: value, Secrets: secrets, Revision: revision}, err
+}
+
+func checkBusinessServiceConfig(ctx context.Context, root, serviceName string, sqlDB *sqlx.DB) error {
+	if err := installer.ValidateConfiguredBusinessService(root, serviceName); err != nil {
+		return err
+	}
+	configService := adminapp.NewConfigService(sqlDB, adminapp.DefaultConfigRegistry(), nil)
+	statuses, err := configService.BlockingStatus(ctx, serviceName)
+	if err != nil {
+		return fmt.Errorf("读取必填配置失败: %w", err)
+	}
+	missing := make([]string, 0)
+	for _, status := range statuses {
+		if !status.Configured {
+			missing = append(missing, fmt.Sprintf("%s/%s（%s）", status.Namespace, status.ConfigKey, status.Reason))
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("%s 必填配置未完成: %s；请登录 Admin 配置后重试", serviceName, strings.Join(missing, "、"))
+	}
+	serviceConfig, err := baseconfig.LoadFile(filepath.Join(root, serviceName, "config.yaml"))
+	if err != nil {
+		return err
+	}
+	serviceDB, err := db.Open(serviceConfig.Database)
+	if err != nil {
+		return fmt.Errorf("%s MySQL 连接检查失败: %w", serviceName, err)
+	}
+	if err := mysqlmigrate.RequireSchemaCurrent(serviceDB); err != nil {
+		_ = serviceDB.Close()
+		return fmt.Errorf("%s 数据库版本检查失败: %w", serviceName, err)
+	}
+	_ = serviceDB.Close()
+	redisClient, err := cache.New(serviceConfig.Redis)
+	if err != nil {
+		return fmt.Errorf("%s Redis 连接检查失败: %w", serviceName, err)
+	}
+	_ = redisClient.Close()
+	if serviceName == "user-server" || serviceName == "voip-server" || serviceName == "call-server" {
+		mqttConfig, _, err := dynamicconfig.ResolveMQTT(ctx, directConfigLoader{service: configService}, serviceName, serviceConfig.MQTT)
+		if err != nil {
+			return fmt.Errorf("%s MQTT 配置检查失败: %w", serviceName, err)
+		}
+		probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		if err := mqttc.Probe(probeCtx, mqttConfig); err != nil {
+			return fmt.Errorf("%s MQTT 连接或认证失败: %w", serviceName, err)
+		}
+	}
+	return nil
+}
+
 func validateMigrationPreflight(ctx context.Context, root, migrationDSN string, requireRuntime bool) error {
 	assessment, err := installermysql.New().InspectDSN(ctx, migrationDSN)
 	if err != nil {
@@ -307,7 +377,6 @@ func newInstaller(options installer.Options) *installer.Bootstrap {
 		Database: installermysql.New(),
 		Bundles:  installer.NewFileBundleStore(options),
 		Probes:   installer.NewStandardProber(),
-		Runtime:  installer.NewSupervisorController(options.SupervisorCTL, options.SupervisorGroup, options.HTTPPort),
 	})
 }
 

@@ -17,6 +17,7 @@ import (
 	"thing-connect/internal/cache"
 	"thing-connect/internal/config"
 	"thing-connect/internal/db"
+	"thing-connect/internal/dynamicconfig"
 	"thing-connect/internal/logging"
 	"thing-connect/internal/mqttc"
 	"thing-connect/internal/servicestatus"
@@ -43,7 +44,17 @@ func main() {
 	if err != nil {
 		log.Fatalf("redis: %v", err)
 	}
-	broker, err := mqttc.New(cfg.MQTT, rdb)
+	dynamicClient, err := dynamicconfig.New(cfg.Admin.ServerURL, cfg.Internal.Key, rdb)
+	if err != nil {
+		log.Fatalf("dynamic config: %v", err)
+	}
+	startupConfigCtx, cancelStartupConfig := context.WithTimeout(context.Background(), 10*time.Second)
+	mqttConfig, _, err := dynamicconfig.ResolveMQTT(startupConfigCtx, dynamicClient, "call-server", cfg.MQTT)
+	cancelStartupConfig()
+	if err != nil {
+		log.Fatalf("mqtt config: %v", err)
+	}
+	broker, err := mqttc.New(mqttConfig, rdb)
 	if err != nil {
 		log.Fatalf("mqtt: %v", err)
 	}
@@ -61,7 +72,7 @@ func main() {
 
 	callHTTP := callhandler.NewServer(cfg, sqlDB, rdb, broker, devStore)
 	callHTTP.Register(r)
-	dynamicClient, dynamicRefs, err := callDynamicConfig(cfg, rdb, callHTTP)
+	dynamicClient, dynamicRefs, err := callDynamicConfig(dynamicClient, cfg.Tirtc, callHTTP)
 	if err != nil {
 		log.Fatalf("dynamic config: %v", err)
 	}

@@ -22,8 +22,8 @@ func TestRegistryRejectsUnknownAndBadValues(t *testing.T) {
 func TestRegistryDefinitionsAndUsableInitialValues(t *testing.T) {
 	registry := DefaultConfigRegistry()
 	definitions := registry.List("")
-	if len(definitions) != 20 {
-		t.Fatalf("registered configuration count = %d, want 20", len(definitions))
+	if len(definitions) != 23 {
+		t.Fatalf("registered configuration count = %d, want 23", len(definitions))
 	}
 	for _, definition := range definitions {
 		value := definition.Default
@@ -31,6 +31,9 @@ func TestRegistryDefinitionsAndUsableInitialValues(t *testing.T) {
 		// environment-specific and must be published through Admin.
 		if definition.Namespace == "common" && definition.Key == "tirtc" {
 			value = json.RawMessage(`{"endpoint":"https://api.example.com","app_id":"test-app"}`)
+		}
+		if definition.Key == "mqtt.connection" {
+			value = json.RawMessage(`{"broker":"mqtt://broker.example.com:1883","auth_mode":"username","username":"service","client_id":""}`)
 		}
 		if err := registry.Validate(definition.Namespace, definition.Key, value); err != nil {
 			t.Errorf("registered value %s/%s rejected: %v", definition.Namespace, definition.Key, err)
@@ -65,6 +68,47 @@ func TestRegistryDefinitionsAndUsableInitialValues(t *testing.T) {
 	}
 	if blockingFields != 3 {
 		t.Fatalf("TiRTC blocking fields = %d, want 3", blockingFields)
+	}
+}
+
+func TestMQTTConnectionIsBlockingAndRequiresUnambiguousAuthentication(t *testing.T) {
+	registry := DefaultConfigRegistry()
+	for _, namespace := range []string{"user-server", "voip-server", "call-server"} {
+		definition, ok := registry.Lookup(namespace, "mqtt.connection")
+		if !ok || !definition.Required || !definition.Blocking || definition.Reload != "restart" {
+			t.Fatalf("%s MQTT definition = %+v", namespace, definition)
+		}
+		valid := json.RawMessage(`{"broker":"mqtts://broker.example.com:8883","auth_mode":"username","username":"service","client_id":""}`)
+		if err := registry.Validate(namespace, "mqtt.connection", valid); err != nil {
+			t.Fatalf("%s valid MQTT connection rejected: %v", namespace, err)
+		}
+		if err := validateRequiredSecrets(namespace, "mqtt.connection", valid, json.RawMessage(`{"password":"secret"}`)); err != nil {
+			t.Fatalf("%s valid MQTT secret rejected: %v", namespace, err)
+		}
+	}
+	invalid := json.RawMessage(`{"broker":"mqtt://broker.example.com:1883/path","auth_mode":"username","username":"service","client_id":"duplicate"}`)
+	if err := registry.Validate("user-server", "mqtt.connection", invalid); err == nil {
+		t.Fatal("ambiguous or path-bearing MQTT connection accepted")
+	}
+}
+
+func TestBlockingDefinitionsAreTargetedPerService(t *testing.T) {
+	registry := DefaultConfigRegistry()
+	for service, want := range map[string][]string{
+		"device-server": {},
+		"user-server":   {"common/tirtc", "user-server/mqtt.connection"},
+		"voip-server":   {"common/tirtc", "voip-server/mqtt.connection"},
+		"ai-server":     {"common/tirtc"},
+		"call-server":   {"call-server/mqtt.connection", "common/tirtc"},
+	} {
+		definitions := registry.BlockingForTarget(service)
+		got := make([]string, 0, len(definitions))
+		for _, definition := range definitions {
+			got = append(got, definitionID(definition.Namespace, definition.Key))
+		}
+		if strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Errorf("%s blocking definitions = %v, want %v", service, got, want)
+		}
 	}
 }
 

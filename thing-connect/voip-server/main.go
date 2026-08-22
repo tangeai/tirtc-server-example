@@ -16,6 +16,7 @@ import (
 	"thing-connect/internal/cache"
 	"thing-connect/internal/config"
 	"thing-connect/internal/db"
+	"thing-connect/internal/dynamicconfig"
 	"thing-connect/internal/logging"
 	"thing-connect/internal/mqttc"
 	"thing-connect/internal/servicestatus"
@@ -45,7 +46,19 @@ func main() {
 		slog.Error("redis init failed", "err", err)
 		os.Exit(1)
 	}
-	broker, err := mqttc.New(cfg.MQTT, rdb)
+	dynamicClient, err := dynamicconfig.New(cfg.Admin.ServerURL, cfg.Internal.Key, rdb)
+	if err != nil {
+		slog.Error("dynamic config init failed", "err", err)
+		os.Exit(1)
+	}
+	startupConfigCtx, cancelStartupConfig := context.WithTimeout(context.Background(), 10*time.Second)
+	mqttConfig, _, err := dynamicconfig.ResolveMQTT(startupConfigCtx, dynamicClient, "voip-server", cfg.MQTT)
+	cancelStartupConfig()
+	if err != nil {
+		slog.Error("mqtt config invalid", "err", err)
+		os.Exit(1)
+	}
+	broker, err := mqttc.New(mqttConfig, rdb)
 	if err != nil {
 		slog.Error("mqtt init failed", "err", err)
 		os.Exit(1)
@@ -63,7 +76,7 @@ func main() {
 
 	voipHTTP := handler.NewServer(cfg, sqlDB, rdb, broker)
 	voipHTTP.Register(r)
-	dynamicClient, dynamicRefs, err := voipDynamicConfig(cfg, rdb, voipHTTP)
+	dynamicClient, dynamicRefs, err := voipDynamicConfig(dynamicClient, cfg.Tirtc, voipHTTP)
 	if err != nil {
 		slog.Error("dynamic config init failed", "err", err)
 		os.Exit(1)

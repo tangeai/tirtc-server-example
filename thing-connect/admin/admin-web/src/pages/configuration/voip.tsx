@@ -33,7 +33,7 @@ import {
   voipConfigStatusNames,
   voipInvalidReasonNames,
 } from '../../shared/admin-metadata';
-import { ServicePanel, type ConfigEntry } from './config-page';
+import { ConfigPage, ServicePanel, type ConfigEntry } from './config-page';
 
 export function VoIPPage() {
   const [apps, appsLoading, reloadApps] = useLoad(
@@ -135,6 +135,7 @@ export function VoIPPage() {
         </Button>,
       )}
       <ServicePanel service="voip-server" />
+      <ConfigPage namespace="voip-server" embedded excludeGroups={['wechat']} />
       <Row gutter={16}>
         <Col span={10}>
           <Card

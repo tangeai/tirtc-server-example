@@ -23,7 +23,6 @@ import {
 import { ADMIN_PASSWORD_POLICY_MESSAGE, validateAdminPassword } from './password-policy';
 
 type SetupMode = 'fresh' | 'recovery' | 'installed' | 'normal';
-type MQTTAuthMode = 'username' | 'clientid';
 
 export type SetupSnapshot = {
   mode: SetupMode;
@@ -56,7 +55,6 @@ export type SetupProblem = {
 type SetupDraft = {
   setup_token: string;
   admin_password_confirm: string;
-  optional_services?: string[];
   database: {
     host: string;
     port: number;
@@ -68,13 +66,6 @@ type SetupDraft = {
     tls: string;
   };
   redis: { host: string; port: number; password?: string; db: number };
-  mqtt: {
-    broker: string;
-    auth_mode: MQTTAuthMode;
-    username?: string;
-    client_ids?: Record<string, string>;
-    password: string;
-  };
   network: { public_base_url?: string; cookie_secure: boolean; trusted_proxies?: string };
   admin: { email: string; nick_name?: string; password: string };
 };
@@ -215,7 +206,7 @@ const fallbackServiceCatalog: SetupServiceDefinition[] = [
     display_name: '设备服务',
     business: true,
     required: true,
-    uses_mqtt: true,
+    uses_mqtt: false,
   },
   {
     name: 'user-server',
@@ -266,32 +257,12 @@ export function SetupPage({ initial }: { initial: SetupSnapshot }) {
   const [busy, setBusy] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [requestProblem, setRequestProblem] = useState<SetupProblem>();
-  const mqttAuthMode = Form.useWatch(['mqtt', 'auth_mode'], form) || 'username';
-  const optionalServices = Form.useWatch('optional_services', form) || [];
   const catalog = initial.available_services?.length
     ? initial.available_services
     : fallbackServiceCatalog;
   const businessServices = catalog.filter((service) => service.business);
-  const requiredBusinessServices = businessServices.filter((service) => service.required);
-  const optionalBusinessServices = businessServices.filter((service) => !service.required);
-  const enabledMQTTServices = businessServices.filter(
-    (service) => service.uses_mqtt && (service.required || optionalServices.includes(service.name)),
-  );
   const serviceNames = Object.fromEntries(
     catalog.map((service) => [service.name, service.display_name]),
-  );
-  const defaultClientIDs = Object.fromEntries(
-    catalog
-      .filter((service) => service.uses_mqtt)
-      .map((service) => {
-        const known: Record<string, string> = {
-          'device-server': 'devicesrv',
-          'user-server': 'usrsrv',
-          'voip-server': 'voipsrv',
-          'call-server': 'callsrv',
-        };
-        return [service.name, known[service.name] || `${service.name.replace(/-server$/, '')}srv`];
-      }),
   );
   const recovering = Boolean(snapshot.operation_id && snapshot.phase !== 'installed');
   const canResume = Boolean(
@@ -321,31 +292,10 @@ export function SetupPage({ initial }: { initial: SetupSnapshot }) {
       setup_token: _setupToken,
       admin_password_confirm: _adminPasswordConfirm,
       network,
-      mqtt,
       ...rest
     } = values;
-    const normalizedMQTT =
-      mqtt.auth_mode === 'clientid'
-        ? {
-            broker: mqtt.broker,
-            auth_mode: mqtt.auth_mode,
-            client_ids: Object.fromEntries(
-              enabledMQTTServices.map((service) => [
-                service.name,
-                mqtt.client_ids?.[service.name] || '',
-              ]),
-            ),
-            password: mqtt.password,
-          }
-        : {
-            broker: mqtt.broker,
-            auth_mode: 'username' as const,
-            username: mqtt.username || '',
-            password: mqtt.password,
-          };
     return {
       ...rest,
-      mqtt: normalizedMQTT,
       network: {
         ...network,
         trusted_proxies: (network.trusted_proxies || '')
@@ -442,7 +392,7 @@ export function SetupPage({ initial }: { initial: SetupSnapshot }) {
               { title: '数据库' },
               { title: '管理员' },
               { title: '配置' },
-              { title: '服务' },
+              { title: '交接' },
               { title: '完成' },
             ]}
           />
@@ -499,7 +449,7 @@ export function SetupPage({ initial }: { initial: SetupSnapshot }) {
                   onChange={(event) => setToken(event.target.value)}
                 />
                 <Button type="primary" loading={busy} disabled={!token} onClick={resume}>
-                  启动业务服务并继续
+                  完成 Admin 安装并关闭安装入口
                 </Button>
               </Space.Compact>
             </>
@@ -520,7 +470,7 @@ export function SetupPage({ initial }: { initial: SetupSnapshot }) {
       <Card className="setup-card setup-form-card">
         <Typography.Title level={2}>初始化 ThingConnect</Typography.Title>
         <Typography.Paragraph type="secondary">
-          连接信息通过预检后才会执行安装。陌生非空数据库、未来版本或结构不一致的数据库不会被修改。
+          连接信息通过预检后才会执行安装。任何已有表的数据库都按只读处理；只有不存在或完全为空的专用数据库可以初始化。
         </Typography.Paragraph>
         {formProblem ? (
           <SetupProblemAlert
@@ -557,14 +507,8 @@ export function SetupPage({ initial }: { initial: SetupSnapshot }) {
             form={form}
             layout="vertical"
             initialValues={{
-              optional_services: [],
               database: { host: '127.0.0.1', port: 3306, name: 'thing_connect', tls: 'false' },
               redis: { host: '127.0.0.1', port: 6379, db: 0 },
-              mqtt: {
-                broker: 'mqtt://127.0.0.1:1883',
-                auth_mode: 'username',
-                client_ids: defaultClientIDs,
-              },
               network: { cookie_secure: false, trusted_proxies: '127.0.0.1' },
             }}
             onFinish={preview}
@@ -575,22 +519,13 @@ export function SetupPage({ initial }: { initial: SetupSnapshot }) {
             </Form.Item>
             <Typography.Title level={4}>业务服务</Typography.Title>
             <Typography.Paragraph type="secondary">
-              必需服务固定安装。其他能力可按需启用，未选择的服务不会生成配置、启动或参与就绪检查。
+              安装器会生成以下业务服务的基础配置，但不会启动它们。进入管理后台完成各服务必填配置后，
+              再按页面提示在服务器执行启动命令。
             </Typography.Paragraph>
             <Space direction="vertical" className="setup-service-selection">
-              {requiredBusinessServices.map((service) => (
-                <Checkbox key={service.name} checked disabled>
-                  {service.display_name}（必需）
-                </Checkbox>
+              {businessServices.map((service) => (
+                <Tag key={service.name}>{service.display_name}（安装后配置）</Tag>
               ))}
-              <Form.Item name="optional_services" noStyle>
-                <Checkbox.Group
-                  options={optionalBusinessServices.map((service) => ({
-                    label: `${service.display_name}（可选）`,
-                    value: service.name,
-                  }))}
-                />
-              </Form.Item>
             </Space>
             <Typography.Title level={4}>MySQL 8</Typography.Title>
             <Row gutter={16}>
@@ -701,69 +636,6 @@ export function SetupPage({ initial }: { initial: SetupSnapshot }) {
               <Col xs={24} md={4}>
                 <Form.Item name={['redis', 'password']} label="密码">
                   <Input.Password />
-                </Form.Item>
-              </Col>
-            </Row>
-            <Typography.Title level={4}>MQTT</Typography.Title>
-            <Row gutter={16}>
-              <Col xs={24} md={14}>
-                <Form.Item name={['mqtt', 'broker']} label="Broker" rules={[{ required: true }]}>
-                  <Input placeholder="mqtt://127.0.0.1:1883" />
-                </Form.Item>
-              </Col>
-              <Col xs={24} md={10}>
-                <Form.Item
-                  name={['mqtt', 'auth_mode']}
-                  label="认证方式"
-                  rules={[{ required: true }]}
-                >
-                  <Select
-                    options={[
-                      { value: 'username', label: 'Username（推荐）' },
-                      { value: 'clientid', label: 'ClientID（单实例）' },
-                    ]}
-                  />
-                </Form.Item>
-              </Col>
-            </Row>
-            {mqttAuthMode === 'username' ? (
-              <Form.Item
-                name={['mqtt', 'username']}
-                label="MQTT 用户名"
-                rules={[{ required: true }]}
-              >
-                <Input autoComplete="username" />
-              </Form.Item>
-            ) : (
-              <>
-                <Alert
-                  type="warning"
-                  showIcon
-                  message="ClientID 模式要求每个服务使用不同的已注册 ClientID；扩容多副本时请改用 Username 模式。"
-                />
-                <Row gutter={16}>
-                  {enabledMQTTServices.map((service) => (
-                    <Col key={service.name} xs={24} md={12}>
-                      <Form.Item
-                        name={['mqtt', 'client_ids', service.name]}
-                        label={`${service.display_name} ClientID`}
-                        rules={[{ required: true }]}
-                      >
-                        <Input />
-                      </Form.Item>
-                    </Col>
-                  ))}
-                </Row>
-              </>
-            )}
-            <Row gutter={16}>
-              <Col xs={24} md={12}>
-                <Form.Item
-                  name={['mqtt', 'password']}
-                  label="MQTT 密码"
-                  rules={[{ required: true }]}
-                >
-                  <Input.Password autoComplete="current-password" />
                 </Form.Item>
               </Col>
             </Row>
