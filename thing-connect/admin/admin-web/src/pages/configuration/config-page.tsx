@@ -29,7 +29,7 @@ import {
   dependencyNames,
   serviceName,
 } from '../../shared/admin-metadata';
-import { commonServiceRows } from './config-status';
+import { commonServiceRows, configBadges } from './config-status';
 
 export type Definition = {
   namespace: string;
@@ -228,9 +228,11 @@ export function ConfigPage({
               render: (_, r) => (
                 <>
                   <b>{r.definition.name}</b>
-                  {r.definition.required && <Tag color="gold">必填</Tag>}
-                  {r.definition.blocking && <Tag color="error">缺失会阻塞业务</Tag>}
-                  {r.definition.reload === 'restart' && <Tag color="processing">需服务器重启</Tag>}
+                  {configBadges(r.definition, !!r.entry.id).map((badge) => (
+                    <Tag key={badge.label} color={badge.color}>
+                      {badge.label}
+                    </Tag>
+                  ))}
                   {r.definition.description && (
                     <>
                       <br />
