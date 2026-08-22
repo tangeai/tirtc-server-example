@@ -355,7 +355,7 @@ sudo /opt/thing-connect/service-local.sh start thing-connect:call-server
 
 `/health/live` 只表示进程存活；`/health/ready` 才表示必需依赖和数据库版本满足要求。
 
-安装器使用的本地服务脚本可用于首次验收和故障排查：
+安装器使用的本地服务脚本可用于首次验收、故障排查，以及未接入独立进程管理器时的本机运行：
 
 ```bash
 sudo /opt/thing-connect/service-local.sh status-all
@@ -364,13 +364,13 @@ sudo /opt/thing-connect/service-local.sh stop-all
 sudo /opt/thing-connect/service-local.sh restart thing-connect:admin-server
 ```
 
-该脚本不注册开机服务，也不提供日志轮转。验收通过后仍需按 4.3 节接入部署环境自己的进程托管方式。
+该脚本不注册开机服务，也不提供日志轮转。持续使用时，运维环境需另外负责开机启动、日志收集与轮转；需要这些能力时可按 4.3 节接入现有进程托管方式。
 
 本地脚本以进程存活接口区分 `RUNNING` 和 `STARTING`；只有守护脚本存在但服务未监听时显示 `STARTING`。同一服务的守护进程使用独占锁，PID 文件丢失时会扫描并接管原守护进程，不会再启动一份。`CONFLICT` 表示检测到历史遗留的多个守护进程，应先执行对应服务的 `stop` 清理，再根据页面提示检查端口和日志。
 
-### 4.3 接入生产进程托管
+### 4.3 可选：接入生产进程托管
 
-使用 systemd、Supervisor、容器平台或其他现有编排系统托管进程均可，本文不规定具体发布工具。托管配置必须满足以下约束：
+不要求安装 Supervisor。可以继续用 `service-local.sh` 手动管理服务；需要异常拉起、开机自启、集中日志或自动发布验收时，再接入 systemd、Supervisor、容器平台或其他现有编排系统。托管配置必须满足以下约束：
 
 - 切换前执行 `sudo /opt/thing-connect/service-local.sh stop-all`，确认本地脚本管理的进程已停止，再启动新的进程管理器。
 - Admin 先启动并达到 `/health/ready`，再预检并启动五个业务服务。
@@ -439,9 +439,23 @@ sudo env \
 
 脚本要求备份文件已存在、非空、可读，并记录 SHA-256；缺少备份或未声明恢复验证时，在执行任何迁移前停止。`SKIP_MIGRATIONS=1` 只用于 DBA 已通过独立受控流程执行了同一版本迁移的环境，不能用来绕过备份。
 
-该命令取得部署锁后快进拉取源码，重新加载新版本服务清单，构建全部服务，备份当前文件，按嵌入迁移目录执行缺失数据库版本，再按 Admin 优先顺序发布并检查 readiness。迁移版本从 `core/NNN_*.sql` 和 `admin/NNN_*.sql` 自动发现；增加表或修改表时不需要改安装脚本中的版本号。数据库迁移不能随旧二进制自动回滚。
+该命令取得部署锁后快进拉取源码，重新加载新版本服务清单，构建全部服务，备份当前文件，并按嵌入迁移目录执行缺失数据库版本。迁移版本从 `core/NNN_*.sql` 和 `admin/NNN_*.sql` 自动发现；增加表或修改表时不需要改安装脚本中的版本号。数据库迁移不能随旧二进制自动回滚。
 
-新版本增加服务时，同步更新服务清单、可生成和校验的基础配置、Admin 动态配置注册表、服务器预检、进程托管和 readiness。表结构变更同步增加有序可重入迁移并更新 `scripts/schema.sql`。Supervisor 部署还需在发布前执行 `supervisorctl reread` 和 `supervisorctl update`；缺少进程定义时发布会在修改文件和数据库前停止。使用 systemd、容器平台或其他编排系统时，由对应发布流水线完成同等的清单同步、显式迁移、Admin 优先启动和 readiness 门槛。
+`deploy-prod.sh` 自动识别服务管理方式：已安装服务在 Supervisor 中都有完整条目时，按 Admin 优先顺序逐服务发布、重启并检查 readiness；没有 `supervisorctl`，或 Supervisor 中没有任何 ThingConnect 条目时，进入手动模式。手动模式不控制服务进程，更新前必须先停止本地服务：
+
+```bash
+sudo /opt/thing-connect/service-local.sh stop-all
+sudo env \
+  DATABASE_BACKUP_FILE=/secure/backups/thing-connect-before-update.sql \
+  DATABASE_BACKUP_RESTORE_VERIFIED=1 \
+  /opt/thing-connect/deploy-prod.sh update
+sudo /opt/thing-connect/service-local.sh start-all
+sudo /opt/thing-connect/service-local.sh status-all
+```
+
+脚本在手动模式下检测到 `RUNNING`、`STARTING`、`CONFLICT`，或已安装服务端口仍在监听时，会在拉取、迁移和发布前停止更新，并显示准确的 `stop-all` 命令；更新完成后显示 `start-all` 和 `status-all`。Supervisor 只配置部分已安装服务时脚本拒绝发布，避免 Supervisor 与本地脚本同时管理同一服务。可用 `SERVICE_MANAGER=supervisor` 或 `SERVICE_MANAGER=manual` 明确指定模式；显式手动模式也不能跳过已有的 ThingConnect Supervisor 条目，必须先停止并移除这些条目。
+
+新版本增加服务时，同步更新服务清单、可生成和校验的基础配置、Admin 动态配置注册表、服务器预检、进程托管和 readiness。表结构变更同步增加有序可重入迁移并更新 `scripts/schema.sql`。Supervisor 部署还需在发布前执行 `supervisorctl reread` 和 `supervisorctl update`；缺少部分已安装服务的进程定义时发布会在修改文件和数据库前停止。使用手动模式、systemd、容器平台或其他编排系统时，由对应运维流程完成同等的显式迁移、Admin 优先启动和 readiness 门槛。
 
 ## 5. 相关文档
 

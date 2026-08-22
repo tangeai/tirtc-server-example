@@ -57,11 +57,15 @@ load_deployment_service_catalog() {
 
 load_deployment_service_catalog || exit 1
 
-# 生产服务仅由 Supervisor 托管。
+# Supervisor 是可选的自动进程管理器；未接入 Supervisor 时，发布脚本只更新
+# 文件和数据库，服务由运维人员通过 service-local.sh 手动停止、启动和验收。
 SUPERVISORCTL="${SUPERVISORCTL:-supervisorctl}"
 # 对应 deploy/supervisor/thing-connect.supervisor.conf 的 [group:thing-connect]。
 SUPERVISOR_WAIT_SECONDS="${SUPERVISOR_WAIT_SECONDS:-15}"
 SUPERVISOR_STABLE_SECONDS="${SUPERVISOR_STABLE_SECONDS:-2}"
+SERVICE_MANAGER="${SERVICE_MANAGER:-auto}"
+ACTIVE_SERVICE_MANAGER=""
+LOCAL_SERVICECTL="${LOCAL_SERVICECTL:-$DEPLOY_ROOT/service-local.sh}"
 HEALTH_WAIT_SECONDS="${HEALTH_WAIT_SECONDS:-30}"
 HEALTH_REQUEST_TIMEOUT_SECONDS="${HEALTH_REQUEST_TIMEOUT_SECONDS:-3}"
 HEALTH_HOST="${HEALTH_HOST:-127.0.0.1}"
@@ -173,7 +177,7 @@ supervisor_state() {
 require_supervisor_service() {
     local svc="$1" state
     command -v "$SUPERVISORCTL" >/dev/null 2>&1 || {
-        err "找不到 $SUPERVISORCTL；生产环境必须安装并配置 Supervisor"
+        err "找不到 $SUPERVISORCTL；当前操作不能使用 Supervisor 自动管理服务"
         return 1
     }
     state="$(supervisor_state "$svc")"
@@ -212,13 +216,124 @@ wait_for_supervisor_state() {
 
 validate_supervisor_inventory() {
     local svc
+    local -a services=("$@")
     command -v "$SUPERVISORCTL" >/dev/null 2>&1 || {
-        err "找不到 $SUPERVISORCTL；生产环境必须安装并配置 Supervisor"
+        err "找不到 $SUPERVISORCTL"
         return 1
     }
-    for svc in "${ALL_SERVICES[@]}"; do
+    if [ "${#services[@]}" -eq 0 ]; then
+        services=("${ACTIVE_SERVICES[@]}")
+    fi
+    if [ "${#services[@]}" -eq 0 ]; then
+        services=("${ALL_SERVICES[@]}")
+    fi
+    for svc in "${services[@]}"; do
         require_supervisor_service "$svc" || return 1
     done
+}
+
+select_service_manager() {
+    local svc state configured=0 total="${#ACTIVE_SERVICES[@]}"
+    case "$SERVICE_MANAGER" in
+        auto|supervisor|manual) ;;
+        *)
+            err "SERVICE_MANAGER 只能是 auto、supervisor 或 manual"
+            return 1
+            ;;
+    esac
+
+    if [ "$SERVICE_MANAGER" = "manual" ]; then
+        if command -v "$SUPERVISORCTL" >/dev/null 2>&1; then
+            for svc in "${ACTIVE_SERVICES[@]}"; do
+                state="$(supervisor_state "$svc")"
+                [ -z "$state" ] || configured=$((configured + 1))
+            done
+            if [ "$configured" -ne 0 ]; then
+                err "SERVICE_MANAGER=manual 不能忽略 Supervisor 中已有的 $configured 个 ThingConnect 服务"
+                err "请先停止并移除这些 Supervisor 条目，避免两个进程管理器重复启动服务"
+                return 1
+            fi
+        fi
+        ACTIVE_SERVICE_MANAGER="manual"
+    elif [ "$SERVICE_MANAGER" = "supervisor" ]; then
+        validate_supervisor_inventory "${ACTIVE_SERVICES[@]}" || return 1
+        ACTIVE_SERVICE_MANAGER="supervisor"
+    elif ! command -v "$SUPERVISORCTL" >/dev/null 2>&1; then
+        ACTIVE_SERVICE_MANAGER="manual"
+    else
+        for svc in "${ACTIVE_SERVICES[@]}"; do
+            state="$(supervisor_state "$svc")"
+            [ -z "$state" ] || configured=$((configured + 1))
+        done
+        if [ "$configured" -eq 0 ]; then
+            ACTIVE_SERVICE_MANAGER="manual"
+        elif [ "$configured" -eq "$total" ]; then
+            ACTIVE_SERVICE_MANAGER="supervisor"
+        else
+            err "Supervisor 只配置了 $configured/$total 个已安装服务，拒绝混用进程管理器"
+            err "请补齐 Supervisor 清单，或停止并移除 ThingConnect 的 Supervisor 条目后使用 $LOCAL_SERVICECTL"
+            return 1
+        fi
+    fi
+
+    if [ "$ACTIVE_SERVICE_MANAGER" = "manual" ]; then
+        [ -x "$LOCAL_SERVICECTL" ] || {
+            err "未使用 Supervisor，且本地服务脚本不存在或不可执行: $LOCAL_SERVICECTL"
+            return 1
+        }
+        log "未检测到完整的 ThingConnect Supervisor 清单；使用手动服务管理模式"
+    else
+        validate_supervisor_inventory "${ACTIVE_SERVICES[@]}" || return 1
+        log "服务管理器校验通过：Supervisor"
+    fi
+}
+
+manual_service_control_hint() {
+    local action="$1"
+    case "$action" in
+        start)
+            err "请手动执行: sudo $LOCAL_SERVICECTL start-all"
+            ;;
+        stop)
+            err "请手动执行: sudo $LOCAL_SERVICECTL stop-all"
+            ;;
+        restart)
+            err "请手动执行: sudo $LOCAL_SERVICECTL stop-all"
+            err "然后执行: sudo $LOCAL_SERVICECTL start-all"
+            ;;
+        status)
+            err "请手动执行: sudo $LOCAL_SERVICECTL status-all"
+            ;;
+    esac
+}
+
+validate_manual_services_stopped() {
+    local output svc cfg port active=0
+    output="$("$LOCAL_SERVICECTL" status-all 2>&1)" || {
+        err "无法读取本地服务状态: $LOCAL_SERVICECTL status-all"
+        [ -z "$output" ] || printf '%s\n' "$output" >&2
+        return 1
+    }
+    if grep -Eq ' (RUNNING|STARTING|CONFLICT)( |$)' <<<"$output"; then
+        active=1
+    fi
+    for svc in "${ACTIVE_SERVICES[@]}"; do
+        cfg="$(service_config_path "$svc")" || continue
+        port="$(yaml_section_value "$cfg" server http_port)"
+        [[ "$port" =~ ^[1-9][0-9]*$ ]] || continue
+        if (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
+            output+=$'\n'"$svc 端口 $port 仍在监听"
+            active=1
+        fi
+    done
+    if [ "$active" -ne 0 ]; then
+        err "手动服务管理模式要求更新前停止全部本地服务，避免迁移期间混跑新旧版本"
+        printf '%s\n' "$output" >&2
+        manual_service_control_hint stop
+        err "停止后重新执行本次更新命令"
+        return 1
+    fi
+    log "本地服务均已停止，可以安全更新文件和数据库"
 }
 
 validate_service_manager() {
@@ -242,8 +357,15 @@ validate_service_manager() {
         err "找不到 curl；生产发布必须执行 readiness 检查"
         return 1
     }
-    validate_supervisor_inventory || return 1
-    log "服务管理器校验通过：Supervisor"
+    select_service_manager
+}
+
+prepare_update_service_control() {
+    resolve_active_services || return 1
+    validate_service_manager || return 1
+    if [ "$ACTIVE_SERVICE_MANAGER" = "manual" ]; then
+        validate_manual_services_stopped || return 1
+    fi
 }
 
 validate_backup_retention() {
@@ -386,10 +508,6 @@ is_http_url() {
     [[ "$1" =~ ^https?://[^[:space:]]+$ ]]
 }
 
-is_mqtt_url() {
-    [[ "$1" =~ ^(mqtt|mqtts|tcp|ssl)://[^[:space:]@]+$ ]]
-}
-
 strict_validate_config_syntax() {
     local validator=""
     if [ -x "$BUILD_DIR/bin/admin-server" ]; then
@@ -411,7 +529,6 @@ validate_configs() {
     local database_dsn decoded_key_bytes
     local redis_addr redis_password redis_db
     local expected_redis_addr="" expected_redis_password="" expected_redis_db=""
-    local mqtt_broker mqtt_username mqtt_client_id mqtt_password expected_mqtt_broker=""
     local -A configured_ports=()
 
 	resolve_active_services || return 1
@@ -456,32 +573,6 @@ validate_configs() {
             return 1
         fi
 
-        if yaml_has_section_key "$cfg" mqtt broker; then
-            mqtt_broker="$(yaml_section_value "$cfg" mqtt broker)"
-            mqtt_username="$(yaml_section_value "$cfg" mqtt username)"
-            mqtt_client_id="$(yaml_section_value "$cfg" mqtt client_id)"
-            mqtt_password="$(yaml_section_value "$cfg" mqtt password)"
-            is_mqtt_url "$mqtt_broker" || {
-                err "$svc: mqtt.broker 必须是有效的 mqtt/mqtts/tcp/ssl 地址且不能在 URL 中携带账号"
-                return 1
-            }
-            [ -n "$mqtt_username" ] || [ -n "$mqtt_client_id" ] || {
-                err "$svc: mqtt.username 与 mqtt.client_id 至少配置一个"
-                return 1
-            }
-            ! is_placeholder_secret "$mqtt_password" || {
-                err "$svc: mqtt.password 仍是公开占位值"
-                return 1
-            }
-            [ -z "$expected_mqtt_broker" ] && expected_mqtt_broker="$mqtt_broker"
-            [ "$mqtt_broker" = "$expected_mqtt_broker" ] || {
-                err "$svc: mqtt.broker 与其他 MQTT 服务不一致"
-                return 1
-            }
-        elif [ "${SERVICE_USES_MQTT[$svc]}" = "true" ]; then
-            err "$svc: mqtt.broker 未配置"
-            return 1
-        fi
     done
 
     for svc in "${ACTIVE_BUSINESS_SERVICES[@]}"; do
@@ -556,7 +647,7 @@ validate_configs() {
         return 1
     fi
     strict_validate_config_syntax || return 1
-    log "配置校验通过"
+    log "基础生产配置校验通过；Admin 动态配置和依赖连接由业务服务启动预检确认"
 }
 
 # ================== 拉代码 ==================
@@ -614,6 +705,31 @@ publish_deploy_script() {
         return 1
     fi
     log "部署脚本已发布: $target"
+}
+
+publish_local_service_script() {
+    local source="$BUILD_DIR/scripts/service-local.sh"
+    local target="$DEPLOY_ROOT/service-local.sh"
+    local pending="$DEPLOY_ROOT/.service-local.sh.new"
+
+    [ -f "$source" ] || {
+        err "缺少本地服务脚本: $source"
+        return 1
+    }
+    bash -n "$source" || {
+        err "本地服务脚本语法检查失败: $source"
+        return 1
+    }
+    rm -f -- "$pending" || return 1
+    if ! cp -- "$source" "$pending"; then
+        rm -f -- "$pending"
+        return 1
+    fi
+    if ! chmod 0755 "$pending" || ! mv -f -- "$pending" "$target"; then
+        rm -f -- "$pending"
+        return 1
+    fi
+    log "本地服务脚本已发布: $target"
 }
 
 publish_service_catalog() {
@@ -917,8 +1033,8 @@ deploy_one() {
     local static_dir="${SERVICE_STATIC_DIR[$svc]}"
     local static_source=""
 
-    # Linux 的 rename 可安全替换正在运行的可执行文件；运行中的 Supervisor
-    # 子进程继续使用旧 inode，直到后续 restart_one 切换到新版本。
+    # Linux 的 rename 可安全替换正在运行的可执行文件；已运行进程继续使用
+    # 旧 inode。Supervisor 模式随后自动重启，手动模式要求发布前先停止服务。
 
     if [ ! -f "$src_bin" ]; then
         err "找不到 $src_bin"
@@ -1017,8 +1133,13 @@ run_batch() {
         validate_build_release "$@" || return 1
     fi
     case "$action" in
-        start|restart) validate_service_manager || return 1 ;;
-        stop|status) validate_supervisor_inventory || return 1 ;;
+        start|stop|restart|status)
+            validate_service_manager || return 1
+            if [ "$ACTIVE_SERVICE_MANAGER" = "manual" ]; then
+                manual_service_control_hint "$action"
+                return 1
+            fi
+            ;;
     esac
     for svc in "$@"; do
         case "$action" in
@@ -1091,7 +1212,9 @@ rollback_release() {
     for svc in "${DEPLOYED_SERVICES[@]}"; do
         backup="$BACKUP_DIR/$svc"
         target="$DEPLOY_ROOT/$svc"
-        stop_one "$svc" || rollback_failed=1
+        if [ "$ACTIVE_SERVICE_MANAGER" = "supervisor" ]; then
+            stop_one "$svc" || rollback_failed=1
+        fi
         if [ -f "$backup/$svc" ]; then
             if ! cp -a "$backup/$svc" "$target/$svc.rollback" ||
                ! mv -f "$target/$svc.rollback" "$target/$svc" ||
@@ -1115,15 +1238,18 @@ rollback_release() {
         elif [ -d "$target/static" ]; then
             rm -rf "$target/static" || rollback_failed=1
         fi
-        if [ -f "$backup/$svc" ]; then
+        if [ -f "$backup/$svc" ] && [ "$ACTIVE_SERVICE_MANAGER" = "supervisor" ]; then
             if ! start_one "$svc"; then
                 err "$svc 回滚后启动失败，请人工处理"
                 rollback_failed=1
             fi
-        else
+        elif [ ! -f "$backup/$svc" ]; then
             warn "$svc 没有可回滚版本，已保持停止状态"
         fi
     done
+    if [ "$ACTIVE_SERVICE_MANAGER" = "manual" ]; then
+        warn "文件已回滚，服务保持停止；修复发布问题后请使用 $LOCAL_SERVICECTL 手动启动"
+    fi
     mark_backup_failed || rollback_failed=1
     err "回滚完成；失败版本备份目录: $BACKUP_DIR"
     [ "$rollback_failed" -eq 0 ]
@@ -1132,6 +1258,10 @@ rollback_release() {
 quiesce_after_schema_change() {
 	local svc failed=0
 	err "数据库 schema 已变化；停止整个服务组，避免新旧二进制混合运行"
+	if [ "$ACTIVE_SERVICE_MANAGER" = "manual" ]; then
+		validate_manual_services_stopped || return 1
+		return 0
+	fi
 	for svc in "${STOP_ORDER[@]}"; do
 		stop_one "$svc" || failed=1
 	done
@@ -1172,14 +1302,13 @@ full_deploy() (
     local services=() svc
     local status
     validate_deploy_root || return 1
-    validate_service_manager || return 1
+    prepare_update_service_control || return 1
     validate_backup_retention || return 1
     validate_release_options || return 1
     pull_code || return 1
     validate_paths || return 1
 	load_deployment_service_catalog || return 1
-	validate_service_manager || return 1
-	resolve_active_services || return 1
+	prepare_update_service_control || return 1
 	services=("${ACTIVE_SERVICES[@]}")
     run_batch build "${ALL_SERVICES[@]}" || return 1
     validate_build_release "${ALL_SERVICES[@]}" || return 1
@@ -1212,12 +1341,14 @@ full_deploy() (
             rollback_active_release "$status"
             return "$status"
         fi
-        if restart_one "$svc"; then
-            :
-        else
-            status=$?
-            rollback_active_release "$status"
-            return "$status"
+        if [ "$ACTIVE_SERVICE_MANAGER" = "supervisor" ]; then
+            if restart_one "$svc"; then
+                :
+            else
+                status=$?
+                rollback_active_release "$status"
+                return "$status"
+            fi
         fi
     done
     if mark_backup_successful; then
@@ -1229,9 +1360,17 @@ full_deploy() (
     fi
     trap - ERR INT TERM
     publish_service_catalog || warn "服务已发布成功，但服务清单刷新失败"
+    publish_local_service_script || warn "服务已发布成功，但本地服务脚本刷新失败；请检查 $BUILD_DIR/scripts/service-local.sh"
     publish_deploy_script || warn "服务已发布成功，但根目录部署脚本刷新失败；请继续使用 $BUILD_DIR/scripts/deploy-prod.sh"
     prune_successful_backups || warn "清理过期备份失败，请稍后人工清理"
-    log "全流程发布成功: $(git -C "$REPO_PATH" rev-parse --short HEAD)"
+    if [ "$ACTIVE_SERVICE_MANAGER" = "supervisor" ]; then
+        log "全流程发布成功: $(git -C "$REPO_PATH" rev-parse --short HEAD)"
+    else
+        log "代码、配置校验和数据库迁移已完成: $(git -C "$REPO_PATH" rev-parse --short HEAD)"
+        warn "当前为手动服务管理模式，服务仍保持停止"
+        log "下一步执行: sudo $LOCAL_SERVICECTL start-all"
+        log "启动后检查: sudo $LOCAL_SERVICECTL status-all"
+    fi
     log "回滚备份保留在: $BACKUP_DIR"
     log "手工配置部署如尚无管理员，可执行 init-admin；Web 首次安装会在安装流程中创建"
 )
@@ -1256,6 +1395,7 @@ deploy_files_action() {
     validate_configs || return 1
     run_batch deploy "${ACTIVE_SERVICES[@]}" || return 1
     publish_service_catalog || return 1
+    publish_local_service_script || return 1
     publish_deploy_script
 }
 
@@ -1293,10 +1433,12 @@ migrate_action() {
 
 status_action() {
     local svc failed=0
-    command -v "$SUPERVISORCTL" >/dev/null 2>&1 || {
-        err "找不到 $SUPERVISORCTL"
+    resolve_active_services || return 1
+    validate_service_manager || return 1
+    if [ "$ACTIVE_SERVICE_MANAGER" = "manual" ]; then
+        manual_service_control_hint status
         return 1
-    }
+    fi
     for svc in "${ALL_SERVICES[@]}"; do
         status_one "$svc" || failed=1
     done
@@ -1308,9 +1450,9 @@ usage() {
 用法: deploy-prod.sh [命令]
 
 命令：
-  update         日常更新：拉取、构建、备份、迁移、逐服务发布与就绪检查
+  update         日常更新：拉取、构建、备份、迁移和发布；Supervisor 模式自动重启验收
   migrate        仅执行版本化数据库迁移
-  validate       校验必需服务及已启用可选服务的生产配置
+  validate       校验必需服务及已启用可选服务的基础生产配置
   status         查看全部服务状态
   start          启动并检查已安装服务
   stop           停止已安装服务
@@ -1324,7 +1466,8 @@ usage() {
   help           显示此帮助
 
 不带命令时进入交互菜单。数据库迁移账号读取 MIGRATION_CONFIG；由外部迁移
-平台处理 DDL 时可显式设置 SKIP_MIGRATIONS=1 后执行 update。
+平台处理 DDL 时可显式设置 SKIP_MIGRATIONS=1 后执行 update。Supervisor 可选；
+未配置时先用 service-local.sh stop-all，更新完成后手动 start-all 和 status-all。
 USAGE
 }
 
@@ -1360,9 +1503,9 @@ run_named_command() {
 menu() {
     local choice command_name
     echo ""
-    echo "1) 日常更新部署（拉取、构建、备份、迁移、发布、就绪检查）"
+    echo "1) 日常更新部署（Supervisor 自动重启；无 Supervisor 时手动启停）"
     echo "2) 仅执行数据库迁移"
-    echo "3) 校验生产配置"
+    echo "3) 校验基础生产配置"
     echo "4) 查看全部服务状态"
     echo "5) 重启并检查已安装服务"
     echo "6) 启动并检查已安装服务"

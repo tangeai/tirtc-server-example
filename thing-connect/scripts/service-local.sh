@@ -319,7 +319,8 @@ usage() {
 用法: service-local.sh <命令> [thing-connect:服务名]
 
 命令：status、start、stop、restart、start-all、stop-all、status-all
-该脚本只用于首次安装和切换 Supervisor 前的本机运行，不替代生产进程托管。
+该脚本用于首次安装、故障排查，以及未接入 Supervisor 等进程管理器时的本机运行。
+它不注册开机自启、不轮转日志；生产环境需由运维系统补齐这些能力。
 USAGE
 }
 

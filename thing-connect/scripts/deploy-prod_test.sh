@@ -59,6 +59,203 @@ YAML
     }
 }
 
+test_dynamic_mqtt_is_not_required_in_base_yaml() (
+    local root="$TEST_ROOT/dynamic-mqtt-config"
+    local shared_jwt="shared-business-jwt-0123456789abcdef"
+    local internal_key="shared-internal-key-0123456789abcdef"
+    local config_key="MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+    local output result=0
+    DEPLOY_ROOT="$root"
+    mkdir -p "$root/admin-server" "$root/user-server"
+    cat >"$root/admin-server/config.yaml" <<YAML
+server:
+  http_port: 9000
+database:
+  dsn: "runtime:secret@tcp(mysql.internal:3306)/thing_connect"
+redis:
+  addr: "redis.internal:6379"
+  password: "redis-secret"
+  db: 0
+internal:
+  key: "$internal_key"
+admin:
+  jwt_secret: "admin-jwt-secret-0123456789abcdef"
+  cookie_secure: true
+security:
+  config_encryption_key: "$config_key"
+YAML
+    cat >"$root/user-server/config.yaml" <<YAML
+server:
+  http_port: 9002
+database:
+  dsn: "runtime:secret@tcp(mysql.internal:3306)/thing_connect"
+redis:
+  addr: "redis.internal:6379"
+  password: "redis-secret"
+  db: 0
+jwt_secret: "$shared_jwt"
+internal:
+  key: "$internal_key"
+admin:
+  server_url: "http://127.0.0.1:9000"
+ai:
+  server_url: "http://127.0.0.1:9004"
+voip:
+  server_url: "http://127.0.0.1:9003"
+call:
+  server_url: "http://127.0.0.1:9005"
+YAML
+    resolve_active_services() {
+        ACTIVE_SERVICES=(admin-server user-server)
+        ACTIVE_BUSINESS_SERVICES=(user-server)
+        ACTIVE_STOP_ORDER=(user-server admin-server)
+    }
+    strict_validate_config_syntax() { :; }
+
+    output="$(validate_configs 2>&1)" || result=$?
+    if [ "$result" -ne 0 ]; then
+        echo "FAIL: dynamic MQTT configuration was incorrectly required in base YAML" >&2
+        printf '%s\n' "$output" >&2
+        exit 1
+    fi
+    [[ "$output" != *"mqtt.broker"* ]] || {
+        echo "FAIL: base YAML validation still reported legacy mqtt.broker" >&2
+        exit 1
+    }
+)
+
+test_missing_supervisor_selects_manual_service_control() (
+    local root="$TEST_ROOT/manual-service-control"
+    DEPLOY_ROOT="$root"
+    SUPERVISORCTL="$root/bin/supervisorctl-not-installed"
+    LOCAL_SERVICECTL="$root/service-local.sh"
+    SERVICE_MANAGER="auto"
+    ACTIVE_SERVICES=(admin-server user-server)
+    mkdir -p "$root"
+    cat >"$LOCAL_SERVICECTL" <<'BASH'
+#!/usr/bin/env bash
+printf 'thing-connect:admin-server STOPPED\n'
+printf 'thing-connect:user-server STOPPED\n'
+BASH
+    chmod +x "$LOCAL_SERVICECTL"
+
+    validate_service_manager
+
+    assert_eq "manual" "$ACTIVE_SERVICE_MANAGER" \
+        "missing Supervisor must select manual service-local control"
+)
+
+test_partial_supervisor_inventory_is_rejected() (
+    local root="$TEST_ROOT/partial-supervisor"
+    local output result=0
+    DEPLOY_ROOT="$root"
+    SUPERVISORCTL="true"
+    LOCAL_SERVICECTL="$root/service-local.sh"
+    SERVICE_MANAGER="auto"
+    ACTIVE_SERVICES=(admin-server user-server)
+    supervisor_state() {
+        if [ "$1" = "admin-server" ]; then
+            printf 'RUNNING\n'
+        fi
+        return 0
+    }
+
+    output="$(validate_service_manager 2>&1)" || result=$?
+
+    assert_eq "1" "$result" "partial Supervisor inventory must be rejected"
+    [[ "$output" == *"只配置了 1/2 个已安装服务"* ]] || {
+        echo "FAIL: partial Supervisor inventory was not explained" >&2
+        exit 1
+    }
+)
+
+test_explicit_manual_mode_rejects_existing_supervisor_services() (
+    local root="$TEST_ROOT/manual-with-supervisor"
+    local output result=0
+    DEPLOY_ROOT="$root"
+    SUPERVISORCTL="true"
+    LOCAL_SERVICECTL="$root/service-local.sh"
+    SERVICE_MANAGER="manual"
+    ACTIVE_SERVICES=(admin-server user-server)
+    supervisor_state() {
+        if [ "$1" = "admin-server" ]; then
+            printf 'STOPPED\n'
+        fi
+        return 0
+    }
+
+    output="$(validate_service_manager 2>&1)" || result=$?
+
+    assert_eq "1" "$result" "manual mode must reject existing Supervisor services"
+    [[ "$output" == *"不能忽略 Supervisor 中已有的 1 个 ThingConnect 服务"* ]] || {
+        echo "FAIL: explicit manual mode did not explain the Supervisor conflict" >&2
+        exit 1
+    }
+)
+
+test_manual_update_requires_local_services_to_be_stopped() (
+    local root="$TEST_ROOT/manual-running-services"
+    local output result=0
+    DEPLOY_ROOT="$root"
+    LOCAL_SERVICECTL="$root/service-local.sh"
+    mkdir -p "$root"
+    cat >"$LOCAL_SERVICECTL" <<'BASH'
+#!/usr/bin/env bash
+printf 'thing-connect:admin-server RUNNING pid 123\n'
+printf 'thing-connect:user-server STOPPED\n'
+BASH
+    chmod +x "$LOCAL_SERVICECTL"
+
+    output="$(validate_manual_services_stopped 2>&1)" || result=$?
+
+    assert_eq "1" "$result" "manual update must reject running local services"
+    [[ "$output" == *"$LOCAL_SERVICECTL stop-all"* ]] || {
+        echo "FAIL: manual update did not provide the exact stop-all command" >&2
+        exit 1
+    }
+)
+
+test_manual_update_publishes_without_automatic_restart() (
+    local capture="$TEST_ROOT/manual-update.capture"
+    : >"$capture"
+    validate_deploy_root() { :; }
+    validate_service_manager() { ACTIVE_SERVICE_MANAGER="manual"; }
+    validate_manual_services_stopped() { printf 'manual-checked\n' >>"$capture"; }
+    validate_backup_retention() { :; }
+    validate_release_options() { :; }
+    pull_code() { :; }
+    validate_paths() { :; }
+    load_deployment_service_catalog() { :; }
+    resolve_active_services() {
+        ACTIVE_SERVICES=(admin-server user-server)
+        ACTIVE_BUSINESS_SERVICES=(user-server)
+        ACTIVE_STOP_ORDER=(user-server admin-server)
+    }
+    run_batch() { :; }
+    validate_build_release() { :; }
+    validate_configs() { :; }
+    backup_release() { BACKUP_DIR="$TEST_ROOT/manual-update-backup"; }
+    run_migrations() { :; }
+    deploy_one() { printf 'deployed=%s\n' "$1" >>"$capture"; }
+    restart_one() { printf 'restarted=%s\n' "$1" >>"$capture"; }
+    mark_backup_successful() { :; }
+    publish_service_catalog() { :; }
+    publish_local_service_script() { :; }
+    publish_deploy_script() { :; }
+    prune_successful_backups() { :; }
+    git() { printf 'test-commit\n'; }
+
+    full_deploy
+
+    grep -qx 'manual-checked' "$capture"
+    grep -qx 'deployed=admin-server' "$capture"
+    grep -qx 'deployed=user-server' "$capture"
+    if grep -q '^restarted=' "$capture"; then
+        echo "FAIL: manual update restarted services automatically" >&2
+        exit 1
+    fi
+)
+
 test_publish_deploy_script_replaces_root_entry_atomically() (
     BUILD_DIR="$TEST_ROOT/build"
     mkdir -p "$BUILD_DIR/scripts"
@@ -73,6 +270,22 @@ BASH
     cmp -s "$BUILD_DIR/scripts/deploy-prod.sh" "$DEPLOY_ROOT/deploy-prod.sh"
     [ -x "$DEPLOY_ROOT/deploy-prod.sh" ]
     [ ! -e "$DEPLOY_ROOT/.deploy-prod.sh.new" ]
+)
+
+test_publish_local_service_script_replaces_root_entry_atomically() (
+    BUILD_DIR="$TEST_ROOT/local-service-build"
+    mkdir -p "$BUILD_DIR/scripts"
+    cat >"$BUILD_DIR/scripts/service-local.sh" <<'BASH'
+#!/usr/bin/env bash
+echo current-local-service
+BASH
+    printf '%s\n' '#!/usr/bin/env bash' 'echo old-local-service' >"$DEPLOY_ROOT/service-local.sh"
+
+    publish_local_service_script
+
+    cmp -s "$BUILD_DIR/scripts/service-local.sh" "$DEPLOY_ROOT/service-local.sh"
+    [ -x "$DEPLOY_ROOT/service-local.sh" ]
+    [ ! -e "$DEPLOY_ROOT/.service-local.sh.new" ]
 )
 
 test_publish_deploy_script_keeps_previous_entry_on_invalid_source() (
@@ -241,7 +454,7 @@ test_deploy_lock_is_scoped_to_one_mutating_command() (
 test_menu_starts_with_daily_update() {
     local output
     output="$(menu <<<'invalid')"
-    [[ "$output" == *$'1) 日常更新部署（拉取、构建、备份、迁移、发布、就绪检查）\n2) 仅执行数据库迁移'* ]] || {
+    [[ "$output" == *$'1) 日常更新部署（Supervisor 自动重启；无 Supervisor 时手动启停）\n2) 仅执行数据库迁移'* ]] || {
         echo "FAIL: daily update and migration are not the first menu actions" >&2
         exit 1
     }
@@ -280,6 +493,11 @@ test_pull_never_clones_missing_daily_source() (
 test_status_reports_every_service_even_when_one_is_missing() (
     local capture="$TEST_ROOT/status.capture" result=0
     SUPERVISORCTL="true"
+    resolve_active_services() {
+        ACTIVE_SERVICES=("${ALL_SERVICES[@]}")
+        ACTIVE_BUSINESS_SERVICES=("${BUSINESS_SERVICES[@]}")
+    }
+    validate_service_manager() { ACTIVE_SERVICE_MANAGER="supervisor"; }
     status_one() {
         printf '%s\n' "$1" >>"$capture"
         [ "$1" != "user-server" ]
@@ -419,7 +637,14 @@ test_daily_update_backs_up_files_before_database_migration() {
 test_http_admin_cookie_is_allowed_by_default
 test_migration_refuses_missing_or_unverified_database_backup
 test_yaml_section_headers_allow_valid_whitespace
+test_dynamic_mqtt_is_not_required_in_base_yaml
+test_missing_supervisor_selects_manual_service_control
+test_partial_supervisor_inventory_is_rejected
+test_explicit_manual_mode_rejects_existing_supervisor_services
+test_manual_update_requires_local_services_to_be_stopped
+test_manual_update_publishes_without_automatic_restart
 test_publish_deploy_script_replaces_root_entry_atomically
+test_publish_local_service_script_replaces_root_entry_atomically
 test_publish_deploy_script_keeps_previous_entry_on_invalid_source
 test_running_admin_is_restarted_after_init
 test_initialize_admin_is_noninteractive_and_refreshes_running_service
