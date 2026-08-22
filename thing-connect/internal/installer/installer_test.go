@@ -213,6 +213,44 @@ func TestPreviewRequiresAdminPasswordPolicyWhenCreatingFirstAdmin(t *testing.T) 
 	}
 }
 
+func TestPreviewPreservesDatabaseStateErrors(t *testing.T) {
+	for _, problem := range []error{
+		ErrInvalidInput,
+		ErrAlreadyInstalled,
+		ErrUnknownDatabase,
+		ErrSchemaFuture,
+		ErrSchemaDrift,
+	} {
+		t.Run(problem.Error(), func(t *testing.T) {
+			bootstrap := New(testOptions(t), Dependencies{
+				Database: &fakeProvisioner{inspectErr: problem},
+				Probes:   noopProbe{},
+			})
+
+			_, err := bootstrap.Preview(context.Background(), testDraft())
+			if !errors.Is(err, problem) {
+				t.Fatalf("Preview error = %v, want %v", err, problem)
+			}
+			if errors.Is(err, ErrMySQLUnavailable) || strings.Contains(err.Error(), "mysql unavailable") {
+				t.Fatalf("Preview misclassified database state as unavailable: %v", err)
+			}
+		})
+	}
+}
+
+func TestPreviewClassifiesDatabaseDependencyFailureAsUnavailable(t *testing.T) {
+	dependencyErr := errors.New("database ping failed")
+	bootstrap := New(testOptions(t), Dependencies{
+		Database: &fakeProvisioner{inspectErr: dependencyErr},
+		Probes:   noopProbe{},
+	})
+
+	_, err := bootstrap.Preview(context.Background(), testDraft())
+	if !errors.Is(err, ErrMySQLUnavailable) || !errors.Is(err, dependencyErr) {
+		t.Fatalf("Preview error = %v, want MySQL unavailable wrapping root cause", err)
+	}
+}
+
 func TestNormalizeMQTTAuthRequiresDistinctClientIDsForEnabledServices(t *testing.T) {
 	input := MQTTInput{
 		Broker: "mqtt://127.0.0.1:1883", AuthMode: mqttAuthClientID, Password: "mqtt-password",
@@ -299,13 +337,14 @@ func TestFileBundlePrepareDoesNotActivateBeforeDatabaseIntent(t *testing.T) {
 
 type fakeProvisioner struct {
 	inspect        DatabaseAssessment
+	inspectErr     error
 	claim          *fakeClaim
 	configRecorded bool
 	intentVerified bool
 }
 
 func (f *fakeProvisioner) Inspect(context.Context, DatabaseInput) (DatabaseAssessment, error) {
-	return f.inspect, nil
+	return f.inspect, f.inspectErr
 }
 func (f *fakeProvisioner) Claim(context.Context, DatabaseInput, string, string) (DatabaseClaim, error) {
 	return f.claim, nil

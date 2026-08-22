@@ -32,7 +32,7 @@ func (b *Bootstrap) Preview(ctx context.Context, draft Draft) (Plan, error) {
 	}
 	assessment, err := b.database.Inspect(ctx, draft.Database)
 	if err != nil {
-		return Plan{}, fmt.Errorf("%w: %w", ErrMySQLUnavailable, err)
+		return Plan{}, previewDatabaseError(err)
 	}
 	if assessment.CreateAdmin {
 		if err := adminapp.ValidateAdminPassword(draft.Admin.Password); err != nil {
@@ -75,6 +75,19 @@ func (b *Bootstrap) Preview(ctx context.Context, draft Draft) (Plan, error) {
 	}
 	plan.Digest = digest
 	return plan, nil
+}
+
+func previewDatabaseError(err error) error {
+	switch {
+	case errors.Is(err, ErrInvalidInput),
+		errors.Is(err, ErrAlreadyInstalled),
+		errors.Is(err, ErrUnknownDatabase),
+		errors.Is(err, ErrSchemaFuture),
+		errors.Is(err, ErrSchemaDrift):
+		return err
+	default:
+		return fmt.Errorf("%w: %w", ErrMySQLUnavailable, err)
+	}
 }
 
 func (b *Bootstrap) Execute(ctx context.Context, request ExecuteRequest) (Snapshot, error) {

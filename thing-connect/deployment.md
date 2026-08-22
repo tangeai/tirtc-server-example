@@ -4,6 +4,43 @@
 
 浏览器访问地址默认使用 `127.0.0.1`，表示安装服务器本机；从其他电脑访问时，只需把浏览器 URL 中的 `127.0.0.1` 替换为服务器实际 IP。命令中的其他 `127.0.0.1` 表示同机依赖，应按实际部署调整。`thing.example.com`、账号和密码是占位值；任一步失败都应停止并处理错误。
 
+## 整体架构
+
+```mermaid
+flowchart TB
+    Operator["管理员浏览器"] -->|"安装与管理 :9000"| Services
+    Client["用户 H5 / IoT HTTP"] -->|"业务接口 :9001～:9005"| Services
+    Device["IoT MQTT 设备"] <-->|"MQTT 3.1.1"| MQTT
+
+    subgraph Host["ThingConnect 应用服务器"]
+        direction LR
+        Services["服务进程<br/>Admin / Device / User / VoIP / AI / Call"]
+        Config["config-current/&lt;service&gt;/config.yaml<br/>各服务启动配置"]
+        Services <-->|"安装器写入 / 服务启动读取"| Config
+    end
+
+    subgraph Dependencies["需要准备的基础设施"]
+        direction LR
+        MySQL[("MySQL 8<br/>持久化数据")]
+        Redis[("Redis 7+<br/>缓存与状态")]
+        MQTT[("MQTT Broker<br/>设备长连接")]
+    end
+
+    Services --> MySQL
+    Services --> Redis
+    Services <-->|"Device / User / VoIP / Call"| MQTT
+```
+
+各组件的职责和依赖关系：
+
+- MySQL 保存用户、设备、Admin、业务数据、动态配置和安装状态。安装器使用迁移账号创建数据库与表；所有已安装服务共用一个独立于迁移账号的 DML 运行账号。
+- Redis 保存会话、验证码、限频、设备在线状态、短期任务状态和分布式协调数据。Admin 与已启用业务服务都需要访问同一个 Redis 实例和 DB。
+- MQTT Broker 承载设备长连接和实时指令。Device、User、VoIP、Call 服务连接 Broker；AI 服务不直接连接 MQTT。设备使用业务接口签发的凭据连接同一个 Broker。
+- `config-current/<service>/config.yaml` 由首次安装器生成，按服务保存其启动所需的 MySQL、Redis、MQTT、Admin 地址和共享密钥。普通业务配置在 Admin 中发布并存入 MySQL，业务服务启动后通过内部接口读取。
+- Admin 必须先启动并就绪，业务服务再启动。Nginx 和 HTTPS 位于公网访问路径前端，进程托管负责服务生命周期；三者都不是首次安装页面运行的前置条件。
+
+因此，开始安装前需要准备：一台可构建并运行 Go/Node.js 的 Linux 应用服务器、一个 MySQL 8 实例及迁移/运行两个账号、一个 Redis 7+ 实例、一个支持 MQTT 3.1.1 的 Broker 及认证凭据，以及首个管理员邮箱和密码。生产环境还应提前确定最终域名和 HTTPS 方案；Nginx、证书、TiRTC、SMTP、人机验证、微信和 AI 资源可以在首次安装完成后接入。
+
 ## 1. 服务与端口
 
 | 服务 | 默认 HTTP 端口 | 安装要求 |
@@ -70,7 +107,8 @@
     exit 1
   }
   command -v \
-    curl flock git go mysql mysqldump node npm redis-cli setsid
+    cp curl flock git go mosquitto_sub mv mysql mysqldump \
+    node npm redis-cli setsid
 )
 ```
 
@@ -83,10 +121,10 @@
 - MySQL 8.0+ 地址、端口、目标数据库名和两个账号。
 - Redis 7+ 地址、端口、密码和 DB 编号。
 - 支持 MQTT 3.1.1 的 Broker 地址，以及 Username 或 ClientID 认证凭据。
-- 应用服务器 IP；配置反向代理时再准备域名。
+- 应用服务器 IP；生产反向代理还需提前确定最终域名和 HTTPS 方案。
 - 首个管理员邮箱和密码。密码至少 8 位，且必须包含英文大写字母、英文小写字母和数字；允许同时使用中文和特殊字符。
 
-首次安装时只需允许管理员来源访问 TCP 9000。完成后按实际启用服务允许受信网络访问 9000～9005。MySQL、Redis 和内部 MQTT 不应对公网开放。
+首次安装时只需允许管理员来源访问 TCP 9000。完成后按实际启用服务允许受信网络访问 9000～9005。MySQL 和 Redis 不应对公网开放；MQTT 仅在公网设备确需连接时开放启用 TLS、强认证和 Topic ACL 的设备接入端口，Broker 管理端口不得开放公网。
 
 直接暴露业务端口会同时暴露该进程的路由面，只适合可信网络或验收。公网部署应使用第 4 节的 Nginx 单一入口，并禁止代理 `/v1/internal/*` 及各业务服务的 `/internal/*`。
 
@@ -155,15 +193,17 @@ CREATE DATABASE thing_connect
   set -Eeuo pipefail
   export REDIS_HOST=127.0.0.1
   export REDIS_PORT=6379
-  export REDISCLI_AUTH='replace-with-redis-password'
+  read -srp "Redis 密码（无密码直接回车）: " REDISCLI_AUTH
+  echo
+  export REDISCLI_AUTH
   redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" PING
   unset REDISCLI_AUTH
 )
 ```
 
-无密码 Redis 应删除 `REDISCLI_AUTH` 的设置。MQTT 的通用 CLI 发布测试需要一个明确获准的 Topic，不能假设任意 Topic 都有权限；安装页面会使用所填凭据执行不发布消息的连接认证。`mosquitto_sub -C 1 -W 1` 在连接和订阅成功后仍可能因为主题没有消息而输出 `Timed out`，应以 `CONNACK (0)` 和 `SUBACK` 判断认证与订阅成功。
+MQTT 的通用 CLI 发布测试需要一个明确获准的 Topic，不能假设任意 Topic 都有权限；安装页面会使用所填凭据执行不发布消息的连接认证。`mosquitto_sub -C 1 -W 1` 在连接和订阅成功后仍可能因为主题没有消息而输出 `Timed out`，应以 `CONNACK (0)` 和 `SUBACK` 判断认证与订阅成功。
 
-Username 模式允许所有服务共享一个认证用户名，实际连接 ClientID 会结合各进程的 `SERVICE_INSTANCE_ID` 生成，适合单机和多副本部署。ClientID 模式要求为 Device、User 以及选中的 VoIP、Call 分别准备不同的已注册 ClientID；安装器会逐一连接验证，并把对应 ClientID 写入各服务配置。固定 ClientID 不能被多个服务或多个副本共享，因此需要扩容时使用 Username 模式。生产 MQTT 使用 TLS 时，应填写 `mqtts://` 地址并按 Broker 要求配置受信 CA。
+Username 模式允许所有服务共享一个认证用户名，实际连接 ClientID 会结合各进程的 `SERVICE_INSTANCE_ID` 生成，适合单机和多副本部署。ClientID 模式要求为 Device、User 以及选中的 VoIP、Call 分别准备不同的已注册 ClientID；安装器会逐一连接验证，并把对应 ClientID 写入各服务配置。固定 ClientID 不能被多个服务或多个副本共享，因此需要扩容时使用 Username 模式。生产 MQTT 使用 TLS 时，应填写 `mqtts://` 地址，并确保应用服务器的系统信任库能够验证 Broker 证书链。
 
 TiRTC、SMTP、人机验证、微信和 AI 资源可在首次安装后从 Admin Web 配置。TiRTC App ID、Access Key ID、Secret Key ID 没有可用默认值；不填写不会阻止进程启动，但相关音视频、呼叫和 AI 功能不可用。
 
@@ -180,14 +220,19 @@ TiRTC、SMTP、人机验证、微信和 AI 资源可在首次安装后从 Admin 
     https://raw.githubusercontent.com/tangeai/tirtc-server-example/main/thing-connect/scripts/install.sh
   bash -n /tmp/thing-connect-install.sh
   chmod 0755 /tmp/thing-connect-install.sh
-  sudo env "PATH=$PATH" /tmp/thing-connect-install.sh
+  sudo env \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin \
+    /tmp/thing-connect-install.sh
 )
 ```
+
+使用其他工具链目录时，把它显式加入上述受控 `PATH`，不要把未经检查的用户 `PATH` 整体传给 `sudo`。
 
 私有镜像仓库或自定义目录使用环境变量，不要修改脚本：
 
 ```bash
-sudo env "PATH=$PATH" \
+sudo env \
+  PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin \
   REPO_URL=git@example.com:team/tirtc-server-example.git \
   DEPLOY_ROOT=/opt/thing-connect \
   /tmp/thing-connect-install.sh
@@ -222,7 +267,7 @@ http://127.0.0.1:9000/admin/
 3. Redis 主机、端口、密码和 DB。
 4. MQTT Broker 地址、认证方式和密码。同机 Broker 默认使用 `mqtt://127.0.0.1:1883`；远程 Broker 替换为实际地址。Username 模式填写共享用户名；ClientID 模式分别填写各 MQTT 服务的固定 ClientID。
 5. 首个管理员账号。
-6. 统一对外访问地址、可信代理和 HTTPS Cookie。尚未配置反向代理时，统一对外访问地址可留空；这不影响各服务通过独立端口启动和访问。同机 Nginx 使用默认可信代理 `127.0.0.1`。
+6. 统一对外访问地址、可信代理和 HTTPS Cookie。生产环境即使稍后才配置 Nginx，也应填写最终的 `https://` 地址并勾选 HTTPS Cookie；只做本机或可信内网直连验收时可以留空并关闭 HTTPS Cookie。同机 Nginx 使用默认可信代理 `127.0.0.1`。当前服务发现要求同时安装 VoIP、AI、Call；缺少任一可选服务时不会启用 `/services`。
 
 先执行“连接检查并生成安装计划”，核对数据库动作，再确认安装：
 
@@ -230,18 +275,20 @@ http://127.0.0.1:9000/admin/
 |---|---|
 | 不存在 | 创建数据库并初始化表 |
 | 已存在且无表 | 初始化表 |
-| 可信且已是当前版本 | 保留表和数据，只补齐实例安装状态 |
+| 可信且已是当前版本 | 保留表和数据，校验结构并补齐安装状态和 Admin 默认数据 |
 | 可信旧版本 | 只执行缺失迁移，保留已有数据 |
 | 同一实例中断 | 从持久化步骤恢复 |
 | 已被其他已安装实例锁定 | 拒绝生成新共享密钥 |
 | 陌生非空库、结构漂移、未来版本 | 写入前拒绝，转人工处理 |
 
-安装器会生成共享业务 JWT、六服务 `internal.key`、Admin JWT 和 MFA 加密密钥，以 `0600` 权限写入不可变配置 revision。数据库提交和配置激活具有可恢复记录；中断后使用同一部署目录和数据库继续，不要删除表或手工改写 `config-current`。
+安装器会生成共享业务 JWT、已安装服务共享的 `internal.key`、Admin JWT 和 MFA 加密密钥，以 `0600` 权限写入带摘要校验的一次性配置 revision。数据库提交和配置激活具有可恢复记录；中断后使用同一部署目录和数据库继续，不要删除表或手工改写 `config-current`。
 
 令牌丢失且尚未提交配置时，可重新运行：
 
 ```bash
-sudo env "PATH=$PATH" /opt/thing-connect/install.sh
+sudo env \
+  PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin \
+  /opt/thing-connect/install.sh
 ```
 
 配置已经激活但安装未结束时，重启 Admin 会自动恢复，不要重新安装。
@@ -282,7 +329,7 @@ sudo env "PATH=$PATH" /opt/thing-connect/install.sh
 
 - Admin Web：`http://127.0.0.1:9000/admin/`
 - 用户 H5：`http://127.0.0.1:9002/`
-- Device API：`http://127.0.0.1:9001/v1/device/`
+- Device API 基础地址：`http://127.0.0.1:9001/v1/device`，验收时调用 API Reference 中的具体接口。
 - 已安装的 VoIP、AI、Call API：分别使用 9003、9004、9005。
 
 从其他电脑验收时，把上述 `127.0.0.1` 替换为服务器实际 IP。
@@ -304,16 +351,18 @@ sudo /opt/thing-connect/service-local.sh restart thing-connect:admin-server
 
 使用 systemd、Supervisor、容器平台或其他现有编排系统托管进程均可，本文不规定具体发布工具。托管配置必须满足以下约束：
 
+- 切换前执行 `sudo /opt/thing-connect/service-local.sh stop-all`，确认本地脚本管理的进程已停止，再启动新的进程管理器。
 - Admin 先启动并达到 `/health/ready`，再启动 Device、User 和已安装的可选服务。
 - 每个进程使用安装器生成的对应 `config-current/<service>/config.yaml`，不要复制或手工拆分配置 revision。
 - 每个进程设置稳定且唯一的 `SERVICE_INSTANCE_ID`；Username MQTT 模式依赖它生成不冲突的连接 ClientID。
 - 向进程发送 `SIGTERM` 并留出优雅退出时间，不使用强制终止作为正常重启方式。
 - 只对已安装服务执行 readiness 检查；`/health/live` 不能替代 `/health/ready`。
 - 部署环境负责异常重启、开机自启、日志收集和日志轮转，且同一服务同一实例不能同时被两个进程管理器拉起。
+- 安装产物默认归 `root` 所有。改用非 `root` 运行账号时，只调整该账号必需的配置读取、日志和任务目录权限，并继续保护 `0600` 配置中的数据库与服务密钥。
 
 ### 4.3 完成 Admin 业务配置
 
-登录 Admin Web 后先填写并发布 `common / tirtc`，再按已安装服务配置 SMTP、人机验证、微信应用和 AI 资源。TiRTC App ID、Access Key ID、Secret Key ID 没有可用默认值；未配置时相关音视频、呼叫和 AI 功能不可用。
+首次登录 Admin Web 时绑定 TOTP，并把恢复码离线保存。随后填写并发布 `common / tirtc`，再按已安装服务配置 SMTP、人机验证、微信应用和 AI 资源。TiRTC App ID、Access Key ID、Secret Key ID 没有可用默认值；未配置时相关音视频、呼叫和 AI 功能不可用。
 
 动态配置没有数据库记录时使用后端注册表默认值，不读取服务 YAML 中的同名业务值。普通配置和密钥以明文 JSON 存储在 MySQL；Admin Web 对密钥默认显示 `*`，具备权限的管理员可查看原值。必须限制数据库与备份访问，并启用审计。
 
@@ -342,56 +391,9 @@ sudo /opt/thing-connect/service-local.sh restart thing-connect:admin-server
 )
 ```
 
-仓库模板使用以下推荐结构；它属于运维配置，不由 `install.sh` 写入系统：
+[Nginx 模板](deploy/nginx/thing-connect.nginx.conf)把 `/admin/` 和 `/v1/admin/` 转发到 Admin，把各业务 API 转发到对应服务，其余路径转发到 User H5，并显式拒绝所有内部接口。模板属于运维配置，不由 `install.sh` 写入系统。未安装的可选服务应删除对应 upstream 和 location。Nginx 与服务同机时，安装页面中的 `trusted_proxies` 使用默认值 `127.0.0.1`，不要使用 `0.0.0.0/0`。
 
-```nginx
-upstream device_server { server 127.0.0.1:9001; }
-upstream user_server   { server 127.0.0.1:9002; }
-upstream voip_server   { server 127.0.0.1:9003; }
-upstream ai_server     { server 127.0.0.1:9004; }
-upstream call_server   { server 127.0.0.1:9005; }
-upstream admin_server  { server 127.0.0.1:9000; }
-
-server {
-    listen 80;
-    server_name thing.example.com;
-    server_tokens off;
-    client_max_body_size 12m;
-
-    proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-
-    location = /admin { return 301 /admin/; }
-    location /admin/ { proxy_pass http://admin_server; }
-    location /v1/admin/ { proxy_pass http://admin_server; }
-
-    location = /v1/internal { return 404; }
-    location ^~ /v1/internal/ { return 404; }
-    location = /v1/device/internal { return 404; }
-    location ^~ /v1/device/internal/ { return 404; }
-    location = /v1/user/internal { return 404; }
-    location ^~ /v1/user/internal/ { return 404; }
-    location = /v1/voip/internal { return 404; }
-    location ^~ /v1/voip/internal/ { return 404; }
-    location = /v1/ai/internal { return 404; }
-    location ^~ /v1/ai/internal/ { return 404; }
-    location = /v1/call/internal { return 404; }
-    location ^~ /v1/call/internal/ { return 404; }
-
-    location /v1/device/ { proxy_pass http://device_server; }
-    location /v1/voip/ { proxy_pass http://voip_server; }
-    location /v1/ai/ { proxy_pass http://ai_server; }
-    location /v1/call/ { proxy_pass http://call_server; }
-    location / { proxy_pass http://user_server; }
-}
-```
-
-未安装的可选服务应删除对应 upstream 和 location。Nginx 与服务同机时，各服务配置中的 `trusted_proxies` 使用安装页默认值 `127.0.0.1`，不要使用 `0.0.0.0/0`。
-
-模板只监听 80，不申请或管理证书。已有证书时自行增加 443、证书路径和 HTTP 跳转，再执行 `sudo nginx -t && sudo systemctl reload nginx`。同时把 Admin `cookie_secure` 和用户服务发现地址改为实际 HTTPS 地址；不能只改 Nginx。
+模板只监听 80，不申请或管理证书。已有证书时自行增加 443、证书路径和 HTTP 跳转，再执行 `sudo nginx -t && sudo systemctl reload nginx`。安装页面填写的统一对外访问地址和 HTTPS Cookie 必须与最终入口一致，不能只改 Nginx。
 
 HTTP 会明文传输管理员登录信息和会话 Cookie。公网生产环境应在 Nginx 或上游负载均衡器启用 HTTPS。
 
@@ -399,7 +401,7 @@ HTTP 会明文传输管理员登录信息和会话 Cookie。公网生产环境�
 
 正式开放服务前逐项确认：
 
-- 公网只开放反向代理入口；MySQL、Redis、MQTT 和各服务内部接口不直接暴露公网。
+- 公网只开放反向代理入口和确有需要的 MQTT TLS 设备接入端口；MySQL、Redis、Broker 管理端口、应用服务直连端口和各服务内部接口不直接暴露公网。
 - 公网入口启用 HTTPS，Admin 配置中的 `cookie_secure` 与实际协议一致。
 - 安装期间使用过的临时令牌、高权限数据库凭据和初始密码不进入聊天、工单、Shell 历史或监控；发生暴露时立即轮换。
 - `config-releases`、`config-current`、`var/installer`、Admin 任务目录和数据库备份只允许受信运维账号读取。
