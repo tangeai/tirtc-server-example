@@ -19,6 +19,7 @@ import {
 } from 'antd';
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { api, json } from '../../api';
+import { reportError } from '../../error-feedback';
 import {
   formatTime,
   pageTitle as title,
@@ -57,7 +58,7 @@ export function VoIPPage() {
     setDevicesLoading(true);
     api<PageData>(`/voip/apps/${selected.app_id}/devices?page=1&page_size=100`)
       .then(setDevices)
-      .catch((e) => message.error(e.message))
+      .catch((e) => reportError(e))
       .finally(() => setDevicesLoading(false));
   }, [selected]);
   const entry = entries?.items.find((x) => x.config_key === 'wechat.apps') || {
@@ -99,14 +100,14 @@ export function VoIPPage() {
       reloadEntries();
       reloadApps();
     } catch (e) {
-      message.error((e as Error).message);
+      reportError(e);
     }
   };
   const openProfile = async (row: AnyRow) => {
     try {
       setProfile(await api(`/voip/devices/${row.device_id}/profile`));
     } catch (e) {
-      message.error((e as Error).message);
+      reportError(e);
     }
   };
   const profileFields = [

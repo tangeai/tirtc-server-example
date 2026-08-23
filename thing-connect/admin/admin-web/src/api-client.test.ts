@@ -53,3 +53,19 @@ test('failed refresh clears the session and notifies once', async () => {
   assert.equal(response.status, 401);
   assert.equal(notifications, 1);
 });
+
+test('refresh network failures are reported instead of silently showing the login page', async () => {
+  const failures: unknown[] = [];
+  const connectionError = new TypeError('Failed to fetch internal endpoint');
+  const client = new APIClient({
+    fetcher: async () => {
+      throw connectionError;
+    },
+    onRequestError: (error) => failures.push(error),
+  });
+
+  const restored = await client.restoreSession();
+
+  assert.equal(restored, false);
+  assert.deepEqual(failures, [connectionError]);
+});

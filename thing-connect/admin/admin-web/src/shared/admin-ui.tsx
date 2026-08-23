@@ -6,8 +6,9 @@ import {
   type DependencyList,
   type ReactNode,
 } from 'react';
-import { Alert, Form, Input, Tag, Typography, message } from 'antd';
+import { Alert, Form, Input, Tag, Typography } from 'antd';
 import dayjs from 'dayjs';
+import { reportError } from '../error-feedback';
 
 export type AnyRow = Record<string, any>;
 export type PageData<T = AnyRow> = { items: T[]; page: number; page_size: number; total: number };
@@ -42,7 +43,7 @@ export function useLoad<T>(
       })
       .catch((error: unknown) => {
         if (mounted.current && generation.current === current) {
-          message.error(error instanceof Error ? error.message : '数据加载失败');
+          reportError(error, '数据加载失败');
         }
       })
       .finally(() => {

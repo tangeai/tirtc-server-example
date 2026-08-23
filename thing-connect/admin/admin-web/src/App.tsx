@@ -33,6 +33,8 @@ import {
 } from '@ant-design/icons';
 import { BrowserRouter, useLocation, useNavigate } from 'react-router-dom';
 import { api, json, restoreSession, setAccessToken } from './api';
+import { reportError } from './error-feedback';
+import { ErrorFeedbackHost } from './error-feedback-view';
 import { ADMIN_PASSWORD_POLICY_MESSAGE, validateAdminPassword } from './password-policy';
 import { StepUpFields } from './shared/admin-ui';
 import { loadSetupStatus, SetupPage, type SetupSnapshot } from './setup';
@@ -193,7 +195,7 @@ function Login({ onDone }: { onDone: () => void }) {
         onDone();
       } else setStage(result);
     } catch (e) {
-      message.error((e as Error).message);
+      reportError(e);
     }
   };
   return (
@@ -308,7 +310,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         setReady(true);
       })
       .catch((e) => {
-        message.error(e.message);
+        reportError(e, '管理后台初始化失败');
         setReady(true);
       });
   }, []);
@@ -329,7 +331,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
       setAccessToken('');
       onLogout();
     } catch (e) {
-      message.error((e as Error).message);
+      reportError(e);
     }
   };
   if (!ready) return <Spin fullscreen />;
@@ -478,7 +480,10 @@ function Root() {
         }
         return restoreSession().then(setLogged);
       })
-      .catch(() => restoreSession().then(setLogged))
+      .catch((error) => {
+        reportError(error, '安装状态检查失败');
+        return restoreSession().then(setLogged);
+      })
       .finally(() => setSetupChecked(true));
     return () => window.removeEventListener('admin:unauthorized', unauthorized);
   }, []);
@@ -496,6 +501,7 @@ function Root() {
 export default function App() {
   return (
     <AntApp>
+      <ErrorFeedbackHost />
       <Root />
     </AntApp>
   );

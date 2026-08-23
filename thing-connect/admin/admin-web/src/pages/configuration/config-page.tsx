@@ -14,6 +14,7 @@ import {
 } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { api, json } from '../../api';
+import { reportError } from '../../error-feedback';
 import {
   StepUpFields,
   formatTime,
@@ -184,7 +185,7 @@ export function ConfigPage({
       if (current.definition.test_kind) {
         setConnectionFeedback({ type: 'error', message: (e as Error).message });
       } else {
-        message.error((e as Error).message);
+        reportError(e);
       }
     } finally {
       setPublishing(false);

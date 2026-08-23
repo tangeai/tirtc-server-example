@@ -18,6 +18,7 @@ import {
   message,
 } from 'antd';
 import { api, json } from '../../api';
+import { reportError } from '../../error-feedback';
 import {
   formatTime,
   pageTitle as title,
@@ -58,14 +59,14 @@ export function UsersPage() {
       setQuota(undefined);
       reload();
     } catch (e) {
-      message.error((e as Error).message);
+      reportError(e);
     }
   };
   const openDetail = async (row: AnyRow) => {
     try {
       setDetail(await api(`/users/${row.id}`));
     } catch (e) {
-      message.error((e as Error).message);
+      reportError(e);
     }
   };
   const sendReset = async (v: AnyRow) => {
@@ -75,7 +76,7 @@ export function UsersPage() {
       message.success('密码重置邮件已进入发送队列');
       setResetUser(undefined);
     } catch (e) {
-      message.error((e as Error).message);
+      reportError(e);
     }
   };
   const pagination = {

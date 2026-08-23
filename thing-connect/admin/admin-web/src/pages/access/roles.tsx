@@ -18,6 +18,7 @@ import {
 } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { api, json } from '../../api';
+import { reportError } from '../../error-feedback';
 import {
   StepUpFields,
   pageTitle as title,
@@ -64,7 +65,7 @@ export function RolesPage() {
       setRoleEdit(null);
       reload();
     } catch (e) {
-      message.error((e as Error).message);
+      reportError(e);
     }
   };
   const savePermissions = async (v: AnyRow) => {
@@ -82,7 +83,7 @@ export function RolesPage() {
       setPermissionEdit(null);
       reload();
     } catch (e) {
-      message.error((e as Error).message);
+      reportError(e);
     }
   };
   const openMenus = async (row: AnyRow) => {
@@ -91,7 +92,7 @@ export function RolesPage() {
       setGrantedMenuIDs(result.menu_ids);
       setMenuGrant(row);
     } catch (e) {
-      message.error((e as Error).message);
+      reportError(e);
     }
   };
   const saveMenus = async (v: AnyRow) => {
@@ -103,7 +104,7 @@ export function RolesPage() {
       message.success('菜单授权已更新');
       setMenuGrant(null);
     } catch (e) {
-      message.error((e as Error).message);
+      reportError(e);
     }
   };
   const saveMenu = async (v: AnyRow) => {
@@ -129,7 +130,7 @@ export function RolesPage() {
       setMenuEdit(null);
       reloadMenus();
     } catch (e) {
-      message.error((e as Error).message);
+      reportError(e);
     }
   };
   const permissionDefinitions = roles?.permission_definitions || [];

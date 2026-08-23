@@ -17,6 +17,7 @@ import {
 } from 'antd';
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { api, json } from '../../api';
+import { reportError } from '../../error-feedback';
 import { pageTitle as title, useLoad, type AnyRow } from '../../shared/admin-ui';
 
 export function DictionariesPage() {
@@ -47,7 +48,7 @@ export function DictionariesPage() {
       setTypeEdit(null);
       reload();
     } catch (e) {
-      message.error((e as Error).message);
+      reportError(e);
     }
   };
   const saveItem = async (v: AnyRow) => {
@@ -73,7 +74,7 @@ export function DictionariesPage() {
       setItemEdit(null);
       loadItems(selected);
     } catch (e) {
-      message.error((e as Error).message);
+      reportError(e);
     }
   };
   return (

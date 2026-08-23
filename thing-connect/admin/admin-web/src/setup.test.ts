@@ -11,6 +11,67 @@ const mysqlProblem = {
   suggestions: ['确认 MySQL 地址和端口可从安装服务器访问', '检查 TLS、迁移账号密码和来源授权'],
 };
 
+test('setup network failures return safe customer guidance', async () => {
+  const vite = await createServer({
+    appType: 'custom',
+    logLevel: 'silent',
+    server: { middlewareMode: true },
+  });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    throw new TypeError('Failed to fetch https://internal.example/secret');
+  };
+
+  try {
+    const setup = await vite.ssrLoadModule('/src/setup.tsx');
+    await assert.rejects(setup.setupAPI('/preview'), (error: unknown) => {
+      assert.equal((error as { problem?: { code?: string } }).problem?.code, 'NETWORK_ERROR');
+      assert.equal(
+        (error as { problem?: { message?: string } }).problem?.message,
+        '无法连接 Admin Server',
+      );
+      assert.match(
+        (error as { problem?: { suggestions?: string[] } }).problem?.suggestions?.join('\n') || '',
+        /网络连接.*Admin Server/,
+      );
+      assert.doesNotMatch((error as Error).message, /internal\.example|secret/);
+      return true;
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+    await vite.close();
+  }
+});
+
+test('setup status rejects proxy HTML with actionable guidance', async () => {
+  const vite = await createServer({
+    appType: 'custom',
+    logLevel: 'silent',
+    server: { middlewareMode: true },
+  });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response('<html>internal gateway detail</html>', {
+      status: 502,
+      headers: { 'Content-Type': 'text/html' },
+    });
+
+  try {
+    const setup = await vite.ssrLoadModule('/src/setup.tsx');
+    await assert.rejects(setup.loadSetupStatus(), (error: unknown) => {
+      const problem = (error as { problem?: typeof mysqlProblem }).problem;
+      assert.equal(problem?.code, 'INVALID_RESPONSE');
+      assert.match(problem?.message || '', /安装服务返回了无效响应.*HTTP 502/);
+      assert.match(problem?.suggestions?.join('\n') || '', /反向代理/);
+      assert.doesNotMatch((error as Error).message, /internal gateway detail/i);
+      return true;
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+    await vite.close();
+  }
+});
+
 test('setup API preserves customer guidance from a failed request', async () => {
   const vite = await createServer({
     appType: 'custom',

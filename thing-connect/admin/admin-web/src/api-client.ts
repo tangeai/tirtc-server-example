@@ -6,6 +6,7 @@ type ClientOptions = {
   fetcher: Fetcher;
   basePath?: string;
   onUnauthorized?: () => void;
+  onRequestError?: (error: unknown) => void;
 };
 
 export class APIClient {
@@ -14,11 +15,13 @@ export class APIClient {
   private readonly fetcher: Fetcher;
   private readonly basePath: string;
   private readonly onUnauthorized?: () => void;
+  private readonly onRequestError?: (error: unknown) => void;
 
-  constructor({ fetcher, basePath = '/v1/admin', onUnauthorized }: ClientOptions) {
+  constructor({ fetcher, basePath = '/v1/admin', onUnauthorized, onRequestError }: ClientOptions) {
     this.fetcher = fetcher;
     this.basePath = basePath;
     this.onUnauthorized = onUnauthorized;
+    this.onRequestError = onRequestError;
   }
 
   setAccessToken(value: string) {
@@ -78,7 +81,10 @@ export class APIClient {
         this.accessToken = body.data.access_token;
         return true;
       })
-      .catch(() => false)
+      .catch((error: unknown) => {
+        this.onRequestError?.(error);
+        return false;
+      })
       .then((success) => {
         if (!success) {
           this.accessToken = '';

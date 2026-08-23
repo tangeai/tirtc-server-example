@@ -107,11 +107,20 @@ export async function setupAPI<T>(path: string, init: RequestInit = {}, token = 
   const headers = new Headers(init.headers);
   if (init.body) headers.set('Content-Type', 'application/json');
   if (token) headers.set('X-Setup-Token', token);
-  const response = await fetch(`/v1/setup${path}`, {
-    ...init,
-    headers,
-    credentials: 'same-origin',
-  });
+  let response: Response;
+  try {
+    response = await fetch(`/v1/setup${path}`, {
+      ...init,
+      headers,
+      credentials: 'same-origin',
+    });
+  } catch {
+    throw new SetupRequestError({
+      code: 'NETWORK_ERROR',
+      message: '无法连接 Admin Server',
+      suggestions: ['检查网络连接和 Admin Server 是否正在运行，然后重试'],
+    });
+  }
   let body: Envelope<T>;
   try {
     body = (await response.json()) as Envelope<T>;
@@ -141,10 +150,35 @@ export async function setupAPI<T>(path: string, init: RequestInit = {}, token = 
 }
 
 export async function loadSetupStatus(): Promise<SetupSnapshot | undefined> {
-  const response = await fetch('/v1/setup/status', { credentials: 'same-origin' });
+  let response: Response;
+  try {
+    response = await fetch('/v1/setup/status', { credentials: 'same-origin' });
+  } catch {
+    throw new SetupRequestError({
+      code: 'NETWORK_ERROR',
+      message: '无法连接 Admin Server',
+      suggestions: ['检查网络连接和 Admin Server 是否正在运行，然后重试'],
+    });
+  }
   if (response.status === 404) return undefined;
-  const body = (await response.json()) as Envelope<SetupSnapshot>;
-  if (!response.ok || body.code !== 200) throw new Error(body.msg || `HTTP ${response.status}`);
+  let body: Envelope<SetupSnapshot>;
+  try {
+    body = (await response.json()) as Envelope<SetupSnapshot>;
+  } catch {
+    throw new SetupRequestError({
+      code: 'INVALID_RESPONSE',
+      message: `安装服务返回了无效响应（HTTP ${response.status}）`,
+      suggestions: ['确认请求到达 Admin Server，且反向代理没有替换 JSON 响应'],
+    });
+  }
+  if (!response.ok || body.code !== 200) {
+    const detail = body.data as SetupProblem | undefined;
+    throw new SetupRequestError({
+      code: detail?.code || `HTTP_${response.status}`,
+      message: detail?.message || body.msg || `HTTP ${response.status}`,
+      suggestions: detail?.suggestions,
+    });
+  }
   return body.data;
 }
 

@@ -18,6 +18,7 @@ import {
 } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { api, json } from '../../api';
+import { reportError } from '../../error-feedback';
 import { pageTitle as title, useLoad, type AnyRow } from '../../shared/admin-ui';
 import { ConfigPage, ServicePanel, type ConfigEntry, type Definition } from './config-page';
 
@@ -90,7 +91,7 @@ function EmailTemplatesPage() {
       setEditing(null);
       reload();
     } catch (e) {
-      message.error((e as Error).message);
+      reportError(e);
     }
   };
   const sendTest = async (v: AnyRow) => {
@@ -107,7 +108,7 @@ function EmailTemplatesPage() {
       message.success('模板测试邮件已发送');
       setTesting(null);
     } catch (e) {
-      message.error((e as Error).message);
+      reportError(e);
     }
   };
   return (
@@ -267,7 +268,7 @@ function UserConfigsPage() {
       );
       message.success('SMTP 测试邮件已发送');
     } catch (e) {
-      message.error((e as Error).message);
+      reportError(e);
     }
   };
   return (

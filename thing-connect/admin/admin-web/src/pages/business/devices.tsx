@@ -21,6 +21,7 @@ import {
 } from 'antd';
 import { DownloadOutlined, UploadOutlined } from '@ant-design/icons';
 import { api, json } from '../../api';
+import { reportError } from '../../error-feedback';
 import { formatTime, pageTitle as title, useLoad, type PageData } from '../../shared/admin-ui';
 import {
   assignmentName,
@@ -78,16 +79,16 @@ export function DevicesPage() {
   const importDevices = async ({ reason }: { reason: string }) => {
     const file = importFile?.originFileObj;
     if (!file) {
-      message.error('请先选择 CSV 文件');
+      reportError('请先选择 CSV 文件');
       return;
     }
     if (file.size > 10 * 1024 * 1024) {
-      message.error('CSV 文件不能超过 10 MB');
+      reportError('CSV 文件不能超过 10 MB');
       return;
     }
     const content = await file.text();
     if (content.includes('\ufffd')) {
-      message.error('CSV 文件必须使用 UTF-8 编码');
+      reportError('CSV 文件必须使用 UTF-8 编码');
       return;
     }
     const lines = content.split(/\r?\n/);
@@ -96,15 +97,15 @@ export function DevicesPage() {
       .split(',')
       .map((value) => value.trim().toLowerCase());
     if (header[0] !== 'device_id' || header[1] !== 'device_key') {
-      message.error('CSV 前两列表头必须是 device_id,device_key');
+      reportError('CSV 前两列表头必须是 device_id,device_key');
       return;
     }
     if (lines.length < 2 || !lines.slice(1).some((line) => line.trim())) {
-      message.error('CSV 至少需要一行设备数据');
+      reportError('CSV 至少需要一行设备数据');
       return;
     }
     if (lines.length > 100001) {
-      message.error('CSV 数据不能超过 10 万行');
+      reportError('CSV 数据不能超过 10 万行');
       return;
     }
     const form = new FormData();
@@ -116,7 +117,7 @@ export function DevicesPage() {
       message.success('导入任务已创建，可在任务中心查看进度');
       closeImport();
     } catch (error) {
-      message.error((error as Error).message);
+      reportError(error);
     } finally {
       setImporting(false);
     }
@@ -242,7 +243,7 @@ function UserDevicesPanel() {
       message.success('已解绑并创建清理任务');
       reload();
     } catch (error) {
-      message.error((error as Error).message);
+      reportError(error);
     }
   };
   const openDetail = async (row: ManagedDevice) => {
@@ -254,7 +255,7 @@ function UserDevicesPanel() {
       ]);
       setDetail({ device, logs: logs.items });
     } catch (error) {
-      message.error((error as Error).message);
+      reportError(error);
     }
   };
   return (

@@ -16,6 +16,7 @@ import {
 } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { api, json } from '../../api';
+import { reportError } from '../../error-feedback';
 import { ADMIN_PASSWORD_POLICY_MESSAGE, validateAdminPassword } from '../../password-policy';
 import {
   StepUpFields,
@@ -63,7 +64,7 @@ export function AdminUsersPage() {
       setEditing(null);
       reload();
     } catch (e) {
-      message.error((e as Error).message);
+      reportError(e);
     }
   };
   const runSensitive = async (v: AnyRow) => {
@@ -85,7 +86,7 @@ export function AdminUsersPage() {
       setSensitive(null);
       reload();
     } catch (e) {
-      message.error((e as Error).message);
+      reportError(e);
     }
   };
   const openSessions = async (row: AnyRow) => {
@@ -95,7 +96,7 @@ export function AdminUsersPage() {
       const result = await api<{ items: AnyRow[] }>(`/admin-users/${row.id}/sessions`);
       setSessions(result.items);
     } catch (e) {
-      message.error((e as Error).message);
+      reportError(e);
     } finally {
       setSessionsLoading(false);
     }

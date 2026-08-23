@@ -14,6 +14,7 @@ import {
 } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { api, download, json } from '../../api';
+import { reportError } from '../../error-feedback';
 import {
   formatTime,
   pageTitle as title,
@@ -33,7 +34,7 @@ export function JobsPage() {
     try {
       setDetail(await api(`/jobs/${row.id}?page=1&page_size=100`));
     } catch (e) {
-      message.error((e as Error).message);
+      reportError(e);
     }
   };
   const retry = async (row: AnyRow) => {
@@ -42,14 +43,14 @@ export function JobsPage() {
       message.success('任务已重新排队');
       reload();
     } catch (e) {
-      message.error((e as Error).message);
+      reportError(e);
     }
   };
   const getResult = async (row: AnyRow) => {
     try {
       await download(`/jobs/${row.id}/result`, `device-import-${row.id}-result.csv`);
     } catch (e) {
-      message.error((e as Error).message);
+      reportError(e);
     }
   };
   const jobStatus = (value: number) =>
