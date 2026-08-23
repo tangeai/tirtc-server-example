@@ -39,6 +39,7 @@ func main() {
 	configPath := flag.String("c", "config.yaml", "admin-server config file")
 	initAdmin := flag.Bool("init-admin", false, "create the first super administrator and exit")
 	migrateOnly := flag.Bool("migrate-only", false, "apply core and admin database migrations and exit")
+	migrationCheckOnly := flag.Bool("migration-check-only", false, "inspect pending core and admin database migrations without applying DDL")
 	requireRuntimeTarget := flag.Bool("require-runtime-target", false, "require migration DSN to match every configured runtime service")
 	initEmail := flag.String("init-email", "", "email for the first super administrator")
 	initNickName := flag.String("init-nick-name", "", "nick name for the first super administrator")
@@ -92,7 +93,10 @@ func main() {
 		log.Fatal(err)
 	}
 	logging.Init(cfg.Log.Level, cfg.Log.Format)
-	if *migrateOnly {
+	if *migrateOnly && *migrationCheckOnly {
+		log.Fatal("-migrate-only and -migration-check-only cannot be used together")
+	}
+	if *migrateOnly || *migrationCheckOnly {
 		if err := validateMigrationPreflight(context.Background(), root, cfg.Database.DSN, *requireRuntimeTarget); err != nil {
 			log.Fatalf("migration preflight: %v", err)
 		}
@@ -107,13 +111,21 @@ func main() {
 			log.Printf("close database: %v", err)
 		}
 	}()
-	if *migrateOnly {
-		migrationCtx, stopMigration := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-		defer stopMigration()
+	if *migrateOnly || *migrationCheckOnly {
 		pending, err := mysqlmigrate.AdminMigrationsPending(sqlDB)
 		if err != nil {
 			log.Fatalf("inspect pending migrations: %v", err)
 		}
+		if *migrationCheckOnly {
+			if pending {
+				log.Print("migration_result=pending database migrations required")
+			} else {
+				log.Print("migration_result=unchanged database schema already current")
+			}
+			return
+		}
+		migrationCtx, stopMigration := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer stopMigration()
 		if pending {
 			// MySQL DDL commits implicitly. Emit this marker before the first
 			// possible DDL so deployment automation treats even a failed,

@@ -40,6 +40,104 @@ test_migration_refuses_missing_or_unverified_database_backup() (
     fi
 )
 
+test_current_database_skips_backup_gate() (
+    local capture="$TEST_ROOT/current-migration.capture" result=0 output
+    BUILD_DIR="$TEST_ROOT/current-migration-build"
+    MIGRATION_CONFIG="$TEST_ROOT/current-migration.yaml"
+    DATABASE_BACKUP_FILE=""
+    DATABASE_BACKUP_RESTORE_VERIFIED=0
+    SKIP_MIGRATIONS=0
+    mkdir -p "$BUILD_DIR/bin"
+    : >"$MIGRATION_CONFIG"
+    cat >"$BUILD_DIR/bin/admin-server" <<'BASH'
+#!/usr/bin/env bash
+printf '%s\n' "$@" >"$MIGRATION_CAPTURE"
+if [[ " $* " == *" -migration-check-only "* ]]; then
+    printf 'migration_result=unchanged database schema already current\n'
+    exit 0
+fi
+printf 'unexpected migration execution\n' >&2
+exit 97
+BASH
+    chmod +x "$BUILD_DIR/bin/admin-server"
+    MIGRATION_CAPTURE="$capture"
+    export MIGRATION_CAPTURE
+
+    output="$(run_migrations 2>&1)" || result=$?
+
+    assert_eq "0" "$result" "current database must not require a migration backup"
+    grep -qx -- '-migration-check-only' "$capture"
+    [[ "$output" == *"数据库已是当前版本；跳过数据库迁移和备份门槛"* ]] || {
+        echo "FAIL: current database did not report the skipped migration backup" >&2
+        printf '%s\n' "$output" >&2
+        exit 1
+    }
+)
+
+test_pending_database_still_requires_verified_backup() (
+    local capture="$TEST_ROOT/pending-migration.capture" result=0
+    BUILD_DIR="$TEST_ROOT/pending-migration-build"
+    MIGRATION_CONFIG="$TEST_ROOT/pending-migration.yaml"
+    DATABASE_BACKUP_FILE=""
+    DATABASE_BACKUP_RESTORE_VERIFIED=0
+    SKIP_MIGRATIONS=0
+    mkdir -p "$BUILD_DIR/bin"
+    : >"$MIGRATION_CONFIG"
+    cat >"$BUILD_DIR/bin/admin-server" <<'BASH'
+#!/usr/bin/env bash
+printf '%s\n' "$@" >>"$MIGRATION_CAPTURE"
+if [[ " $* " == *" -migration-check-only "* ]]; then
+    printf 'migration_result=pending database migrations required\n'
+    exit 0
+fi
+printf 'migration_result=changed database migrations applied\n'
+BASH
+    chmod +x "$BUILD_DIR/bin/admin-server"
+    MIGRATION_CAPTURE="$capture"
+    export MIGRATION_CAPTURE
+
+    run_migrations >/dev/null 2>&1 || result=$?
+
+    assert_eq "1" "$result" "pending migration must require a verified backup"
+    grep -qx -- '-migration-check-only' "$capture"
+    if grep -qx -- '-migrate-only' "$capture"; then
+        echo "FAIL: pending migration ran DDL without a verified backup" >&2
+        exit 1
+    fi
+)
+
+test_failed_migration_check_never_runs_ddl() (
+    local capture="$TEST_ROOT/failed-migration-check.capture" result=0
+    BUILD_DIR="$TEST_ROOT/failed-migration-check-build"
+    MIGRATION_CONFIG="$TEST_ROOT/failed-migration-check.yaml"
+    DATABASE_BACKUP_FILE=""
+    DATABASE_BACKUP_RESTORE_VERIFIED=0
+    SKIP_MIGRATIONS=0
+    mkdir -p "$BUILD_DIR/bin"
+    : >"$MIGRATION_CONFIG"
+    cat >"$BUILD_DIR/bin/admin-server" <<'BASH'
+#!/usr/bin/env bash
+printf '%s\n' "$@" >>"$MIGRATION_CAPTURE"
+if [[ " $* " == *" -migration-check-only "* ]]; then
+    printf 'migration preflight failed\n' >&2
+    exit 23
+fi
+printf 'migration_result=changed database migrations applied\n'
+BASH
+    chmod +x "$BUILD_DIR/bin/admin-server"
+    MIGRATION_CAPTURE="$capture"
+    export MIGRATION_CAPTURE
+
+    run_migrations >/dev/null 2>&1 || result=$?
+
+    assert_eq "23" "$result" "migration check failure status must be preserved"
+    grep -qx -- '-migration-check-only' "$capture"
+    if grep -qx -- '-migrate-only' "$capture"; then
+        echo "FAIL: failed migration check still attempted DDL" >&2
+        exit 1
+    fi
+)
+
 test_yaml_section_headers_allow_valid_whitespace() {
     local cfg="$TEST_ROOT/whitespace.yaml"
     cat >"$cfg" <<'YAML'
@@ -533,6 +631,10 @@ test_migration_requires_runtime_target_match_and_reports_schema_change() (
     cat >"$BUILD_DIR/bin/admin-server" <<'BASH'
 #!/usr/bin/env bash
 printf '%s\n' "$@" >"$MIGRATION_CAPTURE"
+if [[ " $* " == *" -migration-check-only "* ]]; then
+    printf 'migration_result=pending database migrations required\n'
+    exit 0
+fi
 printf 'migration_result=changed database migrations applied\n'
 BASH
     chmod +x "$BUILD_DIR/bin/admin-server"
@@ -553,6 +655,10 @@ test_failed_migration_marker_is_treated_as_schema_change() (
     : >"$MIGRATION_CONFIG"
     cat >"$BUILD_DIR/bin/admin-server" <<'BASH'
 #!/usr/bin/env bash
+if [[ " $* " == *" -migration-check-only "* ]]; then
+    printf 'migration_result=pending database migrations required\n'
+    exit 0
+fi
 printf 'migration_result=change_possible pending migrations detected\n'
 printf 'migrate: injected DDL failure\n' >&2
 exit 23
@@ -573,6 +679,10 @@ test_interrupted_migration_with_change_marker_quiesces_services() (
 	: >"$MIGRATION_CONFIG"
 	cat >"$BUILD_DIR/bin/admin-server" <<'BASH'
 #!/usr/bin/env bash
+if [[ " $* " == *" -migration-check-only "* ]]; then
+	printf 'migration_result=pending database migrations required\n'
+	exit 0
+fi
 printf 'migration_result=change_possible pending migrations detected\n'
 kill -TERM "$PPID"
 sleep 5
@@ -636,6 +746,9 @@ test_daily_update_backs_up_files_before_database_migration() {
 
 test_http_admin_cookie_is_allowed_by_default
 test_migration_refuses_missing_or_unverified_database_backup
+test_current_database_skips_backup_gate
+test_pending_database_still_requires_verified_backup
+test_failed_migration_check_never_runs_ddl
 test_yaml_section_headers_allow_valid_whitespace
 test_dynamic_mqtt_is_not_required_in_base_yaml
 test_missing_supervisor_selects_manual_service_control

@@ -70,9 +70,9 @@ HEALTH_WAIT_SECONDS="${HEALTH_WAIT_SECONDS:-30}"
 HEALTH_REQUEST_TIMEOUT_SECONDS="${HEALTH_REQUEST_TIMEOUT_SECONDS:-3}"
 HEALTH_HOST="${HEALTH_HOST:-127.0.0.1}"
 BACKUP_KEEP_COUNT="${BACKUP_KEEP_COUNT:-10}"
-# Database migrations are irreversible by the binary rollback path. Operators
-# must provide a non-empty backup file whose restore has been tested before any
-# migration command is allowed to run.
+# Database migrations are irreversible by the binary rollback path. When the
+# read-only migration check reports pending DDL, operators must provide a
+# non-empty backup file whose restore has been tested before migration starts.
 DATABASE_BACKUP_FILE="${DATABASE_BACKUP_FILE:-}"
 DATABASE_BACKUP_RESTORE_VERIFIED="${DATABASE_BACKUP_RESTORE_VERIFIED:-0}"
 MIGRATION_CONFIG="${MIGRATION_CONFIG:-$DEPLOY_ROOT/admin-server/migration-config.yaml}"
@@ -805,13 +805,12 @@ abort_migration_on_signal() {
 }
 
 run_migrations() {
-	local migration_output migration_status=0
+	local migration_output migration_status=0 inspection_output inspection_status=0
 	MIGRATION_CHANGED=0
     if [ "$SKIP_MIGRATIONS" = "1" ]; then
         warn "已按 SKIP_MIGRATIONS=1 跳过数据库迁移；仅应在迁移已独立完成时使用"
         return
     fi
-    validate_database_backup || return 1
     [ -f "$MIGRATION_CONFIG" ] || {
         err "缺少迁移配置: $MIGRATION_CONFIG"
         err "请复制 admin-server/config.yaml，使用具备 DDL 权限的 database.dsn，并设置权限 600"
@@ -822,6 +821,31 @@ run_migrations() {
         err "缺少迁移程序: $BUILD_DIR/bin/admin-server"
         return 1
     }
+	log "只读检查数据库迁移状态..."
+	if inspection_output="$("$BUILD_DIR/bin/admin-server" \
+		-c "$MIGRATION_CONFIG" \
+		-deploy-root "$DEPLOY_ROOT" \
+		-require-runtime-target \
+		-migration-check-only 2>&1)"; then
+		inspection_status=0
+	else
+		inspection_status=$?
+	fi
+	if [ "$inspection_status" -eq 0 ]; then
+		printf '%s\n' "$inspection_output"
+	else
+		printf '%s\n' "$inspection_output" >&2
+		return "$inspection_status"
+	fi
+	if [[ "$inspection_output" == *"migration_result=unchanged"* ]]; then
+		log "数据库已是当前版本；跳过数据库迁移和备份门槛"
+		return 0
+	fi
+	if [[ "$inspection_output" != *"migration_result=pending"* ]]; then
+		err "迁移检查程序没有返回可识别的结果，拒绝继续发布"
+		return 1
+	fi
+    validate_database_backup || return 1
     warn "数据库迁移不能随二进制回滚；执行前应确认已有可恢复的数据库备份"
 	log "校验迁移账号与所有已安装服务的运行配置指向同一数据库，并执行零写入所有权预检..."
     log "执行数据库迁移..."

@@ -428,7 +428,15 @@ HTTP 会明文传输管理员登录信息和会话 Cookie。公网生产环境�
 
 ### 4.6 版本更新与数据库升级
 
-升级不走首次安装入口。先使用 `mysqldump` 生成完整备份，在隔离 MySQL 实例完成恢复演练，再把绝对路径和恢复验证声明传给更新命令：
+升级不走首次安装入口。日常更新直接执行：
+
+```bash
+sudo /opt/thing-connect/deploy-prod.sh update
+```
+
+脚本构建新版本后，先使用迁移账号执行只读所有权、完整结构和待迁移版本检查。数据库已经是当前版本时，输出“数据库已是当前版本”，跳过数据库备份门槛和 DDL；代码与静态资源继续正常发布。
+
+存在待执行迁移时，脚本在 DDL 前停止并要求可恢复的数据库备份。使用 `mysqldump` 生成完整备份，在隔离 MySQL 实例完成恢复演练，再把绝对路径和恢复验证声明传给更新命令：
 
 ```bash
 sudo env \
@@ -437,7 +445,7 @@ sudo env \
   /opt/thing-connect/deploy-prod.sh update
 ```
 
-脚本要求备份文件已存在、非空、可读，并记录 SHA-256；缺少备份或未声明恢复验证时，在执行任何迁移前停止。`SKIP_MIGRATIONS=1` 只用于 DBA 已通过独立受控流程执行了同一版本迁移的环境，不能用来绕过备份。
+待迁移时，脚本要求备份文件已存在、非空、可读，并记录 SHA-256；缺少备份或未声明恢复验证时，在执行任何 DDL 前停止。只读迁移检查失败也会直接停止发布。`SKIP_MIGRATIONS=1` 只用于 DBA 已通过独立受控流程执行了同一版本迁移的环境，不能用来绕过备份。
 
 该命令取得部署锁后快进拉取源码，重新加载新版本服务清单，构建全部服务，备份当前文件，并按嵌入迁移目录执行缺失数据库版本。迁移版本从 `core/NNN_*.sql` 和 `admin/NNN_*.sql` 自动发现；增加表或修改表时不需要改安装脚本中的版本号。数据库迁移不能随旧二进制自动回滚。
 
@@ -445,13 +453,12 @@ sudo env \
 
 ```bash
 sudo /opt/thing-connect/service-local.sh stop-all
-sudo env \
-  DATABASE_BACKUP_FILE=/secure/backups/thing-connect-before-update.sql \
-  DATABASE_BACKUP_RESTORE_VERIFIED=1 \
-  /opt/thing-connect/deploy-prod.sh update
+sudo /opt/thing-connect/deploy-prod.sh update
 sudo /opt/thing-connect/service-local.sh start-all
 sudo /opt/thing-connect/service-local.sh status-all
 ```
+
+手动模式检测到待迁移版本时，同样先完成数据库备份和恢复演练，再使用带 `DATABASE_BACKUP_FILE` 与 `DATABASE_BACKUP_RESTORE_VERIFIED=1` 的更新命令重试；服务在整个过程中保持停止。
 
 脚本在手动模式下检测到 `RUNNING`、`STARTING`、`CONFLICT`，或已安装服务端口仍在监听时，会在拉取、迁移和发布前停止更新，并显示准确的 `stop-all` 命令；更新完成后显示 `start-all` 和 `status-all`。Supervisor 只配置部分已安装服务时脚本拒绝发布，避免 Supervisor 与本地脚本同时管理同一服务。可用 `SERVICE_MANAGER=supervisor` 或 `SERVICE_MANAGER=manual` 明确指定模式；显式手动模式也不能跳过已有的 ThingConnect Supervisor 条目，必须先停止并移除这些条目。
 
