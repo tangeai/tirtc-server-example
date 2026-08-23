@@ -744,7 +744,7 @@ func validateLegacyFingerprint(tables map[string]bool, versions map[string]int, 
 			"config_entries", "config_publish_outbox",
 		)
 	}
-	if versions["admin"] >= 4 {
+	if versions["admin"] >= 1 {
 		required = append(required, "thingconnect_installation_state")
 	}
 	for _, table := range required {

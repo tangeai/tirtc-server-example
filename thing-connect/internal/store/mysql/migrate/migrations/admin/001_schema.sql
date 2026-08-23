@@ -1,5 +1,5 @@
--- 历史版本 001 的结构定义保持不可变；当前表和字段的完整中文 COMMENT
--- 由 005_schema_comments.sql 统一补齐，scripts/schema.sql 展示最终结构。
+-- 首次发布的 Admin 结构基线。完整中文 COMMENT 由同版本的
+-- 001_schema_comments.sql 统一补齐，scripts/schema.sql 展示最终结构。
 CREATE TABLE IF NOT EXISTS admin_users (
     id BIGINT NOT NULL AUTO_INCREMENT COMMENT '管理员主键',
     email VARCHAR(255) NOT NULL COMMENT '管理员登录邮箱，系统内唯一',
@@ -117,11 +117,11 @@ CREATE TABLE IF NOT EXISTS admin_jobs (
     source_name VARCHAR(255) NOT NULL DEFAULT '', input_file VARCHAR(512) NOT NULL DEFAULT '', result_file VARCHAR(512) NOT NULL DEFAULT '',
     total_count INT NOT NULL DEFAULT 0, succeeded_count INT NOT NULL DEFAULT 0, failed_count INT NOT NULL DEFAULT 0,
     attempts INT NOT NULL DEFAULT 0, next_attempt_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    started_at DATETIME NULL,
+    started_at DATETIME NULL, worker_id VARCHAR(64) NOT NULL DEFAULT '', lease_until DATETIME NULL,
     finished_at DATETIME NULL, last_error VARCHAR(1024) NOT NULL DEFAULT '',
     created_by BIGINT NOT NULL DEFAULT 0, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    PRIMARY KEY (id), KEY idx_admin_job_due (status, next_attempt_at),
+    PRIMARY KEY (id), KEY idx_admin_job_due (status, next_attempt_at), KEY idx_admin_job_lease (status, lease_until),
     KEY idx_admin_job_creator_time (created_by, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -130,12 +130,14 @@ CREATE TABLE IF NOT EXISTS admin_job_items (
     resource_id VARCHAR(128) NOT NULL DEFAULT '', error_code VARCHAR(64) NOT NULL DEFAULT '', error_message VARCHAR(512) NOT NULL DEFAULT '',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    PRIMARY KEY (id), UNIQUE KEY uq_admin_job_row (job_id, row_no), KEY idx_admin_job_item_status (job_id, status)
+    PRIMARY KEY (id), UNIQUE KEY uq_admin_job_row (job_id, row_no), KEY idx_admin_job_item_status (job_id, status),
+    KEY idx_admin_job_item_resource (resource_id, status, job_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS config_entries (
     id BIGINT NOT NULL AUTO_INCREMENT, namespace VARCHAR(64) NOT NULL, config_key VARCHAR(128) NOT NULL,
     scope_type VARCHAR(16) NOT NULL DEFAULT 'global', scope_id VARCHAR(128) NOT NULL DEFAULT '', value TEXT NOT NULL,
+    secret_value TEXT NULL,
     status TINYINT NOT NULL DEFAULT 1, revision BIGINT NOT NULL DEFAULT 1,
     updated_by BIGINT NOT NULL DEFAULT 0, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

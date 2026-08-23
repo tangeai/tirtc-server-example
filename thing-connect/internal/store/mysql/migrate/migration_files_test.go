@@ -33,16 +33,26 @@ func TestEmbeddedMigrationFilesAreNonEmpty(t *testing.T) {
 		"migrations/shared/schema_migrations.sql",
 		"migrations/core/001_user.sql", "migrations/core/001_device.sql",
 		"migrations/core/001_voip.sql", "migrations/core/001_ai.sql",
-		"migrations/core/001_call.sql", "migrations/core/002_user_device_sorting.sql",
-		"migrations/core/003_schema_comments.sql",
-		"migrations/admin/001_schema.sql", "migrations/admin/002_job_leases.sql",
-		"migrations/admin/003_plaintext_secrets.sql", "migrations/admin/004_installation_state.sql",
-		"migrations/admin/005_schema_comments.sql",
+		"migrations/core/001_call.sql", "migrations/core/001_zzz_schema_comments.sql",
+		"migrations/admin/001_schema.sql", "migrations/admin/001_installation_state.sql",
+		"migrations/admin/001_schema_comments.sql",
 	}
 	for _, path := range paths {
 		statements, err := statementsFromFiles(path)
 		if err != nil || len(statements) == 0 {
 			t.Fatalf("%s: statements=%d err=%v", path, len(statements), err)
+		}
+	}
+}
+
+func TestCurrentMigrationCatalogIsSingleBaselineVersion(t *testing.T) {
+	want := map[string]int{"core": 1, "admin": 1}
+	if got := CurrentMigrationVersions(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("current migration versions = %#v, want %#v", got, want)
+	}
+	for component, versions := range migrationCatalog {
+		if len(versions) != 1 || versions[0].Version != 1 {
+			t.Fatalf("%s migration catalog = %#v, want only baseline version 1", component, versions)
 		}
 	}
 }
@@ -75,7 +85,7 @@ func TestMigrationCatalogDiscoversOrderedContiguousVersions(t *testing.T) {
 }
 
 func TestNewSchemaMigrationsDocumentTablesAndColumns(t *testing.T) {
-	commentBaseline := map[string]int{"core": 2, "admin": 4}
+	commentBaseline := map[string]int{"core": 1, "admin": 1}
 	for component, migrations := range migrationCatalog {
 		for _, migration := range migrations {
 			if migration.Version <= commentBaseline[component] {
@@ -161,25 +171,25 @@ func TestCurrentSchemaShapeIncludesEveryDomainAndAlteredColumns(t *testing.T) {
 	}
 }
 
-func TestSchemaShapeForVersionsExcludesFutureChangesAndTracksEarlyClaim(t *testing.T) {
+func TestBaselineVersionOneContainsCurrentSchemaAndTracksEarlyClaim(t *testing.T) {
 	shape, err := SchemaShapeForVersions(map[string]int{"core": 1, "admin": 1}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := shape["users"].Indexes["idx_users_created"]; ok {
-		t.Fatal("core version 1 unexpectedly includes the version 2 sort index")
+	if _, ok := shape["users"].Indexes["idx_users_created"]; !ok {
+		t.Fatal("baseline version 1 is missing the user sort index")
 	}
-	if _, ok := shape["admin_jobs"].Columns["lease_until"]; ok {
-		t.Fatal("admin version 1 unexpectedly includes the version 2 lease column")
+	if _, ok := shape["admin_jobs"].Columns["lease_until"]; !ok {
+		t.Fatal("baseline version 1 is missing the admin job lease column")
 	}
-	if _, ok := shape["config_entries"].Columns["secret_value"]; ok {
-		t.Fatal("admin version 1 unexpectedly includes the version 3 secret column")
+	if _, ok := shape["config_entries"].Columns["secret_value"]; !ok {
+		t.Fatal("baseline version 1 is missing the plaintext secret column")
 	}
-	if _, ok := shape["thingconnect_installation_state"]; ok {
-		t.Fatal("an unclaimed admin version 1 database unexpectedly includes the ownership table")
+	if _, ok := shape["thingconnect_installation_state"]; !ok {
+		t.Fatal("baseline version 1 is missing the installation ownership table")
 	}
 
-	claimed, err := SchemaShapeForVersions(map[string]int{"core": 1, "admin": 1}, true)
+	claimed, err := SchemaShapeForVersions(map[string]int{"core": 0, "admin": 0}, true)
 	if err != nil {
 		t.Fatal(err)
 	}

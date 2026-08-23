@@ -53,8 +53,8 @@ func CurrentSchemaShape() (map[string]TableShape, error) {
 
 // SchemaShapeForVersions derives the exact schema contract represented by a
 // migration ledger. includeInstallationState accounts for the ownership row,
-// which can exist before admin migration 4 when an interrupted fresh install
-// has claimed an otherwise empty database.
+// which can exist before admin version 1 is recorded when an interrupted fresh
+// install has claimed an otherwise empty database.
 func SchemaShapeForVersions(versions map[string]int, includeInstallationState bool) (map[string]TableShape, error) {
 	current := CurrentMigrationVersions()
 	for component, version := range versions {
@@ -66,8 +66,8 @@ func SchemaShapeForVersions(versions map[string]int, includeInstallationState bo
 	paths := []string{"migrations/shared/schema_migrations.sql"}
 	paths = append(paths, migrationPathsThrough("core", versions["core"])...)
 	paths = append(paths, migrationPathsThrough("admin", versions["admin"])...)
-	if versions["admin"] < 4 && includeInstallationState {
-		paths = append(paths, "migrations/admin/004_installation_state.sql")
+	if versions["admin"] < 1 && includeInstallationState {
+		paths = append(paths, "migrations/admin/001_installation_state.sql")
 	}
 	statements, err := statementsFromFiles(paths...)
 	if err != nil {
@@ -420,7 +420,7 @@ func splitTopLevel(value string) []string {
 // The installer calls it after its zero-write assessment and MySQL named lock;
 // it is not a general schema migration entry point.
 func EnsureInstallationState(ctx context.Context, database *sqlx.DB) error {
-	statements, err := statementsFromFiles("migrations/admin/004_installation_state.sql")
+	statements, err := statementsFromFiles("migrations/admin/001_installation_state.sql")
 	if err != nil {
 		return err
 	}

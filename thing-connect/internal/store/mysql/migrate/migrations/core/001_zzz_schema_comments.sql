@@ -1,4 +1,4 @@
--- 为既有业务表补齐 MySQL 元数据注释；字段定义保持与当前 schema 完全一致。
+-- 版本 1 业务表的 MySQL 元数据注释；字段定义保持与建表基线完全一致。
 ALTER TABLE schema_migrations
     COMMENT = 'ThingConnect 数据库迁移版本台账',
     MODIFY COLUMN component VARCHAR(64) NOT NULL COMMENT '迁移组件名：core 或 admin',

@@ -1,10 +1,13 @@
 package migrate_test
 
 import (
+	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/go-sql-driver/mysql"
+	"github.com/jmoiron/sqlx"
 
 	"thing-connect/internal/store/mysql/migrate"
 	"thing-connect/internal/testenv"
@@ -34,6 +37,7 @@ func TestMigrateNewTables(t *testing.T) {
 	cfg := testenv.LoadConfigOrSkip(t, "../../../../tests/testdata/config.yaml")
 	sqlDB := testenv.OpenDBOrSkip(t, cfg)
 	defer sqlDB.Close()
+	resetTestSchema(t, sqlDB)
 	if err := migrate.Migrate(sqlDB); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
@@ -66,7 +70,7 @@ func TestMigrateNewTables(t *testing.T) {
 	if err := sqlDB.Get(&count, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='admin_users'`); err != nil || count == 0 {
 		t.Errorf("admin_users table missing: n=%d err=%v", count, err)
 	}
-	if err := sqlDB.Get(&count, `SELECT COUNT(*) FROM schema_migrations WHERE component IN ('core','admin')`); err != nil || count != 6 {
+	if err := sqlDB.Get(&count, `SELECT COUNT(*) FROM schema_migrations WHERE component IN ('core','admin')`); err != nil || count != 2 {
 		t.Errorf("schema_migrations entries: n=%d err=%v", count, err)
 	}
 	if err := sqlDB.Get(&count, `SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='config_entries' AND column_name='secret_value'`); err != nil || count != 1 {
@@ -77,5 +81,42 @@ func TestMigrateNewTables(t *testing.T) {
 	}
 	if err := sqlDB.Get(&count, `SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='admin_jobs' AND column_name IN ('worker_id','lease_until')`); err != nil || count != 2 {
 		t.Errorf("admin job lease columns missing: n=%d err=%v", count, err)
+	}
+}
+
+func resetTestSchema(t *testing.T, sqlDB *sqlx.DB) {
+	t.Helper()
+	ctx := context.Background()
+	conn, err := sqlDB.Connx(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	var databaseName string
+	if err := conn.GetContext(ctx, &databaseName, `SELECT DATABASE()`); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(strings.ToLower(databaseName), "_test") {
+		t.Fatalf("refusing to reset non-test database %q", databaseName)
+	}
+	var tables []string
+	if err := conn.SelectContext(ctx, &tables, `SELECT table_name FROM information_schema.tables
+		WHERE table_schema=DATABASE() AND table_type='BASE TABLE' ORDER BY table_name`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.ExecContext(ctx, `SET FOREIGN_KEY_CHECKS=0`); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if _, err := conn.ExecContext(context.Background(), `SET FOREIGN_KEY_CHECKS=1`); err != nil {
+			t.Errorf("restore foreign key checks: %v", err)
+		}
+	}()
+	for _, table := range tables {
+		quoted := "`" + strings.ReplaceAll(table, "`", "``") + "`"
+		if _, err := conn.ExecContext(ctx, `DROP TABLE IF EXISTS `+quoted); err != nil {
+			t.Fatalf("drop test table %s: %v", quoted, err)
+		}
 	}
 }

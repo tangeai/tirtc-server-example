@@ -66,7 +66,7 @@ func claimEmptyMigrationTarget(ctx context.Context, conn migrationConn) error {
 	if count != 0 {
 		return nil
 	}
-	statements, err := statementsFromFiles("migrations/admin/004_installation_state.sql")
+	statements, err := statementsFromFiles("migrations/admin/001_installation_state.sql")
 	if err != nil {
 		return err
 	}

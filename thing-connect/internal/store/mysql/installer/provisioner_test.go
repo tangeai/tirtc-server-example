@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	installapp "thing-connect/internal/installer"
+	mysqlmigrate "thing-connect/internal/store/mysql/migrate"
 )
 
 func TestProvisionerClassifiesRuntimeLoginFailure(t *testing.T) {
@@ -52,5 +53,25 @@ func TestRuntimeDMLTablesCoverSharedAccountConsumers(t *testing.T) {
 	}
 	if _, err := runtimeDMLTables([]string{"ai-server", "ai-server"}); err == nil {
 		t.Fatal("duplicate optional services were accepted")
+	}
+}
+
+func TestBaselineAdminVersionRequiresInstallationStateTable(t *testing.T) {
+	shape, err := mysqlmigrate.SchemaShapeForVersions(map[string]int{"core": 0, "admin": 1}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tables := make(map[string]bool, len(shape))
+	for table := range shape {
+		tables[table] = true
+	}
+	delete(tables, "thingconnect_installation_state")
+
+	if err := validateLegacyFingerprint(tables, map[string]int{"core": 0, "admin": 1}, true); !errors.Is(err, installapp.ErrSchemaDrift) {
+		t.Fatalf("validateLegacyFingerprint without installation state = %v, want %v", err, installapp.ErrSchemaDrift)
+	}
+	tables["thingconnect_installation_state"] = true
+	if err := validateLegacyFingerprint(tables, map[string]int{"core": 0, "admin": 1}, true); err != nil {
+		t.Fatalf("validateLegacyFingerprint with complete baseline = %v", err)
 	}
 }

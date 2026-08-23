@@ -90,8 +90,8 @@ func newSuite(t *testing.T) *suite {
 	return s
 }
 
-// resetPool returns every device_pool row to fresh (status=0) and clears
-// device_bind, so 禁止流转 allocation always has fresh devices to hand out.
+// resetPool ensures a deterministic device fixture pool, returns every row to
+// fresh (status=0), and clears device_bind so allocation always has devices.
 // Without this, prior runs leave the pool exhausted — HTTP binds (CommitBindFromPool)
 // set status=1 with no per-test cleanup, and once a device_bind row exists the
 // device is never re-allocated — so every bind fails with "设备池已耗尽".
@@ -103,6 +103,13 @@ func resetPool(t *testing.T, sqlDB *sqlx.DB) {
 	}
 	if _, err := sqlDB.Exec(`UPDATE device_pool SET status=0`); err != nil {
 		t.Fatalf("reset device_pool: %v", err)
+	}
+	for index := 1; index <= 16; index++ {
+		deviceID := fmt.Sprintf("TESTPOOL%04d", index)
+		deviceKey := fmt.Sprintf("test-device-key-%04d", index)
+		if _, err := sqlDB.Exec(`INSERT IGNORE INTO device_pool (device_id, device_key, status) VALUES (?, ?, 0)`, deviceID, deviceKey); err != nil {
+			t.Fatalf("seed device_pool fixture %s: %v", deviceID, err)
+		}
 	}
 }
 

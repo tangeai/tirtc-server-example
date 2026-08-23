@@ -1,4 +1,4 @@
--- 为既有 Admin 表补齐 MySQL 元数据注释；字段定义保持与当前 schema 完全一致。
+-- 版本 1 Admin 表的 MySQL 元数据注释；字段定义保持与建表基线完全一致。
 ALTER TABLE admin_users
     COMMENT = '后台管理员账号',
     MODIFY COLUMN id BIGINT NOT NULL AUTO_INCREMENT COMMENT '管理员主键',

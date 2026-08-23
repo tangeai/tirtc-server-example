@@ -7,8 +7,8 @@
 -- 使用说明：
 --   默认安装不要手工导入本文件；使用 Web 安装器或 deploy-prod.sh migrate。
 --   旧数据库不得导入本文件覆盖，必须执行版本化迁移。
---   完整字段释义同时见 core/003_schema_comments.sql 和 admin/005_schema_comments.sql；
---   两份版本化迁移会把 COMMENT 回填到已经存在的数据库。
+--   完整字段释义同时见 core/001_zzz_schema_comments.sql 和
+--   admin/001_schema_comments.sql；两者与建表文件共同构成版本 1。
 --   使用 mysql 客户端直接导入时，先 cd 到 thing-connect 仓库目录，使文件末尾的
 --   SOURCE 相对路径可以加载字段 COMMENT；不支持 SOURCE 的平台需按顺序执行这两个文件。
 
@@ -161,25 +161,6 @@ CREATE TABLE IF NOT EXISTS voip_user_profile (
     PRIMARY KEY (id),
     UNIQUE KEY uq_voip_user_profile (wx_open_id, wx_app_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
--- 旧数据升级：同一 OpenID + AppID 采用最近一条授权记录的备注，并同步到所有设备。
-INSERT IGNORE INTO voip_user_profile (wx_open_id, wx_app_id, remark)
-SELECT current_auth.wx_open_id, current_auth.wx_app_id, current_auth.remark
-FROM voip_device_auth current_auth
-LEFT JOIN voip_device_auth newer_auth
-  ON newer_auth.wx_open_id = current_auth.wx_open_id
- AND newer_auth.wx_app_id = current_auth.wx_app_id
- AND (
-      newer_auth.created_at > current_auth.created_at
-   OR (newer_auth.created_at = current_auth.created_at AND newer_auth.id > current_auth.id)
- )
-WHERE newer_auth.id IS NULL;
-
-UPDATE voip_device_auth auth
-JOIN voip_user_profile profile
-  ON profile.wx_open_id = auth.wx_open_id
- AND profile.wx_app_id = auth.wx_app_id
-SET auth.remark = profile.remark;
 
 CREATE TABLE IF NOT EXISTS ai_user_role (
     id         BIGINT      NOT NULL AUTO_INCREMENT,
@@ -379,16 +360,10 @@ CREATE TABLE IF NOT EXISTS config_publish_outbox (
     PRIMARY KEY (id), UNIQUE KEY uq_config_publish_revision (config_entry_id, revision), KEY idx_config_publish_due (delivered_at, next_attempt_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- COMMENT 的单一事实源同时用于新库和既有库，避免在基线文件中复制数百条字段释义。
-SOURCE internal/store/mysql/migrate/migrations/core/003_schema_comments.sql
-SOURCE internal/store/mysql/migrate/migrations/admin/005_schema_comments.sql
+-- COMMENT 的单一事实源与建表文件共同构成版本 1，避免复制数百条字段释义。
+SOURCE internal/store/mysql/migrate/migrations/core/001_zzz_schema_comments.sql
+SOURCE internal/store/mysql/migrate/migrations/admin/001_schema_comments.sql
 
 INSERT IGNORE INTO schema_migrations (component, version) VALUES
     ('core', 1),
-    ('core', 2),
-    ('core', 3),
-    ('admin', 1),
-    ('admin', 2),
-    ('admin', 3),
-    ('admin', 4),
-    ('admin', 5);
+    ('admin', 1);
