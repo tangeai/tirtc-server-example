@@ -340,6 +340,7 @@ test_manual_update_publishes_without_automatic_restart() (
     publish_service_catalog() { :; }
     publish_local_service_script() { :; }
     publish_deploy_script() { :; }
+    publish_release_state() { printf 'release-state-published\n' >>"$capture"; }
     prune_successful_backups() { :; }
     git() { printf 'test-commit\n'; }
 
@@ -348,10 +349,201 @@ test_manual_update_publishes_without_automatic_restart() (
     grep -qx 'manual-checked' "$capture"
     grep -qx 'deployed=admin-server' "$capture"
     grep -qx 'deployed=user-server' "$capture"
+    grep -qx 'release-state-published' "$capture"
     if grep -q '^restarted=' "$capture"; then
         echo "FAIL: manual update restarted services automatically" >&2
         exit 1
     fi
+)
+
+test_same_release_commit_skips_the_entire_update() (
+    local current_commit="1111111111111111111111111111111111111111"
+    local output result=0
+    DEPLOY_ROOT="$TEST_ROOT/same-release"
+    REPO_PATH="$TEST_ROOT/same-release-source"
+    FORCE_UPDATE=0
+    ACTIVE_SERVICES=(admin-server user-server)
+    mkdir -p "$DEPLOY_ROOT"
+    printf '%s\n%s\n' "$current_commit" "${ACTIVE_SERVICES[*]}" >"$DEPLOY_ROOT/.release-state"
+    validate_deploy_root() { :; }
+    resolve_active_services() { ACTIVE_SERVICES=(admin-server user-server); }
+    prepare_update_service_control() {
+        echo "FAIL: same release checked service manager or required stopped services" >&2
+        return 92
+    }
+    validate_backup_retention() { :; }
+    validate_release_options() { :; }
+    pull_code() { :; }
+    validate_paths() {
+        echo "FAIL: same release continued into update preparation" >&2
+        return 91
+    }
+    git() {
+        if [[ " $* " == *" --short "* ]]; then
+            printf '1111111\n'
+        else
+            printf '%s\n' "$current_commit"
+        fi
+    }
+
+    output="$(full_deploy 2>&1)" || result=$?
+
+    assert_eq "0" "$result" "same release commit must skip the update"
+    [[ "$output" == *"当前已发布版本与待发布版本一致（1111111），无需更新"* ]] || {
+        echo "FAIL: same release did not report the no-op decision" >&2
+        printf '%s\n' "$output" >&2
+        exit 1
+    }
+)
+
+test_release_state_records_commit_and_installed_services() (
+    local current_commit="2222222222222222222222222222222222222222"
+    DEPLOY_ROOT="$TEST_ROOT/release-marker"
+    REPO_PATH="$TEST_ROOT/release-marker-source"
+    ACTIVE_SERVICES=(admin-server device-server user-server)
+    mkdir -p "$DEPLOY_ROOT"
+    git() {
+        if [[ " $* " == *" --short "* ]]; then
+            printf '2222222\n'
+        else
+            printf '%s\n' "$current_commit"
+        fi
+    }
+
+    publish_release_state >/dev/null
+
+    assert_eq "$current_commit
+${ACTIVE_SERVICES[*]}" "$(<"$DEPLOY_ROOT/.release-state")" \
+        "release state must identify the commit and installed service set"
+    [ ! -e "$DEPLOY_ROOT/.release-state.new" ]
+)
+
+test_force_update_and_service_changes_bypass_same_commit_marker() (
+    local current_commit="3333333333333333333333333333333333333333"
+    DEPLOY_ROOT="$TEST_ROOT/release-marker-bypass"
+    REPO_PATH="$TEST_ROOT/release-marker-bypass-source"
+    ACTIVE_SERVICES=(admin-server user-server)
+    mkdir -p "$DEPLOY_ROOT"
+    git() { printf '%s\n' "$current_commit"; }
+
+    printf '%s\n%s\n' "$current_commit" "${ACTIVE_SERVICES[*]}" >"$DEPLOY_ROOT/.release-state"
+    FORCE_UPDATE=1
+    if release_state_is_current; then
+        echo "FAIL: FORCE_UPDATE=1 was ignored" >&2
+        exit 1
+    fi
+
+    FORCE_UPDATE=0
+    printf '%s\n%s\n' "$current_commit" "admin-server" >"$DEPLOY_ROOT/.release-state"
+    if release_state_is_current; then
+        echo "FAIL: newly installed service was hidden by the commit marker" >&2
+        exit 1
+    fi
+)
+
+test_missing_or_invalid_release_state_continues_update() (
+    local current_commit="4444444444444444444444444444444444444444"
+    local capture="$TEST_ROOT/invalid-release-state.capture"
+    local result=0 state
+    DEPLOY_ROOT="$TEST_ROOT/invalid-release-state"
+    REPO_PATH="$TEST_ROOT/invalid-release-state-source"
+    FORCE_UPDATE=0
+    mkdir -p "$DEPLOY_ROOT"
+    validate_deploy_root() { :; }
+    resolve_active_services() { ACTIVE_SERVICES=(admin-server user-server); }
+    validate_backup_retention() { :; }
+    validate_release_options() { :; }
+    pull_code() { :; }
+    validate_paths() {
+        printf 'update-preparation-reached\n' >"$capture"
+        return 73
+    }
+    git() { printf '%s\n' "$current_commit"; }
+
+    for state in missing invalid; do
+        rm -f -- "$DEPLOY_ROOT/.release-state"
+        if [ "$state" = "invalid" ]; then
+            printf 'not-a-commit\nadmin-server user-server\n' >"$DEPLOY_ROOT/.release-state"
+        fi
+        rm -f -- "$capture"
+        result=0
+        full_deploy >/dev/null 2>&1 || result=$?
+        [ "$result" -ne 0 ] || {
+            echo "FAIL: $state release state unexpectedly completed the update" >&2
+            exit 1
+        }
+        grep -qx 'update-preparation-reached' "$capture" || {
+            echo "FAIL: $state release state skipped update preparation" >&2
+            exit 1
+        }
+    done
+)
+
+test_failed_same_commit_repair_invalidates_previous_release_state() (
+    local current_commit="5555555555555555555555555555555555555555"
+    local capture="$TEST_ROOT/incomplete-release.capture"
+    local failure_mode output result
+    : >"$capture"
+    DEPLOY_ROOT="$TEST_ROOT/incomplete-release"
+    REPO_PATH="$TEST_ROOT/incomplete-release-source"
+    FORCE_UPDATE=1
+    ACTIVE_SERVICES=(admin-server)
+    mkdir -p "$DEPLOY_ROOT"
+    validate_deploy_root() { :; }
+    resolve_active_services() {
+        ACTIVE_SERVICES=(admin-server)
+        ACTIVE_BUSINESS_SERVICES=()
+        ACTIVE_STOP_ORDER=(admin-server)
+    }
+    validate_backup_retention() { :; }
+    validate_release_options() { :; }
+    pull_code() { :; }
+    validate_paths() { :; }
+    load_deployment_service_catalog() { :; }
+    prepare_update_service_control() { ACTIVE_SERVICE_MANAGER="supervisor"; }
+    run_batch() { :; }
+    validate_build_release() { :; }
+    validate_configs() { :; }
+    backup_release() { BACKUP_DIR="$TEST_ROOT/incomplete-release-backup"; }
+    run_migrations() { :; }
+    deploy_one() { :; }
+    restart_one() { :; }
+    mark_backup_successful() { :; }
+    publish_service_catalog() { [ "$failure_mode" != "auxiliary" ]; }
+    publish_local_service_script() { :; }
+    publish_deploy_script() { :; }
+    publish_release_state() {
+        [ "$failure_mode" != "state" ] || return 62
+        printf 'release-state-published\n' >>"$capture"
+    }
+    prune_successful_backups() { :; }
+    git() {
+        if [[ " $* " == *" --short "* ]]; then
+            printf '5555555\n'
+        else
+            printf '%s\n' "$current_commit"
+        fi
+    }
+
+    for failure_mode in auxiliary state; do
+        : >"$capture"
+        printf '%s\n%s\n' "$current_commit" "admin-server" >"$DEPLOY_ROOT/.release-state"
+        result=0
+        output="$(full_deploy 2>&1)" || result=$?
+
+        assert_eq "1" "$result" "$failure_mode failure during same-commit repair must fail visibly"
+        FORCE_UPDATE=0
+        if release_state_is_current; then
+            echo "FAIL: $failure_mode failure left the previous same-commit release state current" >&2
+            exit 1
+        fi
+        FORCE_UPDATE=1
+        [[ "$output" == *"业务服务已发布，但"* ]] || {
+            echo "FAIL: $failure_mode failure did not explain its partial-success state" >&2
+            printf '%s\n' "$output" >&2
+            exit 1
+        }
+    done
 )
 
 test_publish_deploy_script_replaces_root_entry_atomically() (
@@ -549,11 +741,11 @@ test_deploy_lock_is_scoped_to_one_mutating_command() (
     }
 )
 
-test_menu_starts_with_daily_update() {
+test_menu_starts_with_maintenance_update() {
     local output
     output="$(menu <<<'invalid')"
-    [[ "$output" == *$'1) 日常更新部署（Supervisor 自动重启；无 Supervisor 时手动启停）\n2) 仅执行数据库迁移'* ]] || {
-        echo "FAIL: daily update and migration are not the first menu actions" >&2
+    [[ "$output" == *$'1) 维护发布更新（Supervisor 自动重启；无 Supervisor 时手动启停）\n2) 仅执行数据库迁移'* ]] || {
+        echo "FAIL: maintenance update and migration are not the first menu actions" >&2
         exit 1
     }
     [[ "$output" == *$'4) 查看全部服务状态\n5) 重启并检查已安装服务\n6) 启动并检查已安装服务\n7) 停止已安装服务\n0) 退出'* ]] || {
@@ -756,6 +948,11 @@ test_partial_supervisor_inventory_is_rejected
 test_explicit_manual_mode_rejects_existing_supervisor_services
 test_manual_update_requires_local_services_to_be_stopped
 test_manual_update_publishes_without_automatic_restart
+test_same_release_commit_skips_the_entire_update
+test_release_state_records_commit_and_installed_services
+test_force_update_and_service_changes_bypass_same_commit_marker
+test_missing_or_invalid_release_state_continues_update
+test_failed_same_commit_repair_invalidates_previous_release_state
 test_publish_deploy_script_replaces_root_entry_atomically
 test_publish_local_service_script_replaces_root_entry_atomically
 test_publish_deploy_script_keeps_previous_entry_on_invalid_source
@@ -768,7 +965,7 @@ test_file_publish_never_creates_configuration
 test_deploy_uses_catalog_static_directory
 test_deploy_requires_complete_current_build
 test_deploy_lock_is_scoped_to_one_mutating_command
-test_menu_starts_with_daily_update
+test_menu_starts_with_maintenance_update
 test_first_install_is_not_a_deploy_command
 test_pull_never_clones_missing_daily_source
 test_optional_services_are_not_treated_as_installed_without_config

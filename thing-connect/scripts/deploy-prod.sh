@@ -77,6 +77,7 @@ DATABASE_BACKUP_FILE="${DATABASE_BACKUP_FILE:-}"
 DATABASE_BACKUP_RESTORE_VERIFIED="${DATABASE_BACKUP_RESTORE_VERIFIED:-0}"
 MIGRATION_CONFIG="${MIGRATION_CONFIG:-$DEPLOY_ROOT/admin-server/migration-config.yaml}"
 SKIP_MIGRATIONS="${SKIP_MIGRATIONS:-0}"
+FORCE_UPDATE="${FORCE_UPDATE:-0}"
 ALLOW_INSECURE_ADMIN_COOKIE="${ALLOW_INSECURE_ADMIN_COOKIE:-1}"
 MIGRATION_CHANGED=0
 MIGRATION_OUTPUT_FILE=""
@@ -384,8 +385,35 @@ validate_release_options() {
         err "ALLOW_INSECURE_ADMIN_COOKIE 只能是 0 或 1"
         return 1
     }
+    [[ "$FORCE_UPDATE" =~ ^[01]$ ]] || {
+        err "FORCE_UPDATE 只能是 0 或 1"
+        return 1
+    }
     [[ "$DATABASE_BACKUP_RESTORE_VERIFIED" =~ ^[01]$ ]] || {
         err "DATABASE_BACKUP_RESTORE_VERIFIED 只能是 0 或 1"
+        return 1
+    }
+}
+
+release_state_is_current() {
+    local deployed_commit deployed_services target_commit
+    local -a release_state=()
+    [ "$FORCE_UPDATE" != "1" ] || return 1
+    [ -r "$DEPLOY_ROOT/.release-state" ] || return 1
+    mapfile -t release_state <"$DEPLOY_ROOT/.release-state" || return 1
+    [ "${#release_state[@]}" -eq 2 ] || return 1
+    deployed_commit="${release_state[0]}"
+    deployed_services="${release_state[1]}"
+    [[ "$deployed_commit" =~ ^[0-9a-f]{40,64}$ ]] || return 1
+    target_commit="$(git -C "$REPO_PATH" rev-parse HEAD)" || return 1
+    [ "$deployed_commit" = "$target_commit" ] &&
+        [ "$deployed_services" = "${ACTIVE_SERVICES[*]}" ]
+}
+
+invalidate_release_state() {
+    rm -f -- "$DEPLOY_ROOT/.release-state" || {
+        err "无法使旧发布状态失效: $DEPLOY_ROOT/.release-state"
+        err "请检查部署目录权限后重试，避免失败发布被误判为当前版本"
         return 1
     }
 }
@@ -746,6 +774,21 @@ publish_service_catalog() {
     mv -f -- "$loader_pending" "$DEPLOY_ROOT/service-catalog.sh" || return 1
     mv -f -- "$catalog_pending" "$DEPLOY_ROOT/service-catalog.tsv" || return 1
     log "服务清单已发布: $DEPLOY_ROOT/service-catalog.tsv"
+}
+
+publish_release_state() {
+    local commit pending="$DEPLOY_ROOT/.release-state.new"
+    commit="$(git -C "$REPO_PATH" rev-parse HEAD)" || return 1
+    rm -f -- "$pending" || return 1
+    if ! printf '%s\n%s\n' "$commit" "${ACTIVE_SERVICES[*]}" >"$pending"; then
+        rm -f -- "$pending"
+        return 1
+    fi
+    if ! chmod 0644 "$pending" || ! mv -f -- "$pending" "$DEPLOY_ROOT/.release-state"; then
+        rm -f -- "$pending"
+        return 1
+    fi
+    log "已记录当前发布版本: $(git -C "$REPO_PATH" rev-parse --short HEAD)"
 }
 
 validate_build_release() {
@@ -1324,12 +1367,21 @@ abort_active_release() {
 
 full_deploy() (
     local services=() svc
-    local status
+    local status auxiliary_release_complete=1
     validate_deploy_root || return 1
-    prepare_update_service_control || return 1
-    validate_backup_retention || return 1
     validate_release_options || return 1
+    # Resolving the installed service set is read-only. Service-manager and
+    # stopped-process checks are deferred until an update is actually needed.
+    resolve_active_services || return 1
     pull_code || return 1
+    if release_state_is_current; then
+        log "当前已发布版本与待发布版本一致（$(git -C "$REPO_PATH" rev-parse --short HEAD)），无需更新"
+        return 0
+    fi
+    # Once a full release starts, an earlier state must no longer be trusted.
+    # This is especially important for FORCE_UPDATE repairs of the same commit.
+    invalidate_release_state || return 1
+    validate_backup_retention || return 1
     validate_paths || return 1
 	load_deployment_service_catalog || return 1
 	prepare_update_service_control || return 1
@@ -1383,9 +1435,30 @@ full_deploy() (
         return "$status"
     fi
     trap - ERR INT TERM
-    publish_service_catalog || warn "服务已发布成功，但服务清单刷新失败"
-    publish_local_service_script || warn "服务已发布成功，但本地服务脚本刷新失败；请检查 $BUILD_DIR/scripts/service-local.sh"
-    publish_deploy_script || warn "服务已发布成功，但根目录部署脚本刷新失败；请继续使用 $BUILD_DIR/scripts/deploy-prod.sh"
+    publish_service_catalog || {
+        auxiliary_release_complete=0
+        warn "服务已发布成功，但服务清单刷新失败"
+    }
+    publish_local_service_script || {
+        auxiliary_release_complete=0
+        warn "服务已发布成功，但本地服务脚本刷新失败；请检查 $BUILD_DIR/scripts/service-local.sh"
+    }
+    publish_deploy_script || {
+        auxiliary_release_complete=0
+        warn "服务已发布成功，但根目录部署脚本刷新失败；请继续使用 $BUILD_DIR/scripts/deploy-prod.sh"
+    }
+    if [ "$auxiliary_release_complete" -ne 1 ]; then
+        err "业务服务已发布，但辅助发布文件不完整；未记录当前发布状态"
+        err "修复上述文件问题后重新执行 update，脚本会再次完整发布"
+        prune_successful_backups || warn "清理过期备份失败，请稍后人工清理"
+        return 1
+    fi
+    if ! publish_release_state; then
+        err "业务服务已发布，但当前发布状态写入失败"
+        err "修复部署目录权限后重新执行 update，脚本会再次完整发布"
+        prune_successful_backups || warn "清理过期备份失败，请稍后人工清理"
+        return 1
+    fi
     prune_successful_backups || warn "清理过期备份失败，请稍后人工清理"
     if [ "$ACTIVE_SERVICE_MANAGER" = "supervisor" ]; then
         log "全流程发布成功: $(git -C "$REPO_PATH" rev-parse --short HEAD)"
@@ -1474,7 +1547,7 @@ usage() {
 用法: deploy-prod.sh [命令]
 
 命令：
-  update         日常更新：拉取、构建、备份、迁移和发布；Supervisor 模式自动重启验收
+  update         维护发布：拉取、构建、备份、迁移和发布；Supervisor 模式自动重启验收
   migrate        仅执行版本化数据库迁移
   validate       校验必需服务及已启用可选服务的基础生产配置
   status         查看全部服务状态
@@ -1492,6 +1565,7 @@ usage() {
 不带命令时进入交互菜单。数据库迁移账号读取 MIGRATION_CONFIG；由外部迁移
 平台处理 DDL 时可显式设置 SKIP_MIGRATIONS=1 后执行 update。Supervisor 可选；
 未配置时先用 service-local.sh stop-all，更新完成后手动 start-all 和 status-all。
+同一 Git commit 需要重新构建和发布时，显式设置 FORCE_UPDATE=1。
 USAGE
 }
 
@@ -1527,7 +1601,7 @@ run_named_command() {
 menu() {
     local choice command_name
     echo ""
-    echo "1) 日常更新部署（Supervisor 自动重启；无 Supervisor 时手动启停）"
+    echo "1) 维护发布更新（Supervisor 自动重启；无 Supervisor 时手动启停）"
     echo "2) 仅执行数据库迁移"
     echo "3) 校验基础生产配置"
     echo "4) 查看全部服务状态"
