@@ -54,6 +54,9 @@ func (b *Bootstrap) Preview(ctx context.Context, draft Draft) (Plan, error) {
 	default:
 		return Plan{}, classificationProblem(assessment.Class)
 	}
+	if err := b.database.VerifyRuntimeLogin(ctx, draft.Database); err != nil {
+		return Plan{}, fmt.Errorf("%w: %w", ErrMySQLRuntimeAccount, err)
+	}
 	if assessment.CreateAdmin {
 		plan.Actions = append(plan.Actions, "创建首个超级管理员")
 	} else {

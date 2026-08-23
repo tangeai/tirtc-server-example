@@ -162,6 +162,8 @@ func setupError(c *gin.Context, err error) {
 		status, code = http.StatusServiceUnavailable, 503
 	case errors.Is(err, installer.ErrMySQLUnavailable):
 		status, code = http.StatusServiceUnavailable, 503
+	case errors.Is(err, installer.ErrMySQLRuntimeAccount):
+		status, code = http.StatusServiceUnavailable, 503
 	}
 	c.JSON(status, apiresp.JSON{Code: code, Msg: problem.Message, Data: problem})
 }

@@ -178,6 +178,24 @@ func (p *Provisioner) Inspect(ctx context.Context, input installapp.DatabaseInpu
 	return inspect(ctx, server, input.Name, false)
 }
 
+// VerifyRuntimeLogin checks the runtime identity without selecting or changing
+// the target database. This keeps invalid passwords and MySQL Host grants out
+// of the mutating installation phase, including when the database is absent.
+func (p *Provisioner) VerifyRuntimeLogin(_ context.Context, input installapp.DatabaseInput) error {
+	runtimeDB, err := openWithCredentials(input, input.RuntimeUser, input.RuntimePassword, false)
+	if err != nil {
+		return runtimeAccountError(err)
+	}
+	if err := runtimeDB.Close(); err != nil {
+		return runtimeAccountError(err)
+	}
+	return nil
+}
+
+func runtimeAccountError(err error) error {
+	return fmt.Errorf("%w: %w", installapp.ErrMySQLRuntimeAccount, err)
+}
+
 func (p *Provisioner) Claim(ctx context.Context, input installapp.DatabaseInput, operationID, instanceID string) (installapp.DatabaseClaim, error) {
 	server, err := open(input, false)
 	if err != nil {
@@ -288,7 +306,7 @@ func (c *claim) Prepare(ctx context.Context, firstAdmin installapp.FirstAdminInp
 		return fmt.Errorf("执行数据库迁移失败: %w", err)
 	}
 	if err := c.verifyRuntimeDML(ctx, optionalServices); err != nil {
-		return err
+		return runtimeAccountError(err)
 	}
 	store := adminapp.NewStore(target)
 	if err := store.SeedDefaults(ctx); err != nil {

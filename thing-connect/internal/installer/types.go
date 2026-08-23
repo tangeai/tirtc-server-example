@@ -30,20 +30,21 @@ const (
 )
 
 var (
-	ErrInvalidInput     = errors.New("installer: invalid input")
-	ErrPlanStale        = errors.New("installer: plan is stale")
-	ErrInstallBusy      = errors.New("installer: installation is running")
-	ErrAlreadyInstalled = errors.New("installer: already installed")
-	ErrUnauthorized     = errors.New("installer: invalid setup token")
-	ErrInvalidOrigin    = errors.New("installer: invalid setup origin")
-	ErrTooManyAttempts  = errors.New("installer: too many setup attempts")
-	ErrUnknownDatabase  = errors.New("installer: unknown non-empty database")
-	ErrExistingDatabase = errors.New("installer: existing database is read-only during first-run")
-	ErrSchemaFuture     = errors.New("installer: schema is newer than this binary")
-	ErrSchemaDrift      = errors.New("installer: schema does not match its migration ledger")
-	ErrRedisUnavailable = errors.New("installer: redis unavailable")
-	ErrMQTTUnavailable  = errors.New("installer: mqtt unavailable")
-	ErrMySQLUnavailable = errors.New("installer: mysql unavailable")
+	ErrInvalidInput        = errors.New("installer: invalid input")
+	ErrPlanStale           = errors.New("installer: plan is stale")
+	ErrInstallBusy         = errors.New("installer: installation is running")
+	ErrAlreadyInstalled    = errors.New("installer: already installed")
+	ErrUnauthorized        = errors.New("installer: invalid setup token")
+	ErrInvalidOrigin       = errors.New("installer: invalid setup origin")
+	ErrTooManyAttempts     = errors.New("installer: too many setup attempts")
+	ErrUnknownDatabase     = errors.New("installer: unknown non-empty database")
+	ErrExistingDatabase    = errors.New("installer: existing database is read-only during first-run")
+	ErrSchemaFuture        = errors.New("installer: schema is newer than this binary")
+	ErrSchemaDrift         = errors.New("installer: schema does not match its migration ledger")
+	ErrRedisUnavailable    = errors.New("installer: redis unavailable")
+	ErrMQTTUnavailable     = errors.New("installer: mqtt unavailable")
+	ErrMySQLUnavailable    = errors.New("installer: mysql unavailable")
+	ErrMySQLRuntimeAccount = errors.New("installer: mysql runtime account invalid")
 )
 
 type Mode string
@@ -241,6 +242,7 @@ type DependencyProbe interface {
 
 type DatabaseProvisioner interface {
 	Inspect(context.Context, DatabaseInput) (DatabaseAssessment, error)
+	VerifyRuntimeLogin(context.Context, DatabaseInput) error
 	Claim(context.Context, DatabaseInput, string, string) (DatabaseClaim, error)
 	VerifyConfigurationIntent(context.Context, string, string, string) error
 	RecordConfiguration(context.Context, string, string, string) error

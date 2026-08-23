@@ -1,9 +1,34 @@
 package installer
 
 import (
+	"context"
+	"errors"
+	"net"
 	"slices"
 	"testing"
+
+	installapp "thing-connect/internal/installer"
 )
+
+func TestProvisionerClassifiesRuntimeLoginFailure(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	input := installapp.DatabaseInput{
+		Host: "127.0.0.1", Port: port, Name: "thing_connect",
+		RuntimeUser: "runtime", RuntimePassword: "runtime-password", TLS: "false",
+	}
+
+	err = New().VerifyRuntimeLogin(context.Background(), input)
+	if !errors.Is(err, installapp.ErrMySQLRuntimeAccount) {
+		t.Fatalf("VerifyRuntimeLogin error = %v, want %v", err, installapp.ErrMySQLRuntimeAccount)
+	}
+}
 
 func TestRuntimeDMLTablesCoverSharedAccountConsumers(t *testing.T) {
 	minimal, err := runtimeDMLTables(nil)

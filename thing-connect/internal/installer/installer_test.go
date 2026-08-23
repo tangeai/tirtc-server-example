@@ -255,13 +255,41 @@ func TestPreviewClassifiesDatabaseDependencyFailureAsUnavailable(t *testing.T) {
 	}
 }
 
+func TestPreviewRejectsUnavailableRuntimeAccountBeforeInstallation(t *testing.T) {
+	runtimeErr := errors.New("access denied for runtime account")
+	database := &fakeProvisioner{
+		inspect:    DatabaseAssessment{Class: DatabaseAbsent, Versions: map[string]int{}, CreateAdmin: true},
+		runtimeErr: runtimeErr,
+	}
+	bootstrap := New(testOptions(t), Dependencies{Database: database, Probes: noopProbe{}})
+
+	_, err := bootstrap.Preview(context.Background(), testDraft())
+	if !errors.Is(err, runtimeErr) {
+		t.Fatalf("Preview error = %v, want runtime account root cause", err)
+	}
+	if !database.runtimeVerified {
+		t.Fatal("Preview did not verify the runtime account")
+	}
+	problem := Explain(err)
+	if problem.Code != "MYSQL_RUNTIME_ACCOUNT_INVALID" || problem.Message != "MySQL 运行账号检查失败" {
+		t.Fatalf("runtime account problem = %+v", problem)
+	}
+	if strings.Contains(problem.Message, "access denied") || len(problem.Suggestions) < 2 {
+		t.Fatalf("runtime account problem is not safe and actionable: %+v", problem)
+	}
+}
+
 func TestPreviewTreatsEveryExistingDatabaseAsReadOnly(t *testing.T) {
 	for _, class := range []DatabaseClass{DatabaseManagedOlder, DatabaseManagedCurrent} {
 		assessment := DatabaseAssessment{Class: class, TableCount: 23, Versions: map[string]int{"core": 1}}
-		bootstrap := New(testOptions(t), Dependencies{Database: &fakeProvisioner{inspect: assessment}, Probes: noopProbe{}})
+		database := &fakeProvisioner{inspect: assessment}
+		bootstrap := New(testOptions(t), Dependencies{Database: database, Probes: noopProbe{}})
 		_, err := bootstrap.Preview(context.Background(), testDraft())
 		if !errors.Is(err, ErrExistingDatabase) {
 			t.Fatalf("Preview %s = %v, want ErrExistingDatabase", class, err)
+		}
+		if database.runtimeVerified {
+			t.Fatalf("Preview %s checked credentials after refusing the existing database", class)
 		}
 		problem := Explain(err)
 		if problem.Code != "DATABASE_ALREADY_IN_USE" || !strings.Contains(problem.Message, "未执行任何写入") {
@@ -341,15 +369,21 @@ func TestFileBundlePrepareDoesNotActivateBeforeDatabaseIntent(t *testing.T) {
 }
 
 type fakeProvisioner struct {
-	inspect        DatabaseAssessment
-	inspectErr     error
-	claim          *fakeClaim
-	configRecorded bool
-	intentVerified bool
+	inspect         DatabaseAssessment
+	inspectErr      error
+	runtimeErr      error
+	runtimeVerified bool
+	claim           *fakeClaim
+	configRecorded  bool
+	intentVerified  bool
 }
 
 func (f *fakeProvisioner) Inspect(context.Context, DatabaseInput) (DatabaseAssessment, error) {
 	return f.inspect, f.inspectErr
+}
+func (f *fakeProvisioner) VerifyRuntimeLogin(context.Context, DatabaseInput) error {
+	f.runtimeVerified = true
+	return f.runtimeErr
 }
 func (f *fakeProvisioner) Claim(context.Context, DatabaseInput, string, string) (DatabaseClaim, error) {
 	return f.claim, nil
@@ -367,6 +401,7 @@ func (f *fakeProvisioner) Seal(context.Context, string, string, string) error { 
 type fakeClaim struct {
 	assessment DatabaseAssessment
 	prepared   bool
+	prepareErr error
 	recorded   bool
 	events     *[]string
 	recordErr  error
@@ -376,7 +411,7 @@ func (f *fakeClaim) Assessment() DatabaseAssessment { return f.assessment }
 func (f *fakeClaim) InstanceID() string             { return "instance-id" }
 func (f *fakeClaim) Prepare(context.Context, FirstAdminInput, []string) error {
 	f.prepared = true
-	return nil
+	return f.prepareErr
 }
 func (f *fakeClaim) Record(context.Context, string, string, string) error {
 	if f.recordErr != nil {
@@ -616,6 +651,44 @@ func TestBootstrapExecuteRechecksPlanInsideClaim(t *testing.T) {
 	}
 	if saved.OperationID != state.OperationID || saved.Phase != "awaiting_admin_restart" || saved.ConfigDigest == "" {
 		t.Fatalf("saved state = %+v", saved)
+	}
+}
+
+func TestExecutePersistsActionableRuntimeAccountProblem(t *testing.T) {
+	assessment := DatabaseAssessment{Class: DatabaseAbsent, Versions: map[string]int{}, CreateAdmin: true}
+	rootCause := errors.New("access denied for runtime account at application host")
+	claim := &fakeClaim{
+		assessment: assessment,
+		prepareErr: errors.Join(ErrMySQLRuntimeAccount, rootCause),
+	}
+	bootstrap := New(testOptions(t), Dependencies{
+		Database: &fakeProvisioner{inspect: assessment, claim: claim},
+		Bundles:  fakeBundle{},
+		Probes:   noopProbe{},
+	})
+	plan, err := bootstrap.Preview(context.Background(), testDraft())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bootstrap.Execute(context.Background(), ExecuteRequest{
+		Draft: draftPointer(testDraft()), PlanDigest: plan.Digest,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	waitForProblemCode(t, bootstrap, "MYSQL_RUNTIME_ACCOUNT_INVALID")
+	state, err := bootstrap.Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Phase != "database_claimed" || !claim.prepared {
+		t.Fatalf("runtime account failure state = %+v, prepared=%v", state, claim.prepared)
+	}
+	if state.Problem == nil || state.Problem.Message != "MySQL 运行账号检查失败" || len(state.Problem.Suggestions) < 2 {
+		t.Fatalf("runtime account problem is not actionable: %+v", state.Problem)
+	}
+	visible := state.Message + state.Problem.Message + strings.Join(state.Problem.Suggestions, " ")
+	if strings.Contains(strings.ToLower(visible), "access denied") {
+		t.Fatalf("runtime account root cause leaked to setup status: %s", visible)
 	}
 }
 

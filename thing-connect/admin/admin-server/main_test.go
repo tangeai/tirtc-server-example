@@ -43,6 +43,7 @@ func TestSetupErrorReportsDependencyWithoutLeakingRawCause(t *testing.T) {
 		{name: "redis", err: installer.ErrRedisUnavailable, message: "Redis 连接检查失败"},
 		{name: "mqtt", err: installer.ErrMQTTUnavailable, message: "MQTT 连接或认证失败"},
 		{name: "mysql", err: installer.ErrMySQLUnavailable, message: "MySQL 连接检查失败"},
+		{name: "mysql runtime account", err: installer.ErrMySQLRuntimeAccount, message: "MySQL 运行账号检查失败"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			gin.SetMode(gin.TestMode)

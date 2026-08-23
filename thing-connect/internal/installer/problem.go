@@ -10,6 +10,16 @@ import (
 // the wrapped cause and must only be written to protected server logs.
 func Explain(err error) Problem {
 	switch {
+	case errors.Is(err, ErrMySQLRuntimeAccount):
+		return Problem{
+			Code:    "MYSQL_RUNTIME_ACCOUNT_INVALID",
+			Message: "MySQL 运行账号检查失败",
+			Suggestions: []string{
+				"确认运行账号密码正确，并允许安装服务器实际来源地址登录；如有同名账号的更具体 Host 记录，优先检查该记录",
+				"检查账号锁定状态、认证插件和 TLS 要求，并确认运行账号已获得目标数据库的 SELECT、INSERT、UPDATE、DELETE 权限",
+				"修复账号后使用原安装任务重新预检；不要删除数据库、业务表或安装状态",
+			},
+		}
 	case errors.Is(err, ErrMySQLUnavailable):
 		return Problem{
 			Code:    "MYSQL_UNAVAILABLE",
