@@ -1,8 +1,8 @@
 # 多业务会话并发控制与产品实现参考
 
-本文说明一台设备同时承载 H5 实时、微信 VoIP、AI 对讲和设备互呼时，如何用统一仲裁器处理并发、取消、超时和迟到回调。文中的 Linux C 代码只对应 `device-sim-c`；其他操作系统或芯片需要建立独立移植并重新验证。
+这份文档说明一台设备同时承载 H5 实时、微信 VoIP、AI 对讲和设备互呼时，如何通过统一仲裁器处理并发、取消、超时和迟到回调。文中的 Linux C 代码只适用于 `device-sim-c`；其他操作系统或芯片需要独立移植并重新验证。
 
-> 业务接入顺序和协议字段分别见 [设备接入总览](device-integration.md)、[H5 实时](device-h5-live.md)、[微信 VoIP](device-voip.md)、[AI 对讲](device-ai.md) 和 [设备互呼](device-call.md)。本文只讨论设备端并发控制，不改变任何 HTTP、MQTT 或 TiRTC 对外接口。
+> 业务接入顺序和协议字段分别见 [设备接入总览](device-integration.md)、[H5 实时](device-h5-live.md)、[微信 VoIP](device-voip.md)、[AI 对讲](device-ai.md) 和 [设备互呼](device-call.md)。这里讨论的只是设备端并发控制，不改变任何 HTTP、MQTT 或 TiRTC 对外接口。
 
 **文档导航：** [返回总览](README.md) | [统一状态机](device-session-model.md) | [二次开发](device-porting.md) | [Linux C 参考实现](device-sim/device-sim-c/README.md) | [Python 模拟器](device-sim/device-sim-py/README.md)
 
@@ -15,7 +15,7 @@
 - 同一个摄像头、编码器或主码流；
 - 同一个产品交互焦点。
 
-核心做法是：
+整体设计分为六点：
 
 1. 用一个 `SessionArbiter` 决定谁有权使用资源。
 2. 用一个 `SessionCoordinator` 执行 TiRTC 的 Stop/Start 切换。
@@ -24,7 +24,7 @@
 5. 每个异步阶段必须记录结束时刻 `deadline`；失败、取消和超时都进入同一个结束出口。
 6. SDK 回调只投递事件，不在回调栈里执行 Stop/Uninit。
 
-有限状态机、有界事件队列、单一状态写入者、单调时钟超时和旧回调隔离都是常见工程做法。本项目把它们组合成一套具体策略；设备侧不存在强制所有产品使用同一组合的统一实现，队列容量、超时和优先级仍须按产品资源验证。
+这套策略组合了有限状态机、有界事件队列、单一状态写入者、单调时钟超时和旧回调隔离。不同产品可以采用其他组合，但队列容量、超时和优先级都必须根据实际资源验证。
 
 如果硬件能真正并行运行多套 RTC、编码器和音频链路，应把“唯一资源”扩展成资源集合，而不是绕过仲裁器。
 
@@ -87,7 +87,7 @@ CALL: IDLE -> OUTGOING/PENDING -> CONNECTING -> IN_CALL -> IDLE
 
 ## 4. 默认冲突策略
 
-当前 C/Python 参考实现采用确定性的非抢占策略：
+C/Python 参考实现采用确定性的非抢占策略：
 
 - H5 实时是后台基线，前台业务开始时暂停，结束后恢复。
 - 全局只有一个待接槽位，first-wins。
@@ -129,7 +129,7 @@ offer_pending(kind, room_id, ttl):
 
 取消消息必须同时匹配 kind 和 session_id。这样旧房间的迟到取消不会清除新房间。
 
-接听不是“先清 pending，再随便启动”，而是原子消费待接记录：
+接听时需要原子消费待接记录：
 
 ```text
 PENDING(room-A)
@@ -194,7 +194,7 @@ generation 使用 64 位无符号整数。产品不应在设备重启后持久�
 
 ## 8. 统一结束出口
 
-下面事件语义完全相同：
+以下事件都进入同一个结束流程：
 
 - 用户挂断或取消；
 - 对端挂断、拒接或取消；
@@ -371,7 +371,7 @@ event, kind, session_id, generation, old_owner, new_owner, reason, deadline
 
 测试应使用 fake clock/fake timer，不要真的等待 10、30、45 秒。
 
-## 15. 当前参考代码
+## 15. 参考代码
 
 C：
 
@@ -403,4 +403,4 @@ Python：
 9. 定义 busy/拒绝的外部行为。
 10. 增加迟到 callback、timeout、malformed input 和重复结束测试。
 
-如果这十项没有完成，新业务不能宣称已经接入统一竞态策略。
+新业务需要完成以上十项，才能接入统一竞态策略。

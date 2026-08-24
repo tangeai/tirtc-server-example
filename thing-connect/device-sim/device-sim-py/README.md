@@ -1,6 +1,6 @@
 # TiRTC Python 设备模拟器
 
-不用开发板，直接在电脑上模拟一台 TiRTC 音视频设备，体验：
+不用开发板，在电脑上就能模拟一台 TiRTC 音视频设备，用来验证：
 
 - 远程查看设备实时音视频
 - AI 语音对讲
@@ -95,7 +95,7 @@ python3 -m venv .venv
 - [HTTP / MQTT 接口参考](../../api-reference.md)
 - [TiRTC C API](https://docs.tange.ai/products/tirtc/api-reference/c.html)
 
-## 详细说明：环境搭建
+## 环境与依赖
 
 ### macOS
 
@@ -115,7 +115,7 @@ python3 device_sim_main.py --device-id DEV000001 --device-key your-key
 Python 3.13 起标准库不再包含 `audioop`；`requirements.txt` 会仅在
 Python 3.13–3.14 下安装兼容包 `audioop-lts`，无需手工处理。
 
-macOS 使用**文件媒体模式**模拟设备采集；当前 `--with-mic` 硬件音频模式仅支持 Windows。
+macOS 使用**文件媒体模式**模拟设备采集；`--with-mic` 硬件音频模式仅支持 Windows。
 
 可选快捷方式：
 
@@ -290,8 +290,9 @@ VOIP_SCREEN_WIDTH=640 VOIP_SCREEN_HEIGHT=480 VOIP_VIDEO_RES_MODE=fit_screen \
 `alaw/amr/opus`。使用 `--with-mic` 时，上下行必须同时为 `alaw_8khz` 或同时为
 `alaw_16khz`；PCM/AMR/Opus 只能去掉 `--with-mic` 后使用预编码文件测试。
 
-程序始终启动实时媒体推流；若 `--up-video-file` 为空或为 `audio-only`，则实时流退化为纯音频。终端发起或确认 VoIP、AI、设备通话后，
-实时流自动暂停；通话结束后自动恢复。三类通话不会同时运行。
+程序启动后会持续发送实时媒体流。`--up-video-file` 为空或设为 `audio-only` 时，只发送音频。
+
+通过终端发起或接听 VoIP、AI、设备通话后，实时流自动暂停，通话结束后再恢复。三类通话互斥，不会同时运行。
 
 ### 会话冲突与竞态规则
 
@@ -301,17 +302,21 @@ Python 与 C 模拟器统一通过 `SessionArbiter` 仲裁 MQTT、终端和 SDK 
 - 全局只有一个待接槽位，VoIP/设备来电 first-wins；后来来电直接 busy 拒绝，不能覆盖先到来电。
 - 待接槽位绑定 `room_id` 和票据代次，并有 45 秒 TTL；迟到取消只能作用于同一房间。
 - 外呼、AI 对讲和接听来电取得唯一 RTC 所有权后，其他业务不能启动；不做自动抢占。
-- 当前 VoIP 回铃和新来电在同一把锁内分类；接听按 `PENDING → STARTING → ACTIVE` 提交，token 请求或启动期间取消不会复活旧来电。
+- VoIP 回铃和新来电在同一把锁内分类；接听按 `PENDING → STARTING → ACTIVE` 提交，token 请求或启动期间取消不会复活旧来电。
 - 失败、拒接、取消、超时及远端挂断都归还所有权并恢复 H5；生命周期结束使用常驻队列，H5 恢复失败会限次重试。
 - 每次所有权都有递增代次，迟到的旧结束事件不能终止后来启动的同类会话；设备忙线拒接 HTTP 不在 MQTT 回调线程执行。
 
-新增独占 RTC 的业务时，扩展 `SessionKind` 和生命周期适配器，并统一接入仲裁器；业务状态机不再互相查询状态来决定竞争结果。
+需要接入新的独占 RTC 业务时，扩展 `SessionKind` 和生命周期适配器，并统一接入仲裁器。各业务状态机不要互相查询状态来决定竞争结果。
 
 ### TiRTC 运行时架构
 
-进程中只有一个 `TiRtcRuntime`，由它持有统一的 SDK 回调表和连接归属表。启动时完成一次 `TiRtcInit` / `TiRtcStart`，进程退出时执行一次 `TiRtcStop` / `TiRtcUninit`。实时流、VoIP、AI 和设备互呼只注册业务回调，切换时仅停止当前媒体、断开当前连接并激活下一业务代次，不重启 SDK。
+进程中只有一个 `TiRtcRuntime`，统一持有 SDK 回调表和连接归属表。进程启动时调用一次 `TiRtcInit` / `TiRtcStart`，退出时调用一次 `TiRtcStop` / `TiRtcUninit`。
 
-每个连接都绑定到建立它的业务代次。SDK 回调先经过 runtime 检查，再分发给当前业务；已经取消或切换的连接回调会被丢弃，迟到的成功连接会在回调返回后断开。每个回调域使用一个进程期常驻、有界的控制队列，媒体线程启停、断开连接、命令解析和会话恢复都在 SDK 回调栈之外执行；下行文件写入与声卡播放使用独立有界媒体队列。
+实时流、VoIP、AI 和设备互呼只注册各自的业务回调。切换业务时停止媒体、断开连接并激活下一业务代次，不重启 SDK。
+
+每个连接都绑定到建立它的业务代次。SDK 回调先经过 runtime 检查，再分发给对应业务。已经取消或切换的连接回调会被丢弃；成功结果迟到时，连接会在回调返回后断开。
+
+每个回调域使用一个随进程常驻的有界控制队列。媒体线程启停、连接断开、命令解析和会话恢复都在 SDK 回调栈之外执行；下行文件写入与声卡播放则使用独立的有界媒体队列。
 
 ## 启动后如何使用
 
@@ -356,7 +361,7 @@ Python 与 C 模拟器统一通过 `SessionArbiter` 仲裁 MQTT、终端和 SDK 
 
 ## 按验证场景使用
 
-下面这些场景，都是按“先启动设备模拟器，再在终端或 H5 / 小程序侧操作”的顺序设计的。
+下面的场景都先启动设备模拟器，再从终端、H5 或小程序操作。
 
 ### 1. 验证设备 H5 出图
 
@@ -714,7 +719,7 @@ VoIP、AI、设备互呼和实时流模块不单独初始化或反初始化 SDK�
 
 ### MQTT
 
-TLS 开关由服务发现返回值 `mqtt_tls`（bool）自动决定。无额外配置——所有 ca 根证书走系统默认信任链。
+TLS 开关由服务发现返回的 `mqtt_tls`（bool）自动决定，无需额外配置。CA 根证书使用系统默认信任链。
 
 paho-mqtt 连接参数由 `device_flow.connect_mqtt_blocking` 自动组装：
 
@@ -953,12 +958,12 @@ WHIP 连接成功后需等 ~300ms KCP 握手再发 `start_session`。
 
 ## 常见坑
 
-1. **回调对象必须保持存活**：ctypes `CFUNCTYPE` 包装器存入 `cbs._cb_refs` 列表，防止 GC
-2. **回调内不能阻塞或反向调用断开/反初始化**：SDK 回调在内部线程执行，只能复制数据、更新受保护状态或投递事件；每个回调域只有一个常驻有界控制队列，`Disconnect`、命令解析、线程启停和会话恢复必须延后到回调栈之外，文件与声卡 I/O 使用独立有界媒体队列
-3. **`TiRtcWhipConnect` 返回 0 ≠ 成功**：真正结果在 `connect_cb` 回调的 `error` 参数
-4. **AI WHIP 连接后等 ~300ms**：KCP 握手完成前发送命令会丢失
-5. **AI 文件发完即停止上行**：连接保持到服务端返回 `end_session`，不再额外补静音
-6. **H.264 必须重新编码**：`-c copy` 导致 SPS/PPS 缺失、B 帧残留
-7. **SDK 生命周期属于进程级 runtime**：只在进程启动时 Init/Start，业务切换不 Stop/Uninit，进程退出时才 Stop/Uninit
-8. **扬声器外放时有回声**：将电脑音量调到 ~15%，程序启动时会提示
-9. **摄像头无法打开**：确认只在 Windows 使用 `--with-camera`，检查 Windows“相机隐私设置”是否允许桌面应用访问，并用 `--camera-index 1` 等编号选择其他摄像头
+1. **回调对象必须保持存活**：将 ctypes `CFUNCTYPE` 包装器存入 `cbs._cb_refs` 列表，避免被 GC 回收。
+2. **不要在回调内阻塞，也不要反向调用断开或反初始化**：SDK 回调在内部线程执行，只复制数据、更新受保护状态或投递事件。每个回调域只有一个常驻的有界控制队列，`Disconnect`、命令解析、线程启停和会话恢复都要等回调返回后再执行。文件与声卡 I/O 使用独立的有界媒体队列。
+3. **`TiRtcWhipConnect` 返回 0 不代表连接成功**：连接结果以 `connect_cb` 回调的 `error` 参数为准。
+4. **AI WHIP 连接后等 ~300ms**：KCP 握手完成前发送命令会丢失。
+5. **AI 文件发完即停止上行**：连接保持到服务端返回 `end_session`，不再额外补静音。
+6. **H.264 必须重新编码**：`-c copy` 会造成 SPS/PPS 缺失、B 帧残留。
+7. **SDK 生命周期属于进程级 runtime**：只在进程启动时 Init/Start，业务切换不 Stop/Uninit，进程退出时才 Stop/Uninit。
+8. **扬声器外放时有回声**：将电脑音量调到 ~15%，程序启动时会提示。
+9. **摄像头无法打开**：确认只在 Windows 使用 `--with-camera`，检查 Windows“相机隐私设置”是否允许桌面应用访问，并用 `--camera-index 1` 等编号选择其他摄像头。

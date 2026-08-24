@@ -8,7 +8,9 @@
 
 ### `GET /services`
 
-设备启动时获取各业务服务与 TiRTC 的当前入口地址。无需鉴权。自托管环境在 user-server 中启用 `discovery.enabled` 并配置设备可访问的公网地址；向 `fetch_services()` 传入该入口根地址，**「C 参考实现」**会请求根地址加 `/services`。演示环境入口为 `http://ep-open.tangeopen.com/services`。
+设备启动时通过该接口获取各业务服务和 TiRTC 的入口地址，无需鉴权。自托管环境需要在 user-server 中启用 `discovery.enabled`，并配置设备可访问的公网地址。
+
+向 `fetch_services()` 传入入口根地址后，Linux C 参考实现会请求根地址下的 `/services`。演示环境入口为 `http://ep-open.tangeopen.com/services`。
 
 **成功响应** — HTTP 200，JSON 对象：
 
@@ -22,7 +24,7 @@
 | `mqtt-srv` | ✅ | MQTT 地址，格式 `mqtt://host:port` 或 `mqtts://host:port` |
 | `tirtc-srv` | ✅ | TiRTC SDK 服务入口；用于 `TIRTC_OPT_SERVICE_ENDPOINT` |
 
-设备应使用服务发现返回的地址，不要将各业务服务地址或 `tirtc-srv` 固化在固件中。**「C 参考实现」**见 [`fetch_services()`](device-sim/device-sim-c/src/device_flow.c)。
+设备应使用服务发现返回的地址，不要将各业务服务地址或 `tirtc-srv` 固化在固件中。Linux C 参考实现见 [`fetch_services()`](device-sim/device-sim-c/src/device_flow.c)。
 
 ---
 
@@ -38,7 +40,9 @@
 | voip-server | 0 | `"ok"` | 200（鉴权 401 除外） | 错误通过 body `code` 字段区分 |
 | call-server | 200 | `"ok"` | 200（鉴权 401 除外） | 与 device/user/ai-server 一致，跟 voip-server 不同（H5 会直连 call-server，两套成功码容易踩坑） |
 
-> 所有服务成功响应均包含 `"msg":"ok"` 字段。以下示例为简洁起见部分省略 `"msg"` 字段，实际返回中始终存在。
+> 上表适用于使用统一业务响应体的接口。这些接口成功时都包含 `"msg":"ok"`；下文部分示例为简洁起见省略了该字段。
+>
+> 服务发现和微信回调使用各自的响应格式：`GET /services` 直接返回地址对象，`GET /v1/voip/notification/:wx_app_id` 返回纯文本，`POST /v1/voip/notification/:wx_app_id` 返回 `errcode/errmsg`。
 >
 > 客户端必须按数值 `code` 分支，不得比较 `msg` 文本；错误说明允许在不改变
 > `code`、HTTP 状态和 JSON 字段的前提下优化。完整规则见
@@ -65,20 +69,21 @@ JWT 缺失、无效、过期或缺少必要 claim 时返回 HTTP 401 + `code=401
 |--------|---------|-----------|
 | IoT 设备 | `Authorization: Bearer <mqtt_token>` | `POST /v1/device/token` 返回的 `mqtt_token` |
 | 待绑定设备 TTS | `Authorization: Bearer <temp_token>` | 同一次 `POST /v1/device/report` 返回的 `temp_token` |
-| H5 / 小程序用户 | `Authorization: Bearer <user_jwt>` | `POST /v1/user/register` 或 `/v1/user/login` 返回的 `token` |
+| H5、小程序用户 | `Authorization: Bearer <user_jwt>` | `POST /v1/user/register` 或 `/v1/user/login` 返回的 `token` |
 | 微信服务器 | 签名校验（微信标准） | — |
 | 内部服务 | `X-Internal-Key: <shared-key>` | 各服务共同配置的内部调用密钥 |
 | 公开接口 | 无 | — |
 
 **设备 JWT**: 正式 `mqtt_token` 的 `device_id` claim 是设备 ID；临时 `temp_token` 的 `device_id` claim 是 `temp_client_id`。两者都有 `exp`，由 device-server 签发；TTS 只接受与验证码记录匹配的临时 token。
 
-**用户 JWT**: 包含 `user_id`、`auth_revision`、`iat` 和 `exp`。由 user-server 签发，user-server /
-voip-server / ai-server / call-server 使用相同 `jwt_secret` 验证。账号禁用、密码修改或认证版本递增后，只拒绝该用户的旧令牌；历史令牌缺少 `auth_revision` 时按版本 1 兼容。
+**用户 JWT**: 包含 `user_id`、`auth_revision`、`iat` 和 `exp`。由 user-server 签发，user-server、
+voip-server、ai-server 和 call-server 使用相同的 `jwt_secret` 验证。账号禁用、密码修改或认证版本递增后，只拒绝该用户的旧令牌；历史令牌缺少 `auth_revision` 时按版本 1 兼容。
 
 ### Content-Type
 
-除明确标注为文件上传的接口外，所有 POST / PUT 接口需
-`Content-Type: application/json`。文件上传接口使用 `multipart/form-data`，GET 接口无需。
+业务接口的 POST / PUT 请求默认使用 `Content-Type: application/json`。文件上传使用
+`multipart/form-data`；微信 VoIP 通知回调的请求体是 XML，不适用上述 JSON 约定。GET
+接口通常无需设置 `Content-Type`。
 
 ---
 
@@ -164,11 +169,13 @@ voip-server / ai-server / call-server 使用相同 `jwt_secret` 验证。账号�
 | 第 2 ~ `rate_limit_max_hits` 次（默认 ≤10） | 200，**返回与首次完全相同的 `code` / `temp_token` / `temp_client_id`** | 幂等重放：设备重启或重连后重复上报不会换码、也不报错，并绕过全局待处理码上限 |
 | 超过 `rate_limit_max_hits` 次 | 429 | 同一 MAC 限频，`Retry-After` = `rate_limit_window` |
 
-> 因此**单客户端按顺序重复上报同一 MAC，正常只会得到 200（返回原码）或超限后的 429，不会得到 409**。
+> 单个客户端按顺序重复上报同一 MAC 时，只会得到 200（返回原验证码）或超限后的 429。正常情况下不会返回 409。
 
 **409（40901）触发条件**
 
-409 表示该 MAC 仍持有未消费验证码（锁还在），但本次请求没命中上表的幂等重放、直接走到了「新建验证码」这步，撞上已存在的锁。它属于并发与缓存时序边界的兜底返回，`Retry-After` = `code_ttl`。典型诱因：
+409 表示该 MAC 仍持有未消费验证码，但本次请求没有命中上表的幂等重放，而是在新建验证码时遇到已有锁。这是并发与缓存时序边界的兜底返回，`Retry-After` = `code_ttl`。
+
+常见原因如下：
 
 - **并发重复上报**：同一 MAC 几乎同时发来两笔 Report，先抢到锁的返回 200，后到的拿 409。
 - **限频窗口已过、验证码锁仍在**：当部署配置 `rate_limit_window < code_ttl` 时（默认两者相等，均为 190s），计数器先于锁过期，下一笔上报看上去像首次、不走重放，却撞上仍在的锁。
@@ -2448,11 +2455,13 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 
 面向 IoT 硬件设备（+ H5 联系人管理），实现设备间音视频通话。
 
-> **响应格式约定**：call-server 成功时返回 HTTP 200 + `code=200`，业务失败时
-> 返回 HTTP 200 + 非 200 业务码。只有 JWT 中间件鉴权失败返回 HTTP 401 +
-> `code=401`。通过 JWT 鉴权后的资源权限错误使用 `40300`，内部服务凭证错误使用
-> `40301`。所有端点都可能返回 HTTP 200 + `code=50000`（服务器内部错误），
-> 下列端点不再重复列出该通用错误。
+> **响应格式约定：**
+>
+> - 成功时返回 HTTP 200 + `code=200`。
+> - 业务失败时返回 HTTP 200 + 非 200 业务码。
+> - JWT 中间件鉴权失败返回 HTTP 401 + `code=401`。
+> - JWT 鉴权后的资源权限错误使用 `40300`，内部服务凭证错误使用 `40301`。
+> - 所有端点都可能返回 HTTP 200 + `code=50000`（服务器内部错误），下列端点不再重复列出该通用错误。
 >
 > **跨域**: call-server 不加 CORS。H5 联系人页面通过 nginx 反向代理跟 user-server 统一到同一个域名下（见 [`thing-connect.nginx.conf`](deploy/nginx/thing-connect.nginx.conf)：`/v1/call/*` 转发到 call-server，其余转发到 user-server），浏览器全程同源。
 
@@ -2549,7 +2558,7 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 | 40300 | 200 | 调用者不是该房间的合法 caller/target |
 | 40400 | 200 | 房间不存在（已取消或已过期） |
 
-> 若接听者当前锁定在另一个房间，会自动释放原房间（`room_cancel{reason:"caller_left"}` 通知原房间对方）再接听新来电——没有"忙"分支，不想切换应调 `/v1/call/reject` 拒接。
+> 接听者如果已锁定在另一个房间，服务端会先释放原房间，并通过 `room_cancel{reason:"caller_left"}` 通知原房间对方，然后接听新来电。该流程没有“忙”分支；设备不想切换房间时，应调用 `/v1/call/reject` 拒接。
 
 ---
 
@@ -2674,7 +2683,7 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 
 ### `POST /v1/call/device/contacts/request`
 
-发起联系人申请（跨账号）；同账号设备会直接自动接受，不走 pending 流程。仅适用于设备联系人——VoIP 联系人没有申请流程。
+发起跨账号联系人申请。同账号设备会直接自动接受，不走 pending 流程。该接口只适用于设备联系人；VoIP 联系人没有申请流程。
 
 **鉴权**: ✅ 设备 JWT　**请求体**: `{ "target_device_id": "TIRZ00000002" }`
 

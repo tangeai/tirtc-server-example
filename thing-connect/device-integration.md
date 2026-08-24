@@ -1,8 +1,8 @@
 # 设备上线与 MQTT 接入
 
-设备从上电到建立 MQTT 长连接的完整流程：两条上线路径、临时/正式连接、Topic 与消息规范、Token 生命周期。
+这份指南说明设备从上电到建立 MQTT 长连接的完整流程，包括两条上线路径、临时和正式连接、Topic、消息规范及 token 生命周期。
 
-> 设备上线协议以本文档为准。Linux 上的可运行控制流见 [device-sim-c](device-sim/device-sim-c/README.md)；它不是硬件固件，也不包含安全存储、硬件身份或量产机制。HTTP 字段定义见 [api-reference.md#device-server](api-reference.md#device-server)。
+> 设备上线协议以这份文档为准。Linux 上可运行的控制流见 [device-sim-c](device-sim/device-sim-c/README.md)。它不是硬件固件，也不包含安全存储、硬件身份或量产机制。HTTP 字段定义见 [api-reference.md#device-server](api-reference.md#device-server)。
 
 **文档导航：** [返回总览](README.md) | [H5 实时](device-h5-live.md) | [微信 VoIP](device-voip.md) | [AI 对讲](device-ai.md) | [设备呼设备](device-call.md) | [统一状态机](device-session-model.md) | [API Reference](api-reference.md)
 
@@ -14,7 +14,7 @@
 - [临时 MQTT 连接](#临时-mqtt-连接)
 - [正式连接与 MQTT 规范](#正式连接与-mqtt-规范)
 - [上线后业务接入](#上线后业务接入)
-- [Token 生命周期](#token-生命周期)
+- [token 生命周期](#token-生命周期)
 - [错误码与问题排查](#错误码与问题排查)
 
 ---
@@ -44,13 +44,16 @@
 | 验证码 | 持久化存储无 ID+Key | [`POST /v1/device/report`](api-reference.md#post-v1devicereport) | 绑定后从 device_pool 分配（`assign=dynamic`） |
 | 预置凭证 | 持久化存储有 ID+Key | [`POST /v1/device/token`](api-reference.md#post-v1devicetoken) | 生产阶段安全写入（`assign=preburn`） |
 
-无论走哪条路径，最终都收敛到同一步：用 `device_id + device_key` 调 [`/v1/device/token`](api-reference.md#post-v1devicetoken) 换 `mqtt_token`，建立正式连接。上线完成后设备才进入 VoIP / AI / 设备间通话等业务流程。
+两条路径最终都使用 `device_id + device_key` 调用 [`/v1/device/token`](api-reference.md#post-v1devicetoken)，换取 `mqtt_token` 并建立正式连接。上线完成后，设备才能进入 VoIP、AI 和设备互呼等业务流程。
 
 > **返回约定（device-server）：** 成功返回 `HTTP 200` 且 body `code=200`；失败返回对应的 HTTP 状态码，body 携带业务 `code`（如 `HTTP 410 + code=6006`）。
 
 > **路径选择规则：**
+>
 > 1. 持久化存储有凭证 → 先调 [`POST /v1/device/token`](api-reference.md#post-v1devicetoken)；返回 `HTTP 200 + code=200` → 直接建立正式连接。
-> 2. Token 返回 `HTTP 410 + code=6006`（设备已被解绑）→ 调 Report 时**必须携带签名 Header**（`X-Device-Id` / `X-Timestamp` / `X-Nonce` / `X-Signature`，用本地 `device_key` 签名，算法同 [`/v1/device/token`](api-reference.md#post-v1devicetoken)），服务端才会将设备绑回原 ID，而非从 pool 分配新 ID；绑定成功后下发的 `auth_grant` 为空 payload，设备继续使用本地凭证（见 [api-reference.md#post-v1devicereport](api-reference.md#post-v1devicereport)）。
+> 2. token 接口返回 `HTTP 410 + code=6006`，表示设备已解绑。重新调用 Report 时**必须携带签名请求头**：`X-Device-Id`、`X-Timestamp`、`X-Nonce` 和 `X-Signature`。签名使用本地 `device_key`，算法与 [`/v1/device/token`](api-reference.md#post-v1devicetoken) 相同。
+>
+>    服务端会将设备绑回原 ID，不会从 pool 分配新 ID。绑定成功后下发的 `auth_grant` 为空 payload，设备继续使用本地凭证。详情见 [api-reference.md#post-v1devicereport](api-reference.md#post-v1devicereport)。
 > 3. 持久化存储无凭证 → 调 [`POST /v1/device/report`](api-reference.md#post-v1devicereport)（不带签名 Header，body 只有 `mac` 一个字段），走验证码流程从 pool 分配新 ID。
 
 ```mermaid
@@ -74,11 +77,15 @@ flowchart TD
     M --> Z
 ```
 
-> Report 带签名 Header 时（设备已持有 `device_key`），服务端跳过限频层，仅校验签名和 MAC 一致性，详见 [api-reference.md#post-v1devicereport](api-reference.md#post-v1devicereport)。用 device_id 绑定/绑回原 ID 且该设备当前无主时，服务端要求设备已建立临时 MQTT 连接，否则返回 6002，详见 [api-reference.md#post-v1userdevicebind-by-id](api-reference.md#post-v1userdevicebind-by-id)。
+> Report 携带签名请求头时，表示设备已经持有 `device_key`。服务端会跳过限频层，只校验签名和 MAC 一致性，详情见 [api-reference.md#post-v1devicereport](api-reference.md#post-v1devicereport)。
+>
+> 使用 device_id 绑定或绑回原 ID 时，如果设备当前无主，服务端要求设备已建立临时 MQTT 连接，否则返回 6002。详情见 [api-reference.md#post-v1userdevicebind-by-id](api-reference.md#post-v1userdevicebind-by-id)。
 
 ### C 参考实现的完整上线调用顺序
 
-Linux C 参考实现已把 HTTP、HMAC、临时 MQTT 和正式 MQTT 封装在 `device_flow.c`。以下代码说明产品应保留的协议分支；`flash_load_credentials()`、`flash_save_credentials()`、`mac`、`runtime` 和业务回调都是产品必须提供的占位符，不是参考实现 API。产品还需完成[十项二次开发 TODO](device-porting.md#二次开发-todo)，不能只替换存储函数。函数声明见 [device_flow.h](device-sim/device-sim-c/src/device_flow.h)，Linux 完整实现见 [device_flow.c](device-sim/device-sim-c/src/device_flow.c)。
+Linux C 参考实现将 HTTP、HMAC、临时 MQTT 和正式 MQTT 封装在 `device_flow.c`。下面的代码说明产品需要保留的协议分支。`flash_load_credentials()`、`flash_save_credentials()`、`mac`、`runtime` 和业务回调都是产品提供的占位符，不属于参考实现 API。
+
+产品还需要完成[十项二次开发 TODO](device-porting.md#二次开发-todo)，不能只替换存储函数。函数声明见 [device_flow.h](device-sim/device-sim-c/src/device_flow.h)，Linux 完整实现见 [device_flow.c](device-sim/device-sim-c/src/device_flow.c)。
 
 ~~~c
 #include <string.h>
@@ -146,7 +153,9 @@ return connect_mqtt_blocking(svc.mqtt_host, svc.mqtt_port,
                              &g_stop, svc.mqtt_tls);
 ~~~
 
-`get_mqtt_token()` 返回 `-2` 是 「C 参考实现」对业务码 6006 的专用映射，表示必须进入签名 Report 流程；不要把它当作普通网络失败无限重试。`connect_temp_mqtt()` 收到 `auth_grant` 会自动 ACK 并断开临时连接；`connect_mqtt_blocking()` 负责订阅正式 Topic、ACK cmd 消息和 30 秒心跳，但不会自动刷新过期的 mqtt_token。
+在 Linux C 参考实现中，`get_mqtt_token()` 返回 `-2` 是业务码 6006 的专用映射，表示设备必须进入签名 Report 流程，不能把它当作普通网络失败无限重试。
+
+`connect_temp_mqtt()` 收到 `auth_grant` 后会自动 ACK 并断开临时连接。`connect_mqtt_blocking()` 负责订阅正式 Topic、ACK cmd 消息和 30 秒心跳，但不会自动刷新过期的 `mqtt_token`。
 
 ---
 
@@ -162,20 +171,22 @@ return connect_mqtt_blocking(svc.mqtt_host, svc.mqtt_port,
 | 连接 | ClientID | Username | Password | 用途 |
 |------|---------|----------|----------|------|
 | 临时 | `tmp_{8位hex}`（Report 响应中的 `temp_client_id`） | 同 ClientID | `temp_token`（JWT，`device_id` claim = ClientID） | 仅接收 `auth_grant` |
-| 正式 | `sn_{device_id}` | `device_id` | `mqtt_token`（JWT，有效期 `token_expiry`） | VoIP / AI / 设备间通话等所有业务通信 |
+| 正式 | `sn_{device_id}` | `device_id` | `mqtt_token`（JWT，有效期 `token_expiry`） | VoIP、AI、设备互呼等所有业务通信 |
 
-> 两种连接的填法不同，注意不要混：
+> 两种连接使用不同参数：
 >
-> - **临时连接**：ClientID 和 Username 填同一个值——Report 返回的 `temp_client_id`；Password 填 `temp_token`。
+> - **临时连接**：ClientID 和 Username 都填写 Report 返回的 `temp_client_id`，Password 填写 `temp_token`。
 > - **正式连接**：ClientID 填 `sn_{device_id}`（带前缀），Username 填 `device_id`（不带前缀）；Password 填 `mqtt_token`。
 >
-> 关键约束在 Username 上：EMQX 做 JWT 认证时拿 Username 去比对 token 里的 `device_id` claim，所以 Username 一律不带前缀。ClientID 的 `tmp_` / `sn_` 前缀与认证无关，是服务端的寻址约定——在线状态（Redis `online:{clientID}`）、踢线、下行 Topic 都按带前缀的 ClientID 找设备，不能省。
+> EMQX 进行 JWT 认证时，会用 Username 比对 token 中的 `device_id` claim，因此 Username 一律不带前缀。ClientID 的 `tmp_` 和 `sn_` 前缀与认证无关，是服务端的寻址约定。在线状态（Redis `online:{clientID}`）、踢线和下行 Topic 都通过带前缀的 ClientID 查找设备，不能省略。
 
 ---
 
 ## 临时 MQTT 连接
 
-Report 成功后，设备从 **HTTP 响应** 中拿到 `temp_client_id`（格式 `tmp_{8位hex}`，如 `tmp_a1b2c3d4`）和 `temp_token`，按 [凭证与连接](#凭证与连接) 中的临时连接参数**立即建立连接**，订阅 `device/{temp_client_id}/cmd` 等待 `auth_grant` 下发。连接有效期与验证码相同（`code_ttl`），服务端通过 Redis key `online:{temp_client_id}` 判断设备是否在线。
+Report 成功后，设备从 HTTP 响应中取得 `temp_client_id`（格式为 `tmp_{8位hex}`，例如 `tmp_a1b2c3d4`）和 `temp_token`。随后按[凭证与连接](#凭证与连接)中的临时参数立即建立连接，并订阅 `device/{temp_client_id}/cmd`，等待 `auth_grant` 下发。
+
+临时连接的有效期与验证码相同，均为 `code_ttl`。服务端通过 Redis key `online:{temp_client_id}` 判断设备是否在线。
 
 临时连接只用于接收 `auth_grant`，处理方式如下：
 
@@ -213,7 +224,7 @@ Report 成功后，设备从 **HTTP 响应** 中拿到 `temp_client_id`（格式
 | `call_cancel` | `notify` | 微信用户挂断或取消时 |
 | `callers_update` | `notify` | 授权列表变更时（用户 report-auth / delete-auth） |
 
-**`call_incoming`** — 设备用 `peer_id` + `token` 调 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcwhipconnect" target="_blank" rel="noopener">`TiRtcWhipConnect`</a> 接听：
+**`call_incoming`**：设备使用 `peer_id` 和 `token` 调用 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcwhipconnect" target="_blank" rel="noopener">`TiRtcWhipConnect`</a> 接听：
 
 ```json
 {
@@ -240,13 +251,13 @@ Report 成功后，设备从 **HTTP 响应** 中拿到 `temp_client_id`（格式
 - 微信回调携带 call_id 时，payload 额外包含 `wx_call_id`、`wx_from` 两个字段
 - `wx_*` 字段在设备拒接时按拒接接口要求回传，字段映射见 [device-voip.md#拒接与取消](device-voip.md#拒接与取消)
 
-**`call_cancel`** — 对方已取消/拒接，设备清理本地等待状态、断开对应会话：
+**`call_cancel`**：对方已取消或拒接，设备清理本地等待状态并断开对应会话：
 
 ```json
 { "type": "call_cancel", "channel": "wx", "payload": { "wx_room_id": "wxf830863afde621ebWmpfVoip123456" } }
 ```
 
-**`callers_update`** — 授权列表有变化，设备按需刷新本地缓存：
+**`callers_update`**：授权列表有变化，设备按需刷新本地缓存：
 
 ```json
 { "type": "callers_update", "channel": "wx", "payload": {} }
@@ -265,7 +276,7 @@ Report 成功后，设备从 **HTTP 响应** 中拿到 `temp_client_id`（格式
 
 ## 上线后业务接入
 
-完成本文档的“正式连接”后，设备已经具备持久身份（`device_id + device_key`）、正式 MQTT 长连接和 `mqtt_token`，后续业务按场景拆分阅读：
+正式连接建立后，设备已经具备持久身份（`device_id + device_key`）、MQTT 长连接和 `mqtt_token`。后续按需要查阅对应的业务文档：
 
 | 文档 | 内容 | 什么时候看 |
 |------|------|-----------|
@@ -275,25 +286,16 @@ Report 成功后，设备从 **HTTP 响应** 中拿到 `temp_client_id`（格式
 | [device-call.md](device-call.md) | 设备呼设备：联系人、房间、P2P 建连、接听/拒接/挂断 | 做设备间音视频通话 |
 | [device-session-model.md](device-session-model.md) | 统一状态机、消息路由、业务抢占规则 | 一台设备同时做多类业务 |
 
-**推荐阅读顺序：**
-
-1. 先按本文档完成设备上线、正式 MQTT 连接和 `mqtt_token` 获取。
-2. 需要实时预览时看 [device-h5-live.md](device-h5-live.md)。
-3. 需要微信 VoIP 时看 [device-voip.md](device-voip.md)。
-4. 需要 AI 对讲时看 [device-ai.md](device-ai.md)。
-5. 需要设备呼设备时看 [device-call.md](device-call.md)。
-6. 一台设备要同时接多类业务时，再看 [device-session-model.md](device-session-model.md)。
-
 ---
 
-## Token 生命周期
+## token 生命周期
 
 `mqtt_token` 有效期由 `service.token_expiry` 控制（默认 168h = 7 天）。产品应明确选择以下一种策略：
 
 - **内存缓存并提前刷新**：运行期间记录到期时间，在过期前重新获取；重启后重新取 token。这样不增加长期凭证落盘范围。
 - **安全持久化 token**：仅在产品必须离线快速启动时采用；存储必须防止未授权读取，并在到期前或认证失败后刷新。
 
-**Token 过期断连：** EMQX 在 JWT 过期时主动断开设备，`onDisconnect` 收到原因码 `0x98`（认证过期）或 `0x99`（ACL 拒绝）。设备应以此作为触发信号，重新调用 [`/v1/device/token`](api-reference.md#post-v1devicetoken) 换取新 token 后重连。
+**token 过期断连：** EMQX 在 JWT 过期时主动断开设备，`onDisconnect` 收到原因码 `0x98`（认证过期）或 `0x99`（ACL 拒绝）。设备应以此作为触发信号，重新调用 [`/v1/device/token`](api-reference.md#post-v1devicetoken) 换取新 token 后重连。
 
 ---
 
@@ -332,4 +334,4 @@ Report 成功后，设备从 **HTTP 响应** 中拿到 `temp_client_id`（格式
 | <a href="https://docs.tange.ai/products/wxvoip/api-reference/api-for-service-request.html#wxvoip-reject" target="_blank" rel="noopener">`TiRtcServiceRequest`</a> | 返回负数 = 服务请求失败（含拒接 <a href="https://docs.tange.ai/products/wxvoip/api-reference/api-for-service-request.html#wxvoip-reject" target="_blank" rel="noopener">`/v1/wxvoip/reject`</a>） |
 | <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcdisconnect" target="_blank" rel="noopener">`TiRtcDisconnect`</a> | 返回 0 = 成功 |
 
-> 「C 参考实现」的 SDK 初始化、回调与停止顺序见 [device-sim-c/README.md#TiRTC SDK 核心 API](device-sim/device-sim-c/README.md#tirtc-sdk-核心-api)。
+> Linux C 参考实现的 SDK 初始化、回调和停止顺序见 [device-sim-c/README.md#TiRTC SDK 核心 API](device-sim/device-sim-c/README.md#tirtc-sdk-核心-api)。

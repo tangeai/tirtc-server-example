@@ -1,24 +1,28 @@
 # device-sim-c 威胁模型
 
-## Executive summary
+## 执行摘要
 
-`device-sim-c` 若作为直连公网的量产设备基线，首要风险是默认明文 HTTP 服务发现可被在途攻击者篡改，而发现结果又决定设备 HTTP、MQTT 与 TiRTC 的后续连接目标。攻击者可借此降级到明文 MQTT、伪造绑定消息或将控制面导向恶意服务，形成设备身份接管、远程会话操纵和媒体隐私泄露的攻击链。其次是 root 权限放大了明文凭证文件、可预测临时文件、录音路径与动态库替换问题；远端 MQTT JSON、TiRTC 控制消息和媒体帧则构成持续的资源耗尽与 C/codec 内存安全边界。现有实现已有 HMAC、默认 TLS 校验、密码学随机数、有界回调/录音队列、固定缓冲区和会话代次隔离等良好基础，但量产前必须为 HTTP 引导结果增加独立的密码学真实性、禁止生产降级、使用硬件密钥存储、降权隔离进程，并为所有远端消息和落盘数据增加大小、速率、路径与配额约束。
+`device-sim-c` 若作为直连公网的量产设备基线，首要风险来自默认的明文 HTTP 服务发现。发现结果决定设备后续连接的 HTTP、MQTT 和 TiRTC 目标，一旦被在途攻击者篡改，设备可能降级到明文 MQTT、接受伪造的绑定消息，或把控制面连接到恶意服务。由此可形成设备身份接管、远程会话操纵和媒体隐私泄露的完整攻击链。
 
-## Scope and assumptions
+root 权限会进一步放大明文凭证文件、可预测临时文件、录音路径和动态库替换等问题。远端 MQTT JSON、TiRTC 控制消息和媒体帧也会持续触碰资源耗尽与 C/codec 内存安全边界。
+
+参考实现包含 HMAC、默认 TLS 校验、密码学随机数、有界回调与录音队列、固定缓冲区和会话代次隔离等基础控制。用于量产前，还需要为 HTTP 引导结果增加独立的密码学真实性校验，禁止生产环境降级，使用硬件密钥存储并降低进程权限，同时限制远端消息和落盘数据的大小、速率、路径与配额。
+
+## 范围与假设
 
 - 范围：`thing-connect/device-sim/device-sim-c/src/`、`examples/`、`tests/`、`Makefile`，以及运行时链接的仓库内 TiRTC SDK 边界。
-- 目标场景：以当前 Linux C 参考实现作为未来量产设备基线，而非仅在隔离开发机运行。
+- 目标场景：将 Linux C 参考实现作为量产设备基线，而非仅在隔离开发机运行。
 - 部署假设：设备主动直连公网云端；默认 HTTP 服务发现因产品约束必须保留。
 - 权限假设：按保守解释，设备进程可能以 root 运行，同机可能存在不可信进程；若实际部署保证专用非 root 用户、只读程序目录和无不可信共驻，TM-006、TM-007、TM-010 的可能性可下调。
 - 数据敏感性：`device_key`、临时/MQTT/会话 token、联系人标识、通话控制数据、音视频和 AI 录音均视为敏感。
 - 外部服务假设：云端 API、MQTT ACL、token 受众/有效期、TiRTC 服务端鉴权和 SDK 内部实现不在本仓库中；其控制只能按客户端证据确认，未知部分不视为已有缓解。
 - 不在范围：云端服务源代码、MQTT broker 配置、TiRTC 闭源库内部、目标板驱动/codec/OTA 实现和物理防拆设计；这些仍作为外部依赖或信任边界纳入风险。
 
-会显著改变排序的开放问题：量产系统是否有安全启动和签名 OTA、程序/SDK 目录是否只读、设备密钥是否进入 TPM/TEE/安全芯片、云端 MQTT 是否对每个发布者和设备 topic 执行严格 ACL。报告在这些控制尚未得到证据前按“未实现或未验证”处理。
+以下问题会直接影响风险排序：量产系统是否具备安全启动和签名 OTA，程序与 SDK 目录是否只读，设备密钥是否存入 TPM、TEE 或安全芯片，云端 MQTT 是否对每个发布者和设备 topic 执行严格 ACL。没有证据确认的控制，统一按“未实现或未验证”处理。
 
-## System model
+## 系统模型
 
-### Primary components
+### 主要组件
 
 - **进程入口与本地控制**：`device_reference_run()` 解析 CLI、环境变量、凭证路径、CA、媒体文件和 `--insecure`，随后驱动完整运行时。Linux 默认产品入口从 `stdin` 接收命令。证据：`src/main.c` 的 `device_reference_run`，`src/linux_device_adapter.c` 的 `_linux_poll_action`。
 - **上线与控制面**：`device_flow.c` 完成 HTTP 服务发现、HMAC 设备上报、token 换取、临时 MQTT 绑定和永久 MQTT 消息分发。
@@ -28,7 +32,7 @@
 - **本地持久化**：Linux 默认适配器将设备凭证写入 JSON；`audio_recorder.c` 将 AI 下行音频及格式元数据写入文件。
 - **构建与供应链**：Makefile 链接系统 libcurl/libmosquitto/cJSON 和仓库内 `libTiRTC.so`，支持警告升级和 sanitizer，但未定义量产二进制加固或依赖验签流程。
 
-### Data flows and trust boundaries
+### 数据流与信任边界
 
 - **公网 → 服务发现客户端**：服务端 JSON 经 HTTP GET 进入固定 4096 字节缓冲区；客户端检查必需字段、长度、MQTT scheme 和端口，但不验证响应签名、主机白名单，也允许 `mqtt://`。证据：`src/device_flow.c` 的 `_write_cb`、`device_services_parse_json`、`fetch_services`。
 - **设备 → 设备/VoIP/AI/Call API**：HMAC 头或 Bearer token 经 libcurl 发送；HTTPS 时默认校验证书并支持指定 CA，但目标 URL 来自服务发现且 `--insecure` 可关闭校验。证据：`src/http_tls.c` 的 `http_tls_apply`，`src/device_flow.c` 的 `report_device`/`get_mqtt_token`，各业务模块的 HTTP helper。
@@ -40,7 +44,7 @@
 - **远端媒体 → 本地录音文件**：AI 音频进入 64 项有界队列，单帧最大 4096 字节，再持续写 raw/wav/JSON；目录由本地配置和 `device_id` 拼接，没有目录遍历规范化、符号链接防护、总大小或保留期限。证据：`src/audio_recorder.h`、`src/audio_recorder.c` 的 `_mkdir_p`、`audio_recorder_open`、`audio_recorder_submit`。
 - **构建产物 → root 运行时**：动态加载器通过相对 `$ORIGIN` RUNPATH 查找仓库内 TiRTC SDK，同时加载系统网络/JSON 库；安装目录完整性决定进入 root 进程的代码完整性。证据：`Makefile` 的 `RPATH`、`SDK_LIB`、`CFLAGS` 和 `LDFLAGS`。
 
-#### Diagram
+#### 架构图
 
 ```mermaid
 flowchart LR
@@ -77,9 +81,9 @@ flowchart LR
   ADAPTER --> HW
 ```
 
-## Assets and security objectives
+## 资产与安全目标
 
-| Asset | Why it matters | Security objective (C/I/A) |
+| 资产 | 重要性 | 安全目标（C/I/A） |
 |---|---|---|
 | `device_key` 与设备身份 | 泄露后可冒充设备、换取 token，并可能长期控制设备身份 | C、I |
 | 临时、MQTT、AI、VoIP、Call token | 在有效期内提供 broker、业务或会话访问能力 | C、I |
@@ -91,9 +95,9 @@ flowchart LR
 | 产品适配器、TiRTC SDK 与最终固件 | 任一被替换或利用都可能在高权限进程执行攻击者代码 | I、A |
 | 安全日志和恢复信号 | 影响攻击检测、故障定位与批量事件响应 | I、A |
 
-## Attacker model
+## 攻击者模型
 
-### Capabilities
+### 攻击能力
 
 - 位于设备与公网之间，可读取、阻断和修改明文 HTTP 服务发现流量，例如恶意 Wi-Fi、被攻陷网关或上游网络节点。
 - 能控制或入侵某个发现端点、业务 API、MQTT 发布者/broker、远端通话 peer，或窃取一个有时效的 token。
@@ -101,16 +105,16 @@ flowchart LR
 - 同机不可信进程可能读写共享目录、诱导服务使用攻击者准备的路径或影响启动配置；设备主进程可能以 root 运行。
 - 可重复断网、重连、发起来电或填满队列，尝试触发竞态、资源耗尽和迟到回调路径。
 
-### Non-capabilities
+### 不具备的能力
 
 - 未假设攻击者可仅凭观测 HMAC-SHA256 签名恢复 `device_key`；随机数实现优先 `getrandom()` 并在失败时使用 `/dev/urandom`。
 - 未假设攻击者已控制受信任 CA 私钥、量产签名密钥或云端数据库；若实际发生，此处客户端控制不足以独立恢复信任。
 - 仓库未实现入站 HTTP/TCP 服务器，因此普通公网扫描者不能直接连接本进程；远端输入需经过发现、broker、业务 API 或 TiRTC/peer 信道。
 - 未把闭源 `libTiRTC.so` 内部缺陷断言为已存在漏洞；只把它及其回调数据视为需隔离、验证和更新的高风险边界。
 
-## Entry points and attack surfaces
+## 入口与攻击面
 
-| Surface | How reached | Trust boundary | Notes | Evidence (repo path / symbol) |
+| 攻击面 | 入口 | 信任边界 | 说明 | 证据（仓库路径 / 符号） |
 |---|---|---|---|---|
 | HTTP 服务发现 | 设备启动时公网 GET | 公网 → 上线控制面 | 明文、无响应签名；结果决定全部后续端点 | `src/device_flow.c` / `fetch_services` |
 | 设备 report/token API | 发现后的 HTTP(S) POST | 设备身份 → 云 API | 使用 HMAC、时间戳和 nonce；目标仍受发现结果控制 | `src/device_flow.c` / `report_device`, `get_mqtt_token` |
@@ -127,7 +131,7 @@ flowchart LR
 | Product Adapter V1 | 产品在启动前安装函数表 | 产品代码/硬件 → 核心 | 回调所有权和非阻塞约束清晰，但由产品实现兑现 | `src/device_adapter.h` / `DeviceAdapterV1` |
 | 动态库与依赖 | 启动时动态加载 | 安装/更新链 → root 进程 | 相对 RUNPATH；未见构建产物验签与量产加固目标 | `Makefile` / `RPATH`, `SDK_LIB` |
 
-## Top abuse paths
+## 主要滥用路径
 
 1. **接管引导控制面**：攻击者取得公网在途位置 → 修改明文 `/services` 响应 → 下发恶意设备 API、MQTT broker 与 TiRTC 端点 → 设备信任伪造响应并进入攻击者控制的会话路径 → 设备身份完整性、媒体隐私和可用性受损。
 2. **伪造首次绑定并持久化攻击者身份**：攻击者篡改发现结果并提供恶意 `mqtt://` broker → 返回自选临时凭证和 `auth_grant` → 客户端接收并将 `device_id/device_key` 保存到本地 → 设备被永久绑定到攻击者控制身份。
@@ -139,9 +143,9 @@ flowchart LR
 8. **将测试降级带入量产**：启动配置被误设或同机攻击者影响服务参数 → Linux 默认安全适配器批准 `--insecure`，发现结果还可选择 `mqtt://` → 证书验证和 MQTT 加密被关闭 → token、绑定密钥、消息和媒体控制遭窃听或篡改。
 9. **替换运行时 SDK 获取 root 执行**：攻击者获得程序/SDK 安装树写权限或更新链被污染 → 替换相对 RUNPATH 指向的 `libTiRTC.so` → 服务重启 → 恶意库在 root 进程加载并读取设备密钥、媒体和硬件。
 
-## Threat model table
+## 威胁清单
 
-| Threat ID | Threat source | Prerequisites | Threat action | Impact | Impacted assets | Existing controls (evidence) | Gaps | Recommended mitigations | Detection ideas | Likelihood | Impact severity | Priority |
+| 威胁编号 | 威胁来源 | 前提 | 攻击行为 | 影响 | 受影响资产 | 现有控制（证据） | 缺口 | 建议缓解措施 | 检测思路 | 可能性 | 影响等级 | 优先级 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | TM-001 | 公网在途攻击者 | 能修改设备的明文 HTTP；量产要求保留 HTTP 发现 | 篡改服务发现，替换全部后续 API、MQTT 和 RTC 端点 | 批量设备控制面接管、会话操纵、隐私泄露和离线 | 发现配置、身份、token、媒体、设备可用性 | 响应上限 4096 字节；必需字段、长度、MQTT scheme/端口检查（`device_services_parse_json`） | 无来源真实性、签名、过期/版本、主机白名单；允许 `mqtt://` | 保留 HTTP 但对 canonical JSON 使用 Ed25519/ECDSA 离线根密钥签名；固件固定验证公钥、产品/区域 audience、单调版本、签发/过期时间；只接受白名单 HTTPS/WSS/MQTTS 域和端口；验证失败 fail closed 并使用签名缓存 | 统计签名失败、端点变化、scheme 降级、版本回退；批量设备同时发现异常告警 | 高：公网在途能力现实，且每次启动进入此边界 | 高：可影响后续全部信道和大批设备 | **critical** |
 | TM-002 | 在途攻击者或恶意绑定 broker | 可控制发现响应或临时 MQTT 路径，设备处于首次/重绑状态 | 降级到明文 MQTT并伪造 `auth_grant`，注入长期设备身份 | 永久错误绑定、身份接管、设备劫持或批量报废 | `device_key`、设备身份、绑定状态 | 临时用户名/token；TLS 可用；凭证日志隐藏（`connect_temp_mqtt`, `_temp_on_message`） | TLS 由不可信发现结果决定；`auth_grant` 无端到端签名/挑战绑定；解析前无大小限制 | 生产只接受 MQTTS；让 `auth_grant` 由绑定服务签名并绑定设备硬件 ID、一次性 challenge、发现版本和过期时间；将设备公钥/硬件证明纳入绑定；保存前二次校验 | 监控绑定来源、设备身份变化、重复验证码、broker 指纹、同批异常重绑 | 高：TM-001 成功后无需更多信任条件 | 高：持久身份被替换 | **critical** |
@@ -154,16 +158,16 @@ flowchart LR
 | TM-009 | 远端消息/服务/peer | 能控制被日志记录的 type、channel、房间、联系人、ASR/TTS 或 URL 字符串 | 注入换行/ANSI 控制符、伪造安全日志，或让敏感元数据长期留存 | 误导运维、隐藏攻击、终端欺骗、隐私泄露 | 日志完整性、联系人和会话元数据 | 密钥/token 值大多隐藏；媒体日志限频；中央日志有锁（`common.c`, `media_rx_log.c`） | 未统一清除控制字符；debug 默认开启；远端文本和标识直接 `%s` 输出；缺少结构化事件 ID/脱敏政策 | 统一转义 CR/LF/ESC 和不可打印字符；量产默认 info；联系人/房间/设备 ID hash 或截断；结构化安全日志写入受保护 sink；敏感字段清单测试 | 告警控制字符、超长/截断字段、日志解析失败和日志量异常 | 中：多类远端字段可控 | 中：主要影响检测与隐私，通常需与其他攻击组合 | **medium** |
 | TM-010 | 本地安装树攻击者或供应链攻击者 | 能写程序/SDK目录、污染构建依赖或更新包 | 替换 `libTiRTC.so`/系统库或投递未加固二进制，在 root 启动时执行 | 完全设备接管、密钥和媒体窃取、持久化 | 固件、SDK、密钥、硬件和更新链 | SDK 固定版本目录；严格警告和 sanitizer 可手动启用（`Makefile`） | 相对 RUNPATH；未见 artifact 签名/SBOM/哈希验证；默认构建缺少明确 PIE、stack protector、FORTIFY、RELRO/NOW、CFI；CI 未见强制 sanitizer/fuzz | 程序和 SDK 放只读 dm-verity/签名分区；OTA/启动链验证；生成 SBOM并验签第三方库；使用绝对受保护库路径或静态受控链接；启用 PIE、`-fstack-protector-strong`、FORTIFY、RELRO/NOW、noexecstack；CI 强制 sanitizer、静态分析和 fuzz | 启动度量/远程证明、库 hash 变化、签名失败、版本/CVE 清单、构建 provenance 告警 | 中：依赖本地写入或供应链失守；更新链规模放大风险 | 高：root 进程加载即完全失陷 | **high** |
 
-## Criticality calibration
+## 风险等级说明
 
 - **Critical**：无需已控制设备即可跨公网或局域网在途位置批量改变信任根、持久设备身份或获得等价控制。例：篡改无签名 HTTP 发现接管全部后续端点；伪造 `auth_grant` 将量产设备持久绑定到攻击者身份；可规模化窃取不可轮换的设备根密钥。
 - **High**：需要一个重要但现实的前提（有效 token、broker/peer 权限、本地目录写入、更新链污染），成功后造成 root RCE、设备密钥泄露、未授权媒体会话或稳定离线。例：恶意 codec 帧利用 decoder；凭证 `.tmp` 符号链接窃密；无限录音填满系统盘。
 - **Medium**：主要造成局部隐私泄露、审计受损或可恢复的单设备 DoS，通常需要与另一条攻击链组合。例：日志控制字符注入；短时队列填满并丢帧；暴露不含密钥的设备/房间元数据。
 - **Low**：仅泄露低敏感调试信息、产生明显且容易恢复的噪声，或需要攻击者已经拥有更高权限。例：已具 root 后修改日志等级；触发一次无状态错误日志；让本地演示媒体文件校验失败。
 
-## Focus paths for security review
+## 安全审查重点路径
 
-| Path | Why it matters | Related Threat IDs |
+| 路径 | 重要性 | 相关威胁编号 |
 |---|---|---|
 | `src/device_flow.c` | 明文发现、HMAC/token、临时与永久 MQTT 入口集中于此，是最高价值信任边界 | TM-001, TM-002, TM-003, TM-004, TM-008 |
 | `src/http_tls.c` | 统一控制所有 libcurl 证书验证，应承载生产 fail-closed、scheme 和 CA 策略 | TM-001, TM-008 |
@@ -184,11 +188,11 @@ flowchart LR
 | `examples/product_adapter_template.c` | 量产适配起点，必须防止演示 fallback 和未完成安全 TODO 被发布 | TM-005, TM-006, TM-007, TM-008 |
 | `tests/test_core.c` | 应增加签名发现、MQTT 上限/重放、symlink、路径遍历、磁盘配额和日志转义回归测试 | TM-001, TM-002, TM-003, TM-004, TM-006, TM-007, TM-009 |
 
-## Quality check
+## 完整性检查
 
 - [x] 覆盖发现的公网入口：服务发现、业务 API、临时/永久 MQTT、TiRTC 控制和媒体。
 - [x] 覆盖本地入口：CLI、环境变量、stdin、凭证/媒体/录音路径、动态库加载和 Product Adapter。
 - [x] 每个主要信任边界至少映射到一个威胁；关键链路以 TM-001/TM-002 单独建模。
 - [x] 区分量产运行时、外部云/SDK、构建供应链以及测试/示例代码。
-- [x] 已采用用户确认的量产、公网、保留 HTTP 和高权限/不可信共驻假设。
+- [x] 量产、公网、保留 HTTP、高权限运行和同机不可信进程均按保守假设纳入。
 - [x] 对未提供证据的云端 ACL、硬件密钥、Secure Boot/OTA 和 SDK 内部控制保持开放问题，没有把它们误记为已有缓解。

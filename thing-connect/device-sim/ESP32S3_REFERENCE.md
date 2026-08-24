@@ -1,11 +1,11 @@
 # ESP32-S3 设备参考实现需求基线
 
-本文档只定义 ESP32-S3 独立移植工程的需求与架构基线。该工程借鉴 Linux `device-sim-c` 的协议顺序和会话设计，但不属于 `device-sim-c`，也不共用其构建系统或平台代码。ESP32-S3 的实现和验证结论不能用来描述 Linux C 参考实现。
+这份文档定义 ESP32-S3 独立移植工程的需求和架构基线。该工程借鉴 Linux `device-sim-c` 的协议顺序和会话设计，但不属于 `device-sim-c`，也不共用其构建系统或平台代码。ESP32-S3 的实现和验证结论不能用于描述 Linux C 参考实现。
 
 ## 1. 目标与范围
 
 - 首个目标平台：ESP32-S3，推荐 16 MB Flash、8 MB PSRAM；默认 Demo 不依赖 TF 卡。
-- 后续平台：ESP32-P4、其他 ESP-IDF 芯片、ARM/MIPS 嵌入式 Linux、君正 S10 等。
+- 可扩展平台：ESP32-P4、其他 ESP-IDF 芯片、ARM/MIPS 嵌入式 Linux、君正 S10 等。
 - 功能：H5 实时音频、AI 对讲、VoIP、设备互呼。
 - ESP32-S3 从 Flash 媒体分区读取小型编码文件并循环发送，不在设备上转码。
 - 不保存收到的音频。无喇叭时只输出限频帧日志；产品可接入播放模块。
@@ -144,10 +144,11 @@ ESP32-S3 固件不设置 `TIRTC_OPT_SERVICE_ENDPOINT`，TiRTC SDK 使用内置�
 ## 7. 会话模型
 
 单一 SessionManager 任务拥有所有会话状态，MQTT、TiRTC、按键、串口和定时器只向它投递事件。
-TiRTC SDK 是进程级常驻资源：网络和凭证就绪后执行一次 `TiRtcInit`/`TiRtcStart`，H5、AI、VoIP
-和设备互呼共用同一回调表。业务切换只建立或断开对应 TiRTC 连接，不通过
-`TiRtcStop`/`TiRtcUninit` 更换业务。只有启动提交失败时才清理未成功启动的实例并重试；正常业务
-生命周期内不反复初始化和反初始化 SDK。
+TiRTC SDK 是进程级常驻资源。网络和凭证就绪后执行一次 `TiRtcInit`/`TiRtcStart`，H5、AI、VoIP
+和设备互呼共用同一回调表。业务切换时只建立或断开对应的 TiRTC 连接，不通过
+`TiRtcStop`/`TiRtcUninit` 更换业务。
+
+只有启动提交失败时，才清理未成功启动的实例并重试。正常业务生命周期内不反复初始化和反初始化 SDK。
 
 ```text
 OFFLINE
@@ -205,14 +206,17 @@ ARM/MIPS 设备执行。
 ESP32-S3 业务信令沿用 `device-sim-c` 的服务发现、HMAC-SHA256 设备登录、业务 HTTP、永久 MQTT、
 ACK 和心跳协议；`platform_client` 负责这些平台通信，`tirtc_adapter` 只负责媒体连接、命令和帧。
 首次启动沿用 `device-sim-c` 的验证码绑定：设备上报 MAC，显示验证码，通过临时 MQTT 等待
-`auth_grant`，ACK 后将 `device_id/device_key` 保存到 NVS。以后直接读取凭证；解绑后自动重新绑定。
+`auth_grant`，ACK 后将 `device_id/device_key` 保存到 NVS。后续启动直接读取凭证；解绑后自动重新绑定。
 
-## 10. 实施顺序
+## 10. 验证范围与产品扩展
 
-1. 已完成：ESP-IDF 工程、SDK 外部链接和构建契约验证。
-2. 已完成：公共设备配置、媒体读取和 SessionManager。
-3. 已完成：Flash 媒体、NVS Wi-Fi、串口和 SoftAP 配置。
-4. 已完成：G711A 文件源、校验和定时发送。
-5. 已完成：验证码绑定、凭证 NVS 持久化、解绑重绑和正式平台登录。
-6. 已完成参考代码：H5、AI、VoIP、设备互呼和平台信令；仍需账号与 ESP32-S3 实机联调。
-7. 产品扩展：真实 I2S、物理按键和喇叭播放模块。
+参考工程提供以下内容：
+
+- ESP-IDF 工程、SDK 外部链接和构建契约验证。
+- 公共设备配置、媒体读取和 SessionManager。
+- Flash 媒体、NVS Wi-Fi、串口和 SoftAP 配置。
+- G711A 文件源、校验和定时发送。
+- 验证码绑定、凭证 NVS 持久化、解绑重绑和正式平台登录。
+- H5、AI、VoIP、设备互呼和平台信令参考代码。
+
+账号与音频链路仍需在 ESP32-S3 实机上联调。产品还需要接入真实 I2S、物理按键和扬声器播放模块。

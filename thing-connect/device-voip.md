@@ -1,9 +1,9 @@
 # 微信 VoIP 对讲设备接入
 
-本文说明微信小程序与设备之间的 VoIP 对讲接入，包括授权、来电、外呼、拒接和取消，
+这份指南说明微信小程序与设备之间的 VoIP 对讲接入，包括授权、来电、外呼、拒接和取消，
 以及设备如何调用 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcwhipconnect" target="_blank" rel="noopener">`TiRtcWhipConnect`</a> 建立连接。
 
-> 本文只描述 VoIP 业务链路。设备上线与 MQTT 规范见 [device-integration.md](device-integration.md)；字段、错误码和微信回调格式见 [api-reference.md#voip-server](api-reference.md#voip-server)。一台设备同时运行 VoIP/AI/设备呼设备时，还需遵守 [device-session-model.md](device-session-model.md)。
+> 这里说明 VoIP 业务链路。设备上线和 MQTT 规范见 [device-integration.md](device-integration.md)，字段、错误码和微信回调格式见 [api-reference.md#voip-server](api-reference.md#voip-server)。一台设备同时运行 VoIP、AI 和设备互呼时，还需要遵守 [device-session-model.md](device-session-model.md) 中的状态切换规则。
 
 **文档导航：** [返回总览](README.md) | [返回设备入口](device-integration.md) | [H5 实时](device-h5-live.md) | [AI 对讲](device-ai.md) | [设备呼设备](device-call.md) | [统一状态机](device-session-model.md)
 
@@ -23,7 +23,7 @@
 
 ## 快速接入
 
-设备侧接入微信 VoIP，至少要完成这 4 步：
+设备侧按以下四步接入微信 VoIP：
 
 1. 按 [device-integration.md](device-integration.md) 上线，拿到 `mqtt_token`
 2. 启动后调用 [`POST /v1/voip/device/profile`](api-reference.md#post-v1voipdeviceprofile)
@@ -40,9 +40,9 @@ VoIP 场景下，设备作为 WHIP 客户端，通过
 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcconnect" target="_blank" rel="noopener">`TiRtcConnect`</a>，
 两个接口不能混用。
 
-**完成标志**
+联调时检查以下结果：
 
-| 验收端 | 完成标志 |
+| 验收端 | 验收结果 |
 |--------|----------|
 | 设备 | MQTT 收到含 `peer_id`、`token` 的 `call_incoming`；接听后 `TiRtcWhipConnect` 回调 `error == 0` |
 | 小程序 | `wx.requestDeviceVoIP` 成功，`POST /v1/voip/user/report-auth` 返回 200；发起呼叫后设备收到 MQTT 来电 |
@@ -71,7 +71,7 @@ VoIP 场景下，设备作为 WHIP 客户端，通过
 
 视频设备还应上报屏幕宽高；需要适配微信下行画面时，再设置 `video_res_mode`。
 
-参考实现：
+相关代码：
 
 - C VoIP 完整实现：[device-sim/device-sim-c/src/tirtc_voip.c](device-sim/device-sim-c/src/tirtc_voip.c)
 - C 方法声明：[device-sim/device-sim-c/src/tirtc_voip.h](device-sim/device-sim-c/src/tirtc_voip.h)
@@ -156,7 +156,7 @@ VoIP 相关下行消息有三类：
 
 ## 小程序端接入
 
-本节面向**微信小程序开发者**。设备接听流程见[小程序呼设备](#小程序呼设备)。
+本节供微信小程序开发者使用。设备接听流程见[小程序呼设备](#小程序呼设备)。
 
 可参考以下实现：
 
@@ -166,7 +166,7 @@ VoIP 相关下行消息有三类：
 
 ### 1. 前置条件
 
-小程序端要正常呼叫设备，至少要满足：
+小程序呼叫设备前，需要满足以下条件：
 
 1. 用户已在小程序里登录，拿到 `user_jwt`
 2. 当前设备已经绑定到这个登录用户
@@ -188,7 +188,7 @@ VoIP 相关下行消息有三类：
 
 ### 3. 申请设备授权
 
-小程序第一次呼叫某台设备前，应按以下流程完成授权：
+小程序第一次呼叫某台设备前，按以下流程完成授权：
 
 1. 小程序先通过 [`PUT /v1/user/device/name`](api-reference.md#put-v1userdevicename) 设置设备名称
 2. 调 [`POST /v1/voip/user/sn-ticket`](api-reference.md#post-v1voipusersn-ticket)
@@ -229,12 +229,12 @@ VoIP 相关下行消息有三类：
 - 是否启用被叫摄像头
 - 房间类型是 `voice` 还是 `video`
 
-插件发起呼叫后，链路变成：
+插件发起呼叫后，调用链如下：
 
 1. 小程序插件向微信侧发起设备 VoIP 呼叫
 2. 微信服务器回调 `voip-server`
 3. `voip-server` 查询设备 profile，向设备下发 MQTT `call_incoming`
-4. 设备按本文档后续章节完成 ACK、建连、接听或拒接
+4. 设备按后续章节完成 ACK、建连、接听或拒接
 
 小程序列表会阻止对明确离线的设备发起呼叫；回调服务也会在 MQTT 在线状态明确为离线时
 返回失败。在线状态是基于 Broker 心跳/上下线缓存，刚掉线的短窗口仍可能显示在线，因此
@@ -295,7 +295,7 @@ VoIP 相关下行消息有三类：
 
 ## 小程序呼设备
 
-这是最常见的链路：微信用户在小程序里呼叫设备，设备作为被叫。
+小程序呼设备时，微信用户是主叫，设备是被叫。
 
 ```mermaid
 sequenceDiagram
@@ -383,8 +383,7 @@ VoIP 建连成功后，设备进入对讲态，开始本地音频收发；如果
 - `error == 0`：WHIP 连接建立成功；回调保存必要状态并投递事件，控制任务随后保存 `hconn`、启动本地媒体任务
 - `error != 0`：建连失败，不能开始收发
 
-C 参考实现收到 `error == 0` 后只保存连接状态。控制任务等到 `0x2000` 再启动本地媒体；
-收到 `0x2001` 时，则投递断开动作，由延后任务调用 `TiRtcDisconnect`。
+C 参考实现收到 `error == 0` 后只保存连接状态，控制任务等到 `0x2000` 再启动本地媒体。收到 `0x2001` 时，回调只投递断开动作，再由延后任务调用 `TiRtcDisconnect`。
 
 ### 3. C 参考实现接听与媒体生命周期
 
@@ -582,7 +581,7 @@ Content-Type: application/json
 未进入房间时，本地 `cancel` 无法立即停止小程序振铃。房间通知已经超时的设备只需清理
 本地状态，无需再进入房间补发挂断命令。
 
-参考实现的策略略有不同：
+不同参考实现的取消策略如下：
 
 | 实现 | 收到 `cancel` 后的行为 |
 |------|-------------------------|
@@ -680,7 +679,7 @@ payload:
 
 ### 设备拒接
 
-设备收到来电后可以直接调用 TiRTC SDK 的服务请求接口拒接，无需先调本仓库的 Go 服务：
+设备收到来电后，可以直接调用 TiRTC SDK 的服务请求接口拒接，不需要先调用仓库中的 Go 服务：
 
 拒接接口说明见 <a href="https://docs.tange.ai/products/wxvoip/api-reference/api-for-service-request.html#wxvoip-reject" target="_blank" rel="noopener">`TiRtcServiceRequest`</a>。
 
@@ -717,7 +716,7 @@ TiRtcServiceRequest("/v1/wxvoip/reject", json_body, NULL, callback, user_data);
 
 ### 设备主动挂断
 
-设备在已经开始建连或已经接通后，如果要主动结束当前 VoIP 会话，应直接走 TiRTC 媒体层挂断：
+设备开始建连或接通后，主动结束 VoIP 会话时直接从 TiRTC 媒体层挂断：
 
 1. 先停止本地音频/视频发送线程
 2. 通过 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsendcommand" target="_blank" rel="noopener">`TiRtcSendCommand(0x2001, ...)`</a> 发送挂断命令
@@ -823,6 +822,4 @@ payload:
 | 设备取消外呼等待后，小程序仍在振铃 | 未进入房间时无法通过本地 `cancel` 停止小程序振铃；进入房间后发送 `0x2001` |
 | 通话已经结束，设备状态没有清理 | 确认同时处理 MQTT `call_cancel` 和 TiRTC `0x2001` |
 
-使用 C 参考实现验证时，按
-[C 参考实现说明](device-sim/device-sim-c/README.md) 启动程序。收到来电后输入 `yes/no`，
-主动呼叫输入 `wxcall [N]`。拒接字段和原因码见[拒接与取消](#拒接与取消)。
+使用 C 参考实现验证时，按 [C 参考实现说明](device-sim/device-sim-c/README.md) 启动程序。收到来电后输入 `yes/no`，主动呼叫时输入 `wxcall [N]`。拒接字段和原因码见[拒接与取消](#拒接与取消)。

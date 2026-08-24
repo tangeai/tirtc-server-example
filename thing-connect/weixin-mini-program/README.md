@@ -1,9 +1,9 @@
 # 微信小程序开发
 
-本目录是 ThingConnect 的原生微信小程序参考实现，负责用户登录、设备绑定、设备列表、
+这里提供 ThingConnect 的原生微信小程序参考实现，包括用户登录、设备绑定、设备列表、
 微信 IoT VoIP 授权，以及小程序与设备之间的音视频呼叫。
 
-> 本文只描述小程序侧开发。设备如何接听、外呼和收发媒体见
+> 这里说明小程序侧的开发方式。设备如何接听、外呼和收发媒体见
 > [微信 VoIP 对讲设备接入](../device-voip.md)；设备如何主动建立 AI 会话见
 > [AI 对讲设备接入](../device-ai.md)；接口字段和错误码见
 > [API Reference](../api-reference.md)。
@@ -32,7 +32,7 @@
 
 ## 能力边界
 
-当前小程序已经实现：
+小程序支持：
 
 - 邮箱注册、登录和 JWT 本地保存
 - 通过 6 位验证码、设备 ID 或二维码绑定设备
@@ -44,7 +44,7 @@
 - 根据设备 profile 配置视频旋转、镜像、画面比例和 `contain/fill`
 - 小程序取消主动呼叫时通知 `voip-server`
 
-当前小程序**没有实现**：
+小程序不包含：
 
 - 直接建立 AI 对讲媒体连接
 - 调用设备专用的 `GET /v1/ai/token`
@@ -152,6 +152,7 @@ weixin-mini-program/
 │   ├── voip-ui-config.js          # 双向 caller/listener UI 角色映射
 │   └── voip-incoming-query.js     # 设备入呼 query 兼容解析
 └── tests/
+    ├── voip-auth-refresh.test.js  # VoIP 授权状态刷新测试
     └── voip-ui-config.test.js     # 双向 VoIP UI 回归测试
 ```
 
@@ -164,14 +165,17 @@ weixin-mini-program/
 | 绑定设备 | `pages/bind/index` | 验证码绑定、设备 ID 绑定、扫码解析 |
 | 预留页 | `pages/call-box/index` | 当前为空；微信通话使用插件的 `CALL_PAGE_PATH` |
 
-`wmpf-voip` 和 `captcha` 插件声明在 [app.json](app.json)：
+VoIP 和验证码插件声明在 [app.json](app.json)：
 
-| 插件 | provider | 用途 |
-|---|---|---|
-| `wmpf-voip` | `wxf830863afde621eb` | 微信 IoT VoIP；构建时应解析到不低于 2.4.1 |
-| `captcha` | `wxb7c8f9ea9ceb4663` | 登录和注册的人机验证 |
+| 插件 | 版本 | provider | 用途 |
+|---|---|---|---|
+| `wmpf-voip` | `latest` | `wxf830863afde621eb` | 微信 IoT VoIP；构建时应解析到不低于 2.4.1 |
+| `captcha` | `1.4.1` | `wxb7c8f9ea9ceb4663` | 易盾验证码 |
+| `tencentCaptcha` | `2.1.4` | `wx1fe8d9a3cb067a75` | 腾讯验证码 |
+| `captcha4` | `2.7.5` | `wx1629d117cf9be937` | 极验验证码 |
+| `AliyunCaptcha` | `3.0.0` | `wxbe275ff84246f1a4` | 阿里云验证码 |
 
-`callDevice` 要求插件不低于 2.4.0；当前传入的 `deviceName` 要求不低于 2.4.1。
+`callDevice` 要求插件不低于 2.4.0；传入 `deviceName` 时，插件版本需不低于 2.4.1。
 
 ---
 
@@ -181,7 +185,7 @@ weixin-mini-program/
 
 ### 1. ThingConnect 用户身份
 
-登录或注册成功后，`user-server` 返回 `user_jwt`。当前代码将它保存为：
+登录或注册成功后，`user-server` 返回 `user_jwt`。代码将它保存为：
 
 ```js
 wx.setStorageSync('token', token)
@@ -218,7 +222,7 @@ resolve 后页面仍要检查服务端业务码：
 - `user-server` 成功通常为 `code = 200`
 - `voip-server` 成功通常为 `code = 0`
 
-新增接口时要先确认接口属于哪个服务，不要只根据 URL 名称猜测业务码。
+接入接口时先确认它属于哪个服务，不要只根据 URL 名称猜测业务码。
 
 ---
 
@@ -358,7 +362,7 @@ sequenceDiagram
 设备主动外呼时，小程序一般不会先进入自己的业务页面。微信插件会拉起通话页，因此
 入呼 UI 配置必须放在全局 [app.js](app.js)，不能只写在设备列表页。
 
-当前处理顺序：
+入呼处理顺序：
 
 1. `onLaunch` 读取 `getPluginEnterOptions()`。
 2. `onShow` 再读取一次 enter options。
@@ -412,8 +416,8 @@ sequenceDiagram
 
 - `POST /v1/voip/user/delete-auth`
 
-当前设备列表没有单独的“取消授权”按钮；解绑走 `user-server` 的统一清理。如果以后
-增加独立取消授权入口，应在用户仍拥有设备时调用 `delete-auth`。
+设备列表没有单独的“取消授权”按钮，解绑走 `user-server` 的统一清理。需要增加独立
+取消授权入口时，应在用户仍拥有设备时调用 `delete-auth`。
 
 ---
 
@@ -426,11 +430,11 @@ sequenceDiagram
 3. 设备发送 `0x2100 start_session`。
 4. 设备向 AI 上行音频，并播放 AI 下行音频。
 
-这条链路不经过当前小程序。小程序的 `user_jwt` 也不能代替设备 `mqtt_token` 调用
+这条链路不经过小程序。小程序的 `user_jwt` 也不能代替设备 `mqtt_token` 调用
 `GET /v1/ai/token`。
 
-如果以后要在小程序增加“让设备开始 AI 对讲”的按钮，建议新增明确的服务端控制接口或
-MQTT 命令，由设备收到命令后按 `device-ai.md` 自己获取 token、建连和管理媒体。不要
+如需在小程序增加“让设备开始 AI 对讲”的按钮，应提供明确的服务端控制接口或 MQTT
+命令，由设备收到命令后按 `device-ai.md` 自己获取 token、建连和管理媒体。不要
 让小程序获取设备的 AI token，也不要在小程序里复制设备端 `start_session` 状态机。
 
 AI、VoIP、H5 实时流和设备互呼共用设备媒体资源。产品设备应按
@@ -480,10 +484,10 @@ AI、VoIP、H5 实时流和设备互呼共用设备媒体资源。产品设备�
 ```bash
 node --check thing-connect/weixin-mini-program/app.js
 node --check thing-connect/weixin-mini-program/pages/devices/index.js
-node thing-connect/weixin-mini-program/tests/voip-ui-config.test.js
+node --test thing-connect/weixin-mini-program/tests/*.test.js
 ```
 
-VoIP UI 测试覆盖：
+测试会检查授权状态刷新和 VoIP UI 配置。其中，VoIP UI 用例覆盖：
 
 - 小程序呼设备和设备呼小程序两种角色映射
 - `contain` 与 `fill`
@@ -536,7 +540,7 @@ VoIP UI 测试覆盖：
 - **插件提示没有 `callDevice`**：确认构建实际使用的 `wmpf-voip` 版本不低于 2.4.0。
 - **取消后设备仍在响铃**：确认 `currentCall` 已保存 `deviceId/roomId`，并且
   `cancelVoip` 调用了 `/v1/voip/user/cancel`。
-- **AI token 调用失败**：当前小程序不应调用设备 AI token；按
+- **AI token 调用失败**：小程序不应调用设备 AI token；按
   [device-ai.md](../device-ai.md) 从设备侧使用 `mqtt_token` 发起。
 
 更完整的设备侧 VoIP 排查见
@@ -550,7 +554,7 @@ VoIP UI 测试覆盖：
 - [ ] `userServerBaseUrl`、`voipServerBaseUrl` 是公网 HTTPS 且证书有效。
 - [ ] 微信后台已配置 request 合法域名和 VoIP 回调。
 - [ ] `modelId` 与微信 IoT 平台、设备 profile 一致。
-- [ ] `wmpf-voip` 和 `captcha` provider 未被误改。
+- [ ] `app.json` 中 VoIP 和四个验证码插件的 provider、版本与上表一致。
 - [ ] 真机完成双向呼叫、旋转、镜像和 `contain/fill` 验证。
 - [ ] 小程序取消、设备拒接和双方挂断都能清理状态。
 - [ ] 用户 JWT 过期时会返回登录页。

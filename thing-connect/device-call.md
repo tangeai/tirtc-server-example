@@ -1,8 +1,8 @@
 # 设备呼设备接入
 
-设备间音视频通话接入：联系人、房间、MQTT 来电通知、<a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcconnect" target="_blank" rel="noopener">`TiRtcConnect`</a> P2P 建连、接听、拒接、挂断与崩溃恢复。
+本指南说明两台设备如何建立音视频通话，内容包括联系人、房间、MQTT 来电通知、<a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcconnect" target="_blank" rel="noopener">`TiRtcConnect`</a> P2P 建连、接听、拒接、挂断和崩溃恢复。
 
-> 本文只描述设备呼设备链路。设备上线与 MQTT 规范见 [device-integration.md](device-integration.md)；HTTP 字段和错误码见 [api-reference.md#call-server](api-reference.md#call-server)。如果一台设备同时跑设备呼设备 / VoIP / AI，请同时看 [device-session-model.md](device-session-model.md)。
+> 这里说明设备互呼链路。设备上线和 MQTT 规范见 [device-integration.md](device-integration.md)，HTTP 字段和错误码见 [api-reference.md#call-server](api-reference.md#call-server)。一台设备同时运行设备互呼、VoIP 和 AI 时，还需要遵守 [device-session-model.md](device-session-model.md) 中的状态切换规则。
 
 **文档导航：** [返回总览](README.md) | [返回设备入口](device-integration.md) | [H5 实时](device-h5-live.md) | [微信 VoIP](device-voip.md) | [AI 对讲](device-ai.md) | [统一状态机](device-session-model.md)
 
@@ -21,9 +21,7 @@
 
 ## 快速接入
 
-设备呼设备的核心区别只有一句话：
-
-**它不是 VoIP/AI 的 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcwhipconnect" target="_blank" rel="noopener">`TiRtcWhipConnect`</a>，而是设备 <-> 设备的 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcconnect" target="_blank" rel="noopener">`TiRtcConnect`</a>。**
+设备互呼通过 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcconnect" target="_blank" rel="noopener">`TiRtcConnect`</a> 建立设备之间的 P2P 连接。VoIP 和 AI 使用的 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcwhipconnect" target="_blank" rel="noopener">`TiRtcWhipConnect`</a> 不适用于这条链路。
 
 最小流程如下：
 
@@ -35,7 +33,7 @@
 6. 被叫用返回 token 调 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcconnect" target="_blank" rel="noopener">`TiRtcConnect(caller_id, token)`</a>
 7. 建连成功后，被叫发 `0x2000` 表示接通
 
-**完成标志：**
+联调时检查以下结果：
 
 - **设备侧（被叫）**：<a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcconnect" target="_blank" rel="noopener">`TiRtcConnect`</a> 回调 `error == 0`、`0x2000` 接通确认发送无错。
 - **对端（主叫）**：收到被叫的 `0x2000` 接通确认后，双方 `on_audio` / `on_video` 才开始收发媒体（`on_conn_accepted` 只是 P2P 建连，媒体要等 `0x2000`）。
@@ -51,14 +49,14 @@
 - 一台设备同一时刻只能占用一个房间
 - 房间状态要么 `active`，要么 `answered`
 
-这意味着设备侧必须维护明确状态机，至少区分：
+设备侧需要维护明确的状态机，至少区分：
 
 - 空闲
 - 呼出等待中
 - 来电等待中
 - 已接通
 
-### 2. 联系人是硬前提
+### 2. 呼叫前先建立联系人关系
 
 呼叫前双方必须是已接受联系人。
 
@@ -97,7 +95,7 @@
 
 ## 主叫流程
 
-主叫是“先 HTTP 建房间，再被动等待别人连过来”。
+主叫先通过 HTTP 创建房间，再等待被叫连接。
 
 ```mermaid
 sequenceDiagram
@@ -237,7 +235,7 @@ Content-Type: application/json
 
 ## 被叫流程
 
-被叫是“先收到 MQTT 来电，再去换 token，最后主动 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcconnect" target="_blank" rel="noopener">`TiRtcConnect`</a> 连主叫”。
+被叫先从 MQTT 收到来电，再换取 token，并主动调用 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcconnect" target="_blank" rel="noopener">`TiRtcConnect`</a> 连接主叫。
 
 ```mermaid
 sequenceDiagram
@@ -402,7 +400,7 @@ Content-Type: application/json
 
 ### 4. C 参考实现调用骨架
 
-设备互呼的 HTTP 和房间状态由 call_session.c 封装；P2P 连接、媒体收发与 0x2000 接通确认由 tirtc_call.c 封装。应用层不应自行拼接 connect token 或跳过 call_session_do_accept()。
+设备互呼的 HTTP 请求和房间状态由 `call_session.c` 封装，P2P 连接、媒体收发和 `0x2000` 接通确认由 `tirtc_call.c` 封装。应用层不应自行拼接连接 token，也不要跳过 `call_session_do_accept()`。
 
 ~~~c
 #include "tirtc_call.h"
@@ -571,7 +569,7 @@ Authorization: Bearer <mqtt_token>
 }
 ```
 
-用于把当前设备在服务端视角下的房间状态同步回来。
+该接口用于恢复服务端记录的房间状态。
 
 推荐在设备重启后做一次：
 
@@ -584,7 +582,7 @@ Authorization: Bearer <mqtt_token>
 
 [`GET /v1/call/device/contacts`](api-reference.md#get-v1calldevicecontacts) 会同时返回两种联系人：
 
-- `type:"device"`：真正的设备联系人，可用于设备呼设备
+- `type:"device"`：设备联系人，可用于设备互呼
 - `type:"voip"`：微信授权联系人，只能用于 [`POST /v1/voip/device/call`](api-reference.md#post-v1voipdevicecall)
 
 完整字段说明见 [api-reference.md#get-v1calldevicecontacts](api-reference.md#get-v1calldevicecontacts)。
@@ -626,7 +624,7 @@ Authorization: Bearer <mqtt_token>
 - 被叫收到了 `call_incoming` 但 [`device/info`](api-reference.md#post-v1calldeviceinfo) 返回 `40400`：房间已取消或超时
 - [`device/info`](api-reference.md#post-v1calldeviceinfo) 返回 `40210`：房间已被别人抢接
 - 被叫接听后主叫没反应：确认被叫在 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcconnect" target="_blank" rel="noopener">`TiRtcConnect`</a> 成功后发送了 `0x2000`
-- 旧通话被新来电顶掉：这是当前设计，若不想切换应主动调 [`/v1/call/reject`](api-reference.md#post-v1callreject)
+- 旧通话被新来电顶掉：服务端默认允许新来电切换房间；若不想切换，应主动调用 [`/v1/call/reject`](api-reference.md#post-v1callreject)
 - 进程崩溃重启后状态乱：启动时调用 [`GET /v1/call/room`](api-reference.md#get-v1callroom) 做房间恢复
 
 > 使用 Linux C 默认适配联调：按 [device-sim/device-sim-c/README.md](device-sim/device-sim-c/README.md) 启动两台实例；使用 `call <设备ID> [video|audio]` 发起、`accept` / `reject` 响应。HTTP 封装在 [call_session.c](device-sim/device-sim-c/src/call_session.c)，P2P 建连与 `0x2000` 确认在 [tirtc_call.c](device-sim/device-sim-c/src/tirtc_call.c)。默认上行来自文件，默认下行 sink 为空而只记录后丢弃；产品可通过 `DeviceAdapterV1` 替换，单元测试仍不等于真实服务端到端验证。

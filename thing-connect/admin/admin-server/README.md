@@ -2,7 +2,7 @@
 
 `admin-server` 提供 Admin Web、管理员认证与 MFA、RBAC、用户和设备管理、动态配置、数据字典、服务状态、任务中心和审计日志，默认监听 `9000`。
 
-整套系统的环境准备、首次安装、Supervisor、Nginx、数据库迁移、验收、更新和恢复步骤统一见 [ThingConnect 部署指南](../../deployment.md)。本文只说明 Admin Server 自身的使用约束。
+整套系统的环境准备、首次安装、Supervisor、Nginx、数据库迁移、验收、更新和恢复步骤见 [ThingConnect 部署指南](../../deployment.md)。下面只说明 Admin Server 自身的使用约束。
 
 ## 启动配置
 

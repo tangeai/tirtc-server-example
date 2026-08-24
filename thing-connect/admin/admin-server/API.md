@@ -21,17 +21,25 @@ Content-Type: application/json
 | POST | `/v1/setup/preview` | 测试 MySQL 和 Redis，并只读生成数据库计划 |
 | POST | `/v1/setup/execute` | 携带 `draft` 和 `plan_digest` 执行 Admin 安装或对账本机同一未完成任务 |
 
-`preview` 不执行建库、建表、配置写入或进程控制。首次安装只接受不存在或完全无表的专用数据库；任何其他已有表的数据库只读识别后返回 `409`，不建表、迁移、补数据、清空或覆盖。只有数据库安装标记、本地 journal 和目标库名中的操作标识全部一致时，才允许恢复本机同一未完成任务。
+`preview` 不执行建库、建表、配置写入或进程控制。首次安装只接受不存在或完全无表的专用数据库。其他已有表的数据库经只读识别后返回 `409`，不会建表、迁移、补数据、清空或覆盖。
 
-`draft.database` 必须同时提供迁移账号和独立的 DML 运行账号，两者用户名不能相同。迁移账号只用于初始化不存在或无表的专用库；`preview` 在不选择目标数据库、不执行写入的情况下验证运行账号可登录，安装阶段在表结构就绪后用零行语句验证 DML 权限。运行账号写入生成的服务配置。安装器生成五个业务服务的基础配置，但不启动任何业务服务。`draft.optional_services` 和 `draft.mqtt` 只为旧客户端保留解码兼容，服务端忽略其值。任何密码字段均为只写输入，不在计划或状态中返回。
+只有数据库安装标记、本地 journal 和目标库名中的操作标识全部一致时，才允许恢复本机同一未完成任务。
 
-`GET /v1/setup/status` 的 `available_services[]` 来自服务清单，包含 `name`、`display_name`、`business`、`required` 和 `uses_mqtt`。页面只把业务服务显示为“安装后配置”。恢复状态中的 `can_resume=true` 表示 Admin 配置和数据库安装状态可以完成对账；不表示业务服务已就绪，也不触发进程控制。
+`draft.database` 必须同时提供迁移账号和独立的 DML 运行账号，两者用户名不能相同。迁移账号只用于初始化不存在或无表的专用库。`preview` 在不选择目标数据库、不执行写入的情况下验证运行账号能否登录；安装阶段等表结构就绪后，再用零行语句验证 DML 权限。
+
+运行账号会写入生成的服务配置。安装器生成五个业务服务的基础配置，但不启动任何业务服务。`draft.optional_services` 和 `draft.mqtt` 只为旧客户端保留解码兼容，服务端会忽略其值。密码字段都是只写输入，不会出现在计划或状态响应中。
+
+`GET /v1/setup/status` 的 `available_services[]` 来自服务清单，包含 `name`、`display_name`、`business`、`required` 和 `uses_mqtt`。页面将业务服务标记为“安装后配置”。
+
+恢复状态中的 `can_resume=true` 表示 Admin 配置和数据库安装状态可以完成对账，不表示业务服务已就绪，也不会触发进程控制。
 
 首次安装、创建管理员和修改管理员密码使用同一密码策略：按 Unicode 字符计数至少 8 位，并同时包含 ASCII 大写字母、小写字母和数字；中文和特殊字符可以作为其余字符使用。
 
 Redis 或 MySQL 连接预检失败时返回 `503`，`msg` 只标识失败依赖和检查方向，不包含上游原始错误、内网地址、账号或密码；脱敏后的详细原因只写入 Admin 服务日志，日志不记录安装请求体。迁移账号连接失败使用诊断码 `MYSQL_UNAVAILABLE`；运行账号登录、来源授权或 DML 权限检查失败使用 `MYSQL_RUNTIME_ACCOUNT_INVALID`。MQTT 由安装完成后的服务器启动预检验证。
 
-安装错误响应的 `data` 提供结构化诊断信息：`code` 是安装器诊断码，`message` 是页面主提示，`suggestions` 是可直接执行的处理建议。客户端仍按响应顶层的数值 `code` 判断 HTTP 业务结果，不按诊断文案分支。例如：
+安装错误响应的 `data` 提供结构化诊断信息：`code` 是安装器诊断码，`message` 是页面主提示，`suggestions` 是可直接执行的处理建议。客户端仍按响应顶层的数值 `code` 判断 HTTP 业务结果，不按诊断文案分支。
+
+例如：
 
 ```json
 {
@@ -95,9 +103,9 @@ MFA 验证请求：
 | 数据字典 | 字典类型、字典项增改查及 `GET /dictionaries/:code` |
 | 微信 VoIP | 应用列表、应用详情、应用设备及设备上报属性 |
 | 任务 | 设备池导入、任务列表、任务结果下载和失败任务重试 |
+| 日志 | `GET /login-logs`、`GET /audit-logs` |
 
 `GET /services/:service/status` 在实例状态外返回 `configuration_ready`、`required_configurations[]`、`start_command` 和 `restart_command`。`required_configurations[]` 列出未发布或无效的启动阻断项。命令仅用于管理员复制到部署服务器执行，Admin 不执行主机进程控制。
-| 日志 | `GET /login-logs`、`GET /audit-logs` |
 
 写操作由权限码控制。超级管理员默认拥有 [permissions.go](../../internal/admin/permissions.go) 中列出的全部权限，其他角色按后台配置授权。
 
@@ -128,13 +136,22 @@ MFA 验证请求：
 | POST | `/configs/:namespace/:config_key/test` | 使用待发布值测试 MQTT 连接认证或发送 SMTP/模板测试邮件，不发布配置 |
 | PUT | `/configs/:namespace/:config_key` | 发布配置；需要提交当前修订号以避免并发覆盖，可测试配置会在写入前自动复检 |
 
-配置定义中的 `name`、`group`、`description`、`default`、`required`、`blocking`、`test_kind`、`reload`、`secret_paths` 和 `fields` 用于生成管理表单。`required` 表示必须发布可运行值，`blocking` 表示缺失会阻塞定义中说明的业务能力，非空 `test_kind` 表示表单提供对应类型的显式在线测试且发布接口自动执行同一测试；当前注册 `mqtt`。`reload=restart` 表示发布后需重启目标服务，其他配置按服务实现热加载。`fields` 是后端注册表提供的单一字段事实源，每项包含字段路径 `path`、中文名称 `label`、控件类型 `kind`，并可包含 `description`、`options`、`secret`、`providers`、`required`、`required_when_enabled`、`blocking` 和 `min`。`resource_refs` 控件编辑 `[{"id":"...","name":"..."}]` 结构，用于 AI 默认 MCP、设备插件和知识库资源。Admin Web 根据这些元数据生成输入控件和基础校验；只有明确使用自定义编辑器的复杂配置才维护独立页面。
+配置定义中的 `name`、`group`、`description`、`default`、`required`、`blocking`、`test_kind`、`reload`、`secret_paths` 和 `fields` 用于生成管理表单。
+
+- `required` 表示必须发布可运行值。
+- `blocking` 表示缺失配置会阻塞定义中说明的业务能力。
+- 非空 `test_kind` 表示表单提供对应类型的在线测试，发布接口也会自动执行同一测试；目前注册的类型为 `mqtt`。
+- `reload=restart` 表示发布后需要重启目标服务，其他配置按服务实现热加载。
+
+`fields` 是后端注册表提供的字段事实源。每项包含字段路径 `path`、中文名称 `label`、控件类型 `kind`，还可以包含 `description`、`options`、`secret`、`providers`、`required`、`required_when_enabled`、`blocking` 和 `min`。
+
+`resource_refs` 控件编辑 `[{"id":"...","name":"..."}]` 结构，用于 AI 默认 MCP、设备插件和知识库资源。Admin Web 根据这些元数据生成输入控件和基础校验；只有使用自定义编辑器的复杂配置才维护独立页面。
 
 User、VoIP、Call 的 `mqtt.connection` 是可测试配置。测试使用请求中的 `value` 和可选 `secrets`；未提交 `secrets` 时沿用已发布密码。测试只建立临时 MQTT 连接，不订阅、不发布消息、不写 Redis，也不发布配置项。固定 ClientID 模式仍使用相同账号认证，但测试连接采用临时 ClientID，避免断开在线业务服务；正式 ClientID 由服务器启动预检确认。连接、TLS 或认证失败返回 `503` 和可操作的中文排查提示，Broker 客户端原始错误及内网地址只写入受保护日志。
 
 配置响应中的 `using_default=true` 表示数据库尚无发布记录，`value` 是当前有效的注册表默认值，`revision` 为 `0`。配置密钥以明文 JSON 存储。具有 `config.secret.write` 的管理员读取普通配置、具有 `voip.app.write` 的管理员读取微信应用配置时，响应额外包含 `secrets` 原值；其他管理员只看到 `secret_configured`。Admin Web 用默认隐藏且可点击眼睛切换的密码控件展示这些值。
 
-当前仅定义 `scope_type=global`。管理接口和内部读取接口都会拒绝 `instance` 等未注册范围；增加新的配置范围时，需要先在配置注册表定义其语义和生效目标。
+系统只定义 `scope_type=global`。管理接口和内部读取接口都会拒绝 `instance` 等未注册范围。增加新的配置范围前，需要先在配置注册表定义其语义和生效目标。
 
 `user-server/captcha` 的 `provider` 在 `yidun`、`geetest`、`aliyun` 和 `tencent` 之间切换。Provider 发生变化时，写请求必须同时提交新供应商要求的完整 `secrets`；服务端不会合并或复用旧供应商的密钥。Provider 不变时，留空的密钥字段继续保留原值。
 

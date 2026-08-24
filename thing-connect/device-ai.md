@@ -1,8 +1,8 @@
 # AI 对讲设备接入
 
-设备主动发起一次 AI 对讲：先向 AI 平台拿会话凭证，再用 WHIP（WebRTC HTTP Ingestion Protocol）建立连接，最后发 `start_session` 信号正式开始对话。
+AI 对讲由设备主动发起。设备先向 AI 平台获取会话凭证，再通过 WHIP（WebRTC HTTP Ingestion Protocol）建立连接，并发送 `start_session` 开始对话。
 
-> 本文只描述设备侧 AI 对讲链路。设备上线与 MQTT 规范见 [device-integration.md](device-integration.md)；HTTP 字段和角色管理接口见 [api-reference.md#ai-server](api-reference.md#ai-server)。如果一台设备同时跑 AI / VoIP / 设备呼设备，请同时看 [device-session-model.md](device-session-model.md)。
+> 这里说明设备侧的 AI 对讲链路。设备上线和 MQTT 规范见 [device-integration.md](device-integration.md)，HTTP 字段和角色管理接口见 [api-reference.md#ai-server](api-reference.md#ai-server)。一台设备同时运行 AI、VoIP 和设备互呼时，还需要遵守 [device-session-model.md](device-session-model.md) 中的状态切换规则。
 
 **文档导航：** [返回总览](README.md) | [返回设备入口](device-integration.md) | [H5 实时](device-h5-live.md) | [微信 VoIP](device-voip.md) | [设备呼设备](device-call.md) | [统一状态机](device-session-model.md)
 
@@ -23,7 +23,7 @@
 
 AI 对讲是设备主动发起的业务。
 
-设备侧最小流程：
+设备侧按以下顺序接入：
 
 1. 按 [device-integration.md](device-integration.md) 上线，拿到 `mqtt_token`
 2. 调 [`GET /v1/ai/token`](api-reference.md#get-v1aitoken)
@@ -31,11 +31,9 @@ AI 对讲是设备主动发起的业务。
 4. WHIP 建连成功后，通过 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsendcommand" target="_blank" rel="noopener">`TiRtcSendCommand(hconn, 0x2100, ...)`</a> 发一条 JSON-RPC `start_session`（`0x2100` 是 AI 命令通道的命令码），通知平台开始本次对话；成功响应会带回会话 ID 和最终音频格式，详见[建立会话](#建立会话)。
 5. 收到 `start_session` 响应后开始本地音频上行，接收 AI 下行音频
 
-AI 也走 WHIP 上行（设备推流到服务端），核心 API 仍是：
+AI 通过 WHIP 上行，也就是由设备向服务端推流，建连接口为 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcwhipconnect" target="_blank" rel="noopener">`TiRtcWhipConnect`</a>。
 
-- <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcwhipconnect" target="_blank" rel="noopener">`TiRtcWhipConnect`</a>
-
-**完成标志：**
+联调时分别检查三端结果：
 
 - **Linux C 参考实现**：`ai_poll` 持续无错；`on_audio` 收到 AI 下行音频并异步写入文件。
 - **产品设备**：除上述协议结果外，还要确认下行音频经过有界队列、解码并由扬声器连续播放。
@@ -86,7 +84,7 @@ sequenceDiagram
 1. 先查这台设备是否绑定了专属角色
 2. 没绑定则回落到 `default_role_id`
 
-因此设备侧通常不需要自己维护“该选哪个角色”的规则，只要按返回值使用即可。
+设备端无需维护角色选择规则，直接使用接口返回的角色即可。
 
 **HTTP 请求：**
 
@@ -128,7 +126,7 @@ TiRtcWhipConnect(peer_id, token, connect_cb, user_data);
 - 返回 `0` 表示请求已提交，不代表连接已经成功
 - 真正结果要看 `connect_cb(error, hconn, ...)`
 
-**设备侧“收到的结果”不是 HTTP，而是 SDK 连接回调：**
+连接结果来自 SDK 回调，不是 HTTP 响应：
 
 - `error == 0`：WHIP 连接建立成功
 - `error != 0`：建连失败，不能继续发 `start_session`
@@ -218,9 +216,9 @@ TiRtcSendAudioStream(hconn, &fi, audio_frame);
 - 成功后再开始送音频（`stream_id = 1`，格式对齐响应的 `input_audio`）
 - 下行音频由 `on_audio` 回调接收（`stream_id = 1`）并先提交 `DeviceMediaSinkOps`；Linux 默认无 sink 时才复制后异步写入接收目录，它不解码或驱动扬声器
 
-> **上行 / 下行实操**：① 上行单帧时长建议 ≤ 100ms；② 下行流式播放，不要等整句 TTS 结束再播，收到 `interrupt` 或 `end_session` 时立即清播放缓冲。
+> 上行单帧时长建议不超过 100ms。下行音频应流式播放，不要等整句 TTS 结束；收到 `interrupt` 或 `end_session` 时立即清空播放缓冲。
 
-参考实现：
+相关代码：
 
 - C 会话状态与完整实现：[device-sim/device-sim-c/src/tirtc_ai.c](device-sim/device-sim-c/src/tirtc_ai.c)
 - C 方法声明：[device-sim/device-sim-c/src/tirtc_ai.h](device-sim/device-sim-c/src/tirtc_ai.h)
@@ -239,7 +237,9 @@ AI 会话结束时，设备应：
 
 ### 5. Linux C 参考实现调用顺序
 
-Linux AI 模块把 HTTP、WHIP 回调、`0x2100` JSON-RPC 和已编码文件音频发送封装在 `tirtc_ai.c`。下面代码展示这些 Linux API 的调用顺序；`need_hangup` 和 `platform_sleep_ms()` 是说明控制循环的占位符，不是参考实现 API。产品应保留协议顺序和回调约束，并用自己的网络、采集、播放、任务和超时实现替换 Linux 模块。函数声明见 [tirtc_ai.h](device-sim/device-sim-c/src/tirtc_ai.h)，实际调用点见 [main.c](device-sim/device-sim-c/src/main.c)。
+Linux AI 模块将 HTTP、WHIP 回调、`0x2100` JSON-RPC 和已编码文件音频发送封装在 `tirtc_ai.c`。下面的代码展示这些 Linux API 的调用顺序。`need_hangup` 和 `platform_sleep_ms()` 只用于说明控制循环，不是参考实现 API。
+
+产品应保留协议顺序和回调约束，并用自己的网络、采集、播放、任务和超时实现替换 Linux 模块。函数声明见 [tirtc_ai.h](device-sim/device-sim-c/src/tirtc_ai.h)，实际调用点见 [main.c](device-sim/device-sim-c/src/main.c)。
 
 ~~~c
 #include "tirtc_ai.h"
@@ -403,7 +403,7 @@ AI 的角色管理属于 H5 管理端职责，不在设备侧处理，但设备�
 - 解绑后设备回退到默认角色
 - 设备每次调 [`GET /v1/ai/token`](api-reference.md#get-v1aitoken) 时，服务端都会重新计算当前生效角色
 
-所以设备端最稳妥的策略是：
+设备端按以下方式处理角色：
 
 - 每次开启 AI 对话前都重新调一次 [`/v1/ai/token`](api-reference.md#get-v1aitoken)
 - 不要长期缓存 `peer_id` / `role_id`
@@ -413,7 +413,7 @@ AI 的角色管理属于 H5 管理端职责，不在设备侧处理，但设备�
 ## 问题排查
 
 - [`GET /v1/ai/token`](api-reference.md#get-v1aitoken) 返回 401：通常是 `mqtt_token` 失效，先按 [device-integration.md](device-integration.md#token-生命周期) 刷新 token
-- <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcwhipconnect" target="_blank" rel="noopener">`TiRtcWhipConnect`</a> 返回 0 但没进会话：真正结果看连接回调，不看返回值本身
+- <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcwhipconnect" target="_blank" rel="noopener">`TiRtcWhipConnect`</a> 返回 0 但没进会话：以连接回调为准，不以函数返回值判断是否建连成功
 - `start_session` 发了没响应：确认 WHIP 连接回调 `error == 0`（`TiRtcWhipConnect` 返回 0 只代表请求已提交）
 - AI 没有说话但设备已经开始上行：建议按参考实现，收到 `start_session` 成功响应后再启动采集
 - 角色不对：检查 H5 管理端是否给该设备做了角色绑定；设备侧下一次重新调 [`/v1/ai/token`](api-reference.md#get-v1aitoken) 才会看到新角色

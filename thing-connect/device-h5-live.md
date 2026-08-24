@@ -1,8 +1,8 @@
 # H5 实时查看与按住说话
 
-设备持续推送实时音视频，H5 通过 `user-server` 换取 TiRTC token 后直连设备；H5 按住说话时，音频通过 TiRTC 音频流回到设备。
+设备持续推送实时音视频，H5 通过 `user-server` 获取 TiRTC token 后直连设备。用户在 H5 按住说话时，音频通过 TiRTC 流回到设备。
 
-> 本文只描述“设备 <-> H5”这条实时预览链路。设备上线与 MQTT 规范见 [device-integration.md](device-integration.md)；HTTP 字段定义见 [api-reference.md#user-server](api-reference.md#user-server)。**这条链路不走 `call-server /v1/call/device/info`。** 一台设备同时接入 VoIP / AI / 设备呼设备时，状态切换见 [device-session-model.md](device-session-model.md)。
+> 这里说明设备与 H5 之间的实时预览链路。设备上线和 MQTT 规范见 [device-integration.md](device-integration.md)，HTTP 字段定义见 [api-reference.md#user-server](api-reference.md#user-server)。这条链路不调用 `call-server /v1/call/device/info`。一台设备同时接入 VoIP、AI 和设备互呼时，状态切换见 [device-session-model.md](device-session-model.md)。
 
 **文档导航：** [返回总览](README.md) | [返回设备入口](device-integration.md) | [微信 VoIP](device-voip.md) | [AI 对讲](device-ai.md) | [设备呼设备](device-call.md) | [统一状态机](device-session-model.md)
 
@@ -28,7 +28,7 @@ H5 实时查看只需要设备完成两件事：
 1. 按 [device-integration.md](device-integration.md) 完成设备上线，拿到 `device_id`、`device_key`、`mqtt_token`
 2. 使用 `device_id + device_key` 启动 TiRTC 常驻监听，等待 H5 连接后持续发送实时媒体
 
-当前 H5 页面约定如下：
+H5 页面使用以下 stream：
 
 | 方向 | stream_id | 说明 |
 |------|-----------|------|
@@ -36,7 +36,7 @@ H5 实时查看只需要设备完成两件事：
 | 设备 → H5 视频 | `11` | H5 订阅设备实时视频 |
 | H5 → 设备 talkback | `14` | H5 “按住说话”上行音频 |
 
-当前 H5 talkback 约定：
+H5 talkback 约定：
 
 - 编码仅支持 `G.711A`
 - 采样率支持 `8000` 或 `16000`
@@ -44,7 +44,7 @@ H5 实时查看只需要设备完成两件事：
 
 H5 自己会调用 [`GET /v1/user/device/rtc-token?device_id=...`](api-reference.md#get-v1userdevicertc-token) 获取 token，然后 `connect({ deviceId, token })` 直连设备。设备侧**不需要**再额外调 `device/info` 之类的接口。
 
-**完成标志：**
+联调时检查以下结果：
 
 - **设备侧**：H5 连入后推流线程持续运行；按住说话时 `on_audio` 收到 stream 14 的 G.711A。
 - **对端（H5）**：页面 video/audio 元素有画面和声音，浏览器控制台无 stream 10/11 的 subscribe 错误。
@@ -53,7 +53,7 @@ H5 自己会调用 [`GET /v1/user/device/rtc-token?device_id=...`](api-reference
 
 ## 媒体格式与默认约定
 
-当前 H5 实时预览链路**不做运行时能力协商**。设备如果要接入当前 H5 页面，应按下面这组**当前仅支持的音视频格式**实现收发：
+H5 实时预览链路**不做运行时能力协商**。设备接入该页面时，需要按下表中的音视频格式实现收发：
 
 | 方向 | 媒体 | stream_id | 编码/封装 | 采样率/说明 |
 |------|------|-----------|-----------|------------|
@@ -63,9 +63,9 @@ H5 自己会调用 [`GET /v1/user/device/rtc-token?device_id=...`](api-reference
 
 接入侧需要注意：
 
-- 当前 H5 页面把“支持什么格式”视为固定契约，不会先向设备拉取媒体能力
-- 当前链路只支持上表中的 `G.711A` / `H.264` 组合；设备侧如果不是上述格式，不能直接复用当前 H5 页面，需要同时调整前端和设备实现
-- H5 talkback 的默认采样率目前在前端代码里固定为 `8000`，如需切到 `16000`，应同步确认设备解码链路与浏览器端配置
+- H5 页面将媒体格式视为固定契约，不会先向设备拉取能力
+- 该链路只支持上表中的 `G.711A` 和 `H.264` 组合；设备使用其他格式时，需要同时调整前端和设备实现
+- H5 talkback 的默认采样率在前端代码中固定为 `8000`；切换到 `16000` 时，需要同时确认设备解码链路和浏览器端配置
 
 ---
 
@@ -136,7 +136,7 @@ Authorization: Bearer <user_jwt>
 | `endpoint` | TiRTC API 地址 |
 | `in_call` | 设备当前是否在通话中，仅用于前端提示 |
 
-**设备侧需要知道的事实：**
+设备侧只需要了解三点：
 
 - 这个 token 由 user-server 代 H5 申请，设备端不参与签发
 - 设备端不需要实现任何“预览开始”HTTP 回调
@@ -146,9 +146,9 @@ Authorization: Bearer <user_jwt>
 
 ## H5 端接入
 
-这一节描述的是**浏览器端**如何接当前实时预览页面，不是设备端如何推流。
+本节说明浏览器端如何接入实时预览页面。设备推流方式见[设备侧接入](#设备侧接入)。
 
-当前仓库可直接参考：
+页面实现可直接参考：
 
 - 页面实现：[user-server/static/player.html](user-server/static/player.html)
 
@@ -158,7 +158,7 @@ H5 页面开始拉流前，至少要满足：
 
 1. 用户已通过 `user-server` 登录，拿到 `user_jwt`
 2. 当前 `device_id` 已绑定在这个登录用户名下
-3. 设备已经按本文档完成 TiRTC 常驻监听，能够接受 H5 连接
+3. 设备已完成 TiRTC 常驻监听，能够接受 H5 连接
 
 ### 2. 拉取 rtc-token
 
@@ -186,7 +186,7 @@ H5 先调用：
 
 ### 3. 初始化 Web SDK 并建立连接
 
-当前页面的最小流程是：
+页面按以下顺序建立连接：
 
 1. 用返回的 `app_id` 调 `TiRtc.initialize(...)`
 2. 创建 `TiRtcConn`
@@ -283,7 +283,9 @@ connection.connect({ deviceId, token })
 
 ### 1. 初始化 TiRTC 常驻监听
 
-实时预览模式下，设备不是主动外连，而是先本地 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcstart" target="_blank" rel="noopener">`TiRtcStart(...)`</a>，等待 H5 连接进来。`TiRtcStart` 只传 `device_id`，`device_key` 通过 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsetoption" target="_blank" rel="noopener">`TiRtcSetOption(TIRTC_OPT_DEVICE_SECRET_KEY, ...)`</a> 预先设置。
+实时预览模式下，设备先在本地调用 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcstart" target="_blank" rel="noopener">`TiRtcStart(...)`</a>，等待 H5 主动连接。
+
+`TiRtcStart` 只传 `device_id`。`device_key` 需要提前通过 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsetoption" target="_blank" rel="noopener">`TiRtcSetOption(TIRTC_OPT_DEVICE_SECRET_KEY, ...)`</a> 设置。
 
 典型步骤：
 
@@ -294,7 +296,9 @@ connection.connect({ deviceId, token })
 5. 等待 `on_conn_accepted`
 6. 在连接建立后启动实时音频/视频发送线程
 
-> 顺序不可调换：<a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsetoption" target="_blank" rel="noopener">`TiRtcSetOption(TIRTC_OPT_DEVICE_SECRET_KEY, ...)`</a> 必须先于 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcstart" target="_blank" rel="noopener">`TiRtcStart`</a>——后者执行后设备即用 `device_key` 向平台鉴权。
+> 顺序不可调换。先调用 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsetoption" target="_blank" rel="noopener">`TiRtcSetOption(TIRTC_OPT_DEVICE_SECRET_KEY, ...)`</a>，再调用 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcstart" target="_blank" rel="noopener">`TiRtcStart`</a>。
+>
+> 执行 `TiRtcStart` 后，设备会立即使用 `device_key` 向平台鉴权。
 
 Linux C 参考实现见：
 
@@ -304,7 +308,7 @@ Linux C 参考实现见：
 
 ### 2. H5 连上后开始推流
 
-当前实时预览页面的默认流约定是：
+实时预览页面默认使用以下 stream：
 
 - 音频：`stream_id = 10`
 - 视频：`stream_id = 11`
@@ -333,7 +337,7 @@ H5 token 是 `user-server` 用设备 `device_key` 构造的 connect token，scop
 
 ## H5 按住说话
 
-当前 H5 播放页支持“按住说话”反向发音频给设备。
+H5 播放页支持“按住说话”，可以把浏览器音频发送给设备。
 
 从协议上看，这一段只有“浏览器开始发送音频”和“设备收到 talkback 音频帧”两个事件，没有额外 HTTP / MQTT 包。
 
@@ -342,7 +346,7 @@ H5 token 是 `user-server` 用设备 `device_key` 构造的 connect token，scop
 1. 在音频回调 `on_audio` 中按“H5 来源连接 + 音频 stream”处理 talkback 数据
 2. 把这一路音频交给本地播放或业务处理
 
-当前前端实现的约定是：
+前端使用以下约定：
 
 - H5 麦克风输入走 `stream_id = 14`
 - 编码固定为 `G.711A`
@@ -350,17 +354,21 @@ H5 token 是 `user-server` 用设备 `device_key` 构造的 connect token，scop
 - 默认采样率为 `8000`
 - 由浏览器端按住按钮时 `start()`，松开时 `stop()`
 
-**对设备来说，可观察到的行为是：**
+设备侧可以观察到以下行为：
 
 - 按下按钮后：开始持续收到 `stream_id = 14` 的音频帧
 - 松开按钮后：`stream_id = 14` 停止送帧
 - 浏览器静音、页面离开或连接断开：同样停止送帧
 
-Linux C 参考实现的 `tirtc_stream.c::_on_audio()` 会校验当前连接并调用 `DeviceMediaSinkOps.submit`；Linux 默认适配没有 sink，所以只做限频日志后丢弃，不包含扬声器播放。产品应实现 sink，在回调内把 payload 复制到有界播放队列并立即返回；独立媒体任务再解码并驱动扬声器。SDK 回调返回后 `data` 即失效，且回调内不得阻塞。
+Linux C 参考实现的 `tirtc_stream.c::_on_audio()` 会校验当前连接，并调用 `DeviceMediaSinkOps.submit`。Linux 默认适配没有 sink，只记录限频日志后丢弃数据，不包含扬声器播放。
+
+产品需要实现 sink，在回调内把 payload 复制到有界播放队列并立即返回，再由独立媒体任务解码并驱动扬声器。SDK 回调返回后 `data` 即失效，回调内不得阻塞。
 
 ### 4. 产品侧 C 调用示例
 
-下面的代码只说明 TiRTC 调用顺序，不是可直接编译的 Linux C 参考实现。`stream_event_push()`、`ring_buffer_write()`、`talkback_queue` 和 `encoder_request_idr()` 都是伪代码占位符；实际 Linux 代码见 `tirtc_runtime.c`、`tirtc_stream.c`、`device_adapter.c` 和 Linux 默认的 `linux_device_adapter.c`。
+下面的代码只说明 TiRTC 调用顺序，不能直接作为 Linux C 参考实现编译。`stream_event_push()`、`ring_buffer_write()`、`talkback_queue` 和 `encoder_request_idr()` 都是伪代码占位符。
+
+实际 Linux 代码见 `tirtc_runtime.c`、`tirtc_stream.c`、`device_adapter.c` 和默认适配 `linux_device_adapter.c`。
 
 ```c
 #include <string.h>
@@ -473,27 +481,42 @@ int h5_send_h264(const uint8_t *annexb_au, uint32_t len, uint32_t pts_ms, int is
 }
 ```
 
-上例的 `process_rtc_start()` 属于进程级 runtime，只能在进程启动时调用一次；同时支持多个业务时，传给 `TiRtcStart` 的必须是按“连接归属 + 会话代次”分发的统一回调表，不能让每个业务各自启动 SDK。`stream_event_push()` 是应用固定队列抽象，不是 TiRTC API。控制任务处理 `CONNECTED` 时保存句柄并启动采集，处理 `DISCONNECTED` 时停止采集，处理 `CONN_ERROR` 时清除匹配句柄并在回调栈外调用 `TiRtcDisconnect`。
+上例的 `process_rtc_start()` 属于进程级 runtime，只能在进程启动时调用一次。同时支持多个业务时，传给 `TiRtcStart` 的必须是按“连接归属 + 会话代次”分发的统一回调表，不能让每个业务各自启动 SDK。
 
-结束 H5 实时会话时只需：停止采集/编码任务并等待退出 → 在控制任务调用 `TiRtcDisconnect(s_h5_conn)` → 等待该会话的回调和延后动作退出。随后可以直接激活 VoIP、AI 或设备互呼业务，进程级 SDK 保持运行。
+`stream_event_push()` 是应用固定队列抽象，不是 TiRTC API。控制任务处理 `CONNECTED` 时保存句柄并启动采集，处理 `DISCONNECTED` 时停止采集，处理 `CONN_ERROR` 时清除匹配句柄并在回调栈外调用 `TiRtcDisconnect`。
 
-只有进程退出时才执行：停止当前业务媒体并断开连接 → 等待全部业务回调和延后动作退出 → `TiRtcStop()` → 等待 `TIRTC_EVENT_SYS_STOPPED` → 再次确认无回调或媒体任务存活 → `TiRtcUninit()`。可直接对照「C 参考实现」的 `tirtc_runtime.c`、`tirtc_stream.c` 和 `session_coordinator.c`；不要在任何 SDK 回调中调用 `TiRtcDisconnect`、`TiRtcStop` 或 `TiRtcUninit`。
+结束 H5 实时会话时按以下顺序清理：
+
+1. 停止采集和编码任务，并等待任务退出。
+2. 在控制任务中调用 `TiRtcDisconnect(s_h5_conn)`。
+3. 等待该会话的回调和延后动作退出。
+
+清理完成后可以直接激活 VoIP、AI 或设备互呼，进程级 SDK 保持运行。
+
+只有设备进程退出时，才停止进程级 SDK：
+
+1. 停止当前业务媒体并断开连接。
+2. 等待全部业务回调和延后动作退出。
+3. 调用 `TiRtcStop()`，等待 `TIRTC_EVENT_SYS_STOPPED`。
+4. 再次确认没有回调或媒体任务存活，然后调用 `TiRtcUninit()`。
+
+可以对照 Linux C 参考实现中的 `tirtc_runtime.c`、`tirtc_stream.c` 和 `session_coordinator.c`。不要在任何 SDK 回调中调用 `TiRtcDisconnect`、`TiRtcStop` 或 `TiRtcUninit`。
 
 ---
 
 ## 与其他业务的关系
 
-H5 实时查看本质上是“设备常驻监听，H5 被动连入”。它和 VoIP、AI、设备互呼是不同业务会话，但共用同一个进程级 TiRTC SDK runtime；切换业务不重新初始化 SDK。
+H5 实时查看采用设备常驻监听、H5 主动连入的方式。它和 VoIP、AI、设备互呼属于不同的业务会话，但共用同一个进程级 TiRTC SDK runtime；切换业务时不重新初始化 SDK。
 
-现有服务端约束：
+服务端约束：
 
 - [`GET /v1/user/device/rtc-token`](api-reference.md#get-v1userdevicertc-token) 不会因为设备正在通话而拒绝签发 token
 - H5 侧只收到 `in_call` 提示，由前端决定是否继续连接
 
-设备侧必须明确业务优先级。Linux C 参考实现当前策略是：
+设备侧必须明确业务优先级。Linux C 参考实现采用以下策略：
 
 - 程序默认启动实时推流
-- VoIP / AI / 设备呼设备开始后，暂停实时流
+- VoIP、AI 或设备互呼开始后，暂停实时流
 - 业务会话结束后，再恢复实时流
 
 如果产品要允许“实时预览 + 业务会话”并行，需要自行评估：

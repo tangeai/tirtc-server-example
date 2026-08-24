@@ -1,20 +1,24 @@
 # ThingConnect 开发者文档
 
-ThingConnect 展示设备如何接入 **H5 实时预览与对讲、AI 对讲、微信 IoT VoIP、设备间互呼** 四类能力。仓库包含 Linux 用户态 **「C 参考实现」**、Python 模拟器、H5/小程序前端、五个业务服务及一个 Admin Server；真实产品设备不属于仓库已实现范围。
+ThingConnect 提供设备接入示例，覆盖 **H5 实时预览与对讲、AI 对讲、微信 IoT VoIP、设备互呼** 四类能力。仓库中包含 Linux C 参考实现、Python 模拟器、H5 和小程序前端，以及五个业务服务和一个 Admin Server。C 和 Python 示例用于说明协议和接入流程，不能直接当作量产设备实现。
 
-本页按「业务流程 → H5 出图 → 扩展对讲」展开。首次体验请先按[项目快速体验](../README.md)跑通「上线 → 绑定 → H5 出图」。
+第一次使用时，建议先按[项目快速体验](../README.md)跑通设备上线、绑定和 H5 出图，再根据产品需要接入其他对讲能力。下面给出最短接入路径和 TiRTC SDK 调用骨架；完整字段、错误码和排查方法可从各节进入对应专题文档查看。
 
-> 本页提供各能力的**最小接入步骤和 TiRTC SDK 调用骨架**。完整字段、错误码和排查方法见各节的「参考实现」和「深入」链接。
+设备端使用 **TiRTC C SDK**（[SDK 头文件](device-sim/sdk/linux-x86_64/2.2.1/include/tirtc/tiRTC.h)），H5 使用 [TiRTC Web SDK](device-h5-live.md#h5-端接入)，微信小程序使用[微信 IoT VoIP](weixin-mini-program/README.md#微信-voip-开发)。设备协议顺序和会话控制可参考 [Linux C 参考实现](device-sim/device-sim-c/README.md)。
 
-> 三端使用不同的接入方式：设备端使用 **TiRTC C SDK**（[SDK 头文件](device-sim/sdk/linux-x86_64/2.2.1/include/tirtc/tiRTC.h)）；H5 使用 [TiRTC Web SDK](device-h5-live.md#h5-端接入)；微信小程序使用[微信 IoT VoIP](weixin-mini-program/README.md#微信-voip-开发)。设备协议顺序和会话控制可参考 [Linux C 参考实现](device-sim/device-sim-c/README.md)；产品化时必须完成[十项二次开发 TODO](device-porting.md#二次开发-todo)，不能只替换几个系统库就视为移植完成。
+接入真实产品时，还需要完成[十项二次开发 TODO](device-porting.md#二次开发-todo)，不能只替换几个系统库。
 
 ---
 
 ## 业务流程
 
-设备端流程分为「上线与绑定、H5 实时出图、扩展对讲」三段，下面通过时序图展示。
+设备接入分三步：先完成上线和绑定，再跑通 H5 实时出图，最后按需加入其他对讲能力。完整流程如下。
 
-> **启动时先检查持久化存储：** 没有 `device_id + device_key`，调用 [`POST /v1/device/report`](api-reference.md#post-v1devicereport) 注册绑定；已有凭证，先调用 [`POST /v1/device/token`](api-reference.md#post-v1devicetoken)。如果接口返回 **HTTP 410**，且响应体业务错误码为 **`6006`**，说明设备未绑定或已解绑，需携带 HMAC 签名重新调用 [`POST /v1/device/report`](api-reference.md#post-v1devicereport)。
+> **设备启动时先检查持久化存储：**
+>
+> - 没有 `device_id + device_key`：调用 [`POST /v1/device/report`](api-reference.md#post-v1devicereport) 注册绑定。
+> - 已有凭证：先调用 [`POST /v1/device/token`](api-reference.md#post-v1devicetoken) 获取 token。
+> - token 接口返回 **HTTP 410**，且响应体业务错误码为 **`6006`**：设备未绑定或已解绑，携带 HMAC 签名重新调用 [`POST /v1/device/report`](api-reference.md#post-v1devicereport)。
 
 ```mermaid
 sequenceDiagram
@@ -69,17 +73,17 @@ sequenceDiagram
     Note over D,RTC: 设备互呼: TiRtcConnect (P2P)
 ```
 
-三段分别展开：
+设备侧需要处理的内容如下。
 
 **① 上线与绑定**（设备获得身份）
 
 根据持久化存储中是否已有 `device_id + device_key` 选择上线流程。
 
-- **路径 A：持久化存储中没有凭证。** 调用 [`POST /v1/device/report`](api-reference.md#post-v1devicereport) 获取验证码和临时 MQTT 凭证。用户绑定后，设备收到 `device_id + device_key`，先安全持久化，再调用 [`POST /v1/device/token`](api-reference.md#post-v1devicetoken) 获取正式 MQTT token。
+- **路径 A：持久化存储中没有凭证。** 调用 [`POST /v1/device/report`](api-reference.md#post-v1devicereport) 获取验证码和临时 MQTT 凭证。用户绑定后，设备会收到 `device_id + device_key`。先安全持久化这两个值，再调用 [`POST /v1/device/token`](api-reference.md#post-v1devicetoken) 获取正式 MQTT token。
 
 - **路径 B：持久化存储中已有凭证。** 先调用 [`POST /v1/device/token`](api-reference.md#post-v1devicetoken)。成功后直接使用返回的 MQTT token；如果接口返回 **HTTP 410**，且响应体业务错误码为 **`6006`**，则携带 HMAC 签名调用 [`POST /v1/device/report`](api-reference.md#post-v1devicereport)，重新完成绑定。
 
-两条路径调用 [`POST /v1/device/token`](api-reference.md#post-v1devicetoken) 时，均使用相同的签名 Header：`X-Device-Id` / `X-Timestamp` / `X-Nonce` / `X-Signature`。Linux C 参考实现使用 **mbedTLS HMAC-SHA256 → Base64**：
+两条路径调用 [`POST /v1/device/token`](api-reference.md#post-v1devicetoken) 时，都需要携带 `X-Device-Id`、`X-Timestamp`、`X-Nonce` 和 `X-Signature` 四个签名请求头。Linux C 参考实现使用 **mbedTLS HMAC-SHA256 → Base64**：
 
 ```c
 // 签名串 = device_id + timestamp + nonce
@@ -107,52 +111,65 @@ if (mbedtls_base64_encode((unsigned char *)sig, sizeof(sig), &olen,
 sig[olen] = '\0';
 ```
 
-**「C 参考实现」**封装为 `hmac_sha256_b64()`（[device_flow.h](device-sim/device-sim-c/src/device_flow.h)）。最终拿到 `mqtt_token`，建正式连接（`ClientID=sn_{device_id}`，`User=device_id`，`Pass=mqtt_token`）。
+Linux C 参考实现将签名过程封装在 `hmac_sha256_b64()` 中，代码见 [device_flow.h](device-sim/device-sim-c/src/device_flow.h)。拿到 `mqtt_token` 后，使用 `ClientID=sn_{device_id}`、`User=device_id`、`Pass=mqtt_token` 建立正式连接。
 
 **② H5 实时出图**（第一个设备端功能）
-设备调用 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcstart" target="_blank" rel="noopener">`TiRtcStart`</a> 被动监听 → H5 取 `rtc-token`、用 Web SDK 连设备 → 设备 `on_conn_accepted` 后向固定 stream 推音视频 → H5 出图出声、可按住说话。
+
+设备调用 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcstart" target="_blank" rel="noopener">`TiRtcStart`</a> 进入被动监听。H5 获取 `rtc-token` 后，通过 Web SDK 连接设备。设备收到 `on_conn_accepted` 回调后向固定 stream 推送音视频，H5 便可播放画面和声音，并支持按住说话。
 
 **③ 扩展对讲**（第一个闭环跑通后，按需接入）
-- **AI 对讲**：设备主动调用 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcwhipconnect" target="_blank" rel="noopener">`TiRtcWhipConnect`</a>
-- **微信 VoIP**：小程序 ↔ 设备（经 MQTT 来电通知）
-- **设备互呼**：设备 ↔ 设备调用 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcconnect" target="_blank" rel="noopener">`TiRtcConnect`</a>（P2P）
+
+- **AI 对讲**：设备主动调用 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcwhipconnect" target="_blank" rel="noopener">`TiRtcWhipConnect`</a>。
+- **微信 VoIP**：小程序与设备通话，来电通知通过 MQTT 下发。
+- **设备互呼**：设备之间调用 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcconnect" target="_blank" rel="noopener">`TiRtcConnect`</a> 建立 P2P 连接。
 
 **各方职责：**
 
-| 一方 | 负责 |
+| 角色 | 职责 |
 |---|---|
-| Linux C 参考实现 | 上线、凭证、MQTT、TiRTC、会话控制，以及 `DeviceAdapterV1` 二次开发边界；默认仍为文件媒体/stdin 演示 |
+| Linux C 参考实现 | 上线、凭证、MQTT、TiRTC、会话控制，以及 `DeviceAdapterV1` 二次开发边界；默认使用文件媒体和 stdin 演示 |
 | 产品设备 | 平台与硬件适配、真实身份、采集编码、解码播放、视频显示、产品交互、资源仲裁、异常恢复和量产安全 |
-| H5 / 小程序 | 登录、绑定、取 token、发起 / 接听通话 |
-| 服务端（5 个业务服务 + Admin Server） | 身份、绑定、业务 token、MQTT 信令、微信回调、房间、配置与后台管理 |
+| H5、小程序 | 登录、绑定、获取 token、发起和接听通话 |
+| 服务端（五个业务服务和 Admin Server） | 身份、绑定、业务 token、MQTT 信令、微信回调、房间、配置与后台管理 |
 | MQTT Broker | 设备长连接、来电与通知下发 |
 | TiRTC | 实时音视频传输 |
 
-> 设备端按以下顺序接入：TiRTC SDK 基础 → H5 出图 → 按需扩展对讲。
+建议先熟悉 TiRTC SDK 并跑通 H5 出图，再接入产品需要的对讲能力。
 
 ---
 
 ## 设备端
 
-> **📌 MQTT 正式连接参数**（设备所有业务通信的前提）
+> **正式 MQTT 连接参数**
 >
 > - **ClientID** = `sn_{device_id}`
-> - **Username** = `device_id`（**不带 `sn_` 前缀**——EMQX 用它比对 token 里的 `device_id` claim）
+> - **Username** = `device_id`（不带 `sn_` 前缀，EMQX 会用它比对 token 中的 `device_id` claim）
 > - **Password** = `mqtt_token`（`POST /v1/device/token` 签发的 JWT）
 >
-> 临时连接、Token 签发与刷新、心跳、断连原因码见 [device-integration.md](device-integration.md#凭证与连接)。
+> 临时连接、token 签发与刷新、心跳、断连原因码见 [device-integration.md](device-integration.md#凭证与连接)。
 
 ### TiRTC SDK 速查
 
-设备侧的四类能力共用 TiRTC C SDK。先掌握以下 5 点，再看各功能代码。
+四类能力共用同一个 TiRTC C SDK。接入时先确认下面五项。
 
-**① 进程级生命周期（顺序固定）**：<a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsetoption" target="_blank" rel="noopener">`TiRtcSetOption(TIRTC_OPT_MAX_SEND_BUFFER)`</a> → <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcinit" target="_blank" rel="noopener">`TiRtcInit`</a> → 其余 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsetoption" target="_blank" rel="noopener">`TiRtcSetOption`</a> → <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcstart" target="_blank" rel="noopener">`TiRtcStart`</a> → 等 `on_event(SYS_STARTED)` → 多个业务会话共享 SDK → 进程退出时 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcstop" target="_blank" rel="noopener">`TiRtcStop`</a> → 等 `on_event(SYS_STOPPED)` → <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcuninit" target="_blank" rel="noopener">`TiRtcUninit`</a>
+**① 进程级生命周期**
 
-> H5 实时、VoIP、AI 和设备互呼共用一个进程级 SDK runtime 和一张统一回调表。业务切换只停止媒体、断开当前连接并更新会话代次，不调用 `TiRtcStop` / `TiRtcUninit`。连接及异步结果必须绑定会话代次，迟到回调不能进入新的同类会话。
+调用顺序固定，不能跳过中间状态：
 
-> 参数来源：`device_id / device_key` 来自[设备上线](#业务流程)，`endpoint` 取[服务发现](api-reference.md#service-discovery)返回的 `tirtc-srv`，`client_id` 推荐使用设备 MAC，必须唯一且不可变；一旦变更，设备将无法连接。
->
-> `g_sdk_ready`、`s_active_conn` 和 `s_force_key` 是下方精简示例的应用状态变量，不是 SDK 字段。完整实现由 `tirtc_runtime` 保存 SDK 状态和连接归属。
+| 阶段 | 操作 |
+|---|---|
+| 初始化前 | 调用 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsetoption" target="_blank" rel="noopener">`TiRtcSetOption(TIRTC_OPT_MAX_SEND_BUFFER)`</a> |
+| 初始化 | 调用 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcinit" target="_blank" rel="noopener">`TiRtcInit`</a> |
+| 配置 | 调用其余 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsetoption" target="_blank" rel="noopener">`TiRtcSetOption`</a> |
+| 启动 | 调用 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcstart" target="_blank" rel="noopener">`TiRtcStart`</a>，等待 `on_event(SYS_STARTED)` |
+| 运行 | 多个业务会话共用 SDK runtime 和同一张回调表 |
+| 退出 | 调用 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcstop" target="_blank" rel="noopener">`TiRtcStop`</a>，等待 `on_event(SYS_STOPPED)`，最后调用 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcuninit" target="_blank" rel="noopener">`TiRtcUninit`</a> |
+
+H5 实时、VoIP、AI 和设备互呼共用一个进程级 SDK runtime。切换业务时，只停止媒体、断开当前连接并更新会话代次，不调用 `TiRtcStop` 或 `TiRtcUninit`。连接和异步结果都要绑定会话代次，迟到的回调不能进入下一次同类会话。
+
+`device_id` 和 `device_key` 来自[设备上线](#业务流程)；`endpoint` 使用[服务发现](api-reference.md#service-discovery)返回的 `tirtc-srv`；`client_id` 建议使用设备 MAC，并保持全局唯一且不变，否则设备将无法连接。
+
+下面示例中的 `g_sdk_ready`、`s_active_conn` 和 `s_force_key` 是应用自己的状态变量，不是 SDK 字段。完整实现由 `tirtc_runtime` 保存 SDK 状态和连接归属。
 
 ```c
 /* ── 1. 实现 SDK 回调（运行在 SDK 内部线程，避免 sleep、阻塞和耗时操作）── */
@@ -257,7 +274,15 @@ fail:
 }
 ```
 
-> ⚠️ SDK 回调运行在内部线程，不要 `sleep`、阻塞、创建/等待线程，也不要从回调中反向调用 `TiRtcDisconnect`、`TiRtcStop` 或 `TiRtcUninit`。回调只复制仍需使用的数据、更新受保护状态或投递到应用自己的固定队列；断开、线程启停、命令解析、文件/声卡 I/O、会话恢复和延时动作由常驻控制或媒体任务在回调栈外执行。`app_rtc_event_push()`、`app_rtc_media_push()` 和 `app_rtc_command_push()` 是上例中的应用队列抽象，不是 TiRTC API。需要延时的操作（如 AI 等待 300ms）只记录时间，由业务主循环执行。[`TiRtcStart`](https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcstart) 返回 0 仅表示初步检查通过；收到 `SYS_STARTED` 后 SDK 才可用。
+> SDK 回调运行在内部线程，回调函数应尽快返回：
+>
+> - 只复制回调结束后仍要使用的数据、更新受保护状态，或向应用自己的固定队列投递事件。
+> - 不要在回调中 `sleep`、阻塞、创建或等待线程，也不要反向调用 `TiRtcDisconnect`、`TiRtcStop` 或 `TiRtcUninit`。
+> - 断开连接、启停线程、解析命令、文件或声卡 I/O、会话恢复和延时动作，都由常驻控制任务或媒体任务在回调栈外处理。
+>
+> `app_rtc_event_push()`、`app_rtc_media_push()` 和 `app_rtc_command_push()` 是上例中的应用队列抽象，不属于 TiRTC API。需要延时的操作，例如 AI 建连后等待 300ms，只记录时间，再由业务主循环执行。
+>
+> [`TiRtcStart`](https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcstart) 返回 0 只表示初步检查通过。收到 `SYS_STARTED` 后，SDK 才能使用。
 
 **② 三种连接方式**
 
@@ -267,7 +292,9 @@ fail:
 | AI / VoIP | <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcwhipconnect" target="_blank" rel="noopener">`TiRtcWhipConnect(peer_id, token, cb, user)`</a> | WHIP client → server |
 | 设备互呼 | <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcconnect" target="_blank" rel="noopener">`TiRtcConnect(caller_id, token, cb, user)`</a> | 设备 ↔ 设备 P2P（被叫发起） |
 
-[`TiRtcWhipConnect`](https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcwhipconnect) 和 [`TiRtcConnect`](https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcconnect) 都通过 `TIRTCCONNECTCALLBACK` 返回连接结果：`void cb(int error, tirtc_conn_t hconn, void *user_data)`。`error == 0` 时可使用 `hconn` 发送媒体或命令。[`TiRtcDisconnect`](https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcdisconnect) 异步断开连接；该方法返回后，`hconn` 立即失效。
+[`TiRtcWhipConnect`](https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcwhipconnect) 和 [`TiRtcConnect`](https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcconnect) 都通过 `TIRTCCONNECTCALLBACK` 返回连接结果：`void cb(int error, tirtc_conn_t hconn, void *user_data)`。`error == 0` 时可使用 `hconn` 发送媒体或命令。
+
+调用 [`TiRtcDisconnect`](https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcdisconnect) 会异步断开连接。该方法返回后，`hconn` 立即失效。
 
 **③ 发送音视频**（`TIRTCFRAMEINFO` 帧头 + payload）
 
@@ -291,23 +318,29 @@ video.length    = video_len;                   /* 一帧编码后视频数据的
 TiRtcSendVideoStream(hconn, &video, video_frame);
 ```
 
-> 音频与视频都使用 `TIRTCFRAMEINFO`，但分别调用 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsendaudiostream" target="_blank" rel="noopener">`TiRtcSendAudioStream`</a> 和 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsendvideostream" target="_blank" rel="noopener">`TiRtcSendVideoStream`</a>。视频流**第一帧必须是关键帧**；返回 `TIRTC_E_BUSY` 表示发送缓冲满，SDK 自动丢弃非关键帧直到下一个关键帧。
+> 音频与视频都使用 `TIRTCFRAMEINFO`，发送接口不同：
+>
+> - 音频调用 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsendaudiostream" target="_blank" rel="noopener">`TiRtcSendAudioStream`</a>。
+> - 视频调用 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsendvideostream" target="_blank" rel="noopener">`TiRtcSendVideoStream`</a>，**第一帧必须是关键帧**。
+> - 返回 `TIRTC_E_BUSY` 表示发送缓冲已满。SDK 会丢弃非关键帧，直到收到下一个关键帧。
 
 **④ 命令通道（信令）**：调用 [`TiRtcSendCommand`](https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsendcommand) 发送命令。开发者自定义 `cmdw` 必须 `≥ 0x10000`；`0x2000` 和 `0x2100` 是平台预定义命令，不能用于自定义业务。AI 使用 `0x2100`，设备互呼使用 `0x2000`。`on_command` 收到原始 `cmdw`，直接按原值分发。
 
 **⑤ 错误处理**：所有 SDK 返回码统一用 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcgeterrorstr" target="_blank" rel="noopener">`TiRtcGetErrorStr(rc)`</a> 转可读串；版本号 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcgetversion" target="_blank" rel="noopener">`TiRtcGetVersion()`</a>。
 
-> **「C 参考实现」**由 [session_arbiter.c](device-sim/device-sim-c/src/session_arbiter.c) 原子处理准入、pending 和 generation，再由 [session_coordinator.c](device-sim/device-sim-c/src/session_coordinator.c) 串行切换四类业务。空闲时运行 `stream`；进入 `voip / ai / call` 时暂停 `stream`，由当前业务独占 TiRTC，结束后恢复 `stream`。这种设计适合媒体资源有限、业务互斥的设备，但不是 SDK 限制。
+Linux C 参考实现通过 [session_arbiter.c](device-sim/device-sim-c/src/session_arbiter.c) 原子处理准入、pending 和 generation，再由 [session_coordinator.c](device-sim/device-sim-c/src/session_coordinator.c) 串行切换四类业务。
+
+设备空闲时运行 `stream`；进入 `voip`、`ai` 或 `call` 后暂停 `stream`，由当前业务独占 TiRTC，结束后再恢复。这套方式适合媒体资源有限、业务互斥的设备，但不是 SDK 的限制。
 
 ---
 
 ### 你的第一个设备端功能：H5 出图
 
-如果还没有跑通过完整流程，请先按[项目快速体验](../README.md)使用 Python 模拟器完成「上线 → 绑定 → H5 出图」。本节先用 **Linux C 参考实现**验证设备协议和文件媒体路径；真实设备再按[二次开发文档](device-porting.md)接入硬件。
+如果还没跑通过完整流程，请先按[项目快速体验](../README.md)使用 Python 模拟器完成上线、绑定和 H5 出图。本节用 Linux C 参考实现验证设备协议和文件媒体路径；接入真实设备时，再按[二次开发文档](device-porting.md)适配硬件。
 
 #### 步骤 1：设备上线
 
-所有能力共用这个前提：设备完成上线，持有 `device_id + device_key`、`mqtt_token` 和正式 MQTT 长连接。**Linux C 参考实现**用 `device_flow.c` 封装该流程；[main.c](device-sim/device-sim-c/src/main.c) 是 Linux 上可运行的控制流，不是硬件产品启动代码：
+所有能力都以设备上线为前提。上线完成后，设备应持有 `device_id + device_key`、`mqtt_token` 和正式 MQTT 长连接。Linux C 参考实现用 `device_flow.c` 封装这段流程；[main.c](device-sim/device-sim-c/src/main.c) 是可在 Linux 上运行的控制流示例，不是硬件产品的启动代码：
 
 ```c
 #include "device_flow.h"
@@ -334,13 +367,15 @@ connect_mqtt_blocking(svc.mqtt_host, svc.mqtt_port, did, mqtt_token,
                       &g_stop /*停止标志*/, svc.mqtt_tls);
 ```
 
-> 绑定后必须持久化 `did/dkey`。Linux C 参考实现写入 `device_creds.json`，使用同目录临时文件 + `fsync` + `rename`，权限为 0600；产品设备应换成受保护的设备存储。已预置凭证的设备直接从阶段 2 开始。完整字段、临时/正式连接参数、Token 刷新和断连原因码见 [device-integration.md](device-integration.md#上线全流程)。
+> 绑定后必须持久化 `did/dkey`。Linux C 参考实现将凭证写入权限为 0600 的 `device_creds.json`，写入时使用同目录临时文件、`fsync` 和 `rename`。产品设备应改用受保护的设备存储。已预置凭证的设备可以直接从阶段 2 开始。
+>
+> 完整字段、临时和正式连接参数、token 刷新及断连原因码见 [device-integration.md](device-integration.md#上线全流程)。
 
 #### 步骤 2：H5 推流出图
 
-**特点：** H5 实时预览由设备被动监听，无需调用业务 HTTP API 或发送 MQTT 消息。设备调用 [`TiRtcStart`](https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcstart) 后等待 H5 连接，连接建立后推送音视频。
+H5 实时预览由设备被动监听，不需要调用业务 HTTP API，也不需要发送 MQTT 消息。设备调用 [`TiRtcStart`](https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcstart) 后等待 H5 连接，连接建立后开始推送音视频。
 
-**流契约（H5 固定，不协商）：**
+H5 使用固定的 stream，不进行协商：
 
 | 方向 | stream_id | 格式 |
 |------|-----------|------|
@@ -348,7 +383,11 @@ connect_mqtt_blocking(svc.mqtt_host, svc.mqtt_port, did, mqtt_token,
 | 设备 → H5 视频 | `11` | H.264 裸流，首帧须关键帧 |
 | H5 → 设备 按住说话 | `14` | G.711A，默认 8kHz |
 
-**TiRTC SDK 调用：** `on_conn_accepted` 只投递连接事件，设备控制任务在回调返回后保存句柄并启动推流线程；线程按时间戳节流，循环「取一帧 → 填帧头 → 发送」。下面是说明调用顺序的产品侧伪代码，`app_rtc_event_push`、`h264_source_next_*`、`src` 和 `VIDEO_FRAME_MS` 都不是 TiRTC API，也不是可直接编译的 Linux C 参考实现符号；实际代码见 [tirtc_stream.c](device-sim/device-sim-c/src/tirtc_stream.c) 和 [file_media_source.c](device-sim/device-sim-c/src/file_media_source.c)。
+`on_conn_accepted` 回调只负责投递连接事件。回调返回后，设备控制任务保存句柄并启动推流线程；推流线程按时间戳节流，依次取帧、填写帧头并发送。
+
+下面的产品侧伪代码只用于说明调用顺序。`app_rtc_event_push`、`h264_source_next_*`、`src` 和 `VIDEO_FRAME_MS` 都不是 TiRTC API，也不是可直接编译的 Linux C 参考实现符号。
+
+实际代码见 [tirtc_stream.c](device-sim/device-sim-c/src/tirtc_stream.c) 和 [file_media_source.c](device-sim/device-sim-c/src/file_media_source.c)。
 
 ```c
 /* SDK 回调：只投递事件。 */
@@ -398,27 +437,25 @@ static void *push_thread(void *arg) {
    on_audio(hconn, pFi, data)       → sid=14；产品复制并投递给播放队列 */
 ```
 
-> 上述变量和函数只服务于伪代码。Linux C 默认适配实际使用 `FileMediaSource` 读取已编码文件；产品通过 `DeviceMediaSourceOps` 替换成真实采集和编码模块。连接断开及 `TIRTC_E_BUSY` 处理见 [tirtc_stream.c](device-sim/device-sim-c/src/tirtc_stream.c) 的 `_push_thread()`。
+> 上述变量和函数只服务于伪代码。Linux C 默认适配使用 `FileMediaSource` 读取已编码文件；产品通过 `DeviceMediaSourceOps` 接入真实的采集和编码模块。连接断开及 `TIRTC_E_BUSY` 的处理见 [tirtc_stream.c](device-sim/device-sim-c/src/tirtc_stream.c) 中的 `_push_thread()`。
 
-**Linux C 参考实现完成标志：** H5 能播放参考实现从文件发送的音视频；按住说话时，参考实现能记录收到的 H5 音频帧。收到帧不代表扬声器已播放。
+跑通后，H5 可以播放参考实现从文件发送的音视频；按住说话时，参考实现能够记录收到的 H5 音频帧。这里记录到音频帧只说明接收成功，不代表扬声器已经播放。
 
-**参考实现：** [tirtc_runtime.c](device-sim/device-sim-c/src/tirtc_runtime.c) 统一管理进程级 SDK 生命周期与回调分发，[tirtc_stream.c](device-sim/device-sim-c/src/tirtc_stream.c) 只管理实时流会话和媒体发送。完整契约与排查见 [device-h5-live.md](device-h5-live.md#设备侧接入)。
+相关代码分在两个文件中：[tirtc_runtime.c](device-sim/device-sim-c/src/tirtc_runtime.c) 统一管理进程级 SDK 生命周期和回调分发，[tirtc_stream.c](device-sim/device-sim-c/src/tirtc_stream.c) 管理实时流会话和媒体发送。完整契约与排查方法见 [device-h5-live.md](device-h5-live.md#设备侧接入)。
 
 ---
 
 ### 扩展更多能力
 
-完成「上线 + H5 出图」后，再根据产品需求接入 AI 对讲、微信 VoIP 或设备互呼。建议每次只接入一种能力，完成流程和验收后再接入下一种。
+上线和 H5 出图跑通后，再根据产品需要接入 AI 对讲、微信 VoIP 或设备互呼。一次接入一种能力，完成联调和验收后再继续，问题会更容易定位。
 
 #### 1. AI 对讲
 
-**目标：** 设备主动发起 AI 语音对话；该流程**不经过 MQTT 来电**。
+AI 对讲由设备主动发起，不经过 MQTT 来电。设备先调用 [`GET /v1/ai/token`](api-reference.md#get-v1aitoken)，并在请求中携带 `Authorization: Bearer <mqtt_token>`。接口返回建立会话所需的 `peer_id`、`token` 和 `role_id`。
 
-**协议步骤：**
+拿到 token 后，调用 [`TiRtcWhipConnect`](https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcwhipconnect) 建立连接。建连 300ms 后，再通过 [`TiRtcSendCommand`](https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsendcommand) 发送 `start_session`。
 
-1. [`GET /v1/ai/token`](api-reference.md#get-v1aitoken)（`Authorization: Bearer <mqtt_token>`）→ 返回 `peer_id` + `token` + `role_id`
-
-**TiRTC SDK 调用：** 获取 token 后，调用 [`TiRtcWhipConnect`](https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcwhipconnect) 建立连接；连接建立 300ms 后，调用 [`TiRtcSendCommand`](https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsendcommand) 发送 `start_session`；调用 [`TiRtcSendAudioStream`](https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsendaudiostream) 上行音频，下行音频由 `on_audio` 接收。示例：
+上行音频使用 [`TiRtcSendAudioStream`](https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsendaudiostream) 发送，下行音频从 `on_audio` 回调接收。
 
 ```c
 /* peer_id / token / role_id 来自协议步骤第 1 步 */
@@ -441,19 +478,17 @@ if (g_ai_conn && !g_ai_started && now_ms() - g_ai_connect_at >= 300) {
 /* on_audio(hconn, pFi, data) → AI 下行音频，交给扬声器播放 */
 ```
 
-**完成标志：** 设备发起对话后能听到 AI 应答，多轮对话正常。
+验收时，设备发起对话后应能听到 AI 应答，并能正常进行多轮对话。
 
-**参考实现：** [tirtc_ai.c](device-sim/device-sim-c/src/tirtc_ai.c) 中，`ai_get_token()` 获取会话凭证，`ai_start_session()` 建立会话，`ai_poll()` 处理 300ms 延迟信令。完整字段见 [device-ai.md](device-ai.md#建立会话)。
+参考代码在 [tirtc_ai.c](device-sim/device-sim-c/src/tirtc_ai.c)：`ai_get_token()` 获取会话凭证，`ai_start_session()` 建立会话，`ai_poll()` 处理 300ms 延迟信令。完整字段见 [device-ai.md](device-ai.md#建立会话)。
 
 ---
 
 #### 2. 微信 VoIP 对讲
 
-**目标：** 微信小程序与设备进行双向音视频对讲；设备调用 [`TiRtcWhipConnect`](https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcwhipconnect) 建立连接。
+微信小程序和设备通过 VoIP 进行双向音视频对讲，设备使用 [`TiRtcWhipConnect`](https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcwhipconnect) 建立连接。接入顺序如下：
 
-**协议步骤：**
-
-1. [`POST /v1/voip/device/profile`](api-reference.md#post-v1voipdeviceprofile)（`Bearer <mqtt_token>`）上报媒体能力——**硬前提**，缺失会导致来电推送失败：
+1. 调用 [`POST /v1/voip/device/profile`](api-reference.md#post-v1voipdeviceprofile)（`Bearer <mqtt_token>`）上报媒体能力。没有 profile 时，来电无法下发：
 
    ```http
    POST /v1/voip/device/profile
@@ -479,12 +514,14 @@ if (g_ai_conn && !g_ai_started && now_ms() - g_ai_connect_at >= 300) {
    }
    ```
 
-   > `fit_screen` / `fill_screen` 仅适用于 `down_video_mt=mjpeg`，并要求有效的屏幕宽高。上行音频编码由 `TiRtcSendAudioStream` 实际发送的帧格式决定，不在 profile 中上报。完整字段与取值见 [api-reference.md](api-reference.md#post-v1voipdeviceprofile)。
+   > `fit_screen` 和 `fill_screen` 仅适用于 `down_video_mt=mjpeg`，并要求有效的屏幕宽高。上行音频编码由 `TiRtcSendAudioStream` 实际发送的帧格式决定，不在 profile 中上报。完整字段与取值见 [api-reference.md](api-reference.md#post-v1voipdeviceprofile)。
 
-2. 监听 MQTT `device/sn_{device_id}/cmd`，收到 `call_incoming`（payload 含 `peer_id` + `token`）；`device/sn_{device_id}/notify` 收 `call_cancel` / `callers_update`
-3. 设备主动呼小程序：调 [`POST /v1/voip/device/call`](api-reference.md#post-v1voipdevicecall)，等微信回调后同样走第 2 步的 `call_incoming`
+2. 监听 MQTT `device/sn_{device_id}/cmd`，从 `call_incoming` 的 payload 中读取 `peer_id` 和 `token`；在 `device/sn_{device_id}/notify` 接收 `call_cancel` 和 `callers_update`。
+3. 设备主动呼叫小程序时，调用 [`POST /v1/voip/device/call`](api-reference.md#post-v1voipdevicecall)。微信回调后，设备仍按第 2 步接收 `call_incoming`。
 
-**TiRTC SDK 调用：** 收到来电且业务决定接听后，调用 [`TiRtcWhipConnect`](https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcwhipconnect) 建立连接；调用 [`TiRtcSendAudioStream`](https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsendaudiostream) 上行音频，启用视频时再调用 [`TiRtcSendVideoStream`](https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsendvideostream)；下行媒体由 `on_audio` / `on_video` 接收。示例：
+收到来电并决定接听后，设备调用 [`TiRtcWhipConnect`](https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcwhipconnect) 建立连接。
+
+上行音频通过 [`TiRtcSendAudioStream`](https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsendaudiostream) 发送；启用视频时，再调用 [`TiRtcSendVideoStream`](https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsendvideostream)。下行媒体分别从 `on_audio` 和 `on_video` 回调接收。
 
 ```c
 /* call_incoming payload 里的 peer_id / token（来自协议步骤第 2 步） */
@@ -496,24 +533,26 @@ void on_voip_connected(int err, tirtc_conn_t hconn, void *user) {
 }
 ```
 
-**完成标志：** 小程序呼叫设备能接通、双向音视频正常；设备主动呼叫时小程序弹出来电。
+验收时需要确认两个方向：小程序呼叫设备能够接通并正常传输双向音视频；设备主动呼叫时，小程序能够收到来电提醒。
 
-**参考实现：** [tirtc_voip.c](device-sim/device-sim-c/src/tirtc_voip.c) 提供 `voip_report_profile()`、`voip_accept_pending()`、`voip_reject_pending()` 和 `voip_dial_authorized()`，分别处理能力上报、接听、拒接和外呼。完整流程见 [device-voip.md](device-voip.md#小程序呼设备)｜小程序侧见[微信小程序开发](#微信小程序开发)。
+参考代码在 [tirtc_voip.c](device-sim/device-sim-c/src/tirtc_voip.c)。其中，`voip_report_profile()`、`voip_accept_pending()`、`voip_reject_pending()` 和 `voip_dial_authorized()` 分别处理能力上报、接听、拒接和外呼。
+
+设备侧完整流程见 [device-voip.md](device-voip.md#小程序呼设备)，小程序侧见[微信小程序开发](#微信小程序开发)。
 
 ---
 
 #### 3. 设备互呼
 
-**目标：** 两台设备通过 [`TiRtcConnect`](https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcconnect) 建立 P2P 音视频通话，不使用 VoIP/AI 的 [`TiRtcWhipConnect`](https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcwhipconnect)。
+设备互呼使用 [`TiRtcConnect`](https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcconnect) 在两台设备之间建立 P2P 音视频通话，不使用 VoIP 和 AI 对讲所用的 [`TiRtcWhipConnect`](https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcwhipconnect)。接入顺序如下：
 
-**协议步骤：**
+1. 双方需要是已接受的设备联系人。同账号下的设备无需添加好友；跨账号设备由一方调用 [`POST /v1/call/device/contacts/request`](api-reference.md#post-v1calldevicecontactsrequest) 发起申请，对方再调用 [`POST /v1/call/device/contacts/respond`](api-reference.md#post-v1calldevicecontactsrespond) 接受。
+2. 主叫调用 [`POST /v1/call/request`](api-reference.md#post-v1callrequest) 创建房间，等待被叫通过 [`TiRtcConnect`](https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcconnect) 建立连接。
+3. 被叫从 MQTT 收到 `call_incoming(channel=device)`。
+4. 被叫调用 [`POST /v1/call/device/info`](api-reference.md#post-v1calldeviceinfo) 换取连接 `token`。
 
-1. 双方须是「已接受」的设备联系人（同账号设备免好友，跨账号走 [`POST /v1/call/device/contacts/request`](api-reference.md#post-v1calldevicecontactsrequest) → 对方 [`POST /v1/call/device/contacts/respond`](api-reference.md#post-v1calldevicecontactsrespond) 接受）
-2. 主叫调用 [`POST /v1/call/request`](api-reference.md#post-v1callrequest) 创建房间，等待被叫通过 [`TiRtcConnect`](https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcconnect) 建立连接
-3. 被叫收到 MQTT `call_incoming(channel=device)`
-4. 被叫 [`POST /v1/call/device/info`](api-reference.md#post-v1calldeviceinfo) 换取连接 `token`
+被叫调用 [`TiRtcConnect`](https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcconnect) 主动连接主叫。连接成功后，先通过 [`TiRtcSendCommand`](https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsendcommand) 发送 `0x2000` 接通确认。
 
-**TiRTC SDK 调用：** 被叫调用 [`TiRtcConnect`](https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcconnect) 主动连接主叫。连接成功后，调用 [`TiRtcSendCommand`](https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsendcommand) 发送 `0x2000` 接通确认；再通过 [`TiRtcSendAudioStream`](https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsendaudiostream) 和 [`TiRtcSendVideoStream`](https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsendvideostream) 发送媒体，下行媒体由 `on_audio` / `on_video` 接收。示例：
+媒体通过 [`TiRtcSendAudioStream`](https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsendaudiostream) 和 [`TiRtcSendVideoStream`](https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsendvideostream) 发送，下行媒体从 `on_audio` 和 `on_video` 回调接收。
 
 ```c
 /* caller_id（主叫 device_id）/ token 来自协议步骤第 4 步 */
@@ -527,11 +566,13 @@ void on_call_connected(int err, tirtc_conn_t hconn, void *user) {
 }
 ```
 
-**完成标志：** 同账号两台设备互呼接通；跨账号设备完成好友绑定后呼叫接通。
+验收时，同账号下的两台设备应能直接接通；跨账号设备应在完成好友绑定后接通。
 
-**参考实现：** [call_session.c](device-sim/device-sim-c/src/call_session.c) 中的 `call_session_do_call()` 负责主叫建房；[tirtc_call.c](device-sim/device-sim-c/src/tirtc_call.c) 中的 `call_on_device_call_incoming()` 负责被叫获取 token、建立连接并发送 `0x2000` 接通确认。完整流程见 [device-call.md](device-call.md#被叫流程)。
+参考代码分别在 [call_session.c](device-sim/device-sim-c/src/call_session.c) 和 [tirtc_call.c](device-sim/device-sim-c/src/tirtc_call.c)。`call_session_do_call()` 负责主叫建房，`call_on_device_call_incoming()` 负责被叫获取 token、建立连接并发送 `0x2000` 接通确认。
 
-> ⚠️ 一台设备要同时承载多类业务（推流中来了 VoIP 来电、AI 会话中收到设备呼叫），必须按统一状态机处理抢占与恢复。先看 [统一状态机](device-session-model.md)，并发控制与产品实现细节见 [会话仲裁参考](device-session-arbiter.md)。
+完整流程见 [device-call.md](device-call.md#被叫流程)。
+
+如果一台设备同时承载多类业务，例如推流时收到 VoIP 来电，或 AI 会话中收到设备呼叫，必须通过统一状态机处理抢占和恢复。状态设计见[统一状态机](device-session-model.md)，并发控制和产品实现细节见[会话仲裁参考](device-session-arbiter.md)。
 
 ---
 
@@ -543,15 +584,13 @@ void on_call_connected(int err, tirtc_conn_t hconn, void *user) {
 
 ### H5 开发
 
-H5 页面由 user-server 提供静态文件。用户登录后取 RTC token，再用 Web SDK 直连设备。完整页面见 [player.html](user-server/static/player.html)。
+H5 页面由 user-server 提供静态文件。用户登录并获取 RTC token 后，通过 Web SDK 直连设备。完整页面见 [player.html](user-server/static/player.html)。
 
-登录后可在 [devices.html](user-server/static/devices.html) 管理设备。页面通过
-[`GET /v1/user/device/list`](api-reference.md#get-v1userdevicelist) 获取当前用户已绑定设备；
-点击设备名称旁的“修改”，通过
-[`PUT /v1/user/device/name`](api-reference.md#put-v1userdevicename) 保存名称。
-列表中的设备均为当前绑定设备，状态区域用于查看在线/离线及摄像头、带屏等设备能力。
+登录后可以在 [devices.html](user-server/static/devices.html) 管理设备。页面通过 [`GET /v1/user/device/list`](api-reference.md#get-v1userdevicelist) 获取当前用户绑定的设备；点击设备名称旁的“修改”，再调用 [`PUT /v1/user/device/name`](api-reference.md#put-v1userdevicename) 保存新名称。
 
-**步骤：**
+列表还会显示设备在线状态，以及是否带摄像头、屏幕等能力。
+
+页面按以下顺序接入：
 
 1. 用户登录 user-server 拿 `user_jwt`，且 `device_id` 已绑定在该用户名下
 2. [`GET /v1/user/device/rtc-token?device_id=...`](api-reference.md#get-v1userdevicertc-token) 拿 `token`、`app_id`
@@ -575,17 +614,17 @@ conn.subscribeAudio({ streamId: 10 });
 /* 离开页面：conn.disconnect() + 三个 output.detach() + talkback.stop() */
 ```
 
-**完成标志：** 页面出图出声；按住说话按钮时设备端收到音频。
+跑通后，页面能够播放设备的画面和声音；按住说话按钮时，设备端能够收到音频。
 
-**深入：** [device-h5-live.md](device-h5-live.md#h5-端接入)
+更多接入细节见 [device-h5-live.md](device-h5-live.md#h5-端接入)。
 
 ---
 
 ### 微信小程序开发
 
-小程序负责用户账户、设备绑定和微信 VoIP 授权；设备侧来电仍由 C 固件处理。工程在 [weixin-mini-program](weixin-mini-program)，微信开发者工具直接打开。
+小程序负责用户账户、设备绑定和微信 VoIP 授权；设备侧来电仍由 C 固件处理。工程位于 [weixin-mini-program](weixin-mini-program)，可以直接用微信开发者工具打开。
 
-**步骤：**
+接入步骤如下：
 
 1. 导入 `thing-connect/weixin-mini-program`，AppID 用已开通 IoT VoIP 的正式 AppID（不要用测试号）
 2. 编辑 [app.js](weixin-mini-program/app.js) 的 `globalData`：
@@ -611,17 +650,19 @@ await POST('/v1/voip/user/report-auth', { /* 微信返回结果 */ }); // 3. 回
 
 调用顺序与字段说明：[`POST /v1/voip/user/sn-ticket`](api-reference.md#post-v1voipusersn-ticket) → [`POST /v1/voip/user/report-auth`](api-reference.md#post-v1voipuserreport-auth)。
 
-**完成标志：** 可登录、绑定、授权并成功发起 VoIP 呼叫。
+跑通后，小程序应能完成登录、绑定和授权，并成功发起 VoIP 呼叫。
 
-**深入：** [weixin-mini-program/README.md](weixin-mini-program/README.md)
+更多说明见 [weixin-mini-program/README.md](weixin-mini-program/README.md)。
 
 ---
 
 ## 服务端：功能与部署
 
-五个业务服务和 Admin Server 共用 MySQL、Redis；需要 MQTT 的服务连接同一个 Broker。**五个业务服务的 `jwt_secret` 必须一致**，六个服务的 `internal.key` 必须一致，Admin 使用独立的 `admin.jwt_secret`。
+五个业务服务和 Admin Server 共用 MySQL、Redis，需要 MQTT 的服务连接同一个 Broker。五个业务服务的 `jwt_secret` 必须一致，六个服务的 `internal.key` 也必须一致；Admin 使用独立的 `admin.jwt_secret`。
 
-`config.yaml` 保存数据库、Redis、MQTT、服务地址和进程认证密钥等启动引导参数。Admin 注册表中的业务配置使用数据库发布值；没有发布记录时使用注册表默认值。五个业务服务必须在启动时连接 Admin 完成首次配置加载。通用配置中的 TiRTC 应用 ID 和访问密钥是必填阻塞项，需要在 Admin Web 中配置。
+`config.yaml` 保存数据库、Redis、MQTT、服务地址和进程认证密钥等启动引导参数。Admin 注册表中的业务配置使用数据库发布值；没有发布记录时，使用注册表默认值。
+
+五个业务服务必须在启动时连接 Admin，完成首次配置加载。通用配置中的 TiRTC 应用 ID 和访问密钥是必填项，需要在 Admin Web 中配置；缺少这两项时，服务不会启动。
 
 | 服务 | 调用方 | 主要职责 |
 |---|---|---|
@@ -632,18 +673,20 @@ await POST('/v1/voip/user/report-auth', { /* 微信返回结果 */ }); // 3. 回
 | call-server | 设备、H5 | 设备联系人、房间、设备互呼 token 与通知 |
 | admin-server | 管理员、五个业务服务 | Admin Web、RBAC、用户设备管理、动态配置、服务状态与审计 |
 
-生产环境固定安装 Admin、Device、User，VoIP、AI、Call 按需选择。服务器准备、MySQL 权限、首次 Web 安装、Supervisor、Nginx、验收、更新和迁移统一见 [部署指南](deployment.md)。Admin 功能和使用约束见 [Admin Server README](admin/admin-server/README.md)。
+生产环境固定安装 Admin、Device、User，VoIP、AI、Call 按需选择。服务器准备、MySQL 权限、首次 Web 安装、Supervisor、Nginx、验收、更新和迁移见[部署指南](deployment.md)。
+
+Admin 功能和使用约束见 [Admin Server README](admin/admin-server/README.md)。
 
 ---
 
 ## 查接口与错误码
 
-所有 HTTP 接口的请求/返回字段、成功码、业务错误码、微信回调错误码统一维护在：
+HTTP 接口的请求和返回字段、成功码、业务错误码及微信回调错误码集中在以下两份文档中：
 
-- **[api-reference.md](api-reference.md)** — 五个业务服务的接口与错误码。
-- **[admin/admin-server/API.md](admin/admin-server/API.md)** — Admin 登录、RBAC、配置和运维接口。
+- [api-reference.md](api-reference.md)：五个业务服务的接口与错误码。
+- [admin/admin-server/API.md](admin/admin-server/API.md)：Admin 登录、RBAC、配置和运维接口。
 
-各专题文档末尾的「问题排查」「协议速查」给出该能力的常见错误与定位；MQTT 断连原因码、TiRTC SDK 返回值约定见 [device-integration.md](device-integration.md)。
+各专题文档末尾还有问题排查和协议速查，可用于定位常见错误。MQTT 断连原因码、TiRTC SDK 返回值约定见 [device-integration.md](device-integration.md)。
 
 ---
 
