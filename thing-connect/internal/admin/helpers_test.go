@@ -349,3 +349,31 @@ func TestHTTPParsingHelpers(t *testing.T) {
 		t.Fatal("invalid sort order accepted")
 	}
 }
+
+func TestVoIPAppDeviceFilter(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	request := httptest.NewRequest("GET", "/?keyword=device&auth_status=active&profile_reported=true", nil)
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = request
+	where, args, err := voipAppDeviceFilter(context, "wx-app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(where, "a.device_id LIKE ?") ||
+		!strings.Contains(where, "a.auth_status=?") ||
+		!strings.Contains(where, "p.device_id IS NOT NULL") {
+		t.Fatalf("unexpected VoIP device filter: %q", where)
+	}
+	if len(args) != 7 || args[0] != "wx-app" || args[1] != "%device%" || args[6] != "active" {
+		t.Fatalf("unexpected VoIP device filter args: %#v", args)
+	}
+
+	for _, query := range []string{"auth_status=unknown", "profile_reported=maybe"} {
+		badRequest := httptest.NewRequest("GET", "/?"+query, nil)
+		badContext, _ := gin.CreateTestContext(httptest.NewRecorder())
+		badContext.Request = badRequest
+		if _, _, err := voipAppDeviceFilter(badContext, "wx-app"); err == nil {
+			t.Fatalf("invalid filter %q was accepted", query)
+		}
+	}
+}

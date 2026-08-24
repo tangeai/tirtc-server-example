@@ -134,6 +134,14 @@ MFA 验证请求：
 
 `GET /device-pool` 只返回设备池元数据，不返回 `device_key`。支持 `keyword` 和 `state=available|allocated|released`：`available` 表示从未绑定且可分配，`allocated` 表示已分配，`released` 表示已解绑但按设备身份保留、不会重新分配。返回对象包含 `ever_bound`、当前归属、导入任务编号和导入文件名；初始化或外部写入的数据没有导入任务编号。
 
+`GET /voip/apps/:app_id/devices` 分页返回指定微信小程序的授权设备，支持以下可选查询参数：
+
+- `keyword`：匹配设备 ID、授权设备名称、微信 OpenID、设备型号或所属用户邮箱。
+- `auth_status=active|invalid`：按有效或失效状态筛选。
+- `profile_reported=true|false`：按设备是否上报 VoIP 属性筛选。
+
+列表默认按授权记录 ID 倒序排列。筛选条件同时作用于 `items` 和 `total`，Admin Web 使用 `page_size=20` 分页查询，不会一次加载全部授权记录。
+
 登录日志和操作日志保留稳定的英文动作码用于筛选与二次开发。`GET /login-logs` 的每条记录包含登录时提交的 `email`；`GET /audit-logs` 的每条记录包含 `admin_user_id` 和当前可查询到的 `email`，账号不存在或已离线清理时 `email` 为空。
 
 ## 动态配置

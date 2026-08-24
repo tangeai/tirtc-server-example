@@ -3,13 +3,12 @@ import {
   Alert,
   Button,
   Card,
-  Col,
   Descriptions,
   Drawer,
   Form,
   Input,
   Modal,
-  Row,
+  Select,
   Space,
   Switch,
   Table,
@@ -45,22 +44,42 @@ export function VoIPPage() {
     () => api<{ items: ConfigEntry[] }>('/configs?namespace=voip-server'),
     [],
   );
-  const [selected, setSelected] = useState<AnyRow>();
-  const [devices, setDevices] = useState<PageData>();
-  const [devicesLoading, setDevicesLoading] = useState(false);
-  const [profile, setProfile] = useState<AnyRow>();
-  const [appEdit, setAppEdit] = useState<AnyRow | null>(null);
+  const [selectedAppID, setSelectedAppID] = useState('');
+  const selected = useMemo(
+    () => apps?.items.find((item) => item.app_id === selectedAppID),
+    [apps, selectedAppID],
+  );
   useEffect(() => {
-    if (!selected) {
-      setDevices(undefined);
+    const items = apps?.items || [];
+    if (!items.length) {
+      if (selectedAppID) setSelectedAppID('');
       return;
     }
-    setDevicesLoading(true);
-    api<PageData>(`/voip/apps/${selected.app_id}/devices?page=1&page_size=100`)
-      .then(setDevices)
-      .catch((e) => reportError(e))
-      .finally(() => setDevicesLoading(false));
-  }, [selected]);
+    if (!items.some((item) => item.app_id === selectedAppID)) {
+      setSelectedAppID((items.find((item) => item.is_default) || items[0]).app_id);
+    }
+  }, [apps, selectedAppID]);
+  const [deviceQuery, setDeviceQuery] = useState('');
+  const [authStatus, setAuthStatus] = useState('');
+  const [profileReported, setProfileReported] = useState('');
+  const [page, setPage] = useState(1);
+  const pageSize = 20;
+  const deviceParams = useMemo(() => {
+    const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
+    if (deviceQuery) params.set('keyword', deviceQuery);
+    if (authStatus) params.set('auth_status', authStatus);
+    if (profileReported) params.set('profile_reported', profileReported);
+    return params.toString();
+  }, [page, deviceQuery, authStatus, profileReported]);
+  const [devices, devicesLoading, reloadDevices] = useLoad(
+    () =>
+      selectedAppID
+        ? api<PageData>(`/voip/apps/${encodeURIComponent(selectedAppID)}/devices?${deviceParams}`)
+        : Promise.resolve<PageData>({ items: [], page, page_size: pageSize, total: 0 }),
+    [selectedAppID, deviceParams],
+  );
+  const [profile, setProfile] = useState<AnyRow>();
+  const [appEdit, setAppEdit] = useState<AnyRow | null>(null);
   const entry = entries?.items.find((x) => x.config_key === 'wechat.apps') || {
     namespace: 'voip-server',
     config_key: 'wechat.apps',
@@ -96,6 +115,7 @@ export function VoIPPage() {
       if (Object.keys(secretValues).length) body.secrets = { apps: { [appID]: secretValues } };
       await api('/configs/voip-server/wechat.apps', json('PUT', body));
       message.success('微信应用已发布');
+      setSelectedAppID(appID);
       setAppEdit(null);
       reloadEntries();
       reloadApps();
@@ -137,151 +157,172 @@ export function VoIPPage() {
       )}
       <ServicePanel service="voip-server" />
       <ConfigPage namespace="voip-server" embedded excludeGroups={['wechat']} />
-      <Row gutter={16}>
-        <Col span={10}>
-          <Card
-            title="小程序列表"
-            extra={
-              <Button icon={<ReloadOutlined />} onClick={reloadApps}>
-                刷新
-              </Button>
-            }
+      <Card title="授权设备" style={{ marginTop: 16 }}>
+        <Space className="toolbar" wrap>
+          <Select
+            loading={appsLoading}
+            showSearch
+            optionFilterProp="label"
+            placeholder="选择微信小程序"
+            style={{ width: 320 }}
+            value={selectedAppID || undefined}
+            options={(apps?.items || []).map((item) => ({
+              value: item.app_id,
+              label: `${item.app_id} / ${item.model_id}`,
+            }))}
+            onChange={(value) => {
+              setPage(1);
+              setSelectedAppID(value);
+            }}
+          />
+          <Input.Search
+            allowClear
+            placeholder="设备名称、ID、用户邮箱或微信 OpenID"
+            style={{ width: 320 }}
+            onSearch={(value) => {
+              setPage(1);
+              setDeviceQuery(value.trim());
+            }}
+          />
+          <Select
+            allowClear
+            placeholder="授权状态"
+            style={{ width: 130 }}
+            options={[
+              { label: '有效', value: 'active' },
+              { label: '失效', value: 'invalid' },
+            ]}
+            onChange={(value) => {
+              setPage(1);
+              setAuthStatus(value ?? '');
+            }}
+          />
+          <Select
+            allowClear
+            placeholder="属性上报状态"
+            style={{ width: 150 }}
+            options={[
+              { label: '已上报', value: 'true' },
+              { label: '未上报', value: 'false' },
+            ]}
+            onChange={(value) => {
+              setPage(1);
+              setProfileReported(value ?? '');
+            }}
+          />
+          <Button disabled={!selected} onClick={() => setAppEdit(selected || null)}>
+            编辑微信应用
+          </Button>
+          <Button
+            icon={<ReloadOutlined />}
+            onClick={() => {
+              reloadApps();
+              reloadDevices();
+            }}
           >
-            <Table
-              rowKey="app_id"
-              loading={appsLoading}
-              dataSource={apps?.items}
-              pagination={false}
-              onRow={(row) => ({ onClick: () => setSelected(row) })}
-              columns={[
-                {
-                  title: '小程序 / 设备型号',
-                  render: (_, r) => (
+            刷新
+          </Button>
+        </Space>
+        {selected && (
+          <Space className="toolbar" wrap>
+            {selected.enabled ? <Tag color="success">启用</Tag> : <Tag>停用</Tag>}
+            {selected.is_default ? <Tag color="blue">默认应用</Tag> : null}
+            <Tag
+              color={
+                selected.config_status === 'healthy'
+                  ? 'success'
+                  : selected.config_status === 'incomplete'
+                    ? 'warning'
+                    : 'default'
+              }
+            >
+              {voipConfigStatusNames[selected.config_status] || selected.config_status}
+            </Tag>
+            {selected.secret_configured ? (
+              <Tag color="success">密钥已配置</Tag>
+            ) : (
+              <Tag color="warning">密钥未配置</Tag>
+            )}
+            <Typography.Text type="secondary">
+              有效授权 {selected.active_auth_count} 个，失效 {selected.invalid_auth_count} 个
+            </Typography.Text>
+          </Space>
+        )}
+        <Table
+          rowKey="id"
+          loading={devicesLoading}
+          dataSource={devices?.items}
+          locale={{ emptyText: selectedAppID ? '没有符合条件的授权设备' : '请先选择微信小程序' }}
+          pagination={{
+            current: page,
+            pageSize,
+            total: devices?.total || 0,
+            showSizeChanger: false,
+            showTotal: (total) => `共 ${total} 条`,
+            onChange: setPage,
+          }}
+          scroll={{ x: 1000 }}
+          columns={[
+            {
+              title: '设备',
+              render: (_, r) => (
+                <>
+                  <b>{r.authorized_device_name || r.device_id}</b>
+                  <br />
+                  <Typography.Text type="secondary">{r.device_id}</Typography.Text>
+                  {r.wx_model_id ? (
                     <>
-                      <b>{r.app_id}</b>
                       <br />
-                      <Typography.Text type="secondary">设备型号：{r.model_id}</Typography.Text>
+                      <Typography.Text type="secondary">型号：{r.wx_model_id}</Typography.Text>
                     </>
-                  ),
-                },
-                {
-                  title: '状态',
-                  render: (_, r) => (
-                    <Space direction="vertical" size={2}>
-                      {r.enabled ? <Tag color="success">启用</Tag> : <Tag>停用</Tag>}
-                      {r.is_default ? <Tag color="blue">默认应用</Tag> : null}
-                      <Tag
-                        color={
-                          r.config_status === 'healthy'
-                            ? 'success'
-                            : r.config_status === 'incomplete'
-                              ? 'warning'
-                              : 'default'
-                        }
-                      >
-                        {voipConfigStatusNames[r.config_status] || r.config_status}
-                      </Tag>
-                    </Space>
-                  ),
-                },
-                {
-                  title: '密钥',
-                  dataIndex: 'secret_configured',
-                  render: (v) =>
-                    v ? <Tag color="success">已配置</Tag> : <Tag color="warning">未配置</Tag>,
-                },
-                {
-                  title: '设备授权',
-                  render: (_, r) => (
+                  ) : null}
+                </>
+              ),
+            },
+            { title: '所属用户', render: (_, r) => r.owner_email || '未绑定' },
+            { title: '微信用户标识', dataIndex: 'wx_open_id', ellipsis: true },
+            {
+              title: '授权状态',
+              render: (_, r) => (
+                <>
+                  <Tag color={r.auth_status === 'active' ? 'success' : 'default'}>
+                    {voipAuthStatusNames[r.auth_status] || r.auth_status}
+                  </Tag>
+                  {r.invalid_reason ? (
                     <>
-                      {r.active_auth_count} 个有效
                       <br />
-                      {r.invalid_auth_count} 个失效
+                      <Typography.Text type="secondary">
+                        {voipInvalidReasonNames[r.invalid_reason] || r.invalid_reason}
+                      </Typography.Text>
                     </>
-                  ),
-                },
-                { title: '更新时间', dataIndex: 'updated_at', render: formatTime },
-                {
-                  title: '操作',
-                  render: (_, r) => (
-                    <Button
-                      type="link"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setAppEdit(r);
-                      }}
-                    >
-                      编辑
-                    </Button>
-                  ),
-                },
-              ]}
-            />
-          </Card>
-        </Col>
-        <Col span={14}>
-          <Card title={selected ? `${selected.app_id} 的授权设备` : '请从左侧选择一个微信应用'}>
-            <Table
-              rowKey="id"
-              loading={devicesLoading}
-              dataSource={devices?.items}
-              pagination={false}
-              scroll={{ x: 1000 }}
-              columns={[
-                {
-                  title: '设备',
-                  render: (_, r) => (
-                    <>
-                      <b>{r.authorized_device_name || r.device_id}</b>
-                      <br />
-                      <Typography.Text type="secondary">{r.device_id}</Typography.Text>
-                    </>
-                  ),
-                },
-                { title: '所属用户', render: (_, r) => r.owner_email || '未绑定' },
-                { title: '设备型号', dataIndex: 'wx_model_id' },
-                { title: '微信用户标识', dataIndex: 'wx_open_id', ellipsis: true },
-                {
-                  title: '授权状态',
-                  dataIndex: 'auth_status',
-                  render: (v) => (
-                    <Tag color={v === 'active' ? 'success' : 'default'}>
-                      {voipAuthStatusNames[v] || v}
-                    </Tag>
-                  ),
-                },
-                {
-                  title: '授权时间 / 最近校验',
-                  render: (_, r) => (
-                    <>
-                      {formatTime(r.created_at)}
-                      <br />
-                      {r.last_verified_at ? formatTime(r.last_verified_at) : '尚未校验'}
-                    </>
-                  ),
-                },
-                {
-                  title: '失效原因',
-                  dataIndex: 'invalid_reason',
-                  render: (v) => voipInvalidReasonNames[v] || v || '—',
-                },
-                {
-                  title: '设备上报属性',
-                  render: (_, r) => (
-                    <Button
-                      type="link"
-                      disabled={!r.profile_updated_at}
-                      onClick={() => openProfile(r)}
-                    >
-                      查看
-                    </Button>
-                  ),
-                },
-              ]}
-            />
-          </Card>
-        </Col>
-      </Row>
+                  ) : null}
+                </>
+              ),
+            },
+            {
+              title: '授权时间 / 最近校验',
+              render: (_, r) => (
+                <>
+                  {formatTime(r.created_at)}
+                  <br />
+                  {r.last_verified_at ? formatTime(r.last_verified_at) : '尚未校验'}
+                </>
+              ),
+            },
+            {
+              title: '设备上报属性',
+              render: (_, r) =>
+                r.profile_updated_at ? (
+                  <Button type="link" onClick={() => openProfile(r)}>
+                    查看
+                  </Button>
+                ) : (
+                  <Typography.Text type="secondary">未上报</Typography.Text>
+                ),
+            },
+          ]}
+        />
+      </Card>
       <Modal
         open={appEdit !== null}
         title={appEdit?.app_id ? '编辑微信应用' : '新增微信应用'}

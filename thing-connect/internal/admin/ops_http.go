@@ -423,8 +423,20 @@ func (s *HTTPServer) voipApp(c *gin.Context) {
 func (s *HTTPServer) voipAppDevices(c *gin.Context) {
 	page, size := pageParams(c)
 	appID := c.Param("app_id")
+	where, args, err := voipAppDeviceFilter(c, appID)
+	if err != nil {
+		apiresp.BadParam(c, err.Error())
+		return
+	}
+	from := ` FROM voip_device_auth a
+		LEFT JOIN device_bind d ON d.device_id=a.device_id
+		LEFT JOIN users u ON u.id=d.user_id
+		LEFT JOIN voip_device_profile p ON p.device_id=a.device_id`
 	var total int
-	_ = s.store.db.GetContext(c, &total, `SELECT COUNT(*) FROM voip_device_auth WHERE wx_app_id=?`, appID)
+	if err := s.store.db.GetContext(c, &total, `SELECT COUNT(*)`+from+where, args...); err != nil {
+		apiresp.Internal(c, err.Error())
+		return
+	}
 	type row struct {
 		ID               int64      `db:"id" json:"id"`
 		DeviceID         string     `db:"device_id" json:"device_id"`
@@ -441,12 +453,41 @@ func (s *HTTPServer) voipAppDevices(c *gin.Context) {
 		ProfileUpdatedAt *time.Time `db:"profile_updated_at" json:"profile_updated_at,omitempty"`
 		CreatedAt        time.Time  `db:"created_at" json:"created_at"`
 	}
-	var items []row
-	if err := s.store.db.SelectContext(c, &items, `SELECT a.id,a.device_id,a.wx_open_id,a.wx_model_id,a.remark,a.authorized_device_name,COALESCE(d.user_id,0) owner_user_id,COALESCE(u.email,'') owner_email,a.auth_status,a.invalid_reason,a.invalid_at,a.last_verified_at,p.updated_at profile_updated_at,a.created_at FROM voip_device_auth a LEFT JOIN device_bind d ON d.device_id=a.device_id LEFT JOIN users u ON u.id=d.user_id LEFT JOIN voip_device_profile p ON p.device_id=a.device_id WHERE a.wx_app_id=? ORDER BY a.id DESC LIMIT ? OFFSET ?`, appID, size, (page-1)*size); err != nil {
+	items := make([]row, 0)
+	queryArgs := append(append([]any{}, args...), size, (page-1)*size)
+	query := `SELECT a.id,a.device_id,a.wx_open_id,a.wx_model_id,a.remark,a.authorized_device_name,COALESCE(d.user_id,0) owner_user_id,COALESCE(u.email,'') owner_email,a.auth_status,a.invalid_reason,a.invalid_at,a.last_verified_at,p.updated_at profile_updated_at,a.created_at` + from + where + ` ORDER BY a.id DESC LIMIT ? OFFSET ?`
+	if err := s.store.db.SelectContext(c, &items, query, queryArgs...); err != nil {
 		apiresp.Internal(c, err.Error())
 		return
 	}
 	apiresp.OK(c, pageResult{Items: items, Page: page, PageSize: size, Total: total})
+}
+
+func voipAppDeviceFilter(c *gin.Context, appID string) (string, []any, error) {
+	where, args := ` WHERE a.wx_app_id=?`, []any{appID}
+	if keyword := strings.TrimSpace(c.Query("keyword")); keyword != "" {
+		pattern := "%" + keyword + "%"
+		where += ` AND (a.device_id LIKE ? OR a.authorized_device_name LIKE ? OR a.wx_open_id LIKE ? OR a.wx_model_id LIKE ? OR u.email LIKE ?)`
+		args = append(args, pattern, pattern, pattern, pattern, pattern)
+	}
+	switch status := strings.TrimSpace(c.Query("auth_status")); status {
+	case "":
+	case "active", "invalid":
+		where += ` AND a.auth_status=?`
+		args = append(args, status)
+	default:
+		return "", nil, errors.New("授权状态无效")
+	}
+	switch reported := strings.TrimSpace(c.Query("profile_reported")); reported {
+	case "":
+	case "true":
+		where += ` AND p.device_id IS NOT NULL`
+	case "false":
+		where += ` AND p.device_id IS NULL`
+	default:
+		return "", nil, errors.New("设备属性上报状态无效")
+	}
+	return where, args, nil
 }
 
 func (s *HTTPServer) voipDeviceProfile(c *gin.Context) {
