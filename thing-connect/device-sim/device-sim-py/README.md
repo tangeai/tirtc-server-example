@@ -95,6 +95,8 @@ python3 -m venv .venv
 - [HTTP / MQTT 接口参考](../../api-reference.md)
 - [TiRTC C API](https://docs.tange.ai/products/tirtc/api-reference/c.html)
 
+<a id="详细说明环境搭建"></a>
+
 ## 环境与依赖
 
 ### macOS

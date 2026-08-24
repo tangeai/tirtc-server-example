@@ -102,7 +102,9 @@ make WERROR=1 adapter-template-check
 make WERROR=1 product PRODUCT_ADAPTER_OBJ=obj/product_adapter_template.o
 ```
 
-产品项目也可以链接 `libdevice-reference.a`，由自己的入口在创建任何工作线程前调用 `device_adapter_install()`，再调用 [`device_reference_run()`](src/device_reference.h) 复用完整上线和会话编排；薄入口 `reference_main.c` 不会进入静态库。`make test` 会运行主机单元测试和适配器契约测试，并检查完整程序的 `--help` 启动路径。需要内存和未定义行为检查时，先清理不同编译参数产生的对象文件：
+产品项目也可以链接 `libdevice-reference.a`。自有入口需要在创建工作线程前调用 `device_adapter_install()`，然后调用 [`device_reference_run()`](src/device_reference.h) 复用完整的上线和会话编排。薄入口 `reference_main.c` 不会进入静态库。
+
+`make test` 会运行主机单元测试和适配器契约测试，并检查完整程序的 `--help` 启动路径。进行内存和未定义行为检查前，应先清理其他编译参数产生的对象文件：
 
 ```bash
 make clean
@@ -250,7 +252,7 @@ received/<device_id>/ai_<timestamp>.wav   # 仅 G.711A/PCM
 
 ## TiRTC SDK 核心 API
 
-SDK API 定义和媒体帧字段以 [ThingConnect 的 TiRTC SDK 速查](../../README.md#tirtc-sdk-速查) 为准。本实现的关键约束是：
+SDK API 定义和媒体帧字段以目标平台 SDK 的 [`tiRTC.h`](../sdk/linux-x86_64/2.2.1/include/tirtc/tiRTC.h) 为准。本实现的关键约束是：
 
 1. `tirtc_runtime` 是 SDK 生命周期和 `TIRTCCALLBACKS` 的唯一所有者。
 2. 设置 `TIRTC_OPT_DEVICE_SECRET_KEY` 和 `TIRTC_OPT_CLIENT_ID` 后，调用一次 `TiRtcStart(device_id, &callbacks)`。

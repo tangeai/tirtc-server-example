@@ -28,7 +28,9 @@ AI 对讲是设备主动发起的业务。
 1. 按 [device-integration.md](device-integration.md) 上线，拿到 `mqtt_token`
 2. 调 [`GET /v1/ai/token`](api-reference.md#get-v1aitoken)
 3. 用返回的 `peer_id + token` 调 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcwhipconnect" target="_blank" rel="noopener">`TiRtcWhipConnect(peer_id, token, callback, NULL);`</a>
-4. WHIP 建连成功后，通过 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsendcommand" target="_blank" rel="noopener">`TiRtcSendCommand(hconn, 0x2100, ...)`</a> 发一条 JSON-RPC `start_session`（`0x2100` 是 AI 命令通道的命令码），通知平台开始本次对话；成功响应会带回会话 ID 和最终音频格式，详见[建立会话](#建立会话)。
+4. WHIP 建连成功后，通过 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsendcommand" target="_blank" rel="noopener">`TiRtcSendCommand(hconn, 0x2100, ...)`</a> 发送 JSON-RPC `start_session`，通知平台开始本次对话。
+   - `0x2100` 是 AI 命令通道的命令码。
+   - 成功响应会带回会话 ID 和最终音频格式，详见[建立会话](#建立会话)。
 5. 收到 `start_session` 响应后开始本地音频上行，接收 AI 下行音频
 
 AI 通过 WHIP 上行，也就是由设备向服务端推流，建连接口为 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcwhipconnect" target="_blank" rel="noopener">`TiRtcWhipConnect`</a>。
@@ -309,7 +311,9 @@ ai_poll() 必须在非 SDK 回调上下文的主循环或业务任务中持续�
 
 ## 事件处理
 
-AI 对讲的控制消息、字幕和设备能力调用都通过命令通道（<a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsendcommand" target="_blank" rel="noopener">`TiRtcSendCommand`</a> / `on_command`，命令码 `cmdw = 0x2100`）传输，payload 是 JSON-RPC 2.0。完整字段与示例见 [AI Chat 事件协议](https://docs.tange.ai/products/ai-chat/api-reference/events.html)。
+AI 对讲的控制消息、字幕和设备能力调用都通过命令通道传输，发送和接收分别使用 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsendcommand" target="_blank" rel="noopener">`TiRtcSendCommand`</a> 与 `on_command`，命令码为 `cmdw = 0x2100`。
+
+payload 使用 JSON-RPC 2.0。完整字段和示例见 [AI Chat 事件协议](https://docs.tange.ai/products/ai-chat/api-reference/events.html)。
 
 ### JSON-RPC 两类消息
 
@@ -326,15 +330,15 @@ AI 对讲的控制消息、字幕和设备能力调用都通过命令通道（<a
 
 | method | 方向 | 类型 | 设备侧处理 |
 |------|------|------|------|
-| <a href="https://docs.tange.ai/products/ai-chat/api-reference/events.html#start_session" target="_blank" rel="noopener">`start_session`</a> | 设备 → 平台 | Request | 启动会话，处理成功/失败响应（见[建立会话](#建立会话)） |
+| <a href="https://docs.tange.ai/products/ai-chat/api-reference/events.html#start-session" target="_blank" rel="noopener">`start_session`</a> | 设备 → 平台 | Request | 启动会话，处理成功/失败响应（见[建立会话](#建立会话)） |
 | <a href="https://docs.tange.ai/products/ai-chat/api-reference/events.html#caption" target="_blank" rel="noopener">`caption`</a> | 平台 → 设备 | Notification | 接收字幕，按 `caption_type + utterance_id` 分组合并 |
-| <a href="https://docs.tange.ai/products/ai-chat/api-reference/events.html#round_start" target="_blank" rel="noopener">`round_start`</a> | 平台 → 设备 | Notification | 一轮回复开始：切换 UI（点亮"正在说话"） |
-| <a href="https://docs.tange.ai/products/ai-chat/api-reference/events.html#round_end" target="_blank" rel="noopener">`round_end`</a> | 平台 → 设备 | Notification | 一轮回复结束：恢复等待输入状态 |
+| <a href="https://docs.tange.ai/products/ai-chat/api-reference/events.html#round-start" target="_blank" rel="noopener">`round_start`</a> | 平台 → 设备 | Notification | 一轮回复开始：切换 UI（点亮"正在说话"） |
+| <a href="https://docs.tange.ai/products/ai-chat/api-reference/events.html#round-end" target="_blank" rel="noopener">`round_end`</a> | 平台 → 设备 | Notification | 一轮回复结束：恢复等待输入状态 |
 | <a href="https://docs.tange.ai/products/ai-chat/api-reference/events.html#interrupt" target="_blank" rel="noopener">`interrupt`</a> | 设备 → 平台 | Notification | 主动打断当前回复，发后立即停止本地播放 |
-| <a href="https://docs.tange.ai/products/ai-chat/api-reference/events.html#submit_speech" target="_blank" rel="noopener">`submit_speech`</a> | 设备 → 平台 | Notification | 手动提交当前上行语音（按键发送 / 半双工） |
-| <a href="https://docs.tange.ai/products/ai-chat/api-reference/events.html#update_config" target="_blank" rel="noopener">`update_config`</a> | 设备 → 平台 | Request | 运行时更新 `extra_params`，按 `id` 处理响应 |
-| <a href="https://docs.tange.ai/products/ai-chat/api-reference/events.html#device_action" target="_blank" rel="noopener">`device_action`</a> | 平台 → 设备 | Request | 平台请求执行设备能力，保留 `id` 并回同 `id` 响应 |
-| <a href="https://docs.tange.ai/products/ai-chat/api-reference/events.html#end_session" target="_blank" rel="noopener">`end_session`</a> | 双向 | Notification | 结束会话，幂等清理采集/播放/连接 |
+| <a href="https://docs.tange.ai/products/ai-chat/api-reference/events.html#submit-speech" target="_blank" rel="noopener">`submit_speech`</a> | 设备 → 平台 | Notification | 手动提交当前上行语音（按键发送 / 半双工） |
+| <a href="https://docs.tange.ai/products/ai-chat/api-reference/events.html#update-config" target="_blank" rel="noopener">`update_config`</a> | 设备 → 平台 | Request | 运行时更新 `extra_params`，按 `id` 处理响应 |
+| <a href="https://docs.tange.ai/products/ai-chat/api-reference/events.html#device-action" target="_blank" rel="noopener">`device_action`</a> | 平台 → 设备 | Request | 平台请求执行设备能力，保留 `id` 并回同 `id` 响应 |
+| <a href="https://docs.tange.ai/products/ai-chat/api-reference/events.html#end-session" target="_blank" rel="noopener">`end_session`</a> | 双向 | Notification | 结束会话，幂等清理采集/播放/连接 |
 
 ### `caption`：字幕合并
 

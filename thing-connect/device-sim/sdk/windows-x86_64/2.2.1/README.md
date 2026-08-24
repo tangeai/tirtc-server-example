@@ -1,10 +1,11 @@
 # TiRTC Windows x86_64 SDK 使用说明
 
-本 SDK 使用动态接入方式：
+这个 SDK 使用动态库。编译时先包含 `include/tirtc/tiRTC.h`，再根据工具链选择导入库：
 
-1. 编译期包含 `include/tirtc/tiRTC.h`
-2. MSVC 工程链接 `lib/libTiRTC.lib`
-3. MinGW 工程链接 `lib/libTiRTC.dll.a`
+| 工具链 | 导入库 |
+|---|---|
+| MSVC | `lib/libTiRTC.lib` |
+| MinGW | `lib/libTiRTC.dll.a` |
 
 运行时需要随程序一起分发 `lib/libTiRTC.dll` 和 `lib/webrtc.dll`。
 
@@ -20,13 +21,13 @@
 
 ## 如何使用
 
-业务代码只应包含 `include/tirtc/tiRTC.h`，并链接 `libTiRTC.lib` 或 `libTiRTC.dll.a`。
+业务代码只包含 `include/tirtc/tiRTC.h`，并链接与工具链对应的导入库。
 
 不要把 `webrtc.dll` 当作 TiRTC SDK 的入口库使用。它是运行时依赖库，会由 SDK 内部按需加载。
 
 ## 运行时库摆放位置
 
-`libTiRTC.dll` 和 `webrtc.dll` 必须放在 Windows 动态库加载器能找到的位置。推荐把它们放在主程序可执行文件旁边。
+`libTiRTC.dll` 和 `webrtc.dll` 必须放在 Windows 动态库加载器可以找到的位置。最简单的做法是把它们放在主程序可执行文件旁边。
 
 示例：
 

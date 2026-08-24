@@ -21,7 +21,9 @@
 
 ## 快速接入
 
-设备互呼通过 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcconnect" target="_blank" rel="noopener">`TiRtcConnect`</a> 建立设备之间的 P2P 连接。VoIP 和 AI 使用的 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcwhipconnect" target="_blank" rel="noopener">`TiRtcWhipConnect`</a> 不适用于这条链路。
+设备互呼通过 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcconnect" target="_blank" rel="noopener">`TiRtcConnect`</a> 建立 P2P 连接。
+
+VoIP 和 AI 使用 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcwhipconnect" target="_blank" rel="noopener">`TiRtcWhipConnect`</a>，设备互呼不使用这个接口。
 
 最小流程如下：
 
@@ -627,4 +629,8 @@ Authorization: Bearer <mqtt_token>
 - 旧通话被新来电顶掉：服务端默认允许新来电切换房间；若不想切换，应主动调用 [`/v1/call/reject`](api-reference.md#post-v1callreject)
 - 进程崩溃重启后状态乱：启动时调用 [`GET /v1/call/room`](api-reference.md#get-v1callroom) 做房间恢复
 
-> 使用 Linux C 默认适配联调：按 [device-sim/device-sim-c/README.md](device-sim/device-sim-c/README.md) 启动两台实例；使用 `call <设备ID> [video|audio]` 发起、`accept` / `reject` 响应。HTTP 封装在 [call_session.c](device-sim/device-sim-c/src/call_session.c)，P2P 建连与 `0x2000` 确认在 [tirtc_call.c](device-sim/device-sim-c/src/tirtc_call.c)。默认上行来自文件，默认下行 sink 为空而只记录后丢弃；产品可通过 `DeviceAdapterV1` 替换，单元测试仍不等于真实服务端到端验证。
+> 使用 Linux C 默认适配联调时，按 [device-sim-c README](device-sim/device-sim-c/README.md) 启动两台实例。通过 `call <设备ID> [video|audio]` 发起呼叫，通过 `accept` 或 `reject` 响应。
+>
+> HTTP 封装位于 [call_session.c](device-sim/device-sim-c/src/call_session.c)，P2P 建连与 `0x2000` 确认位于 [tirtc_call.c](device-sim/device-sim-c/src/tirtc_call.c)。默认上行来自文件，下行 sink 只记录后丢弃；产品可通过 `DeviceAdapterV1` 替换。
+>
+> 单元测试通过不代表真实服务的端到端链路已经验证。

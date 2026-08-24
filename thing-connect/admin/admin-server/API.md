@@ -60,7 +60,9 @@ Redis 或 MySQL 连接预检失败时返回 `503`，`msg` 只标识失败依赖�
 
 所有响应设置 `Cache-Control: no-store`。安装令牌、数据库/Redis 密码、首个管理员密码和生成密钥不出现在状态响应中。安装完成后写接口返回 `410`；重新授权只能在服务器本地执行部署流程，普通配置错误不会重新开放这些接口。
 
-除登录、MFA 验证、刷新和退出外，请求使用 `Authorization: Bearer <access_token>`。刷新令牌保存在 HttpOnly Cookie `admin_refresh` 中，Admin Web 只在页面内存中保存短期访问令牌，页面重新加载时通过刷新 Cookie 恢复会话。Admin Web 和二次开发客户端发送 `X-Admin-Request: 1`；使用 Cookie 的刷新与退出接口缺少该请求头时拒绝请求，以阻止跨站表单触发会话操作。列表接口通常接受 `page`、`page_size` 和页面对应的筛选参数。
+除登录、MFA 验证、刷新和退出外，请求使用 `Authorization: Bearer <access_token>`。刷新令牌保存在 HttpOnly Cookie `admin_refresh` 中；Admin Web 只在页面内存中保存短期访问令牌，页面重新加载时通过刷新 Cookie 恢复会话。
+
+Admin Web 和二次开发客户端发送 `X-Admin-Request: 1`。使用 Cookie 的刷新与退出接口缺少该请求头时会被拒绝，以阻止跨站表单触发会话操作。列表接口通常接受 `page`、`page_size` 和页面对应的筛选参数。
 
 ## 认证
 
@@ -119,7 +121,16 @@ MFA 验证请求：
 
 `online` 依据 Redis 中 150 秒有效期的 MQTT 在线记录判定；设备心跳或 Broker 连接事件会刷新记录。`presence_known=false` 表示 Admin Server 当时无法读取 Redis，不能按离线处理。兼容升级前值时设备仍可显示在线，但 `last_seen_at` 可能为空；设备产生下一次心跳后会写入最近观测时间。
 
-`GET /users` 默认按 `created_at DESC, id DESC` 返回，并接受 `sort_by=created_at` 与 `sort_order=asc|desc`。`GET /devices` 接受 `sort_by=active_time|bind_time` 与 `sort_order=asc|desc`；未指定时按设备记录 ID 倒序。所有排序都追加同方向的 ID 作为稳定次序，注册时间、账号状态与注册时间组合、首次活跃时间和绑定时间均有对应索引。页码分页仍使用 `OFFSET`，大数据量下应限制深翻页；面向千万级数据的连续导出或无限滚动客户端应使用后续提供的游标接口，而不是遍历高页码。
+用户和设备列表的排序规则如下：
+
+| 接口 | 默认排序 | 可选排序 |
+|---|---|---|
+| `GET /users` | `created_at DESC, id DESC` | `sort_by=created_at`，`sort_order=asc|desc` |
+| `GET /devices` | 设备记录 ID 倒序 | `sort_by=active_time|bind_time`，`sort_order=asc|desc` |
+
+所有排序都会追加同方向的 ID，保证结果稳定。注册时间、账号状态与注册时间组合、首次活跃时间和绑定时间均有对应索引。
+
+页码分页使用 `OFFSET`。数据量较大时应限制深翻页，不要通过连续遍历高页码完成大批量导出或无限滚动。
 
 `GET /device-pool` 只返回设备池元数据，不返回 `device_key`。支持 `keyword` 和 `state=available|allocated|released`：`available` 表示从未绑定且可分配，`allocated` 表示已分配，`released` 表示已解绑但按设备身份保留、不会重新分配。返回对象包含 `ever_bound`、当前归属、导入任务编号和导入文件名；初始化或外部写入的数据没有导入任务编号。
 
@@ -147,7 +158,14 @@ MFA 验证请求：
 
 `resource_refs` 控件编辑 `[{"id":"...","name":"..."}]` 结构，用于 AI 默认 MCP、设备插件和知识库资源。Admin Web 根据这些元数据生成输入控件和基础校验；只有使用自定义编辑器的复杂配置才维护独立页面。
 
-User、VoIP、Call 的 `mqtt.connection` 是可测试配置。测试使用请求中的 `value` 和可选 `secrets`；未提交 `secrets` 时沿用已发布密码。测试只建立临时 MQTT 连接，不订阅、不发布消息、不写 Redis，也不发布配置项。固定 ClientID 模式仍使用相同账号认证，但测试连接采用临时 ClientID，避免断开在线业务服务；正式 ClientID 由服务器启动预检确认。连接、TLS 或认证失败返回 `503` 和可操作的中文排查提示，Broker 客户端原始错误及内网地址只写入受保护日志。
+User、VoIP、Call 的 `mqtt.connection` 支持连接测试：
+
+- 测试使用请求中的 `value` 和可选 `secrets`；没有提交 `secrets` 时，沿用已发布密码。
+- 测试只建立临时 MQTT 连接，不订阅、不发布消息、不写 Redis，也不发布配置项。
+- 固定 ClientID 模式仍使用相同账号认证，但测试连接改用临时 ClientID，避免断开在线业务服务。
+- 正式 ClientID 由服务器启动预检确认。
+
+连接、TLS 或认证失败时返回 `503` 和可操作的中文提示。Broker 客户端原始错误及内网地址只写入受保护日志。
 
 配置响应中的 `using_default=true` 表示数据库尚无发布记录，`value` 是当前有效的注册表默认值，`revision` 为 `0`。配置密钥以明文 JSON 存储。具有 `config.secret.write` 的管理员读取普通配置、具有 `voip.app.write` 的管理员读取微信应用配置时，响应额外包含 `secrets` 原值；其他管理员只看到 `secret_configured`。Admin Web 用默认隐藏且可点击眼睛切换的密码控件展示这些值。
 

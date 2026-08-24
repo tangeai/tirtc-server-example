@@ -2,7 +2,9 @@
 
 设备持续推送实时音视频，H5 通过 `user-server` 获取 TiRTC token 后直连设备。用户在 H5 按住说话时，音频通过 TiRTC 流回到设备。
 
-> 这里说明设备与 H5 之间的实时预览链路。设备上线和 MQTT 规范见 [device-integration.md](device-integration.md)，HTTP 字段定义见 [api-reference.md#user-server](api-reference.md#user-server)。这条链路不调用 `call-server /v1/call/device/info`。一台设备同时接入 VoIP、AI 和设备互呼时，状态切换见 [device-session-model.md](device-session-model.md)。
+> 这里说明设备与 H5 之间的实时预览链路。设备上线和 MQTT 规范见 [device-integration.md](device-integration.md)，HTTP 字段定义见 [api-reference.md#user-server](api-reference.md#user-server)。
+>
+> 这条链路不调用 `call-server /v1/call/device/info`。一台设备同时接入 VoIP、AI 和设备互呼时，状态切换见 [device-session-model.md](device-session-model.md)。
 
 **文档导航：** [返回总览](README.md) | [返回设备入口](device-integration.md) | [微信 VoIP](device-voip.md) | [AI 对讲](device-ai.md) | [设备呼设备](device-call.md) | [统一状态机](device-session-model.md)
 
