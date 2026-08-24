@@ -1,8 +1,9 @@
 # 微信 VoIP 对讲设备接入
 
-微信小程序与设备之间的 VoIP 对讲接入：授权列表、来电、外呼、拒接、取消，以及设备侧如何使用 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcwhipconnect" target="_blank" rel="noopener">`TiRtcWhipConnect`</a> 建连。
+本文说明微信小程序与设备之间的 VoIP 对讲接入，包括授权、来电、外呼、拒接和取消，
+以及设备如何调用 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcwhipconnect" target="_blank" rel="noopener">`TiRtcWhipConnect`</a> 建立连接。
 
-> 本文只描述 VoIP 业务链路。设备上线与 MQTT 规范见 [device-integration.md](device-integration.md)；字段、错误码和微信回调格式见 [api-reference.md#voip-server](api-reference.md#voip-server)。如果一台设备同时跑 VoIP / AI / 设备呼设备，请同时看 [device-session-model.md](device-session-model.md)。
+> 本文只描述 VoIP 业务链路。设备上线与 MQTT 规范见 [device-integration.md](device-integration.md)；字段、错误码和微信回调格式见 [api-reference.md#voip-server](api-reference.md#voip-server)。一台设备同时运行 VoIP/AI/设备呼设备时，还需遵守 [device-session-model.md](device-session-model.md)。
 
 **文档导航：** [返回总览](README.md) | [返回设备入口](device-integration.md) | [H5 实时](device-h5-live.md) | [AI 对讲](device-ai.md) | [设备呼设备](device-call.md) | [统一状态机](device-session-model.md)
 
@@ -27,18 +28,24 @@
 1. 按 [device-integration.md](device-integration.md) 上线，拿到 `mqtt_token`
 2. 启动后调用 [`POST /v1/voip/device/profile`](api-reference.md#post-v1voipdeviceprofile)
 3. 监听 MQTT `device/sn_{device_id}/cmd` 和 `device/sn_{device_id}/notify`
-4. 收到 `call_incoming` 后，用 payload 里的 `peer_id + token` 调 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcwhipconnect" target="_blank" rel="noopener">`TiRtcWhipConnect(peer_id, token, callback, NULL);`</a>：返回 `0` 只表示请求已提交，真正结果看连接回调 `callback(error, hconn, ...)`，`error == 0` 才算建连成功。完整流程见[小程序呼设备](#小程序呼设备)
+4. 收到 `call_incoming` 后，用 payload 中的 `peer_id + token` 调
+   <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcwhipconnect" target="_blank" rel="noopener">`TiRtcWhipConnect(peer_id, token, callback, NULL)`</a>
 
-VoIP 使用的是 **WHIP client -> server** 模式，核心 API 是：
+`TiRtcWhipConnect` 返回 `0` 只表示请求已提交；回调中的 `error == 0` 才表示建连成功。
+完整流程见[小程序呼设备](#小程序呼设备)。
 
-- <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcwhipconnect" target="_blank" rel="noopener">`TiRtcWhipConnect`</a>
+VoIP 场景下，设备作为 WHIP 客户端，通过
+<a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcwhipconnect" target="_blank" rel="noopener">`TiRtcWhipConnect`</a>
+连接服务端。设备呼设备使用
+<a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcconnect" target="_blank" rel="noopener">`TiRtcConnect`</a>，
+两个接口不能混用。
 
-不是设备呼设备里用的 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcconnect" target="_blank" rel="noopener">`TiRtcConnect`</a>。
+**完成标志**
 
-**完成标志：**
-
-- **设备侧**：MQTT 收到 `call_incoming` 且 payload 含 `peer_id` + `token`；接听后 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcwhipconnect" target="_blank" rel="noopener">`TiRtcWhipConnect`</a> 回调 `error == 0`。
-- **对端（小程序）**：<a href="https://developers.weixin.qq.com/miniprogram/dev/framework/device/voip/auth.html" target="_blank" rel="noopener">`wx.requestDeviceVoIP`</a> 成功、[`POST /v1/voip/user/report-auth`](api-reference.md#post-v1voipuserreport-auth) 返回 200；发起呼叫后设备端收到 MQTT 来电。
+| 验收端 | 完成标志 |
+|--------|----------|
+| 设备 | MQTT 收到含 `peer_id`、`token` 的 `call_incoming`；接听后 `TiRtcWhipConnect` 回调 `error == 0` |
+| 小程序 | `wx.requestDeviceVoIP` 成功，`POST /v1/voip/user/report-auth` 返回 200；发起呼叫后设备收到 MQTT 来电 |
 
 ---
 
@@ -50,9 +57,10 @@ VoIP 使用的是 **WHIP client -> server** 模式，核心 API 是：
 
 - [`POST /v1/voip/device/profile`](api-reference.md#post-v1voipdeviceprofile)
 
-这是接 VoIP 前的硬前提。当前实现中，如果微信回调发生时服务端查不到设备 profile，推送 `call_incoming` 会失败。
+这是接收 VoIP 来电的前提；未上报 profile 的设备无法收到 `call_incoming`。
 
-**完整字段说明、枚举值与错误码见：** [api-reference.md#post-v1voipdeviceprofile](api-reference.md#post-v1voipdeviceprofile)
+字段、枚举值和错误码见
+[profile 接口说明](api-reference.md#post-v1voipdeviceprofile)。
 
 至少应上报：
 
@@ -60,6 +68,8 @@ VoIP 使用的是 **WHIP client -> server** 模式，核心 API 是：
 - 是否有视频能力
 - 上下行视频/音频编码能力
 - 呼叫超时
+
+视频设备还应上报屏幕宽高；需要适配微信下行画面时，再设置 `video_res_mode`。
 
 参考实现：
 
@@ -74,47 +84,55 @@ Authorization: Bearer <mqtt_token>
 Content-Type: application/json
 ```
 
-```jsonc
+```json
 {
-  "screen_width": 1,          // 设备自身屏幕宽度（px）；纯语音设备传 1
-  "screen_height": 1,         // 设备自身屏幕高度（px）；纯语音设备传 1
-  "camera_rotation": 0,       // 设备视频顺时针旋转角度：0 / 90 / 180 / 270
-  "aspect_ratio": 1.3333333333, // 设备视频宽高比，此处为 4:3
-  "hor_mirror": false,        // 是否水平镜像设备视频
-  "vert_mirror": false,       // 是否垂直镜像设备视频
-  "object_fit": "contain",    // 视频缩放方式：fill / contain
-  "audio_rate": 8000,         // 音频采样率：8000 / 16000 Hz
-  "audio_channels": 1,        // 音频声道数：1 / 2
-  "up_video_mt": "none",      // 设备→小程序不发送视频
-  "down_video_mt": "none",    // 小程序→设备不发送视频
-  "down_audio_mt": "alaw",    // 小程序→设备使用 G.711 A-law
-  "no_video": true,           // 是否为无视频能力的纯语音设备
-  "calling_timeout_sec": 30   // 呼叫超时时间（秒）
+  "screen_width": 640,
+  "screen_height": 480,
+  "camera_rotation": 0,
+  "aspect_ratio": 1.3333333333,
+  "hor_mirror": false,
+  "vert_mirror": false,
+  "object_fit": "contain",
+  "audio_rate": 8000,
+  "audio_channels": 1,
+  "up_video_mt": "h264",
+  "down_video_mt": "mjpeg",
+  "video_res_mode": "fit_screen",
+  "down_audio_mt": "alaw",
+  "no_video": false,
+  "calling_timeout_sec": 30
 }
 ```
 
-> 上述代码块使用注释辅助说明；实际 HTTP 请求体必须移除 `//` 注释，发送标准 JSON。
+示例设备的屏幕为 640 × 480。微信下行使用 MJPEG，完整画面会等比缩小到屏幕范围内。
 
-`camera_rotation`、`aspect_ratio`、`hor_mirror`、`vert_mirror`、`object_fit` 分别
-控制设备视频的旋转角度、宽高比、水平镜像、垂直镜像和缩放方式。旋转只允许
-`0/90/180/270`，宽高比必须大于 `0`，缩放方式只允许 `fill/contain`。这些值是设备
-能力，应随 profile 上报，不需要每次呼叫重复传；均可省略，省略后微信插件使用默认值。
-小程序在通话开始前通过微信插件
-[`setUIConfig`](https://developers.weixin.qq.com/miniprogram/dev/framework/device/voip-plugin/api/setUIConfig.html)
-配置通话页面。设备呼叫小程序时，设备是 caller，profile 中的视频 UI 值会同时用于
-caller 和 listener 通话页面，但手机 listener 的 `cameraRotation` 固定为 `0`。
-当 `object_fit=contain` 时，小程序使用手机 `screenHeight / screenWidth` 作为两端
-`aspectRatio`，避免按设备视频比例创建容器后让 `contain` 与 `fill` 看起来相同。
-小程序呼叫设备时，两路视频分别设置：
-小程序是 caller，`callerUI.cameraRotation` 固定为 `0`；设备是 listener，
-`listenerUI` 使用设备 profile 的旋转、镜像和缩放值，避免设备配置同时影响
-小程序本机预览。设备主动外呼时，
-voip-server 会把 profile 中已上报的值自动加入微信呼叫 query。小程序主动呼设备时，
-设备视频的 `objectFit` 使用 profile 的 `object_fit`，小程序同时按手机
-`screenHeight / screenWidth` 设置页面 `aspectRatio`，从而保持设备视频完整显示。
-小程序启动时直接使用 query 中的视频 UI 参数并立即调用 `setUIConfig`。如果 query
-中带有 `device_id`、`deviceId` 或微信入呼参数 `callerId`，参数缺失时也可读取设备
-列表刷新时保存的本地 profile 缓存。每次设备列表刷新成功都会整体替换该缓存。
+`video_res_mode` 只影响小程序发送给设备的下行视频：
+
+| 取值 | 画面处理 | 使用要求 |
+|------|----------|----------|
+| `auto` | 不缩放、不裁剪 | 无；省略字段时使用此模式 |
+| `fit_screen` | 按比例缩小到屏幕范围内，不放大、不裁剪；输出宽高向下取偶数 | `down_video_mt=mjpeg`，并上报有效的屏幕宽高 |
+| `fill_screen` | 按比例缩放并居中裁剪到屏幕尺寸，允许放大 | `down_video_mt=mjpeg`，并上报有效且为偶数的屏幕宽高 |
+
+三种模式都不旋转画面。配置不符合要求时，VoIP 呼叫可能失败。
+
+- 完整约束：[TiRTC Server API](https://docs.tange.ai/products/wxvoip/api-reference/server-api.html)
+- 上报时机：设备上线后、接听来电前
+- 重新上报：媒体能力或屏幕参数变化后
+
+视频 UI 参数均可省略：
+
+| profile 字段 | 作用 | 默认值 |
+|--------------|------|--------|
+| `camera_rotation` | 顺时针旋转设备画面：`0/90/180/270` | `0` |
+| `aspect_ratio` | 设备视频宽高比，必须大于 `0` | `4/3` |
+| `hor_mirror` | 水平镜像 | `false` |
+| `vert_mirror` | 垂直镜像 | `false` |
+| `object_fit` | 画面填充方式：`fill/contain` | `fill` |
+
+小程序通过 [`setUIConfig`](https://developers.weixin.qq.com/miniprogram/dev/framework/device/voip-plugin/api/setUIConfig.html)
+应用这些参数。`callerUI`、`listenerUI` 的对应关系见
+[小程序 VoIP 页面参数](weixin-mini-program/README.md#5-callerui-和-listenerui)。
 
 **成功返回：**
 
@@ -122,7 +140,7 @@ voip-server 会把 profile 中已上报的值自动加入微信呼叫 query。�
 { "code": 0, "msg": "ok", "data": null }
 ```
 
-### 2. 监听两类 MQTT 消息
+### 2. 监听 VoIP MQTT 消息
 
 VoIP 相关下行消息有三类：
 
@@ -138,9 +156,9 @@ VoIP 相关下行消息有三类：
 
 ## 小程序端接入
 
-这一节描述的是**微信小程序端**如何接入当前 VoIP 链路，不是设备端如何接听。
+本节面向**微信小程序开发者**。设备接听流程见[小程序呼设备](#小程序呼设备)。
 
-当前仓库可直接参考：
+可参考以下实现：
 
 - 小程序总体说明：[weixin-mini-program/README.md](weixin-mini-program/README.md)
 - 设备列表页实现：[weixin-mini-program/pages/devices/index.js](weixin-mini-program/pages/devices/index.js)
@@ -157,21 +175,20 @@ VoIP 相关下行消息有三类：
 
 ### 2. 小程序初始化
 
-当前实现里，设备列表页加载时会同步：
+设备列表页加载时依次完成：
 
 1. <a href="https://developers.weixin.qq.com/miniprogram/dev/api/open-api/login/wx.login.html" target="_blank" rel="noopener">`wx.login()`</a>，再调用 [`POST /v1/voip/user/wechat-mini-login`](api-reference.md#post-v1voipuserwechat-mini-login)
 2. <a href="https://developers.weixin.qq.com/miniprogram/dev/api/open-api/device-voip/wx.getDeviceVoIPList.html" target="_blank" rel="noopener">`wx.getDeviceVoIPList()`</a>，同步当前微信侧已有的设备授权状态
 3. [`GET /v1/voip/user/auth-list`](api-reference.md#get-v1voipuserauth-list)，读取服务端保存的授权名称快照
 
-[`POST /v1/voip/user/wechat-mini-login`](api-reference.md#post-v1voipuserwechat-mini-login) 的完整字段说明、返回值与错误码见：
+字段、响应和错误码见
+[微信登录接口说明](api-reference.md#post-v1voipuserwechat-mini-login)。
 
-- [api-reference.md#post-v1voipuserwechat-mini-login](api-reference.md#post-v1voipuserwechat-mini-login)
-
-这一阶段的目的，是把当前微信用户换成后续授权和呼叫需要的 `wx_user_openid`。
+`wechat-mini-login` 将微信登录凭证换成 `wx_user_openid`，供后续授权和呼叫使用。
 
 ### 3. 申请设备授权
 
-小程序第一次呼叫某台设备前，应先完成设备授权。当前实现流程是：
+小程序第一次呼叫某台设备前，应按以下流程完成授权：
 
 1. 小程序先通过 [`PUT /v1/user/device/name`](api-reference.md#put-v1userdevicename) 设置设备名称
 2. 调 [`POST /v1/voip/user/sn-ticket`](api-reference.md#post-v1voipusersn-ticket)
@@ -183,25 +200,30 @@ VoIP 相关下行消息有三类：
 - [api-reference.md#post-v1voipusersn-ticket](api-reference.md#post-v1voipusersn-ticket)
 - [api-reference.md#post-v1voipuserreport-auth](api-reference.md#post-v1voipuserreport-auth)
 
-当前仓库里的调用关系是：
+`sn-ticket` 和 `report-auth` 分别用于：
 
 - `sn-ticket` 用来获取 <a href="https://developers.weixin.qq.com/miniprogram/dev/framework/device/voip/auth.html" target="_blank" rel="noopener">`wx.requestDeviceVoIP`</a> 所需的 `sn_ticket`
 - `report-auth` 用来把“这位微信用户已被授权呼叫这台设备”同步到服务端
-- 服务端保存成功后，后续设备侧能通过 [`GET /v1/voip/device/contacts`](api-reference.md#get-v1voipdevicecontacts) 或 `callers_update` 感知授权变化
 
-授权设备名称、手机端看到的设备来电名称、小程序呼设备时传入的 `deviceName` 必须保持
-一致。微信保存的是授权时快照；设备绑定后可以修改当前名称，但不会直接修改微信快照。
-改名后页面会醒目标记“待重新授权”，并提示用户在微信“最近使用”中删除小程序，再
-重新进入完成授权。解绑时服务端会清空设备名称和授权记录。绑定名称为空时，
-`sn-ticket` 使用 `device_id` 作为授权名称。
+`report-auth` 成功后，设备可通过
+[`GET /v1/voip/device/contacts`](api-reference.md#get-v1voipdevicecontacts) 或
+`callers_update` 获取授权变化。
+
+**设备名称规则**
+
+| 场景 | 规则 |
+|------|------|
+| 首次授权 | 授权名称、手机端来电名称和 `deviceName` 必须一致；绑定名称为空时，`sn-ticket` 使用 `device_id` |
+| 设备改名 | 微信仍保留授权时的名称快照；按页面提示删除微信“最近使用”中的小程序，再重新进入并授权 |
+| 设备解绑 | 设备名称和授权记录一并清空 |
 
 ### 4. 小程序呼叫设备
 
-当前小程序端不是自己直接请求 `voip-server` 发起设备呼叫，而是通过 `wmpf-voip` 插件调用：
+小程序通过 `wmpf-voip` 插件呼叫设备：
 
 - <a href="https://developers.weixin.qq.com/miniprogram/dev/framework/device/voip-plugin/api/callDevice.html" target="_blank" rel="noopener">`wmpfVoip.callDevice(...)`</a>
 
-当前实现会根据设备 profile 推断：
+插件调用参数根据设备 profile 确定：
 
 - 是否启用主叫摄像头
 - 是否启用被叫摄像头
@@ -218,26 +240,22 @@ VoIP 相关下行消息有三类：
 返回失败。在线状态是基于 Broker 心跳/上下线缓存，刚掉线的短窗口仍可能显示在线，因此
 设备侧和小程序侧仍需保留通话超时处理。
 
-### 5. 小程序取消 / 挂断
+### 5. 小程序取消和挂断
 
-当前仓库里的小程序取消呼叫，走的是：
+小程序通过以下接口取消呼叫：
 
 - [`POST /v1/voip/user/cancel`](api-reference.md#post-v1voipusercancel)
 
-完整字段说明、返回值与错误码见：
+字段、响应和错误码见
+[取消接口说明](api-reference.md#post-v1voipusercancel)。
 
-- [api-reference.md#post-v1voipusercancel](api-reference.md#post-v1voipusercancel)
-
-当前实现挂在 `wmpf-voip` 插件的全局事件上：
+取消流程如下：
 
 - 小程序收到 `cancelVoip`
 - 调 [`POST /v1/voip/user/cancel`](api-reference.md#post-v1voipusercancel)
 - `voip-server` 再向设备推送 `call_cancel`
 
-因此对设备侧来说，“小程序挂断/取消”的外显结果始终是：
-
-- `device/sn_{device_id}/notify`
-- `type = call_cancel`
+设备最终会在 `device/sn_{device_id}/notify` 收到 `type=call_cancel` 的通知。
 
 ### 6. 授权失效与取消授权
 
@@ -248,21 +266,24 @@ VoIP 相关下行消息有三类：
 - 列表中不存在：授权记录已被清空，可以重新调用 `wx.requestDeviceVoIP`
 - API 调用失败：状态未知，不误报为未授权
 
-服务端无法主动获知所有微信设置变化。小程序成功读取
-`wx.getDeviceVoIPList()` 后，会把明确为“列表缺失/已关闭”且服务端仍为 active 的授权
-删除，并通知设备刷新；API 调用失败得到 `unknown` 时不会删除。用户没有再次打开小程序
-时，设备外呼若收到微信错误码 `9`，服务端也会把授权标记为 `invalid`、从设备联系人
-列表隐藏并推送 `callers_update`。这只能确定授权不可用，不能武断认定用户主动取消。
-用户在设置中重新开启后，小程序会识别为已授权，并重新上报以恢复服务端状态。
+微信设置变化按以下规则同步：
 
-解绑设备时由服务端事务直接删除 VoIP 授权并清空设备名称，小程序无需在失去设备
-所有权后补调接口。如果后续增加“保持绑定但删除服务端授权”的独立入口，可调用：
+| 场景 | 处理方式 |
+|------|----------|
+| 列表缺失或提醒已关闭 | 小程序删除仍为 `active` 的授权，并通知设备刷新联系人 |
+| `wx.getDeviceVoIPList()` 调用失败 | 状态记为 `unknown`，保留现有授权 |
+| 设备外呼收到微信错误码 `9` | 授权标记为 `invalid`，从联系人列表隐藏，并推送 `callers_update` |
+| 用户重新开启提醒 | 小程序重新上报，恢复授权状态 |
+| 设备解绑 | 授权和设备名称一并删除，小程序无需补调接口 |
+
+错误码 `9` 只能说明授权不可用，不能据此判断用户主动取消。
+
+如需在保持设备绑定的情况下删除授权，调用：
 
 - [`POST /v1/voip/user/delete-auth`](api-reference.md#post-v1voipuserdelete-auth)
 
-完整字段说明、返回值与错误码见：
-
-- [api-reference.md#post-v1voipuserdelete-auth](api-reference.md#post-v1voipuserdelete-auth)
+字段、响应和错误码见
+[删除授权接口说明](api-reference.md#post-v1voipuserdelete-auth)。
 
 设备侧随后会收到：
 
@@ -286,27 +307,20 @@ sequenceDiagram
     VS->>DEV: MQTT call_incoming(channel=wx)
     DEV->>DEV: ACK
     DEV->>DEV: TiRtcWhipConnect(peer_id, token)
-    DEV->>DEV: 接听 / 拒接
+    DEV->>DEV: 接听或拒接
 ```
-
-图中涉及的 TiRTC SDK 接口：<a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcwhipconnect" target="_blank" rel="noopener">`TiRtcWhipConnect`</a>。
 
 ### 1. 收到 `call_incoming`
 
-`call_incoming` 的 payload 会带这些关键字段：
+`call_incoming` payload 中的关键字段按用途分为三组：
 
-- `peer_id`
-- `token`
-- `wx_app_id`
-- `wx_model_id`
-- `wx_room_id`
-- `wx_user_openid`
-- `wx_user_remark`
-- `wx_user_nickname`（与 `wx_user_remark` 相同）
-- `wx_server_token`
-- `wx_session_key`
-- `wx_payload`
-- 可选：`wx_call_id`、`wx_from`
+| 用途 | 字段 |
+|------|------|
+| 建立 RTC 连接 | `peer_id`、`token` |
+| 微信会话 | `wx_app_id`、`wx_model_id`、`wx_room_id`、`wx_server_token`、`wx_session_key`、`wx_payload` |
+| 联系人与回铃关联 | `wx_user_openid`、`wx_user_remark`、`wx_user_nickname`，以及可选的 `wx_call_id`、`wx_from` |
+
+`wx_user_nickname` 与 `wx_user_remark` 的值相同。
 
 **MQTT 下行通知：**
 
@@ -362,19 +376,21 @@ payload:
 
 VoIP 建连成功后，设备进入对讲态，开始本地音频收发；如果设备有视频能力，也可开始视频收发。
 
-接口说明见 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcwhipconnect" target="_blank" rel="noopener">`TiRtcWhipConnect`</a>。返回 `0` 只表示请求已提交，真正结果看连接回调 `callback(error, hconn, ...)`：
+接口说明见
+<a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcwhipconnect" target="_blank" rel="noopener">`TiRtcWhipConnect`</a>。
+连接结果以 `callback(error, hconn, ...)` 为准：
 
 - `error == 0`：WHIP 连接建立成功；回调保存必要状态并投递事件，控制任务随后保存 `hconn`、启动本地媒体任务
 - `error != 0`：建连失败，不能开始收发
 
-当前 「C 参考实现」的实际策略是：
-- 回调 `error=0` 后保存连接状态，继续等待业务接通确认
-- 收到 `0x2000` 后才由控制任务启动本地媒体
-- 收到 `0x2001` 时投递断开动作，由延后任务调用 `TiRtcDisconnect`
+C 参考实现收到 `error == 0` 后只保存连接状态。控制任务等到 `0x2000` 再启动本地媒体；
+收到 `0x2001` 时，则投递断开动作，由延后任务调用 `TiRtcDisconnect`。
 
 ### 3. C 参考实现接听与媒体生命周期
 
-下列代码使用 「C 参考实现」已实现的方法。MQTT 分发层收到 channel=wx 的 payload 后只调用 voip_on_call_incoming()；该方法保存待接听字段。产品 UI、按键或自动应答策略决定何时调用 voip_accept_pending()，不要在 MQTT 回调线程中直接阻塞等待。
+下列代码使用 C 参考实现提供的方法。MQTT 分发层收到 `channel=wx` 的 payload 后，
+只调用 `voip_on_call_incoming()` 保存待接听信息。产品 UI、按键或自动应答策略决定
+何时调用 `voip_accept_pending()`；不要在 MQTT 回调线程中阻塞等待。
 
 ~~~c
 #include "tirtc_voip.h"
@@ -434,7 +450,15 @@ tirtc_runtime_stop();
 voip_destroy(voip);
 ~~~
 
-`voip_start_session()` 是 Linux 参考实现的底层方法，参数为 MQTT payload 中的 `peer_id`、`token` 和上行媒体配置；通常调用 `voip_accept_pending()`，避免应用层重复解析或遗漏来电状态。`_von_audio()` 将下行帧交给 `DeviceMediaSinkOps.submit`，Linux 默认适配没有 sink，因此只记录元数据后丢弃。产品必须在 sink 中复制到有界播放队列，并通过 `DeviceMediaSourceOps` 用麦克风采集和编码输出替换默认文件源。
+**Linux 参考实现的媒体接入点**
+
+| 环节 | 接入要求 |
+|------|----------|
+| 接听 | 通常调用 `voip_accept_pending()`；它使用已保存的 `peer_id`、`token` 和上行媒体配置，避免应用层重复解析来电 |
+| 下行播放 | `_von_audio()` 将帧交给 `DeviceMediaSinkOps.submit`；默认没有 sink，只记录元数据后丢弃 |
+| 产品适配 | sink 需要把帧复制到有界播放队列；通过 `DeviceMediaSourceOps` 接入麦克风采集和编码，替换默认文件源 |
+
+`voip_start_session()` 是上述接听流程使用的底层方法。
 
 ---
 
@@ -459,8 +483,6 @@ sequenceDiagram
     DEV->>MP: 双向音视频收发
 ```
 
-图中涉及的 TiRTC SDK 接口：<a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcwhipconnect" target="_blank" rel="noopener">`TiRtcWhipConnect`</a>。
-
 ### 1. 设备发起呼叫
 
 调用：
@@ -473,11 +495,11 @@ sequenceDiagram
 - `wx_user_openid`
 - `wx_room_type`
 
-设备 JWT 鉴权直接复用 `mqtt_token`。`wx_app_id`、`wx_model_id` 仍可由旧设备传入，
-但服务端以有效授权记录为准，因此旧设备无需升级请求结构，新设备也不需要自行保存
-型号 ID。
+设备使用 `mqtt_token` 鉴权。旧设备仍可传入 `wx_app_id`、`wx_model_id`，接口以有效授权
+记录为准；新设备不需要保存型号 ID。
 
-**完整字段说明、枚举值与错误码见：** [api-reference.md#post-v1voipdevicecall](api-reference.md#post-v1voipdevicecall)
+字段、枚举值和错误码见
+[设备外呼接口说明](api-reference.md#post-v1voipdevicecall)。
 
 **HTTP 请求：**
 
@@ -501,24 +523,32 @@ Content-Type: application/json
 { "code": 0, "msg": "ok", "data": { "call_id": "8d4bc1f..." } }
 ```
 
-成功响应中的 `data.call_id` 用于关联本次外呼与后续 MQTT 回铃。服务端在发起前检查设备
-仍已绑定且联系人授权有效；同一设备或联系人 30 秒内重复发起会返回 `40900`。微信房间
-通知成功下发到设备后会提前释放防重状态，正常接通、挂断后可立即重拨。微信返回错误码
-`9` 时返回业务码 `40205`，设备应刷新联系人列表。只有设备 JWT 缺失、无效或过期时
-才返回 HTTP `401` 和业务码 `401`；设备已解绑返回 HTTP `200` 和业务码 `6006`。
+`data.call_id` 用于关联本次外呼与后续 MQTT 回铃。
 
-voip-server 调用微信主叫 API 发起视频呼叫时，会在 `query` 中写入 profile 的旋转、
-比例和镜像值。小程序启动时同步读取这些 query 参数。
-`payload`/`wxa_payload` 保留给加入房间与设备通知链路透传，不作为小程序 UI 配置来源。
-请求未传 `payload` 时，服务端会自动写入本次 `call_id`、主叫设备、目标 OpenID 和
-房间类型；这些字段会随 MQTT 回推成为 `wx_call_id`、`wx_from`、`wx_room_type`。
-设备必须用 `wx_call_id` 关联回铃，不能只按 OpenID 判断，否则同一微信用户恰好反向
-呼入时可能串房。调用方显式传入自定义 `payload` 时，服务端保持原值不覆盖；自定义
-payload 必须携带 `id`、`from`、`to`、`room_type` 字段，确保 MQTT 回推包含精确关联信息。
+**外呼结果**
+
+| 场景 | 返回或行为 | 设备动作 |
+|------|------------|----------|
+| 设备未绑定 | HTTP 200，业务码 `6006` | 重新完成设备绑定 |
+| 联系人授权无效，或微信返回错误码 `9` | 业务码 `40205` | 刷新联系人列表 |
+| 设备 JWT 缺失、无效或过期 | HTTP 401，业务码 `401` | 重新获取 `mqtt_token` |
+| 同一设备或联系人 30 秒内重复发起 | 业务码 `40900` | 等待当前呼叫结束或限制解除 |
+| 微信房间通知已下发到在线设备 | 解除重复呼叫限制 | 正常接通或挂断后可立即重拨 |
+
+**视频 UI 与回铃关联**
+
+| 项目 | 规则 |
+|------|------|
+| 视频 UI | 使用 profile 中的旋转、比例和镜像值；小程序从 `query` 读取 |
+| 默认 payload | 自动包含 `id`、`from`、`to`、`room_type` |
+| 自定义 payload | 原值透传；必须自行包含 `id`、`from`、`to`、`room_type` |
+| MQTT 回铃 | 使用 `wx_call_id` 关联，不能只按 OpenID 判断 |
+
+`payload` 和 `wxa_payload` 用于加入房间和设备通知链路，不作为小程序 UI 配置来源。
 
 ### 2. 等待回推 `call_incoming`
 
-接口成功只表示“服务端已向微信发起外呼请求”，不表示媒体已经建好。真正的 RTC 建连仍以 MQTT 回推的 `call_incoming` 为准。
+接口成功后仍需等待 MQTT `call_incoming`。收到回推并完成连接后，RTC 媒体才算建立。
 
 主叫设备后续动作：
 
@@ -528,13 +558,13 @@ payload 必须携带 `id`、`from`、`to`、`room_type` 字段，确保 MQTT 回
 4. 等待平台下发 `0x2000`
 5. 收到接通确认后开始媒体收发并进入通话态
 
-设备主动外呼和“小程序呼设备”复用同一种 `call_incoming` 信封格式，差别主要在业务语义：
+设备外呼和小程序呼设备使用相同的 `call_incoming` 消息格式：
 
 - 小程序呼设备：设备是被叫
 - 设备呼小程序：设备先主动发起，再等待微信侧用户接听
 
-设备主动外呼也必须等待 `0x2000` 后再启动媒体线程；`TiRtcWhipConnect` 返回成功或连接
-回调成功，都不等于双方已经接通。
+设备外呼也要等到 `0x2000` 再启动媒体线程。`TiRtcWhipConnect` 返回成功或连接回调成功，
+都不能作为双方已接通的判断依据。
 
 设备外呼成功后应启动 30 秒本地等待计时器。期间没有收到对应 `wx_call_id` 的
 `call_incoming`，应清理外呼状态；已取消或已超时的 `call_id` 建议至少保留 60 秒，
@@ -542,50 +572,30 @@ payload 必须携带 `id`、`from`、`to`、`room_type` 字段，确保 MQTT 回
 
 ### 3. 设备取消外呼等待
 
-当前仓库**没有**提供设备侧 `POST /v1/voip/device/cancel` 之类的接口。
+仓库没有设备侧 `POST /v1/voip/device/cancel` 接口。设备发起外呼后，取消操作分为两种：
 
-这意味着设备如果在“外呼请求已发出、但对方还没接听”的阶段想取消，要分清两个目标：
+| 目标 | 处理方式 | 结果 |
+|------|----------|------|
+| 结束本地等待 | 清理本地外呼状态，并记录已取消的 `call_id` | 不保证小程序停止振铃；迟到回铃应拒绝或忽略 |
+| 让小程序停止振铃 | 收到 `call_incoming` 后进入房间，发送 `TiRtcSendCommand(0x2001, ...)`，再调用 `TiRtcDisconnect` | 挂断命令通过媒体链路送达小程序 |
 
-1. 只是本地不再等待这次外呼
-2. 真的让小程序侧停止振铃
+未进入房间时，本地 `cancel` 无法立即停止小程序振铃。房间通知已经超时的设备只需清理
+本地状态，无需再进入房间补发挂断命令。
 
-如果只是目标 1，Python 模拟器会先进入一个“等待房间通知”的取消态：
+参考实现的策略略有不同：
 
-- 先记录“这次外呼已请求取消”
-- 最多等待 `10s` 房间通知
-- 如果这段时间内房间通知一直没到，再只清理本地 `_outgoing_call` 等状态
+| 实现 | 收到 `cancel` 后的行为 |
+|------|-------------------------|
+| Python 模拟器 | 最多等待 10 秒；房间通知到达后自动建连、发送 `0x2001` 并断开，否则结束本地取消状态 |
+| Linux C 参考实现 | 立即结束本地等待，暂存已取消的 `call_id`，并拒绝迟到回铃 |
 
-也就是说，**房间通知超时后**，设备端只需结束本地取消状态，不再需要为了取消而补进房间。
-
-如果目标是 2，也就是让小程序侧停止振铃，当前链路下不能只做本地取消，而是要：
-
-1. 等进入房间（即收到 `call_incoming` 并完成建连）
-2. 再通过 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsendcommand" target="_blank" rel="noopener">`TiRtcSendCommand(0x2001, ...)`</a> 发挂断命令
-3. 随后调用 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcdisconnect" target="_blank" rel="noopener">`TiRtcDisconnect`</a>
-
-Python 模拟器的实现行为是：
-
-1. 外呼等待态收到 `cancel`
-2. 先等房间通知
-3. 房间通知在 `10s` 内到达，则自动进房间
-4. 建连成功后立即发送 `0x2001`
-5. 随后 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcdisconnect" target="_blank" rel="noopener">`TiRtcDisconnect`</a>
-6. 如果 `10s` 内房间通知没到，则直接结束本地取消状态
-
-Linux C 参考实现会立即结束本地等待，并把本次 `call_id` 暂存为已取消；迟到回铃会被拒绝。它与前述 Python 策略都不能让尚未进房间的小程序立即停止振铃。其他芯片的独立移植行为以各自文档和代码为准。
-
-因此这里的关键约束是：
-
-- 当前没有设备侧对称的 HTTP cancel 接口
-- **未进房间前的本地 cancel 不等于小程序停止振铃**
-- 要实现“小程序侧立即停振铃”，设备侧也要进入房间后发 `0x2001`
-- 如果房间通知已经超时，设备端取消状态即可，不再需要进入房间发送取消呼叫
+其他芯片的移植行为以各自文档和代码为准。
 
 ---
 
 ## 授权列表与联系人
 
-VoIP 联系人不是通过 `call-server` 的联系人申请产生，而是来自微信授权。
+VoIP 联系人来自微信授权，与 `call-server` 的联系人申请相互独立。
 
 ### 1. 刷新授权列表
 
@@ -593,9 +603,8 @@ VoIP 联系人不是通过 `call-server` 的联系人申请产生，而是来自
 
 - [`GET /v1/voip/device/contacts`](api-reference.md#get-v1voipdevicecontacts)
 
-用于获取当前允许呼叫这台设备的小程序用户列表。
-
-**完整字段说明、枚举值与错误码见：** [api-reference.md#get-v1voipdevicecontacts](api-reference.md#get-v1voipdevicecontacts)
+该接口返回允许呼叫当前设备的小程序用户。字段和错误码见
+[联系人接口说明](api-reference.md#get-v1voipdevicecontacts)。
 
 **HTTP 请求：**
 
@@ -625,20 +634,29 @@ Authorization: Bearer <mqtt_token>
 
 ### 2. 响应 `callers_update`
 
-当用户在小程序侧：
+调用以下任一接口后，设备会收到 `callers_update`：
 
 - [`POST /v1/voip/user/report-auth`](api-reference.md#post-v1voipuserreport-auth)
 - [`POST /v1/voip/user/delete-auth`](api-reference.md#post-v1voipuserdelete-auth)
 
-后，服务端会推送 `callers_update`。设备收到后应刷新本地授权列表缓存。
-不要在 MQTT 消息回调线程里同步等待 HTTP：应启动一个去重的后台刷新任务，成功后再
-原子替换缓存；刷新失败时保留上一次列表，避免阻塞随后到达的 `call_incoming` 或把
-联系人误清空。Python 与 C 参考实现已按此处理。
+设备按以下规则刷新本地联系人缓存：
 
-小程序授权时可通过 `report-auth.remark` 保存当前 OpenID 的统一联系人名称；它不是
-设备名称，也不属于某一台设备。同一 `wx_open_id + wx_app_id` 在所有已授权设备上使用
-相同名称。该名称也可由小程序右上角入口、设备端或 H5 修改，多个入口采用最后一次
-成功写入生效，并通知所有受影响设备刷新；`report-auth` 未传或传空值时沿用已有名称。
+| 场景 | 设备处理 |
+|------|----------|
+| 收到 `callers_update` | 启动一个去重的后台 HTTP 刷新任务，不阻塞 MQTT 回调线程 |
+| 刷新成功 | 原子替换整个联系人缓存 |
+| 刷新失败 | 保留上一次缓存，避免误清空联系人 |
+
+Python 与 C 参考实现均按此处理。
+
+**联系人名称规则**
+
+| 项目 | 规则 |
+|------|------|
+| 名称范围 | `report-auth.remark` 属于 `wx_open_id + wx_app_id`，不是设备名称，也不属于某一台设备 |
+| 修改入口 | 小程序、设备端和 H5 均可修改；最后一次成功写入生效 |
+| 跨设备同步 | 所有已授权设备使用同一名称，修改后都会收到刷新通知 |
+| 空值 | `report-auth` 未传或传空值时，沿用已有名称 |
 
 **MQTT 下行通知：**
 
@@ -654,7 +672,7 @@ payload:
 { "type": "callers_update", "channel": "wx", "payload": {} }
 ```
 
-> 这一套是 VoIP 自己的授权系统，不是设备呼设备的联系人系统。两者不要混用。
+> VoIP 授权与设备呼设备联系人是两套独立数据，不能混用。
 
 ---
 
@@ -679,7 +697,7 @@ TiRtcServiceRequest("/v1/wxvoip/reject", json_body, NULL, callback, user_data);
 - `wx_payload`
 - `hangup_reason`
 
-当前文档中约定的常见原因码：
+常用原因码：
 
 - `5`：设备正在外呼等待中，拒绝非目标来电
 - `7`：设备已在通话中或主动拒接
@@ -706,19 +724,20 @@ TiRtcServiceRequest("/v1/wxvoip/reject", json_body, NULL, callback, user_data);
 3. 再调用 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcdisconnect" target="_blank" rel="noopener">`TiRtcDisconnect`</a>
 4. 清理本地会话状态，恢复空闲态或实时推流态
 
-「C 参考实现」中，终端 `cancel` 在 `CONNECTING` / `IN_CALL` 状态下会直接调用 `voip_stop_session()`；这时发送的是：
+C 参考实现中，终端在 `CONNECTING/IN_CALL` 状态下输入 `cancel`，会直接调用
+`voip_stop_session()`，并发送：
 
 ```json
 { "reason": 0 }
 ```
 
-这里的关键点是：**建连中和已接通的“取消”本质上就是挂断**。对“设备呼小程序”场景，如果目标是让小程序停止振铃，设备也需要先进入房间，再发 `0x2001`。并且**设备主动挂断不经过本仓库 Go 服务的额外 HTTP 接口**。当前设备侧没有 `/v1/voip/device/hangup` 之类的服务端入口。
+建连中或通话中执行 `cancel`，按挂断处理。设备呼叫小程序时，如需停止小程序振铃，
+设备要先进入房间，再发送 `0x2001`。设备主动挂断不调用额外的 Go 服务接口；
+服务端也不提供 `/v1/voip/device/hangup`。
 
 ### 对方取消/挂断
 
-小程序侧在业务层取消/挂断后，服务端会推送：
-
-- `call_cancel` -> `device/sn_{device_id}/notify`
+小程序在业务层取消或挂断后，设备会在 `device/sn_{device_id}/notify` 收到 `call_cancel`。
 
 **MQTT 下行通知：**
 
@@ -748,13 +767,14 @@ payload:
 
 ### 对端媒体层挂断（`0x2001`）
 
-在媒体已经建好之后，对端也可能不经过 `call_cancel`，而是直接通过 TiRTC 命令字 `0x2001` 通知挂断。
+媒体连接建立后，对端也可以直接发送 TiRTC 命令字 `0x2001`。该挂断不一定伴随
+`call_cancel` 通知。
 
 设备侧收到 `0x2001` 时，应视为对端主动结束通话：
 
 1. 立即停止本地媒体收发
 2. 调用 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcdisconnect" target="_blank" rel="noopener">`TiRtcDisconnect`</a>
-3. 清理当前 room / 会话状态
+3. 清理当前房间和会话状态
 
 不要只依赖 MQTT `call_cancel` 判断通话结束。对讲中应同时处理：
 
@@ -765,7 +785,7 @@ payload:
 
 ## 协议速查
 
-### HTTP 请求 / 成功返回
+### HTTP 请求和成功响应
 
 | 接口 | 请求方 | 用途 | 成功返回 |
 |------|--------|------|---------|
@@ -773,32 +793,36 @@ payload:
 | [`GET /v1/voip/device/contacts`](api-reference.md#get-v1voipdevicecontacts) | 设备 | 拉取小程序联系人 | `{code:0,data:{contacts:[...]}}` |
 | [`POST /v1/voip/device/call`](api-reference.md#post-v1voipdevicecall) | 设备 | 主动呼叫小程序 | `{code:0,data:{call_id}}` |
 
-> 当前没有设备侧 `cancel` / `hangup` HTTP 接口；设备主动结束会话依赖 TiRTC `0x2001` + <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcdisconnect" target="_blank" rel="noopener">`TiRtcDisconnect`</a>。
+> 设备侧没有 `cancel/hangup` HTTP 接口。主动结束会话时，先发送 TiRTC `0x2001`，再调用 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcdisconnect" target="_blank" rel="noopener">`TiRtcDisconnect`</a>。
 
 ### MQTT 下行通知
 
 | topic | type | 设备动作 |
 |------|------|---------|
-| `device/sn_{device_id}/cmd` | `call_incoming` | ACK -> 接听或拒接 |
+| `device/sn_{device_id}/cmd` | `call_incoming` | ACK 后接听或拒接 |
 | `device/sn_{device_id}/notify` | `call_cancel` | 清理等待态或断开当前会话 |
 | `device/sn_{device_id}/notify` | `callers_update` | 重新拉取授权列表 |
 
-### TiRTC 命令 / 回调
+### TiRTC 命令和回调
 
 | 方向 | 载体 | 含义 | 设备动作 |
 |------|------|------|---------|
-| 平台 -> 设备 | `0x2000` | 接通确认（被叫场景） | 收到后开始本地媒体发送 |
-| 对端 -> 设备 | `0x2001` | 对端主动挂断 | 停止媒体、`TiRtcDisconnect`、清理状态 |
-| 设备 -> 对端 | `0x2001` | 设备主动挂断 | 发送后断开本地会话 |
+| 平台 → 设备 | `0x2000` | 接通确认（被叫场景） | 收到后开始本地媒体发送 |
+| 对端 → 设备 | `0x2001` | 对端主动挂断 | 停止媒体、`TiRtcDisconnect`、清理状态 |
+| 设备 → 对端 | `0x2001` | 设备主动挂断 | 发送后断开本地会话 |
 
 ## 问题排查
 
-- 微信上已经呼出，但设备没收到 `call_incoming`：先检查设备是否已正式 MQTT 在线，以及是否先上报过 [`POST /v1/voip/device/profile`](api-reference.md#post-v1voipdeviceprofile)
-- <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcwhipconnect" target="_blank" rel="noopener">`TiRtcWhipConnect`</a> 返回 0 但没有通话：0 只表示调用成功，真正结果要看连接回调
-- 设备能收来电但无法拒接：确认拒接请求体里的 `wx_*` 字段直接来自当前 `call_incoming` payload
-- 收到 `callers_update` 后列表没变：确认设备侧有重新调用 [`GET /v1/voip/device/contacts`](api-reference.md#get-v1voipdevicecontacts)
-- 设备呼小程序时 HTTP 成功但没通话：[`POST /v1/voip/device/call`](api-reference.md#post-v1voipdevicecall) 成功只表示微信 API 调用成功，后续仍要等 MQTT `call_incoming`
-- 设备想取消外呼等待但对方仍在振铃：这是当前链路约束，仓库里没有设备侧 `cancel` HTTP 接口；若想让小程序立即停振铃，设备也要进入房间后发送 `0x2001`
-- 通话已经结束但设备状态没清掉：确认同时处理了 MQTT `call_cancel` 和 TiRTC `0x2001`
+| 现象 | 检查项 |
+|------|--------|
+| 微信上已经呼出，设备没有收到 `call_incoming` | 确认设备已正式 MQTT 在线，并已调用 [`POST /v1/voip/device/profile`](api-reference.md#post-v1voipdeviceprofile) |
+| `TiRtcWhipConnect` 返回 0，但没有通话 | 返回 0 只表示请求已提交；检查连接回调及其 `error` 参数 |
+| 设备收到来电，但无法拒接 | 确认拒接请求中的 `wx_*` 字段来自本次 `call_incoming` payload |
+| 收到 `callers_update` 后列表没有变化 | 确认设备重新调用了 [`GET /v1/voip/device/contacts`](api-reference.md#get-v1voipdevicecontacts) |
+| 设备呼叫小程序时 HTTP 成功，但没有通话 | 接口成功后仍要等待 MQTT `call_incoming` |
+| 设备取消外呼等待后，小程序仍在振铃 | 未进入房间时无法通过本地 `cancel` 停止小程序振铃；进入房间后发送 `0x2001` |
+| 通话已经结束，设备状态没有清理 | 确认同时处理 MQTT `call_cancel` 和 TiRTC `0x2001` |
 
-> 使用 「C 参考实现」验证：按 [device-sim/device-sim-c/README.md](device-sim/device-sim-c/README.md) 启动后，收到来电输入 `yes` / `no`，主动呼叫输入 `wxcall [N]`。拒接字段映射与原因码见本文档的 [拒接与取消](#拒接与取消)。
+使用 C 参考实现验证时，按
+[C 参考实现说明](device-sim/device-sim-c/README.md) 启动程序。收到来电后输入 `yes/no`，
+主动呼叫输入 `wxcall [N]`。拒接字段和原因码见[拒接与取消](#拒接与取消)。

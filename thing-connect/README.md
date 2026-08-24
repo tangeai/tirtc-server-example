@@ -471,14 +471,15 @@ if (g_ai_conn && !g_ai_started && now_ms() - g_ai_connect_at >= 300) {
      "audio_rate": 8000,         // 音频采样率：8000 / 16000
      "audio_channels": 1,        // 声道数：1 / 2
      "up_video_mt": "h264",      // 上行视频编码（设备→小程序）：h264 / h265 / mjpeg / none
-     "down_video_mt": "h264",    // 下行视频编码（小程序→设备）：h264 / mjpeg / none（不支持 h265）
+     "down_video_mt": "mjpeg",  // 下行视频编码（小程序→设备）：h264 / mjpeg / none（不支持 h265）
+     "video_res_mode": "fit_screen", // 微信下行视频等比缩小到设备屏幕范围
      "down_audio_mt": "amr",     // 下行音频编码（小程序→设备）：alaw / amr / opus，默认 alaw
      "no_video": false,          // 无视频能力置 true，此时 up/down_video_mt 可留空
      "calling_timeout_sec": 30   // 呼叫超时秒数
    }
    ```
 
-   > 字段全集与取值以 [api-reference.md](api-reference.md#post-v1voipdeviceprofile) 为准。**注意没有上行音频字段**：上行音频编码由设备调用 `TiRtcSendAudioStream` 发送时的实际帧格式决定，无需在此上报（本接口仅有 `down_audio_mt`）。
+   > `fit_screen` / `fill_screen` 仅适用于 `down_video_mt=mjpeg`，并要求有效的屏幕宽高。上行音频编码由 `TiRtcSendAudioStream` 实际发送的帧格式决定，不在 profile 中上报。完整字段与取值见 [api-reference.md](api-reference.md#post-v1voipdeviceprofile)。
 
 2. 监听 MQTT `device/sn_{device_id}/cmd`，收到 `call_incoming`（payload 含 `peer_id` + `token`）；`device/sn_{device_id}/notify` 收 `call_cancel` / `callers_update`
 3. 设备主动呼小程序：调 [`POST /v1/voip/device/call`](api-reference.md#post-v1voipdevicecall)，等微信回调后同样走第 2 步的 `call_incoming`

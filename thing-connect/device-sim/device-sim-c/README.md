@@ -163,13 +163,21 @@ Linux ARM、MIPS 或其他架构必须使用与 CPU、ABI 和 libc 匹配的 TiR
 | `--up-video-file` | `../assets/video.h264` | 实时流、VoIP 和设备互呼的上行编码视频文件；空字符串表示纯音频 |
 | `--up-video-format` | `h264` | 上行视频文件的声明格式 |
 | `--down-video-format` | `h264` | 下行视频协商格式；默认适配收到后丢弃，产品 sink 可显示 |
+| `VOIP_VIDEO_RES_MODE` | `auto` | 微信 VoIP 下行视频分辨率模式：`auto` / `fit_screen` / `fill_screen`；后两者要求下行 MJPEG 和有效屏幕宽高 |
 | `--ai-audio-file` | 与 `--up-audio-file` 相同 | AI 上行音频文件 |
 | `--ai-up-audio-format` | 与 `--up-audio-format` 相同 | AI 上行音频格式 |
 | `--down-media-dir` | `received` | AI 下行音频保存根目录 |
 | `--ca-cert` | `../assets/ca-certificates.crt` | MQTT 与 HTTPS 共用的 CA 证书 |
 | `--insecure` | 关闭 | 禁用 MQTT/HTTPS 证书校验，仅用于隔离测试环境 |
 
-微信 VoIP 显示参数通过 `VOIP_SCREEN_WIDTH`、`VOIP_SCREEN_HEIGHT`、`VOIP_CAMERA_ROTATION`、`VOIP_ASPECT_RATIO`、`VOIP_OBJECT_FIT`、`VOIP_HOR_MIRROR` 和 `VOIP_VERT_MIRROR` 环境变量配置；其含义见 [微信 VoIP 设备接入](../../device-voip.md#设备侧前提)。
+微信 VoIP 显示和分辨率参数通过 `VOIP_SCREEN_WIDTH`、`VOIP_SCREEN_HEIGHT`、`VOIP_VIDEO_RES_MODE`、`VOIP_CAMERA_ROTATION`、`VOIP_ASPECT_RATIO`、`VOIP_OBJECT_FIT`、`VOIP_HOR_MIRROR` 和 `VOIP_VERT_MIRROR` 环境变量配置；其含义见 [微信 VoIP 设备接入](../../device-voip.md#设备侧前提)。
+
+使用 MJPEG 下行并将画面完整缩小到设备屏幕范围：
+
+```bash
+VOIP_SCREEN_WIDTH=640 VOIP_SCREEN_HEIGHT=480 VOIP_VIDEO_RES_MODE=fit_screen \
+  ./device-sim --down-video-format mjpeg
+```
 
 ## 终端命令
 

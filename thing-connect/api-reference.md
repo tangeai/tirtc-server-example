@@ -985,96 +985,85 @@ JWT 由 register / login 返回的 `token` 提供，含 `user_id` claim。缺失
 |------|------|:--:|------|
 | screen_width | int | | 设备自身屏幕宽度，与视频素材分辨率无关（`no_video=true` 时传 1） |
 | screen_height | int | | 设备自身屏幕高度，与视频素材分辨率无关（`no_video=true` 时传 1） |
-| camera_rotation | int | | 设备视频在微信通话 UI 中的顺时针旋转角度：`0`、`90`、`180`、`270` |
-| aspect_ratio | number | | 设备视频宽高比，必须大于 `0`，例如 `1.7777777778`（`16/9`） |
-| hor_mirror | bool | | 是否水平镜像设备视频 |
-| vert_mirror | bool | | 是否垂直镜像设备视频 |
-| object_fit | string | | 设备视频缩放方式：`fill` 或 `contain`；省略时使用微信插件默认值 |
+| camera_rotation | int | | 设备视频在微信通话 UI 中的顺时针旋转角度：`0`、`90`、`180`、`270`；小程序默认 `0` |
+| aspect_ratio | number | | 设备视频宽高比，必须大于 `0`，例如 `1.7777777778`（`16/9`）；小程序默认 `4/3` |
+| hor_mirror | bool | | 是否水平镜像设备视频；小程序默认 `false` |
+| vert_mirror | bool | | 是否垂直镜像设备视频；小程序默认 `false` |
+| object_fit | string | | 设备视频缩放方式：`fill` 或 `contain`；小程序默认 `fill` |
 | audio_rate | int | ✅ | 采样率：`8000` 或 `16000` |
 | audio_channels | int | ✅ | 声道数：`1` 或 `2` |
+| video_mt | string | | 兼容旧设备的上下行统一视频编码：`h264`、`mjpeg`、`none`；新设备使用方向字段 |
 | up_video_mt | string | | 上行视频编码（设备→小程序）：`h264`、`h265`、`mjpeg`、`none` |
 | down_video_mt | string | | 下行视频编码（小程序→设备）：`h264`、`mjpeg`、`none`（不支持 h265） |
+| video_res_mode | string | | 微信下行视频分辨率适配：`auto`、`fit_screen`、`fill_screen`；省略等同 `auto` |
 | down_audio_mt | string | | 下行音频编码（小程序→设备）：`alaw`、`amr`、`opus`，默认 `alaw` |
 | no_video | bool | | 是否无视频能力 |
 | calling_timeout_sec | int | | 呼叫超时秒数 |
 
-> 请求体整体仍按自由 JSON 原样存入 `voip_device_profile` 表，最大 **512 字节**；服务端额外校验上述五个视频 UI 字段。
->
-> 小程序应在通话开始前通过微信插件
-> [`setUIConfig`](https://developers.weixin.qq.com/miniprogram/dev/framework/device/voip-plugin/api/setUIConfig.html)
-> 配置通话页面。
->
-> 设备呼叫小程序时，设备是 caller，profile 的视频 UI 值会同时用于
-> caller 和 listener 通话页面，但手机 listener 的 `cameraRotation` 固定为 `0`。
-> 当 `object_fit=contain` 时，小程序按手机 `screenHeight / screenWidth` 设置两端
-> `UIConfig.aspectRatio`，避免按设备视频比例创建容器后让 `contain` 与 `fill`
-> 看起来相同。
->
-> 小程序启动时直接使用微信 query 中的视频 UI 字段并立即调用 `setUIConfig`。
-> 如果 query 中带有 `device_id`、`deviceId` 或微信入呼参数 `callerId`，字段缺失时
-> 也可读取每次刷新设备列表时更新的本地 profile 缓存兜底。
->
-> 小程序呼叫设备时，两路视频分别设置：小程序是 caller，
-> `callerUI.cameraRotation` 固定为 `0`；设备是 listener，`listenerUI` 使用设备
-> profile 的旋转、镜像和缩放值，避免设备配置同时影响小程序本机预览。
-> 小程序主动呼设备时，设备视频的 `objectFit` 使用 profile 的 `object_fit`。小程序按手机
-> `screenHeight / screenWidth` 计算 `UIConfig.aspectRatio`，不使用设备 profile 的
-> `aspect_ratio` 作为页面比例。设备主动呼小程序且使用 `contain` 时采用相同规则。
->
-> 五个字段都不是必填；未上报的字段不会传给插件，由插件使用默认值：
-> `cameraRotation=0`、`aspectRatio=4/3`、`horMirror=false`、`vertMirror=false`、
-> `objectFit=fill`。
->
-> 表中只有 `down_audio_mt` 而无上行音频字段：上行音频编码由设备调用 `TiRtcSendAudioStream` 发送时的实际帧格式决定，无需在此上报。
->
-> **示例 — 视频设备（仅展示一种合法格式组合，不代表客户端默认值）**
->
-> 以下使用 JSONC 注释说明字段；实际请求体必须删除注释并发送合法 JSON。
->
-> ```jsonc
-> {
->   // 设备自身屏幕宽度（像素），与视频素材分辨率无关
->   "screen_width": 640,
->   // 设备自身屏幕高度（像素），与视频素材分辨率无关
->   "screen_height": 480,
->   // 设备视频在微信通话 UI 中顺时针旋转 90°
->   "camera_rotation": 90,
->   // 设备视频宽高比，1.7777777778 表示 16:9
->   "aspect_ratio": 1.7777777778,
->   // 水平镜像设备视频
->   "hor_mirror": true,
->   // 不垂直镜像设备视频
->   "vert_mirror": false,
->   // 完整显示设备视频，必要时留空白边
->   "object_fit": "contain",
->   // 设备音频采样率为 8000 Hz
->   "audio_rate": 8000,
->   // 设备音频为单声道
->   "audio_channels": 1,
->   // 设备发送给小程序的视频使用 H.264 编码
->   "up_video_mt": "h264",
->   // 小程序发送给设备的视频使用 H.264 编码
->   "down_video_mt": "h264",
->   // 小程序发送给设备的音频使用 AMR 编码
->   "down_audio_mt": "amr",
->   // 设备具有视频能力
->   "no_video": false,
->   // 呼叫等待 30 秒后超时
->   "calling_timeout_sec": 30
-> }
-> ```
->
-> **示例 — 纯语音设备**
->
-> ```json
-> {
->   "screen_width": 1, "screen_height": 1,
->   "audio_rate": 8000, "audio_channels": 1,
->   "up_video_mt": "none", "down_video_mt": "none", "down_audio_mt": "alaw",
->   "no_video": true,
->   "calling_timeout_sec": 30
-> }
-> ```
+**上报规则**
+
+| 参数类别 | 开发者需要遵守的规则 |
+|----------|----------------------|
+| 请求格式 | 请求体必须是 JSON 对象，最大 **512 字节** |
+| 上报时机 | 设备上线后、接听来电前完成上报；媒体能力或屏幕参数变化后重新上报 |
+| TiRTC profile 参数 | 使用 TiRTC Server API 中的同名顶层字段；字段名、类型和组合由开发者保证 |
+| 视频编码兼容 | 旧设备可继续使用 `video_mt`；同时上报方向字段时，以 `up_video_mt`、`down_video_mt` 为准，不向 TiRTC 发送 `video_mt` |
+| 视频 UI 参数 | `camera_rotation`、`aspect_ratio`、`hor_mirror`、`vert_mirror`、`object_fit` 仅用于小程序通话页面，不作为 TiRTC 会话参数 |
+| 会话身份参数 | 不要上报 `wx_session_key`、`wx_room_id`、`wx_session_token`、`wx_app_id`、`device_id`、`wx_payload`、`wx_model_id`；这些值按本次呼叫确定，profile 中的同名字段无效 |
+
+`video_res_mode` 只影响小程序发送给设备的下行视频，不负责旋转画面：
+
+| 取值 | 下行画面处理 | 使用要求 |
+|------|-------------|----------|
+| `auto` | 保持微信下行画面的原始尺寸，不缩放、不裁剪 | 无；省略字段时使用此模式 |
+| `fit_screen` | 按比例缩小到屏幕范围内，不放大、不裁剪；输出宽高向下取偶数 | `down_video_mt=mjpeg`，并上报有效的屏幕宽高 |
+| `fill_screen` | 按比例缩放并居中裁剪到屏幕尺寸，允许放大 | `down_video_mt=mjpeg`，并上报有效且为偶数的屏幕宽高 |
+
+配置不符合要求时，VoIP 呼叫可能失败。完整约束见
+[TiRTC Server API](https://docs.tange.ai/products/wxvoip/api-reference/server-api.html)。
+
+五个视频 UI 字段均可省略。`callerUI` / `listenerUI` 的对应关系见
+[小程序 VoIP 页面参数](weixin-mini-program/README.md#5-callerui-和-listenerui)。
+
+本接口没有上行音频字段；设备以 `TiRtcSendAudioStream` 实际发送的帧格式为准。
+
+**视频设备示例**（MJPEG 下行完整适配到 640 × 480 屏幕）
+
+```json
+{
+  "screen_width": 640,
+  "screen_height": 480,
+  "camera_rotation": 90,
+  "aspect_ratio": 1.7777777778,
+  "hor_mirror": true,
+  "vert_mirror": false,
+  "object_fit": "contain",
+  "audio_rate": 8000,
+  "audio_channels": 1,
+  "up_video_mt": "h264",
+  "down_video_mt": "mjpeg",
+  "video_res_mode": "fit_screen",
+  "down_audio_mt": "amr",
+  "no_video": false,
+  "calling_timeout_sec": 30
+}
+```
+
+**纯语音设备示例**
+
+```json
+{
+  "screen_width": 1,
+  "screen_height": 1,
+  "audio_rate": 8000,
+  "audio_channels": 1,
+  "up_video_mt": "none",
+  "down_video_mt": "none",
+  "down_audio_mt": "alaw",
+  "no_video": true,
+  "calling_timeout_sec": 30
+}
+```
 
 **成功响应** — HTTP 200
 
@@ -1087,7 +1076,7 @@ JWT 由 register / login 返回的 `token` 提供，含 `user_id` claim。缺失
 | code | HTTP | 含义 |
 |------|------|------|
 | 401 | 401 | JWT 鉴权失败 |
-| 40000 | 200 | JSON 解析失败、超过 512 字节，或视频 UI 字段类型/取值不合法 |
+| 40000 | 200 | JSON 解析失败、请求体不是 JSON 对象、超过 512 字节，或视频 UI 字段类型/取值不合法 |
 | 50000 | 200 | 数据库保存失败 |
 
 ---
@@ -1158,23 +1147,34 @@ JWT 由 register / login 返回的 `token` 提供，含 `user_id` claim。缺失
 | wx_listener_camera_status | int | | 被叫摄像头状态：`0`=开启、`1`=关闭 |
 | payload | string | | 自定义 payload |
 
-视频呼叫时，voip-server 会从已上报的设备 profile 读取
-`camera_rotation`、`aspect_ratio`、`hor_mirror`、`vert_mirror`、`object_fit`，自动写入发给微信的
-同名 query 参数。调用方不需要在每次 `/device/call` 请求中重复传；如果 `wx_query`
-已包含同名字段，以 profile 为准。profile 未上报的字段不会被写入 query。
+**视频 UI 参数**
 
-`payload`/`wxa_payload` 是微信和 TiRTC 不解析的业务透传字段，主要用于加入房间及设备
-通知链路；小程序视频 UI 不依赖它，启动配置使用 `query`。
+| 场景 | 行为 |
+|------|------|
+| profile 已上报视频 UI 字段 | 呼叫使用 profile 中的 `camera_rotation`、`aspect_ratio`、`hor_mirror`、`vert_mirror`、`object_fit` |
+| `wx_query` 包含同名字段 | 以 profile 为准 |
+| profile 未上报某个字段 | 不向 query 添加该字段，使用小程序插件默认值 |
 
-请求未传 `payload` 时，服务端自动生成包含 `id`（等于成功响应中的 `call_id`）、
-`from`、`to`、`room_type` 的 JSON，用于回调关联和防重状态提前释放。显式传入自定义
-`payload` 时保持原值；需要精确回铃关联的自定义 payload
-应自行携带上述字段。
+调用方不需要在每次 `/device/call` 请求中重复传视频 UI 参数。
+小程序视频 UI 使用 `query`，不读取 `payload` 或 `wxa_payload`。
 
-服务端会校验设备仍处于绑定状态、联系人授权为 `active`，并从授权记录读取
-`wx_model_id`；`wx_app_id` 用于选择小程序和匹配授权记录，不传时使用默认 AppID。
-同一设备或联系人 30 秒内的重复发起会被拒绝；微信房间通知成功发布到在线设备的 MQTT
-topic 后会提前释放防重状态，因此正常接通、挂断后可以立即重新呼叫。
+**payload 行为**
+
+| 请求方式 | 行为 |
+|----------|------|
+| 省略 `payload` | 接口生成包含 `id`、`from`、`to`、`room_type` 的 JSON；`id` 等于响应中的 `call_id` |
+| 传入自定义 `payload` | 按原值透传；如需精确关联 MQTT 回铃，应自行包含 `id`、`from`、`to`、`room_type` |
+
+`payload` / `wxa_payload` 仅用于加入房间和设备通知链路，微信和 TiRTC 不解析其业务内容。
+
+**发起条件**
+
+| 检查项 | 规则 |
+|--------|------|
+| 设备状态 | 设备必须仍处于绑定状态 |
+| 联系人授权 | 授权必须为 `active`；`wx_model_id` 取自授权记录 |
+| 小程序 | `wx_app_id` 用于选择小程序并匹配授权；省略时使用默认 AppID |
+| 重复呼叫 | 同一设备或联系人 30 秒内不能重复发起；微信房间通知成功下发到在线设备后解除限制 |
 
 **请求示例**
 

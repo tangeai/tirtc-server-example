@@ -1119,6 +1119,10 @@ def report_profile(voip_server: str, mqtt_token: str,
     if object_fit not in ("", "fill", "contain"):
         _warn("VOIP_OBJECT_FIT 仅支持 fill/contain，已回退为微信默认值")
         object_fit = ""
+    video_res_mode = os.getenv("VOIP_VIDEO_RES_MODE", "auto").strip().lower()
+    if video_res_mode not in ("auto", "fit_screen", "fill_screen"):
+        _warn("VOIP_VIDEO_RES_MODE 仅支持 auto/fit_screen/fill_screen，已回退为 auto")
+        video_res_mode = "auto"
     selected_has_video = has_video() if with_video is None else (with_video and bool(_video_file_path))
     if selected_has_video:
         profile = {
@@ -1132,6 +1136,7 @@ def report_profile(voip_server: str, mqtt_token: str,
             "up_video_mt": VIDEO_FORMATS[_up_video_format].codec,
             "down_video_mt": VIDEO_FORMATS[_down_video_format].codec,
             "down_audio_mt": AUDIO_FORMATS[_down_audio_format].codec,
+            "video_res_mode": video_res_mode,
             "no_video": False,
             "calling_timeout_sec": 30,
         }
@@ -1146,6 +1151,7 @@ def report_profile(voip_server: str, mqtt_token: str,
             "audio_channels": 1,
             "up_video_mt": "none", "down_video_mt": "none",
             "down_audio_mt": AUDIO_FORMATS[_down_audio_format].codec,
+            "video_res_mode": video_res_mode,
             "no_video": True,
             "calling_timeout_sec": 30,
         }

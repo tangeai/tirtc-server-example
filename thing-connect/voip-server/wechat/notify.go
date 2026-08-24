@@ -421,63 +421,22 @@ func pushJoinToDevice(c *gin.Context, appCfg WxAppCfg, tirtcCfg TirtcServerCfg, 
 	if err != nil || profileJSON == "" {
 		return fmt.Errorf("device %s has no media profile — call POST /v1/voip/device/profile first", deviceID)
 	}
-	var media struct {
-		ScreenWidth       int    `json:"screen_width"`
-		ScreenHeight      int    `json:"screen_height"`
-		AudioRate         int    `json:"audio_rate"`
-		AudioChannels     int    `json:"audio_channels"`
-		VideoMt           string `json:"video_mt"`
-		UpVideoMt         string `json:"up_video_mt"`
-		DownVideoMt       string `json:"down_video_mt"`
-		DownAudioMt       string `json:"down_audio_mt"`
-		NoVideo           bool   `json:"no_video"`
-		CallingTimeoutSec int    `json:"calling_timeout_sec"`
-	}
-	if err := json.Unmarshal([]byte(profileJSON), &media); err != nil {
-		return fmt.Errorf("device %s profile parse error: %w", deviceID, err)
-	}
-
-	cts := media.CallingTimeoutSec
-	sw, sh := media.ScreenWidth, media.ScreenHeight
 
 	voipReq := tirtcapi.TokenWxvoipRequest{
-		WxSessionKey:      m.SessionKey,
-		WxRoomID:          m.RoomID,
-		WxSessionToken:    m.ServerToken,
-		WxAppID:           wxAppID,
-		DeviceID:          deviceID,
-		WxPayload:         m.Payload,
-		WxModelID:         modelID,
-		CallingTimeoutSec: &cts,
-		UpVideoMt:         media.UpVideoMt,
-		DownVideoMt:       media.DownVideoMt,
-		DownAudioMt:       media.DownAudioMt,
-		ScreenWidth:       &sw,
-		ScreenHeight:      &sh,
-		AudioRate:         media.AudioRate,
-		AudioChannels:     media.AudioChannels,
-	}
-	// video_mt is a legacy compat field that sets both directions at once and must
-	// not be combined with up_video_mt/down_video_mt (the cloud rejects the
-	// request). Prefer the explicit up/down fields when the device reports them.
-	if media.UpVideoMt == "" && media.DownVideoMt == "" {
-		voipReq.VideoMt = media.VideoMt
-	}
-	if media.NoVideo {
-		noVideo := true
-		voipReq.NoVideo = &noVideo
+		Profile:        json.RawMessage(profileJSON),
+		WxSessionKey:   m.SessionKey,
+		WxRoomID:       m.RoomID,
+		WxSessionToken: m.ServerToken,
+		WxAppID:        wxAppID,
+		DeviceID:       deviceID,
+		WxPayload:      m.Payload,
+		WxModelID:      modelID,
 	}
 
 	slog.InfoContext(ctx, "voip notify calling tirtc token service",
 		"device_id", deviceID,
 		"room_id", m.RoomID,
-		"audio_rate", media.AudioRate,
-		"audio_channels", media.AudioChannels,
-		"down_audio_mt", media.DownAudioMt,
-		"up_video_mt", media.UpVideoMt,
-		"down_video_mt", media.DownVideoMt,
-		"no_video", media.NoVideo,
-		"payload", string(m.Payload),
+		"profile_bytes", len(profileJSON),
 	)
 	peerID, token, err := tirtcapi.PostTokenService(ctx, client, tirtcCfg.BaseURL, tirtcCfg.AccessID, tirtcCfg.AppID, tirtcCfg.SecretKey, voipReq)
 	if err != nil {

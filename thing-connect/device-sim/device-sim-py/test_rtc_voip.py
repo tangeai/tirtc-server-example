@@ -132,7 +132,9 @@ class RtcVoipTests(unittest.TestCase):
             "VOIP_HOR_MIRROR": "true",
             "VOIP_VERT_MIRROR": "false",
             "VOIP_OBJECT_FIT": "contain",
+            "VOIP_VIDEO_RES_MODE": "fit_screen",
         }), \
+                mock.patch.object(rtc_voip, "_down_video_format", "mjpeg"), \
                 mock.patch.object(
                     rtc_voip.http_trace,
                     "request",
@@ -148,6 +150,8 @@ class RtcVoipTests(unittest.TestCase):
         self.assertIs(profile["hor_mirror"], True)
         self.assertIs(profile["vert_mirror"], False)
         self.assertEqual(profile["object_fit"], "contain")
+        self.assertEqual(profile["down_video_mt"], "mjpeg")
+        self.assertEqual(profile["video_res_mode"], "fit_screen")
         self.assertEqual(
             request.call_args_list[1].args[1],
             "https://voip.example/v1/voip/device/contacts",

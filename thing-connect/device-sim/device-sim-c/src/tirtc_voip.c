@@ -501,6 +501,15 @@ int voip_report_profile(const char *voip_server, const char *mqtt_token,
             LOG_W("VOIP_OBJECT_FIT 仅支持 fill/contain，已回退为微信默认值");
         }
     }
+    const char *video_res_mode = getenv("VOIP_VIDEO_RES_MODE");
+    if (!video_res_mode || video_res_mode[0] == '\0') {
+        video_res_mode = "auto";
+    } else if (strcmp(video_res_mode, "auto") != 0 &&
+               strcmp(video_res_mode, "fit_screen") != 0 &&
+               strcmp(video_res_mode, "fill_screen") != 0) {
+        LOG_W("VOIP_VIDEO_RES_MODE 仅支持 auto/fit_screen/fill_screen，已回退为 auto");
+        video_res_mode = "auto";
+    }
     if (!s_voip_has_video) {
         screen_width = 1;
         screen_height = 1;
@@ -513,7 +522,8 @@ int voip_report_profile(const char *voip_server, const char *mqtt_token,
              "\"hor_mirror\":%s,\"vert_mirror\":%s,"
              "\"audio_rate\":%d,\"audio_channels\":1,"
              "\"up_video_mt\":\"%s\",\"down_video_mt\":\"%s\","
-             "\"down_audio_mt\":\"%s\",\"no_video\":%s,"
+             "\"down_audio_mt\":\"%s\",\"video_res_mode\":\"%s\","
+             "\"no_video\":%s,"
              "\"calling_timeout_sec\":30}",
              screen_width, screen_height,
              camera_rotation, aspect_ratio, object_fit_field,
@@ -522,7 +532,8 @@ int voip_report_profile(const char *voip_server, const char *mqtt_token,
              down->sample_rate,
              s_voip_has_video ? up_video->codec : "none",
              s_voip_has_video ? down_video->codec : "none",
-             down->codec, s_voip_has_video ? "false" : "true");
+             down->codec, video_res_mode,
+             s_voip_has_video ? "false" : "true");
 
     char body_buf[4096];
     long http_code = 0;

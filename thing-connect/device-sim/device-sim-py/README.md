@@ -270,14 +270,21 @@ python3 device_sim_main.py --device-id DEV000001 --device-key your-key \
 | `--down-video-format` | `h264` | 下行视频保存格式后缀，支持 `h264/h265/mjpeg` |
 | `VOIP_SCREEN_WIDTH`（环境变量） | `1280` | 设备自身屏幕宽度（像素），与上行视频素材分辨率无关 |
 | `VOIP_SCREEN_HEIGHT`（环境变量） | `720` | 设备自身屏幕高度（像素），与上行视频素材分辨率无关 |
+| `VOIP_VIDEO_RES_MODE`（环境变量） | `auto` | 微信 VoIP 下行视频分辨率模式：`auto/fit_screen/fill_screen`；后两者要求 `--down-video-format mjpeg` 和有效屏幕宽高 |
 | `VOIP_CAMERA_ROTATION`（环境变量） | `0` | 微信 VoIP 通话 UI 顺时针旋转角度，仅支持 `0/90/180/270`，随 device profile 上报 |
 | `VOIP_ASPECT_RATIO`（环境变量） | `1.3333333333` | 微信 VoIP 视频宽高比，必须大于 `0` |
 | `VOIP_OBJECT_FIT`（环境变量） | 空 | 微信 VoIP 设备视频缩放方式：`fill/contain`；为空时不上传，使用微信默认值 |
-
 | `VOIP_HOR_MIRROR`（环境变量） | `false` | 是否水平镜像微信 VoIP 视频 |
 | `VOIP_VERT_MIRROR`（环境变量） | `false` | 是否垂直镜像微信 VoIP 视频 |
 | `--down-media-dir` | `device-sim-py/received` | 各媒体模式通用的下行音视频保存目录 |
 | `--log-level` | `debug` | `debug` / `info` / `warn` / `error` |
+
+使用 MJPEG 下行并将画面完整缩小到设备屏幕范围：
+
+```bash
+VOIP_SCREEN_WIDTH=640 VOIP_SCREEN_HEIGHT=480 VOIP_VIDEO_RES_MODE=fit_screen \
+  python3 device_sim_main.py --down-video-format mjpeg
+```
 
 `--down-audio-format` 同时用于微信 VoIP profile，因此文件模式只允许云端支持的
 `alaw/amr/opus`。使用 `--with-mic` 时，上下行必须同时为 `alaw_8khz` 或同时为

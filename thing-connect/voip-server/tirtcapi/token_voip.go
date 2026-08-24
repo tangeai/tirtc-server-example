@@ -28,25 +28,124 @@ type tokenServiceData struct {
 
 const tokenWxvoipPath = "/v1/token/wxvoip"
 
-// TokenWxvoipRequest POST /v1/token/wxvoip 的 JSON 体。
+// TokenWxvoipRequest combines the device-owned media profile with the
+// server-owned fields required by POST /v1/token/wxvoip.
+//
+// Profile fields are forwarded without being enumerated here so TiRTC can add
+// media parameters without requiring a matching voip-server release. Fields
+// used only by the mini-program UI are removed, and server-owned fields always
+// override values supplied by a device profile.
 type TokenWxvoipRequest struct {
-	WxSessionKey      string `json:"wx_session_key"`
-	WxRoomID          string `json:"wx_room_id"`
-	WxSessionToken    string `json:"wx_session_token"`
-	WxAppID           string `json:"wx_app_id"`
-	DeviceID          string `json:"device_id"`
-	WxPayload         string `json:"wx_payload,omitempty"`
-	WxModelID         string `json:"wx_model_id"`
-	CallingTimeoutSec *int   `json:"calling_timeout_sec,omitempty"`
-	NoVideo           *bool  `json:"no_video,omitempty"`
-	VideoMt           string `json:"video_mt,omitempty"`
-	UpVideoMt         string `json:"up_video_mt,omitempty"`
-	DownVideoMt       string `json:"down_video_mt,omitempty"`
-	DownAudioMt       string `json:"down_audio_mt,omitempty"`
-	ScreenWidth       *int   `json:"screen_width,omitempty"`
-	ScreenHeight      *int   `json:"screen_height,omitempty"`
-	AudioRate         int    `json:"audio_rate"`
-	AudioChannels     int    `json:"audio_channels"`
+	Profile        json.RawMessage `json:"-"`
+	WxSessionKey   string          `json:"wx_session_key"`
+	WxRoomID       string          `json:"wx_room_id"`
+	WxSessionToken string          `json:"wx_session_token"`
+	WxAppID        string          `json:"wx_app_id"`
+	DeviceID       string          `json:"device_id"`
+	WxPayload      string          `json:"wx_payload,omitempty"`
+	WxModelID      string          `json:"wx_model_id"`
+}
+
+var localProfileFields = [...]string{
+	"camera_rotation",
+	"aspect_ratio",
+	"hor_mirror",
+	"vert_mirror",
+	"object_fit",
+}
+
+var serverOwnedTokenFields = [...]string{
+	"wx_session_key",
+	"wx_room_id",
+	"wx_session_token",
+	"wx_app_id",
+	"device_id",
+	"wx_payload",
+	"wx_model_id",
+}
+
+type tokenWxvoipServerFields struct {
+	WxSessionKey   string `json:"wx_session_key"`
+	WxRoomID       string `json:"wx_room_id"`
+	WxSessionToken string `json:"wx_session_token"`
+	WxAppID        string `json:"wx_app_id"`
+	DeviceID       string `json:"device_id"`
+	WxPayload      string `json:"wx_payload,omitempty"`
+	WxModelID      string `json:"wx_model_id"`
+}
+
+// MarshalJSON performs a controlled top-level merge. Profile values retain
+// their original JSON types; only local UI fields are filtered and call-scoped
+// server fields are authoritative.
+func (r TokenWxvoipRequest) MarshalJSON() ([]byte, error) {
+	params := make(map[string]json.RawMessage)
+	profile := bytes.TrimSpace(r.Profile)
+	if len(profile) > 0 {
+		if err := json.Unmarshal(profile, &params); err != nil {
+			return nil, fmt.Errorf("profile must be a JSON object: %w", err)
+		}
+		if params == nil {
+			return nil, fmt.Errorf("profile must be a JSON object")
+		}
+	}
+	normalizeLegacyVideoFields(params)
+
+	for _, name := range localProfileFields {
+		delete(params, name)
+	}
+	for _, name := range serverOwnedTokenFields {
+		delete(params, name)
+	}
+
+	serverBody, err := json.Marshal(tokenWxvoipServerFields{
+		WxSessionKey:   r.WxSessionKey,
+		WxRoomID:       r.WxRoomID,
+		WxSessionToken: r.WxSessionToken,
+		WxAppID:        r.WxAppID,
+		DeviceID:       r.DeviceID,
+		WxPayload:      r.WxPayload,
+		WxModelID:      r.WxModelID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var serverFields map[string]json.RawMessage
+	if err := json.Unmarshal(serverBody, &serverFields); err != nil {
+		return nil, err
+	}
+	for name, value := range serverFields {
+		params[name] = value
+	}
+	return json.Marshal(params)
+}
+
+// normalizeLegacyVideoFields preserves the historical video_mt compatibility
+// rule while allowing all other profile fields to pass through. Empty
+// directional fields were omitted by the previous typed request structure;
+// non-empty directional fields take precedence over video_mt because TiRTC
+// rejects requests that combine both forms.
+func normalizeLegacyVideoFields(params map[string]json.RawMessage) {
+	for _, name := range []string{"up_video_mt", "down_video_mt"} {
+		raw, ok := params[name]
+		if !ok {
+			continue
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			delete(params, name)
+			continue
+		}
+		var value string
+		if json.Unmarshal(raw, &value) == nil && value == "" {
+			delete(params, name)
+		}
+	}
+	if _, ok := params["up_video_mt"]; ok {
+		delete(params, "video_mt")
+		return
+	}
+	if _, ok := params["down_video_mt"]; ok {
+		delete(params, "video_mt")
+	}
 }
 
 // PostTokenService 向 tirtc-server-api 发起 POST /v1/token/wxvoip。

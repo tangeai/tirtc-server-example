@@ -181,10 +181,10 @@ func TestPushJoinToDevice_RejectsKnownOfflineDevice(t *testing.T) {
 	}
 }
 
-// TestPushJoinToDevice_ForwardsMediaFormats verifies the new up/down video and
-// down audio format fields from the device profile are forwarded to the
-// tirtc-server-api /v1/token/wxvoip request body.
-func TestPushJoinToDevice_ForwardsMediaFormats(t *testing.T) {
+// TestPushJoinToDevice_ForwardsProfileFields verifies that TiRTC profile
+// fields are merged without a fixed Go field list. Local mini-program UI
+// fields are filtered and call-scoped values remain server-owned.
+func TestPushJoinToDevice_ForwardsProfileFields(t *testing.T) {
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
@@ -195,7 +195,7 @@ func TestPushJoinToDevice_ForwardsMediaFormats(t *testing.T) {
 	defer srv.Close()
 
 	prof := stubProfiler{
-		profile: `{"screen_width":1,"screen_height":1,"audio_rate":8000,"audio_channels":1,"up_video_mt":"h264","down_video_mt":"mjpeg","down_audio_mt":"amr","calling_timeout_sec":30}`,
+		profile: `{"screen_width":640,"screen_height":480,"camera_rotation":90,"object_fit":"contain","audio_rate":8000,"audio_channels":1,"video_mt":"h264","up_video_mt":"h264","down_video_mt":"mjpeg","down_audio_mt":"amr","video_res_mode":"fit_screen","future_media_option":{"enabled":true},"device_id":"untrusted","wx_payload":"untrusted","calling_timeout_sec":30}`,
 		remark:  "客厅联系人",
 	}
 	var pub stubPublisher
@@ -211,6 +211,7 @@ func TestPushJoinToDevice_ForwardsMediaFormats(t *testing.T) {
 		RoomID:      "room",
 		ServerToken: "st",
 		OpenID:      "openid",
+		Payload:     "server-payload",
 		PayloadData: &voipCallPayload{
 			ID:       "call-1",
 			From:     "dev1",
@@ -240,6 +241,28 @@ func TestPushJoinToDevice_ForwardsMediaFormats(t *testing.T) {
 		push["wx_room_type"] != "video" {
 		t.Fatalf("outgoing correlation fields not forwarded: %+v", push)
 	}
+	for key, want := range map[string]any{
+		"wx_session_key":   "sk",
+		"wx_room_id":       "room",
+		"wx_session_token": "st",
+		"wx_app_id":        "wxapp",
+		"device_id":        "dev1",
+		"wx_payload":       "server-payload",
+		"wx_model_id":      "model",
+		"video_res_mode":   "fit_screen",
+	} {
+		if got := gotBody[key]; got != want {
+			t.Errorf("token request %s=%v, want %v", key, got, want)
+		}
+	}
+	if option, ok := gotBody["future_media_option"].(map[string]any); !ok || option["enabled"] != true {
+		t.Errorf("future profile field not forwarded: %v", gotBody["future_media_option"])
+	}
+	for _, key := range []string{"camera_rotation", "object_fit"} {
+		if _, ok := gotBody[key]; ok {
+			t.Errorf("local UI field %s must not be sent to token API", key)
+		}
+	}
 
 	if gotBody["up_video_mt"] != "h264" {
 		t.Errorf("up_video_mt not forwarded: want h264, got %v", gotBody["up_video_mt"])
@@ -250,10 +273,8 @@ func TestPushJoinToDevice_ForwardsMediaFormats(t *testing.T) {
 	if gotBody["down_audio_mt"] != "amr" {
 		t.Errorf("down_audio_mt not forwarded: want amr, got %v", gotBody["down_audio_mt"])
 	}
-	// video_mt must not leak when explicit up/down fields are set, otherwise
-	// the cloud-side tirtc server rejects the request.
 	if _, ok := gotBody["video_mt"]; ok {
-		t.Errorf("video_mt should not be sent when up/down fields are set, got %v", gotBody["video_mt"])
+		t.Errorf("legacy video_mt must be omitted when directional fields are set: %v", gotBody["video_mt"])
 	}
 }
 

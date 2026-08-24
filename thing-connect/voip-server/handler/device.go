@@ -411,7 +411,7 @@ type videoUIConfig struct {
 func validateVideoUIProfile(profile json.RawMessage) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(profile, &fields); err != nil || fields == nil {
-		return nil
+		return fmt.Errorf("profile 必须是 JSON 对象")
 	}
 	if raw, ok := fields["camera_rotation"]; ok {
 		var rotation int

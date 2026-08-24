@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -234,6 +235,38 @@ func TestVideoUIProfile(t *testing.T) {
 	}
 	if err := validateVideoUIProfile(json.RawMessage(`{"up_video_mt":"h264"}`)); err != nil {
 		t.Fatalf("profile without video UI fields rejected: %v", err)
+	}
+	if err := validateVideoUIProfile(json.RawMessage(`{"video_res_mode":"developer-defined"}`)); err != nil {
+		t.Fatalf("TiRTC profile fields must not be validated by ThingConnect: %v", err)
+	}
+}
+
+func TestPostDeviceProfileRejectsNonObject(t *testing.T) {
+	server := NewServer(nil, nil, nil, nil)
+	router := gin.New()
+	router.POST("/", func(c *gin.Context) {
+		c.Set("device_id", "device-1")
+		server.postDeviceProfile(c)
+	})
+
+	for _, profile := range []string{"null", `[]`, `"profile"`, `1`} {
+		t.Run(profile, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(profile))
+			request.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(recorder, request)
+
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("HTTP=%d, want 200", recorder.Code)
+			}
+			var response apiresp.JSON
+			if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			if response.Code != apiresp.ErrBadParam || response.Msg != "profile 必须是 JSON 对象" {
+				t.Fatalf("response=%+v", response)
+			}
+		})
 	}
 }
 
