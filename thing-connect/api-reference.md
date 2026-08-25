@@ -1117,6 +1117,17 @@ JWT 由 register / login 返回的 `token` 提供，含 `user_id` claim。缺失
 }
 ```
 
+`code`、`msg` 遵循 voip-server 的统一响应约定；`data` 字段如下：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| data.contacts | object[] | 当前设备的有效 VoIP 联系人，按授权创建时间倒序排列；没有联系人时为 `[]` |
+| data.contacts[].wx_open_id | string | 微信用户 OpenID；发起外呼时作为 `wx_user_openid` |
+| data.contacts[].wx_app_id | string | 授权所属的微信小程序 AppID |
+| data.contacts[].wx_model_id | string | 授权对应的微信设备型号 ID；发起外呼时服务端从授权记录读取 |
+| data.contacts[].remark | string | 当前 `wx_open_id + wx_app_id` 的统一联系人名称；未设置时为空字符串 |
+| data.contacts[].created_at | string | 该设备授权记录的创建时间，RFC 3339 格式 |
+
 **错误码**
 
 | code | HTTP | 含义 |
@@ -1303,6 +1314,18 @@ H5 查询指定设备的小程序 VoIP 联系人。此接口与设备接口分�
 }
 ```
 
+`code`、`msg` 遵循 voip-server 的统一响应约定；`data.contacts` 的字段、排序和空列表行为与
+`GET /v1/voip/device/contacts` 相同：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| data.contacts | object[] | 指定设备的有效 VoIP 联系人，按授权创建时间倒序排列；没有联系人时为 `[]` |
+| data.contacts[].wx_open_id | string | 微信用户 OpenID |
+| data.contacts[].wx_app_id | string | 授权所属的微信小程序 AppID |
+| data.contacts[].wx_model_id | string | 授权对应的微信设备型号 ID |
+| data.contacts[].remark | string | 当前 `wx_open_id + wx_app_id` 的统一联系人名称；未设置时为空字符串 |
+| data.contacts[].created_at | string | 该设备授权记录的创建时间，RFC 3339 格式 |
+
 **错误码**
 
 | code | HTTP | 含义 |
@@ -1353,7 +1376,13 @@ H5 查询指定设备的小程序 VoIP 联系人。此接口与设备接口分�
 }
 ```
 
-没有授权记录时 `list` 为 `[]`。
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| data.list | object[] | 当前微信身份在当前账号名下设备上的有效授权记录；没有授权时为 `[]` |
+| data.list[].device_id | string | 已授权的设备 ID |
+| data.list[].remark | string | 当前 `wx_open_id + wx_app_id` 的统一联系人名称；未设置时为空字符串 |
+| data.list[].authorized_device_name | string | 创建该微信授权时使用的设备名称；不是设备当前绑定名称 |
+| data.list[].auth_status | string | 授权状态；本接口只返回有效记录，因此固定为 `active` |
 
 **错误码**
 
@@ -1391,7 +1420,10 @@ H5 查询指定设备的小程序 VoIP 联系人。此接口与设备接口分�
 }
 ```
 
-尚未设置时 `remark` 为 `""`。
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| data.wx_open_id | string | 最近一次 `wechat-mini-login` 确定的当前微信用户 OpenID |
+| data.remark | string | 当前 `wx_open_id + wx_app_id` 的统一联系人名称；尚未设置时为 `""` |
 
 **错误码**
 
@@ -1422,7 +1454,7 @@ H5 查询指定设备的小程序 VoIP 联系人。此接口与设备接口分�
 { "wx_app_id": "wxXXX", "remark": "小雨" }
 ```
 
-**成功响应**: `{ "code": 0, "msg": "ok", "data": null }`
+**成功响应**: `{ "code": 0, "msg": "ok" }`；响应不包含 `data` 字段。
 
 **错误码**
 
@@ -1483,8 +1515,10 @@ H5 查询指定设备的小程序 VoIP 联系人。此接口与设备接口分�
 **成功响应** — HTTP 200
 
 ```json
-{ "code": 0, "msg": "ok", "data": null }
+{ "code": 0, "msg": "ok" }
 ```
+
+成功响应不包含 `data` 字段。
 
 **错误码**
 
@@ -1535,8 +1569,10 @@ H5 查询指定设备的小程序 VoIP 联系人。此接口与设备接口分�
 **成功响应** — HTTP 200
 
 ```json
-{ "code": 0, "msg": "ok", "data": null }
+{ "code": 0, "msg": "ok" }
 ```
+
+成功响应不包含 `data` 字段。
 
 **错误码**
 
@@ -2707,14 +2743,21 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 ]}}
 ```
 
+`code`、`msg` 遵循 call-server 的统一响应约定；`data` 字段如下。标记为“仅 device”或
+“仅 voip”的字段在另一种联系人对象中不返回，而不是返回 `null`。
+
 | 字段 | 适用 type | 说明 |
 |------|:--:|------|
-| device_id | 全部 | device 联系人为对方 device_id；voip 联系人为 `wx_open_id`（无独立设备身份） |
-| id | voip | `voip_device_auth` 表主键，`PUT /v1/call/device/contacts/remark` 不需要它（用 peer_id），仅供参考 |
-| remark | 全部 | device 为本设备对该联系人的备注；voip 为当前 `wx_open_id + wx_app_id` 的统一联系人名称 |
-| source | 全部 | `manual`（跨账号申请）/ `auto`（同账号自动关联）/ `voip`（小程序授权） |
-| online | 仅 device | voip 联系人无在线状态字段 |
-| wx_open_id / wx_app_id / wx_model_id | 仅 voip | 微信授权信息 |
+| data.contacts | — | 联系人对象数组；没有联系人时为 `[]` |
+| data.contacts[].device_id | 全部 | device 联系人为对方设备 ID；voip 联系人为 `wx_open_id`（无独立设备身份） |
+| data.contacts[].type | 全部 | 联系人类型：`device`（设备联系人）或 `voip`（微信授权联系人）；设备必须按此字段选择呼叫接口 |
+| data.contacts[].id | 仅 voip | `voip_device_auth` 表主键；`PUT /v1/call/device/contacts/remark` 不使用它，而是使用 `peer_id` |
+| data.contacts[].remark | 全部 | device 为本设备对该联系人的备注；voip 为当前 `wx_open_id + wx_app_id` 的统一联系人名称；未设置时为空字符串 |
+| data.contacts[].source | 全部 | 联系人来源：`manual`（跨账号申请）、`auto`（同账号自动关联）或 `voip`（小程序授权） |
+| data.contacts[].online | 仅 device | 对方设备当前是否在线 |
+| data.contacts[].wx_open_id | 仅 voip | 微信用户 OpenID；与该项的 `device_id` 相同 |
+| data.contacts[].wx_app_id | 仅 voip | 授权所属的微信小程序 AppID |
+| data.contacts[].wx_model_id | 仅 voip | 授权对应的微信设备型号 ID；发起 VoIP 外呼时由 voip-server 从授权记录读取 |
 
 > **设备联系人**：同账号下的其他设备会在首次拉取时懒创建为 `source:"auto"` 的已接受联系人（无需事件驱动）。跨账号需走 `request`/`respond` 申请流程。
 >
@@ -2736,6 +2779,13 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 ]}}
 ```
 
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| data.pending | object[] | 当前设备可审批的联系人申请；没有待审批申请时为 `[]` |
+| data.pending[].type | string | 联系人类型；申请流程只适用于设备联系人，因此固定为 `device` |
+| data.pending[].peer_device_id | string | 发起申请的对方设备 ID；审批时作为 `peer_device_id` |
+| data.pending[].created_at | string | 申请创建时间，RFC 3339 格式 |
+
 收到 `channel:"device"` 的 `callers_update` 后，设备应同时刷新联系人列表和 pending 列表。当前没有 `contacts_update` 事件。
 
 `callers_update.payload` 字段：
@@ -2754,7 +2804,14 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 
 **鉴权**: ✅ 设备 JWT　**请求体**: `{ "target_device_id": "TIRZ00000002" }`
 
-**成功响应**: `{ "code": 200, "msg": "ok", "data": {"status": "pending", "source": "manual"} }`。成功后向目标设备的 `device/sn_{target_device_id}/notify` 推送：
+**成功响应**: `{ "code": 200, "msg": "ok", "data": {"status": "pending", "source": "manual"} }`。
+
+| 字段 | 说明 |
+|------|------|
+| data.status | 跨账号申请为 `pending`；同账号设备直接建立联系人时为 `accepted` |
+| data.source | 跨账号申请为 `manual`；同账号自动联系人为 `auto` |
+
+成功后向目标设备的 `device/sn_{target_device_id}/notify` 推送：
 
 ```json
 {
@@ -2780,7 +2837,11 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 
 **鉴权**: ✅ 设备 JWT　**请求体**: `{ "peer_device_id": "xxx", "action": "accept" }`（`action`: `accept` | `reject`）
 
-**成功响应**: `{ "code": 200, "msg": "ok", "data": {"status": "accepted"} }`。成功后向申请发起设备推送 `callers_update`。　**错误码**: `40000`、`40205`（申请不存在或非法响应）、`40209`（申请方或接收方联系人数量已达上限）
+**成功响应**: `{ "code": 200, "msg": "ok", "data": {"status": "accepted"} }`。
+`data.status` 为审批后的状态：`accepted` 或 `rejected`。成功后向申请发起设备推送
+`callers_update`。
+
+**错误码**: `40000`、`40205`（申请不存在或非法响应）、`40209`（申请方或接收方联系人数量已达上限）
 
 ---
 
@@ -2805,7 +2866,7 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 { "peer_id": "TIRZ00000002", "remark": "门铃" }
 ```
 
-**成功响应**: `{ "code": 200, "msg": "ok", "data": null }`
+**成功响应**: `{ "code": 200, "msg": "ok" }`；响应不包含 `data` 字段。
 
 **错误码**: `40000`（缺 peer_id 或 remark 超过 64 个字符）、`40205`（peer_id 既不是已接受的设备联系人，也不是本设备的 VoIP 授权用户）
 
@@ -2829,7 +2890,7 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 ```
 
-**成功响应**: `{ "code": 200, "msg": "ok", "data": null }`
+**成功响应**: `{ "code": 200, "msg": "ok" }`；响应不包含 `data` 字段。
 
 **错误码**: `40000`（缺 peer_id）、`40205`（联系人不存在、不是 accepted 状态或已删除）、`40211`（同账号 auto 联系人受保护，不允许删除）
 
@@ -2837,15 +2898,68 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 
 ### H5 侧联系人管理（`UserJWTAuth`，鉴权同 voip-server `/v1/voip/user/*`）
 
-| 接口 | 说明 |
-|------|------|
-| `GET /v1/voip/user/contacts?device_id=xxx` | 某台名下设备的小程序 VoIP 联系人列表；由 voip-server 提供，不包含设备联系人 |
-| `GET /v1/call/user/contacts?device_id=xxx` | 某台名下设备的完整联系人列表（含 VoIP 联系人）；每项包含对应数据表的数字 `id` |
-| `GET /v1/call/user/contacts/pending` | 用户名下所有设备待审批的申请，返回 `{id, type, initiator_device, target_device, created_at}`；当前 `type` 固定为 `device` |
-| `POST /v1/call/user/contacts/request` | `{device_id, target_device_id}`，代设备发起申请（仅设备联系人） |
-| `POST /v1/call/user/contacts/respond` | `{id, action}`；服务端根据申请 ID 确定接收设备，并校验该设备必须属于当前用户，不能代替发起方审批 |
-| `PUT /v1/call/user/contacts/remark` | `{device_id, peer_id, remark}`；`device_id` 是当前用户名下的本方设备，`peer_id` 是对方设备 ID 或 VoIP 联系人的 `wx_open_id`；VoIP 名称会同步到同一小程序下的全部授权设备；remark 最多 64 个 Unicode 字符 |
-| `DELETE /v1/call/user/contacts/:id` | 按 `call_contact.id` 删除 manual 设备联系人；auto 联系人返回 `40211`，VoIP 联系人的移除走小程序取消授权 |
+#### `GET /v1/call/user/contacts?device_id=xxx`
+
+查询当前用户某台设备的完整联系人列表，同时返回设备联系人和 VoIP 联系人。
+
+**查询参数**：`device_id` 必填，且必须属于当前用户。
+
+**成功响应**：
+
+```json
+{ "code": 200, "msg": "ok", "data": { "contacts": [
+  {"id": 12, "device_id": "TIRZ00000002", "type": "device", "remark": "门铃", "source": "manual", "online": true},
+  {"id": 3, "device_id": "o4DLd5...", "type": "voip", "source": "voip", "remark": "妈妈",
+   "wx_open_id": "o4DLd5...", "wx_app_id": "wxXXX", "wx_model_id": "HRHY_xxx"}
+]}}
+```
+
+| 字段 | 适用 type | 说明 |
+|------|:--:|------|
+| data.contacts | — | 指定设备的联系人对象数组；没有联系人时为 `[]` |
+| data.contacts[].id | 全部 | 对应数据表的数字主键：device 来自 `call_contact`，voip 来自 `voip_device_auth` |
+| data.contacts[].device_id | 全部 | device 联系人为对方设备 ID；voip 联系人为 `wx_open_id` |
+| data.contacts[].type | 全部 | `device` 或 `voip` |
+| data.contacts[].remark | 全部 | device 为指定设备对该联系人的备注；voip 为当前 `wx_open_id + wx_app_id` 的统一联系人名称 |
+| data.contacts[].source | 全部 | `manual`、`auto` 或 `voip` |
+| data.contacts[].online | 仅 device | 对方设备当前是否在线 |
+| data.contacts[].wx_open_id | 仅 voip | 微信用户 OpenID；与该项的 `device_id` 相同 |
+| data.contacts[].wx_app_id | 仅 voip | 授权所属的微信小程序 AppID |
+| data.contacts[].wx_model_id | 仅 voip | 授权对应的微信设备型号 ID |
+
+**错误码**：`40000`（缺少 `device_id`）、`40300`（设备不属于当前用户）。
+
+#### `GET /v1/call/user/contacts/pending`
+
+查询当前用户名下所有设备可以审批的联系人申请。
+
+**成功响应**：
+
+```json
+{ "code": 200, "msg": "ok", "data": { "pending": [
+  {"id": 12, "type": "device", "initiator_device": "TIRZ00000001",
+   "target_device": "TIRZ00000002", "created_at": "2026-07-22T14:00:00+08:00"}
+]}}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| data.pending | object[] | 当前用户可审批的申请；没有待审批申请时为 `[]` |
+| data.pending[].id | integer | `call_contact` 表主键；审批时作为 `POST /v1/call/user/contacts/respond` 的 `id` |
+| data.pending[].type | string | 联系人类型；申请流程只适用于设备联系人，因此固定为 `device` |
+| data.pending[].initiator_device | string | 发起申请的设备 ID |
+| data.pending[].target_device | string | 当前用户负责审批的接收设备 ID |
+| data.pending[].created_at | string | 申请创建时间，RFC 3339 格式 |
+
+#### 其他 H5 联系人操作
+
+| 接口 | 请求 | 成功响应与说明 |
+|------|------|----------------|
+| `GET /v1/voip/user/contacts?device_id=xxx` | 查询参数 `device_id` | 某台名下设备的小程序 VoIP 联系人列表；由 voip-server 提供，不包含设备联系人；字段见该接口章节 |
+| `POST /v1/call/user/contacts/request` | `{device_id, target_device_id}` | `data.status` 为 `pending`（跨账号）或 `accepted`（同账号），`data.source` 对应为 `manual` 或 `auto` |
+| `POST /v1/call/user/contacts/respond` | `{id, action}` | `data.status` 为审批后的 `accepted` 或 `rejected`；服务端根据申请 ID 确定接收设备，不能代替发起方审批 |
+| `PUT /v1/call/user/contacts/remark` | `{device_id, peer_id, remark}` | 不返回 `data` 字段；`device_id` 是当前用户名下的本方设备，`peer_id` 是对方设备 ID 或 VoIP 联系人的 `wx_open_id`；VoIP 名称会同步到同一小程序下的全部授权设备；remark 最多 64 个 Unicode 字符 |
+| `DELETE /v1/call/user/contacts/:id` | 路径参数 `id` | 不返回 `data` 字段；按 `call_contact.id` 删除 manual 设备联系人；auto 联系人返回 `40211`，VoIP 联系人的移除走小程序取消授权 |
 
 > `id` 不是鉴权凭据。审批和删除会根据 ID 找到实际设备并校验所有权；申请和备注会校验请求中的 `device_id` 属于当前用户。H5 发起的审批、备注和删除会向受影响设备推送 `callers_update`。JWT 鉴权失败返回 HTTP 401 + `code=401`；设备或联系人不属于当前用户返回 HTTP 200 + `code=40300`。
 

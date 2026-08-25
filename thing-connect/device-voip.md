@@ -669,7 +669,8 @@ Authorization: Bearer <mqtt_token>
         "wx_open_id": "o4DLd5...",
         "wx_app_id": "wxXXX",
         "wx_model_id": "HRHY_xxx",
-        "remark": "小雨"
+        "remark": "小雨",
+        "created_at": "2026-06-18T12:00:00Z"
       }
     ]
   }
@@ -678,10 +679,12 @@ Authorization: Bearer <mqtt_token>
 
 | 返回字段 | 含义 |
 |----------|------|
+| `data.contacts` | 当前设备的有效 VoIP 联系人数组，按授权创建时间倒序排列；没有联系人时为 `[]` |
 | `data.contacts[].wx_open_id` | 联系人的微信 OpenID；发起外呼时写入 `wx_user_openid` |
 | `data.contacts[].wx_app_id` | 联系人所属小程序 AppID |
 | `data.contacts[].wx_model_id` | 授权时对应的微信设备型号 ID；新设备外呼不需要自行回传 |
 | `data.contacts[].remark` | 当前微信身份的统一联系人名称，可能为空 |
+| `data.contacts[].created_at` | 该设备授权记录的创建时间，RFC 3339 格式 |
 
 ### 2. 响应 `callers_update`
 
