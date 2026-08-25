@@ -53,7 +53,7 @@ _ECHO_GATE_ACTIVE = True
 _ECHO_GATE_ATTEN_DB = 24
 
 try:
-    from g711 import alaw_encode, alaw_decode
+    from alaw import alaw_encode, alaw_decode
 except ImportError:
     alaw_encode = alaw_decode = None
 
@@ -223,7 +223,7 @@ def configure_hardware_audio(enable: bool, fmt: str = "alaw_8khz",
         _err(f"不支持的音频格式: {fmt}，可选: {list(AUDIO_FORMATS.keys())}")
         return
     if not supports_live_audio_capture(fmt):
-        _err(f"实时麦克风不支持 {fmt}，仅支持 pcm/g711a")
+        _err(f"实时麦克风不支持 {fmt}，仅支持 pcm/alaw")
         return
     _hw_audio = True
     _hw_audio_fmt = fmt

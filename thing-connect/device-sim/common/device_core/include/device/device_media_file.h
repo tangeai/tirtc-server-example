@@ -22,7 +22,7 @@ typedef struct {
     FILE *file;
     size_t packet_size;
     uint32_t packet_index;
-} device_g711_file_t;
+} device_alaw_file_t;
 
 typedef struct {
     FILE *file;
@@ -47,15 +47,15 @@ typedef struct {
     uint32_t frame_index;
 } device_h264_file_t;
 
-device_media_file_result_t device_g711_file_open(device_g711_file_t *source,
+device_media_file_result_t device_alaw_file_open(device_alaw_file_t *source,
                                                  const char *path,
                                                  size_t packet_size);
-device_media_file_result_t device_g711_file_next(device_g711_file_t *source,
+device_media_file_result_t device_alaw_file_next(device_alaw_file_t *source,
                                                  uint8_t *buffer,
                                                  size_t capacity,
                                                  size_t *size,
                                                  bool loop);
-void device_g711_file_close(device_g711_file_t *source);
+void device_alaw_file_close(device_alaw_file_t *source);
 
 device_media_file_result_t device_amr_file_open(device_amr_file_t *source,
                                                 const char *path,

@@ -71,7 +71,7 @@ static const char *media_name(uint8_t media)
 {
     switch (media) {
     case TIRTC_AUDIO_PCM: return "pcm";
-    case TIRTC_AUDIO_ALAW: return "g711a";
+    case TIRTC_AUDIO_ALAW: return "alaw";
     case TIRTC_AUDIO_AAC: return "aac";
     case TIRTC_AUDIO_OPUS: return "opus";
     case TIRTC_AUDIO_AMR: return "amr";
@@ -685,7 +685,7 @@ void tirtc_adapter_set_event_handlers(const tirtc_adapter_event_handlers_t *hand
 static uint8_t audio_media(device_audio_codec_t codec)
 {
     switch (codec) {
-    case DEVICE_AUDIO_CODEC_G711A: return TIRTC_AUDIO_ALAW;
+    case DEVICE_AUDIO_CODEC_ALAW: return TIRTC_AUDIO_ALAW;
     case DEVICE_AUDIO_CODEC_AMR_NB:
     case DEVICE_AUDIO_CODEC_AMR_WB: return TIRTC_AUDIO_AMR;
     case DEVICE_AUDIO_CODEC_OPUS: return TIRTC_AUDIO_OPUS;

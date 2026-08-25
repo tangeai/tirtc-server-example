@@ -251,12 +251,16 @@ static void test_format_tables(void) {
     assert(audio_format_find("alaw_8khz"));
     assert(audio_format_find("g711a_8k") ==
            audio_format_find("alaw_8khz"));
+    assert(audio_format_find("g711a_8khz") ==
+           audio_format_find("alaw_8khz"));
+    assert(audio_format_find("g711a_16khz") ==
+           audio_format_find("alaw_16khz"));
     assert(audio_format_find("pcm_16k") ==
            audio_format_find("pcm_s16le_16khz"));
     assert(!audio_format_find("mp3"));
     assert(strcmp(
                audio_format_ai_codec(audio_format_find("alaw_8khz")),
-               "g711a") == 0);
+               "alaw") == 0);
     assert(strcmp(
                audio_format_ai_codec(audio_format_find("pcm_s16le_16khz")),
                "pcm") == 0);
@@ -352,7 +356,7 @@ static void test_ai_start_session_json_declares_codecs(void) {
     assert(json != NULL);
     assert(strstr(
                json,
-               "\"input_audio\":{\"codec\":\"g711a\","
+               "\"input_audio\":{\"codec\":\"alaw\","
                "\"sample_rate\":8000,\"channels\":1}") != NULL);
     assert(strstr(
                json,

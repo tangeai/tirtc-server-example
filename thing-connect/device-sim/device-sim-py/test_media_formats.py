@@ -42,10 +42,10 @@ class MediaFormatsTests(unittest.TestCase):
                 spec = VIDEO_FORMATS[name]
                 self.assertEqual(spec.codec, codec)
 
-    def test_ai_g711a_descriptor_uses_protocol_codec_name(self):
+    def test_ai_alaw_descriptor_uses_public_codec_name(self):
         self.assertEqual(
             ai_audio_descriptor("alaw_8khz"),
-            {"codec": "g711a", "sample_rate": 8000, "channels": 1},
+            {"codec": "alaw", "sample_rate": 8000, "channels": 1},
         )
 
     def test_ai_rejects_unsupported_aac_descriptor(self):
@@ -55,6 +55,8 @@ class MediaFormatsTests(unittest.TestCase):
     def test_with_mic_accepts_matching_alaw_8khz_or_16khz(self):
         validate_with_mic_audio_formats("alaw_8khz", "g711a_8k")
         validate_with_mic_audio_formats("g711a_16k", "alaw_16khz")
+        validate_with_mic_audio_formats("g711a_8khz", "alaw_8khz")
+        validate_with_mic_audio_formats("alaw_16khz", "g711a_16khz")
 
         for up_format, down_format in (
                 ("pcm_s16le_16khz", "alaw_8khz"),

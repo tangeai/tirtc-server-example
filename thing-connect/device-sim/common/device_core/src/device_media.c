@@ -18,7 +18,7 @@ void device_media_config_set_defaults(device_media_config_t *config)
         return;
     }
 
-    config->audio.codec = DEVICE_AUDIO_CODEC_G711A;
+    config->audio.codec = DEVICE_AUDIO_CODEC_ALAW;
     (void)snprintf(config->audio.asset_path,
                    sizeof(config->audio.asset_path),
                    "%s",
@@ -78,11 +78,11 @@ bool device_media_config_validate(const device_media_config_t *config,
     }
 
     switch (config->audio.codec) {
-    case DEVICE_AUDIO_CODEC_G711A:
+    case DEVICE_AUDIO_CODEC_ALAW:
     case DEVICE_AUDIO_CODEC_OPUS:
         if (config->audio.sample_rate_hz != 8000 &&
             config->audio.sample_rate_hz != 16000) {
-            return fail(error, error_size, "G711A/Opus sample rate must be 8000 or 16000 Hz");
+            return fail(error, error_size, "alaw/Opus sample rate must be 8000 or 16000 Hz");
         }
         break;
     case DEVICE_AUDIO_CODEC_AMR_NB:
@@ -160,12 +160,31 @@ bool device_media_config_validate(const device_media_config_t *config,
 const char *device_audio_codec_name(device_audio_codec_t codec)
 {
     switch (codec) {
-    case DEVICE_AUDIO_CODEC_G711A: return "g711a";
+    case DEVICE_AUDIO_CODEC_ALAW: return "alaw";
     case DEVICE_AUDIO_CODEC_AMR_NB: return "amr-nb";
     case DEVICE_AUDIO_CODEC_AMR_WB: return "amr-wb";
     case DEVICE_AUDIO_CODEC_OPUS: return "opus";
     default: return "unknown";
     }
+}
+
+bool device_audio_codec_parse(const char *name, device_audio_codec_t *codec)
+{
+    if (name == NULL || codec == NULL) {
+        return false;
+    }
+    if (strcmp(name, "alaw") == 0 || strcmp(name, "g711a") == 0) {
+        *codec = DEVICE_AUDIO_CODEC_ALAW;
+    } else if (strcmp(name, "amr-nb") == 0) {
+        *codec = DEVICE_AUDIO_CODEC_AMR_NB;
+    } else if (strcmp(name, "amr-wb") == 0) {
+        *codec = DEVICE_AUDIO_CODEC_AMR_WB;
+    } else if (strcmp(name, "opus") == 0) {
+        *codec = DEVICE_AUDIO_CODEC_OPUS;
+    } else {
+        return false;
+    }
+    return true;
 }
 
 const char *device_video_codec_name(device_video_codec_t codec)

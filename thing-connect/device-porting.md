@@ -152,7 +152,7 @@ C 参考实现的 `identity` 默认适配用 `device_creds.json` 保存 `device_
 
 | 业务 | 默认 `stream_id` | 参考格式 |
 |---|---:|---|
-| H5 实时流 | 10 | G.711 A-law 8 kHz 单声道 |
+| H5 实时流 | 10 | `alaw`（G.711 A-law）8 kHz 单声道 |
 | 微信 VoIP | 10 | 以 profile 上报和房间协商为准 |
 | 设备互呼 | 10 | 以双方设备能力为准 |
 | AI | 1 | 以 `start_session.input_audio` 为准 |

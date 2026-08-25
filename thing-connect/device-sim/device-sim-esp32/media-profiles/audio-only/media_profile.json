@@ -1,7 +1,7 @@
 {
   "audio": {
     "file": "number.alaw_8khz",
-    "codec": "g711a",
+    "codec": "alaw",
     "sample_rate_hz": 8000,
     "channels": 1,
     "packet_ms": 40,

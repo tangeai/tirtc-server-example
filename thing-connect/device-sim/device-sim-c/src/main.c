@@ -900,7 +900,7 @@ int device_reference_run(int argc, char *argv[]) {
     }
     if (!audio_format_ai_codec(ai_up_audio_spec) ||
         !audio_format_ai_codec(down_audio_spec)) {
-        LOG_E("AI 音频格式仅支持 G.711A、PCM、AMR、Opus");
+        LOG_E("AI 音频格式仅支持 alaw、PCM、AMR、Opus");
         return 1;
     }
     if (!up_video_spec || !down_video_spec) {

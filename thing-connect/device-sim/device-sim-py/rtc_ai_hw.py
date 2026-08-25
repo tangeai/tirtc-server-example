@@ -23,7 +23,7 @@ import uuid
 
 import requests
 import http_trace
-from g711 import alaw_decode, alaw_encode
+from alaw import alaw_decode, alaw_encode
 from media_formats import (
     AUDIO_FORMATS,
     ai_audio_descriptor,
@@ -103,7 +103,7 @@ def configure_audio_formats(up_format: str = "alaw_8khz",
     down = normalize_audio_format(down_format)
     for direction, name in (("上行", up), ("下行", down)):
         if AUDIO_FORMATS[name].codec not in ("pcm", "alaw"):
-            raise ValueError(f"AI 硬件音频{direction}仅支持 pcm/g711a: {name}")
+            raise ValueError(f"AI 硬件音频{direction}仅支持 pcm/alaw: {name}")
     _up_audio_format = up
     _down_audio_format = down
 

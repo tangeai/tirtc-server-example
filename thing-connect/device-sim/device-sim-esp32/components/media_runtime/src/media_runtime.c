@@ -22,7 +22,7 @@
 #define MEDIA_AUDIO_BUFFER_BYTES 1500U
 
 typedef struct {
-    device_g711_file_t g711;
+    device_alaw_file_t alaw;
     device_amr_file_t amr;
     device_opus_packet_file_t opus;
 } audio_source_t;
@@ -144,22 +144,6 @@ static bool json_file_name(const cJSON *object,
     return true;
 }
 
-static bool parse_audio_codec(const char *name, device_audio_codec_t *codec)
-{
-    if (strcmp(name, "g711a") == 0) {
-        *codec = DEVICE_AUDIO_CODEC_G711A;
-    } else if (strcmp(name, "amr-nb") == 0) {
-        *codec = DEVICE_AUDIO_CODEC_AMR_NB;
-    } else if (strcmp(name, "amr-wb") == 0) {
-        *codec = DEVICE_AUDIO_CODEC_AMR_WB;
-    } else if (strcmp(name, "opus") == 0) {
-        *codec = DEVICE_AUDIO_CODEC_OPUS;
-    } else {
-        return false;
-    }
-    return true;
-}
-
 static bool parse_video_codec(const char *name, device_video_codec_t *codec)
 {
     if (strcmp(name, "mjpeg") == 0) {
@@ -249,7 +233,7 @@ static esp_err_t load_profile(device_media_config_t *config)
               json_string(audio, "file", config->audio.asset_path,
                           sizeof(config->audio.asset_path)) &&
               json_string(audio, "codec", audio_codec, sizeof(audio_codec)) &&
-              parse_audio_codec(audio_codec, &config->audio.codec) &&
+              device_audio_codec_parse(audio_codec, &config->audio.codec) &&
               json_u32(audio, "sample_rate_hz", &config->audio.sample_rate_hz) &&
               json_u32(audio, "channels", &channels) && channels <= UINT8_MAX &&
               json_u32(audio, "packet_ms", &packet_ms) && packet_ms <= UINT16_MAX &&
@@ -308,8 +292,8 @@ static device_media_file_result_t open_audio_source(audio_source_t *source,
     size_t fixed_packet_bytes =
         s_config.audio.sample_rate_hz * s_config.audio.packet_ms / 1000U;
     switch (s_config.audio.codec) {
-    case DEVICE_AUDIO_CODEC_G711A:
-        return device_g711_file_open(&source->g711, path, fixed_packet_bytes);
+    case DEVICE_AUDIO_CODEC_ALAW:
+        return device_alaw_file_open(&source->alaw, path, fixed_packet_bytes);
     case DEVICE_AUDIO_CODEC_AMR_NB:
         return device_amr_file_open(&source->amr, path, false);
     case DEVICE_AUDIO_CODEC_AMR_WB:
@@ -328,8 +312,8 @@ static device_media_file_result_t next_audio_packet(audio_source_t *source,
                                                     bool loop)
 {
     switch (s_config.audio.codec) {
-    case DEVICE_AUDIO_CODEC_G711A:
-        return device_g711_file_next(&source->g711, buffer, capacity, size, loop);
+    case DEVICE_AUDIO_CODEC_ALAW:
+        return device_alaw_file_next(&source->alaw, buffer, capacity, size, loop);
     case DEVICE_AUDIO_CODEC_AMR_NB:
     case DEVICE_AUDIO_CODEC_AMR_WB:
         return device_amr_file_next(&source->amr, buffer, capacity, size, loop);
@@ -346,13 +330,13 @@ static device_media_file_result_t next_audio_packet(audio_source_t *source,
 
 static bool audio_source_is_open(const audio_source_t *source)
 {
-    return source->g711.file != NULL || source->amr.file != NULL ||
+    return source->alaw.file != NULL || source->amr.file != NULL ||
            source->opus.file != NULL;
 }
 
 static void close_audio_source(audio_source_t *source)
 {
-    device_g711_file_close(&source->g711);
+    device_alaw_file_close(&source->alaw);
     device_amr_file_close(&source->amr);
     device_opus_packet_file_close(&source->opus);
 }
@@ -366,7 +350,7 @@ static esp_err_t validate_assets(void)
     uint32_t audio_packet_bytes =
         s_config.audio.sample_rate_hz * s_config.audio.packet_ms / 1000U;
     uint32_t expected_audio_bytes = audio_packet_bytes * s_config.audio.packet_count;
-    if (s_config.audio.codec == DEVICE_AUDIO_CODEC_G711A &&
+    if (s_config.audio.codec == DEVICE_AUDIO_CODEC_ALAW &&
         (stat(audio_path, &info) != 0 || info.st_size != (off_t)expected_audio_bytes)) {
         long actual = stat(audio_path, &info) == 0 ? (long)info.st_size : -1L;
         ESP_LOGE(TAG,
@@ -377,7 +361,7 @@ static esp_err_t validate_assets(void)
         return ESP_ERR_INVALID_SIZE;
     }
 
-    if (s_config.audio.codec != DEVICE_AUDIO_CODEC_G711A) {
+    if (s_config.audio.codec != DEVICE_AUDIO_CODEC_ALAW) {
         audio_source_t source = {0};
         uint8_t packet[MEDIA_AUDIO_BUFFER_BYTES];
         device_media_file_result_t audio_result = open_audio_source(&source, audio_path);

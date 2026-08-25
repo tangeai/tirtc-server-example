@@ -25,8 +25,10 @@ typedef struct {
 } AudioFormatAlias;
 
 static const AudioFormatAlias k_audio_aliases[] = {
-    {"g711a_8k",  "alaw_8khz"},
-    {"g711a_16k", "alaw_16khz"},
+    {"g711a_8k",    "alaw_8khz"},
+    {"g711a_16k",   "alaw_16khz"},
+    {"g711a_8khz",  "alaw_8khz"},
+    {"g711a_16khz", "alaw_16khz"},
     {"amr_8k",    "amr_nb"},
     {"amr_16k",   "amr_wb"},
     {"opus_8k",   "opus_8khz"},
@@ -61,8 +63,8 @@ const char *audio_format_choices(void) {
 
 const char *audio_format_ai_codec(const AudioFormat *format) {
     if (!format || !format->codec) return NULL;
-    if (strcmp(format->codec, "alaw") == 0) return "g711a";
-    if (strcmp(format->codec, "pcm") == 0 ||
+    if (strcmp(format->codec, "alaw") == 0 ||
+        strcmp(format->codec, "pcm") == 0 ||
         strcmp(format->codec, "amr") == 0 ||
         strcmp(format->codec, "opus") == 0)
         return format->codec;

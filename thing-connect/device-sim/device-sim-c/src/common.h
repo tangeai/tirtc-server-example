@@ -167,7 +167,7 @@ static inline const char *sess_state_str(SessionState s) {
 
 /* ── G.711 silence ──────────────────────────────────────────────────────── */
 
-#define G711A_SILENCE_BYTE 0xD5
+#define ALAW_SILENCE_BYTE 0xD5
 #define PCM_SILENCE_BYTE   0x00
 
 /* ── Utility helpers ────────────────────────────────────────────────────── */

@@ -27,20 +27,20 @@ static void test_media_files(void)
     size_t size;
     char path[64];
 
-    const uint8_t g711[] = {1, 2, 3, 4};
-    create_temp_file(path, g711, sizeof(g711));
-    device_g711_file_t audio;
-    assert(device_g711_file_open(&audio, path, 2) == DEVICE_MEDIA_FILE_OK);
-    assert(device_g711_file_next(&audio, buffer, sizeof(buffer), &size, true) ==
+    const uint8_t alaw[] = {1, 2, 3, 4};
+    create_temp_file(path, alaw, sizeof(alaw));
+    device_alaw_file_t audio;
+    assert(device_alaw_file_open(&audio, path, 2) == DEVICE_MEDIA_FILE_OK);
+    assert(device_alaw_file_next(&audio, buffer, sizeof(buffer), &size, true) ==
            DEVICE_MEDIA_FILE_OK);
     assert(size == 2 && buffer[0] == 1 && buffer[1] == 2);
-    assert(device_g711_file_next(&audio, buffer, sizeof(buffer), &size, true) ==
+    assert(device_alaw_file_next(&audio, buffer, sizeof(buffer), &size, true) ==
            DEVICE_MEDIA_FILE_OK);
     assert(buffer[0] == 3 && buffer[1] == 4);
-    assert(device_g711_file_next(&audio, buffer, sizeof(buffer), &size, true) ==
+    assert(device_alaw_file_next(&audio, buffer, sizeof(buffer), &size, true) ==
            DEVICE_MEDIA_FILE_OK);
     assert(buffer[0] == 1 && buffer[1] == 2);
-    device_g711_file_close(&audio);
+    device_alaw_file_close(&audio);
     assert(unlink(path) == 0);
 
     const uint8_t amr[] = {
@@ -142,7 +142,16 @@ int main(void)
 
     device_media_config_set_defaults(&media);
     assert(device_media_config_validate(&media, error, sizeof(error)));
-    assert(media.audio.codec == DEVICE_AUDIO_CODEC_G711A);
+    assert(media.audio.codec == DEVICE_AUDIO_CODEC_ALAW);
+    assert(strcmp(device_audio_codec_name(media.audio.codec), "alaw") == 0);
+    device_audio_codec_t parsed_codec;
+    assert(device_audio_codec_parse("alaw", &parsed_codec));
+    assert(parsed_codec == DEVICE_AUDIO_CODEC_ALAW);
+    assert(device_audio_codec_parse("g711a", &parsed_codec));
+    assert(parsed_codec == DEVICE_AUDIO_CODEC_ALAW);
+    assert(!device_audio_codec_parse("aac", &parsed_codec));
+    assert(!device_audio_codec_parse(NULL, &parsed_codec));
+    assert(!device_audio_codec_parse("alaw", NULL));
     assert(media.audio.sample_rate_hz == 8000);
     assert(media.audio.packet_ms == 20);
     assert(media.audio.duration_ms == 10000);

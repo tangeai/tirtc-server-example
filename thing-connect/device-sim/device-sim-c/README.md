@@ -228,7 +228,7 @@ main.c
 - 音频：A-law 8/16 kHz、AMR-NB/WB、Ogg Opus 8/16 kHz、PCM S16LE 8/16 kHz、AAC ADTS 8/16 kHz。
 - 视频：H.264/H.265 Annex-B、MJPEG。
 
-AI 上下行格式支持 G.711A、PCM、AMR 和 Opus，不支持 AAC。启动时会按声明格式校验并拆分整个文件；声明与内容不匹配时拒绝启动。
+AI 上下行格式支持 `alaw`（G.711 A-law）、PCM、AMR 和 Opus，不支持 AAC。启动时会按声明格式校验并拆分整个文件；声明与内容不匹配时拒绝启动。
 
 | 场景 | 默认格式 | 默认间隔 | `stream_id` |
 |---|---|---:|---:|
@@ -247,7 +247,7 @@ AI 下行音频默认保存为：
 ```text
 received/<device_id>/ai_<timestamp>.raw
 received/<device_id>/ai_<timestamp>.fmt.json
-received/<device_id>/ai_<timestamp>.wav   # 仅 G.711A/PCM
+received/<device_id>/ai_<timestamp>.wav   # 仅 alaw/PCM
 ```
 
 ## TiRTC SDK 核心 API

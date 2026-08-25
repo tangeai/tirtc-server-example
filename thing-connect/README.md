@@ -305,7 +305,7 @@ audio.stream_id = 10;                         /* 0~15，全局唯一 */
 audio.media     = TIRTC_AUDIO_ALAW;           /* PCM=1/ALAW=2/AAC=3/OPUS=4/AMR=5 */
 audio.flags     = TIRTC_AUDIOSAMPLE_8K16B1C;  /* 音频采样规格 */
 audio.ts        = (uint32_t)(audio_pts_ms & 0xFFFFFFFF); /* 主机序，精度 ms */
-audio.length    = 320;                        /* G.711A 8kHz：约 320B/40ms */
+audio.length    = 320;                        /* A-law/alaw 8kHz：约 320B/40ms */
 TiRtcSendAudioStream(hconn, &audio, audio_pkt);
 
 /* 视频：同样使用 TIRTCFRAMEINFO，但媒体类型、flags 与发送接口不同。 */
@@ -379,9 +379,9 @@ H5 使用固定的 stream，不进行协商：
 
 | 方向 | stream_id | 格式 |
 |------|-----------|------|
-| 设备 → H5 音频 | `10` | G.711A，8kHz（320B / 40ms） |
+| 设备 → H5 音频 | `10` | G.711 A-law（`alaw`），8kHz（320B / 40ms） |
 | 设备 → H5 视频 | `11` | H.264 裸流，首帧须关键帧 |
-| H5 → 设备 按住说话 | `14` | G.711A，默认 8kHz |
+| H5 → 设备 按住说话 | `14` | G.711 A-law（`alaw`），默认 8kHz |
 
 `on_conn_accepted` 回调只负责投递连接事件。回调返回后，设备控制任务保存句柄并启动推流线程；推流线程按时间戳节流，依次取帧、填写帧头并发送。
 
@@ -412,13 +412,13 @@ static void *push_thread(void *arg) {
 
         if (audio_pts <= video_pts) {
             unsigned char pkt[320];
-            int len = h264_source_next_audio(&src, pkt, 320);   /* 取一帧 G.711A；产品替换为编码器输出 */
+            int len = h264_source_next_audio(&src, pkt, 320);   /* 取一帧 A-law；产品替换为编码器输出 */
             TIRTCFRAMEINFO fi = {0};
             fi.stream_id = 10; fi.media = TIRTC_AUDIO_ALAW; fi.flags = TIRTC_AUDIOSAMPLE_8K16B1C;
             fi.ts = (uint32_t)audio_pts; fi.length = len;
             if (TiRtcSendAudioStream(s_active_conn, &fi, pkt) == TIRTC_E_INVALID_HANDLE)
                 { sleep_ms(5); continue; }                      /* 句柄未就绪，短暂重试 */
-            audio_pts += 40;                                    /* G.711A 8kHz = 40ms/帧 */
+            audio_pts += 40;                                    /* A-law/alaw 8kHz = 40ms/帧 */
         } else {
             unsigned char *frame = NULL; int is_key = 0;
             int len = h264_source_next_video(&src, &frame, &is_key, s_force_key);  /* 取一帧 H.264；s_force_key 由 on_request_key_frame 置位 */

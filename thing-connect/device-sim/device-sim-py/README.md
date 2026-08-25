@@ -161,7 +161,7 @@ python device_sim_main.py --device-id DEV000001 --device-key your-key --with-cam
 `requirements-audio.txt` 和 `requirements-camera.txt` 均包含基础 `requirements.txt`。
 只使用一种 PC 硬件时，安装对应的依赖文件即可；同时使用摄像头和麦克风时，两份都要安装。
 
-Windows 也可使用文件模式；只有显式传入 `--with-mic` 时，VoIP、AI 或设备间通话才使用 PC 麦克风和扬声器。此模式线上上下行必须同时使用 `alaw_8khz` 或同时使用 `alaw_16khz`（G.711A、单声道）；PCM/AMR/Opus 只能去掉 `--with-mic` 后使用预编码文件测试。
+Windows 也可使用文件模式；只有显式传入 `--with-mic` 时，VoIP、AI 或设备间通话才使用 PC 麦克风和扬声器。此模式线上上下行必须同时使用 `alaw_8khz` 或同时使用 `alaw_16khz`（G.711 A-law、单声道）；PCM/AMR/Opus 只能去掉 `--with-mic` 后使用预编码文件测试。
 
 显式传入 `--with-camera` 时，实时推流、VoIP 和设备间视频通话使用 `--camera-index` 指定的 PC 摄像头，`--up-video-file` 被摄像头替代。画面统一缩放并编码为 `1280x720`、15fps、H.264 Annex-B；`--up-video-format` 必须为 `h264`。未传 `--with-camera` 时，视频继续从 `--up-video-file` 循环读取，支持 `h264/h265/mjpeg`。
 
@@ -266,7 +266,7 @@ python3 device_sim_main.py --device-id DEV000001 --device-key your-key \
 | `--camera-index` | `0` | `--with-camera` 使用的摄像头编号 |
 | `--up-audio-format` | `alaw_8khz` | 上行音频格式 |
 | `--down-audio-format` | `alaw_8khz` | 下行音频格式 |
-| `--up-audio-file` | `../assets/audio.g711a` | 各媒体模式通用的 G.711A 8 kHz 单声道音频文件 |
+| `--up-audio-file` | `../assets/audio.g711a` | 各媒体模式通用的 `alaw` 8 kHz 单声道音频文件 |
 | `--up-video-file` | `../assets/video.h264` | 各媒体模式通用的上行视频文件；空值或 `audio-only` 表示纯音频 |
 | `--up-video-format` | `h264` | 上行视频格式，支持 `h264/h265/mjpeg` |
 | `--down-video-format` | `h264` | 下行视频保存格式后缀，支持 `h264/h265/mjpeg` |
@@ -568,7 +568,7 @@ device-sim-py/
 ├── audio_device.py        # 跨平台音频设备（麦克风/扬声器）
 ├── camera_video_source.py # Windows 摄像头采集与 H.264 编码
 ├── rtc_echo_gate.py       # 回声门控（替代 AEC，远端有声时衰减麦克风）
-├── g711.py                # G.711 A-law 编解码
+├── alaw.py                # G.711 A-law 编解码
 ├── media_source.py        # Annex-B H.264 帧级读取
 │
 ├── rtc_voip.py            # VoIP 模块（WHIP、音视频收发、PC 音频）
@@ -836,7 +836,7 @@ resp = requests.post(f"{server}/v1/device/token", headers=headers)
 Windows `--with-mic` 在线上使用上下行一致的 `alaw_8khz` 或 `alaw_16khz`，默认
 `alaw_8khz`。麦克风 PCM 16k 在发送前按目标采样率重采样并编码为 G.711 A-law；
 收到的 G.711 A-law 解码后再交给扬声器。AI `start_session` 会显式协商
-`codec=g711a`、对应采样率及单声道。视频来源由 `--with-camera` 或
+`codec=alaw`、对应采样率及单声道。视频来源由 `--with-camera` 或
 `--up-video-file` 决定。
 
 ### 接收媒体与音频格式检测
@@ -923,7 +923,7 @@ payload 中的 `wx_user_remark` 是设备联系人备注名；字段缺失时按
 
 ```json
 {"jsonrpc":"2.0","id":"uuid","method":"start_session",
- "params":{"device_id":"...","role_id":"...","input_audio":{"sample_rate":8000,"channels":1},"output_audio":{"sample_rate":8000,"channels":1}}}
+ "params":{"device_id":"...","role_id":"...","input_audio":{"codec":"alaw","sample_rate":8000,"channels":1},"output_audio":{"codec":"alaw","sample_rate":8000,"channels":1}}}
 ```
 
 WHIP 连接成功后需等 ~300ms KCP 握手再发 `start_session`。

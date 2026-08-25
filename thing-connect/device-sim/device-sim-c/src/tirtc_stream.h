@@ -27,7 +27,7 @@ void stream_service_stop(void);
 /** True while the stream service owns the current session. */
 int stream_is_active(void);
 
-/* H.264/G.711A file-source helper API. */
+/* H.264/A-law file-source helper API. */
 typedef struct {
     FILE *vf;
     FILE *af;

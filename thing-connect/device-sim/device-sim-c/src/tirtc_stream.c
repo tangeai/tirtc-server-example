@@ -418,7 +418,7 @@ int h264_source_next_audio(H264FileSource *src, unsigned char *pkt,
     size_t copy = length < (size_t)pkt_size ? length : (size_t)pkt_size;
     memcpy(pkt, data, copy);
     if (copy < (size_t)pkt_size)
-        memset(pkt + copy, G711A_SILENCE_BYTE, (size_t)pkt_size - copy);
+        memset(pkt + copy, ALAW_SILENCE_BYTE, (size_t)pkt_size - copy);
     return pkt_size;
 }
 

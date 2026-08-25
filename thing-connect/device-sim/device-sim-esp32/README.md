@@ -13,7 +13,7 @@ H5 实时、AI 对讲、VoIP 和设备互呼均为纯音频，不保存下行音
 - TiRTC SDK 外部目录选择和构建契约校验。
 - SPIFFS 媒体分区、`media_profile.json`、音频素材启动校验和按 PTS 循环发送。
 - TiRTC 上行音频流 ID 为 10；入站连接等待对端订阅，外连等待业务确认后才开始发送。
-- G711A 8 kHz 单声道固定包读取器。
+- `alaw`（G.711 A-law）8 kHz 单声道固定包读取器。
 - Wi-Fi NVS 持久化、串口修改、无配置/连接失败时的 SoftAP 配网页面。
 - STA 关闭 Wi-Fi 省电模式，避免实时 KCP 音频因休眠产生排队和抖动。
 - 首次验证码绑定、临时 MQTT `auth_grant`/ACK、设备凭证 NVS 持久化和解绑重绑。
@@ -39,7 +39,7 @@ device-sim-esp32/
 │   ├── wifi_manager/      # NVS、STA、SoftAP 配网页面
 │   ├── runtime_config/    # 设备凭证 NVS
 │   └── device_console/    # 串口命令
-├── media/                 # 默认纯音频配置和 G711A 素材
+├── media/                 # 默认纯音频配置和 alaw 素材
 └── partitions.csv         # 4 MiB app + 1.5 MiB media
 ```
 
@@ -64,7 +64,7 @@ idf.py -DTIRTC_SDK_DIR=/absolute/path/to/espressif-esp32s3/2.2.1 build
 
 ## 构建与烧录
 
-默认配置使用 `number.alaw_8khz`：G711A 8 kHz 单声道数字语音，按 40 ms/包发送。
+默认配置使用 `number.alaw_8khz`：G.711 A-law（`alaw`）8 kHz 单声道数字语音，按 40 ms/包发送。
 所有业务均为纯音频：
 
 ```bash
@@ -146,7 +146,7 @@ restart         重启
 [`media_profile.json`](media/media_profile.json)，所有业务共用同一音频配置。各字段含义见
 [ESP32-S3 需求基线的媒体配置](../ESP32S3_REFERENCE.md#4-flash-媒体与下行处理)。
 
-- G711A：默认素材为 `number.alaw_8khz`，8 kHz 单声道，40 ms 每包 320 字节，
+- `alaw`：默认素材为 `number.alaw_8khz`，8 kHz 单声道，40 ms 每包 320 字节，
   共 546 包、21.84 秒。
 - `video.file` 为空，`uplink_enabled=false`，`downlink_enabled=false`。
 - H5 实时、AI 对讲、VoIP、设备互呼都只发送和接收音频。

@@ -113,7 +113,7 @@ JSON 代码块保持可直接复制，因此不在其中写注释。示例里的
 | `audio_rate`、`audio_channels` | 设备接收语音的采样率和声道数；示例为 8 kHz 单声道 |
 | `up_video_mt` | 设备发给小程序的上行视频编码；没有摄像头时留空或传 `none` |
 | `down_video_mt` | 小程序发给设备的下行视频编码；没有屏幕或解码能力时留空或传 `none` |
-| `down_audio_mt` | 设备接收的下行音频编码；示例 `alaw` 对应 G711A |
+| `down_audio_mt` | 设备接收的下行音频编码；`alaw` 表示 G.711 A-law |
 | `no_video` | 是否明确禁用双向视频；设为 `true` 时按纯音频设备处理 |
 | `calling_timeout_sec` | 小程序呼叫设备时的振铃超时秒数；省略时平台默认 30 秒 |
 
@@ -476,7 +476,7 @@ voip_destroy(voip);
 |------|----------|------|
 | `voip_create(voip_server, device_id, mqtt_token, voip_audio)` | VoIP 服务地址、设备 ID、设备 MQTT token、默认上行音频文件 | [`tirtc_voip.h`](device-sim/device-sim-c/src/tirtc_voip.h#L19) |
 | `voip_configure_video(voip, video_path)` | VoIP 状态和可选的 H264/MJPEG 上行视频文件；纯音频设备不调用 | [`tirtc_voip.h`](device-sim/device-sim-c/src/tirtc_voip.h#L28) |
-| `voip_configure_down_audio_format(format)` | 设备下行播放格式；示例 `alaw_8khz` 表示 G711A 8 kHz | [`tirtc_voip.h`](device-sim/device-sim-c/src/tirtc_voip.h#L32) |
+| `voip_configure_down_audio_format(format)` | 设备下行播放格式；示例 `alaw_8khz` 表示 G.711 A-law 8 kHz | [`tirtc_voip.h`](device-sim/device-sim-c/src/tirtc_voip.h#L32) |
 | `tirtc_runtime_start(device_id, device_key, client_id, endpoint)` | 设备 ID、设备密钥、全局唯一且稳定的 client ID、服务发现返回的 TiRTC endpoint | [`tirtc_runtime.h`](device-sim/device-sim-c/src/tirtc_runtime.h#L30) |
 | `voip_service_register()` | 将 VoIP 模块注册到 TiRTC runtime；必须在启动 runtime 前完成 | [`tirtc_voip.h`](device-sim/device-sim-c/src/tirtc_voip.h#L50) |
 | `voip_report_profile(voip_server, mqtt_token, &callers)` | 上报媒体能力，并通过输出参数返回授权联系人 JSON；所有权随后交给 `VoipState` | [`tirtc_voip.h`](device-sim/device-sim-c/src/tirtc_voip.h#L56) |

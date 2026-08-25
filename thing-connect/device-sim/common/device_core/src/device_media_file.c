@@ -2,7 +2,7 @@
 
 #include <string.h>
 
-device_media_file_result_t device_g711_file_open(device_g711_file_t *source,
+device_media_file_result_t device_alaw_file_open(device_alaw_file_t *source,
                                                  const char *path,
                                                  size_t packet_size)
 {
@@ -19,7 +19,7 @@ device_media_file_result_t device_g711_file_open(device_g711_file_t *source,
     return DEVICE_MEDIA_FILE_OK;
 }
 
-device_media_file_result_t device_g711_file_next(device_g711_file_t *source,
+device_media_file_result_t device_alaw_file_next(device_alaw_file_t *source,
                                                  uint8_t *buffer,
                                                  size_t capacity,
                                                  size_t *size,
@@ -53,7 +53,7 @@ device_media_file_result_t device_g711_file_next(device_g711_file_t *source,
     return count == 0 ? DEVICE_MEDIA_FILE_EOF : DEVICE_MEDIA_FILE_INVALID;
 }
 
-void device_g711_file_close(device_g711_file_t *source)
+void device_alaw_file_close(device_alaw_file_t *source)
 {
     if (source == NULL) {
         return;

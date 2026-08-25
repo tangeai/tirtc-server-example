@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""g711.py — ITU-T G.711 A-law 编解码（基于 audioop 兼容模块）"""
+"""alaw.py — ITU-T G.711 A-law 编解码（基于 audioop 兼容模块）"""
 
 import audioop
 
@@ -48,4 +48,4 @@ if __name__ == "__main__":
     test_pcm = struct.pack('<h', 10000) * 100
     assert alaw_encode(test_pcm) == audioop.lin2alaw(test_pcm, 2)
 
-    print("g711.py all tests passed (using audioop-compatible module)")
+    print("alaw.py all tests passed (using audioop-compatible module)")

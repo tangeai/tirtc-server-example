@@ -81,7 +81,7 @@ function applyVideoUIConfig(wmpfVoip, device) {
 function formatAudioCodecName(value, rate) {
   const codec = normalizeMediaCodec(value)
   if (!codec) return ''
-  if (codec === 'ALAW') return 'G.711A'
+  if (codec === 'ALAW') return 'G.711 A-law (alaw)'
   if (codec === 'AMR') {
     if (rate === 8000) return 'AMR-NB'
     if (rate === 16000) return 'AMR-WB'

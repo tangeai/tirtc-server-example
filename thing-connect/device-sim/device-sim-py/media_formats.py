@@ -45,6 +45,8 @@ _CANONICAL_AUDIO_FORMATS = {
 _AUDIO_FORMAT_ALIASES = {
     "g711a_8k": "alaw_8khz",
     "g711a_16k": "alaw_16khz",
+    "g711a_8khz": "alaw_8khz",
+    "g711a_16khz": "alaw_16khz",
     "amr_8k": "amr_nb",
     "amr_16k": "amr_wb",
     "opus_8k": "opus_8khz",
@@ -69,7 +71,7 @@ VIDEO_FORMATS = {
 
 _AI_CODEC_NAMES = {
     "pcm": "pcm",
-    "alaw": "g711a",
+    "alaw": "alaw",
     "amr": "amr",
     "opus": "opus",
 }
@@ -110,7 +112,7 @@ def validate_with_mic_audio_formats(up_format: str, down_format: str) -> None:
     if up != down or up not in WITH_MIC_AUDIO_FORMATS:
         raise ValueError(
             "--with-mic 上下行必须使用相同的 alaw_8khz 或 alaw_16khz"
-            "（G.711A、单声道）；PCM/AMR/Opus 请去掉 --with-mic 后使用预编码文件模式"
+            "（G.711 A-law、单声道）；PCM/AMR/Opus 请去掉 --with-mic 后使用预编码文件模式"
         )
 
 

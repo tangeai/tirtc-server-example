@@ -16,7 +16,7 @@
 
 ### 音频
 
-- 默认：G711A、8 kHz、单声道、40 ms/包。
+- 默认：G.711 A-law（`alaw`）、8 kHz、单声道、40 ms/包。
 
 ### 视频
 
@@ -50,7 +50,7 @@
 {
   "audio": {
     "file": "number.alaw_8khz",
-    "codec": "g711a",
+    "codec": "alaw",
     "sample_rate_hz": 8000,
     "channels": 1,
     "packet_ms": 40,
@@ -80,7 +80,7 @@
 | 字段 | 含义 |
 |------|------|
 | `audio.file` | Flash 媒体分区中的音频文件名，不允许包含目录 |
-| `audio.codec` | 文件编码；默认 `g711a`，解析器还支持 `amr-nb`、`amr-wb` 和 `opus` |
+| `audio.codec` | 文件编码；默认 `alaw`，解析器兼容同义值 `g711a`，还支持 `amr-nb`、`amr-wb` 和 `opus` |
 | `audio.sample_rate_hz`、`audio.channels` | 采样率和声道数；当前 TiRTC 适配要求单声道，采样率为 8 kHz 或 16 kHz |
 | `audio.packet_ms` | 每个上行音频包覆盖的时长，单位毫秒 |
 | `audio.duration_ms`、`audio.packet_count` | 整个素材的时长和包数；启动时和文件大小交叉校验 |
@@ -95,10 +95,10 @@
 [`media_runtime.c`](device-sim-esp32/components/media_runtime/src/media_runtime.c)。
 
 - 音频素材到结尾后循环发送。
-- 启动时校验配置与素材：文件必须存在，G711A 文件大小和音频包数必须与配置一致。
-- G711A 使用 `number.alaw_8khz`，为 8 kHz 单声道、40 ms/包，共 174,720 字节、
+- 启动时校验配置与素材：文件必须存在，A-law 文件大小和音频包数必须与配置一致。
+- `alaw` 使用 `number.alaw_8khz`，为 8 kHz 单声道、40 ms/包，共 174,720 字节、
   546 包、21.84 秒。
-- G711A 8 kHz、40 ms 每包 320 字节。
+- `alaw` 8 kHz、40 ms 每包 320 字节。
 - 收到音频时，有喇叭的产品投递到音频解码/播放任务；无喇叭时只记录帧元数据。
 - 默认参考实现不保存下行音频。
 - TiRTC 回调不得打印原始 payload，也不得每帧同步打印；只打印首批帧和周期统计。
@@ -234,7 +234,7 @@ ACK 和心跳协议；`platform_client` 负责这些平台通信，`tirtc_adapte
 - ESP-IDF 工程、SDK 外部链接和构建契约验证。
 - 公共设备配置、媒体读取和 SessionManager。
 - Flash 媒体、NVS Wi-Fi、串口和 SoftAP 配置。
-- G711A 文件源、校验和定时发送。
+- `alaw` 文件源、校验和定时发送。
 - 验证码绑定、凭证 NVS 持久化、解绑重绑和正式平台登录。
 - H5、AI、VoIP、设备互呼和平台信令参考代码。
 

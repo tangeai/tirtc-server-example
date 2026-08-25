@@ -14,7 +14,7 @@ extern "C" {
 #define DEVICE_MEDIA_REFERENCE_DURATION_MS 10000U
 
 typedef enum {
-    DEVICE_AUDIO_CODEC_G711A = 0,
+    DEVICE_AUDIO_CODEC_ALAW = 0,
     DEVICE_AUDIO_CODEC_AMR_NB,
     DEVICE_AUDIO_CODEC_AMR_WB,
     DEVICE_AUDIO_CODEC_OPUS,
@@ -66,6 +66,8 @@ bool device_media_config_validate(const device_media_config_t *config,
                                   char *error,
                                   size_t error_size);
 
+/* Accepts canonical codec names and documented compatibility aliases. */
+bool device_audio_codec_parse(const char *name, device_audio_codec_t *codec);
 const char *device_audio_codec_name(device_audio_codec_t codec);
 const char *device_video_codec_name(device_video_codec_t codec);
 

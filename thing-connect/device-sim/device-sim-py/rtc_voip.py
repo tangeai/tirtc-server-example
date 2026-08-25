@@ -31,7 +31,7 @@ from camera_video_source import (
     describe_video_source,
     open_video_source,
 )
-from g711 import alaw_decode, alaw_encode
+from alaw import alaw_decode, alaw_encode
 from media_source import VIDEO_FRAME_MS
 from media_postprocess import convert_audio_to_wav, convert_video_to_mp4
 from sdk_callback_guard import SdkCallbackGuard, join_worker_before_uninit
@@ -250,7 +250,7 @@ def configure_hardware_audio(enable: bool, fmt: str = "alaw_8khz") -> None:
         return
     fmt = normalize_audio_format(fmt)
     if not supports_live_audio_capture(fmt):
-        raise RuntimeError(f"VoIP 实时麦克风不支持 {fmt}，仅支持 pcm/g711a")
+        raise RuntimeError(f"VoIP 实时麦克风不支持 {fmt}，仅支持 pcm/alaw")
     try:
         from audio_device import MicCapture, select_mic
         configure_playback(True)

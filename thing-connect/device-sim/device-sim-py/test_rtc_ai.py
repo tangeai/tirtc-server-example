@@ -179,7 +179,7 @@ class RtcAiLifecycleTests(unittest.TestCase):
         self.assertEqual(recorder.args[1], "dev-1")
         self.assertRegex(recorder.args[2], r"^ai_\d+\.raw$")
 
-    def test_start_session_accepts_positive_send_count_and_declares_g711a(self):
+    def test_start_session_accepts_positive_send_count_and_declares_alaw(self):
         callbacks = []
 
         def remember_callback(peer, token, callback, user):
@@ -206,7 +206,7 @@ class RtcAiLifecycleTests(unittest.TestCase):
 
             raw_message = send_command.call_args.args[2]
             message = json.loads(raw_message.decode())
-            expected = {"codec": "g711a", "sample_rate": 8000, "channels": 1}
+            expected = {"codec": "alaw", "sample_rate": 8000, "channels": 1}
             self.assertEqual(message["params"]["input_audio"], expected)
             self.assertEqual(message["params"]["output_audio"], expected)
             self.assertEqual(rtc_ai.get_state(), "CONNECTING")

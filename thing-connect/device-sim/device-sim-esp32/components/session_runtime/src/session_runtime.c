@@ -1062,7 +1062,7 @@ static void handle_accept_response(const char *body)
 static const char *platform_audio_codec(device_audio_codec_t codec)
 {
     switch (codec) {
-    case DEVICE_AUDIO_CODEC_G711A: return "alaw";
+    case DEVICE_AUDIO_CODEC_ALAW: return "alaw";
     case DEVICE_AUDIO_CODEC_AMR_NB:
     case DEVICE_AUDIO_CODEC_AMR_WB: return "amr";
     case DEVICE_AUDIO_CODEC_OPUS: return "opus";
@@ -1363,8 +1363,12 @@ static void send_ai_start(void)
               cJSON_AddStringToObject(root, "method", "start_session") &&
               cJSON_AddStringToObject(params, "device_id", runtime.device_id) &&
               cJSON_AddStringToObject(params, "role_id", s_ai_role_id) &&
+              cJSON_AddStringToObject(input_audio, "codec",
+                                      platform_audio_codec(media->audio.codec)) &&
               cJSON_AddNumberToObject(input_audio, "sample_rate", media->audio.sample_rate_hz) &&
               cJSON_AddNumberToObject(input_audio, "channels", media->audio.channels) &&
+              cJSON_AddStringToObject(output_audio, "codec",
+                                      platform_audio_codec(media->audio.codec)) &&
               cJSON_AddNumberToObject(output_audio, "sample_rate", media->audio.sample_rate_hz) &&
               cJSON_AddNumberToObject(output_audio, "channels", media->audio.channels);
     if (ok) {

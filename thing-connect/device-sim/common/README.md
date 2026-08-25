@@ -4,7 +4,7 @@
 
 - 设备媒体配置和业务方向规则；
 - H5、AI、VoIP、设备互呼的公共状态和业务名称；
-- G711A、AMR-NB、AMR-WB、Opus、MJPEG、H264 Annex-B 文件读取器；
+- `alaw`（G.711 A-law）、AMR-NB、AMR-WB、Opus、MJPEG、H264 Annex-B 文件读取器；
 - 主机单元测试。
 
 Linux `device-sim-c` 使用自己的实现，**不编译或链接 `device_core`**。两者共享协议目标和部分设计思路，但不是同一份程序。ESP32-S3 的构建、运行或能力结论不能用于描述 Linux C 参考实现。
