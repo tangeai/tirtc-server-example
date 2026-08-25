@@ -104,6 +104,19 @@ Content-Type: application/json
 }
 ```
 
+JSON 代码块保持可直接复制，因此不在其中写注释。示例里的基础媒体字段含义如下；
+视频显示字段和 `video_res_mode` 的取值见后面的两张表。
+
+| 字段 | 含义 |
+|------|------|
+| `screen_width`、`screen_height` | 设备显示区域的像素宽高；下行视频需要缩放或裁剪时必须填写真实值 |
+| `audio_rate`、`audio_channels` | 设备接收语音的采样率和声道数；示例为 8 kHz 单声道 |
+| `up_video_mt` | 设备发给小程序的上行视频编码；没有摄像头时留空或传 `none` |
+| `down_video_mt` | 小程序发给设备的下行视频编码；没有屏幕或解码能力时留空或传 `none` |
+| `down_audio_mt` | 设备接收的下行音频编码；示例 `alaw` 对应 G711A |
+| `no_video` | 是否明确禁用双向视频；设为 `true` 时按纯音频设备处理 |
+| `calling_timeout_sec` | 小程序呼叫设备时的振铃超时秒数；省略时平台默认 30 秒 |
+
 示例设备的屏幕为 640 × 480。微信下行使用 MJPEG，完整画面会等比缩小到屏幕范围内。
 
 `video_res_mode` 只影响小程序发送给设备的下行视频：
@@ -312,15 +325,23 @@ sequenceDiagram
 
 ### 1. 收到 `call_incoming`
 
-`call_incoming` payload 中的关键字段按用途分为三组：
+`call_incoming` payload 中的字段来源和用途如下：
 
-| 用途 | 字段 |
+| 字段 | 用途 |
 |------|------|
-| 建立 RTC 连接 | `peer_id`、`token` |
-| 微信会话 | `wx_app_id`、`wx_model_id`、`wx_room_id`、`wx_server_token`、`wx_session_key`、`wx_payload` |
-| 联系人与回铃关联 | `wx_user_openid`、`wx_user_remark`、`wx_user_nickname`，以及可选的 `wx_call_id`、`wx_from` |
+| `peer_id` | 本次 WHIP 连接的 service description，原样传给 `TiRtcWhipConnect` |
+| `token` | 本次 WHIP 连接的短期 token，和 `peer_id` 配套使用 |
+| `wx_app_id`、`wx_model_id` | 微信小程序和设备型号标识；拒接请求需要原样回传 |
+| `wx_room_id` | 微信 VoIP 房间 ID，用于拒接、取消和日志关联 |
+| `wx_server_token` | 微信服务端 token；拒接请求中的字段名改为 `wx_session_token` |
+| `wx_session_key` | 本次微信会话密钥；设备业务层不应自行生成或改写 |
+| `wx_payload` | 微信原始 `Payload` 字符串；拒接时原样回传 |
+| `wx_user_openid` | 主叫微信用户标识，也是设备联系人主键之一 |
+| `wx_user_remark`、`wx_user_nickname` | 当前统一联系人名称；两个字段的值相同 |
+| `wx_call_id`、`wx_from`、`wx_room_type` | 可选的外呼关联字段；用于识别设备此前发起的呼叫及其音频/视频类型 |
 
-`wx_user_nickname` 与 `wx_user_remark` 的值相同。
+同一份字段定义也可在
+[API Reference 的微信通知接口](api-reference.md#post-v1voipnotificationwx_app_id)中查看。
 
 **MQTT 下行通知：**
 
@@ -449,13 +470,31 @@ tirtc_runtime_stop();
 voip_destroy(voip);
 ~~~
 
+示例中各函数的参数和声明入口：
+
+| 函数 | 参数说明 | 声明 |
+|------|----------|------|
+| `voip_create(voip_server, device_id, mqtt_token, voip_audio)` | VoIP 服务地址、设备 ID、设备 MQTT token、默认上行音频文件 | [`tirtc_voip.h`](device-sim/device-sim-c/src/tirtc_voip.h#L19) |
+| `voip_configure_video(voip, video_path)` | VoIP 状态和可选的 H264/MJPEG 上行视频文件；纯音频设备不调用 | [`tirtc_voip.h`](device-sim/device-sim-c/src/tirtc_voip.h#L28) |
+| `voip_configure_down_audio_format(format)` | 设备下行播放格式；示例 `alaw_8khz` 表示 G711A 8 kHz | [`tirtc_voip.h`](device-sim/device-sim-c/src/tirtc_voip.h#L32) |
+| `tirtc_runtime_start(device_id, device_key, client_id, endpoint)` | 设备 ID、设备密钥、全局唯一且稳定的 client ID、服务发现返回的 TiRTC endpoint | [`tirtc_runtime.h`](device-sim/device-sim-c/src/tirtc_runtime.h#L30) |
+| `voip_service_register()` | 将 VoIP 模块注册到 TiRTC runtime；必须在启动 runtime 前完成 | [`tirtc_voip.h`](device-sim/device-sim-c/src/tirtc_voip.h#L50) |
+| `voip_report_profile(voip_server, mqtt_token, &callers)` | 上报媒体能力，并通过输出参数返回授权联系人 JSON；所有权随后交给 `VoipState` | [`tirtc_voip.h`](device-sim/device-sim-c/src/tirtc_voip.h#L56) |
+| `voip_set_auth_list(voip, callers)` | 把资料接口返回的联系人 JSON 交给 VoIP 状态；函数接管该对象的所有权 | [`tirtc_voip.h`](device-sim/device-sim-c/src/tirtc_voip.h#L22) |
+| `voip_service_start/stop(voip)` | 启动或停止 VoIP 后台服务；销毁状态前必须先停止 | [`tirtc_voip.h`](device-sim/device-sim-c/src/tirtc_voip.h#L51) |
+| `tirtc_runtime_activate/deactivate(service, generation)` | 激活指定业务并取得代次；结束时必须用同一业务和代次释放 | [`tirtc_runtime.h`](device-sim/device-sim-c/src/tirtc_runtime.h#L35) |
+| `voip_on_call_incoming(voip, payload)` | 保存 MQTT `call_incoming` 的内层 `payload`，不在回调线程中建连 | [`tirtc_voip.h`](device-sim/device-sim-c/src/tirtc_voip.h#L38) |
+| `voip_accept_pending(voip)` | 接听已保存的来电，内部读取 `peer_id` 和 `token` 并提交 WHIP 建连 | [`tirtc_voip.h`](device-sim/device-sim-c/src/tirtc_voip.h#L69) |
+| `tirtc_runtime_stop()` | 停止 TiRTC runtime 并释放 SDK 资源 | [`tirtc_runtime.h`](device-sim/device-sim-c/src/tirtc_runtime.h#L32) |
+| `voip_destroy(voip)` | 销毁 VoIP 状态及其持有的联系人、媒体路径和同步资源 | [`tirtc_voip.h`](device-sim/device-sim-c/src/tirtc_voip.h#L21) |
+
 **Linux 参考实现的媒体接入点**
 
 | 环节 | 接入要求 |
 |------|----------|
 | 接听 | 通常调用 `voip_accept_pending()`；它使用已保存的 `peer_id`、`token` 和上行媒体配置，避免应用层重复解析来电 |
-| 下行播放 | `_von_audio()` 将帧交给 `DeviceMediaSinkOps.submit`；默认没有 sink，只记录元数据后丢弃 |
-| 产品适配 | sink 需要把帧复制到有界播放队列；通过 `DeviceMediaSourceOps` 接入麦克风采集和编码，替换默认文件源 |
+| 下行播放 | `_von_audio()` 将帧交给 [`DeviceMediaSinkOps.submit`](device-sim/device-sim-c/src/device_adapter.h#L148)；默认没有 sink，只记录元数据后丢弃 |
+| 产品适配 | sink 需要把帧复制到有界播放队列；通过 [`DeviceMediaSourceOps`](device-sim/device-sim-c/src/device_adapter.h#L132) 接入麦克风采集和编码，替换默认文件源 |
 
 `voip_start_session()` 是上述接听流程使用的底层方法。
 
@@ -515,6 +554,12 @@ Content-Type: application/json
   "wx_room_type": "video"
 }
 ```
+
+| 字段 | 必填 | 含义 |
+|------|:----:|------|
+| `device_id` | 是 | 当前发起呼叫的设备 ID，必须与 `mqtt_token` 中的设备身份一致 |
+| `wx_user_openid` | 是 | 目标联系人 OpenID，取自联系人接口返回的 `wx_open_id` |
+| `wx_room_type` | 是 | `voice` 表示纯音频，`video` 表示音视频 |
 
 **成功返回：**
 
@@ -631,6 +676,13 @@ Authorization: Bearer <mqtt_token>
 }
 ```
 
+| 返回字段 | 含义 |
+|----------|------|
+| `data.contacts[].wx_open_id` | 联系人的微信 OpenID；发起外呼时写入 `wx_user_openid` |
+| `data.contacts[].wx_app_id` | 联系人所属小程序 AppID |
+| `data.contacts[].wx_model_id` | 授权时对应的微信设备型号 ID；新设备外呼不需要自行回传 |
+| `data.contacts[].remark` | 当前微信身份的统一联系人名称，可能为空 |
+
 ### 2. 响应 `callers_update`
 
 调用以下任一接口后，设备会收到 `callers_update`：
@@ -684,8 +736,16 @@ payload:
 拒接接口说明见 <a href="https://docs.tange.ai/products/wxvoip/api-reference/api-for-service-request.html#wxvoip-reject" target="_blank" rel="noopener">`TiRtcServiceRequest`</a>。
 
 ```c
-TiRtcServiceRequest("/v1/wxvoip/reject", json_body, NULL, callback, user_data);
+TiRtcServiceRequest(
+    "/v1/wxvoip/reject", /* 固定的拒接接口路径 */
+    json_body,           /* 下方请求体序列化后的 JSON 字符串；非 NULL 表示 POST */
+    NULL,                /* 设备身份请求不传客户端访问 token */
+    callback,            /* 异步响应回调；响应 body 仅在回调执行期间有效 */
+    user_data);          /* 原样透传给 callback 的业务上下文 */
 ```
+
+完整 C 签名、返回值和回调生命周期见
+[`tiRTC.h` 中的 `TiRtcServiceRequest`](device-sim/sdk/linux-x86_64/2.2.1/include/tirtc/tiRTC.h#L863)。
 
 拒接请求体里的关键字段都来自 `call_incoming` payload：
 

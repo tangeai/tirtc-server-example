@@ -24,13 +24,13 @@ root 权限会进一步放大明文凭证文件、可预测临时文件、录音
 
 ### 主要组件
 
-- **进程入口与本地控制**：`device_reference_run()` 解析 CLI、环境变量、凭证路径、CA、媒体文件和 `--insecure`，随后驱动完整运行时。Linux 默认产品入口从 `stdin` 接收命令。证据：`src/main.c` 的 `device_reference_run`，`src/linux_device_adapter.c` 的 `_linux_poll_action`。
-- **上线与控制面**：`device_flow.c` 完成 HTTP 服务发现、HMAC 设备上报、token 换取、临时 MQTT 绑定和永久 MQTT 消息分发。
-- **会话控制**：`session_arbiter.c` 与 `session_coordinator.c` 管理唯一活动会话、待接票据、代次和 STREAM/VOIP/AI/CALL 资源切换。
-- **TiRTC 边界**：`tirtc_runtime.c` 是闭源 SDK 生命周期和回调的单一所有者，各业务模块接收远端控制和媒体数据。
-- **产品适配器**：`device_adapter.h` 暴露身份、媒体、产品动作、资源、恢复和安全接口；生产实现将该边界连接到摄像头、麦克风、扬声器、安全存储和 UI。
-- **本地持久化**：Linux 默认适配器将设备凭证写入 JSON；`audio_recorder.c` 将 AI 下行音频及格式元数据写入文件。
-- **构建与供应链**：Makefile 链接系统 libcurl/libmosquitto/cJSON 和仓库内 `libTiRTC.so`，支持警告升级和 sanitizer，但未定义量产二进制加固或依赖验签流程。
+- **进程入口与本地控制**：`device_reference_run()` 解析 CLI、环境变量、凭证路径、CA、媒体文件和 `--insecure`，随后驱动完整运行时。Linux 默认产品入口从 `stdin` 接收命令。证据：[`src/main.c`](src/main.c) 的 `device_reference_run`，[`src/linux_device_adapter.c`](src/linux_device_adapter.c) 的 `_linux_poll_action`。
+- **上线与控制面**：[`device_flow.c`](src/device_flow.c) 完成 HTTP 服务发现、HMAC 设备上报、token 换取、临时 MQTT 绑定和永久 MQTT 消息分发。
+- **会话控制**：[`session_arbiter.c`](src/session_arbiter.c) 与 [`session_coordinator.c`](src/session_coordinator.c) 管理唯一活动会话、待接票据、代次和 STREAM/VOIP/AI/CALL 资源切换。
+- **TiRTC 边界**：[`tirtc_runtime.c`](src/tirtc_runtime.c) 是闭源 SDK 生命周期和回调的单一所有者，各业务模块接收远端控制和媒体数据。
+- **产品适配器**：[`device_adapter.h`](src/device_adapter.h) 暴露身份、媒体、产品动作、资源、恢复和安全接口；生产实现将该边界连接到摄像头、麦克风、扬声器、安全存储和 UI。
+- **本地持久化**：Linux 默认适配器将设备凭证写入 JSON；[`audio_recorder.c`](src/audio_recorder.c) 将 AI 下行音频及格式元数据写入文件。
+- **构建与供应链**：[`Makefile`](Makefile) 链接系统 libcurl/libmosquitto/cJSON 和仓库内 `libTiRTC.so`，支持警告升级和 sanitizer，但未定义量产二进制加固或依赖验签流程。
 
 ### 数据流与信任边界
 
@@ -169,24 +169,24 @@ flowchart LR
 
 | 路径 | 重要性 | 相关威胁编号 |
 |---|---|---|
-| `src/device_flow.c` | 明文发现、HMAC/token、临时与永久 MQTT 入口集中于此，是最高价值信任边界 | TM-001, TM-002, TM-003, TM-004, TM-008 |
-| `src/http_tls.c` | 统一控制所有 libcurl 证书验证，应承载生产 fail-closed、scheme 和 CA 策略 | TM-001, TM-008 |
-| `src/main.c` | CLI/环境、端点、CA、凭证、媒体路径和不安全开关汇聚，决定量产配置攻击面 | TM-001, TM-006, TM-007, TM-008 |
-| `src/linux_device_adapter.c` | 明文身份文件、符号链接风险、随机源和不安全传输审批均在默认实现 | TM-006, TM-008 |
-| `src/device_adapter.h` | 量产安全存储、媒体 sink、资源和恢复契约的公共边界 | TM-005, TM-006, TM-007, TM-008 |
-| `src/device_adapter.c` | 通用媒体帧验证和安全 hook 执行点，适合增加全局硬限制 | TM-005, TM-008 |
-| `src/audio_recorder.c` | 处理不可信媒体到 root 文件系统的路径、队列和持续写入 | TM-005, TM-007 |
-| `src/sdk_callback_guard.c` | 远端控制事件的有界复制、队列过载和关闭屏障实现 | TM-004, TM-005 |
-| `src/tirtc_runtime.c` | 闭源 SDK 生命周期、统一回调和 device secret 进入点 | TM-001, TM-005, TM-010 |
-| `src/tirtc_ai.c` | 解析远端 AI 控制文本并保存下行音频，包含隐私、日志和文件风险 | TM-005, TM-007, TM-009 |
-| `src/tirtc_voip.c` | 处理联系人、微信标识、来电控制和远端媒体 | TM-003, TM-005, TM-009 |
-| `src/tirtc_call.c` | 处理 peer 控制命令、room ID 和远端媒体回调 | TM-003, TM-005, TM-009 |
-| `src/call_session.c` | 业务 API token、联系人/房间 JSON 与异步拒接队列 | TM-003, TM-004, TM-009 |
-| `src/file_media_source.c` | 解析最高 256 MiB 的本地编码媒体，是本地文件驱动的 C 解析面 | TM-005, TM-010 |
-| `src/common.c` | 所有远端文本最终进入中央日志，应统一转义和脱敏 | TM-009 |
-| `Makefile` | 动态库路径、编译加固、sanitizer 和供应链校验的落地点 | TM-005, TM-010 |
-| `examples/product_adapter_template.c` | 量产适配起点，必须防止演示 fallback 和未完成安全 TODO 被发布 | TM-005, TM-006, TM-007, TM-008 |
-| `tests/test_core.c` | 应增加签名发现、MQTT 上限/重放、symlink、路径遍历、磁盘配额和日志转义回归测试 | TM-001, TM-002, TM-003, TM-004, TM-006, TM-007, TM-009 |
+| [`src/device_flow.c`](src/device_flow.c) | 明文发现、HMAC/token、临时与永久 MQTT 入口集中于此，是最高价值信任边界 | TM-001, TM-002, TM-003, TM-004, TM-008 |
+| [`src/http_tls.c`](src/http_tls.c) | 统一控制所有 libcurl 证书验证，应承载生产 fail-closed、scheme 和 CA 策略 | TM-001, TM-008 |
+| [`src/main.c`](src/main.c) | CLI/环境、端点、CA、凭证、媒体路径和不安全开关汇聚，决定量产配置攻击面 | TM-001, TM-006, TM-007, TM-008 |
+| [`src/linux_device_adapter.c`](src/linux_device_adapter.c) | 明文身份文件、符号链接风险、随机源和不安全传输审批均在默认实现 | TM-006, TM-008 |
+| [`src/device_adapter.h`](src/device_adapter.h) | 量产安全存储、媒体 sink、资源和恢复契约的公共边界 | TM-005, TM-006, TM-007, TM-008 |
+| [`src/device_adapter.c`](src/device_adapter.c) | 通用媒体帧验证和安全 hook 执行点，适合增加全局硬限制 | TM-005, TM-008 |
+| [`src/audio_recorder.c`](src/audio_recorder.c) | 处理不可信媒体到 root 文件系统的路径、队列和持续写入 | TM-005, TM-007 |
+| [`src/sdk_callback_guard.c`](src/sdk_callback_guard.c) | 远端控制事件的有界复制、队列过载和关闭屏障实现 | TM-004, TM-005 |
+| [`src/tirtc_runtime.c`](src/tirtc_runtime.c) | 闭源 SDK 生命周期、统一回调和 device secret 进入点 | TM-001, TM-005, TM-010 |
+| [`src/tirtc_ai.c`](src/tirtc_ai.c) | 解析远端 AI 控制文本并保存下行音频，包含隐私、日志和文件风险 | TM-005, TM-007, TM-009 |
+| [`src/tirtc_voip.c`](src/tirtc_voip.c) | 处理联系人、微信标识、来电控制和远端媒体 | TM-003, TM-005, TM-009 |
+| [`src/tirtc_call.c`](src/tirtc_call.c) | 处理 peer 控制命令、room ID 和远端媒体回调 | TM-003, TM-005, TM-009 |
+| [`src/call_session.c`](src/call_session.c) | 业务 API token、联系人/房间 JSON 与异步拒接队列 | TM-003, TM-004, TM-009 |
+| [`src/file_media_source.c`](src/file_media_source.c) | 解析最高 256 MiB 的本地编码媒体，是本地文件驱动的 C 解析面 | TM-005, TM-010 |
+| [`src/common.c`](src/common.c) | 所有远端文本最终进入中央日志，应统一转义和脱敏 | TM-009 |
+| [`Makefile`](Makefile) | 动态库路径、编译加固、sanitizer 和供应链校验的落地点 | TM-005, TM-010 |
+| [`examples/product_adapter_template.c`](examples/product_adapter_template.c) | 量产适配起点，必须防止演示 fallback 和未完成安全 TODO 被发布 | TM-005, TM-006, TM-007, TM-008 |
+| [`tests/test_core.c`](tests/test_core.c) | 应增加签名发现、MQTT 上限/重放、symlink、路径遍历、磁盘配额和日志转义回归测试 | TM-001, TM-002, TM-003, TM-004, TM-006, TM-007, TM-009 |
 
 ## 完整性检查
 

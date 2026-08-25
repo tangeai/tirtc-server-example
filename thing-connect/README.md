@@ -585,6 +585,8 @@ void on_call_connected(int err, tirtc_conn_t hconn, void *user) {
 ### H5 开发
 
 H5 页面由 user-server 提供静态文件。用户登录并获取 RTC token 后，通过 Web SDK 直连设备。完整页面见 [player.html](user-server/static/player.html)。
+SDK 类、方法和参数以 [TiRTC Web API 参考](https://docs.tange.ai/products/tirtc/api-reference/web.html)
+为准。
 
 登录后可以在 [devices.html](user-server/static/devices.html) 管理设备。页面通过 [`GET /v1/user/device/list`](api-reference.md#get-v1userdevicelist) 获取当前用户绑定的设备；点击设备名称旁的“修改”，再调用 [`PUT /v1/user/device/name`](api-reference.md#put-v1userdevicename) 保存新名称。
 
@@ -611,7 +613,7 @@ await conn.connect({ deviceId, token: rtcToken });   // 触发设备 on_conn_acc
 videoOutput.attach(); audioOutput.attach();
 conn.subscribeVideo({ streamId: 11 });
 conn.subscribeAudio({ streamId: 10 });
-/* 离开页面：conn.disconnect() + 三个 output.detach() + talkback.stop() */
+/* 离开页面：conn.disconnect() + 两个输出对象 detach() + talkback.stop()/detach() */
 ```
 
 跑通后，页面能够播放设备的画面和声音；按住说话按钮时，设备端能够收到音频。
@@ -649,6 +651,8 @@ await POST('/v1/voip/user/report-auth', { /* 微信返回结果 */ }); // 3. 回
 ```
 
 调用顺序与字段说明：[`POST /v1/voip/user/sn-ticket`](api-reference.md#post-v1voipusersn-ticket) → [`POST /v1/voip/user/report-auth`](api-reference.md#post-v1voipuserreport-auth)。
+微信授权函数的参数和限制见
+[`wx.requestDeviceVoIP`](https://developers.weixin.qq.com/miniprogram/dev/framework/device/voip/auth.html)。
 
 跑通后，小程序应能完成登录、绑定和授权，并成功发起 VoIP 呼叫。
 

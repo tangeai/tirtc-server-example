@@ -1740,7 +1740,18 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 **成功响应** — HTTP 200
 
 ```json
-{ "code": 200, "data": { "items": [...], "total": 3 } }
+{
+  "code": 200,
+  "data": {
+    "items": [
+      {
+        "id": "finxxxxxxxx",
+        "name": "我的助手"
+      }
+    ],
+    "total": 3
+  }
+}
 ```
 
 #### `GET /v1/ai/roles/default`
@@ -1752,7 +1763,18 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 **成功响应** — HTTP 200
 
 ```json
-{ "code": 200, "data": { "id": "fin63bby1og0", "name": "默认助手", ... } }
+{
+  "code": 200,
+  "data": {
+    "id": "fin63bby1og0",
+    "name": "默认助手",
+    "agent_config": {
+      "prompt": "你是一个智能助手",
+      "welcome_text": "你好！",
+      "ali_rag": null
+    }
+  }
+}
 ```
 
 **错误码**
@@ -1795,7 +1817,18 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 **成功响应** — HTTP 200
 
 ```json
-{ "code": 200, "data": { "id": "finxxxxxxxx", "name": "我的助手", ... } }
+{
+  "code": 200,
+  "data": {
+    "id": "finxxxxxxxx",
+    "name": "我的助手",
+    "agent_config": {
+      "prompt": "你是一个智能助手",
+      "welcome_text": "你好！",
+      "ali_rag": null
+    }
+  }
+}
 ```
 
 #### `GET /v1/ai/roles/:id`
@@ -2103,7 +2136,8 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
   "config": {
     "name": "my_tool",
     "url": "https://mcp.example.com/sse",
-    "description": "自定义工具"
+    "description": "自定义工具",
+    "type": "sse"
   },
   "enabled": true
 }
@@ -2112,7 +2146,20 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 **成功响应** — HTTP 200
 
 ```json
-{ "code": 200, "data": { "id": "app_tool_001", "app_id": "2818153", "enabled": true, "config": {...} } }
+{
+  "code": 200,
+  "data": {
+    "id": "app_tool_001",
+    "app_id": "2818153",
+    "enabled": true,
+    "config": {
+      "name": "my_tool",
+      "url": "https://mcp.example.com/sse",
+      "description": "自定义工具",
+      "type": "sse"
+    }
+  }
+}
 ```
 
 ##### `GET /v1/ai/mcp/app-tools/:id`
@@ -2132,7 +2179,19 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 **成功响应** — HTTP 200
 
 ```json
-{ "code": 200, "data": { "id": "app_tool_001", "enabled": false, "config": {...} } }
+{
+  "code": 200,
+  "data": {
+    "id": "app_tool_001",
+    "enabled": false,
+    "config": {
+      "name": "my_tool",
+      "url": "https://mcp.example.com/sse",
+      "description": "自定义工具",
+      "type": "sse"
+    }
+  }
+}
 ```
 
 ##### `DELETE /v1/ai/mcp/app-tools/:id`
@@ -2208,7 +2267,15 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 **成功响应** — HTTP 200
 
 ```json
-{ "code": 200, "data": { "id": "plg_001", "name": "开灯", "action": "turn_on", ... } }
+{
+  "code": 200,
+  "data": {
+    "id": "plg_001",
+    "name": "开灯",
+    "action": "turn_on",
+    "description": "打开设备灯"
+  }
+}
 ```
 
 ##### `GET /v1/ai/plugins/:id`

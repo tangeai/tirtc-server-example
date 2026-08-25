@@ -188,6 +188,9 @@ H5 先调用：
 
 ### 3. 初始化 Web SDK 并建立连接
 
+类、方法、参数和返回值见
+[TiRTC Web API 参考](https://docs.tange.ai/products/tirtc/api-reference/web.html)。
+
 页面按以下顺序建立连接：
 
 1. 用返回的 `app_id` 调 `TiRtc.initialize(...)`
@@ -202,15 +205,15 @@ H5 先调用：
 对应的参考代码形态如下：
 
 ```js
-const { rtcToken, appId } = await fetchRtcToken();
+const { rtcToken, appId } = await fetchRtcToken(); // 本项目接口返回的短期 token 和应用 ID
 
 TiRtc.initialize(TiRtcInitOptions({ appId }));
 await TiRtc.videoOutputReady();
 
 const connection  = new TiRtcConn();
-const audioOutput = TiRtcAudioOutput({ connection, streamId: 10 });
-const videoOutput = TiRtcVideoOutput({ connection, streamId: 11 });
-const audioInput  = new TiRtcAudioInput({ connection, streamId: 14 });
+const audioOutput = TiRtcAudioOutput({ connection, streamId: 10 }); // 设备音频下行
+const videoOutput = TiRtcVideoOutput({ connection, streamId: 11 }); // 设备视频下行
+const audioInput  = new TiRtcAudioInput({ connection, streamId: 14 }); // 浏览器对讲上行
 
 audioInput.setOptions({ sampleRate: 8000 });
 
@@ -229,7 +232,9 @@ H5 页面离开时，至少应做：
 2. `audioOutput.detach()`
 3. `videoOutput.detach()`
 4. `audioInput.stop()`
+5. `await audioInput.detach()`
 
+`audioInput.stop()` 停止麦克风采集，`audioInput.detach()` 解除发送流绑定，两者不能互相替代。
 否则容易出现浏览器麦克风没释放、页面销毁后仍保留连接对象等问题。
 
 ---

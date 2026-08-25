@@ -212,7 +212,10 @@ window.addEventListener('beforeunload', () => {
   if (connection)  connection.disconnect();
   if (audioOutput) audioOutput.detach();
   if (videoOutput) videoOutput.detach();
-  if (audioInput)  audioInput.stop();
+  if (audioInput) {
+    audioInput.stop();
+    void audioInput.detach().catch(() => {});
+  }
 });
 
 start();

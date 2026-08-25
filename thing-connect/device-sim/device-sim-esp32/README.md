@@ -142,7 +142,9 @@ restart         重启
 
 ## 媒体配置
 
-一台设备只读取一份 `media_profile.json`，所有业务共用同一音频配置。
+一台设备只读取一份
+[`media_profile.json`](media/media_profile.json)，所有业务共用同一音频配置。各字段含义见
+[ESP32-S3 需求基线的媒体配置](../ESP32S3_REFERENCE.md#4-flash-媒体与下行处理)。
 
 - G711A：默认素材为 `number.alaw_8khz`，8 kHz 单声道，40 ms 每包 320 字节，
   共 546 包、21.84 秒。
@@ -155,6 +157,8 @@ restart         重启
 
 下行回调只统计并限频打印，不写入 Flash：
 
-- 有喇叭：在 `tirtc_adapter.c` 的 `TODO(product-audio)` 后投递到独立播放任务。
+- 有喇叭：在
+  [`tirtc_adapter.c`](components/tirtc_adapter/src/tirtc_adapter.c)
+  的 `TODO(product-audio)` 后投递到独立播放任务。
 
 不要在 TiRTC SDK 回调线程中同步解码、播放或逐帧打印。

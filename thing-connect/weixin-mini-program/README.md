@@ -275,7 +275,9 @@ resolve 后页面仍要检查服务端业务码：
 2. 设备保持正式 MQTT 在线。
 3. 设备已上报 `/v1/voip/device/profile`。
 4. 小程序完成 `wechat-mini-login`。
-5. 当前微信用户已通过 `wx.requestDeviceVoIP` 授权该设备。
+5. 当前微信用户已通过
+   [`wx.requestDeviceVoIP`](https://developers.weixin.qq.com/miniprogram/dev/framework/device/voip/auth.html)
+   授权该设备。
 6. 授权结果已通过 `/v1/voip/user/report-auth` 同步到服务端。
 
 微信侧授权成功但 `report-auth` 失败时，页面会保留“微信已授权”的状态并提示用户重新
@@ -285,16 +287,17 @@ resolve 后页面仍要检查服务端业务码：
 
 设备列表页显示时会并行处理：
 
-- `wx.login()` + `wechat-mini-login`
+- [`wx.login()`](https://developers.weixin.qq.com/miniprogram/dev/api/open-api/login/wx.login.html) + `wechat-mini-login`
 - `GET /v1/user/device/list`
-- `wx.getDeviceVoIPList()`
+- [`wx.getDeviceVoIPList()`](https://developers.weixin.qq.com/miniprogram/dev/api/open-api/device-voip/wx.getDeviceVoIPList.html)
 - `GET /v1/voip/user/contact-remark`
 
 首次授权流程：
 
 1. 用户设置设备名称和“我的联系人名称”。
 2. 小程序调 `POST /v1/voip/user/sn-ticket`。
-3. 小程序把响应中的 `device_name` 传给 `wx.requestDeviceVoIP(...)`。
+3. 小程序把响应中的 `device_name` 传给
+   [`wx.requestDeviceVoIP(...)`](https://developers.weixin.qq.com/miniprogram/dev/framework/device/voip/auth.html)。
 4. 再次刷新微信登录关系，避免服务端缓存过期。
 5. 小程序将同一 `device_name` 调 `POST /v1/voip/user/report-auth`。
 
@@ -306,16 +309,20 @@ resolve 后页面仍要检查服务端业务码：
 授权后才会更新微信来电名称。服务端对旧版小程序保留兼容：名称为空时，
 `sn-ticket` 返回设备 ID 作为授权名称。
 
-页面将 `wx.getDeviceVoIPList()` 结果区分为四种状态：已授权、已关闭、记录缺失和未知。
+页面将
+[`wx.getDeviceVoIPList()`](https://developers.weixin.qq.com/miniprogram/dev/api/open-api/device-voip/wx.getDeviceVoIPList.html)
+结果区分为四种状态：已授权、已关闭、记录缺失和未知。
 已关闭时引导用户到小程序设置重新开启；记录缺失时可直接重新申请授权；查询失败时不
 误报为未授权。重新开启后页面会把有效状态重新同步到服务端。
 
 ### 3. 小程序呼叫设备
 
-小程序不直接调用 `voip-server` 创建房间，而是调用：
+小程序不直接调用 `voip-server` 创建房间，而是调用
+[`wmpfVoip.callDevice`](https://developers.weixin.qq.com/miniprogram/dev/framework/device/voip-plugin/api/callDevice.html)：
 
 ```js
 const wmpfVoip = requirePlugin('wmpf-voip').default
+const randUuid = generateUUID() // 本项目生成的外呼关联 ID
 const { roomId } = await wmpfVoip.callDevice({
   sn: deviceId,
   modelId: app.globalData.modelId,
@@ -325,9 +332,28 @@ const { roomId } = await wmpfVoip.callDevice({
   nickName: 'User',
   deviceName: authorizedDeviceName,
   isCloud: true,
+  payload: randUuid,
 })
 wx.redirectTo({ url: wmpfVoip.CALL_PAGE_PATH })
 ```
+
+| 参数 | 含义 |
+|------|------|
+| `sn` | 接听方设备 ID/SN |
+| `modelId` | 微信 IoT 平台分配的接听方设备 ModelID |
+| `roomType` | `voice` 为纯音频，`video` 为音视频 |
+| `enableCallerCamera` | 拨打方小程序是否启用摄像头；本项目按设备是否有屏幕决定 |
+| `enableListenerCamera` | 接听方设备是否启用摄像头；本项目按设备是否有摄像头决定 |
+| `nickName` | 设备端显示的微信联系人名称 |
+| `deviceName` | 微信端显示的设备名称；应使用授权时的名称快照，要求插件不低于 2.4.1 |
+| `isCloud` | ThingConnect 固定传 `true`，使微信的设备消息回调进入 `voip-server` |
+| `payload` | 本次外呼的开发者透传值；微信回调后由服务端原样下发为 `wx_payload` |
+| 返回值 `roomId` | 本次微信 VoIP 房间 ID，保存到 `currentCall` 以关联取消和结束事件 |
+
+官方接口还有计费、时长和视频编码参数；未在本项目示例中使用的字段以
+[`callDevice(Object req)` 参数表](https://developers.weixin.qq.com/miniprogram/dev/framework/device/voip-plugin/api/callDevice.html)
+为准。仓库中的完整调用见
+[`pages/devices/index.js`](pages/devices/index.js#L873)。
 
 链路如下：
 
@@ -364,10 +390,12 @@ sequenceDiagram
 
 入呼处理顺序：
 
-1. `onLaunch` 读取 `getPluginEnterOptions()`。
+1. `onLaunch` 读取 [`getPluginEnterOptions()`](app.js#L44)。
 2. `onShow` 再读取一次 enter options。
-3. 插件触发 `callPageOnShow` 时读取 `getPluginOnloadOptions()`。
-4. 立即调用一次 `setUIConfig`。
+3. 插件触发 `callPageOnShow` 时读取
+   [`getPluginOnloadOptions()`](https://developers.weixin.qq.com/miniprogram/dev/framework/device/voip-plugin/api/getPluginOnloadOptions.html)。
+4. 立即调用一次
+   [`setUIConfig`](https://developers.weixin.qq.com/miniprogram/dev/framework/device/voip-plugin/api/setUIConfig.html)。
 5. 保留一个 `0ms` 延迟补调用，使配置落在插件 `initByListener` 前。
 
 不要删除“立即设置 + 0ms 补设置”。这是为了兼容插件来电页的初始化时序，不是普通的

@@ -3,13 +3,13 @@
 数据库结构按所属服务领域拆分为 SQL 文件，只由首次安装器或
 `admin-server -migrate-only` 统一执行。常驻业务服务启动时不执行 DDL。
 
-- `core/001_user.sql`：用户账号。
-- `core/001_device.sql`：设备、绑定和清理 outbox。
-- `core/001_voip.sql`：VoIP 授权与资料。
-- `core/001_ai.sql`：AI 角色与资源。
-- `core/001_call.sql`：设备联系人。
-- `core/001_zzz_schema_comments.sql`：业务表和字段的完整中文元数据注释。
-- `admin/`：Admin Server 拥有的版本 1 基线；`001_installation_state.sql`
+- [`core/001_user.sql`](core/001_user.sql)：用户账号。
+- [`core/001_device.sql`](core/001_device.sql)：设备、绑定和清理 outbox。
+- [`core/001_voip.sql`](core/001_voip.sql)：VoIP 授权与资料。
+- [`core/001_ai.sql`](core/001_ai.sql)：AI 角色与资源。
+- [`core/001_call.sql`](core/001_call.sql)：设备联系人。
+- [`core/001_zzz_schema_comments.sql`](core/001_zzz_schema_comments.sql)：业务表和字段的完整中文元数据注释。
+- [`admin/`](admin)：Admin Server 拥有的版本 1 基线；`001_installation_state.sql`
   也是空库领取与中断恢复共用的唯一所有权标记定义。
 
 首次发布基线中，`core` 和 `admin` 都只有版本 1。同一版本可以按领域拆成多个

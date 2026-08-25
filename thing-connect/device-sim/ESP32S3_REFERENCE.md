@@ -75,6 +75,25 @@
 }
 ```
 
+字段说明：
+
+| 字段 | 含义 |
+|------|------|
+| `audio.file` | Flash 媒体分区中的音频文件名，不允许包含目录 |
+| `audio.codec` | 文件编码；默认 `g711a`，解析器还支持 `amr-nb`、`amr-wb` 和 `opus` |
+| `audio.sample_rate_hz`、`audio.channels` | 采样率和声道数；当前 TiRTC 适配要求单声道，采样率为 8 kHz 或 16 kHz |
+| `audio.packet_ms` | 每个上行音频包覆盖的时长，单位毫秒 |
+| `audio.duration_ms`、`audio.packet_count` | 整个素材的时长和包数；启动时和文件大小交叉校验 |
+| `video.file`、`video.codec` | 视频素材文件名和编码；ESP32-S3 纯音频基线保留字段但不加载视频文件 |
+| `video.width`、`video.height`、`video.fps` | 视频尺寸和帧率；纯音频基线固定为 `0` |
+| `video.camera_rotation`、`video.aspect_ratio`、`video.hor_mirror`、`video.vert_mirror` | 设备上报给小程序的视频显示参数；纯音频基线使用默认值 |
+| `video.duration_ms`、`video.frame_count` | 视频素材时长和帧数；纯音频基线固定为 `0` |
+| `video.uplink_enabled`、`video.downlink_enabled` | 是否启用设备视频上行和下行；ESP32-S3 目标必须同时为 `false` |
+
+仓库中的可烧录配置见
+[`media/media_profile.json`](device-sim-esp32/media/media_profile.json)，解析和目标能力校验见
+[`media_runtime.c`](device-sim-esp32/components/media_runtime/src/media_runtime.c)。
+
 - 音频素材到结尾后循环发送。
 - 启动时校验配置与素材：文件必须存在，G711A 文件大小和音频包数必须与配置一致。
 - G711A 使用 `number.alaw_8khz`，为 8 kHz 单声道、40 ms/包，共 174,720 字节、

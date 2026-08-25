@@ -11,8 +11,8 @@
 
 ## 包内容
 
-- `include/tirtc/tiRTC.h`：TiRTC 对外 API 头文件
-- `include/tirtc/basedef.h`：TiRTC 基础类型定义
+- [`include/tirtc/tiRTC.h`](include/tirtc/tiRTC.h)：TiRTC 对外 API 头文件
+- [`include/tirtc/basedef.h`](include/tirtc/basedef.h)：TiRTC 基础类型定义
 - `lib/libTiRTC.a`：TiRTC 静态库
 - `lib/libTiRTC.dylib`：TiRTC 动态库
 - `lib/libtgrtc.dylib`：运行时依赖库

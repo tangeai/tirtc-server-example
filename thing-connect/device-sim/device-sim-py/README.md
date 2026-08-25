@@ -585,6 +585,16 @@ device-sim-py/
 └── rtc_stream.py          # 音视频推流
 ```
 
+主要入口可直接跳转到
+[`device_sim_main.py`](device_sim_main.py)、
+[`device_rtc_runtime.py`](device_rtc_runtime.py)、
+[`tirtc_runtime.py`](tirtc_runtime.py)、
+[`session_arbiter.py`](session_arbiter.py)、
+[`device_flow.py`](device_flow.py) 和
+[`tirtc_sdk.py`](tirtc_sdk.py)。各业务实现分别在
+[`rtc_stream.py`](rtc_stream.py)、[`rtc_ai.py`](rtc_ai.py)、
+[`rtc_voip.py`](rtc_voip.py) 与 [`rtc_call.py`](rtc_call.py)。
+
 ### device_flow — 设备上线协议
 
 ```python

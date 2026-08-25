@@ -1,6 +1,6 @@
 # device-sim common
 
-`common/device_core` 是 **ESP32-S3 独立移植工程**使用的纯 C 组件。它不依赖 ESP-IDF、FreeRTOS、pthread、文件系统实现或 TiRTC SDK 类型，包含：
+[`common/device_core`](device_core) 是 **ESP32-S3 独立移植工程**使用的纯 C 组件。它不依赖 ESP-IDF、FreeRTOS、pthread、文件系统实现或 TiRTC SDK 类型，包含：
 
 - 设备媒体配置和业务方向规则；
 - H5、AI、VoIP、设备互呼的公共状态和业务名称；
@@ -25,3 +25,7 @@ device-sim-c     ──> 自有 Linux/POSIX 实现（不依赖 device_core）
 ```
 
 `device_core` 只处理配置、状态和文件拆帧。ESP32-S3 工程仍需在自身组件中实现任务、网络、存储、日志和媒体 source/sink。其他平台复用时，需要建立独立移植工程并单独验证；这不代表 Linux C 参考实现已经跨平台。
+
+公开数据结构和校验接口见
+[`include/device/device_media.h`](device_core/include/device/device_media.h)，会话方向判断见
+[`include/device/device_session.h`](device_core/include/device/device_session.h)。

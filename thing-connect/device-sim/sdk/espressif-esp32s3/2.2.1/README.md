@@ -21,7 +21,9 @@ SDK 包内会附带实际编译配置：
 manifest/build-contract.env
 ```
 
-接入时请以该文件为准。
+接入时请以
+[`manifest/build-contract.env`](manifest/build-contract.env) 为准；SDK 函数声明见
+[`include/tirtc/tiRTC.h`](include/tirtc/tiRTC.h)。
 
 ## 为什么需要对齐
 

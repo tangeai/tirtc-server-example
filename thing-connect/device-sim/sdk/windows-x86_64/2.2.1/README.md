@@ -11,12 +11,12 @@
 
 ## 包内容
 
-- `include/tirtc/tiRTC.h`：TiRTC 对外 API 头文件
-- `include/tirtc/basedef.h`：TiRTC 基础类型定义
+- [`include/tirtc/tiRTC.h`](include/tirtc/tiRTC.h)：TiRTC 对外 API 头文件
+- [`include/tirtc/basedef.h`](include/tirtc/basedef.h)：TiRTC 基础类型定义
 - `lib/libTiRTC.dll`：TiRTC 动态库
 - `lib/libTiRTC.lib`：MSVC import library
 - `lib/libTiRTC.dll.a`：MinGW import library
-- `lib/libTiRTC.def`：导出符号定义
+- [`lib/libTiRTC.def`](lib/libTiRTC.def)：导出符号定义
 - `lib/webrtc.dll`：运行时依赖库
 
 ## 如何使用
