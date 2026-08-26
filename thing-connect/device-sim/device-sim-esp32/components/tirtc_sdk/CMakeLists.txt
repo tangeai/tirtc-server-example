@@ -5,7 +5,7 @@ if(NOT DEFINED TIRTC_SDK_DIR OR TIRTC_SDK_DIR STREQUAL "")
         # IDF evaluates component CMake files once in an early requirements
         # subprocess where project cache variables are not propagated.
         get_filename_component(TIRTC_SDK_DIR
-            "${CMAKE_CURRENT_LIST_DIR}/../../../sdk/espressif-esp32s3/2.2.1"
+            "${CMAKE_CURRENT_LIST_DIR}/../../../sdk/espressif-esp32s3/2.3.0"
             ABSOLUTE)
     endif()
 endif()

@@ -4,7 +4,7 @@ ThingConnect 提供设备接入示例，覆盖 **H5 实时预览与对讲、AI �
 
 第一次使用时，建议先按[项目快速体验](../README.md)跑通设备上线、绑定和 H5 出图，再根据产品需要接入其他对讲能力。下面给出最短接入路径和 TiRTC SDK 调用骨架；完整字段、错误码和排查方法可从各节进入对应专题文档查看。
 
-设备端使用 **TiRTC C SDK**（[SDK 头文件](device-sim/sdk/linux-x86_64/2.2.1/include/tirtc/tiRTC.h)），H5 使用 [TiRTC Web SDK](device-h5-live.md#h5-端接入)，微信小程序使用[微信 IoT VoIP](weixin-mini-program/README.md#微信-voip-开发)。设备协议顺序和会话控制可参考 [Linux C 参考实现](device-sim/device-sim-c/README.md)。
+设备端使用 **TiRTC C SDK**（[SDK 头文件](device-sim/sdk/linux-x86_64/2.3.0/include/tirtc/tiRTC.h)），H5 使用 [TiRTC Web SDK](device-h5-live.md#h5-端接入)，微信小程序使用[微信 IoT VoIP](weixin-mini-program/README.md#微信-voip-开发)。设备协议顺序和会话控制可参考 [Linux C 参考实现](device-sim/device-sim-c/README.md)。
 
 接入真实产品时，还需要完成[十项二次开发 TODO](device-porting.md#二次开发-todo)，不能只替换几个系统库。
 
@@ -83,30 +83,29 @@ sequenceDiagram
 
 - **路径 B：持久化存储中已有凭证。** 先调用 [`POST /v1/device/token`](api-reference.md#post-v1devicetoken)。成功后直接使用返回的 MQTT token；如果接口返回 **HTTP 410**，且响应体业务错误码为 **`6006`**，则携带 HMAC 签名调用 [`POST /v1/device/report`](api-reference.md#post-v1devicereport)，重新完成绑定。
 
-两条路径调用 [`POST /v1/device/token`](api-reference.md#post-v1devicetoken) 时，都需要携带 `X-Device-Id`、`X-Timestamp`、`X-Nonce` 和 `X-Signature` 四个签名请求头。Linux C 参考实现使用 **mbedTLS HMAC-SHA256 → Base64**：
+两条路径调用 [`POST /v1/device/token`](api-reference.md#post-v1devicetoken) 时，都需要携带 `X-Device-Id`、`X-Timestamp`、`X-Nonce` 和 `X-Signature` 四个签名请求头。Linux C 参考实现使用 **OpenSSL HMAC-SHA256 → Base64**：
 
 ```c
 // 签名串 = device_id + timestamp + nonce
 // 签名值 = Base64(HMAC-SHA256(device_key, 签名串))
 
-#include <mbedtls/md.h>
-#include <mbedtls/base64.h>
+#include <openssl/evp.h>
+#include <openssl/hmac.h>
 
 char raw[256];
 int n = snprintf(raw, sizeof(raw), "%s%s%s", device_id, timestamp, nonce);
 if (n < 0 || (size_t)n >= sizeof(raw)) return -1;
 
-unsigned char hmac[32];
-const mbedtls_md_info_t *md = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
-if (md == NULL ||
-    mbedtls_md_hmac(md,
-                    (const unsigned char *)device_key, strlen(device_key),
-                    (const unsigned char *)raw, strlen(raw), hmac) != 0)
+unsigned char hmac[EVP_MAX_MD_SIZE];
+unsigned int hmac_len = 0;
+if (HMAC(EVP_sha256(), device_key, (int)strlen(device_key),
+         (const unsigned char *)raw, strlen(raw), hmac, &hmac_len) == NULL ||
+    hmac_len != 32)
     return -1;
 
-size_t olen = 0; char sig[64];
-if (mbedtls_base64_encode((unsigned char *)sig, sizeof(sig), &olen,
-                          hmac, sizeof(hmac)) != 0 || olen >= sizeof(sig))
+char sig[64];
+int olen = EVP_EncodeBlock((unsigned char *)sig, hmac, (int)hmac_len);
+if (olen != 44 || (size_t)olen >= sizeof(sig))
     return -1;
 sig[olen] = '\0';
 ```
@@ -717,7 +716,7 @@ HTTP 接口的请求和返回字段、成功码、业务错误码及微信回调
 thing-connect/
 ├── device-sim/device-sim-c/  # Linux C 参考实现（文件媒体，不接硬件）
 ├── device-sim/device-sim-py/  # Python 设备模拟器（首次体验用）
-├── device-sim/sdk/<platform>/2.2.1/include/tirtc/tiRTC.h  # TiRTC C SDK 权威头文件
+├── device-sim/sdk/<platform>/2.3.0/include/tirtc/tiRTC.h  # TiRTC C SDK 权威头文件
 ├── device-server/            # 设备身份与 MQTT token
 ├── user-server/              # 用户、绑定、H5 静态页面与 RTC token
 ├── voip-server/              # 微信 IoT VoIP

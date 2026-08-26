@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 
 set(_TIRTC_DEFAULT_SDK_DIR
-    "${CMAKE_CURRENT_LIST_DIR}/../sdk/espressif-esp32s3/2.2.1")
+    "${CMAKE_CURRENT_LIST_DIR}/../sdk/espressif-esp32s3/2.3.0")
 
 if(NOT DEFINED TIRTC_SDK_DIR OR TIRTC_SDK_DIR STREQUAL "")
     if(DEFINED ENV{TIRTC_SDK_DIR} AND NOT "$ENV{TIRTC_SDK_DIR}" STREQUAL "")

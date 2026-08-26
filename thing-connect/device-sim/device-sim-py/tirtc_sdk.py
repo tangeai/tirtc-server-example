@@ -14,11 +14,11 @@ import os
 import platform
 import sys
 
-DEFAULT_SDK_VERSION = "2.2.1"
+DEFAULT_SDK_VERSION = "2.3.0"
 
 # ── 加载动态库 ────────────────────────────────────────────────────────────
 # 目录布局: sdk/<platform>/<version>/{include,lib}/
-# 默认固定使用 2.2.1；也允许调用方通过 TIRTC_SDK_VERSION 显式覆盖。
+# 默认固定使用 2.3.0；也允许调用方通过 TIRTC_SDK_VERSION 显式覆盖。
 _DIR = os.path.dirname(os.path.abspath(__file__))
 # PyInstaller frozen: 库已解压到 sys._MEIPASS/<platform>/<version>/lib
 _SDK_ROOT = getattr(sys, "_MEIPASS", None) or os.path.join(_DIR, "..", "sdk")
@@ -116,6 +116,8 @@ OnSubVideoCB    = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_uint8
 OnUnsubVideoCB  = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_uint8)
 OnSubAudioCB    = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_uint8)
 OnUnsubAudioCB  = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_uint8)
+OnUpdateBitrateCB = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_uint8,
+                                    ctypes.c_uint32)
 ConnectCB       = ctypes.CFUNCTYPE(None, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p)
 ServiceReqCB    = ctypes.CFUNCTYPE(None, ctypes.c_char_p, ctypes.c_void_p)
 
@@ -134,6 +136,7 @@ class TIRTCCALLBACKS(ctypes.Structure):
         ("on_unsubscribe_video", OnUnsubVideoCB),
         ("on_subscribe_audio",   OnSubAudioCB),
         ("on_unsubscribe_audio", OnUnsubAudioCB),
+        ("on_update_bitrate",    OnUpdateBitrateCB),
     ]
 
 # ── SDK 函数绑定 ──────────────────────────────────────────────────────────

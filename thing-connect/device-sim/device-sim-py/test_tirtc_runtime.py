@@ -46,6 +46,18 @@ def _handler(counts, *, accepts=False):
 
 
 class TiRtcRuntimeTests(unittest.TestCase):
+    def test_callbacks_match_tirtc_2_3_abi(self):
+        self.assertEqual(tirtc_runtime.sdk._SDK_VERSION, "2.3.0")
+        self.assertEqual(
+            tirtc_runtime.sdk.TiRtcGetVersion(),
+            b"v2.3.0",
+        )
+        self.assertEqual(TIRTCCALLBACKS._fields_[-1][0], "on_update_bitrate")
+        self.assertEqual(
+            ctypes.sizeof(TIRTCCALLBACKS),
+            14 * ctypes.sizeof(ctypes.c_void_p),
+        )
+
     def test_binding_keeps_sdk_version_compatibility_internal(self):
         with mock.patch.object(
                 tirtc_runtime.sdk, "HAS_CLIENT_ID_OPT", False), \

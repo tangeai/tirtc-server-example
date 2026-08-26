@@ -1,5 +1,5 @@
 /** \file device_flow.c
- * \brief Device provisioning — HTTP + MQTT + mbedTLS signing.
+ * \brief Device provisioning — HTTP + MQTT + OpenSSL signing.
  *
  * Linux reference: demonstrates how a device communicates with the server
  * using Linux/POSIX libraries.
@@ -7,19 +7,21 @@
  * Libraries used:
  *   - libcurl       (HTTP GET/POST, TLS)
  *   - libmosquitto  (MQTT 3.1.1 client, TLS)
- *   - mbedTLS       (HMAC-SHA256, Base64)
+ *   - OpenSSL       (HMAC-SHA256, Base64)
  *   - pthread       (heartbeat thread, temp-mqtt wait)
  */
 
 #include "device_flow.h"
 
 #include <assert.h>
+#include <limits.h>
 #include <signal.h>
 
 #include <curl/curl.h>
 #include <mosquitto.h>
-#include <mbedtls/base64.h>
-#include <mbedtls/md.h>
+#include <openssl/crypto.h>
+#include <openssl/evp.h>
+#include <openssl/hmac.h>
 
 #include <cjson/cJSON.h>
 
@@ -197,31 +199,33 @@ static int json_data_str(const char *json_str, const char *key,
 }
 
 /* =========================================================================
- *  Crypto: HMAC-SHA256 + Base64 (SDK-bundled mbedTLS)
+ *  Crypto: HMAC-SHA256 + Base64 (OpenSSL libcrypto)
  * ========================================================================= */
 
 int hmac_sha256_b64(const char *key, const char *data,
                     char *out, size_t out_size) {
-    if (!key || !data || !out || out_size == 0) {
+    if (!key || !data || !out || out_size < 45U || strlen(key) > INT_MAX) {
         LOG_E("HMAC-SHA256 签名参数无效");
         return -1;
     }
-    const mbedtls_md_info_t *md_info =
-        mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
-    if (!md_info) {
-        LOG_E("mbedTLS 不支持 SHA-256");
+    unsigned char digest[EVP_MAX_MD_SIZE];
+    unsigned int digest_len = 0;
+    if (!HMAC(EVP_sha256(), key, (int)strlen(key),
+              (const unsigned char *)data, strlen(data),
+              digest, &digest_len) || digest_len != 32U) {
+        LOG_E("HMAC-SHA256 签名失败");
+        OPENSSL_cleanse(digest, sizeof(digest));
         return -1;
     }
-    unsigned char digest[32];
-    int rc = mbedtls_md_hmac(md_info,
-                             (const unsigned char *)key, strlen(key),
-                             (const unsigned char *)data, strlen(data), digest);
-    if (rc != 0) { LOG_E("HMAC-SHA256 签名失败: -0x%04x", -rc); return -1; }
 
-    size_t olen = 0;
-    rc = mbedtls_base64_encode((unsigned char *)out, out_size, &olen, digest, sizeof(digest));
-    if (rc != 0 || olen >= out_size) { LOG_E("Base64 编码失败: -0x%04x", -rc); return -1; }
-    out[olen] = '\0';
+    int encoded_len = EVP_EncodeBlock((unsigned char *)out, digest,
+                                      (int)digest_len);
+    OPENSSL_cleanse(digest, sizeof(digest));
+    if (encoded_len != 44 || (size_t)encoded_len >= out_size) {
+        LOG_E("Base64 编码失败");
+        return -1;
+    }
+    out[encoded_len] = '\0';
     return 0;
 }
 

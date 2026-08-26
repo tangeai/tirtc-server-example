@@ -83,10 +83,10 @@
 
 ## 编译与测试
 
-默认目标是 Linux x86_64，依赖 `libcurl`、`libmosquitto`、`cJSON`、`pthread` 和仓库附带的 TiRTC SDK。
+默认目标是 Linux x86_64，依赖 `libcurl`、OpenSSL `libcrypto`、`libmosquitto`、`cJSON`、`pthread` 和仓库附带的 TiRTC SDK。
 
 ```bash
-sudo apt install libcurl4-openssl-dev libmosquitto-dev libcjson-dev pkg-config
+sudo apt install libcurl4-openssl-dev libssl-dev libmosquitto-dev libcjson-dev pkg-config
 
 cd thing-connect/device-sim/device-sim-c
 make WERROR=1
@@ -104,17 +104,15 @@ make WERROR=1 product PRODUCT_ADAPTER_OBJ=obj/product_adapter_template.o
 
 产品项目也可以链接 `libdevice-reference.a`。自有入口需要在创建工作线程前调用 `device_adapter_install()`，然后调用 [`device_reference_run()`](src/device_reference.h) 复用完整的上线和会话编排。薄入口 `reference_main.c` 不会进入静态库。
 
-`make test` 会运行主机单元测试和适配器契约测试，并检查完整程序的 `--help` 启动路径。进行内存和未定义行为检查前，应先清理其他编译参数产生的对象文件：
+`make test` 会核对 SDK 头文件版本与实际加载的动态库版本，运行主机单元测试和适配器契约测试，并检查完整程序的 `--help` 启动路径。构建目录会记录 SDK 和编译配置；配置变化时所有对象自动重编，相同配置继续增量构建。切换到 sanitizer 配置时无需手动清理：
 
 ```bash
-make clean
 make SANITIZE=address,undefined WERROR=1 test
 ```
 
 在受调试器或 `ptrace` 管理的容器中，LeakSanitizer 可能直接报 `LeakSanitizer does not work under ptrace`。这表示泄漏检查没有启动，不表示发现泄漏，也不能据此宣称无泄漏。可先只验证 AddressSanitizer/UndefinedBehaviorSanitizer：
 
 ```bash
-make clean
 ASAN_OPTIONS=detect_leaks=0 make SANITIZE=address,undefined WERROR=1 test
 ```
 
@@ -252,14 +250,15 @@ received/<device_id>/ai_<timestamp>.wav   # 仅 alaw/PCM
 
 ## TiRTC SDK 核心 API
 
-SDK API 定义和媒体帧字段以目标平台 SDK 的 [`tiRTC.h`](../sdk/linux-x86_64/2.2.1/include/tirtc/tiRTC.h) 为准。本实现的关键约束是：
+SDK API 定义和媒体帧字段以目标平台 SDK 的 [`tiRTC.h`](../sdk/linux-x86_64/2.3.0/include/tirtc/tiRTC.h) 为准。本实现的关键约束是：
 
 1. `tirtc_runtime` 是 SDK 生命周期和 `TIRTCCALLBACKS` 的唯一所有者。
-2. 设置 `TIRTC_OPT_DEVICE_SECRET_KEY` 和 `TIRTC_OPT_CLIENT_ID` 后，调用一次 `TiRtcStart(device_id, &callbacks)`。
+2. 仅 `TIRTC_OPT_MAX_SEND_BUFFER` 在 `TiRtcInit` 前设置；初始化成功后设置设备密钥、Client ID 和其他普通选项，再调用一次 `TiRtcStart(device_id, &callbacks)`。
 3. `TiRtcStart` 返回 0 后仍要等待 `TIRTC_EVENT_SYS_STARTED`。
 4. 业务模块只注册回调、管理连接和媒体，不调用 SDK 初始化或反初始化。
 5. SDK 回调只做有界复制、状态提交或队列投递；断开、文件 I/O 和业务恢复在回调栈外执行。
 6. 进程退出时，先停止当前业务并排空回调/控制队列，再 `TiRtcStop`，等待 `SYS_STOPPED` 后 `TiRtcUninit`。
+7. `TIRTCCALLBACKS.on_update_bitrate` 保持为空；文件媒体源没有可动态调节的实时视频编码器。产品接入实时编码器时，再配置码率范围并把回调投递到编码线程处理。
 
 ## 各业务模块调用
 

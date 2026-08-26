@@ -16,12 +16,12 @@ Windows 可通过 `--with-camera` 使用 PC 摄像头，通过 `--with-mic` 使�
 
 - Windows 10/11 x64、Ubuntu x64 或 macOS Apple 芯片
 - CPython **3.10–3.14**
-- 仓库已包含模拟器所需的 TiRTC SDK **2.2.1** 和默认音视频素材
+- 仓库已包含模拟器所需的 TiRTC SDK **2.3.0** 和默认音视频素材
 
 克隆仓库后无需另外下载模拟器 SDK。以 Windows 为例，仓库中应能看到：
 
 ```text
-thing-connect/device-sim/sdk/windows-x86_64/2.2.1/lib/libTiRTC.dll
+thing-connect/device-sim/sdk/windows-x86_64/2.3.0/lib/libTiRTC.dll
 ```
 
 Ubuntu 和 macOS 对应目录分别为 `linux-x86_64` 和 `macos-arm64`。

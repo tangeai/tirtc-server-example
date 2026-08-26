@@ -28,11 +28,13 @@ class RtcCallVideoPolicyTests(unittest.TestCase):
         with mock.patch.object(rtc_call._media, "prepare_session"), \
                 mock.patch.object(
                     rtc_call.sdk, "TiRtcUnsubscribeVideo",
-                    return_value=0) as unsubscribe:
+                    return_value=1) as unsubscribe, \
+                mock.patch.object(rtc_call, "_warn") as warn:
             rtc_call.set_call_type("audio")
             rtc_call._apply_video_downlink_policy(0x1234)
 
         unsubscribe.assert_called_once()
+        warn.assert_not_called()
         self.assertEqual(
             unsubscribe.call_args.args[1], rtc_call.sdk.VIDEO_STREAM_ID)
 

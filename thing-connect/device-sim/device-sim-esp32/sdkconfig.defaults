@@ -1,7 +1,7 @@
 CONFIG_IDF_TARGET="esp32s3"
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 
-# TiRTC 2.2.1 build contract. Do not change without a matching SDK build.
+# TiRTC 2.3.0 build contract. Do not change without a matching SDK build.
 CONFIG_FREERTOS_HZ=1000
 # CONFIG_FREERTOS_USE_TRACE_FACILITY is not set
 # CONFIG_FREERTOS_USE_STATS_FORMATTING_FUNCTIONS is not set

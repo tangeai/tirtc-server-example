@@ -5,7 +5,7 @@ import tempfile
 import threading
 import time
 
-os.environ.setdefault("TIRTC_SDK_VERSION", "2.2.1")
+os.environ.setdefault("TIRTC_SDK_VERSION", "2.3.0")
 from device_rtc_runtime import DeviceRtcRuntime, RuntimeConfig
 
 

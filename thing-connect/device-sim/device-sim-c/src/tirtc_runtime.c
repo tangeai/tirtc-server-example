@@ -453,6 +453,9 @@ static void _build_sdk_callbacks(void) {
     callbacks->on_unsubscribe_video = _on_unsubscribe_video;
     callbacks->on_subscribe_audio = _on_subscribe_audio;
     callbacks->on_unsubscribe_audio = _on_unsubscribe_audio;
+    /* File-backed media has no live encoder to retune. TiRTC 2.3.0 requires
+     * this appended callback field to be present, but permits a NULL value. */
+    callbacks->on_update_bitrate = NULL;
 }
 
 static int _wait_started(void) {

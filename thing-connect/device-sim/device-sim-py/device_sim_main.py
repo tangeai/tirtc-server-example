@@ -19,7 +19,7 @@ import signal
 import sys
 import threading
 
-DEFAULT_SDK_VERSION = "2.2.1"
+DEFAULT_SDK_VERSION = "2.3.0"
 DEFAULT_AUDIO_FILENAME = "audio.g711a"
 EXPERIENCE_PLATFORM_URL = "https://demo-open.tange-ai.com"
 MIN_PYTHON_VERSION = (3, 10)
@@ -301,7 +301,7 @@ def main():
                         help="日志级别（默认 debug）")
     parser.add_argument("--sdk-version", default=os.getenv("TIRTC_SDK_VERSION", DEFAULT_SDK_VERSION),
                         dest="sdk_version",
-                        help="TiRTC SDK 版本（对应 sdk/<platform>/<version>/ 目录；默认 2.2.1，"
+                        help="TiRTC SDK 版本（对应 sdk/<platform>/<version>/ 目录；默认 2.3.0，"
                              "也可用 TIRTC_SDK_VERSION 环境变量覆盖）")
     args = parser.parse_args()
 

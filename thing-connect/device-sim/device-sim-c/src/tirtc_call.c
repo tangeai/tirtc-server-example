@@ -418,7 +418,7 @@ static void _prepare_media_policy(void) {
 static void _apply_video_downlink_policy(tirtc_conn_t hconn) {
     if (!hconn || !_is_audio_call()) return;
     int rc = TiRtcUnsubscribeVideo(hconn, STREAM_ID_VIDEO);
-    if (rc == 0)
+    if (rc >= 0)
         LOG_I("纯音频设备通话已退订下行视频 stream=%u",
               STREAM_ID_VIDEO);
     else

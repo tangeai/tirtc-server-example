@@ -36,6 +36,19 @@ typedef struct {
     DeviceProductEvent last_event;
 } AdapterContractContext;
 
+static void test_hmac_sha256_b64(void) {
+    char signature[64];
+    assert(hmac_sha256_b64(
+               "key", "The quick brown fox jumps over the lazy dog",
+               signature, sizeof(signature)) == 0);
+    assert(strcmp(signature,
+                  "97yD9DBThCSxMpjmqm+xQ+9NWaFJRhdZl0edvC0aPNg=") == 0);
+
+    char too_small[44];
+    assert(hmac_sha256_b64("key", "data", too_small,
+                           sizeof(too_small)) == -1);
+}
+
 static int adapter_identity_load(void *opaque, const char *slot,
                                  char *id, size_t id_size,
                                  char *key, size_t key_size) {
@@ -1447,6 +1460,7 @@ static void test_process_runtime_generation_dispatch(void) {
 
 int main(void) {
     g_log_level = 100;
+    test_hmac_sha256_b64();
     assert(linux_device_adapter_install_default() == 0);
     test_device_adapter_contract();
     test_format_tables();

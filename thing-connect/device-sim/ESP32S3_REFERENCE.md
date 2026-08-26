@@ -209,13 +209,13 @@ device-sim/
 ESP32-S3 SDK 默认位置：
 
 ```text
-sdk/espressif-esp32s3/2.2.1/
+sdk/espressif-esp32s3/2.3.0/
 ├── include/tirtc/
 ├── lib/libTiRTC.a
 └── manifest/build-contract.env
 ```
 
-SDK 路径必须可以通过 `TIRTC_SDK_DIR` 或构建参数覆盖，不把库复制到应用组件中。2.2.1 包要求 ESP-IDF
+SDK 路径必须可以通过 `TIRTC_SDK_DIR` 或构建参数覆盖，不把库复制到应用组件中。2.3.0 包要求 ESP-IDF
 5.5.x、`CONFIG_FREERTOS_HZ=1000`，并关闭 FreeRTOS trace/stats 相关配置。旧工程中的 UNICORE 是旧版 SDK
 问题的规避项，新 SDK 不直接继承，需通过双核实机压力测试决定。
 

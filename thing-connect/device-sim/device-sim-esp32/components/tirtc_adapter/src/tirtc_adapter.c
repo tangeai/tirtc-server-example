@@ -355,6 +355,8 @@ static const TIRTCCALLBACKS s_callbacks = {
     .on_unsubscribe_video = on_unsubscribe,
     .on_subscribe_audio = on_subscribe_audio,
     .on_unsubscribe_audio = on_unsubscribe,
+    /* This audio-only target has no video encoder bitrate to adjust. */
+    .on_update_bitrate = NULL,
 };
 
 static int set_string_option(TIRTCOPTION option, const char *value)
@@ -401,7 +403,23 @@ int tirtc_adapter_start(const tirtc_adapter_config_t *config)
     TiRtcLogSetCallback(sdk_log);
     TiRtcLogSetLevel(config->log_level > 0 ? config->log_level : 3);
 
-    int rc = set_string_option(TIRTC_OPT_DEVICE_SECRET_KEY, config->device_secret);
+    int rc = 0;
+    if (config->max_send_buffer_bytes > 0) {
+        rc = TiRtcSetOption(TIRTC_OPT_MAX_SEND_BUFFER,
+                            &config->max_send_buffer_bytes,
+                            sizeof(config->max_send_buffer_bytes));
+        if (rc != 0) {
+            goto fail;
+        }
+    }
+
+    rc = TiRtcInit();
+    if (rc != 0) {
+        goto fail;
+    }
+    s_initialized = true;
+
+    rc = set_string_option(TIRTC_OPT_DEVICE_SECRET_KEY, config->device_secret);
     if (rc != 0) {
         goto fail;
     }
@@ -424,26 +442,10 @@ int tirtc_adapter_start(const tirtc_adapter_config_t *config)
             goto fail;
         }
     }
-    if (config->max_send_buffer_bytes > 0) {
-        rc = TiRtcSetOption(TIRTC_OPT_MAX_SEND_BUFFER,
-                            &config->max_send_buffer_bytes,
-                            sizeof(config->max_send_buffer_bytes));
-        if (rc != 0) {
-            goto fail;
-        }
-    }
-
-    rc = TiRtcInit();
-    if (rc != 0) {
-        goto fail;
-    }
-    s_initialized = true;
 
     s_state = TIRTC_ADAPTER_STARTING;
     rc = TiRtcStart(config->device_id, &s_callbacks);
     if (rc != 0) {
-        TiRtcUninit();
-        s_initialized = false;
         goto fail;
     }
 
@@ -451,6 +453,10 @@ int tirtc_adapter_start(const tirtc_adapter_config_t *config)
     return 0;
 
 fail:
+    if (s_initialized) {
+        TiRtcUninit();
+        s_initialized = false;
+    }
     s_state = TIRTC_ADAPTER_ERROR;
     ESP_LOGE(TAG, "TiRTC start failed: %d (%s)", rc, TiRtcGetErrorStr(rc));
     return rc;
@@ -621,7 +627,7 @@ int tirtc_adapter_disable_video_downlink(void)
     }
 
     int rc = TiRtcUnsubscribeVideo(connection, STREAM_ID_VIDEO);
-    if (rc == 0) {
+    if (rc >= 0) {
         ESP_LOGI(TAG,
                  "video downlink stream=%u unsubscribed: ESP32-S3 target is audio-only",
                  STREAM_ID_VIDEO);

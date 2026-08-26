@@ -91,9 +91,9 @@ C 参考实现提供版本化的 `DeviceAdapterV1`、Linux 默认适配、产品
 ```text
 thing-connect/device-sim/sdk/
 └── <target-platform>/
-    ├── 2.2.1/include/tirtc/
-    ├── 2.2.1/lib/libTiRTC.so
-    └── 0.1.6/include/mbedtls/
+    └── 2.3.0/
+        ├── include/tirtc/
+        └── lib/libTiRTC.so
 ```
 
 交叉编译示例：
@@ -106,8 +106,7 @@ make WERROR=1 \
   PKG_CONFIG=aarch64-linux-gnu-pkg-config \
   SYSROOT=/path/to/target-sysroot \
   SDK_PLATFORM=linux-aarch64 \
-  SDK_VERSION=2.2.1 \
-  MBEDTLS_SDK_VERSION=0.1.6
+  SDK_VERSION=2.3.0
 ```
 
 只构建不含参考 `main` 的静态库：
@@ -116,14 +115,14 @@ make WERROR=1 \
 make WERROR=1 framework
 ```
 
-`PKG_CONFIG` 必须返回目标 sysroot 中的 libcurl 参数，不能误用主机库。如果工具链没有 pkg-config wrapper，可显式传入 `CURL_CFLAGS`、`CURL_LIBS`、`CJSON_CFLAGS`、`CJSON_LIBS`、`MOSQUITTO_CFLAGS` 和 `MOSQUITTO_LIBS`。产品安装路径不保留仓库相对 SDK 布局时，设置 `RPATH=` 禁用演示 rpath，并由系统动态链接器配置目标库路径。
+`PKG_CONFIG` 必须返回目标 sysroot 中的 libcurl 和 libcrypto 参数，不能误用主机库。如果工具链没有 pkg-config wrapper，可显式传入 `CURL_CFLAGS`、`CURL_LIBS`、`OPENSSL_CFLAGS`、`OPENSSL_LIBS`、`CJSON_CFLAGS`、`CJSON_LIBS`、`MOSQUITTO_CFLAGS` 和 `MOSQUITTO_LIBS`。产品安装路径不保留仓库相对 SDK 布局时，设置 `RPATH=` 禁用演示 rpath，并由系统动态链接器配置目标库路径。
 
 真实项目还需要适配：
 
 - 启动顺序：网络、时间和凭证就绪后，再请求 token 并启动 TiRTC。
 - 时钟：签名时间使用已校准的墙上时钟；会话超时使用单调时钟。
 - 随机数：通过 `security.random_bytes` 接入并验证产品批准的密码学安全随机数源；Linux 默认实现只使用 `getrandom()` 或 `/dev/urandom`，失败时不会降级到伪随机数。
-- 网络：处理网口/Wi-Fi/4G 的获取地址、DNS、切换和断网事件。
+- 网络：处理网口/Wi-Fi/4G 的获取地址、DNS、切换和断网事件；使用 `TIRTC_NETCONN_4G` 时，在 `TiRtcStart` 前通过 `TIRTC_OPT_ICCID` 提供 ICCID。
 - 进程：将 CLI 入口接到实际 daemon/service，实现看门狗和有序退出。
 
 验收：冷启动、网络未就绪、校时失败、DNS 失败、SDK 动态库缺失和进程重启都有明确日志和可恢复路径。
@@ -156,6 +155,8 @@ C 参考实现的 `identity` 默认适配用 `device_creds.json` 保存 `device_
 | 微信 VoIP | 10 | 以 profile 上报和房间协商为准 |
 | 设备互呼 | 10 | 以双方设备能力为准 |
 | AI | 1 | 以 `start_session.input_audio` 为准 |
+
+TiRTC 要求所有媒体、消息、订阅和关键帧请求使用 `0..15` 范围内的 `stream_id`，表中的默认值均满足该约束。
 
 需要实现发送节奏、PTS、输入欠载、发送缓冲满、音频中断、采集设备重启和媒体切换。不能在 TiRTC 回调线程中采集、编码或等待音频硬件。
 

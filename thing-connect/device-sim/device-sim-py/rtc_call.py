@@ -226,7 +226,7 @@ def _apply_video_downlink_policy(hconn_val: int) -> None:
         return
     rc = sdk.TiRtcUnsubscribeVideo(
         ctypes.c_void_p(hconn_val), sdk.VIDEO_STREAM_ID)
-    if rc == 0:
+    if rc >= 0:
         _info(
             f"纯音频设备通话已退订下行视频 "
             f"stream={sdk.VIDEO_STREAM_ID}"

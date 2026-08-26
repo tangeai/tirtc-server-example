@@ -748,7 +748,7 @@ TiRtcServiceRequest(
 ```
 
 完整 C 签名、返回值和回调生命周期见
-[`tiRTC.h` 中的 `TiRtcServiceRequest`](device-sim/sdk/linux-x86_64/2.2.1/include/tirtc/tiRTC.h#L863)。
+[`tiRTC.h` 中的 `TiRtcServiceRequest`](device-sim/sdk/linux-x86_64/2.3.0/include/tirtc/tiRTC.h)。
 
 拒接请求体里的关键字段都来自 `call_incoming` payload：
 

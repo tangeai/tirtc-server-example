@@ -1,7 +1,7 @@
 # device-sim-esp32
 
 ESP32-S3 TiRTC 设备参考实现，目标硬件为 ESP32-S3 N16R8（16 MB Flash、8 MB
-octal PSRAM），使用 ESP-IDF 5.5.x 和 TiRTC SDK 2.2.1。默认 Demo 不依赖 TF 卡，
+octal PSRAM），使用 ESP-IDF 5.5.x 和 TiRTC SDK 2.3.0。默认 Demo 不依赖 TF 卡，
 H5 实时、AI 对讲、VoIP 和设备互呼均为纯音频，不保存下行音频。
 
 这是基于 Linux C 参考实现的协议顺序和会话设计进行的**独立移植**。它不属于 `device-sim-c`，不与后者共用构建系统或平台代码；ESP32-S3 的能力、限制和测试结论不能反向代表 Linux C 参考实现。
@@ -50,7 +50,7 @@ device-sim-esp32/
 默认读取：
 
 ```text
-../sdk/espressif-esp32s3/2.2.1/
+../sdk/espressif-esp32s3/2.3.0/
 ├── include/tirtc/
 ├── lib/libTiRTC.a
 └── manifest/build-contract.env
@@ -59,7 +59,7 @@ device-sim-esp32/
 可指定其他 SDK 根目录：
 
 ```bash
-idf.py -DTIRTC_SDK_DIR=/absolute/path/to/espressif-esp32s3/2.2.1 build
+idf.py -DTIRTC_SDK_DIR=/absolute/path/to/espressif-esp32s3/2.3.0 build
 ```
 
 ## 构建与烧录

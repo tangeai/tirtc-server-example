@@ -2,7 +2,7 @@
  * \brief Device provisioning protocol layer — HTTP + MQTT + HMAC signing.
  *
  * Linux reference: shows how a device talks to the server over
- * libcurl (HTTP) + libmosquitto (MQTT) + SDK bundled mbedTLS (HMAC-SHA256 / Base64).
+ * libcurl (HTTP) + libmosquitto (MQTT) + OpenSSL libcrypto (HMAC-SHA256 / Base64).
  */
 
 #ifndef DEVICE_FLOW_H
@@ -11,9 +11,8 @@
 #include <stddef.h>
 #include <signal.h>
 #include <cjson/cJSON.h>
-/* Linux uses the mbedTLS headers shipped with SDK 0.1.6, verified compatible
- * with the SDK 2.2.1 exported one-shot HMAC/Base64 symbols.  Other targets
- * must use the cryptographic API provided by their own platform port. */
+/* Linux uses OpenSSL libcrypto. Other targets must use the cryptographic API
+ * provided by their own platform port. */
 
 #ifdef __cplusplus
 extern "C" {

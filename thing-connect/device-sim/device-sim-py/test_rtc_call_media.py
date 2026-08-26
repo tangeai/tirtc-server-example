@@ -7,7 +7,7 @@ import threading
 import unittest
 from unittest import mock
 
-os.environ.setdefault("TIRTC_SDK_VERSION", "2.2.1")
+os.environ.setdefault("TIRTC_SDK_VERSION", "2.3.0")
 
 import rtc_call_media
 
