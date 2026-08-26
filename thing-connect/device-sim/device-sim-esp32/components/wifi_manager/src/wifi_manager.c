@@ -1,3 +1,10 @@
+/*
+ * Wi-Fi STA 与 SoftAP 配网 adapter。
+ *
+ * 启动时优先读取 NVS 并连接 STA；没有配置或连续连接失败时开启 APSTA，提供
+ * 一个最小配置页。网页只保存配置并重启，连接状态仍由同一事件处理路径建立。
+ * 实时媒体要求关闭 Wi-Fi power save，避免 KCP 音视频排队和抖动。
+ */
 #include "wifi_manager.h"
 
 #include <stdio.h>
@@ -30,6 +37,7 @@ static int s_retry_count;
 static char s_provisioning_ssid[33];
 static httpd_handle_t s_http_server;
 
+/* 页面内嵌在固件中，避免模板依赖额外文件系统分区。 */
 static const char s_setup_page[] =
     "<!doctype html><html lang=zh-CN><meta charset=utf-8>"
     "<meta name=viewport content='width=device-width,initial-scale=1'>"
@@ -87,6 +95,7 @@ esp_err_t wifi_manager_load_credentials(wifi_manager_credentials_t *credentials)
     if (err != ESP_OK) {
         return err;
     }
+    /* SSID/password 必须成组读取；任一失败都清空输出。 */
     size_t ssid_size = sizeof(credentials->ssid);
     size_t password_size = sizeof(credentials->password);
     err = nvs_get_str(nvs, WIFI_NVS_SSID, credentials->ssid, &ssid_size);
@@ -119,6 +128,7 @@ esp_err_t wifi_manager_save_credentials(const char *ssid, const char *password)
     if (err == ESP_OK) {
         err = nvs_set_str(nvs, WIFI_NVS_PASSWORD, password);
     }
+    /* commit 成功后新配置才对下一次启动可见。 */
     if (err == ESP_OK) {
         err = nvs_commit(nvs);
     }
@@ -146,6 +156,7 @@ esp_err_t wifi_manager_forget_credentials(void)
 
 static void restart_task(void *argument)
 {
+    /* 先给 HTTP 响应留出发送时间，再让正常启动路径应用新配置。 */
     (void)argument;
     vTaskDelay(pdMS_TO_TICKS(1000));
     esp_restart();
@@ -159,6 +170,7 @@ static esp_err_t setup_page_get(httpd_req_t *request)
 
 static esp_err_t wifi_config_post(httpd_req_t *request)
 {
+    /* 请求体有硬上限且分段读取，防止配置 HTTP 任务被无界占用。 */
     if (request->content_len <= 0 || request->content_len > 512) {
         return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "invalid request size");
     }
@@ -258,6 +270,7 @@ static void start_provisioning(void)
                    mac[4],
                    mac[5]);
 
+    /* AP 名称后缀来自 STA MAC，方便同时调试多块开发板。 */
     wifi_config_t ap = {0};
     size_t ap_ssid_length = strlen(s_provisioning_ssid);
     size_t ap_password_length = strlen(WIFI_SETUP_PASSWORD);
@@ -283,6 +296,7 @@ static void wifi_event(void *argument,
                        int32_t event_id,
                        void *event_data)
 {
+    /* 所有连接/重试/降级到 SoftAP 的转换都集中在 ESP-IDF 网络事件中。 */
     (void)argument;
     (void)event_data;
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
@@ -330,6 +344,7 @@ esp_err_t wifi_manager_start(void)
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event, NULL));
 
+    /* 启动前先决定 STA 还是 APSTA；STA_START 事件负责真正 connect。 */
     wifi_manager_credentials_t credentials;
     if (wifi_manager_load_credentials(&credentials) == ESP_OK) {
         wifi_config_t station = {0};
@@ -348,6 +363,7 @@ esp_err_t wifi_manager_start(void)
     if (err != ESP_OK) {
         return err;
     }
+    /* 实时媒体需要稳定时延，明确关闭默认省电。 */
     err = esp_wifi_set_ps(WIFI_PS_NONE);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "cannot disable Wi-Fi power save: %s",

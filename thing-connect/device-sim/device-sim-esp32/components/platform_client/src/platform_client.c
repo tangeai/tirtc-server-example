@@ -1,3 +1,13 @@
+/*
+ * ThingConnect 平台传输 adapter。
+ *
+ * 正常上线：服务发现 -> SNTP -> HMAC 设备登录 -> MQTT token -> 永久 MQTT。
+ * 首次绑定：设备上报 -> 显示验证码 -> 临时 MQTT auth_grant -> QoS1 ACK。
+ * 业务 HTTP：调用者复制请求到固定队列，由 request_task 串行执行和回调。
+ *
+ * 正常在线阶段的 MQTT token 只保存在本模块内存中。首次绑定会把设备密钥
+ * 放入 provision result 交给组合根持久化；两者都不会写入日志。
+ */
 #include "platform_client.h"
 
 #include <stdio.h>
@@ -32,6 +42,7 @@
 #define PROVISION_DONE_BIT BIT0
 #define PROVISION_ERROR_BIT BIT1
 
+/* 服务发现结果；生成的起步工程会裁剪未使用的服务字段。 */
 typedef struct {
     char device[256];
     char voip[256];
@@ -48,6 +59,7 @@ typedef struct {
     bool overflow;
 } http_output_t;
 
+/* 请求按值进入固定队列，避免调用者栈内字符串在异步执行前失效。 */
 typedef struct {
     platform_service_t service;
     char path[PLATFORM_REQUEST_PATH_MAX];
@@ -58,6 +70,7 @@ typedef struct {
     void *user_data;
 } platform_request_t;
 
+/* 首次绑定临时 MQTT 的全部可变状态，生命周期限制在 provision 调用内。 */
 typedef struct {
     EventGroupHandle_t events;
     esp_mqtt_client_handle_t mqtt;
@@ -71,6 +84,8 @@ typedef struct {
 } provision_mqtt_t;
 
 static const char *TAG = "platform_client";
+
+/* 正常在线阶段的进程级状态；模块只支持一个设备实例。 */
 static platform_services_t s_services;
 static char s_device_id[65];
 static char s_device_secret[257];
@@ -91,6 +106,9 @@ static char s_mqtt_message[PLATFORM_SIGNAL_MAX];
 static size_t s_mqtt_message_size;
 static int s_mqtt_message_id = -1;
 
+/* ===== 有界 HTTP 与 JSON 基础函数 ===== */
+
+/* esp_http_client 可能分片回调；按容量拼接，溢出时整次请求失败。 */
 static esp_err_t http_event(esp_http_client_event_t *event)
 {
     if (event->event_id != HTTP_EVENT_ON_DATA || event->data == NULL ||
@@ -122,6 +140,7 @@ static esp_err_t http_request(const char *url,
                               unsigned timeout_ms,
                               int *status)
 {
+    /* response 由调用者提供，函数返回时总是以 NUL 结尾或报告容量错误。 */
     http_output_t output = {
         .data = response,
         .capacity = response_size,
@@ -186,6 +205,7 @@ static bool json_copy_string(const cJSON *object,
 
 static esp_err_t discover_services(const char *url)
 {
+    /* 服务地址属于运行时发现结果，不在固件中分别硬编码。 */
     char response[PLATFORM_HTTP_BODY_MAX];
     int status = 0;
     esp_err_t err = http_request(url, NULL, NULL, NULL, NULL, 0,
@@ -257,6 +277,7 @@ static esp_err_t hmac_signature(const char *text, char *base64, size_t base64_si
 
 static esp_err_t obtain_mqtt_token(void)
 {
+    /* 时间戳、随机 nonce 和 HMAC 防止设备登录请求被直接重放。 */
     char timestamp[24];
     (void)snprintf(timestamp, sizeof(timestamp), "%lld", (long long)time(NULL));
     char nonce[17];
@@ -332,6 +353,7 @@ static const char *service_base(platform_service_t service)
 
 static void process_request(const platform_request_t *request)
 {
+    /* 请求任务是业务 HTTP 的唯一执行者，callback 也在该任务中同步调用。 */
     const char *base = service_base(request->service);
     char url[512];
     int url_length = base == NULL ? -1 :
@@ -385,6 +407,7 @@ static void publish_heartbeat(unsigned sequence)
 
 static void request_task(void *argument)
 {
+    /* 同一任务同时负责串行业务 HTTP 和每 30 秒心跳，避免额外后台任务。 */
     (void)argument;
     unsigned heartbeat_sequence = 0;
     int64_t next_heartbeat_ms = esp_timer_get_time() / 1000 + 30000;
@@ -413,6 +436,7 @@ static void mqtt_event(void *handler_args,
                        int32_t event_id,
                        void *event_data)
 {
+    /* MQTT payload 可能分片；只在完整且未超限时向上层分发。 */
     (void)handler_args;
     (void)base;
     esp_mqtt_event_handle_t event = event_data;
@@ -511,6 +535,7 @@ static esp_err_t start_mqtt(void)
 
 static esp_err_t sync_clock(void)
 {
+    /* HMAC 登录依赖可信 Unix 时间；已同步时不重复初始化 SNTP。 */
     time_t current = time(NULL);
     if (current > 1700000000) {
         return ESP_OK;
@@ -537,9 +562,12 @@ typedef struct {
     char temp_client_id[65];
 } provision_report_t;
 
+/* ===== 首次验证码绑定 / 服务端解绑后重绑 ===== */
+
 static esp_err_t report_for_provision(const platform_provision_config_t *config,
                                       provision_report_t *report)
 {
+    /* existing_device_* 同时存在时给上报加签；首次绑定只上报 MAC。 */
     cJSON *body_root = cJSON_CreateObject();
     if (body_root == NULL ||
         !cJSON_AddStringToObject(body_root, "mac", config->mac_address)) {
@@ -658,6 +686,7 @@ static void provision_handle_message(provision_mqtt_t *context,
                                      const char *json,
                                      size_t length)
 {
+    /* 只处理 auth_grant；凭证完整校验后才发送 QoS1 ACK。 */
     cJSON *root = cJSON_ParseWithLength(json, length);
     const cJSON *type = root == NULL
                             ? NULL
@@ -724,6 +753,7 @@ static void provision_mqtt_event(void *handler_args,
                                  int32_t event_id,
                                  void *event_data)
 {
+    /* context 位于阻塞等待函数的栈上，MQTT 停止并销毁后才会离开作用域。 */
     (void)base;
     provision_mqtt_t *context = handler_args;
     esp_mqtt_event_handle_t event = event_data;
@@ -779,6 +809,7 @@ static esp_err_t wait_for_auth_grant(const provision_report_t *report,
                                      const platform_provision_config_t *config,
                                      platform_provision_result_t *result)
 {
+    /* 临时 MQTT 与正常设备 MQTT 完全分离，完成或超时后始终销毁。 */
     provision_mqtt_t context = {
         .message_id = -1,
         .ack_message_id = -1,
@@ -865,6 +896,7 @@ static esp_err_t wait_for_auth_grant(const provision_report_t *report,
 esp_err_t platform_client_provision(const platform_provision_config_t *config,
                                     platform_provision_result_t *result)
 {
+    /* 这是同步编排入口；调用者负责把 result 安全持久化。 */
     if (config == NULL || result == NULL || config->mac_address == NULL ||
         config->mac_address[0] == '\0' ||
         strlen(config->mac_address) >= sizeof(s_mac_address) ||
@@ -916,6 +948,7 @@ esp_err_t platform_client_provision(const platform_provision_config_t *config,
 
 esp_err_t platform_client_start(const platform_client_config_t *config)
 {
+    /* 正常在线入口只创建一次永久请求任务和 MQTT client。 */
     if (s_ready) {
         return ESP_OK;
     }
@@ -1032,6 +1065,7 @@ esp_err_t platform_client_request_timeout(platform_service_t service,
         timeout_ms == 0 || timeout_ms > 60000U) {
         return ESP_ERR_INVALID_ARG;
     }
+    /* path/body 复制进队列项；callback/user_data 的生命周期由调用者保证。 */
     platform_request_t request = {
         .service = service,
         .post = json_body != NULL,

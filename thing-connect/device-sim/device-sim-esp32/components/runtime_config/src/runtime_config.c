@@ -1,3 +1,9 @@
+/*
+ * TiRTC 设备凭证的 NVS adapter。
+ *
+ * 三个字段作为一组提交；读取任一必需字段失败时清空整个输出，避免调用者误用
+ * 半组配置。这里使用普通 NVS，量产工程应由组合根启用 NVS 加密或安全芯片。
+ */
 #include "runtime_config.h"
 
 #include <stdbool.h>
@@ -48,6 +54,7 @@ esp_err_t runtime_config_load_tirtc(runtime_tirtc_config_t *config)
     if (err != ESP_OK) {
         return err;
     }
+    /* client_id 是向后兼容的可选字段；ID 和 secret 必须同时存在。 */
     size_t size = sizeof(config->device_id);
     err = nvs_get_str(nvs, "device_id", config->device_id, &size);
     if (err == ESP_OK) {
@@ -85,6 +92,7 @@ esp_err_t runtime_config_save_tirtc(const runtime_tirtc_config_t *config)
             err = erase_err;
         }
     }
+    /* nvs_commit 是整组配置对后续启动可见的提交点。 */
     if (err == ESP_OK) err = nvs_commit(nvs);
     if (nvs != 0) nvs_close(nvs);
     return err;
