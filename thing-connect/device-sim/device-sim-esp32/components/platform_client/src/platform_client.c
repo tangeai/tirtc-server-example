@@ -227,11 +227,9 @@ static esp_err_t discover_services(const char *url)
               json_copy_string(root, "call-srv", s_services.call,
                                sizeof(s_services.call)) &&
               json_copy_string(root, "mqtt-srv", s_services.mqtt,
-                               sizeof(s_services.mqtt));
-    if (root != NULL) {
-        (void)json_copy_string(root, "tirtc-srv", s_services.tirtc,
+                               sizeof(s_services.mqtt)) &&
+              json_copy_string(root, "tirtc-srv", s_services.tirtc,
                                sizeof(s_services.tirtc));
-    }
     cJSON_Delete(root);
     if (!ok) {
         ESP_LOGE(TAG, "service discovery response is incomplete");
@@ -1033,6 +1031,11 @@ bool platform_client_provisioning(void)
 const char *platform_client_verification_code(void)
 {
     return s_verification_code;
+}
+
+const char *platform_client_tirtc_endpoint(void)
+{
+    return s_ready && s_services.tirtc[0] != '\0' ? s_services.tirtc : NULL;
 }
 
 esp_err_t platform_client_request(platform_service_t service,

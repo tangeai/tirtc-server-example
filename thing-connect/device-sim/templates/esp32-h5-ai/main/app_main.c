@@ -171,10 +171,17 @@ static void starter_start_task(void *argument)
         }
 
         if (!tirtc_submitted) {
+            const char *tirtc_endpoint = platform_client_tirtc_endpoint();
+            if (tirtc_endpoint == NULL) {
+                ESP_LOGE(TAG, "service discovery did not return tirtc-srv");
+                vTaskDelay(pdMS_TO_TICKS(START_RETRY_DELAY_MS));
+                continue;
+            }
             const starter_tirtc_config_t tirtc = {
                 .device_id = s_tirtc_config.device_id,
                 .device_secret = s_tirtc_config.device_secret,
                 .client_id = s_tirtc_config.client_id,
+                .service_endpoint = tirtc_endpoint,
                 .max_send_buffer_bytes = 1024U * 1024U,
                 .log_level = 3,
             };

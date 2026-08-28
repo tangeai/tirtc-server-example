@@ -44,7 +44,7 @@ esp_err_t starter_media_start(starter_tirtc_mode_t mode, uint32_t generation);
 /** 停止并回收板级采集任务；重复调用安全。 */
 void starter_media_stop(void);
 
-/** 把远端关键帧请求转交给 H.264 编码器；过期 generation 会被忽略。 */
+/** 把远端刷新请求转交给所选编码器；MJPEG 可忽略，过期 generation 会被忽略。 */
 void starter_media_request_key_frame(uint32_t generation);
 
 /**

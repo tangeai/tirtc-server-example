@@ -83,6 +83,13 @@ bool platform_client_provisioning(void);
 const char *platform_client_verification_code(void);
 
 /**
+ * 返回最近一次服务发现得到的 TiRTC endpoint。
+ * 仅在 platform_client_ready() 为 true 时有效；未发现或未就绪时返回 NULL。
+ * 返回字符串由本模块持有，调用者不得修改或释放。
+ */
+const char *platform_client_tirtc_endpoint(void);
+
+/**
  * json_body 为 NULL 时发送 GET，否则发送 POST。请求复制进固定队列后立即返回；
  * callback 在平台请求任务中执行，body 只在 callback 返回前有效。
  */

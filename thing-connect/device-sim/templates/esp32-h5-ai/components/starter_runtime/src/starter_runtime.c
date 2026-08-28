@@ -533,32 +533,90 @@ static void handle_connection(const runtime_event_t *event)
     finish_session(ESP_ERR_INVALID_STATE);
 }
 
+static bool ai_audio_format_is_alaw_8k_mono(const cJSON *format)
+{
+    const cJSON *codec = cJSON_IsObject(format)
+                             ? cJSON_GetObjectItemCaseSensitive(format, "codec")
+                             : NULL;
+    const cJSON *sample_rate = cJSON_IsObject(format)
+                                   ? cJSON_GetObjectItemCaseSensitive(
+                                         format, "sample_rate")
+                                   : NULL;
+    const cJSON *channels = cJSON_IsObject(format)
+                               ? cJSON_GetObjectItemCaseSensitive(format, "channels")
+                               : NULL;
+    return cJSON_IsString(codec) && codec->valuestring != NULL &&
+           strcmp(codec->valuestring, "alaw") == 0 &&
+           cJSON_IsNumber(sample_rate) && sample_rate->valueint == 8000 &&
+           cJSON_IsNumber(channels) && channels->valueint == 1;
+}
+
 static void handle_ai_command(const runtime_event_t *event)
 {
-    /* 只消费当前 AI 连接上的 0x2100 start_session 响应。 */
+    /* 只消费当前 AI 连接上的 0x2100 JSON-RPC 消息。 */
     if (event->mode != STARTER_TIRTC_AI || event->command != AI_COMMAND ||
-        event->generation != s_connection_generation ||
-        atomic_load_explicit(&s_public_state, memory_order_acquire) !=
-            STARTER_RUNTIME_AI_CONNECTING) {
+        event->generation != s_connection_generation) {
         return;
     }
+    starter_runtime_state_t state =
+        (starter_runtime_state_t)atomic_load_explicit(&s_public_state,
+                                                       memory_order_acquire);
     cJSON *root = event->text == NULL
                       ? NULL
                       : cJSON_ParseWithLength(event->text, event->length);
+    const cJSON *method = root == NULL
+                              ? NULL
+                              : cJSON_GetObjectItemCaseSensitive(root, "method");
+    if ((state == STARTER_RUNTIME_AI_CONNECTING ||
+         state == STARTER_RUNTIME_AI_ACTIVE) &&
+        cJSON_IsString(method) && method->valuestring != NULL &&
+        strcmp(method->valuestring, "end_session") == 0) {
+        cJSON_Delete(root);
+        ESP_LOGI(TAG, "AI platform ended the session");
+        finish_session(0);
+        return;
+    }
+    if (state != STARTER_RUNTIME_AI_CONNECTING) {
+        cJSON_Delete(root);
+        return;
+    }
     const cJSON *id = root == NULL
                           ? NULL
                           : cJSON_GetObjectItemCaseSensitive(root, "id");
     /* result/error 都必须属于当前 start_session，不能让无 ID 的旁路命令改状态。 */
     bool id_matches = cJSON_IsString(id) && id->valuestring != NULL &&
                       strcmp(id->valuestring, s_ai_request_id) == 0;
+    const cJSON *result = root == NULL
+                              ? NULL
+                              : cJSON_GetObjectItemCaseSensitive(root, "result");
+    const cJSON *session_id = cJSON_IsObject(result)
+                                  ? cJSON_GetObjectItemCaseSensitive(result,
+                                                                     "session_id")
+                                  : NULL;
+    const cJSON *input_audio = cJSON_IsObject(result)
+                                   ? cJSON_GetObjectItemCaseSensitive(result,
+                                                                      "input_audio")
+                                   : NULL;
+    const cJSON *output_audio = cJSON_IsObject(result)
+                                    ? cJSON_GetObjectItemCaseSensitive(result,
+                                                                       "output_audio")
+                                    : NULL;
     bool rejected = root != NULL && id_matches &&
                     cJSON_GetObjectItemCaseSensitive(root, "error") != NULL;
-    bool accepted = root != NULL && id_matches &&
-                    cJSON_GetObjectItemCaseSensitive(root, "result") != NULL;
+    bool has_result = root != NULL && id_matches && cJSON_IsObject(result);
+    bool accepted = has_result && cJSON_IsString(session_id) &&
+                    session_id->valuestring != NULL &&
+                    session_id->valuestring[0] != '\0' &&
+                    ai_audio_format_is_alaw_8k_mono(input_audio) &&
+                    ai_audio_format_is_alaw_8k_mono(output_audio);
     cJSON_Delete(root);
     if (rejected) {
         ESP_LOGE(TAG, "AI start_session was rejected");
         finish_session(ESP_FAIL);
+    } else if (has_result && !accepted) {
+        ESP_LOGE(TAG,
+                 "AI start_session response lacks session_id or negotiated alaw/8k/mono formats");
+        finish_session(ESP_ERR_INVALID_RESPONSE);
     } else if (accepted) {
         /* 服务端明确接受后才开放麦克风，避免把音频发到未建立的 AI 会话。 */
         if (starter_media_start(STARTER_TIRTC_AI,

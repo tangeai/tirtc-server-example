@@ -23,6 +23,13 @@ typedef enum {
     STARTER_TIRTC_AI,      /**< AI WHIP 外连，只有音频。 */
 } starter_tirtc_mode_t;
 
+/** H5 stream 11 支持的编码；具体板卡必须在自己的媒体合同中选定一种。 */
+typedef enum {
+    STARTER_VIDEO_MJPEG = 0,
+    STARTER_VIDEO_H264,
+    STARTER_VIDEO_H265,
+} starter_video_codec_t;
+
 /** SDK 帧元数据的稳定副本；payload 不包含在该结构中。 */
 typedef struct {
     uint8_t stream_id;     /**< 协议流编号。 */
@@ -76,6 +83,7 @@ typedef struct {
     const char *device_id;       /**< 已绑定设备 ID，调用 start 时必须有效。 */
     const char *device_secret;   /**< 设备密钥；模块不会打印其内容。 */
     const char *client_id;       /**< TiRTC 客户端 ID。 */
+    const char *service_endpoint; /**< 服务发现返回的 tirtc-srv，必须非空。 */
     uint32_t max_send_buffer_bytes; /**< SDK 最大发送缓冲，0 使用 SDK 默认值。 */
     int log_level;               /**< TiRTC 日志级别，非正数使用 3。 */
 } starter_tirtc_config_t;
@@ -122,8 +130,24 @@ int starter_tirtc_send_alaw(uint32_t timestamp_ms,
                             const void *data,
                             uint32_t length);
 
-/** 发送 H.264 Annex-B access unit；只允许 H5，固定使用 stream 11。 */
+/** 发送板级合同选定的完整视频帧；只允许 H5，固定使用 stream 11。 */
+int starter_tirtc_send_video(starter_video_codec_t codec,
+                             uint32_t timestamp_ms,
+                             bool key_frame,
+                             const void *data,
+                             uint32_t length);
+
+/** 每次调用提交一张完整 JPEG；不能提交裸 MCU 块或截断帧。 */
+int starter_tirtc_send_jpeg(uint32_t timestamp_ms,
+                            const void *data,
+                            uint32_t length);
+
+/** 每次调用提交一个完整 Annex-B access unit。 */
 int starter_tirtc_send_h264(uint32_t timestamp_ms,
+                            bool key_frame,
+                            const void *data,
+                            uint32_t length);
+int starter_tirtc_send_h265(uint32_t timestamp_ms,
                             bool key_frame,
                             const void *data,
                             uint32_t length);

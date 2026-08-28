@@ -118,9 +118,10 @@ esp_err_t starter_media_start(starter_tirtc_mode_t mode, uint32_t generation)
      * TODO(product-media-capture):
      * 1. 启动板级麦克风任务，把 PCM 编码为 G.711 A-law、8 kHz、单声道；
      * 2. starter_tirtc_audio_ready() 为 true 时调用 starter_tirtc_send_alaw()；
-     * 3. H5 模式再启动摄像头/H.264 编码任务，在 video_ready() 为 true 时
-     *    调用 starter_tirtc_send_h264()；AI 模式禁止启动视频；
-     * 4. 使用单调递增的毫秒时间戳，H.264 数据必须是 Annex-B access unit；
+     * 3. H5 模式按板级合同从 MJPEG/H.264/H.265 中选一种，在 video_ready()
+     *    为 true 时调用对应 starter_tirtc_send_*()；AI 模式禁止启动视频；
+     * 4. 使用单调递增毫秒时间戳；MJPEG 每次发送完整 JPEG，H.264/H.265
+     *    每次发送完整 Annex-B access unit；
      * 5. 发送成功后按需累加 s_audio_sent/s_video_sent 状态计数。
      *
      * 采集、编码和发送循环应属于板级任务，不要占用 SDK 回调线程。
@@ -153,8 +154,8 @@ void starter_media_request_key_frame(uint32_t generation)
         return;
     }
     /*
-     * TODO(product-media-keyframe): 通知 H.264 编码器立即生成 IDR。下一次提交
-     * 的 access unit 必须给 starter_tirtc_send_h264() 传 key_frame=true。
+     * TODO(product-media-keyframe): H.264/H.265 编码器立即生成 IDR，并给下一
+     * 个 access unit 传 key_frame=true；MJPEG 每帧独立，可忽略该请求。
      */
 }
 

@@ -179,6 +179,11 @@ G.711 A-law 对外统一使用 `alaw`。兼容解析可接受同义值 `g711a`�
 
 - `id`：与请求对应
 - `result.session_id`：本次会话 ID
+- `result.input_audio`：平台最终接受的设备上行格式
+- `result.output_audio`：平台最终选择的设备下行格式
+
+固定格式的嵌入式实现必须逐项校验 `codec`、`sample_rate`、`channels`；字段
+缺失或与本地编码/解码能力不一致时应结束会话，不能把请求值当作响应值继续推流。
 
 失败时返回：
 

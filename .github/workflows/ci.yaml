@@ -128,3 +128,22 @@ jobs:
           esp_idf_version: v5.5.4
           target: esp32s3
           path: thing-connect/device-sim/device-sim-esp32
+
+  esp32-starter:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Starter generator contract tests
+        run: python3 -m unittest thing-connect/device-sim/scripts/test_create_esp32_project.py
+      - name: Generate focused starter
+        run: >-
+          python3 thing-connect/device-sim/scripts/create_esp32_project.py
+          generated-esp32-starter
+          --name generated_esp32_starter
+      - name: Generated ESP32-S3 starter build
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.4
+          target: esp32s3
+          path: generated-esp32-starter

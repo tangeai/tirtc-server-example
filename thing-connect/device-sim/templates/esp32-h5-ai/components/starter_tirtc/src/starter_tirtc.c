@@ -14,6 +14,8 @@
 
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+#include "freertos/task.h"
 #include "tirtc/tiRTC.h"
 
 #ifndef TIRTC_SDK_STATIC_SEMAPHORE_SIZE
@@ -26,6 +28,7 @@ _Static_assert(sizeof(StaticSemaphore_t) == TIRTC_SDK_STATIC_SEMAPHORE_SIZE,
 #define H5_AUDIO_STREAM 10U
 #define H5_VIDEO_STREAM 11U
 #define AI_AUDIO_STREAM 1U
+#define DEFERRED_DISCONNECT_DEPTH 4U
 
 static const char *TAG = "starter_tirtc";
 
@@ -50,6 +53,66 @@ static atomic_uint_fast32_t s_pending_tag;
 static atomic_bool s_audio_subscribed;
 static atomic_bool s_video_subscribed;
 static bool s_initialized;
+static QueueHandle_t s_disconnect_queue;
+static TaskHandle_t s_disconnect_task;
+
+/* SDK 生命周期调用只能从产品任务执行，拒绝/迟到连接由本队列移出回调栈。 */
+static void deferred_disconnect_task(void *argument)
+{
+    (void)argument;
+    tirtc_conn_t connection;
+    for (;;) {
+        if (xQueueReceive(s_disconnect_queue, &connection, portMAX_DELAY) == pdTRUE &&
+            connection != NULL) {
+            (void)TiRtcDisconnect(connection);
+        }
+    }
+}
+
+static bool defer_disconnect(tirtc_conn_t connection)
+{
+    if (connection == NULL || s_disconnect_queue == NULL ||
+        xQueueSend(s_disconnect_queue, &connection, 0) != pdTRUE) {
+        ESP_LOGE(TAG, "cannot defer rejected connection cleanup");
+        return false;
+    }
+    return true;
+}
+
+static int start_disconnect_worker(void)
+{
+    if (s_disconnect_queue != NULL) {
+        return 0;
+    }
+    s_disconnect_queue = xQueueCreate(DEFERRED_DISCONNECT_DEPTH,
+                                      sizeof(tirtc_conn_t));
+    if (s_disconnect_queue == NULL) {
+        return TIRTC_E_LACK_OF_RESOURCE;
+    }
+    if (xTaskCreate(deferred_disconnect_task,
+                    "tirtc_cleanup",
+                    4096,
+                    NULL,
+                    7,
+                    &s_disconnect_task) != pdPASS) {
+        vQueueDelete(s_disconnect_queue);
+        s_disconnect_queue = NULL;
+        return TIRTC_E_LACK_OF_RESOURCE;
+    }
+    return 0;
+}
+
+static void stop_disconnect_worker(void)
+{
+    if (s_disconnect_task != NULL) {
+        vTaskDelete(s_disconnect_task);
+        s_disconnect_task = NULL;
+    }
+    if (s_disconnect_queue != NULL) {
+        vQueueDelete(s_disconnect_queue);
+        s_disconnect_queue = NULL;
+    }
+}
 
 /* SDK 回调携带 opaque handle，只允许当前原子槽位中的 handle 改变状态。 */
 static bool connection_matches(tirtc_conn_t connection)
@@ -123,7 +186,7 @@ static void on_conn_accepted(tirtc_conn_t connection)
     /* AI 占用媒体路径时拒绝 H5；其他时候用 CAS 保证只接受第一条入站连接。 */
     if (!atomic_load_explicit(&s_accept_h5, memory_order_acquire)) {
         ESP_LOGW(TAG, "H5 connection arrived while AI owns the media path; rejecting");
-        (void)TiRtcDisconnect(connection);
+        (void)defer_disconnect(connection);
         return;
     }
     uintptr_t expected = 0;
@@ -133,7 +196,7 @@ static void on_conn_accepted(tirtc_conn_t connection)
                                                   memory_order_acq_rel,
                                                   memory_order_acquire)) {
         ESP_LOGW(TAG, "additional H5 connection rejected");
-        (void)TiRtcDisconnect(connection);
+        (void)defer_disconnect(connection);
         return;
     }
     clear_subscriptions();
@@ -185,7 +248,7 @@ static void on_ai_connect(int error, tirtc_conn_t connection, void *user_data)
     if (request == 0U ||
         request != atomic_load_explicit(&s_pending_request, memory_order_acquire)) {
         if (error == 0 && connection != NULL) {
-            (void)TiRtcDisconnect(connection);
+            (void)defer_disconnect(connection);
         }
         return;
     }
@@ -205,7 +268,7 @@ static void on_ai_connect(int error, tirtc_conn_t connection, void *user_data)
                                                   memory_order_acq_rel,
                                                   memory_order_acquire)) {
         ESP_LOGW(TAG, "AI connection completed after another connection won");
-        (void)TiRtcDisconnect(connection);
+        (void)defer_disconnect(connection);
         notify_connection(STARTER_TIRTC_AI, 0, request_tag, false, TIRTC_E_BUSY);
         return;
     }
@@ -232,7 +295,13 @@ static void on_audio(tirtc_conn_t connection,
     /* 只把协议规定的下行音频流交给媒体模块，其余流在适配层丢弃。 */
     bool expected = (mode == STARTER_TIRTC_H5 && frame->stream_id == 14U) ||
                     (mode == STARTER_TIRTC_AI && frame->stream_id == AI_AUDIO_STREAM);
-    if (!expected) {
+    if (!expected || frame->media != TIRTC_AUDIO_ALAW ||
+        frame->flags != TIRTC_AUDIOSAMPLE_8K16B1C) {
+        ESP_LOGW(TAG,
+                 "dropping unsupported audio stream=%u media=%u flags=%u",
+                 frame->stream_id,
+                 frame->media,
+                 frame->flags);
         return;
     }
     starter_tirtc_frame_t copy = {
@@ -376,6 +445,7 @@ int starter_tirtc_start(const starter_tirtc_config_t *config)
 {
     if (config == NULL || config->device_id == NULL || config->device_id[0] == '\0' ||
         config->device_secret == NULL || config->device_secret[0] == '\0' ||
+        config->service_endpoint == NULL || config->service_endpoint[0] == '\0' ||
         s_initialized) {
         return TIRTC_E_INVALID_PARAMETER;
     }
@@ -395,9 +465,13 @@ int starter_tirtc_start(const starter_tirtc_config_t *config)
     rc = TiRtcInit();
     if (rc != 0) return rc;
     s_initialized = true;
-    if ((rc = set_string_option(TIRTC_OPT_DEVICE_SECRET_KEY,
+    if ((rc = start_disconnect_worker()) != 0 ||
+        (rc = set_string_option(TIRTC_OPT_SERVICE_ENDPOINT,
+                                config->service_endpoint)) != 0 ||
+        (rc = set_string_option(TIRTC_OPT_DEVICE_SECRET_KEY,
                                 config->device_secret)) != 0 ||
         (rc = set_string_option(TIRTC_OPT_CLIENT_ID, config->client_id)) != 0) {
+        stop_disconnect_worker();
         TiRtcUninit();
         s_initialized = false;
         return rc;
@@ -411,6 +485,7 @@ int starter_tirtc_start(const starter_tirtc_config_t *config)
                              &max_connections,
                              sizeof(max_connections))) != 0 ||
         (rc = TiRtcStart(config->device_id, &s_callbacks)) != 0) {
+        stop_disconnect_worker();
         TiRtcUninit();
         s_initialized = false;
         return rc;
@@ -520,10 +595,11 @@ int starter_tirtc_send_alaw(uint32_t timestamp_ms,
     return TiRtcSendAudioStream(connection, &frame, data);
 }
 
-int starter_tirtc_send_h264(uint32_t timestamp_ms,
-                            bool key_frame,
-                            const void *data,
-                            uint32_t length)
+int starter_tirtc_send_video(starter_video_codec_t codec,
+                             uint32_t timestamp_ms,
+                             bool key_frame,
+                             const void *data,
+                             uint32_t length)
 {
     tirtc_conn_t connection = (tirtc_conn_t)atomic_load_explicit(
         &s_connection, memory_order_acquire);
@@ -531,15 +607,57 @@ int starter_tirtc_send_h264(uint32_t timestamp_ms,
         data == NULL || length == 0U) {
         return TIRTC_E_INVALID_PARAMETER;
     }
-    /* 一个 data 缓冲应包含一个 Annex-B access unit，IDR 时设置关键帧标志。 */
+    uint8_t media;
+    switch (codec) {
+    case STARTER_VIDEO_MJPEG: media = TIRTC_VIDEO_JPEG; break;
+    case STARTER_VIDEO_H264: media = TIRTC_VIDEO_H264; break;
+    case STARTER_VIDEO_H265: media = TIRTC_VIDEO_H265; break;
+    default: return TIRTC_E_INVALID_PARAMETER;
+    }
+    /* data 必须是一个完整 JPEG 或一个完整 Annex-B access unit。 */
     TIRTCFRAMEINFO frame = {
         .stream_id = H5_VIDEO_STREAM,
-        .media = TIRTC_VIDEO_H264,
+        .media = media,
         .flags = key_frame ? TIRTC_FRAME_FLAG_KEY_FRAME : 0,
         .ts = timestamp_ms,
         .length = length,
     };
     return TiRtcSendVideoStream(connection, &frame, data);
+}
+
+int starter_tirtc_send_jpeg(uint32_t timestamp_ms,
+                            const void *data,
+                            uint32_t length)
+{
+    return starter_tirtc_send_video(STARTER_VIDEO_MJPEG,
+                                    timestamp_ms,
+                                    true,
+                                    data,
+                                    length);
+}
+
+int starter_tirtc_send_h264(uint32_t timestamp_ms,
+                            bool key_frame,
+                            const void *data,
+                            uint32_t length)
+{
+    return starter_tirtc_send_video(STARTER_VIDEO_H264,
+                                    timestamp_ms,
+                                    key_frame,
+                                    data,
+                                    length);
+}
+
+int starter_tirtc_send_h265(uint32_t timestamp_ms,
+                            bool key_frame,
+                            const void *data,
+                            uint32_t length)
+{
+    return starter_tirtc_send_video(STARTER_VIDEO_H265,
+                                    timestamp_ms,
+                                    key_frame,
+                                    data,
+                                    length);
 }
 
 bool starter_tirtc_audio_ready(void)

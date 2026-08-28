@@ -4,6 +4,10 @@
 
 模板不内置媒体文件，也不自动生成音视频帧。没有接入板级媒体适配器时，工程可以完成配网、绑定、MQTT、TiRTC、H5 和 AI 会话流程，但不会向 H5/AI 发送媒体，也不会从物理扬声器或屏幕输出收到的媒体。
 
+`platform-media-contract.json` 固定平台/Web 支持的 stream、媒体类型和发送边界；
+板级 `board-video-contract.json` 必须从其中选择一个视频 profile。平台支持某种编码
+不等于开发板能生成该编码。
+
 ## 构建和烧录
 
 准备 ESP-IDF 5.5.x 环境后执行：
@@ -40,7 +44,9 @@ restart
 设备处于 `waiting` 时接受一个 H5 连接。接入板级媒体适配器后：
 
 - 音频上行使用 stream `10`，格式为 G.711 A-law、8 kHz、单声道；
-- 视频上行使用 stream `11`，格式为 H.264 Annex-B；
+- 视频上行使用 stream `11`；平台/Web 支持 MJPEG、H.264、H.265，本工程必须
+  根据板级合同固定选择一种。MJPEG 每次发送完整 JPEG，H.264/H.265 每次发送
+  完整 Annex-B access unit；
 - H5 下行语音使用 stream `14`，SDK 回调复制到固定队列后由媒体任务消费；
 - H5 请求关键帧时，`starter_media_request_key_frame()` 通知产品编码器产生 IDR。
 
@@ -90,7 +96,7 @@ third_party/tirtc/             TiRTC SDK 2.3.0
 
 代码中的 `TODO(product-...)` 是预留的产品适配点：
 
-- `TODO(product-media-capture)`：启动/停止麦克风、摄像头和编码任务，并提交 G.711A/H.264 帧；
+- `TODO(product-media-capture)`：启动/停止麦克风、摄像头和编码任务，并提交 G.711A 与板级合同选定的视频帧；
 - `TODO(product-media-keyframe)`：把 H5 关键帧请求转成编码器 IDR 请求；
 - `TODO(product-media-playback)`：把下行 A-law 解码成 PCM 并写入 I2S 扬声器；
 - `TODO(product-media-display)`：有屏设备增加非阻塞视频接收、解码和显示适配；
