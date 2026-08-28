@@ -39,7 +39,7 @@ func TestVoipDeviceCallSeparatesJWTAndBusinessErrors(t *testing.T) {
 		"wx_app_id":       wxAppID,
 		"wx_user_openid":  wxOpenID,
 		"wx_room_type":    "voice",
-		"wx_version_type": 2,
+		"wx_version_type": 0,
 	})
 	if err != nil {
 		t.Fatal(err)

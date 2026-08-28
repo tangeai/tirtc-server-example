@@ -1229,7 +1229,7 @@ static void handle_voip_callers_response(const char *body)
          cJSON_AddStringToObject(request, "wx_user_openid", open_id) &&
          cJSON_AddStringToObject(request, "wx_model_id", model_id) &&
          cJSON_AddStringToObject(request, "wx_room_type", "voice") &&
-         cJSON_AddNumberToObject(request, "wx_version_type", 2);
+         cJSON_AddNumberToObject(request, "wx_version_type", 0);
     char *request_body = ok ? cJSON_PrintUnformatted(request) : NULL;
     cJSON_Delete(request);
     if (request_body == NULL) {

@@ -1,0 +1,5 @@
+interface:
+  display_name: "TiRTC Embedded Builder"
+  short_description: "从开发板资料生成并验证 TiRTC Web/AI 固件"
+  default_prompt: "Use $tirtc-embedded-builder to analyze my ESP32 board materials and build a TiRTC H5 live-view and AI intercom project."
+

@@ -1459,7 +1459,7 @@ int voip_do_outgoing_call_ex(VoipState *vs, const cJSON *caller,
         !cJSON_AddStringToObject(body, "wx_model_id", model_id->valuestring) ||
         !cJSON_AddStringToObject(body, "wx_room_type",
                                  video_call ? "video" : "voice") ||
-        !cJSON_AddNumberToObject(body, "wx_version_type", 2)) {
+        !cJSON_AddNumberToObject(body, "wx_version_type", 0)) {
         cJSON_Delete(body);
         LOG_W("微信 VoIP 外呼 JSON 分配失败");
         return -1;

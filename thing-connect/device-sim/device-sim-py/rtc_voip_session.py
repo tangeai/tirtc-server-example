@@ -682,7 +682,7 @@ class VoipCallState:
                 "wx_user_openid":  target_openid,
                 "wx_model_id":     wx_model_id,
                 "wx_room_type":    "video" if call_type == "video" else "voice",
-                "wx_version_type": 2,
+                "wx_version_type": 0,
             }
             # 先设置带代次的 provisional 外呼状态，再申请 RTC。这样 MQTT
             # 在所有权切换边界到达时，也不会把反向来电误认成本次回铃。
