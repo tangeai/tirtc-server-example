@@ -87,9 +87,9 @@ number.alaw_8khz
 设备没有 Wi-Fi 配置时会启动：
 
 ```text
-SSID: TiRTC-Setup-XXXX
-密码: tirtc1234
-网页: http://192.168.4.1
+SSID: TiRTC-XXXX
+认证: 开放热点，无需密码
+网页: http://192.168.6.1
 ```
 
 网页提交 SSID/密码后写入 NVS 并重启。也可使用串口：

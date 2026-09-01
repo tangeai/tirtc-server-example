@@ -27,7 +27,11 @@
 #define WIFI_NVS_SSID "ssid"
 #define WIFI_NVS_PASSWORD "password"
 #define WIFI_CONNECT_RETRIES 5
-#define WIFI_SETUP_PASSWORD "tirtc1234"
+#define WIFI_SETUP_URL "http://192.168.6.1"
+#define WIFI_SETUP_IP_A 192
+#define WIFI_SETUP_IP_B 168
+#define WIFI_SETUP_IP_C 6
+#define WIFI_SETUP_IP_D 1
 
 static const char *TAG = "wifi_manager";
 static bool s_started;
@@ -257,6 +261,38 @@ static void start_http_server(void)
     (void)httpd_register_uri_handler(s_http_server, &api);
 }
 
+static esp_err_t configure_provisioning_netif(esp_netif_t *ap_netif)
+{
+    if (ap_netif == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    esp_netif_dhcp_status_t dhcp_status = ESP_NETIF_DHCP_INIT;
+    esp_err_t err = esp_netif_dhcps_get_status(ap_netif, &dhcp_status);
+    if (err != ESP_OK) {
+        return err;
+    }
+    bool restart_dhcp = dhcp_status == ESP_NETIF_DHCP_STARTED;
+    if (restart_dhcp) {
+        err = esp_netif_dhcps_stop(ap_netif);
+        if (err != ESP_OK) {
+            return err;
+        }
+    }
+
+    esp_netif_ip_info_t ip_info = {0};
+    esp_netif_set_ip4_addr(&ip_info.ip, WIFI_SETUP_IP_A, WIFI_SETUP_IP_B,
+                           WIFI_SETUP_IP_C, WIFI_SETUP_IP_D);
+    esp_netif_set_ip4_addr(&ip_info.gw, WIFI_SETUP_IP_A, WIFI_SETUP_IP_B,
+                           WIFI_SETUP_IP_C, WIFI_SETUP_IP_D);
+    esp_netif_set_ip4_addr(&ip_info.netmask, 255, 255, 255, 0);
+    err = esp_netif_set_ip_info(ap_netif, &ip_info);
+    if (err != ESP_OK || !restart_dhcp) {
+        return err;
+    }
+    return esp_netif_dhcps_start(ap_netif);
+}
+
 static void start_provisioning(void)
 {
     if (s_provisioning) {
@@ -266,29 +302,26 @@ static void start_provisioning(void)
     esp_read_mac(mac, ESP_MAC_WIFI_STA);
     (void)snprintf(s_provisioning_ssid,
                    sizeof(s_provisioning_ssid),
-                   "TiRTC-Setup-%02X%02X",
+                   "TiRTC-%02X%02X",
                    mac[4],
                    mac[5]);
 
     /* AP 名称后缀来自 STA MAC，方便同时调试多块开发板。 */
     wifi_config_t ap = {0};
     size_t ap_ssid_length = strlen(s_provisioning_ssid);
-    size_t ap_password_length = strlen(WIFI_SETUP_PASSWORD);
     memcpy(ap.ap.ssid, s_provisioning_ssid, ap_ssid_length);
-    memcpy(ap.ap.password, WIFI_SETUP_PASSWORD, ap_password_length);
     ap.ap.ssid_len = ap_ssid_length;
     ap.ap.channel = 1;
     ap.ap.max_connection = 4;
-    ap.ap.authmode = WIFI_AUTH_WPA2_PSK;
+    ap.ap.authmode = WIFI_AUTH_OPEN;
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap));
     s_provisioning = true;
     start_http_server();
     ESP_LOGW(TAG,
-             "provisioning active: connect SSID=%s password=%s, then open http://192.168.4.1",
-             s_provisioning_ssid,
-             WIFI_SETUP_PASSWORD);
+             "provisioning active: connect open SSID=%s, then open %s",
+             s_provisioning_ssid, WIFI_SETUP_URL);
 }
 
 static void wifi_event(void *argument,
@@ -333,8 +366,17 @@ esp_err_t wifi_manager_start(void)
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
         return err;
     }
-    (void)esp_netif_create_default_wifi_sta();
-    (void)esp_netif_create_default_wifi_ap();
+    esp_netif_t *sta_netif = esp_netif_create_default_wifi_sta();
+    esp_netif_t *ap_netif = esp_netif_create_default_wifi_ap();
+    if (sta_netif == NULL || ap_netif == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+    err = configure_provisioning_netif(ap_netif);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "cannot configure provisioning address: %s",
+                 esp_err_to_name(err));
+        return err;
+    }
 
     wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
     err = esp_wifi_init(&init);

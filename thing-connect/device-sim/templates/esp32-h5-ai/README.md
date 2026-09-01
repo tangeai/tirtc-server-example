@@ -22,7 +22,7 @@ idf.py -p <SERIAL_PORT> flash monitor
 
 ## 首次启动
 
-1. 设备没有 Wi-Fi 配置时启动 `TiRTC-Setup-XXXX` SoftAP，密码为 `tirtc1234`；连接后打开 `http://192.168.4.1` 填写 Wi-Fi。
+1. 设备没有 Wi-Fi 配置时启动 `TiRTC-XXXX` 开放 SoftAP，无需密码；连接后打开 `http://192.168.6.1` 填写 Wi-Fi。
 2. 设备联网后在串口打印绑定验证码和体验平台地址。
 3. 在 H5 完成设备绑定。凭证保存到 NVS，设备随后完成服务发现、MQTT 登录和 TiRTC 启动。
 4. 串口输入 `status` 查看平台、MQTT、TiRTC、会话和媒体计数。

@@ -94,6 +94,20 @@ class CreateEsp32ProjectTest(unittest.TestCase):
             self.assertNotIn("VoIP", readme)
             self.assertNotIn("设备互呼", readme)
 
+            wifi_source = (
+                output / "components/wifi_manager/src/wifi_manager.c"
+            ).read_text(encoding="utf-8")
+            self.assertIn('"TiRTC-%02X%02X"', wifi_source)
+            self.assertIn("ap.ap.authmode = WIFI_AUTH_OPEN", wifi_source)
+            self.assertIn(
+                "esp_netif_set_ip4_addr(&ip_info.ip, WIFI_SETUP_IP_A,",
+                wifi_source,
+            )
+            self.assertIn('"http://192.168.6.1"', wifi_source)
+            self.assertNotIn("WIFI_SETUP_PASSWORD", wifi_source)
+            self.assertNotIn("TiRTC-Setup-", wifi_source)
+            self.assertNotIn("192.168.4.1", wifi_source)
+
     def test_does_not_overwrite_existing_output(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             output = Path(temp_dir) / "existing"
