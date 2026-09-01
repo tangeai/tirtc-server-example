@@ -5,7 +5,8 @@
  * @file wifi_manager.h
  * @brief Wi-Fi STA 连接和首次 SoftAP 配网。
  *
- * 有可用 NVS 配置时连接 STA；配置缺失或重试耗尽时同时开启 SoftAP 和配置页。
+ * 有可用 NVS 配置时连接 STA；配置缺失或重试耗尽时同时开启 SoftAP、captive
+ * portal 自动发现和配置页。
  * 模块关闭 Wi-Fi 省电以降低实时音视频抖动。
  */
 

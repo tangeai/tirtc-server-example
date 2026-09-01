@@ -104,9 +104,23 @@ class CreateEsp32ProjectTest(unittest.TestCase):
                 wifi_source,
             )
             self.assertIn('"http://192.168.6.1"', wifi_source)
+            self.assertIn("ESP_NETIF_CAPTIVEPORTAL_URI", wifi_source)
+            self.assertIn("httpd_register_err_handler", wifi_source)
+            self.assertIn("wifi_captive_dns_start", wifi_source)
             self.assertNotIn("WIFI_SETUP_PASSWORD", wifi_source)
             self.assertNotIn("TiRTC-Setup-", wifi_source)
             self.assertNotIn("192.168.4.1", wifi_source)
+
+            dns_source = (
+                output / "components/wifi_manager/src/wifi_captive_dns.c"
+            ).read_text(encoding="utf-8")
+            wifi_cmake = (
+                output / "components/wifi_manager/CMakeLists.txt"
+            ).read_text(encoding="utf-8")
+            self.assertIn("wildcard DNS listening", dns_source)
+            self.assertIn("DNS_FLAG_RESPONSE", dns_source)
+            self.assertIn('"src/wifi_captive_dns.c"', wifi_cmake)
+            self.assertIn("lwip", wifi_cmake)
 
     def test_does_not_overwrite_existing_output(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -6,6 +6,7 @@
  * 实时媒体要求关闭 Wi-Fi power save，避免 KCP 音视频排队和抖动。
  */
 #include "wifi_manager.h"
+#include "wifi_captive_dns.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -235,17 +236,29 @@ static esp_err_t wifi_config_post(httpd_req_t *request)
     return response;
 }
 
-static void start_http_server(void)
+static esp_err_t captive_portal_redirect(httpd_req_t *request,
+                                         httpd_err_code_t error)
+{
+    (void)error;
+    httpd_resp_set_status(request, "303 See Other");
+    httpd_resp_set_hdr(request, "Location", WIFI_SETUP_URL);
+    httpd_resp_set_type(request, "text/plain; charset=utf-8");
+    return httpd_resp_sendstr(request, "打开 TiRTC 配网页面");
+}
+
+static esp_err_t start_http_server(void)
 {
     if (s_http_server != NULL) {
-        return;
+        return ESP_OK;
     }
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.max_uri_handlers = 4;
-    if (httpd_start(&s_http_server, &config) != ESP_OK) {
+    config.lru_purge_enable = true;
+    esp_err_t err = httpd_start(&s_http_server, &config);
+    if (err != ESP_OK) {
         s_http_server = NULL;
         ESP_LOGE(TAG, "cannot start provisioning HTTP server");
-        return;
+        return err;
     }
     const httpd_uri_t page = {
         .uri = "/",
@@ -257,8 +270,22 @@ static void start_http_server(void)
         .method = HTTP_POST,
         .handler = wifi_config_post,
     };
-    (void)httpd_register_uri_handler(s_http_server, &page);
-    (void)httpd_register_uri_handler(s_http_server, &api);
+    err = httpd_register_uri_handler(s_http_server, &page);
+    if (err == ESP_OK) {
+        err = httpd_register_uri_handler(s_http_server, &api);
+    }
+    if (err == ESP_OK) {
+        err = httpd_register_err_handler(s_http_server,
+                                         HTTPD_404_NOT_FOUND,
+                                         captive_portal_redirect);
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "cannot register provisioning HTTP handlers: %s",
+                 esp_err_to_name(err));
+        (void)httpd_stop(s_http_server);
+        s_http_server = NULL;
+    }
+    return err;
 }
 
 static esp_err_t configure_provisioning_netif(esp_netif_t *ap_netif)
@@ -287,6 +314,13 @@ static esp_err_t configure_provisioning_netif(esp_netif_t *ap_netif)
                            WIFI_SETUP_IP_C, WIFI_SETUP_IP_D);
     esp_netif_set_ip4_addr(&ip_info.netmask, 255, 255, 255, 0);
     err = esp_netif_set_ip_info(ap_netif, &ip_info);
+    if (err == ESP_OK) {
+        err = esp_netif_dhcps_option(ap_netif,
+                                     ESP_NETIF_OP_SET,
+                                     ESP_NETIF_CAPTIVEPORTAL_URI,
+                                     (void *)WIFI_SETUP_URL,
+                                     strlen(WIFI_SETUP_URL));
+    }
     if (err != ESP_OK || !restart_dhcp) {
         return err;
     }
@@ -318,9 +352,25 @@ static void start_provisioning(void)
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap));
     s_provisioning = true;
-    start_http_server();
+    esp_err_t err = start_http_server();
+    if (err == ESP_OK) {
+        esp_netif_t *ap_netif = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+        esp_netif_ip_info_t ip_info = {0};
+        if (ap_netif == NULL) {
+            err = ESP_ERR_NOT_FOUND;
+        } else {
+            err = esp_netif_get_ip_info(ap_netif, &ip_info);
+        }
+        if (err == ESP_OK) {
+            err = wifi_captive_dns_start(ip_info.ip.addr);
+        }
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "cannot start captive portal DNS: %s",
+                     esp_err_to_name(err));
+        }
+    }
     ESP_LOGW(TAG,
-             "provisioning active: connect open SSID=%s, then open %s",
+             "provisioning active: connect open SSID=%s; captive portal=%s",
              s_provisioning_ssid, WIFI_SETUP_URL);
 }
 

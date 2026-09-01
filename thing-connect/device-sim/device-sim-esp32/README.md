@@ -17,7 +17,8 @@ H5 实时、AI 对讲、VoIP 和设备互呼均为纯音频，不保存下行音
 - SPIFFS 媒体分区、`media_profile.json`、音频素材启动校验和按 PTS 循环发送。
 - TiRTC 上行音频流 ID 为 10；入站连接等待对端订阅，外连等待业务确认后才开始发送。
 - `alaw`（G.711 A-law）8 kHz 单声道固定包读取器。
-- Wi-Fi NVS 持久化、串口修改、无配置/连接失败时的 SoftAP 配网页面。
+- Wi-Fi NVS 持久化、串口修改、无配置/连接失败时带 captive portal 自动发现的
+  SoftAP 配网页面。
 - STA 关闭 Wi-Fi 省电模式，避免实时 KCP 音频因休眠产生排队和抖动。
 - 首次验证码绑定、临时 MQTT `auth_grant`/ACK、设备凭证 NVS 持久化和解绑重绑。
 - 服务发现、SNTP、HMAC-SHA256 设备登录、业务 HTTP、永久 MQTT、ACK 和心跳。
@@ -92,6 +93,8 @@ SSID: TiRTC-XXXX
 网页: http://192.168.6.1
 ```
 
+Android、iOS、Windows 等支持 captive portal 探测的客户端通常会在连接热点后自动
+显示配网页面；没有弹窗时手动打开上述 HTTP 地址。HTTPS 页面不能被透明重定向。
 网页提交 SSID/密码后写入 NVS 并重启。也可使用串口：
 
 ```text
