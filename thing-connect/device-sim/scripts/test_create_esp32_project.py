@@ -104,9 +104,9 @@ class CreateEsp32ProjectTest(unittest.TestCase):
                 wifi_source,
             )
             self.assertIn('"http://192.168.6.1"', wifi_source)
-            self.assertIn("ESP_NETIF_CAPTIVEPORTAL_URI", wifi_source)
             self.assertIn("httpd_register_err_handler", wifi_source)
             self.assertIn("wifi_captive_dns_start", wifi_source)
+            self.assertNotIn("ESP_NETIF_CAPTIVEPORTAL_URI", wifi_source)
             self.assertNotIn("WIFI_SETUP_PASSWORD", wifi_source)
             self.assertNotIn("TiRTC-Setup-", wifi_source)
             self.assertNotIn("192.168.4.1", wifi_source)

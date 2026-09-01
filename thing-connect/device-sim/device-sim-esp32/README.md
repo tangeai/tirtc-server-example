@@ -93,8 +93,9 @@ SSID: TiRTC-XXXX
 网页: http://192.168.6.1
 ```
 
-Android、iOS、Windows 等支持 captive portal 探测的客户端通常会在连接热点后自动
-显示配网页面；没有弹窗时手动打开上述 HTTP 地址。HTTPS 页面不能被透明重定向。
+设备通过通配 DNS 和 HTTP 重定向响应 Android、iOS、Windows 等客户端的 captive
+portal 探测，连接热点后通常会自动显示配网页面；没有弹窗时手动打开上述 HTTP
+地址。HTTPS 页面不能被透明重定向。
 网页提交 SSID/密码后写入 NVS 并重启。也可使用串口：
 
 ```text

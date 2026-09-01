@@ -314,13 +314,12 @@ static esp_err_t configure_provisioning_netif(esp_netif_t *ap_netif)
                            WIFI_SETUP_IP_C, WIFI_SETUP_IP_D);
     esp_netif_set_ip4_addr(&ip_info.netmask, 255, 255, 255, 0);
     err = esp_netif_set_ip_info(ap_netif, &ip_info);
-    if (err == ESP_OK) {
-        err = esp_netif_dhcps_option(ap_netif,
-                                     ESP_NETIF_OP_SET,
-                                     ESP_NETIF_CAPTIVEPORTAL_URI,
-                                     (void *)WIFI_SETUP_URL,
-                                     strlen(WIFI_SETUP_URL));
-    }
+    /*
+     * Do not advertise DHCP option 114 here. RFC 8910 requires that URI to be
+     * an RFC 8908 HTTPS/JSON API endpoint; this provisioning server is a local
+     * HTTP page. Legacy captive-portal probes are handled by wildcard DNS and
+     * the HTTP redirect instead.
+     */
     if (err != ESP_OK || !restart_dhcp) {
         return err;
     }
