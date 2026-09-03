@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="基于 TiRTC 的开源设备音视频示例系统，帮助嵌入式开发者快速实现远程实时查看、AI 音视频对讲、设备间音视频对讲和设备呼微信小程序 VoIP 对讲。">
+  <meta name="description" content="TiRTC 开源设备音视频示例系统，包含设备模拟器、服务端、Web/H5 和设备端参考实现，可用于验证远程实时查看、AI 音视频对讲、设备间音视频对讲和设备呼叫微信小程序 VoIP 对讲。">
   <title>TiRTC 开源示例 · 快速开发设备音视频产品</title>
   <script>document.documentElement.classList.add("js");</script>
   <style>
@@ -1517,11 +1517,11 @@
           <div class="eyebrow"><span class="eyebrow-dot"></span>OPEN-SOURCE TIRTC EXAMPLES FOR DEVICES</div>
           <h1>用 TiRTC<br><em>快速开发音视频设备</em></h1>
           <p class="hero-copy">
-            一套基于 TiRTC P2P 实时音视频 SDK 的开源示例系统，提供设备模拟器、服务端、Web/H5 和设备端参考实现，帮助嵌入式开发者快速跑通完整业务链路。
+            这套开源示例包含设备模拟器、服务端、Web/H5 和设备端参考实现。在电脑上完成 TiRTC P2P 实时音视频链路验证后，即可将相关能力接入嵌入式设备。
           </p>
           <div class="hero-actions">
-            <a class="button button-primary" href="https://github.com/tangeai/tirtc-server-example/blob/main/thing-connect/device-sim/device-sim-py/README.md" target="_blank" rel="noreferrer">开始模拟器教程 <span class="arrow">→</span></a>
-            <a class="button button-secondary" href="#demo">观看功能示例</a>
+            <a class="button button-primary" href="https://github.com/tangeai/tirtc-server-example/blob/main/thing-connect/device-sim/device-sim-py/README.md" target="_blank" rel="noreferrer">开始使用设备模拟器 <span class="arrow">→</span></a>
+            <a class="button button-secondary" href="#demo">查看功能演示</a>
           </div>
           <div class="hero-note">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
@@ -1531,7 +1531,7 @@
             无需开发板 · 支持 Windows、macOS Apple Silicon、Ubuntu x86_64
           </div>
           <div class="hero-mirror">
-            <span>GitHub 下载较慢？</span>
+            <span>GitHub 下载速度较慢？</span>
             <a href="https://gitee.com/tange-ai/tirtc-server-example" target="_blank" rel="noreferrer">使用 Gitee 国内镜像</a>
             <small>（同步可能稍有延迟）</small>
           </div>
@@ -1592,14 +1592,14 @@
               </div>
             </div>
             <div class="terminal-divider"></div>
-            <div class="terminal-line terminal-muted">复制以上命令运行成功后，在浏览器打开：</div>
+            <div class="terminal-line terminal-muted">命令运行成功后，打开体验平台：</div>
             <div class="terminal-line">
               <a class="terminal-link" href="https://demo-open.tange-ai.com/" target="_blank" rel="noreferrer">https://demo-open.tange-ai.com/</a>
             </div>
             <div class="live-status">
               <div>
-                <strong>TiRTC 设备示例已连接</strong>
-                <small>可以开始验证四项产品功能</small>
+                <strong>TiRTC 设备模拟器已连接</strong>
+                <small>可开始验证各项音视频功能</small>
               </div>
               <span class="live-badge"><i></i> ONLINE</span>
             </div>
@@ -1624,27 +1624,27 @@
         </div>
         <div class="trust-item">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M8 3h8a5 5 0 0 1 5 5v4a5 5 0 0 1-5 5h-3l-5 4v-4a5 5 0 0 1-5-5V8a5 5 0 0 1 5-5Z"/></svg>
-          设备呼微信小程序 VoIP 对讲
+          设备呼叫微信小程序 VoIP 对讲
         </div>
       </div>
     </section>
 
     <section class="routes" id="routes">
       <div class="shell">
-        <div class="section-heading reveal">
+        <div class="section-heading final-cta-heading reveal">
           <div class="section-kicker">Learn TiRTC by example</div>
-          <h2>先跑通示例，再开发自己的产品</h2>
-          <p>第一步运行开源设备模拟器；第二步跟随功能视频，了解如何用 TiRTC 实现四类常见业务。</p>
+          <h2>完成示例验证，进入产品开发</h2>
+          <p>在电脑上启动设备模拟器，完成设备上线、绑定和音视频验证。功能演示将介绍 TiRTC 在常见场景中的应用。</p>
         </div>
 
         <article class="setup-step reveal">
           <span class="setup-number">01</span>
           <div class="setup-copy">
-            <h3>下载并运行 TiRTC 设备模拟器</h3>
-            <p>安装 CPython 3.10–3.14，在电脑上完成设备上线、绑定和音视频验证。</p>
+            <h3>运行 TiRTC 设备模拟器</h3>
+            <p>安装 CPython 3.10–3.14，按照教程启动模拟设备，完成设备上线、绑定及音视频收发验证。</p>
           </div>
           <ul class="setup-requirements">
-            <li>Windows / Ubuntu x86_64</li>
+            <li>Windows/Ubuntu x86_64</li>
             <li>macOS Apple Silicon</li>
             <li>无需开发板</li>
           </ul>
@@ -1655,8 +1655,8 @@
           <div class="video-step-heading reveal">
             <span class="setup-number">02</span>
             <div>
-              <h3>直接观看功能视频演示</h3>
-              <p>先了解 TiRTC 能实现什么；模拟器成功上线并绑定后，再跟随视频逐项操作。</p>
+              <h3>常用功能演示</h3>
+              <p>设备模拟器上线并完成绑定后，可按照视频完成各项功能验证。</p>
             </div>
           </div>
 
@@ -1670,8 +1670,8 @@
                 <button class="video-play-button" type="button" aria-label="播放设备远程查看实时音视频演示"><span class="video-play-icon" aria-hidden="true"></span>播放演示</button>
                 <span class="video-label"><i></i> 远程实时查看</span>
               </div>
-              <h3>设备远程查看实时音视频</h3>
-              <p>演示设备如何通过 TiRTC 推送音视频，并在 Web 体验平台（H5）中完成远程实时查看。</p>
+              <h3>远程查看设备的实时音视频</h3>
+              <p>设备通过 TiRTC 推送音视频，可在 Web 体验平台（H5）中实时查看。</p>
             </article>
 
             <article class="video-card reveal">
@@ -1680,11 +1680,11 @@
                   <source src="https://demo-open.tange-ai.com/download/videos/ai-call.mp4" type="video/mp4">
                   当前浏览器不支持视频播放。
                 </video>
-                <button class="video-play-button" type="button" aria-label="播放 AI 语音对讲与设备呼叫演示"><span class="video-play-icon" aria-hidden="true"></span>播放演示</button>
+                <button class="video-play-button" type="button" aria-label="播放 AI 对讲、设备互呼和微信小程序呼叫演示"><span class="video-play-icon" aria-hidden="true"></span>播放演示</button>
                 <span class="video-label"><i></i> AI 对讲与设备呼叫</span>
               </div>
-              <h3>AI 语音对讲+设备呼设备+设备呼微信小程序</h3>
-              <p>当前已实现 AI语音对讲，AI控制设备呼叫设备，设备呼叫微信小程序。</p>
+              <h3>AI 对讲与设备呼叫</h3>
+              <p>支持 AI 语音对讲，可通过 AI 控制一台设备呼叫另一台设备，也可由设备呼叫微信小程序。</p>
             </article>
             <!--
             <article class="video-card reveal">
@@ -1695,8 +1695,8 @@
                 </video>
                 <span class="video-label"><i></i> 功能 03</span>
               </div>
-              <h3>设备间音视频对讲</h3>
-              <p>演示两台设备如何通过 TiRTC 建立呼叫并进行实时音视频对讲。</p>
+              <h3>设备间实时音视频对讲</h3>
+              <p>两台设备通过 TiRTC 建立呼叫后，即可进行实时音视频对讲。</p>
             </article>
 
             <article class="video-card reveal">
@@ -1708,8 +1708,8 @@
                 <span class="video-label"><i></i> 功能 04</span>
                 <span class="video-pending">视频待上传</span>
               </div>
-              <h3>设备呼微信小程序 VoIP 对讲</h3>
-              <p>演示设备如何发起呼叫，并在微信小程序中接听和进行实时音视频对讲。</p>
+              <h3>设备呼叫微信小程序 VoIP</h3>
+              <p>设备发起呼叫，微信小程序接听后，即可开始实时音视频对讲。</p>
             </article>
             -->
           </div>
@@ -1720,30 +1720,30 @@
     <section class="final-cta">
       <div class="final-cta-inner shell reveal">
         <div class="final-cta-heading">
-          <h2>跑通设备示例，接入产品工程</h2>
-          <p>选择与设备平台匹配的 TiRTC SDK 或固件，在开发板或嵌入式设备上跑通音视频，再接入自己的产品。</p>
+          <h2>完成设备验证，接入产品工程</h2>
+          <p>根据设备的操作系统和芯片选择 SDK 或预编译固件，在设备上完成音视频验证后接入产品工程。</p>
         </div>
 
         <div class="sdk-panel">
           <div>
             <span class="sdk-panel-kicker">选择设备平台</span>
             <h3>下载匹配设备的 SDK</h3>
-            <p>SDK 与操作系统、芯片和工具链对应，请按实际硬件选择。</p>
+            <p>请根据实际硬件选择与操作系统、芯片和工具链匹配的 SDK。</p>
           </div>
 
           <div>
             <div class="sdk-options">
               <a class="sdk-option" href="https://docs.tange.ai/products/tirtc/download.html" target="_blank" rel="noreferrer">
                 <span>
-                  <strong>Linux / 嵌入式 Linux</strong>
-                  <small>x86_64、ARM、MIPS 等，按工具链和 ABI 选择</small>
+                  <strong>Linux/嵌入式 Linux</strong>
+                  <small>x86_64、ARM、MIPS 等平台，需根据工具链和 ABI 选择</small>
                 </span>
                 <span>查看 SDK →</span>
               </a>
               <a class="sdk-option" href="https://docs.tange.ai/products/tirtc/download.html" target="_blank" rel="noreferrer">
                 <span>
-                  <strong>RTOS / 芯片平台</strong>
-                  <small>FreeRTOS、LiteOS 等，下载芯片专用 SDK</small>
+                  <strong>RTOS/芯片平台</strong>
+                  <small>FreeRTOS、LiteOS 等平台，请下载对应芯片的专用 SDK</small>
                 </span>
                 <span>查看 SDK →</span>
               </a>
@@ -1762,8 +1762,8 @@
         <div class="product-path">
           <article class="product-step">
             <span class="product-step-number">01</span>
-            <h3>在真实设备上跑通示例</h3>
-            <p>有预编译固件就直接烧录；没有的话，用对应 SDK 编译示例工程。先确认设备能够上线、绑定并正常收发音视频。</p>
+            <h3>在真实设备上验证示例</h3>
+            <p>如有预编译固件，可直接烧录；否则使用对应 SDK 编译示例工程。完成设备上线与绑定后，验证音视频收发是否正常。</p>
             <div class="product-resource-links">
               <a href="https://github.com/tangeai/tirtc-device-example/releases" target="_blank" rel="noreferrer">ESP32 预编译固件<span>→</span></a>
               <a href="https://github.com/tangeai/tirtc-device-example" target="_blank" rel="noreferrer">ESP32 示例工程 <span>→</span></a>
@@ -1773,7 +1773,7 @@
           <article class="product-step">
             <span class="product-step-number">02</span>
             <h3>接入产品工程</h3>
-            <p>参考 C 示例和移植文档，接入摄像头、麦克风、网络、存储等设备接口，把已经验证的链路用到自己的产品中。</p>
+            <p>参考 C 示例和移植文档，完成摄像头、麦克风、网络、存储等接口适配，并将验证过的音视频链路集成到产品中。</p>
             <div class="product-resource-links">
               <a href="https://github.com/tangeai/tirtc-server-example/tree/main/thing-connect/device-sim/device-sim-c" target="_blank" rel="noreferrer">Linux C 参考实现 <span>→</span></a>
               <a href="https://github.com/tangeai/tirtc-server-example/blob/main/thing-connect/device-porting.md" target="_blank" rel="noreferrer">设备端移植指南 <span>→</span></a>
