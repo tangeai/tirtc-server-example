@@ -1837,7 +1837,7 @@
     function resetCopyButton() {
       if (copyResetTimer) window.clearTimeout(copyResetTimer);
       copyResetTimer = null;
-      copyButtonLabel.textContent = "复制命令";
+      copyButtonLabel.textContent = "复制";
       copyButton.classList.remove("copied");
       copyButton.setAttribute("aria-label", `复制 ${terminalPlatformNames[activeTerminalPlatform]} 运行命令`);
     }
