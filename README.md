@@ -128,6 +128,10 @@ Python 模拟器已经跑通设备上线、用户绑定、MQTT 长连接和实�
 | 微信 IoT VoIP | 微信官方 IoT VoIP 能力，需在微信公众平台开通 |
 | 微信 wmpf-voip 插件 | 小程序侧通话 UI 插件（provider: `wxf830863afde621eb`） |
 
+微信 VoIP 体验需先使用微信扫描二维码：
+
+![微信 VoIP 体验二维码](images/voip/tangexiaotai-wx.png)
+
 ---
 
 ## License
