@@ -1,118 +1,87 @@
-<!-- thing-connect/weixin-mini-program/pages/devices/index.wxml -->
-<view class="page" bindtap="onPageTap">
-  <!-- 顶部导航栏 -->
+<view class="page">
   <view class="navbar">
     <text class="navbar-title">我的设备</text>
     <view class="navbar-actions">
-      <view class="icon-btn" bindtap="onEditContactRemark" bindlongpress="onCopyOpenId" aria-label="微信 OpenID 与联系人名称">
+      <view class="icon-btn" bindtap="onEditContactRemark" aria-label="联系人设置" role="button">
         <view class="icon-openid"></view>
       </view>
-      <view class="icon-btn" bindtap="logout">
+      <view class="icon-btn" bindtap="onConfirmLogout" aria-label="退出登录" role="button">
         <view class="icon-logout"></view>
       </view>
     </view>
   </view>
 
-  <!-- 添加设备按钮 -->
-  <view class="add-bar" bindtap="goAdd">
-    <view class="add-bar-left">
-      <view class="add-icon"></view>
-      <text class="add-text">添加设备</text>
-    </view>
-    <view class="add-arrow"></view>
+  <button class="add-fab" bindtap="goAdd" aria-label="添加设备">
+    <view class="add-fab-plus" aria-hidden="true"></view>
+  </button>
+
+  <view wx:if="{{loading && !initialized}}" class="state-card">
+    <view class="skeleton skeleton-title"></view>
+    <view class="skeleton skeleton-line"></view>
+    <view class="skeleton skeleton-actions"></view>
+    <text class="state-description">正在获取设备…</text>
   </view>
-
-  <!-- 列表区域 -->
-  <view class="list">
-    <!-- 首屏加载 -->
-    <view wx:if="{{loading && !initialized}}" class="loading-wrap">
-      <text class="loading-text">加载中...</text>
-    </view>
-
-    <!-- 空状态 -->
-    <view wx:elif="{{initialized && deviceList.length === 0}}" class="empty">
-      <view class="empty-img"></view>
-      <text class="empty-text">暂无设备</text>
-      <text class="empty-sub">点击上方「添加设备」开始绑定</text>
-    </view>
-
-    <!-- 设备列表 -->
-    <view wx:else class="list-inner">
-      <view wx:if="{{loading}}" class="refresh-bar">
-        <view class="refresh-indicator">
-          <view class="refresh-spinner"></view>
-          <text class="refresh-text">加载中...</text>
+  <view wx:elif="{{loadError && !deviceList.length}}" class="state-card">
+    <text class="state-title">设备列表暂时无法加载</text>
+    <text class="state-description">{{loadError}}</text>
+    <button class="state-button" bindtap="onRetry">重新加载</button>
+  </view>
+  <view wx:elif="{{initialized && !deviceList.length}}" class="state-card">
+    <view class="empty-symbol">＋</view>
+    <text class="state-title">添加你的第一台设备</text>
+    <text class="state-description">绑定后，即可实时查看、与设备通话，或设置 AI 角色。</text>
+    <button class="state-button" bindtap="goAdd">添加设备</button>
+  </view>
+  <view wx:else class="device-list">
+    <view wx:if="{{loadError}}" class="refresh-warning" bindtap="onRetry">{{loadError}} · 点击重试</view>
+    <text wx:elif="{{loading}}" class="refresh-note">正在更新设备状态…</text>
+    <view wx:for="{{deviceList}}" wx:key="device_id" class="device-card">
+      <view class="device-heading">
+        <view class="device-avatar {{item.online ? '' : 'device-avatar-offline'}}">
+          <view class="device-glyph"></view>
         </view>
-      </view>
-      <view wx:for="{{deviceList}}" wx:key="device_id" class="swipe-wrap">
-        <view class="swipe-delete-btn" data-id="{{item.device_id}}" bindtap="onUnbind">解绑</view>
-        <view
-          class="card"
-          style="transform: translateX({{item.slideX || 0}}px); transition: transform 0.22s ease;"
-          data-id="{{item.device_id}}"
-          data-index="{{index}}"
-          catchtap="noop"
-          bindtouchstart="onSwipeStart"
-          bindtouchend="onSwipeEnd"
-          bindtouchcancel="onSwipeEnd"
-        >
-          <view class="card-inner">
-            <view class="card-top">
-              <view class="card-title-row">
-                <view class="card-id-row">
-                  <view class="device-name-row">
-                    <text class="device-name">{{item.device_name || '未命名设备'}}</text>
-                    <text class="device-name-edit" data-id="{{item.device_id}}" bindtap="onEditDeviceName">修改</text>
-                  </view>
-                </view>
-                <text class="card-device-id">{{item.device_id}}</text>
-              </view>
-              <view class="card-badges">
-                <view wx:if="{{item.status === 1}}" class="badge-online-wrap">
-                  <view class="dot {{item.online ? 'dot-on' : 'dot-off'}}"></view>
-                  <text class="badge-online-text {{item.online ? 'text-on' : 'text-off'}}">{{item.online ? '在线' : '离线'}}</text>
-                </view>
-                <text wx:if="{{item.voipAuthed}}" class="badge badge-authed">已授权</text>
-                <text wx:elif="{{item.voipAuthState === 'disabled'}}" class="badge badge-auth-disabled">授权已关闭</text>
-                <text wx:elif="{{item.voipAuthState === 'unknown'}}" class="badge badge-auth-unknown">授权未知</text>
-                <text wx:if="{{item.deviceNamePending}}" class="badge badge-name-pending" bindtap="onDeviceNamePendingHelp">名称待重新授权</text>
-                <text wx:if="{{item.hasCamera}}" class="badge badge-video-in">摄像头</text>
-                <text wx:if="{{item.hasScreen}}" class="badge badge-video-out">带屏</text>
-              </view>
-            </view>
-            <view wx:if="{{item.mac}}" class="card-meta">
-              <text class="meta-key">MAC</text>
-              <text class="meta-val">{{item.mac}}</text>
-            </view>
-            <view wx:if="{{item.mediaSummary}}" class="card-meta">
-              <text class="meta-key">媒体</text>
-              <text class="meta-val">{{item.mediaSummary}}</text>
-            </view>
-            <view class="card-actions">
-              <block wx:if="{{!item.voipAuthed}}">
-                <button class="btn-action btn-auth" data-id="{{item.device_id}}" bindtap="onAuthorize">{{item.voipAuthState === 'disabled' ? '查看授权设置' : (item.voipAuthState === 'unknown' ? '刷新授权状态' : '授权呼叫')}}</button>
-              </block>
-              <block wx:else>
-                <button class="btn-action btn-call" data-id="{{item.device_id}}" bindtap="onCall">{{item.callButtonText}}</button>
-              </block>
-            </view>
+        <view class="device-identity">
+          <text class="device-name">{{item.device_name || '未命名设备'}}</text>
+          <view class="device-presence">
+            <view class="presence-dot {{item.online ? 'presence-online' : ''}}"></view>
+            <text>{{item.online ? '在线' : '离线'}}</text>
           </view>
         </view>
+        <button class="more-button" data-id="{{item.device_id}}" bindtap="onDeviceMenu" aria-label="设备管理">
+          <view class="more-dot"></view><view class="more-dot"></view><view class="more-dot"></view>
+        </button>
+      </view>
+      <text class="device-id" selectable>设备 ID：{{item.device_id}}</text>
+      <view class="device-context">
+        <text>{{item.online ? '随时查看，与家人保持联系' : '请检查设备电源和网络连接'}}</text>
+      </view>
+      <view class="primary-actions">
+        <button wx:if="{{item.voipAuthed}}" class="device-action action-call" disabled="{{!item.online}}" data-id="{{item.device_id}}" bindtap="onCall">{{item.callButtonText}}</button>
+        <button wx:else class="device-action action-call" data-id="{{item.device_id}}" bindtap="onAuthorize">{{item.voipAuthState === 'disabled' ? '开启通话提醒' : (item.voipAuthState === 'unknown' ? '刷新通话授权' : '授权呼入')}}</button>
+        <button class="device-action action-live" disabled="{{!item.online}}" data-id="{{item.device_id}}" bindtap="onOpenLive">查看画面</button>
+      </view>
+      <view class="device-footer">
+        <button class="role-button" data-id="{{item.device_id}}" bindtap="onOpenAgent"><text class="role-mark">AI</text>角色设置 <text class="role-arrow">›</text></button>
+        <text wx:if="{{item.deviceNamePending}}" class="auth-status auth-pending" bindtap="onDeviceNamePendingHelp">来电名称待更新</text>
+        <text wx:elif="{{item.voipAuthed}}" class="auth-status">微信通话已授权</text>
+        <text wx:else class="auth-status">{{item.voipAuthState === 'disabled' ? '通话提醒已关闭' : (item.voipAuthState === 'unknown' ? '通话授权待确认' : '首次通话需微信授权')}}</text>
       </view>
     </view>
+    <text class="list-footnote" wx:if="{{deviceList.length}}">下拉可刷新设备状态</text>
   </view>
 
   <view wx:if="{{authNameModalVisible}}" class="auth-name-mask" catchtap="noop" catchtouchmove="noop">
     <view class="auth-name-dialog">
-      <text class="auth-name-title">{{authNameMode === 'profile' ? '我的微信身份' : '设置联系人名称'}}</text>
+      <text class="auth-name-title">{{authNameMode === 'profile' ? '联系人设置' : '设置联系人名称'}}</text>
       <view wx:if="{{authNameMode === 'profile'}}" class="profile-openid-card">
         <view class="profile-openid-header">
           <text class="profile-openid-label">微信 OpenID</text>
-          <text class="profile-openid-copy" bindtap="onCopyProfileOpenId">复制</text>
+          <text wx:if="{{profileOpenId}}" class="profile-openid-copy" bindtap="onCopyProfileOpenId" role="button">复制</text>
+          <text wx:elif="{{profileOpenIdError}}" class="profile-openid-copy" bindtap="loadProfileOpenId" role="button">重试</text>
         </view>
-        <text class="profile-openid-value" selectable>{{profileOpenId || '正在获取...'}}</text>
+        <text class="profile-openid-value" selectable>{{profileOpenId || (profileOpenIdError ? '获取失败，请点击重试' : '正在获取…')}}</text>
       </view>
-      <text class="auth-name-subtitle">这是当前小程序 OpenID 的联系人名称，所有已授权设备都会显示该名称。</text>
+      <text class="auth-name-subtitle">设备来电时显示的联系人名称，所有已授权设备共用。</text>
       <input
         class="auth-name-input"
         value="{{authName}}"
@@ -122,7 +91,7 @@
         bindinput="onAuthNameInput"
       />
       <view class="auth-name-suggestions">
-        <text class="auth-name-suggestions-label">随机昵称</text>
+        <text class="auth-name-suggestions-label">常用称呼</text>
         <view class="auth-name-tags">
           <view
             wx:for="{{authNameSuggestions}}"

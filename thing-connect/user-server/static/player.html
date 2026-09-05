@@ -2,8 +2,10 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
+  <meta name="referrer" content="no-referrer">
+  <script src="/static/js/mini-program-page.js"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>实时监控</title>
+  <title>实时查看</title>
   <link rel="stylesheet" href="/static/css/tailwind.css">
   <style>
     html, body { margin: 0; padding: 0; background: #000; color: #fff; height: 100%; overflow: hidden; }
@@ -17,6 +19,9 @@
       background: #ef4444 !important;
       transform: scale(0.97);
     }
+    .mini-program #topbar, .mini-program #video-wrap > .md\:flex { display: none; }
+    #player-feedback { padding: 20px 24px; color: #c7d1cc; font: 14px/1.7 system-ui; text-align: center; }
+    #player-retry { margin: 12px auto; border: 0; border-radius: 12px; padding: 12px 28px; background: #07C160; color: white; }
     @media (min-width: 900px) {
       body { background: #111; }
       #video-wrap { max-width: 1100px; margin: 0 auto; border-radius: 12px; overflow: hidden; }
@@ -66,7 +71,7 @@
       <button id="talk-btn"
         class="flex items-center gap-1.5 px-4 py-2 rounded-full bg-white/10 border border-white/15 text-xs font-medium text-white/80 transition-all"
         onmousedown="startTalk()" onmouseup="stopTalk()"
-        ontouchstart="startTalk(event)" ontouchend="stopTalk(event)">
+        ontouchstart="startTalk(event)" ontouchend="stopTalk(event)" ontouchcancel="stopTalk(event)" onmouseleave="stopTalk(event)">
         <span id="talk-dot" class="w-1.5 h-1.5 rounded-full bg-white/30"></span>
         <span id="talk-label">按住说话</span>
       </button>
@@ -85,13 +90,17 @@
   </div>
 </div>
 
+<div id="player-feedback" role="status">
+  <p id="player-message">正在连接设备…</p>
+  <button id="player-retry" hidden>重新连接</button>
+</div>
 <script type="module">
 import { TiRtc, TiRtcInitOptions, TiRtcConn, TiRtcVideoOutput, TiRtcAudioOutput, TiRtcAudioInput } from '/static/js/tirtc.es.min.js';
 
 const $ = id => document.getElementById(id);
 
-const jwtToken = localStorage.getItem('token');
-if (!jwtToken) { location.href = '/'; }
+const jwtToken = window.MiniProgramPage.token;
+if (!jwtToken) window.MiniProgramPage.requireLogin();
 
 const params   = new URLSearchParams(location.search);
 const deviceID = params.get('device_id') || '';
@@ -100,7 +109,7 @@ const STREAM_AUDIO     = 10;
 const STREAM_VIDEO     = 11;
 
 // ── Page title ────────────────────────────────────────────────────────────
-const titleText = deviceID ? `${deviceID} 实时监控` : '实时监控';
+const titleText = deviceID ? `${deviceID} 实时查看` : '实时查看';
 document.title = titleText;
 ['page-title','page-title-pc'].forEach(id => {
   const el = $(id);
@@ -121,9 +130,11 @@ function setStatus(online) {
 async function fetchRtcToken() {
   const res = await fetch(`/v1/user/device/rtc-token?device_id=${encodeURIComponent(deviceID)}`, {
     headers: { 'Authorization': 'Bearer ' + jwtToken },
+    signal: requestController.signal,
   });
   const d = await res.json();
-  if (d.code !== 200) throw new Error(d.msg || 'fetch token failed');
+  if (d.code === 401) window.MiniProgramPage.requireLogin();
+  if (d.code !== 200) throw new Error(d.msg || '连接暂时不可用，请稍后重试');
   return { rtcToken: d.data.token, appId: d.data.app_id, endpoint: d.data.endpoint };
 }
 
@@ -134,15 +145,40 @@ let videoOutput     = null;
 let audioInput      = null;
 let muted           = false;  // default muted, user clicks speaker to unmute
 let talking         = false;  // prevent double-start
+let starting        = false;
+let generation      = 0;
+let connected       = false;
+let startTimeout    = null;
+let requestController = null;
+
+function showFailure(message) {
+  $('player-message').textContent = message;
+  $('player-retry').hidden = false;
+  setStatus(false);
+}
 
 async function start() {
+  if (starting || !jwtToken || !deviceID) return;
+  cleanup();
+  const attempt = generation;
+  starting = true;
+  requestController = new AbortController();
+  startTimeout = setTimeout(() => {
+    if (attempt !== generation) return;
+    cleanup();
+    showFailure('连接超时，请检查设备和手机网络后重试');
+  }, 20000);
+  $('player-message').textContent = '正在连接设备…';
+  $('player-retry').hidden = true;
   try {
     const { rtcToken, appId } = await fetchRtcToken();
+    if (attempt !== generation) return;
 
     TiRtc.initialize(TiRtcInitOptions({ appId:appId }));
 
     // Wait for wasm to load
     await TiRtc.videoOutputReady();
+    if (attempt !== generation) return;
 
     connection  = new TiRtcConn();
     audioOutput = TiRtcAudioOutput({ connection, streamId: STREAM_AUDIO });
@@ -150,20 +186,26 @@ async function start() {
     audioInput  = new TiRtcAudioInput({ connection, streamId: 14 });
     audioInput.setOptions({ sampleRate: 8000 });
 
-    connection.connect({ deviceId: deviceID, token: rtcToken })
-      .then(() => {
-        setStatus(true);
-        videoOutput.attach();
-        audioOutput.attach();
-        connection.subscribeVideo({ streamId: STREAM_VIDEO });
-        connection.subscribeAudio({ streamId: STREAM_AUDIO });
-        updateMuteUI();
-      })
-      .catch(err => { console.error('connect failed', err); setStatus(false); });
+    await connection.connect({ deviceId: deviceID, token: rtcToken });
+    if (attempt !== generation) return;
+    connected = true;
+    setStatus(true);
+    videoOutput.attach();
+    if (!muted) audioOutput.attach();
+    connection.subscribeVideo({ streamId: STREAM_VIDEO });
+    connection.subscribeAudio({ streamId: STREAM_AUDIO });
+    updateMuteUI();
+    $('player-message').textContent = '已连接 · 点击声音按钮开启或关闭声音';
 
   } catch(e) {
-    console.error('rtc start failed', e);
-    setStatus(false);
+    if (attempt !== generation) return;
+    cleanup();
+    showFailure('暂时无法连接，请确认设备在线后重试');
+  } finally {
+    if (attempt === generation) {
+      starting = false;
+      clearTimeout(startTimeout);
+    }
   }
 }
 
@@ -184,13 +226,18 @@ window.toggleMute = function() {
 // ── Talk ─────────────────────────────────────────────────────────────────
 window.startTalk = function(e) {
   if (e) e.preventDefault();
-  if (!audioInput || talking) return;
+  if (!audioInput || talking || !connected) return;
+  const input = audioInput;
+  const attempt = generation;
   talking = true;
   $('talk-btn').classList.add('active');
   $('talk-dot').style.background = '#ef4444';
   $('talk-label').textContent = '说话中…';
-  audioInput.start().then(() => audioInput.attach()).catch(err => {
-    console.warn('talk error', err);
+  input.start().then(() => {
+    if (attempt !== generation || !talking) { input.stop(); return; }
+    return input.attach();
+  }).catch(() => {
+    if (attempt !== generation) return;
     talking = false;
     $('talk-btn').classList.remove('active');
     $('talk-dot').style.background = 'rgba(255,255,255,0.3)';
@@ -208,7 +255,14 @@ window.stopTalk = function(e) {
   if (audioInput) audioInput.stop();
 };
 
-window.addEventListener('beforeunload', () => {
+function cleanup() {
+  generation += 1;
+  starting = false;
+  connected = false;
+  clearTimeout(startTimeout);
+  if (requestController) requestController.abort();
+  requestController = null;
+  window.stopTalk();
   if (connection)  connection.disconnect();
   if (audioOutput) audioOutput.detach();
   if (videoOutput) videoOutput.detach();
@@ -216,9 +270,21 @@ window.addEventListener('beforeunload', () => {
     audioInput.stop();
     void audioInput.detach().catch(() => {});
   }
+  connection = audioOutput = videoOutput = audioInput = null;
+}
+
+$('player-retry').onclick = start;
+window.addEventListener('pagehide', cleanup);
+window.addEventListener('beforeunload', cleanup);
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    cleanup();
+    showFailure('播放已暂停，点击重新连接继续查看');
+  }
 });
 
-start();
+if (deviceID) start();
+else showFailure('未找到设备，请返回设备列表重新打开');
 </script>
 </body>
 </html>

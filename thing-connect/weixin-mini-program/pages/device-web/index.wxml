@@ -1,0 +1,7 @@
+<web-view wx:if="{{src}}" src="{{src}}" bindload="onWebLoad" binderror="onWebError" />
+<view wx:else class="web-state">
+  <text class="state-title">{{loading ? '正在打开…' : '暂时无法打开'}}</text>
+  <text class="state-description">{{error || '正在确认设备信息，请稍候'}}</text>
+  <button wx:if="{{error}}" class="retry" bindtap="openPage">重新尝试</button>
+  <button class="back" bindtap="goBack">返回设备列表</button>
+</view>

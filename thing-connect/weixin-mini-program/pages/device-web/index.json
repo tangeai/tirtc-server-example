@@ -1,8 +1,6 @@
 {
-  "navigationBarTitleText": "我的设备",
+  "navigationBarTitleText": "设备",
   "navigationBarBackgroundColor": "#07c160",
   "navigationBarTextStyle": "white",
-  "backgroundTextStyle": "dark",
-  "enablePullDownRefresh": true,
   "usingComponents": {}
 }

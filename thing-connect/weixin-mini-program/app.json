@@ -3,7 +3,8 @@
     "pages/login/index",
     "pages/devices/index",
     "pages/bind/index",
-    "pages/call-box/index"
+    "pages/call-box/index",
+    "pages/device-web/index"
   ],
   "window": {
     "navigationBarBackgroundColor": "#07c160",

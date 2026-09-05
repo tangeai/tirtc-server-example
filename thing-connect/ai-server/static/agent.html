@@ -2,6 +2,8 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
+  <meta name="referrer" content="no-referrer">
+  <script src="/static/js/mini-program-page.js"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>智能体配置 — ThingConnect</title>
   <link rel="stylesheet" href="/static/css/tailwind.css">
@@ -10,6 +12,9 @@
     .thin-scroll::-webkit-scrollbar-track { background: transparent; }
     .thin-scroll::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 2px; }
     .thin-scroll::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+    .mini-program header > div:first-child > a { display: none; }
+    .mini-program #editor-form { padding-bottom: calc(32px + env(safe-area-inset-bottom)); }
+    .mini-program input, .mini-program textarea, .mini-program select { font-size: 16px; }
   </style>
 </head>
 <body class="bg-gray-50 min-h-screen font-sans">
@@ -100,8 +105,7 @@
               🤖
             </div>
             <div class="flex flex-col gap-1.5">
-              <button class="px-3 sm:px-3.5 py-1.5 text-[11px] sm:text-xs font-medium rounded-md border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">上传图片</button>
-              <span class="text-[10px] sm:text-[11px] text-gray-400">支持 PNG/JPG，建议 1:1</span>
+              <span class="text-sm text-gray-500">角色头像</span>
             </div>
           </div>
         </div>
@@ -261,7 +265,7 @@
 
         <!-- Action buttons -->
         <div class="flex gap-3 mt-6 sm:mt-8 pt-4 sm:pt-6 border-t border-gray-100">
-          <button onclick="saveAgent()"
+          <button onclick="saveAgent()" id="btn-save"
             class="flex-1 py-2.5 rounded-lg bg-emerald-500 text-white text-sm font-bold hover:bg-emerald-600 active:scale-[0.99] transition-all tracking-wide">
             保存
           </button>
@@ -455,8 +459,8 @@
 
 <script>
 const $ = id => document.getElementById(id);
-const token = localStorage.getItem('token');
-if (!token) location.href = '/';
+const token = window.MiniProgramPage.token;
+if (!token) window.MiniProgramPage.requireLogin();
 
 // ── State ──
 let agents = [];
@@ -466,6 +470,10 @@ let deviceId = '';
 let defaultRoleId = '';
 let defaultRole = null;
 let isEditingDefault = false;
+let selectingRole = 0;
+let savingRole = false;
+let bindingRole = false;
+let editorDirty = false;
 let voices = [];
 let voiceLang = '';
 let knowledgeIndexes = [];
@@ -487,15 +495,24 @@ function isMobile() { return window.innerWidth < 640; }
 
 // ── API ──
 async function api(path, opts = {}) {
-  const res = await fetch(path, {
-    ...opts,
-    headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json', ...(opts.headers || {}) },
-  });
-  const text = await res.text();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
   try {
-    return JSON.parse(text);
-  } catch {
-    return { code: res.status, msg: text.slice(0, 200) };
+    const res = await fetch(path, {
+      ...opts,
+      signal: controller.signal,
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json', ...(opts.headers || {}) },
+    });
+    let result;
+    try {
+      result = await res.json();
+    } catch {
+      return { code: res.status >= 400 ? res.status : 50000, msg: '服务暂时不可用，请稍后重试' };
+    }
+    if (result.code === 401) window.MiniProgramPage.requireLogin();
+    return result;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -510,6 +527,7 @@ function toast(msg, error = false) {
 
 // ── Init ──
 async function init() {
+  if (!token) return;
   const params = new URLSearchParams(location.search);
   deviceId = params.get('device_id') || '';
   if (!deviceId) {
@@ -519,7 +537,8 @@ async function init() {
   $('header-device-id').textContent = deviceId;
 
   // Load bound role (also reveals default_role_id)
-  const bindData = await api('/v1/ai/device/' + deviceId + '/role');
+  const bindData = await api('/v1/ai/device/' + encodeURIComponent(deviceId) + '/role');
+  if (bindData.code !== 200) throw new Error('无法读取设备角色');
   if (bindData.code === 200) {
     if (bindData.data?.role_id) boundRoleId = bindData.data.role_id;
     defaultRoleId = bindData.data?.default_role_id || '';
@@ -542,7 +561,7 @@ async function init() {
   // Auto-select bound role or default role on page load
   const targetId = boundRoleId || defaultRoleId;
   if (targetId && agents.find(a => a.id === targetId)) {
-    selectAgent(targetId);
+    await selectAgent(targetId);
   }
 }
 
@@ -553,7 +572,7 @@ async function loadAgents() {
   if (data.code === 200 && data.data?.items) {
     agents = data.data.items;
   } else {
-    agents = [];
+    throw new Error('无法加载角色列表');
   }
   // Always prepend default role if it exists
   if (defaultRole) {
@@ -580,6 +599,10 @@ function showList() {
 }
 
 // ── Render ──
+function escapeText(value) {
+  return String(value || '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
+}
+
 function renderAgentList() {
   const query = ($('search-input').value || '').toLowerCase();
   const filtered = agents.filter(a =>
@@ -595,20 +618,23 @@ function renderAgentList() {
   container.innerHTML = filtered.map(a => `
     <div class="group flex items-start gap-2.5 sm:gap-3 px-2.5 sm:px-3 py-2.5 sm:py-3 rounded-lg cursor-pointer mb-1 transition-all
       ${currentAgentId === a.id ? 'bg-emerald-50 border border-emerald-200' : 'border border-transparent hover:bg-gray-50 hover:border-gray-200'}"
-      onclick="selectAgent('${a.id}')">
+      data-role-id="${escapeText(a.id)}">
       <div class="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-emerald-100 to-emerald-200 border border-emerald-300 flex items-center justify-center text-lg sm:text-xl flex-shrink-0">
-        ${a.avatar || '🤖'}
+        AI
       </div>
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-1.5 sm:gap-2">
-          <span class="text-[13px] sm:text-sm font-medium text-gray-800 truncate">${a.name}</span>
+          <span class="text-[13px] sm:text-sm font-medium text-gray-800 truncate">${escapeText(a.name)}</span>
           ${isDefaultRole(a.id) ? '<span class="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-200">默认</span>' : ''}
           ${a.id === boundRoleId ? '<span class="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-200">已绑定</span>' : ''}
         </div>
-        <p class="text-[11px] sm:text-xs text-gray-400 mt-0.5 truncate">${a.user_params?.description || a.agent_config?.prompt?.slice(0, 40) || '暂无描述'}</p>
+        <p class="text-[11px] sm:text-xs text-gray-400 mt-0.5 truncate">${escapeText(a.user_params?.description || a.agent_config?.prompt?.slice(0, 40) || '暂无描述')}</p>
       </div>
     </div>
   `).join('');
+  container.querySelectorAll('[data-role-id]').forEach(row => {
+    row.onclick = () => selectAgent(row.dataset.roleId);
+  });
 }
 
 function setFieldsReadonly(readonly) {
@@ -636,10 +662,29 @@ function setFieldsReadonly(readonly) {
   onKnowledgeIndexChange();
 }
 
-function selectAgent(id) {
-  currentAgentId = id;
-  const a = agents.find(x => x.id === id);
+async function selectAgent(id) {
+  if (savingRole || bindingRole) return;
+  if (editorDirty && !confirm('当前修改尚未保存，确定切换角色吗？')) return;
+  const request = ++selectingRole;
+  let a = agents.find(x => x.id === id);
   if (!a) return;
+  if (!isDefaultRole(id)) {
+    try {
+      const detail = await api('/v1/ai/roles/' + encodeURIComponent(id));
+      if (request !== selectingRole) return;
+      if (detail.code !== 200 || !detail.data) {
+        toast(detail.msg || '角色详情加载失败，请重试', true);
+        return;
+      }
+      a = { ...a, ...detail.data };
+      agents = agents.map(item => item.id === id ? a : item);
+    } catch {
+      if (request === selectingRole) toast('角色详情加载失败，请检查网络后重试', true);
+      return;
+    }
+  }
+  currentAgentId = id;
+  editorDirty = false;
   isEditingDefault = isDefaultRole(id);
 
   // Reset language filter so the agent's voice is always visible
@@ -688,7 +733,11 @@ function selectAgent(id) {
   $('field-memory').checked = a.agent_config?.ali_memory?.enable === true;
 
   if (a.avatar && a.avatar.startsWith('http')) {
-    $('avatar-preview').innerHTML = `<img src="${a.avatar}" class="w-full h-full object-cover rounded-xl sm:rounded-2xl">`;
+    const image = document.createElement('img');
+    image.src = a.avatar;
+    image.alt = '角色头像';
+    image.className = 'w-full h-full object-cover rounded-xl sm:rounded-2xl';
+    $('avatar-preview').replaceChildren(image);
   } else {
     $('avatar-preview').textContent = a.avatar || '🤖';
   }
@@ -698,6 +747,10 @@ function selectAgent(id) {
 }
 
 function newAgent() {
+  if (savingRole || bindingRole) return;
+  if (editorDirty && !confirm('当前修改尚未保存，确定新建角色吗？')) return;
+  selectingRole += 1;
+  editorDirty = false;
   currentAgentId = null;
   isEditingDefault = false;
   $('editor-empty').classList.add('hidden');
@@ -1428,6 +1481,7 @@ function filterAgents() { renderAgentList(); }
 // ── Bind button state ──
 function updateBindButton() {
   const btn = $('btn-bind');
+  btn.disabled = bindingRole || !currentAgentId || currentAgentId === boundRoleId;
   if (!currentAgentId) {
     btn.textContent = '保存后再绑定';
     btn.classList.add('opacity-50', 'pointer-events-none');
@@ -1450,16 +1504,36 @@ function updateHeaderBinding() {
 
 // ── Actions ──
 async function saveAgent() {
+  if (savingRole || bindingRole) return;
+  selectingRole += 1;
+  savingRole = true;
+  const button = $('btn-save');
+  button.disabled = true;
+  button.textContent = '保存中…';
+  try {
+    await persistAgent();
+  } catch {
+    toast('保存失败，请检查网络后重试，当前填写内容已保留', true);
+  } finally {
+    savingRole = false;
+    button.disabled = isEditingDefault;
+    button.textContent = '保存';
+  }
+}
+
+async function persistAgent() {
   if (isEditingDefault) { toast('默认角色不可修改', true); return; }
   const name = $('field-name').value.trim();
   if (!name) { toast('请输入智能体名称', true); return; }
   const promptText = $('field-prompt').value.trim();
   if (!promptText) { toast('请输入角色设定', true); return; }
 
+  const previous = agents.find(agent => agent.id === currentAgentId) || {};
   const payload = {
     name,
-    avatar: '',
+    avatar: previous.avatar || '',
     agent_config: {
+      ...previous.agent_config,
       prompt: promptText,
       welcome_text: $('field-welcome').value.trim(),
       ali_memory: { enable: $('field-memory').checked },
@@ -1467,16 +1541,21 @@ async function saveAgent() {
       device_plugins: selectedPlugins,
     },
     service_config: {
+      ...previous.service_config,
       name: name,
       type: 'custom-compose',
       config: {
+        ...previous.service_config?.config,
         llm: {
+          ...previous.service_config?.config?.llm,
           provider: 'ali-llm',
-          provider_params: { model: $('field-model').value },
+          provider_params: { ...previous.service_config?.config?.llm?.provider_params, model: $('field-model').value },
         },
         tts: {
+          ...previous.service_config?.config?.tts,
           provider: 'ali-tts',
           provider_params: {
+            ...previous.service_config?.config?.tts?.provider_params,
             voice: $('field-voice').value || undefined,
             rate: parseFloat($('field-rate').value),
             pitch: parseFloat($('field-pitch').value),
@@ -1485,6 +1564,7 @@ async function saveAgent() {
       },
     },
     user_params: {
+      ...previous.user_params,
       description: $('field-desc').value.trim(),
       voice: $('field-voice').value || undefined,
     },
@@ -1517,11 +1597,14 @@ async function saveAgent() {
   }
 
   renderAgentList();
+  editorDirty = false;
+  updateHeaderBinding();
   $('btn-delete').classList.remove('hidden');
   updateBindButton();
 }
 
 async function deleteAgent() {
+  if (savingRole || bindingRole) return;
   if (!currentAgentId) return;
   if (isEditingDefault) { toast('默认角色不可删除', true); return; }
   if (!confirm('确定要删除这个智能体吗？已绑定此角色的设备将恢复默认角色。')) return;
@@ -1536,6 +1619,7 @@ async function deleteAgent() {
     currentAgentId = null;
     renderAgentList();
     updateHeaderBinding();
+    editorDirty = false;
     newAgent();
     $('editor-form').classList.add('hidden');
     $('editor-empty').classList.remove('hidden');
@@ -1547,28 +1631,58 @@ async function deleteAgent() {
 }
 
 async function bindToDevice() {
+  if (savingRole || bindingRole) return;
   if (!currentAgentId || currentAgentId === boundRoleId) return;
   if (!deviceId) { toast('未指定设备', true); return; }
+  if (editorDirty) { toast('请先保存角色修改', true); return; }
 
-  const res = await api('/v1/ai/device/' + deviceId + '/role', {
-    method: 'PUT',
-    body: JSON.stringify({ role_id: currentAgentId }),
-  });
-  if (res.code === 200) {
-    boundRoleId = currentAgentId;
-    updateHeaderBinding();
-    renderAgentList();
+  bindingRole = true;
+  selectingRole += 1;
+  $('btn-bind').disabled = true;
+  try {
+    const res = await api('/v1/ai/device/' + encodeURIComponent(deviceId) + '/role', {
+      method: 'PUT',
+      body: JSON.stringify({ role_id: currentAgentId }),
+    });
+    if (res.code === 200) {
+      boundRoleId = currentAgentId;
+      updateHeaderBinding();
+      renderAgentList();
+      updateBindButton();
+      toast('绑定成功');
+    } else {
+      toast(res.msg || '绑定失败', true);
+    }
+  } catch {
+    toast('设置失败，请检查网络后重试', true);
+  } finally {
+    bindingRole = false;
     updateBindButton();
-    toast('绑定成功');
-  } else {
-    toast(res.msg || '绑定失败', true);
   }
 }
 
-init().catch(err => {
-  console.error('init failed:', err);
-  $('agent-list').innerHTML = '<p class="text-center text-xs text-red-400 py-12">加载失败，请刷新页面重试</p>';
+$('editor-form').addEventListener('input', () => { editorDirty = true; });
+$('editor-form').addEventListener('change', () => { editorDirty = true; });
+window.addEventListener('beforeunload', event => {
+  if (!editorDirty) return;
+  event.preventDefault();
+  event.returnValue = '';
 });
+
+function initializePage() {
+  init().catch(() => {
+    $('agent-list').replaceChildren();
+    const message = document.createElement('p');
+    message.textContent = '角色加载失败，请检查网络后重试';
+    message.style.cssText = 'padding:32px 16px;text-align:center;color:#666666;font-size:14px';
+    const retry = document.createElement('button');
+    retry.textContent = '重新加载';
+    retry.style.cssText = 'display:block;margin:0 auto;padding:12px 24px;border-radius:12px;background:#07C160;color:white';
+    retry.onclick = initializePage;
+    $('agent-list').append(message, retry);
+  });
+}
+initializePage();
 </script>
 </body>
 </html>

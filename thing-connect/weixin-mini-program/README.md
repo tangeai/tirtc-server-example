@@ -37,6 +37,8 @@
 - 邮箱注册、登录和 JWT 本地保存
 - 通过 6 位验证码、设备 ID 或二维码绑定设备
 - 展示、刷新和解绑当前账号下的设备
+- 从设备卡片进入实时查看 H5 页面
+- 从设备卡片进入 AI 角色页面，编辑角色并设置设备使用的角色
 - 获取微信 OpenID，维护当前微信用户的统一联系人名称
 - 申请微信设备 VoIP 授权
 - 小程序主动呼叫设备
@@ -48,7 +50,7 @@
 
 - 直接建立 AI 对讲媒体连接
 - 调用设备专用的 `GET /v1/ai/token`
-- AI 角色管理、知识库管理或 AI 字幕页面
+- 原生 AI 角色编辑器或 AI 字幕页面（角色编辑使用内嵌 H5）
 - 自定义微信插件通话页面
 
 各端职责如下：
@@ -76,7 +78,7 @@
 1. 已开通微信 IoT VoIP 能力的正式小程序 AppID，测试号不能完整验证设备 VoIP。
 2. 微信 IoT 平台分配的 `ModelID`。
 3. 已部署且可通过公网 HTTPS 访问的 `user-server` 和 `voip-server`。
-4. 小程序后台已配置 request 合法域名。
+4. 小程序后台已配置 request 合法域名，并将 H5 的 HTTPS 域名配置为 web-view 业务域名。
 5. 设备已按[设备上线](../device-integration.md)完成绑定并保持正式 MQTT 在线。
 6. 设备已调用
    [`POST /v1/voip/device/profile`](../api-reference.md#post-v1voipdeviceprofile)
@@ -145,6 +147,7 @@ weixin-mini-program/
 │   ├── login/                     # 邮箱登录、注册和验证码
 │   ├── devices/                   # 设备列表、联系人名称、授权和呼叫
 │   ├── bind/                      # 验证码、设备 ID、扫码绑定
+│   ├── device-web/                # 实时查看与 AI 角色 H5 承接
 │   └── call-box/                  # 预留空页面，当前不承载插件通话 UI
 ├── utils/
 │   ├── api.js                     # userApi / voipApi
@@ -163,6 +166,7 @@ weixin-mini-program/
 | 登录/注册 | `pages/login/index` | 登录、注册、发送邮箱验证码、存储 JWT |
 | 设备列表 | `pages/devices/index` | 拉取设备、同步授权、编辑联系人名称、解绑和呼叫 |
 | 绑定设备 | `pages/bind/index` | 验证码绑定、设备 ID 绑定、扫码解析 |
+| 设备网页 | `pages/device-web/index` | 验证设备归属、承接实时查看与 AI 角色页面、失败重试 |
 | 预留页 | `pages/call-box/index` | 当前为空；微信通话使用插件的 `CALL_PAGE_PATH` |
 
 VoIP 和验证码插件声明在 [app.json](app.json)：
@@ -251,6 +255,14 @@ resolve 后页面仍要检查服务端业务码：
 
 ### 设备列表和解绑
 
+右下角的圆形“＋”按钮用于添加设备。
+
+设备卡片以微信通话为主要操作，右侧“查看画面”用于打开实时播放，底部提供“AI 角色设置”。离线设备不能实时查看或呼叫，
+但仍可编辑 AI 角色。设备名称、设备信息和解绑位于卡片右上角的管理菜单；
+联系人设置和退出登录分别使用页面顶部的人像图标和退出图标。解绑和退出登录均需确认。
+
+首次加载、暂无设备和加载失败分别展示对应状态；刷新失败时保留已有设备，并提供重试入口。
+
 [pages/devices/index.js](pages/devices/index.js) 的 `loadDevices()` 会：
 
 1. 调 `GET /v1/user/device/list`
@@ -262,6 +274,28 @@ resolve 后页面仍要检查服务端业务码：
 解绑调用 `DELETE /v1/user/device/reset`。`user-server` 会完成设备所有权和 VoIP 授权
 清理，并清空设备名称；小程序解绑成功后不要再用已经失去所有权的设备调用
 `delete-auth`。
+
+### 实时查看与 AI 角色页面
+
+两个入口均由 `pages/device-web/index` 承接，使用 `userServerBaseUrl` 的同源地址：
+
+| 入口 | H5 路径 | 使用方式 |
+|---|---|---|
+| 实时查看 | `/player?device_id=...` | 查看设备音视频；进入后台会暂停，返回页面后点击“重新连接” |
+| AI 角色设置 | `/v1/ai/agent?device_id=...` | 编辑并保存角色；选择其他角色或新建角色后，点击“绑定到此设备”应用 |
+
+AI 页面由 ai-server 提供，需要按现有同源部署方式将 `/v1/ai/*` 代理到 ai-server。
+H5 域名必须满足微信 [web-view 业务域名要求](https://developers.weixin.qq.com/miniprogram/dev/component/web-view.html)；
+request 合法域名不能替代业务域名。真机发布前完成域名校验，并确保
+`/static/js/mini-program-page.js`、播放器及 AI 页面均部署到对应服务。
+
+页面使用当前小程序账号，进入前重新确认设备归属。登录凭证仅通过 HTTPS 页面 URL 的
+fragment 传入，页面启动时立即清除，只保存在页面内存，不写入浏览器本地登录态。
+不要记录或分享承接页面的完整 URL。承接页关闭转发菜单，页面刷新或登录过期后需返回
+小程序重新打开。返回时使用微信顶部导航；不要将业务页面改为可接收任意外部 URL 的入口。
+
+设备在线状态不代表媒体资源空闲。正在进行其他业务时，实际播放结果取决于设备会话仲裁。
+音频播放及麦克风权限以微信真机环境为准；音视频能力需分别在 iOS、Android 上验收。
 
 ---
 
@@ -581,6 +615,10 @@ node --test thing-connect/weixin-mini-program/tests/*.test.js
 - [ ] 使用正式小程序 AppID，不使用测试号。
 - [ ] `userServerBaseUrl`、`voipServerBaseUrl` 是公网 HTTPS 且证书有效。
 - [ ] 微信后台已配置 request 合法域名和 VoIP 回调。
+- [ ] H5 HTTPS 域名已配置为 web-view 业务域名，实时查看与 AI 页面均能在正式版打开。
+- [ ] 同账号进入 H5 无需重复登录，切换账号后不沿用旧账号；过期登录能返回小程序重新登录。
+- [ ] 在线/离线、解绑后打开、网络失败重试、页面返回和后台恢复均完成真机检查。
+- [ ] AI 角色详情、修改保存、角色切换与绑定在手机上完成验收。
 - [ ] `modelId` 与微信 IoT 平台、设备 profile 一致。
 - [ ] `app.json` 中 VoIP 和四个验证码插件的 provider、版本与上表一致。
 - [ ] 真机完成双向呼叫、旋转、镜像和 `contain/fill` 验证。

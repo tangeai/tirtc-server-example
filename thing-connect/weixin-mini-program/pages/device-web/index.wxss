@@ -1,0 +1,7 @@
+.web-state { min-height: 80vh; padding: 80rpx 48rpx; box-sizing: border-box; display: flex; flex-direction: column; justify-content: center; text-align: center; background: #EDEDED; }
+.state-title { font-size: 36rpx; font-weight: 600; color: #1A1A1A; }
+.state-description { margin: 24rpx 0 48rpx; font-size: 28rpx; line-height: 1.7; color: #666666; }
+button { width: 100%; margin: 12rpx 0; border-radius: 20rpx; font-size: 28rpx; }
+button::after { border: 0; }
+.retry { background: #07C160; color: white; }
+.back { background: white; color: #333333; }

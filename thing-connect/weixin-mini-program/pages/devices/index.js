@@ -16,8 +16,6 @@ const {
 const { refreshVoipAuthState } = require('../../utils/voip-auth-refresh')
 const app = getApp()
 
-const SWIPE_THRESHOLD = 60
-const SWIPE_OPEN_X = -88
 const MAX_DEVICE_NAME_CHARS = 13
 const AUTH_NAME_POOL = ['爸爸', '妈妈', '爷爷', '奶奶', '哥哥', '姐姐', '朋友']
 
@@ -119,6 +117,7 @@ Page({
     deviceList: [],
     loading: false,
     initialized: false,
+    loadError: '',
     authNameModalVisible: false,
     authName: '',
     authNameSuggestions: [],
@@ -126,6 +125,7 @@ Page({
     authNameMode: 'authorize',
     contactRemark: '',
     profileOpenId: '',
+    profileOpenIdError: false,
     deviceNameModalVisible: false,
     editingDeviceId: '',
     editingDeviceName: '',
@@ -152,7 +152,6 @@ Page({
       authorizedDeviceName: previous.authorizedDeviceName || '',
       serverVoipAuthed: previous.serverVoipAuthed || false,
       deviceNamePending: false,
-      slideX: 0,
       up_video_mt: upVideoMT,
       down_video_mt: downVideoMT,
       down_audio_mt: downAudioMT,
@@ -174,8 +173,89 @@ Page({
     }
   },
 
+  _updateData(value) {
+    if (!this._disposed) this.setData(value)
+  },
+
+  onUnload() {
+    this._disposed = true
+  },
+
   onShow() {
+    this._navigating = false
+    if (!wx.getStorageSync('token')) {
+      wx.reLaunch({ url: '/pages/login/index' })
+      return
+    }
     this.loadDevices()
+  },
+
+  onRetry() {
+    this.loadDevices()
+  },
+
+  onOpenLive(e) {
+    this._openDevicePage(e.currentTarget.dataset.id, 'live')
+  },
+
+  onOpenAgent(e) {
+    this._openDevicePage(e.currentTarget.dataset.id, 'agent')
+  },
+
+  _openDevicePage(deviceId, kind) {
+    if (this._navigating) return
+    const device = this.data.deviceList.find(d => d.device_id === deviceId)
+    if (!device) return
+    if (kind === 'live' && device.online !== true) {
+      wx.showToast({ title: '设备离线，请检查电源和网络', icon: 'none' })
+      return
+    }
+    this._navigating = true
+    wx.navigateTo({
+      url: '/pages/device-web/index?kind=' + kind + '&device_id=' + encodeURIComponent(deviceId),
+      complete: () => { this._navigating = false },
+      fail: () => wx.showToast({ title: '打开失败，请重试', icon: 'none' }),
+    })
+  },
+
+  onConfirmLogout() {
+    wx.showModal({
+      title: '退出登录',
+      content: '退出后需要重新登录，设备绑定和已保存的设置会保留。',
+      confirmText: '退出登录',
+      success: ({ confirm }) => { if (confirm) this.logout() },
+    })
+  },
+
+  onDeviceMenu(e) {
+    const id = e.currentTarget.dataset.id
+    const device = this.data.deviceList.find(d => d.device_id === id)
+    if (!device) return
+    const deviceInfo = [
+      '设备名称：' + (device.device_name || '未命名设备'),
+      '设备编号：' + id,
+      device.mac ? 'MAC：' + device.mac : '',
+      device.mediaSummary ? '媒体能力：' + device.mediaSummary : '',
+    ].filter(Boolean).join('\n')
+    wx.showActionSheet({
+      itemList: ['修改设备名称', '设备信息', '解绑设备'],
+      success: ({ tapIndex }) => {
+        if (tapIndex === 0) this._openDeviceNameModal(id, false)
+        if (tapIndex === 1) wx.showModal({
+          title: device.device_name || '设备信息',
+          content: deviceInfo,
+          confirmText: '复制信息',
+          cancelText: '关闭',
+          success: ({ confirm }) => {
+            if (confirm) wx.setClipboardData({
+              data: deviceInfo,
+              fail: () => wx.showToast({ title: '复制失败，请重试', icon: 'none' }),
+            })
+          },
+        })
+        if (tapIndex === 2) this.onUnbind(e)
+      },
+    })
   },
 
   onPullDownRefresh() {
@@ -191,13 +271,13 @@ Page({
       return this._loadPromise
     }
 
-    this.setData({ loading: true })
+    this._updateData({ loading: true, loadError: '' })
     wx.showNavigationBarLoading()
 
     this._loadPromise = (async () => {
       try {
-        this._closeOtherSwipes()
         const res = await userApi('/v1/user/device/list', 'GET')
+        if (this._disposed) return
         if (res.code === 200) {
           const existingMap = {}
           this.data.deviceList.forEach(d => { existingMap[d.device_id] = d })
@@ -207,7 +287,7 @@ Page({
             .map(d => this._decorateDevice(d, existingMap[d.device_id] || {}))
           // 每次列表刷新成功都以服务端最新结果整体更新缓存，供设备入呼同步读取。
           updateDeviceVideoProfileCache(list)
-          this.setData({ deviceList: list, initialized: true })
+          this._updateData({ deviceList: list, initialized: true })
           await refreshVoipAuthState({
             refreshOpenId: () => this._fetchOpenId(true),
             syncWechatAuthState: () => this._syncVoIPAuthState(),
@@ -215,16 +295,20 @@ Page({
             syncServerAuthList: () => this._syncServerAuthList(),
             reconcileAuthorizedDevices: () => this._reconcileAuthorizedDevices(),
           })
-        } else if (res.code === 401) {
+        } else {
+          throw res
+        }
+      } catch (error) {
+        if (error.code === 401) {
           wx.removeStorageSync('token')
           wx.showToast({ title: '登录已过期，请重新登录', icon: 'none' })
-          setTimeout(() => wx.redirectTo({ url: '/pages/login/index' }), 1000)
+          wx.reLaunch({ url: '/pages/login/index' })
+        } else {
+          this._updateData({ loadError: '暂时无法更新设备，请检查网络后重试' })
         }
-      } catch (_) {
-        wx.showToast({ title: '加载失败', icon: 'none' })
       } finally {
         this._loadPromise = null
-        this.setData({ loading: false, initialized: true })
+        this._updateData({ loading: false, initialized: true })
         wx.hideNavigationBarLoading()
         if (stopPullDownRefresh) {
           wx.stopPullDownRefresh()
@@ -285,7 +369,7 @@ Page({
               voipAuthed: voipAuthState === 'authorized',
             }
           })
-          this.setData({ deviceList: list })
+          this._updateData({ deviceList: list })
           resolve()
         },
         fail: () => {
@@ -294,7 +378,7 @@ Page({
             voipAuthState: 'unknown',
             voipAuthed: false,
           }))
-          this.setData({ deviceList: list })
+          this._updateData({ deviceList: list })
           resolve()
         },
       })
@@ -328,7 +412,7 @@ Page({
           ),
         }
       })
-      this.setData({ deviceList: list })
+      this._updateData({ deviceList: list })
       return true
     } catch (_) {
       // 微信侧授权状态仍然可用，名称快照稍后刷新。
@@ -392,39 +476,10 @@ Page({
       })
       if (!res || res.code !== 0 || !res.data) return
       const contactRemark = res.data.remark || ''
-      this.setData({ contactRemark })
+      this._updateData({ contactRemark })
     } catch (_) {
       // 保留当前页面已有名称，用户仍可从右上角入口重新保存。
     }
-  },
-
-  onCopyOpenId() {
-    const openid = app.globalData.wxOpenId
-    if (!openid) { wx.showToast({ title: '暂未获取到 OpenID', icon: 'none' }); return }
-    wx.showModal({
-      title: '微信 OpenID',
-      content: openid,
-      cancelText: '关闭',
-      confirmText: '复制',
-      confirmColor: '#07c160',
-      success: (res) => {
-        if (res.confirm) {
-          wx.setClipboardData({ data: openid, success: () => wx.showToast({ title: '已复制', icon: 'success' }) })
-        }
-      }
-    })
-  },
-
-  onCopyProfileOpenId() {
-    const openid = this.data.profileOpenId || app.globalData.wxOpenId
-    if (!openid) {
-      wx.showToast({ title: '暂未获取到 OpenID', icon: 'none' })
-      return
-    }
-    wx.setClipboardData({
-      data: openid,
-      success: () => wx.showToast({ title: '已复制', icon: 'success' }),
-    })
   },
 
   goAdd() {
@@ -435,7 +490,7 @@ Page({
 
   _openDeviceNameModal(deviceId, continueAuthorize = false) {
     const device = this.data.deviceList.find(d => d.device_id === deviceId)
-    this.setData({
+    this._updateData({
       deviceNameModalVisible: true,
       editingDeviceId: deviceId,
       editingDeviceName: (device && device.device_name) || '',
@@ -448,11 +503,11 @@ Page({
   },
 
   onDeviceNameInput(e) {
-    this.setData({ editingDeviceName: e.detail.value })
+    this._updateData({ editingDeviceName: e.detail.value })
   },
 
   onCancelDeviceName() {
-    this.setData({
+    this._updateData({
       deviceNameModalVisible: false,
       editingDeviceId: '',
       editingDeviceName: '',
@@ -492,7 +547,7 @@ Page({
         }
       })
       this.onCancelDeviceName()
-      this.setData({ deviceList: list })
+      this._updateData({ deviceList: list })
       if (continueAuthorize) {
         await this._continueAuthorize(deviceId)
       } else {
@@ -533,67 +588,17 @@ Page({
     wx.redirectTo({ url: '/pages/login/index' })
   },
 
-  onSwipeStart(e) {
-    const { id, index } = e.currentTarget.dataset
-    const touch = e.touches[0]
-    this._swipeTouch = {
-      deviceId: id,
-      index,
-      startX: touch.clientX,
-      startY: touch.clientY,
-    }
-    this._closeOtherSwipes(id)
-  },
-
-  onSwipeEnd(e) {
-    if (!this._swipeTouch) return
-    const touch = e.changedTouches[0]
-    const { deviceId, index, startX, startY } = this._swipeTouch
-    this._swipeTouch = null
-    if (deviceId !== e.currentTarget.dataset.id) return
-
-    const dx = touch.clientX - startX
-    const dy = touch.clientY - startY
-    if (Math.abs(dy) > Math.abs(dx)) return
-
-    let targetX = this.data.deviceList[index] && this.data.deviceList[index].slideX ? this.data.deviceList[index].slideX : 0
-    if (dx <= -SWIPE_THRESHOLD) {
-      targetX = SWIPE_OPEN_X
-    } else if (dx >= SWIPE_THRESHOLD) {
-      targetX = 0
-    } else if (this.data.deviceList[index] && this.data.deviceList[index].slideX) {
-      targetX = SWIPE_OPEN_X
-    }
-    this.setData({ [`deviceList[${index}].slideX`]: targetX })
-  },
-
-  _closeOtherSwipes(activeDeviceId = '') {
-    const updates = {}
-    this.data.deviceList.forEach((item, index) => {
-      if (item.device_id !== activeDeviceId && item.slideX) {
-        updates[`deviceList[${index}].slideX`] = 0
-      }
-    })
-    if (Object.keys(updates).length > 0) {
-      this.setData(updates)
-    }
-  },
-
   // ── 解绑 ──────────────────────────────────────────
   onUnbind(e) {
     const deviceId = e.currentTarget.dataset.id
-    const deviceIndex = this.data.deviceList.findIndex(d => d.device_id === deviceId)
     wx.showModal({
       title: '解绑设备',
-      content: `确认解绑设备 ${deviceId}？`,
+      content: `解绑后将无法查看或呼叫此设备，微信通话授权也会清除。确定解绑设备 ${deviceId}？`,
       confirmColor: '#e64340',
       success: async (res) => {
-        if (!res.confirm) {
-          if (deviceIndex >= 0) {
-            this.setData({ [`deviceList[${deviceIndex}].slideX`]: 0 })
-          }
-          return
-        }
+        if (!res.confirm || this._unbinding) return
+        this._unbinding = true
+        wx.showLoading({ title: '正在解绑…', mask: true })
         try {
           const res = await userApi('/v1/user/device/reset', 'DELETE', { device_id: deviceId })
           if (res.code !== 200) throw new Error(res.msg || '解绑失败')
@@ -602,20 +607,19 @@ Page({
           wx.showToast({ title: '已解绑' })
           this.loadDevices()
         } catch (err) {
-          wx.showToast({ title: err.msg || '解绑失败', icon: 'none' })
+          wx.showToast({ title: err.msg || '解绑失败，请稍后重试', icon: 'none' })
+        } finally {
+          this._unbinding = false
+          wx.hideLoading()
         }
       }
     })
   },
 
-  onPageTap() {
-    this._closeOtherSwipes()
-  },
-
   // ── VoIP 授权 ─────────────────────────────────────
   _openAuthNameModal(deviceId, mode, currentName = '') {
     const suggestions = randomAuthNames()
-    this.setData({
+    this._updateData({
       authNameModalVisible: true,
       authName: currentName || suggestions[0],
       authNameSuggestions: suggestions,
@@ -636,11 +640,7 @@ Page({
       return
     }
     if (device && device.voipAuthState === 'unknown') {
-      wx.showModal({
-        title: '授权状态未知',
-        content: '暂时无法读取微信通话授权状态，请检查网络后下拉刷新。为避免误触发授权，本次不会调用授权接口。',
-        showCancel: false,
-      })
+      this.loadDevices()
       return
     }
     if (!device || !String(device.device_name || '').trim()) {
@@ -660,29 +660,44 @@ Page({
 
   onEditContactRemark() {
     this._openAuthNameModal('', 'profile', this.data.contactRemark)
-    const cachedOpenId = app.globalData.wxOpenId || ''
-    this.setData({ profileOpenId: cachedOpenId })
-    if (cachedOpenId) return
+    return this.loadProfileOpenId()
+  },
 
-    this._fetchOpenId().then(openid => {
-      if (this.data.authNameModalVisible && this.data.authNameMode === 'profile') {
-        this.setData({ profileOpenId: openid })
-      }
-    }).catch(() => {
-      wx.showToast({ title: 'OpenID 获取失败，请稍后重试', icon: 'none' })
+  async loadProfileOpenId() {
+    const request = (this._profileRequest || 0) + 1
+    this._profileRequest = request
+    this._updateData({ profileOpenId: app.globalData.wxOpenId || '', profileOpenIdError: false })
+    try {
+      const openid = await this._fetchOpenId()
+      if (request !== this._profileRequest || !this.data.authNameModalVisible || this.data.authNameMode !== 'profile') return
+      this._updateData({ profileOpenId: openid, profileOpenIdError: false })
+    } catch (_) {
+      if (request !== this._profileRequest || !this.data.authNameModalVisible || this.data.authNameMode !== 'profile') return
+      this._updateData({ profileOpenId: '', profileOpenIdError: true })
+    }
+  },
+
+  onCopyProfileOpenId() {
+    const openid = this.data.profileOpenId
+    if (!openid) return
+    wx.setClipboardData({
+      data: openid,
+      success: () => wx.showToast({ title: '已复制', icon: 'success' }),
+      fail: () => wx.showToast({ title: '复制失败，请重试', icon: 'none' }),
     })
   },
 
   onAuthNameInput(e) {
-    this.setData({ authName: e.detail.value })
+    this._updateData({ authName: e.detail.value })
   },
 
   onSelectAuthName(e) {
-    this.setData({ authName: e.currentTarget.dataset.name })
+    this._updateData({ authName: e.currentTarget.dataset.name })
   },
 
   onCancelAuthName() {
-    this.setData({
+    this._profileRequest = (this._profileRequest || 0) + 1
+    this._updateData({
       authNameModalVisible: false,
       authName: '',
       authNameSuggestions: [],
@@ -798,14 +813,14 @@ Page({
           deviceNamePending: authorizedDeviceName !== authorizationDeviceName,
         }
       })
-      this.setData({ deviceList: list, contactRemark: remark })
+      this._updateData({ deviceList: list, contactRemark: remark })
       wx.showToast({ title: alreadyAuthorized ? '名称已保存' : '授权成功' })
     } catch (err) {
       if (wechatAuthorized) {
         const list = this.data.deviceList.map(d => (
           d.device_id === deviceId ? { ...d, voipAuthed: true } : d
         ))
-        this.setData({ deviceList: list })
+        this._updateData({ deviceList: list })
         wx.showModal({
           title: '名称保存失败',
           content: `${err.message || JSON.stringify(err)}。微信授权已完成，请点击右上角用户图标设置“我的联系人名称”后重试。`,
@@ -830,7 +845,7 @@ Page({
       if (!res || res.code !== 0) {
         throw new Error((res && res.msg) || '保存联系人名称失败')
       }
-      this.setData({ contactRemark: remark })
+      this._updateData({ contactRemark: remark })
       wx.showToast({ title: '联系人名称已保存' })
     } catch (err) {
       wx.showModal({ title: '保存失败', content: err.message || JSON.stringify(err), showCancel: false })
