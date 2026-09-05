@@ -29,7 +29,10 @@
   <view wx:elif="{{initialized && !deviceList.length}}" class="state-card">
     <view class="empty-symbol">＋</view>
     <text class="state-title">添加你的第一台设备</text>
-    <text class="state-description">绑定后，即可实时查看、与设备通话，或设置 AI 角色。</text>
+    <view class="state-description">
+      <text class="state-description-line">绑定设备后，即可</text>
+      <text class="state-description-line">与设备通话、查看画面或设置 AI 角色</text>
+    </view>
     <button class="state-button" bindtap="goAdd">添加设备</button>
   </view>
   <view wx:else class="device-list">

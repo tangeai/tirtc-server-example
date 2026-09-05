@@ -4,8 +4,8 @@
   <view class="hero">
     <view class="hero-circle"></view>
     <view class="hero-text">
-      <text class="hero-title">ThingConnect</text>
-      <text class="hero-sub">Connect the Things, Build the Future. @tang.ai</text>
+      <text class="hero-title">XiaoTai.Chat</text>
+      <text class="hero-sub">小钛，连接设备，让沟通更简单。</text>
     </view>
   </view>
 
