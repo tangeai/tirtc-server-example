@@ -1,4 +1,6 @@
 const app = getApp()
+const { expireSession } = require('./session')
+const PUBLIC_PATHS = new Set(['/v1/config/captcha', '/v1/user/login', '/v1/user/register', '/v1/user/send-code'])
 
 function request(baseUrl, path, method = 'GET', data, extraHeaders = {}) {
   return new Promise((resolve, reject) => {
@@ -9,6 +11,13 @@ function request(baseUrl, path, method = 'GET', data, extraHeaders = {}) {
       header: { 'content-type': 'application/json', ...extraHeaders },
       data,
       success(res) {
+        const code = res.data && res.data.code
+        if (!PUBLIC_PATHS.has(path) && (code === 401 || (res.statusCode === 401 && code == null))) {
+          const token = (extraHeaders.Authorization || '').replace(/^Bearer /, '')
+          expireSession(token)
+          reject({ code: 401, msg: '登录状态已过期，请重新登录', sessionExpired: true })
+          return
+        }
         if (res.statusCode === 200) {
           resolve(res.data)
         } else {

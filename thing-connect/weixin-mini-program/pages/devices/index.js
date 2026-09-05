@@ -1,3 +1,4 @@
+const { expireSession } = require('../../utils/session')
 // thing-connect/weixin-mini-program/pages/devices/index.js
 const { userApi, voipApi } = require('../../utils/api')
 const {
@@ -299,10 +300,9 @@ Page({
           throw res
         }
       } catch (error) {
+        if (error.sessionExpired) return
         if (error.code === 401) {
-          wx.removeStorageSync('token')
-          wx.showToast({ title: '登录已过期，请重新登录', icon: 'none' })
-          wx.reLaunch({ url: '/pages/login/index' })
+          expireSession()
         } else {
           this._updateData({ loadError: '暂时无法更新设备，请检查网络后重试' })
         }
@@ -559,6 +559,7 @@ Page({
         }
       }
     } catch (err) {
+      if (err.sessionExpired) return
       wx.showModal({
         title: '保存失败',
         content: err.message || JSON.stringify(err),
@@ -607,6 +608,7 @@ Page({
           wx.showToast({ title: '已解绑' })
           this.loadDevices()
         } catch (err) {
+          if (err.sessionExpired) return
           wx.showToast({ title: err.msg || '解绑失败，请稍后重试', icon: 'none' })
         } finally {
           this._unbinding = false
@@ -788,6 +790,7 @@ Page({
         })
         wechatAuthorized = true
       } catch (err) {
+      if (err.sessionExpired) return
         if (!err || err.errCode !== 10001) throw err
         alreadyAuthorized = true
         wechatAuthorized = true
@@ -816,6 +819,7 @@ Page({
       this._updateData({ deviceList: list, contactRemark: remark })
       wx.showToast({ title: alreadyAuthorized ? '名称已保存' : '授权成功' })
     } catch (err) {
+      if (err.sessionExpired) return
       if (wechatAuthorized) {
         const list = this.data.deviceList.map(d => (
           d.device_id === deviceId ? { ...d, voipAuthed: true } : d
@@ -848,6 +852,7 @@ Page({
       this._updateData({ contactRemark: remark })
       wx.showToast({ title: '联系人名称已保存' })
     } catch (err) {
+      if (err.sessionExpired) return
       wx.showModal({ title: '保存失败', content: err.message || JSON.stringify(err), showCancel: false })
     } finally {
       wx.hideLoading()
@@ -903,6 +908,7 @@ Page({
       wx.hideLoading()
       wx.redirectTo({ url: wmpfVoip.CALL_PAGE_PATH })
     } catch (err) {
+      if (err.sessionExpired) return
       wx.showModal({ title: '呼叫失败', content: err.message || JSON.stringify(err), showCancel: false })
     } finally {
       wx.hideLoading()

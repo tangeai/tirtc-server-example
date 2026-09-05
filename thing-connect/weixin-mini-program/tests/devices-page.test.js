@@ -14,6 +14,7 @@ function makePage(result) {
     Page: value => { definition = value },
     getApp: () => ({ globalData: {} }),
     require: id => {
+      if (id.endsWith('/session')) return { expireSession: () => calls.push(['login']) }
       if (id.endsWith('/api')) return { userApi: async () => {
         if (result instanceof Error) throw result
         return result

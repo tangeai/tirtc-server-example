@@ -1,3 +1,4 @@
+const { expireSession } = require('../../utils/session')
 // thing-connect/weixin-mini-program/pages/bind/index.js
 const { userApi } = require('../../utils/api')
 
@@ -85,6 +86,7 @@ Page({
         this.setData({ errMsg: res.msg || '绑定失败' })
       }
     } catch (e) {
+      if (e.sessionExpired) return
       this.setData({ errMsg: e.msg || '绑定失败' })
     } finally {
       this.setData({ bindLoading: false })
@@ -107,6 +109,7 @@ Page({
         this.setData({ errMsg: res.msg || '绑定失败' })
       }
     } catch (e) {
+      if (e.sessionExpired) return
       this.setData({ errMsg: e.msg || '绑定失败' })
     } finally {
       this.setData({ bindLoading: false })
@@ -114,8 +117,6 @@ Page({
   },
 
   _goRelogin() {
-    wx.removeStorageSync('token')
-    wx.showToast({ title: '登录已过期，请重新登录', icon: 'none' })
-    setTimeout(() => wx.redirectTo({ url: '/pages/login/index' }), 1000)
+    expireSession()
   },
 })

@@ -34,9 +34,6 @@
         </view>
       </view>
       <ne-captcha wx:if="{{captchaProvider === 'yidun' && captchaId}}" id="captcha-login" captcha-id="{{captchaId}}" width="630rpx" bindverify="onLoginCaptchaVerify"></ne-captcha>
-      <t-captcha wx:if="{{captchaProvider === 'tencent' && captchaId}}" id="captcha-login-tencent" app-id="{{captchaId}}" bindverify="onLoginTencentVerify" />
-      <captcha4 wx:if="{{captchaProvider === 'geetest' && captchaId}}" id="captcha-login-geetest" captchaId="{{captchaId}}" bindSuccess="onLoginGeetestVerify" />
-      <aliyun-captcha wx:if="{{captchaProvider === 'aliyun' && captchaId}}" id="captcha-login-aliyun" props="{{aliyunLoginProps}}" />
       <button class="btn-primary" bindtap="doLogin" disabled="{{loginLoading}}">{{loginLoading ? '登录中...' : '登录'}}</button>
     </view>
 
@@ -56,9 +53,6 @@
         </view>
       </view>
       <ne-captcha wx:if="{{captchaProvider === 'yidun' && captchaId}}" id="captcha-reg" captcha-id="{{captchaId}}" width="630rpx" bindverify="onRegCaptchaVerify"></ne-captcha>
-      <t-captcha wx:if="{{captchaProvider === 'tencent' && captchaId}}" id="captcha-reg-tencent" app-id="{{captchaId}}" bindverify="onRegTencentVerify" />
-      <captcha4 wx:if="{{captchaProvider === 'geetest' && captchaId}}" id="captcha-reg-geetest" captchaId="{{captchaId}}" bindSuccess="onRegGeetestVerify" />
-      <aliyun-captcha wx:if="{{captchaProvider === 'aliyun' && captchaId}}" id="captcha-reg-aliyun" props="{{aliyunRegProps}}" />
       <view class="field">
         <text class="label">密码</text>
         <view class="input-wrap">

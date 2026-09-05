@@ -1,3 +1,4 @@
+const { expireSession } = require('../../utils/session')
 const { buildDeviceWebPage } = require('../../utils/device-web-page')
 const { userApi } = require('../../utils/api')
 const app = getApp()
@@ -40,6 +41,7 @@ Page({
       this._timer = setTimeout(() => this.onWebError(), 20000)
     } catch (error) {
       if (this._disposed) return
+      if (error.sessionExpired) return
       if (error.code === 401) return this.login()
       this.setData({ loading: false, error: error.message || error.msg || '暂时无法打开，请检查网络后重试' })
     } finally {
@@ -48,8 +50,7 @@ Page({
   },
 
   login() {
-    wx.removeStorageSync('token')
-    wx.reLaunch({ url: '/pages/login/index' })
+    expireSession()
   },
 
   onWebLoad() {

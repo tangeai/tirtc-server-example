@@ -12,7 +12,8 @@ async function refreshVoipAuthState(tasks) {
   let openIdReady = true
   try {
     await refreshOpenId()
-  } catch (_) {
+  } catch (error) {
+    if (error.sessionExpired) throw error
     openIdReady = false
   }
 

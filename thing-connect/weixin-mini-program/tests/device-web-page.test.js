@@ -5,6 +5,33 @@ const path = require('node:path')
 const vm = require('node:vm')
 const { buildDeviceWebPage } = require('../utils/device-web-page')
 
+test('H5 过期等待微信 SDK 就绪后自动返回登录首页，并去重', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../user-server/static/js/mini-program-page.js'), 'utf8')
+  const navigations = []
+  let sdk, panel
+  const window = {}
+  vm.runInNewContext(source, {
+    window, URLSearchParams,
+    location: { search: '?source=miniprogram', hash: '#mini_token=test-token', pathname: '/player' },
+    history: { replaceState() {} },
+    document: {
+      documentElement: { classList: { add() {} } },
+      getElementById: () => panel,
+      createElement: () => ({ style: {}, append() {} }),
+      head: { appendChild: value => { sdk = value } },
+      body: { appendChild: value => { panel = value } },
+    },
+  })
+  window.MiniProgramPage.requireLogin()
+  assert.equal(navigations.length, 0)
+  window.wx = { miniProgram: { reLaunch: options => navigations.push(options) } }
+  sdk.onload()
+  window.MiniProgramPage.requireLogin()
+  assert.equal(navigations.length, 1)
+  assert.equal(navigations[0].url, '/pages/login/index?expired=1')
+  assert.equal(navigations[0].url.includes('test-token'), false)
+})
+
 test('固定 HTTPS 页面及编码参数，凭证仅在 fragment 中传递', () => {
   for (const [kind, pathname] of [['live', '/player'], ['agent', '/v1/ai/agent']]) {
     const page = buildDeviceWebPage('https://app.example.com/', kind, '设备 &/#', 'test-token')
@@ -42,7 +69,7 @@ function embeddedPage(apiResult, token = 'native-token') {
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../pages/device-web/index.js'), 'utf8'), {
     Page: value => { definition = value },
     getApp: () => ({ globalData: { userServerBaseUrl: 'https://app.example.com' } }),
-    require: id => id.includes('device-web-page') ? { buildDeviceWebPage } : { userApi: async () => {
+    require: id => id.endsWith('/session') ? { expireSession: () => calls.push(['login']) } : id.includes('device-web-page') ? { buildDeviceWebPage } : { userApi: async () => {
       if (apiResult instanceof Error) throw apiResult
       return apiResult
     } },
