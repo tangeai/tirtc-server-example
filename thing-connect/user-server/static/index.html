@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="TiRTC 开源设备音视频示例系统，包含设备模拟器、服务端、Web/H5 和设备端参考实现，可用于验证远程实时查看、AI 音视频对讲、设备间音视频对讲和设备呼叫微信小程序 VoIP 对讲。">
-  <title>TiRTC 开源示例 · 快速开发设备音视频产品</title>
+  <meta name="description" content="探鸽 · 小钛支持多款开发板烧录体验，提供实时音视频、AI 对话与多人对讲。设备端、服务端、Web 和微信小程序开源，可直接体验、复用或自行部署。">
+  <title>探鸽 · 小钛 — 设备音视频平台</title>
   <script>document.documentElement.classList.add("js");</script>
   <style>
     :root {
@@ -86,37 +86,6 @@
       white-space: nowrap;
     }
 
-    .brand-mark {
-      position: relative;
-      width: 31px;
-      height: 31px;
-      border-radius: 9px;
-      background: var(--ink);
-      overflow: hidden;
-    }
-
-    .brand-mark::before,
-    .brand-mark::after {
-      content: "";
-      position: absolute;
-      border-radius: 50%;
-      border: 2px solid #79d2c4;
-    }
-
-    .brand-mark::before {
-      width: 16px;
-      height: 16px;
-      top: 6px;
-      left: 6px;
-    }
-
-    .brand-mark::after {
-      width: 4px;
-      height: 4px;
-      top: 12px;
-      left: 12px;
-      background: #79d2c4;
-    }
 
     .nav-links,
     .nav-actions {
@@ -651,6 +620,7 @@
     }
 
     .trust-item svg {
+      flex-shrink: 0;
       width: 18px;
       height: 18px;
       color: var(--accent);
@@ -1393,10 +1363,12 @@
       }
 
       .trust-items {
-        grid-template-columns: repeat(2, 1fr);
+        grid-template-columns: repeat(2, minmax(0, 1fr));
       }
 
       .trust-item {
+        min-width: 0;
+        white-space: normal;
         justify-content: flex-start;
         padding-left: 8px;
         font-size: 12px;
@@ -1471,13 +1443,14 @@
       }
     }
   </style>
+  <link rel="stylesheet" href="/static/css/brand.css?v=2">
 </head>
 <body>
   <header class="site-header">
     <nav class="nav shell" aria-label="主导航">
-      <a class="brand" href="#top" aria-label="TiRTC 开源示例首页">
+      <a class="brand" href="#top" aria-label="探鸽 · 小钛首页">
         <span class="brand-mark" aria-hidden="true"></span>
-        <span>TiRTC · OPEN EXAMPLES</span>
+        <span>探鸽 · 小钛</span>
       </a>
 
       <div class="nav-links" id="nav-links">
@@ -1514,21 +1487,21 @@
     <section class="hero">
       <div class="hero-grid shell">
         <div class="reveal">
-          <div class="eyebrow"><span class="eyebrow-dot"></span>OPEN-SOURCE TIRTC EXAMPLES FOR DEVICES</div>
-          <h1>用 TiRTC<br><em>快速开发音视频设备</em></h1>
+          <div class="eyebrow"><span class="eyebrow-dot"></span>开发板即刻体验 · 设备到应用整套开源</div>
+          <h1>烧录即可体验<br><em>整套开源，按需部署</em></h1>
           <p class="hero-copy">
-            这套开源示例包含设备模拟器、服务端、Web/H5 和设备端参考实现。在电脑上完成 TiRTC P2P 实时音视频链路验证后，即可将相关能力接入嵌入式设备。
+            为已适配的开发板烧录固件，联网绑定后即可体验实时音视频、AI 对话和多人对讲。服务端、Web 与微信小程序可直接复用，也可下载源码自行部署，继续开发自己的产品。
           </p>
           <div class="hero-actions">
-            <a class="button button-primary" href="https://github.com/tangeai/tirtc-server-example/blob/main/thing-connect/device-sim/device-sim-py/README.md" target="_blank" rel="noreferrer">开始使用设备模拟器 <span class="arrow">→</span></a>
-            <a class="button button-secondary" href="#demo">查看功能演示</a>
+            <a class="button button-primary" href="#routes">选择体验方式 <span class="arrow">→</span></a>
+            <a class="button button-secondary" href="https://github.com/tangeai/tirtc-server-example" target="_blank" rel="noopener noreferrer">获取开源代码</a>
           </div>
           <div class="hero-note">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
               <path d="M12 3 4 7v5c0 4.6 3.1 7.7 8 9 4.9-1.3 8-4.4 8-9V7l-8-4Z"/>
               <path d="m9 12 2 2 4-4"/>
             </svg>
-            无需开发板 · 支持 Windows、macOS Apple Silicon、Ubuntu x86_64
+            支持多款开发板 · 也可用电脑模拟器体验
           </div>
           <div class="hero-mirror">
             <span>GitHub 下载速度较慢？</span>
@@ -1632,15 +1605,25 @@
     <section class="routes" id="routes">
       <div class="shell">
         <div class="section-heading final-cta-heading reveal">
-          <div class="section-kicker">Learn TiRTC by example</div>
-          <h2>完成示例验证，进入产品开发</h2>
-          <p>在电脑上启动设备模拟器，完成设备上线、绑定和音视频验证。功能演示将介绍 TiRTC 在常见场景中的应用。</p>
+          <div class="section-kicker">选择适合你的开始方式</div>
+          <h2>开发板直接体验，应用按需部署</h2>
+          <p>有开发板，烧录固件即可开始；没有硬件，也能用电脑模拟器体验。需要接入自己的业务，可复用服务端、Web 与微信小程序，部署到自己的环境。</p>
         </div>
 
         <article class="setup-step reveal">
           <span class="setup-number">01</span>
           <div class="setup-copy">
-            <h3>运行 TiRTC 设备模拟器</h3>
+            <h3>烧录开发板，直接体验</h3>
+            <p>选择已适配的开发板和对应固件，按说明烧录、联网并绑定设备，即可通过 Web 或微信小程序体验。</p>
+          </div>
+          <ul class="setup-requirements"><li>匹配板型与固件</li><li>联网后绑定设备</li></ul>
+          <a class="setup-link" href="https://github.com/tangeai/tirtc-device-qiming/releases" target="_blank" rel="noopener noreferrer">查看开发板固件 <span>→</span></a>
+        </article>
+
+        <article class="setup-step reveal">
+          <span class="setup-number">02</span>
+          <div class="setup-copy">
+            <h3>没有开发板？用电脑体验</h3>
             <p>安装 CPython 3.10–3.14，按照教程启动模拟设备，完成设备上线、绑定及音视频收发验证。</p>
           </div>
           <ul class="setup-requirements">
@@ -1651,12 +1634,21 @@
           <a class="setup-link" href="https://github.com/tangeai/tirtc-server-example/blob/main/thing-connect/device-sim/device-sim-py/README.md" target="_blank" rel="noreferrer">查看模拟器教程 <span>→</span></a>
         </article>
 
+        <article class="setup-step reveal">
+          <span class="setup-number">03</span>
+          <div class="setup-copy">
+            <h3>复用整套应用，自行部署</h3>
+            <p>下载服务端、Web 与微信小程序源码，按照部署指南配置运行环境和服务，即可搭建自己的平台并继续扩展业务。</p>
+          </div>
+          <ul class="setup-requirements"><li>服务端与 Web</li><li>微信小程序</li><li>设备端源码</li></ul>
+          <a class="setup-link" href="https://github.com/tangeai/tirtc-server-example/blob/main/thing-connect/deployment.md" target="_blank" rel="noopener noreferrer">查看部署指南 <span>→</span></a>
+        </article>
+
         <div class="video-step" id="demo">
           <div class="video-step-heading reveal">
-            <span class="setup-number">02</span>
             <div>
               <h3>常用功能演示</h3>
-              <p>设备模拟器上线并完成绑定后，可按照视频完成各项功能验证。</p>
+              <p>开发板或模拟器上线并完成绑定后，可参照视频体验各项功能。</p>
             </div>
           </div>
 
@@ -1788,7 +1780,7 @@
 
   <footer class="site-footer">
     <div class="footer-inner shell">
-      <span>© <span id="year"></span> TANGE AI · TiRTC 开源示例</span>
+      <span>© <span id="year"></span> 探鸽 · 小钛</span>
       <div class="footer-links">
         <a href="https://github.com/tangeai/tirtc-server-example" target="_blank" rel="noreferrer">GitHub</a>
         <a href="https://community.tange-ai.com" target="_blank" rel="noreferrer">开放社区</a>

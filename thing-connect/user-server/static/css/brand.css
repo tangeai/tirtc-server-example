@@ -1,0 +1,41 @@
+/* Shared brand mark for the homepage, authentication and device list. */
+.brand-mark {
+  display: inline-block;
+  position: relative;
+  width: 31px;
+  height: 31px;
+  flex: 0 0 auto;
+  border-radius: 9px;
+  background: #172026;
+  overflow: hidden;
+}
+
+.brand-mark::before,
+.brand-mark::after {
+  box-sizing: border-box;
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  border: 2px solid #79d2c4;
+}
+
+.brand-mark::before {
+  width: 16px;
+  height: 16px;
+}
+
+.brand-mark::after {
+  width: 4px;
+  height: 4px;
+  background: #79d2c4;
+}
+
+.site-brand-name {
+  white-space: nowrap;
+  font-size: 17px;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+}

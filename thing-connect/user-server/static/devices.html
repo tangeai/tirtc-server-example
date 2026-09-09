@@ -3,26 +3,21 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ThingConnect — 我的设备</title>
+  <title>探鸽 · 小钛 — 我的设备</title>
   <link rel="stylesheet" href="/static/css/tailwind.css">
 <style>
 [hidden]{display:none!important}
 .device-dialog{border:1px solid #e5e7eb;border-radius:18px;padding:24px;width:min(420px,calc(100vw - 32px));color:#172c25;max-height:90vh;overflow:auto}.device-dialog::backdrop{background:#0007}.device-dialog h2{font-size:18px;font-weight:700}.device-dialog h3{font-weight:600;margin:22px 0 12px}.device-dialog header{display:flex;justify-content:space-between;gap:12px}.detail-muted{color:#6b7280;font-size:13px;overflow-wrap:anywhere;margin:8px 0}.danger{color:#dc2626}.device-details{display:grid;grid-template-columns:130px minmax(0,1fr);gap:10px;font-size:13px;margin:18px 0}.device-details dt{color:#6b7280}.device-details dd{overflow-wrap:anywhere}.media-tabs{display:flex;gap:6px}.media-tabs button{flex:1;font-size:13px;border:1px solid #d1d5db;border-radius:8px;padding:9px 4px}.media-tabs [aria-selected=true]{background:#ecfdf5;border-color:#10b981;color:#047857}.device-info-dialog{width:min(580px,calc(100vw - 32px))}.device-summary{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:14px 16px}.device-summary>button{text-align:left;cursor:pointer;background:#f4f7f6;border-radius:10px;padding:10px;min-width:0}.device-summary>button:hover{background:#ecfdf5}.device-summary>button:focus-visible{outline:2px solid #10b981;outline-offset:2px}.device-summary b span{float:right}.device-summary b{display:block;color:#475569;font-size:12px;margin-bottom:5px}.device-summary p{font-size:12px;color:#64748b;overflow-wrap:anywhere}.room-dot[hidden]{display:none}.room-dot{display:inline-block;width:6px;height:6px;background:#10b981;border-radius:50%;margin-left:3px}.feature-buttons button{min-width:0;white-space:nowrap}
 </style>  <script src="/static/user-shell.js?v=a3b29baae127"></script>
+  <link rel="stylesheet" href="/static/css/brand.css?v=2">
 </head>
 <body class="bg-gray-50 min-h-screen font-sans">
 
 <!-- TOPBAR -->
 <header class="sticky top-0 z-50 flex items-center justify-between h-[60px] px-4 sm:px-8 bg-white border-b border-gray-200">
   <div class="flex items-center gap-2.5">
-    <div class="w-[30px] h-[30px] bg-gradient-to-br from-emerald-400 to-blue-500 rounded-[7px] flex items-center justify-center">
-      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round">
-        <circle cx="12" cy="12" r="3"/>
-        <path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>
-        <path d="M5.64 5.64l1.77 1.77M16.6 16.6l1.76 1.76M5.64 18.36l1.77-1.77M16.6 7.4l1.76-1.76"/>
-      </svg>
-    </div>
-    <span class="text-base max-[380px]:hidden font-bold tracking-tight text-gray-900">ThingConnect</span>
+    <span class="brand-mark" aria-hidden="true"></span>
+    <span class="site-brand-name text-gray-900">探鸽 · 小钛</span>
   </div>
   <div class="flex items-center gap-2 sm:gap-4">
     <div data-navigation hidden></div>

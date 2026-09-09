@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="登录 TiRTC 体验平台，添加模拟器或真实设备，验证设备音视频能力。">
-  <title>注册/登录 · TiRTC 体验平台</title>
+  <title>注册/登录 — 探鸽 · 小钛</title>
   <style>
     :root {
       --ink: #172026;
@@ -93,38 +93,6 @@
       white-space: nowrap;
     }
 
-    .brand-mark {
-      position: relative;
-      width: 31px;
-      height: 31px;
-      flex: 0 0 auto;
-      overflow: hidden;
-      border-radius: 9px;
-      background: var(--ink);
-    }
-
-    .brand-mark::before,
-    .brand-mark::after {
-      position: absolute;
-      content: "";
-      border: 2px solid #79d2c4;
-      border-radius: 50%;
-    }
-
-    .brand-mark::before {
-      width: 16px;
-      height: 16px;
-      top: 6px;
-      left: 6px;
-    }
-
-    .brand-mark::after {
-      width: 4px;
-      height: 4px;
-      top: 12px;
-      left: 12px;
-      background: #79d2c4;
-    }
 
     .back-home {
       display: inline-flex;
@@ -474,19 +442,20 @@
       }
     }
   </style>
+  <link rel="stylesheet" href="/static/css/brand.css?v=2">
 </head>
 <body>
   <header class="site-header">
     <nav class="nav shell" aria-label="登录页导航">
-      <a class="brand" href="/" aria-label="返回 TiRTC 开源示例首页">
+      <a class="brand" href="/" aria-label="返回探鸽 · 小钛首页">
         <span class="brand-mark" aria-hidden="true"></span>
-        <span>TiRTC · OPEN EXAMPLES</span>
+        <span>探鸽 · 小钛</span>
       </a>
       <a class="back-home" href="/">
         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M16 10H4M9 5l-5 5 5 5"/>
         </svg>
-        <span>返回示例首页</span>
+        <span>返回首页</span>
       </a>
     </nav>
   </header>
@@ -494,7 +463,7 @@
   <main class="auth-main">
     <div class="auth-layout shell">
       <section class="auth-card" aria-labelledby="card-title">
-        <p class="mobile-brand">TiRTC Experience Platform</p>
+        <p class="mobile-brand">探鸽 · 小钛</p>
         <div class="card-heading">
           <h2 id="card-title">登录体验平台</h2>
           <p id="card-sub">继续管理和调试你的 TiRTC 设备</p>
