@@ -10,6 +10,7 @@ static DeviceBusiness _device_business(SessionKind kind) {
     case SESSION_VOIP: return DEVICE_BUSINESS_VOIP;
     case SESSION_AI: return DEVICE_BUSINESS_AI;
     case SESSION_CALL: return DEVICE_BUSINESS_CALL;
+    case SESSION_ROOM: return DEVICE_BUSINESS_ROOM;
     default: return DEVICE_BUSINESS_NONE;
     }
 }
@@ -112,7 +113,7 @@ int session_coordinator_begin(SessionCoordinator *sc, SessionKind kind) {
         pthread_mutex_unlock(&sc->lock);
         return -1;
     }
-    if (sc->current != SESSION_NONE && sc->current != SESSION_STREAM && sc->current != kind) {
+    if (sc->current != SESSION_NONE && sc->current != SESSION_STREAM && sc->current != SESSION_ROOM && sc->current != kind) {
         LOG_W("%s 会话正在进行中", session_kind_name(sc->current));
         pthread_mutex_unlock(&sc->lock);
         return -1;
@@ -167,6 +168,7 @@ const char *session_kind_name(SessionKind kind) {
     case SESSION_VOIP: return "VoIP";
     case SESSION_AI: return "AI";
     case SESSION_CALL: return "设备互呼";
+    case SESSION_ROOM: return "多人对讲";
     default: return "无";
     }
 }

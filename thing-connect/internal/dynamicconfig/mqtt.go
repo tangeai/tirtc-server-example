@@ -61,7 +61,7 @@ func ResolveMQTT(ctx context.Context, loader SnapshotLoader, namespace string, f
 	switch value.AuthMode {
 	case "username":
 		if strings.TrimSpace(value.ClientID) != "" {
-			return config.MQTTCfg{}, snapshot.Revision, errors.New("Username 认证不能同时配置固定 ClientID")
+			return config.MQTTCfg{}, snapshot.Revision, errors.New("用户名认证不能同时配置固定 ClientID")
 		}
 		resolved.Username = strings.TrimSpace(value.Username)
 	case "clientid":

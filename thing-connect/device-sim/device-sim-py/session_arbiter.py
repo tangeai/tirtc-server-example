@@ -87,7 +87,7 @@ class SessionArbiter:
         self._validate_business_kind(kind)
         with self._state_lock:
             self._expire_pending_locked()
-            if (self._closed or self._owner is not None
+            if (self._closed or self._owner not in (None, SessionKind.ROOM)
                     or self._pending_ticket is not None):
                 return False
             self._pending_generation += 1
@@ -111,7 +111,7 @@ class SessionArbiter:
             if (ticket is not None and ticket.kind == kind and session_id
                     and ticket.session_id == session_id):
                 return IncomingDecision.DUPLICATE
-            if (not self._closed and self._owner is None
+            if (not self._closed and self._owner in (None, SessionKind.ROOM)
                     and ticket is None):
                 self._pending_generation += 1
                 self._pending_ticket = _PendingTicket(
@@ -170,7 +170,7 @@ class SessionArbiter:
                     else ticket is None
                 )
                 if (self._closed
-                        or (self._owner is not None and not same_owner)
+                        or (self._owner not in (None, SessionKind.ROOM) and not same_owner)
                         or (same_owner and not allow_existing)
                         or (same_owner and session_id is not None
                             and self._owner_session_id != session_id)

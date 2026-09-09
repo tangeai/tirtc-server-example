@@ -171,9 +171,15 @@ $(SDK_ABI_TEST_TARGET): tests/test_sdk_abi.c $(BUILD_CONFIG) | $(OBJDIR)
 	@echo "  CC    $@"
 	@$(CC) $(CFLAGS) $(SDK_VERSION_CPPFLAGS) -o $@ $< $(LDFLAGS)
 
-test: check-sdk $(TEST_TARGET) $(SDK_ABI_TEST_TARGET) $(TARGET)
+ROOM_TEST_TARGET := $(OBJDIR)/test-room
+$(ROOM_TEST_TARGET): tests/test_room.c $(SRCDIR)/tirtc_room.c $(FRAMEWORK_TARGET) $(BUILD_CONFIG)
+	@echo "  CC    $@"
+	@$(CC) $(CFLAGS) -I$(SRCDIR) -o $@ $< $(FRAMEWORK_TARGET) $(LDFLAGS)
+
+test: check-sdk $(TEST_TARGET) $(ROOM_TEST_TARGET) $(SDK_ABI_TEST_TARGET) $(TARGET)
 	@LD_LIBRARY_PATH="$(SDK_DIR)/lib:$${LD_LIBRARY_PATH}" $(SDK_ABI_TEST_TARGET)
 	@LD_LIBRARY_PATH="$(SDK_DIR)/lib:$${LD_LIBRARY_PATH}" $(TEST_TARGET)
+	@LD_LIBRARY_PATH="$(SDK_DIR)/lib:$${LD_LIBRARY_PATH}" $(ROOM_TEST_TARGET)
 	@LD_LIBRARY_PATH="$(SDK_DIR)/lib:$${LD_LIBRARY_PATH}" $(TARGET_RUN) --help >/dev/null
 
 run: $(TARGET)

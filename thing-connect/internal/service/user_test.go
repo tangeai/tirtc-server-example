@@ -621,3 +621,22 @@ func (f *fakeCacheStore) GetReportFingerprint(_ context.Context, _ string) (stri
 	return "", nil
 }
 func (f *fakeCacheStore) DelReportFingerprint(_ context.Context, _ string) error { return nil }
+
+func TestDeviceMediaProfilesPreserveReportedValuesWithoutCrossSceneFallback(t *testing.T) {
+	raw := `{"down_audio_mt":"opus,amr","audio_rate":16000,"hor_mirror":false,"camera_rotation":0,"openid":"private","secret":"private"}`
+	profiles := deviceMediaProfiles(&raw)
+	if len(profiles) != 1 || string(profiles["voip"]["down_audio_mt"]) != `"opus,amr"` || string(profiles["voip"]["hor_mirror"]) != "false" || string(profiles["voip"]["camera_rotation"]) != "0" {
+		t.Fatalf("reported fields=%v", profiles)
+	}
+	for _, key := range []string{"openid", "secret", "up_audio_mt"} {
+		if _, ok := profiles["voip"][key]; ok {
+			t.Fatalf("unreported/private field %s exposed", key)
+		}
+	}
+	if _, ok := profiles["stream"]; ok {
+		t.Fatal("VoIP leaked into stream")
+	}
+	if len(deviceMediaProfiles(nil)) != 0 {
+		t.Fatal("missing profile synthesized")
+	}
+}

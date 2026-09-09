@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ThingConnect — 绑定设备</title>
   <link rel="stylesheet" href="/static/css/tailwind.css">
+  <script src="/static/user-shell.js?v=a3b29baae127"></script>
 </head>
 <body class="bg-gray-50 min-h-screen font-sans">
 
@@ -161,7 +162,7 @@
 <script>
   const $ = id => document.getElementById(id);
   const token = localStorage.getItem('token');
-  if (!token) location.href = '/';
+  if (!token) location.href = '/login';
 
   let currentTab = 'code';
 

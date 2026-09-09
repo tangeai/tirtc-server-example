@@ -32,6 +32,7 @@
 #include "tirtc_stream.h"
 #include "tirtc_voip.h"
 #include "tirtc_ai.h"
+#include "tirtc_room.h"
 #include "tirtc_call.h"
 #include "tirtc_runtime.h"
 #include "call_session.h"
@@ -64,6 +65,7 @@ typedef struct {
     VoipState *voip;
     AiState *ai;
     CallState *call;
+    RoomState *room;
     const char *up_audio_format;
     const char *up_video_format;
     char video[512];
@@ -71,9 +73,11 @@ typedef struct {
     int pending_selection; /* 0=none, 1=wxcall, 2=device/mixed contact */
     char pending_call_type[16];
     pthread_mutex_t lease_lock;
-    SessionLease leases[SESSION_CALL + 1];
-    uint64_t rtc_generations[SESSION_CALL + 1];
+    SessionLease leases[SESSION_ROOM + 1];
+    uint64_t rtc_generations[SESSION_ROOM + 1];
 } DeviceRuntime;
+
+static void _mqtt_room_sync(void *ctx){DeviceRuntime *rt=ctx;room_sync(rt->room);}
 
 static int _activate_runtime(DeviceRuntime *rt, SessionKind kind,
                              TirtcService service) {
@@ -344,6 +348,7 @@ static void _mqtt_callers(void *ctx, const cJSON *p) { DeviceRuntime *rt = ctx; 
 static void _mqtt_callee_answered(void *ctx, const cJSON *p) { DeviceRuntime *rt = ctx; call_on_device_callee_answered(rt->call, p); }
 
 static void _print_commands(void) {
+    printf("[terminal] room create [密码] | room join 房间号 [密码] | room leave | room status | room ptt down/up\n");
     printf("[terminal] wxcall [N] [video|audio] | call [N|device_id] [video|audio] | aicall\n");
     printf("[terminal] accept/reject [reason] | cancel | hangup | ct list|pending|add|accept|reject|del|remark\n");
     printf("[terminal] room | help | exit（缩写: w/a/r/h/e）\n");
@@ -424,6 +429,7 @@ static int _accept_voip_action(void *opaque) {
 }
 
 static void _handle_command(DeviceRuntime *rt, const char *line) {
+    if (rt->room && room_command(rt->room,line)) return;
     char command[32] = "", arg1[256] = "", arg2[32] = "";
     sscanf(line, "%31s %255s %31s", command, arg1, arg2);
 
@@ -627,6 +633,8 @@ static void _handle_product_action(DeviceRuntime *rt,
     case DEVICE_ACTION_EXIT:
         STR_COPY(command, "exit");
         break;
+    case DEVICE_ACTION_ROOM_PTT_DOWN: room_ptt(rt->room,1); return;
+    case DEVICE_ACTION_ROOM_PTT_UP: room_ptt(rt->room,0); return;
     case DEVICE_ACTION_NONE:
     default:
         return;
@@ -1043,11 +1051,13 @@ int device_reference_run(int argc, char *argv[]) {
     rt.call = call_create_ex(svc.call_server, did, mqtt_token,
                              audio_path, up_audio_spec->name,
                              video_path, up_video_spec->name);
-    if (!rt.voip || !rt.ai || !rt.call) {
+    rt.room=room_create(svc.call_server,did,mqtt_token,audio_path,up_audio_spec->name,down_audio_spec->name);
+    if (!rt.voip || !rt.ai || !rt.call || !rt.room) {
         LOG_E("创建业务会话状态失败");
         voip_destroy(rt.voip);
         ai_destroy(rt.ai);
         call_destroy(rt.call);
+        room_destroy(rt.room);
         return 1;
     }
     ai_configure_receive_dir(rt.ai, down_media_dir);
@@ -1057,17 +1067,19 @@ int device_reference_run(int argc, char *argv[]) {
         voip_destroy(rt.voip);
         ai_destroy(rt.ai);
         call_destroy(rt.call);
+        room_destroy(rt.room);
         return 1;
     }
     if (stream_service_register() != 0 ||
         voip_service_register() != 0 ||
         ai_service_register() != 0 ||
-        call_service_register() != 0) {
+        call_service_register() != 0 || room_register(rt.room) != 0) {
         LOG_E("注册 TiRTC 业务回调失败");
         tirtc_runtime_stop();
         voip_destroy(rt.voip);
         ai_destroy(rt.ai);
         call_destroy(rt.call);
+        room_destroy(rt.room);
         return 1;
     }
     if (tirtc_runtime_start(did, dkey, mac, tirtc_endpoint) != 0) {
@@ -1075,6 +1087,7 @@ int device_reference_run(int argc, char *argv[]) {
         voip_destroy(rt.voip);
         ai_destroy(rt.ai);
         call_destroy(rt.call);
+        room_destroy(rt.room);
         return 1;
     }
 
@@ -1090,6 +1103,7 @@ int device_reference_run(int argc, char *argv[]) {
         voip_destroy(rt.voip);
         ai_destroy(rt.ai);
         call_destroy(rt.call);
+        room_destroy(rt.room);
         return 1;
     }
     session_arbiter_init(&rt.arbiter, &rt.coordinator);
@@ -1101,6 +1115,7 @@ int device_reference_run(int argc, char *argv[]) {
         voip_destroy(rt.voip);
         ai_destroy(rt.ai);
         call_destroy(rt.call);
+        room_destroy(rt.room);
         return 1;
     }
     voip_set_session_end_callback(rt.voip, _finish_voip, &rt);
@@ -1109,25 +1124,37 @@ int device_reference_run(int argc, char *argv[]) {
     call_set_runtime_callbacks_ex(rt.call, _begin_call, _finish_call, &rt);
     call_set_runtime_action_callback(rt.call, _run_call_action);
 
+    char media_profile[1024];
+    if (device_media_profile_json(media_profile, sizeof(media_profile),
+                                  up_audio_spec->name, down_audio_spec->name,
+                                  up_video_spec->name, down_video_spec->name,
+                                  video_path[0] != '\0') != 0 ||
+        report_device_media(svc.device_server, mqtt_token, media_profile) != 0)
+        LOG_W("设备媒体能力未同步，请检查 device-server，恢复后重新启动模拟器上报");
+
     /* Profile is registered before the idle stream, so incoming WeChat calls
      * can find this device even while it is serving H5 live video. */
     cJSON *initial_callers = NULL;
     if (voip_report_profile(svc.voip_server, mqtt_token, &initial_callers) == 0)
         voip_set_auth_list(rt.voip, initial_callers);
     if (session_coordinator_start_stream(&rt.coordinator) != 0) {
+        room_shutdown(rt.room);
         session_arbiter_shutdown(&rt.arbiter);
         tirtc_runtime_stop();
         voip_destroy(rt.voip);
         ai_destroy(rt.ai);
         call_destroy(rt.call);
+        room_destroy(rt.room);
         session_arbiter_destroy(&rt.arbiter);
         session_coordinator_destroy(&rt.coordinator);
         pthread_mutex_destroy(&rt.lease_lock);
         return 1;
     }
 
+    if(room_start(rt.room,&rt.arbiter,&rt.coordinator)!=0){g_stop=1;}
     MqttMsgHandler handler;
     memset(&handler, 0, sizeof(handler));
+    handler.on_room_assignment_changed = _mqtt_room_sync;
     handler.on_call_incoming = _mqtt_voip_incoming;
     handler.on_callers_update = _mqtt_voip_callers;
     handler.on_call_cancel = _mqtt_voip_cancel;
@@ -1140,9 +1167,11 @@ int device_reference_run(int argc, char *argv[]) {
     pthread_t cmd_tid;
     if (pthread_create(&cmd_tid, NULL, _runtime_cmd_thread, &rt) != 0) {
         LOG_E("无法创建终端线程");
+        room_shutdown(rt.room);
         session_arbiter_shutdown(&rt.arbiter);
         tirtc_runtime_stop();
         voip_destroy(rt.voip); ai_destroy(rt.ai); call_destroy(rt.call);
+        room_destroy(rt.room);
         session_arbiter_destroy(&rt.arbiter);
         session_coordinator_destroy(&rt.coordinator);
         pthread_mutex_destroy(&rt.lease_lock);
@@ -1154,11 +1183,13 @@ int device_reference_run(int argc, char *argv[]) {
     g_stop = 1;
     pthread_join(cmd_tid, NULL);
     LOG_I("正在关闭...");
+    room_shutdown(rt.room);
     session_arbiter_shutdown(&rt.arbiter);
     tirtc_runtime_stop();
     voip_destroy(rt.voip);
     ai_destroy(rt.ai);
     call_destroy(rt.call);
+    room_destroy(rt.room);
     session_arbiter_destroy(&rt.arbiter);
     session_coordinator_destroy(&rt.coordinator);
     pthread_mutex_destroy(&rt.lease_lock);

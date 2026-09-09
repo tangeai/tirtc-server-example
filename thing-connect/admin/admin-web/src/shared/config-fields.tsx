@@ -6,7 +6,15 @@ export type ConfigField = {
   path: string[];
   label: string;
   description?: string;
-  kind: 'text' | 'number' | 'boolean' | 'select' | 'tags' | 'password' | 'resource_refs';
+  kind:
+    | 'text'
+    | 'number'
+    | 'boolean'
+    | 'select'
+    | 'tags'
+    | 'password'
+    | 'resource_refs'
+    | 'navigation_links';
   options?: { label: string; value: string }[];
   secret?: boolean;
   providers?: string[];
@@ -49,6 +57,85 @@ const captchaProviderDescriptions: Record<string, string> = {
   aliyun: '仅显示阿里云验证码 2.0 的 SceneId、Prefix、地域和 AccessKey。',
   tencent: '仅显示腾讯云 CaptchaAppId、云 API 密钥和应用密钥；小程序参数可选。',
 };
+
+function NavigationLinksField({ field }: { field: ConfigField }) {
+  return (
+    <Form.Item label={field.label} extra={field.description}>
+      <Form.List name={['config', ...field.path]}>
+        {(items, { add, remove, move }) => (
+          <Space direction="vertical" style={{ width: '100%' }}>
+            {items.map(({ key, name, ...rest }) => (
+              <div key={key} style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 16 }}>
+                <Form.Item
+                  {...rest}
+                  name={[name, 'name']}
+                  label="链接名称"
+                  rules={[{ required: true, whitespace: true, message: '请填写链接名称' }]}
+                >
+                  <Input maxLength={20} placeholder="例如：接入文档" />
+                </Form.Item>
+                <Form.Item
+                  {...rest}
+                  name={[name, 'url']}
+                  label="链接地址"
+                  rules={[
+                    { required: true, message: '请填写链接地址' },
+                    {
+                      validator: (_, value) => {
+                        try {
+                          const url = new URL(value);
+                          if (
+                            !['http:', 'https:'].includes(url.protocol) ||
+                            url.username ||
+                            url.password ||
+                            /[\\\s]/.test(value)
+                          )
+                            throw Error();
+                          return Promise.resolve();
+                        } catch {
+                          return Promise.reject(new Error('请填写有效的 HTTP(S) 地址'));
+                        }
+                      },
+                    },
+                  ]}
+                >
+                  <Input maxLength={2048} placeholder="https://" />
+                </Form.Item>
+                <Space wrap>
+                  <Form.Item
+                    {...rest}
+                    name={[name, 'enabled']}
+                    valuePropName="checked"
+                    style={{ marginBottom: 0 }}
+                  >
+                    <Switch checkedChildren="启用" unCheckedChildren="停用" />
+                  </Form.Item>
+                  <Button disabled={name === 0} onClick={() => move(name, name - 1)}>
+                    上移
+                  </Button>
+                  <Button disabled={name === items.length - 1} onClick={() => move(name, name + 1)}>
+                    下移
+                  </Button>
+                  <Button danger onClick={() => remove(name)}>
+                    删除
+                  </Button>
+                </Space>
+              </div>
+            ))}
+            <Button
+              type="dashed"
+              icon={<PlusOutlined />}
+              disabled={items.length >= 3}
+              onClick={() => add({ name: '', url: '', enabled: true })}
+            >
+              添加链接（最多 3 个）
+            </Button>
+          </Space>
+        )}
+      </Form.List>
+    </Form.Item>
+  );
+}
 
 function ResourceRefsField({ field }: { field: ConfigField }) {
   return (
@@ -121,6 +208,8 @@ export function FriendlyConfigFields({
         />
       )}
       {visibleFields.map((field) => {
+        if (field.kind === 'navigation_links')
+          return <NavigationLinksField key={field.path.join('.')} field={field} />;
         if (field.kind === 'resource_refs') {
           return (
             <ResourceRefsField

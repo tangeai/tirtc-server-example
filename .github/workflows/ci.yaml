@@ -65,10 +65,12 @@ jobs:
           bash scripts/install_test.sh
           bash scripts/service-local_test.sh
           bash scripts/deploy-prod_test.sh
+          bash scripts/deploy-local_test.sh
       - name: Build web applications
         working-directory: thing-connect
         run: |
           npm ci
+          node --test call-server/tests/*.test.js user-server/tests/*.test.js
           npm run build:css
           npm --prefix admin/admin-web ci
           npm --prefix admin/admin-web run check

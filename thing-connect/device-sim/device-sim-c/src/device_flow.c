@@ -28,6 +28,7 @@
 #include "common.h"
 #include "device_adapter.h"
 #include "http_tls.h"
+#include "media_format.h"
 
 /* ── Global stop flag (shared across modules, defined in main.c) ──── */
 extern volatile sig_atomic_t g_stop;
@@ -813,6 +814,7 @@ static void _perm_on_connect(struct mosquitto *mq, void *obj, int rc) {
         snprintf(notify_topic, sizeof(notify_topic), "device/sn_%s/notify", ctx->device_id);
         mosquitto_subscribe(mq, NULL, cmd_topic, 1);
         mosquitto_subscribe(mq, NULL, notify_topic, 1);
+        if(ctx->handler && ctx->handler->on_room_assignment_changed)ctx->handler->on_room_assignment_changed(ctx->ctx);
         LOG_I("step 3/4  设备已上线，长连接已建立 (Ctrl+C 退出)");
     } else {
         LOG_E("永久 MQTT 连接被拒绝 rc=%d", rc);
@@ -866,7 +868,9 @@ static void _perm_on_message(struct mosquitto *mq, void *obj,
     LOG_D("MQTT message [%s] type=%s channel=%s bytes=%d",
           msg->topic, t, ch, msg->payloadlen);
 
-    if (strcmp(t, "unbind") == 0) {
+    if (strcmp(t,"room_assignment_changed")==0 || strcmp(t,"room_closed")==0) {
+        if(ctx->handler && ctx->handler->on_room_assignment_changed)ctx->handler->on_room_assignment_changed(ctx->ctx);
+    } else if (strcmp(t, "unbind") == 0) {
         LOG_W("收到解绑通知，断开连接（凭证已保留）...");
         *ctx->stop_flag = 1;
     } else if (strcmp(t, "call_incoming") == 0 && strcmp(ch, "wx") == 0) {
@@ -1009,4 +1013,61 @@ int connect_mqtt_blocking(const char *host, int port,
 
     LOG_I("MQTT 已断开");
     return 0;
+}
+
+
+int device_media_profile_json(char *out, size_t capacity,
+                              const char *up_audio, const char *down_audio,
+                              const char *up_video, const char *down_video,
+                              int has_video) {
+    const AudioFormat *up = audio_format_find(up_audio);
+    const AudioFormat *down = audio_format_find(down_audio);
+    const VideoFormat *up_v = video_format_find(up_video);
+    const VideoFormat *down_v = video_format_find(down_video);
+    if (!out || capacity == 0 || !up || !down ||
+        (has_video && (!up_v || !down_v))) return -1;
+    /* Only constant codec names from the format registry enter the JSON. */
+    int n = snprintf(out, capacity,
+        "{\"media_profiles\":{"
+        "\"stream\":{\"up_audio_mt\":[\"%s\"],\"up_video_mt\":%s%s%s,"
+        "\"down_audio_mt\":[\"alaw\"],\"down_video_mt\":[],"
+        "\"audio_rate\":8000,\"audio_channels\":1},"
+        "\"call\":{\"up_audio_mt\":[\"%s\"],\"up_video_mt\":%s%s%s,"
+        "\"down_audio_mt\":[\"%s\"],\"down_video_mt\":%s%s%s,"
+        "\"audio_rate\":%d,\"audio_channels\":1,\"no_video\":%s}}}",
+        up->codec, has_video ? "[\"" : "[", has_video ? up_v->codec : "", has_video ? "\"]" : "]",
+        up->codec, has_video ? "[\"" : "[", has_video ? up_v->codec : "", has_video ? "\"]" : "]",
+        down->codec, has_video ? "[\"" : "[", has_video ? down_v->codec : "", has_video ? "\"]" : "]",
+        down->sample_rate, has_video ? "false" : "true");
+    if (n < 0 || (size_t)n >= capacity) { out[0] = '\0'; return -1; }
+    return 0;
+}
+
+int report_device_media(const char *server, const char *mqtt_token,
+                         const char *json) {
+    if (!server || !mqtt_token || !json) return -1;
+    char url[512], auth[1024], buffer[4096];
+    int n = snprintf(url, sizeof(url), "%s/v1/device/profile", server);
+    if (n < 0 || (size_t)n >= sizeof(url)) return -1;
+    n = snprintf(auth, sizeof(auth), "Authorization: Bearer %s", mqtt_token);
+    if (n < 0 || (size_t)n >= sizeof(auth)) return -1;
+    const char *headers[] = {auth};
+    for (int attempt = 0; attempt < 3 && !g_stop; attempt++) {
+        StrBuf body;
+        sb_init(&body, buffer, sizeof(buffer));
+        long status = 0;
+        int rc = http_post(url, json, headers, 1, &body, &status);
+        int code = rc == 0 ? json_code(body.buf) : -1;
+        if (rc == 0 && status == 200 && code == 200) {
+            LOG_I("设备媒体能力上报成功");
+            return 0;
+        }
+        LOG_W("媒体能力上报未完成 (HTTP %ld code=%d)", status, code);
+        if (rc == 0 && status < 500 && status != 429) break;
+        if (attempt < 2) {
+            for (int i = 0; i < (1 << attempt) * 10 && !g_stop; i++)
+                device_platform_sleep_ms(100);
+        }
+    }
+    return -1;
 }

@@ -206,3 +206,9 @@ device-sim-c 是仓库中的 Linux C 参考实现，代码组织如下：
 - 完整并发控制与产品实现参考：[device-session-arbiter.md](device-session-arbiter.md)
 
 产品二次开发时建议保留 Router → Arbiter → Coordinator/业务适配器的职责边界。非 Linux 目标应作为独立移植实现自己的任务、同步、队列和硬件适配，并重新完成竞态测试。
+
+## 多人对讲 ROOM
+
+ROOM 表示设备持续收听多人房间，持有共享 TiRTC 资源时暂停空闲 STREAM。AI、CALL、VOIP 可抢占 ROOM；ROOM 不能抢占它们，也不能越过待接听的呼叫。业务结束后，设备从 call-server 读取当前 `assignment_version` 与期望房间，再申请新的连接租约恢复 ROOM。
+
+抢占、断开、关系变化和关闭均同步关闭本机 PTT，清空成员列表与旧媒体状态。迟到连接、音频和状态上报由本机会话代次、连接句柄及服务端租约标识共同隔离。恢复默认只收听，不能沿用上一次的按下状态。公开协议见 [设备多人对讲](device-room.md)。

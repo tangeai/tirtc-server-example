@@ -45,15 +45,10 @@ func TestEmbeddedMigrationFilesAreNonEmpty(t *testing.T) {
 	}
 }
 
-func TestCurrentMigrationCatalogIsSingleBaselineVersion(t *testing.T) {
-	want := map[string]int{"core": 1, "admin": 1}
+func TestCurrentMigrationCatalogVersions(t *testing.T) {
+	want := map[string]int{"core": 4, "admin": 1}
 	if got := CurrentMigrationVersions(); !reflect.DeepEqual(got, want) {
-		t.Fatalf("current migration versions = %#v, want %#v", got, want)
-	}
-	for component, versions := range migrationCatalog {
-		if len(versions) != 1 || versions[0].Version != 1 {
-			t.Fatalf("%s migration catalog = %#v, want only baseline version 1", component, versions)
-		}
+		t.Fatalf("versions=%v want=%v", got, want)
 	}
 }
 

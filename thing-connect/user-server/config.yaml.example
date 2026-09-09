@@ -49,3 +49,10 @@ discovery:
   call_server_url: "http://thing.example.com"
   mqtt_url: "mqtts://mqtt.example.com:8883"
   tirtc_endpoint: "https://your-tirtc-endpoint"
+
+# 未发布后台配置时使用；链接顺序即展示顺序，最多 3 项。
+navigation:
+  links: []
+  # - name: "接入文档"
+  #   url: "https://docs.example.com"
+  #   enabled: true

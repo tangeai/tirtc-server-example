@@ -26,3 +26,13 @@ internal:
   key: "replace-with-an-internal-key-at-least-32-characters" # 须与 admin 及其他服务一致
 admin:
   server_url: "http://127.0.0.1:9000"
+
+# 未发布 call-server 命名空间的 room.policy 时使用以下 YAML 策略。
+room:
+  participant_limit: 100
+  empty_ttl: "24h"
+  presence_heartbeat: "15s"
+  presence_lease: "45s"
+  code_cooldown: "24h"
+  command_ttl: "20s"
+  token_timeout: "5s"

@@ -1,0 +1,7 @@
+CREATE TABLE IF NOT EXISTS device_profile (
+    device_id VARCHAR(64) NOT NULL COMMENT '设备 ID',
+    profile JSON NOT NULL COMMENT '按 stream、call、voip 场景保存的设备媒体能力',
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '创建时间',
+    updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6) COMMENT '更新时间',
+    PRIMARY KEY (device_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='设备上报的媒体能力';

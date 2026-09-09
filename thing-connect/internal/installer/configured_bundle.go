@@ -102,24 +102,6 @@ func inspectConfiguredServiceBundle(root string) ([]configuredService, error) {
 	return result, nil
 }
 
-func configuredOptionalServiceNames(root string) ([]string, error) {
-	configured, err := inspectConfiguredServiceBundle(root)
-	if err != nil {
-		return nil, err
-	}
-	present := make(map[string]bool, len(configured))
-	for _, service := range configured {
-		present[service.name] = true
-	}
-	result := make([]string, 0, 3)
-	for _, service := range serviceCatalog {
-		if service.Business && !service.Required && present[service.Name] {
-			result = append(result, service.Name)
-		}
-	}
-	return result, nil
-}
-
 func databaseTargetIdentity(dsn string) (string, error) {
 	cfg, err := mysql.ParseDSN(dsn)
 	if err != nil {

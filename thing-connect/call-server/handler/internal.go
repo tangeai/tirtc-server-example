@@ -25,6 +25,12 @@ func (s *Server) postInternalUnbind(c *gin.Context) {
 		return
 	}
 	ctx := c.Request.Context()
+	if s.intercom != nil {
+		if err := s.intercom.Unbind(ctx, body.DeviceID); err != nil {
+			apiresp.Fail(c, apiresp.ErrInternal, "服务器内部错误，请稍后重试")
+			return
+		}
+	}
 
 	if roomID, err := s.rdb.Get(ctx, lockKey(body.DeviceID)).Result(); err == nil && roomID != "" {
 		if rm, err := s.getRoom(ctx, roomID); err == nil && rm != nil {

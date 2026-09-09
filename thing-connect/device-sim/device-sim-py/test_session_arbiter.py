@@ -24,6 +24,31 @@ class SessionArbiterTests(unittest.TestCase):
     def tearDown(self):
         self.arbiter.shutdown()
 
+    def test_room_preemption_rejects_stale_finish_and_waits_for_call(self):
+        room = self.arbiter.begin(SessionKind.ROOM, lambda: None)
+        self.assertEqual(self.arbiter.admit_incoming(SessionKind.CALL, 'incoming'),
+                         IncomingDecision.PENDING)
+        self.arbiter.begin(SessionKind.CALL, lambda: None,
+                           consume_pending=True, session_id='incoming')
+        self.assertIn(('stop', 'room'), self.events)
+        self.arbiter.finish(SessionKind.ROOM, room.generation)
+        self.assertEqual(self.arbiter.current, SessionKind.CALL)
+        with self.assertRaises(SessionConflict):
+            self.arbiter.begin(SessionKind.ROOM, lambda: None)
+        self.arbiter.finish(SessionKind.CALL)
+        self.arbiter.begin(SessionKind.ROOM, lambda: None)
+        self.arbiter.begin(SessionKind.AI, lambda: None)
+        self.assertEqual(self.arbiter.current, SessionKind.AI)
+
+    def test_rejected_ai_start_does_not_interrupt_room_while_call_pending(self):
+        self.arbiter.begin(SessionKind.ROOM, lambda: None)
+        self.assertTrue(self.arbiter.offer_pending(SessionKind.CALL))
+        before = list(self.events)
+        with self.assertRaises(SessionConflict):
+            self.arbiter.begin(SessionKind.AI, lambda: None)
+        self.assertEqual(self.arbiter.current, SessionKind.ROOM)
+        self.assertEqual(self.events, before)
+
     def test_pending_first_wins_without_stopping_stream(self):
         barrier = threading.Barrier(12)
         results = []

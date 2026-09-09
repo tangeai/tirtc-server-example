@@ -11,6 +11,7 @@ from camera_video_source import describe_video_source
 from media_source import FileMediaSource
 from rtc_ai_session import AiCallState
 from rtc_call_session import CallState
+from rtc_room import RoomSession
 from rtc_voip_session import VoipCallState
 from session_arbiter import SessionArbiter
 from session_coordinator import SessionAdapter, SessionCoordinator, SessionKind
@@ -40,6 +41,7 @@ class RuntimeConfig:
     down_video_format: str = "h264"
     hardware_audio: bool = False
     log_level: str = "debug"
+    device_server: str = ""
 
 
 class DeviceRtcRuntime:
@@ -154,11 +156,16 @@ class DeviceRtcRuntime:
                 SessionKind.CALL, action),
             after_stop=lambda: self._finish_async(SessionKind.CALL),
         )
+        self.room = RoomSession(config, sdk_runtime,
+            lambda action: self._begin(SessionKind.ROOM, action),
+            self._finish_room,
+            lambda: self.arbiter.current in (None, SessionKind.ROOM) and self.arbiter.pending is None)
+        adapters[SessionKind.ROOM] = SessionAdapter(self.room.start_service, self.room.stop_service)
         self.message_handler = SessionMessageRouter(
-            self.arbiter, self.voip, self.call)
+            self.arbiter, self.voip, self.call, room=self.room)
         self.terminal = TerminalController(
             self.arbiter, self.voip, self.ai, self.call,
-            video_capable=bool(config.up_video_file))
+            video_capable=bool(config.up_video_file), room=self.room)
 
     def start(self) -> None:
         self._print_media_config()
@@ -170,8 +177,12 @@ class DeviceRtcRuntime:
                 c.client_id,
                 c.tirtc_endpoint or None,
             )
+            if c.device_server:
+                from device_flow import report_media_profiles
+                report_media_profiles(c.device_server, c.mqtt_token, self.media_profiles())
             self._prime_voip_profile()
             self.coordinator.start_stream()
+            self.room.start()
         except BaseException:
             try:
                 self.shutdown()
@@ -190,9 +201,14 @@ class DeviceRtcRuntime:
 
         first_error = None
         try:
-            self.message_handler.shutdown()
+            self.room.shutdown()
         except BaseException as exc:
             first_error = exc
+        try:
+            self.message_handler.shutdown()
+        except BaseException as exc:
+            if first_error is None:
+                first_error = exc
         try:
             self.arbiter.shutdown()
         except BaseException as exc:
@@ -208,6 +224,12 @@ class DeviceRtcRuntime:
 
     def run_cmd_loop(self, stop_event) -> None:
         self.terminal.run_cmd_loop(stop_event)
+
+    def _finish_room(self):
+        with self._lease_lock:
+            lease = self._leases.get(SessionKind.ROOM)
+        if lease is not None:
+            self.arbiter.finish(SessionKind.ROOM, lease.generation)
 
     def _start_stream(self) -> None:
         c = self.config
@@ -334,6 +356,27 @@ class DeviceRtcRuntime:
             active_generation = generation
         if active_generation is not None:
             self.sdk_runtime.deactivate(service, active_generation)
+
+    def media_profiles(self) -> dict:
+        """按实际配置分别描述实时流与设备互呼；VoIP 保留其专用上报。"""
+        from media_formats import AUDIO_FORMATS, VIDEO_FORMATS
+        c = self.config
+        up, down = AUDIO_FORMATS[c.up_audio_format], AUDIO_FORMATS[c.down_audio_format]
+        video = [VIDEO_FORMATS[c.up_video_format].codec] if c.up_video_file else []
+        return {
+            "stream": {
+                "up_audio_mt": [up.codec], "up_video_mt": video,
+                "down_audio_mt": ["alaw"], "down_video_mt": [],
+                "audio_rate": 8000, "audio_channels": 1,
+            },
+            "call": {
+                "up_audio_mt": [up.codec], "up_video_mt": list(video),
+                "down_audio_mt": [down.codec],
+                "down_video_mt": [VIDEO_FORMATS[c.down_video_format].codec] if video else [],
+                "audio_rate": down.sample_rate, "audio_channels": 1,
+                "no_video": not bool(video),
+            },
+        }
 
     def _prime_voip_profile(self) -> None:
         """启动实时流前先上报 VoIP profile，确保微信回调能找到设备媒体能力。"""

@@ -1014,6 +1014,11 @@ if (localStorage.getItem('token') && location.pathname !== '/forgot-password') {
     : (location.pathname === '/register' || new URLSearchParams(location.search).get('tab') === 'register' ? 'register' : 'login');
   switchTab(requestedTab, false);
   captchaInitPromise = initCaptchaId();
+  const notice = sessionStorage.getItem('login-notice');
+  if (notice && requestedTab === 'login') {
+    sessionStorage.removeItem('login-notice');
+    showErr('登录状态已失效，请重新登录');
+  }
 }
 </script>
 

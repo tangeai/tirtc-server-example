@@ -17,6 +17,15 @@ import (
 )
 
 func TestProvisionerCreatesOnlyAbsentOrEmptyDatabase(t *testing.T) {
+	for _, shared := range []bool{false, true} {
+		t.Run(fmt.Sprintf("shared_account=%t", shared), func(t *testing.T) {
+			testProvisionerCreatesOnlyAbsentOrEmptyDatabase(t, shared)
+		})
+	}
+}
+
+func testProvisionerCreatesOnlyAbsentOrEmptyDatabase(t *testing.T, shared bool) {
+	t.Helper()
 	cfg := testenv.LoadConfigOrSkip(t, "../../../../tests/testdata/config.yaml")
 	parsed, err := mysql.ParseDSN(cfg.Database.DSN)
 	if err != nil {
@@ -33,6 +42,9 @@ func TestProvisionerCreatesOnlyAbsentOrEmptyDatabase(t *testing.T) {
 	databaseName := "thingconnect_installer_" + strings.ReplaceAll(uuid.NewString()[:8], "-", "") + "_test"
 	runtimeUser := "tc_rt_" + strings.ReplaceAll(uuid.NewString()[:8], "-", "")
 	runtimePassword := "RuntimeDMLPassword123!"
+	if shared {
+		runtimeUser, runtimePassword = parsed.User, parsed.Passwd
+	}
 	input := installapp.DatabaseInput{
 		Host: host, Port: port, Name: databaseName,
 		MigrationUser: parsed.User, MigrationPassword: parsed.Passwd, TLS: parsed.TLSConfig,
@@ -51,12 +63,14 @@ func TestProvisionerCreatesOnlyAbsentOrEmptyDatabase(t *testing.T) {
 		testenv.DependencyUnavailable(t, "MySQL server", err)
 	}
 	defer server.Close()
-	if _, err := server.Exec(`CREATE USER '` + runtimeUser + `'@'%' IDENTIFIED BY '` + runtimePassword + `'`); err != nil {
-		t.Fatalf("create DML-only runtime user: %v", err)
-	}
-	defer func() { _, _ = server.Exec(`DROP USER IF EXISTS '` + runtimeUser + `'@'%'`) }()
-	if _, err := server.Exec(`GRANT SELECT,INSERT,UPDATE,DELETE ON ` + quoteIdentifier(databaseName) + `.* TO '` + runtimeUser + `'@'%'`); err != nil {
-		t.Fatalf("grant DML-only runtime privileges: %v", err)
+	if !shared {
+		if _, err := server.Exec(`CREATE USER '` + runtimeUser + `'@'%' IDENTIFIED BY '` + runtimePassword + `'`); err != nil {
+			t.Fatalf("create DML-only runtime user: %v", err)
+		}
+		defer func() { _, _ = server.Exec(`DROP USER IF EXISTS '` + runtimeUser + `'@'%'`) }()
+		if _, err := server.Exec(`GRANT SELECT,INSERT,UPDATE,DELETE ON ` + quoteIdentifier(databaseName) + `.* TO '` + runtimeUser + `'@'%'`); err != nil {
+			t.Fatalf("grant DML-only runtime privileges: %v", err)
+		}
 	}
 	defer func() {
 		if !strings.HasSuffix(databaseName, "_test") {
@@ -86,10 +100,12 @@ func TestProvisionerCreatesOnlyAbsentOrEmptyDatabase(t *testing.T) {
 		claim.Close()
 		t.Fatal(err)
 	}
-	if _, err := runtimeDB.Exec(`CREATE TABLE runtime_must_not_have_ddl (id BIGINT PRIMARY KEY)`); err == nil {
-		_ = runtimeDB.Close()
-		claim.Close()
-		t.Fatal("DML-only runtime account unexpectedly created a table")
+	if !shared {
+		if _, err := runtimeDB.Exec(`CREATE TABLE runtime_must_not_have_ddl (id BIGINT PRIMARY KEY)`); err == nil {
+			_ = runtimeDB.Close()
+			claim.Close()
+			t.Fatal("DML-only runtime account unexpectedly created a table")
+		}
 	}
 	_ = runtimeDB.Close()
 	digest := strings.Repeat("a", 64)

@@ -327,3 +327,18 @@ call_destroy(call);
 - Linux 默认适配优先使用 `getrandom()`，再尝试 `/dev/urandom`；两者都失败时随机数请求失败，不使用伪随机 fallback。产品仍必须接入并验证自己的密码学安全随机数源。
 - Linux 默认适配没有硬件 sink；“收到回调”不等于“已播放或已显示”。
 - 只有单元测试不能证明真实服务互通、弱网长稳、媒体质量和产品安全；这些必须在目标环境另行验收。
+
+## 多人对讲
+
+使用 `room create [四位密码]`、`room join 六位房间号 [四位密码]` 和 `room leave` 控制此设备的房间，也可在“我的设备 → 多人对讲”远程安排。`room status` 查看连接状态和成员数；本机 `room ptt down` 开始发送音频，`room ptt up` 同步关闭发送开关。加入和恢复连接时默认不发送音频。
+
+ROOM 复用进程 TiRTC runtime，由会话仲裁器管理：AI、设备通话和微信通话可以抢占 ROOM，结束后 ROOM 读取最新关系再恢复。上行复用所选文件与音频格式，支持 G.711 A-law、PCM、Opus、AMR 的 8/16 kHz 单声道；AAC 不用于多人对讲。成员列表和媒体队列有界，退出、断开或被抢占时清除旧连接状态。
+
+产品通过 `DeviceAdapterV1` 的媒体源与播放 sink 处理 `DEVICE_BUSINESS_ROOM`，通过 `DEVICE_ACTION_ROOM_PTT_DOWN` / `DEVICE_ACTION_ROOM_PTT_UP` 接入本机按键。Linux 默认适配器从文件读取上行，下行不落盘；真实扬声器需要产品 sink。协议、房间容量和部署要求见 [设备多人对讲](../../device-room.md)。
+
+
+## 设备媒体能力上报
+
+统一模拟器入口取得正式 MQTT token 后，向服务发现返回的 device-server 调用 [`POST /v1/device/profile`](../../api-reference.md#post-v1deviceprofile)，分别上报实时查看和设备通话的实际格式配置。Web 设备信息按场景显示这些能力；H5 下行音频固定按 talkback 协议描述，不从 VoIP 参数复制。未配置的旋转、镜像等字段显示“未上报”。
+
+上报在启动控制线程执行，单次请求最多 10 秒，网络或服务端暂时失败时按 1 秒、2 秒退避，最多尝试三次。鉴权、解绑和参数错误不重试；上报失败会打印提示，修复服务或配置后重新启动模拟器上报。此展示接口失败不阻止既有媒体业务启动。微信 VoIP 继续使用自己的 profile 注册接口。

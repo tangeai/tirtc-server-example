@@ -333,7 +333,7 @@ def connect_temp_mqtt(broker_host: str, broker_port: int,
             _log(f"已订阅 {down_topic}，等待服务端下发 DeviceID+KEY…")
         else:
             rc_val = rc.value if hasattr(rc, "value") else rc
-            _err(f"连接被拒绝 rc={rc_val}（temp_token 已过期？）")
+            _err(f"MQTT 临时连接被拒绝 rc={rc_val}；请检查 Broker 的 JWT 验签密钥、账号匹配规则及令牌有效期")
             connect_error.append(rc)
             received.set()
 
@@ -445,6 +445,9 @@ def connect_mqtt_blocking(broker_host: str, broker_port: int,
             _ok(f"步骤 2/4  MQTT 正式连接成功  ClientID={client_id}")
             client.subscribe(cmd_topic, qos=1)
             client.subscribe(notify_topic, qos=1)
+            callback = getattr(handler, "on_mqtt_connected", None)
+            if callback:
+                callback()
             _ok("步骤 3/4  设备在线，保持长连接（Ctrl+C 退出）…")
         else:
             rc_val = rc.value if hasattr(rc, "value") else rc
@@ -480,7 +483,11 @@ def connect_mqtt_blocking(broker_host: str, broker_port: int,
             f"type={msg_type} channel={channel} bytes={len(msg.payload)}"
         )
         payload  = data.get("payload") or {}
-        if msg_type == "unbind":
+        if msg_type in ("room_assignment_changed", "room_closed"):
+            callback = getattr(handler, "on_room_assignment_changed", None)
+            if callback:
+                callback(data)
+        elif msg_type == "unbind":
             _warn("收到服务端解绑通知，断开 MQTT 连接（凭证保留，重新绑定时复用）")
             stop_event.set()   # 主循环退出 → 下次上电视同已绑定设备，6006 后走重新绑定
         elif msg_type == "call_incoming" and channel == "wx":
@@ -544,3 +551,27 @@ def connect_mqtt_blocking(broker_host: str, broker_port: int,
         client.disconnect()
         heartbeat_thread.join()
     _ok("已断开 MQTT 连接")
+
+
+def report_media_profiles(server: str, mqtt_token: str, profiles: dict) -> bool:
+    """上报显式场景快照；启动线程最多尝试三次，永久错误不重试。"""
+    for attempt in range(3):
+        try:
+            response = http_trace.request(
+                "POST", f"{server.rstrip('/')}/v1/device/profile",
+                headers={"Authorization": f"Bearer {mqtt_token}"},
+                json={"media_profiles": profiles}, timeout=10)
+            data = response.json()
+            code = data.get("code") if isinstance(data, dict) else None
+            if response.status_code == 200 and code == 200:
+                _ok("设备媒体能力上报成功")
+                return True
+            if response.status_code < 500 and response.status_code != 429:
+                _warn(f"媒体能力上报未接受（HTTP {response.status_code}，code={code}）")
+                return False
+        except (requests.RequestException, ValueError):
+            pass
+        if attempt < 2:
+            time.sleep(2 ** attempt)
+    _warn("媒体能力上报失败；请检查 device-server，恢复后重新启动模拟器上报")
+    return False

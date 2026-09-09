@@ -49,7 +49,7 @@ func TestSetupErrorReportsDependencyWithoutLeakingRawCause(t *testing.T) {
 			gin.SetMode(gin.TestMode)
 			router := gin.New()
 			router.GET("/setup", func(c *gin.Context) {
-				setupError(c, fmt.Errorf("%w: %v", test.err, errors.New("sensitive raw dependency cause")))
+				setupError(c, fmt.Errorf("%w: %w", test.err, errors.New("sensitive raw dependency cause")))
 			})
 			recorder := httptest.NewRecorder()
 			router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/setup", nil))

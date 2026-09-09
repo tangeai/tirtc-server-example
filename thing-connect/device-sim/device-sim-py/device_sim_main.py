@@ -158,8 +158,8 @@ def _terminal_link(url: str, label: str = "") -> str:
     return f"\033]8;;{url}\033\\{text}\033]8;;\033\\"
 
 
-def _print_bind_guide() -> None:
-    homepage_url = EXPERIENCE_PLATFORM_URL
+def _print_bind_guide(homepage_url: str = "") -> None:
+    homepage_url = homepage_url or EXPERIENCE_PLATFORM_URL
     print(f"\033[1;36m[device]\033[0m  注册/登录入口: \033[1;96;4m{_terminal_link(homepage_url, homepage_url)}\033[0m")
     print(f"\033[1;36m[device]\033[0m  操作指引      : 打开首页完成注册/登录后，进入设备绑定并输入上方验证码")
 
@@ -181,7 +181,7 @@ def _print_tts_guide(server: str, code: str) -> None:
 
 
 def _bind_via_scan(args, server: str, broker_host: str, broker_port: int, broker_tls: bool,
-                   device_id: str = "", device_key: str = ""):
+                   device_id: str = "", device_key: str = "", homepage_url: str = ""):
     """阶段一：report → 展示验证码 → 临时 MQTT 等待绑定，返回 (device_id, device_key)。
 
     当 args.device_key 存在时（预烧设备解绑后重绑），使用签名 Report（情况1）；
@@ -209,7 +209,7 @@ def _bind_via_scan(args, server: str, broker_host: str, broker_port: int, broker
     print(f"\033[1;96m[device]\033[0m   然后输入验证码: \033[1;30;103m {code} \033[0m")
     print(f"\033[1;96m[device]\033[0m ╚══════════════════════════════════════╝")
     _print_tts_guide(server, code)
-    _print_bind_guide()
+    _print_bind_guide(homepage_url)
     print()
     result = connect_temp_mqtt(
         broker_host=broker_host,
@@ -378,6 +378,7 @@ def main():
 
     svc = fetch_services(base_url=args.endpoint)
     _server         = svc["device_server"]
+    _homepage_url   = svc.get("user_server") or EXPERIENCE_PLATFORM_URL
     _broker_host    = svc["mqtt_host"]
     _broker_port    = svc["mqtt_port"]
     _broker_tls     = svc["mqtt_tls"]
@@ -410,7 +411,7 @@ def main():
     if not (device_id and device_key):
         device_id, device_key = _bind_via_scan(
             args, _server, _broker_host, _broker_port, _broker_tls,
-            device_id=device_id, device_key=device_key,
+            device_id=device_id, device_key=device_key, homepage_url=_homepage_url,
         )
         _save_creds(device_id, device_key, args.creds_file)
     else:
@@ -429,7 +430,7 @@ def main():
         print(f"\033[1;33m[device]\033[0m 重新进入验证码绑定流程（保留原 device_id={device_id}）")
         device_id, device_key = _bind_via_scan(
             args, _server, _broker_host, _broker_port, _broker_tls,
-            device_id=device_id, device_key=device_key,
+            device_id=device_id, device_key=device_key, homepage_url=_homepage_url,
         )
         _save_creds(device_id, device_key, args.creds_file)
         mqtt_token = get_mqtt_token(_server, device_id, device_key, args.mac)
@@ -442,7 +443,7 @@ def main():
     runtime = DeviceRtcRuntime(
         RuntimeConfig(
             device_id=device_id, device_key=device_key, client_id=args.mac,
-            mqtt_token=mqtt_token, tirtc_endpoint=_tirtc_endpoint,
+            mqtt_token=mqtt_token, tirtc_endpoint=_tirtc_endpoint, device_server=_server,
             voip_server=_voip_server, ai_server=_ai_server, call_server=_call_server,
             up_audio_file=args.up_audio_file, up_video_file=args.up_video_file,
             down_media_dir=args.down_media_dir,

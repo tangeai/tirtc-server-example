@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"thing-connect/internal/room"
+	"thing-connect/internal/webnav"
 	"time"
 )
 
@@ -61,6 +63,8 @@ type ConfigRegistry struct{ definitions map[string]ConfigDefinition }
 
 func DefaultConfigRegistry() *ConfigRegistry {
 	definitions := []ConfigDefinition{
+		def("user-server", "web.navigation", "web", "顶部导航链接", `{"links":[]}`, nil, []string{"user-server"}, func(raw json.RawMessage) error { _, err := webnav.Parse(raw); return err }),
+		def("call-server", "room.policy", "call", "多人对讲策略", room.DefaultConfigJSON, nil, []string{"call-server"}, func(raw json.RawMessage) error { _, err := room.ParseConfig(raw); return err }),
 		def("device-server", "device.code_policy", "device", "设备验证码策略", `{"code_ttl":"190s","rate_limit_window":"190s","rate_limit_max_hits":10,"ip_rate_limit_window":"60s","ip_rate_limit_max_fingerprints":50,"global_max_pending_codes":10000}`, nil, []string{"device-server"}, validateDeviceCodePolicy),
 		def("device-server", "device.token_policy", "device", "设备 Token 策略", `{"token_expiry":"168h"}`, nil, []string{"device-server"}, validateDurationFields("token_expiry")),
 		def("device-server", "mqtt.ack_policy", "mqtt", "MQTT ACK 策略", `{"timeout":"5s"}`, nil, []string{"device-server"}, validateDurationFields("timeout")),
@@ -282,7 +286,7 @@ func validateMQTTConnection(raw json.RawMessage) error {
 	parsed, err := url.Parse(strings.TrimSpace(broker))
 	if err != nil || (parsed.Scheme != "mqtt" && parsed.Scheme != "mqtts") || parsed.Host == "" || parsed.User != nil ||
 		(parsed.Path != "" && parsed.Path != "/") || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return errors.New("Broker 必须是 mqtt:// 或 mqtts:// 地址，且不能包含账号、路径、查询参数或片段")
+		return errors.New("MQTT 地址必须是 mqtt:// 或 mqtts:// 地址，且不能包含账号、路径、查询参数或片段")
 	}
 	authMode, _ := stringField(object, "auth_mode")
 	username, _ := stringField(object, "username")
@@ -290,10 +294,10 @@ func validateMQTTConnection(raw json.RawMessage) error {
 	switch authMode {
 	case "username":
 		if strings.TrimSpace(username) == "" {
-			return errors.New("Username 认证方式必须填写 MQTT 用户名")
+			return errors.New("用户名认证方式必须填写 MQTT 用户名")
 		}
 		if strings.TrimSpace(clientID) != "" {
-			return errors.New("Username 认证方式不能同时填写固定 ClientID")
+			return errors.New("用户名认证方式不能同时填写固定 ClientID")
 		}
 	case "clientid":
 		if strings.TrimSpace(clientID) == "" {

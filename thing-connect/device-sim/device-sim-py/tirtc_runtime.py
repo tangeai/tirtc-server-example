@@ -35,6 +35,7 @@ class ServiceKind(str, Enum):
     VOIP = "voip"
     AI = "ai"
     CALL = "device-call"
+    ROOM = "room"
 
 
 class _ConnectionOwner(NamedTuple):

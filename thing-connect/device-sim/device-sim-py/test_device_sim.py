@@ -127,6 +127,27 @@ class DeviceSimulatorTests(unittest.TestCase):
         self.assertIn("https://demo-open.tange-ai.com", output.getvalue())
         self.assertNotIn("srv-open.tangeopen.com", output.getvalue())
 
+    def test_bind_guide_uses_discovered_local_user_server(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            device_sim_main._print_bind_guide("http://dev-demo-open.tangeai.cn:8080")
+        self.assertIn("http://dev-demo-open.tangeai.cn:8080", output.getvalue())
+        self.assertNotIn("https://demo-open.tange-ai.com", output.getvalue())
+
+    def test_temp_mqtt_rejection_does_not_claim_token_expiration(self):
+        client = mock.Mock()
+        client.loop_start.side_effect = lambda: client.on_connect(client, None, {}, 135)
+        output = io.StringIO()
+        with mock.patch.object(device_flow, "_new_mqtt_client", return_value=client), \
+                redirect_stdout(output), redirect_stderr(output), self.assertRaises(SystemExit):
+            device_flow.connect_temp_mqtt("localhost", 1883, "tmp_test", "secret-test-token", 1, False)
+        self.assertIn("rc=135", output.getvalue())
+        self.assertIn("JWT 验签密钥", output.getvalue())
+        self.assertNotIn("temp_token 已过期？", output.getvalue())
+        self.assertNotIn("secret-test-token", output.getvalue())
+        client.publish.assert_not_called()
+        client.disconnect.assert_called_once()
+
     def test_device_id_and_key_must_be_paired(self):
         self.assertTrue(device_credentials.credentials_are_paired("dev1", "key1"))
         self.assertTrue(device_credentials.credentials_are_paired("", ""))

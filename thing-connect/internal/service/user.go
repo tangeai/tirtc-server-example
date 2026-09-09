@@ -23,24 +23,25 @@ import (
 
 // DeviceInfo is the service-layer device list item (online status added by service).
 type DeviceInfo struct {
-	DeviceID       string   `json:"device_id"`
-	DeviceName     string   `json:"device_name"`
-	Status         int8     `json:"status"`
-	MAC            string   `json:"mac"`
-	BindTime       *string  `json:"bind_time"`
-	Online         bool     `json:"online"`
-	UpVideoMT      string   `json:"up_video_mt"`
-	DownVideoMT    string   `json:"down_video_mt"`
-	DownAudioMT    string   `json:"down_audio_mt"`
-	AudioRate      int      `json:"audio_rate"`
-	CameraRotation *int     `json:"camera_rotation,omitempty"`
-	AspectRatio    *float64 `json:"aspect_ratio,omitempty"`
-	HorMirror      *bool    `json:"hor_mirror,omitempty"`
-	VertMirror     *bool    `json:"vert_mirror,omitempty"`
-	ObjectFit      *string  `json:"object_fit,omitempty"`
-	HasCamera      bool     `json:"has_camera"`
-	HasScreen      bool     `json:"has_screen"`
-	VoipRoomType   string   `json:"voip_room_type"`
+	MediaProfiles  map[string]map[string]json.RawMessage `json:"media_profiles"`
+	DeviceID       string                                `json:"device_id"`
+	DeviceName     string                                `json:"device_name"`
+	Status         int8                                  `json:"status"`
+	MAC            string                                `json:"mac"`
+	BindTime       *string                               `json:"bind_time"`
+	Online         bool                                  `json:"online"`
+	UpVideoMT      string                                `json:"up_video_mt"`
+	DownVideoMT    string                                `json:"down_video_mt"`
+	DownAudioMT    string                                `json:"down_audio_mt"`
+	AudioRate      int                                   `json:"audio_rate"`
+	CameraRotation *int                                  `json:"camera_rotation,omitempty"`
+	AspectRatio    *float64                              `json:"aspect_ratio,omitempty"`
+	HorMirror      *bool                                 `json:"hor_mirror,omitempty"`
+	VertMirror     *bool                                 `json:"vert_mirror,omitempty"`
+	ObjectFit      *string                               `json:"object_fit,omitempty"`
+	HasCamera      bool                                  `json:"has_camera"`
+	HasScreen      bool                                  `json:"has_screen"`
+	VoipRoomType   string                                `json:"voip_room_type"`
 }
 
 // OnlineChecker allows service to check device online status without importing mqttc.
@@ -568,6 +569,7 @@ func (s *UserService) DeviceList(ctx context.Context, userID int64, checker Onli
 	for _, r := range rows {
 		media := parseVoipProfile(r.VoipProfile)
 		di := DeviceInfo{
+			MediaProfiles:  reportedDeviceMediaProfiles(r.MediaProfiles, r.VoipProfile),
 			DeviceID:       r.DeviceID,
 			DeviceName:     r.DeviceName,
 			Status:         r.Status,
@@ -724,4 +726,50 @@ func (s *UserService) issueJWT(userID, authRevision int64) (string, error) {
 		return "", fmt.Errorf("issueJWT: %w", err)
 	}
 	return signed, nil
+}
+
+// deviceMediaProfiles exposes only explicitly reported, non-sensitive fields.
+// The flat legacy media fields remain compatible; they are not cross-scene defaults.
+func deviceMediaProfiles(profile *string) map[string]map[string]json.RawMessage {
+	result := map[string]map[string]json.RawMessage{}
+	if profile == nil {
+		return result
+	}
+	var raw map[string]json.RawMessage
+	if json.Unmarshal([]byte(*profile), &raw) != nil {
+		return result
+	}
+	fields := map[string]json.RawMessage{}
+	for _, key := range []string{"up_audio_mt", "up_video_mt", "down_audio_mt", "down_video_mt", "audio_rate", "audio_channels", "camera_rotation", "aspect_ratio", "hor_mirror", "vert_mirror", "object_fit", "no_video", "video_mt"} {
+		if value, ok := raw[key]; ok && string(value) != "null" {
+			fields[key] = value
+		}
+	}
+	if len(fields) > 0 {
+		result["voip"] = fields
+	}
+	return result
+}
+
+// New reports override the same scene as a whole; older VoIP devices retain
+// their existing source until they explicitly report a VoIP scene here.
+func reportedDeviceMediaProfiles(reported, legacyVoip *string) map[string]map[string]json.RawMessage {
+	result := deviceMediaProfiles(legacyVoip)
+	if reported == nil {
+		return result
+	}
+	var profiles map[string]json.RawMessage
+	if json.Unmarshal([]byte(*reported), &profiles) != nil {
+		return result
+	}
+	for scene, raw := range profiles {
+		if ValidateMediaProfiles(map[string]json.RawMessage{scene: raw}) != nil {
+			continue
+		}
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(raw, &fields) == nil {
+			result[scene] = fields
+		}
+	}
+	return result
 }

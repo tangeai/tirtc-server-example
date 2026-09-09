@@ -22,8 +22,8 @@ func TestRegistryRejectsUnknownAndBadValues(t *testing.T) {
 func TestRegistryDefinitionsAndUsableInitialValues(t *testing.T) {
 	registry := DefaultConfigRegistry()
 	definitions := registry.List("")
-	if len(definitions) != 23 {
-		t.Fatalf("registered configuration count = %d, want 23", len(definitions))
+	if len(definitions) != 25 {
+		t.Fatalf("registered configuration count = %d, want 25", len(definitions))
 	}
 	for _, definition := range definitions {
 		value := definition.Default
@@ -232,5 +232,19 @@ func TestWechatAppsMayAllBeDisabled(t *testing.T) {
 	invalid := json.RawMessage(`{"default_app_id":"","apps":{"wx1":{"enabled":true,"model_id":"model"}}}`)
 	if err := registry.Validate("voip-server", "wechat.apps", invalid); err == nil {
 		t.Fatal("enabled WeChat app without a default was accepted")
+	}
+}
+
+func TestNavigationRegistryLimit(t *testing.T) {
+	registry := DefaultConfigRegistry()
+	definition, ok := registry.definitions[definitionID("user-server", "web.navigation")]
+	if !ok || definition.Reload != "runtime" || len(definition.SecretPaths) != 0 || len(definition.Fields) != 1 || definition.Fields[0].Kind != "navigation_links" {
+		t.Fatalf("invalid navigation definition: %+v", definition)
+	}
+	if err := definition.validator([]byte(`{"links":[]}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := definition.validator([]byte(`{"links":[{"name":"链接","url":"javascript:alert(1)","enabled":true}]}`)); err == nil {
+		t.Fatal("unsafe URL allowed")
 	}
 }

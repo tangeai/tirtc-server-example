@@ -9,7 +9,7 @@
 static pthread_rwlock_t s_adapter_lock = PTHREAD_RWLOCK_INITIALIZER;
 static DeviceAdapterV1 s_adapter;
 static int s_installed;
-static uint64_t s_generations[DEVICE_BUSINESS_CALL + 1];
+static uint64_t s_generations[DEVICE_BUSINESS_ROOM + 1];
 
 static DeviceAdapterV1 _adapter_snapshot(void) {
     DeviceAdapterV1 snapshot;
@@ -180,7 +180,7 @@ void device_media_source_close(DeviceMediaSource *source) {
 }
 
 uint64_t device_adapter_session_generation(DeviceBusiness business) {
-    if (business <= DEVICE_BUSINESS_NONE || business > DEVICE_BUSINESS_CALL)
+    if (business <= DEVICE_BUSINESS_NONE || business > DEVICE_BUSINESS_ROOM)
         return 0;
     pthread_rwlock_rdlock(&s_adapter_lock);
     uint64_t generation = s_generations[business];
@@ -257,7 +257,7 @@ void device_resource_release(DeviceBusiness business) {
 }
 
 void device_adapter_session_starting(DeviceBusiness business) {
-    if (business <= DEVICE_BUSINESS_NONE || business > DEVICE_BUSINESS_CALL)
+    if (business <= DEVICE_BUSINESS_NONE || business > DEVICE_BUSINESS_ROOM)
         return;
     pthread_rwlock_wrlock(&s_adapter_lock);
     uint64_t generation = ++s_generations[business];

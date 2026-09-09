@@ -78,12 +78,13 @@ type DeviceBindLog struct {
 // UserDeviceRow is the query result for device list.
 // Used by UserStore.GetDeviceList.
 type UserDeviceRow struct {
-	DeviceID    string  `db:"device_id"`
-	DeviceName  string  `db:"device_name"`
-	Status      int8    `db:"status"` // 1 always (device_bind only contains bound rows)
-	MAC         string  `db:"mac"`
-	BindTime    *string `db:"bind_time"`
-	VoipProfile *string `db:"voip_profile"`
+	DeviceID      string  `db:"device_id"`
+	DeviceName    string  `db:"device_name"`
+	Status        int8    `db:"status"` // 1 always (device_bind only contains bound rows)
+	MAC           string  `db:"mac"`
+	BindTime      *string `db:"bind_time"`
+	VoipProfile   *string `db:"voip_profile"`
+	MediaProfiles *string `db:"media_profiles"`
 }
 
 // DeviceRole is one row of ai_device_role — the device→role binding stored locally.

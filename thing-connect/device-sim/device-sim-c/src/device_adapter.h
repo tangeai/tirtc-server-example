@@ -29,6 +29,7 @@ typedef enum {
     DEVICE_BUSINESS_VOIP = 2,
     DEVICE_BUSINESS_AI = 3,
     DEVICE_BUSINESS_CALL = 4,
+    DEVICE_BUSINESS_ROOM = 5,
 } DeviceBusiness;
 
 typedef enum {
@@ -63,6 +64,8 @@ typedef enum {
     DEVICE_ACTION_DIAL_CONTACT_INDEX,
     DEVICE_ACTION_DIAL_WX_INDEX,
     DEVICE_ACTION_EXIT,
+    DEVICE_ACTION_ROOM_PTT_DOWN,
+    DEVICE_ACTION_ROOM_PTT_UP,
 } DeviceActionType;
 
 typedef struct {
@@ -145,7 +148,8 @@ typedef struct {
     void (*close)(void *context, void *handle);
 } DeviceMediaSourceOps;
 
-/** submit() runs in a TiRTC SDK callback. It must not block or retain frame
+/** submit() runs in a TiRTC SDK callback or a business media worker.
+ * It must not block or retain frame
  * pointers. A product sink must copy accepted payload into its own bounded
  * queue before returning. Return 0 when accepted, NOT_HANDLED to request the
  * Linux demo fallback, or a negative code when deliberately dropped/failed.

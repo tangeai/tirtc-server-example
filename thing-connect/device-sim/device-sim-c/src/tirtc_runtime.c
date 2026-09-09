@@ -172,6 +172,7 @@ const char *tirtc_runtime_service_name(TirtcService service) {
     case TIRTC_SERVICE_VOIP: return "voip";
     case TIRTC_SERVICE_AI: return "ai";
     case TIRTC_SERVICE_CALL: return "device-call";
+    case TIRTC_SERVICE_ROOM: return "room";
     default: return "none";
     }
 }

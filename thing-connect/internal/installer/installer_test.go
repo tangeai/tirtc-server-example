@@ -755,3 +755,47 @@ func TestBootstrapStopsWhenLockedAssessmentDiffers(t *testing.T) {
 }
 
 func draftPointer(value Draft) *Draft { return &value }
+
+func TestPreviewAllowsSharedDatabaseAccountAndStillChecksLogin(t *testing.T) {
+	for _, loginErr := range []error{nil, errors.New("invalid runtime credentials")} {
+		draft := testDraft()
+		draft.Database.RuntimeUser = draft.Database.MigrationUser
+		draft.Database.RuntimePassword = draft.Database.MigrationPassword
+		database := &fakeProvisioner{
+			inspect:    DatabaseAssessment{Class: DatabaseAbsent, Versions: map[string]int{}, CreateAdmin: true},
+			runtimeErr: loginErr,
+		}
+		bootstrap := New(testOptions(t), Dependencies{Database: database, Probes: noopProbe{}})
+		_, err := bootstrap.Preview(context.Background(), draft)
+		if !database.runtimeVerified {
+			t.Fatal("shared account did not reach runtime login verification")
+		}
+		if loginErr == nil && err != nil {
+			t.Fatalf("shared account rejected: %v", err)
+		}
+		if loginErr != nil && !errors.Is(err, ErrMySQLRuntimeAccount) {
+			t.Fatalf("invalid shared-account credentials: got %v, want runtime account error", err)
+		}
+	}
+}
+
+func TestDraftStillRequiresBothDatabaseCredentials(t *testing.T) {
+	for _, field := range []string{"migration_user", "migration_password", "runtime_user", "runtime_password"} {
+		t.Run(field, func(t *testing.T) {
+			draft := testDraft()
+			switch field {
+			case "migration_user":
+				draft.Database.MigrationUser = ""
+			case "migration_password":
+				draft.Database.MigrationPassword = ""
+			case "runtime_user":
+				draft.Database.RuntimeUser = ""
+			case "runtime_password":
+				draft.Database.RuntimePassword = ""
+			}
+			if err := validateDraft(draft); !errors.Is(err, ErrInvalidInput) {
+				t.Fatalf("missing %s: got %v, want invalid input", field, err)
+			}
+		})
+	}
+}

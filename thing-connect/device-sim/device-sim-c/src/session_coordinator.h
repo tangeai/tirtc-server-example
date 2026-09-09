@@ -17,6 +17,7 @@ typedef enum {
     SESSION_VOIP,
     SESSION_AI,
     SESSION_CALL,
+    SESSION_ROOM,
 } SessionKind;
 
 typedef int  (*session_start_fn)(void *ctx);
@@ -30,7 +31,7 @@ typedef struct {
 
 typedef struct {
     pthread_mutex_t lock;
-    SessionAdapter  adapters[SESSION_CALL + 1];
+    SessionAdapter  adapters[SESSION_ROOM + 1];
     SessionKind     current;
     int             closed;
 } SessionCoordinator;

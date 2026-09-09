@@ -21,7 +21,7 @@ func (p *StandardProber) Probe(ctx context.Context, draft Draft) error {
 	probeCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
 	if err := probeRedis(probeCtx, draft.Redis); err != nil {
-		return fmt.Errorf("%w: %v", ErrRedisUnavailable, err)
+		return fmt.Errorf("%w: %w", ErrRedisUnavailable, err)
 	}
 	return nil
 }

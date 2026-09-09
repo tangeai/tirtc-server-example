@@ -4,6 +4,7 @@ import "strings"
 
 func defaultConfigFields(namespace, key string) []ConfigFieldDefinition {
 	fields := map[string][]ConfigFieldDefinition{
+		definitionID("user-server", "web.navigation"): {{Path: []string{"links"}, Label: "顶部导航链接", Description: "最多 3 个；按列表顺序展示，统一在新标签页打开。未配置或全部停用时隐藏。", Kind: "navigation_links"}},
 		definitionID("device-server", "device.code_policy"): {
 			textConfigField("code_ttl", "设备验证码有效期", "例如 190s 表示 190 秒"),
 			textConfigField("rate_limit_window", "单设备限频周期", "例如 190s"),
@@ -63,6 +64,15 @@ func defaultConfigFields(namespace, key string) []ConfigFieldDefinition {
 		},
 		definitionID("call-server", "call.contact_policy"): {
 			numberConfigField("max_contacts_per_device", "每台设备最多联系人数量"),
+		},
+		definitionID("call-server", "room.policy"): {
+			numberConfigField("participant_limit", "房间人数上限（最多 100）"),
+			textConfigField("empty_ttl", "空房保留时间", "例如 15s、5m、24h"),
+			textConfigField("presence_heartbeat", "设备续租周期", "例如 15s、5m、24h"),
+			textConfigField("presence_lease", "在线租约时间", "例如 15s、5m、24h"),
+			textConfigField("code_cooldown", "房间号冷却时间", "例如 15s、5m、24h"),
+			textConfigField("command_ttl", "通知有效期", "例如 15s、5m、24h"),
+			textConfigField("token_timeout", "获取连接凭证超时", "例如 15s、5m、24h"),
 		},
 		definitionID("call-server", "call.room_policy"): {
 			numberConfigField("room_ttl_hours", "呼叫房间保留时间（小时）"),

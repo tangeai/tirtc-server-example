@@ -617,25 +617,15 @@ export function SetupPage({ initial }: { initial: SetupSnapshot }) {
               </Col>
             </Row>
             <Typography.Paragraph type="secondary">
-              必须提供独立的长期运行账号，并仅授予业务表所需的 SELECT、INSERT、UPDATE、DELETE
-              权限。安装器会在不写入数据的语句中逐表验证权限。
+              运行账号可以与安装/迁移账号相同。生产环境建议使用独立账号，授予业务表所需的
+              SELECT、INSERT、UPDATE、DELETE 权限。安装器会通过不写入数据的语句逐表验证权限。
             </Typography.Paragraph>
             <Row gutter={16}>
               <Col xs={24} md={12}>
                 <Form.Item
                   name={['database', 'runtime_user']}
                   label="DML 运行账号"
-                  dependencies={[['database', 'migration_user']]}
-                  rules={[
-                    { required: true },
-                    ({ getFieldValue }) => ({
-                      validator(_, value) {
-                        return value && value === getFieldValue(['database', 'migration_user'])
-                          ? Promise.reject(new Error('运行账号必须与迁移账号分离'))
-                          : Promise.resolve();
-                      },
-                    }),
-                  ]}
+                  rules={[{ required: true }]}
                 >
                   <Input autoComplete="username" />
                 </Form.Item>

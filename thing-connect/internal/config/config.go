@@ -13,6 +13,8 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"thing-connect/internal/model"
+	"thing-connect/internal/room"
+	"thing-connect/internal/webnav"
 )
 
 type ServerCfg struct {
@@ -174,6 +176,8 @@ type WechatCfg struct {
 }
 
 type Config struct {
+	Navigation  webnav.Config  `yaml:"navigation"`
+	Room        room.Config    `yaml:"room"`
 	Server      ServerCfg      `yaml:"server"`
 	Log         LogCfg         `yaml:"log"`
 	Database    DatabaseCfg    `yaml:"database"`
@@ -213,11 +217,14 @@ func LoadFile(path string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("config: read %s: %w", path, err)
 	}
-	var cfg Config
+	cfg := Config{Room: room.DefaultConfig()}
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&cfg); err != nil {
 		return nil, fmt.Errorf("config: parse %s: %w", path, err)
+	}
+	if _, err := cfg.Room.Policy(); err != nil {
+		return nil, fmt.Errorf("config: room: %w", err)
 	}
 	if cfg.Server.HTTPPort == 0 {
 		cfg.Server.HTTPPort = 8080
@@ -272,6 +279,9 @@ func LoadFile(path string) (*Config, error) {
 	}
 	if cfg.Service.MQTTACKTimeout == 0 {
 		cfg.Service.MQTTACKTimeout = 5 * time.Second
+	}
+	if err := cfg.Navigation.Validate(); err != nil {
+		return nil, err
 	}
 	return &cfg, nil
 }

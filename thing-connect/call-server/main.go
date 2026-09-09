@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"log"
@@ -20,9 +22,12 @@ import (
 	"thing-connect/internal/dynamicconfig"
 	"thing-connect/internal/logging"
 	"thing-connect/internal/mqttc"
+	"thing-connect/internal/room"
+	roomsignals "thing-connect/internal/room/signals"
 	"thing-connect/internal/servicestatus"
 	mysqlstore "thing-connect/internal/store/mysql"
 	mysqlmigrate "thing-connect/internal/store/mysql/migrate"
+	"thing-connect/internal/tirtcapi"
 	"thing-connect/internal/userauth"
 )
 
@@ -83,6 +88,40 @@ func main() {
 		log.Fatalf("dynamic config: %v", err)
 	}
 	cancelConfig()
+	roomPolicy, err := cfg.Room.Policy()
+	if err != nil {
+		log.Fatal(err)
+	}
+	pepper := hmac.New(sha256.New, []byte(cfg.Internal.Key))
+	pepper.Write([]byte("thingconnect/intercom/password/v1"))
+	rtc := callHTTP.Config().Tirtc
+	rooms, err := room.New(mysqlstore.NewRoomStore(sqlDB), tirtcapi.NewRoomClient(tirtcapi.AgentAPIConfig{BaseURL: "https://api-tirtc.tange365.com", AppID: rtc.AppID, AccessKeyID: rtc.AccessKeyID, SecretKeyID: rtc.SecretKeyID}, nil), &roomsignals.Adapter{Redis: rdb, Broker: broker}, pepper.Sum(nil), roomPolicy)
+	if err != nil {
+		log.Fatalf("room: %v", err)
+	}
+	roomRefs := []dynamicconfig.Ref{{Namespace: "call-server", Key: "room.policy", Apply: func(snapshot dynamicconfig.Snapshot) error {
+		if snapshot.Revision == 0 {
+			return rooms.UpdatePolicy(roomPolicy)
+		}
+		p, e := room.ParseConfig(snapshot.Value)
+		if e != nil {
+			return e
+		}
+		return rooms.UpdatePolicy(p)
+	}}}
+	roomConfigCtx, roomConfigCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	if err := dynamicClient.ApplyInitial(roomConfigCtx, roomRefs); err != nil {
+		log.Fatalf("room config: %v", err)
+	}
+	roomConfigCancel()
+	dynamicRefs = append(dynamicRefs, roomRefs...)
+	callHTTP.SetIntercom(rooms)
+	callhandler.RegisterIntercom(r, cfg.JWTSecret, rooms)
+	roomDone := make(chan struct{})
+	go func() {
+		defer close(roomDone)
+		rooms.Run(statusCtx, func(e error) { log.Printf("room worker: %v", e) })
+	}()
 	go dynamicClient.Run(statusCtx, dynamicRefs)
 	reporter, err := servicestatus.NewReporter(rdb, "call-server", probes, dynamicClient.Revisions)
 	if err != nil {
@@ -117,6 +156,7 @@ func main() {
 		log.Printf("call-server shutdown: %v", err)
 	}
 	statusCancel()
+	<-roomDone
 	broker.Close()
 	if err := rdb.Close(); err != nil {
 		log.Printf("call-server close redis: %v", err)

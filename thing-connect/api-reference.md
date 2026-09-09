@@ -277,6 +277,64 @@ int device_sign(const char *device_id, const char *device_key,
 
 ---
 
+### `POST /v1/device/profile`
+
+设备信息上报接口。请求体中的 `media_profiles` 提供媒体能力，供“我的设备 → 更多 → 设备信息”按场景展示。该接口不修改正在进行的通话或媒体协商参数。
+
+**鉴权**：正式设备 `mqtt_token`。设备身份仅取自 JWT，不接受请求体中的 `device_id`；用户 token、临时 token、缺少过期时间或已过期的 token 返回 HTTP 401 + `code=401`。
+
+```json
+{
+  "media_profiles": {
+    "stream": {
+      "up_audio_mt": ["alaw"],
+      "up_video_mt": ["h264"],
+      "down_audio_mt": ["alaw"],
+      "down_video_mt": [],
+      "audio_rate": 8000,
+      "audio_channels": 1
+    },
+    "call": {
+      "up_audio_mt": ["alaw"],
+      "up_video_mt": ["h264"],
+      "down_audio_mt": ["opus", "amr"],
+      "down_video_mt": ["h264", "mjpeg"],
+      "audio_rate": 16000,
+      "audio_channels": 1,
+      "camera_rotation": 0,
+      "hor_mirror": false,
+      "vert_mirror": false,
+      "aspect_ratio": "4:3",
+      "object_fit": "contain"
+    }
+  }
+}
+```
+
+`media_profiles` 必须包含至少一个场景：`stream`（实时查看）、`call`（设备通话）、`voip`（微信 VoIP）。正文最大 16 KiB。每个场景的字段均可省略，未知字段和 `null` 被拒绝。
+
+| 字段 | 类型与取值 |
+|---|---|
+| `up_audio_mt` / `down_audio_mt` | 编码字符串数组，最多 8 项；支持 `alaw`、`g711a`、`pcm`、`opus`、`amr`、`amr_nb`、`amr_wb`、`aac` |
+| `up_video_mt` / `down_video_mt` | 编码字符串数组，最多 8 项；支持 `h264`、`h265`、`mjpeg`、`none` |
+| `audio_rate` | 下行音频采样率：8000、16000、24000、32000、44100 或 48000 Hz |
+| `audio_channels` | 下行音频声道数：1 或 2 |
+| `camera_rotation` | 顺时针旋转角度：0、90、180 或 270 |
+| `hor_mirror` / `vert_mirror` | 水平 / 垂直镜像，布尔值 |
+| `no_video` | 布尔值；为 true 时表示该场景无视频 |
+| `aspect_ratio` | 正数比例，或 `宽:高` 字符串（宽、高为 1–9999） |
+| `object_fit` | `fill`、`contain` 或 `cover` |
+
+编码列表按设备首选顺序排列，空数组表示明确不支持；省略字段表示未上报。编码也接受逗号、斜杠、分号、竖线或空白分隔的字符串。设备只应声明自身实际支持的能力，接口允许的编码不代表每种业务都支持该编码。
+
+每次请求**完整替换携带场景的能力快照**，未携带的场景保留。`{"media_profiles":{"call":{}}}` 清除设备通话场景的已报字段。不要把同一场景拆成多次字段增量上报；同场景请求须串行，重试复用原快照。重复请求幂等，最后提交的快照生效，不同场景并发上报不会相互覆盖。
+
+**响应**：成功为 HTTP 200，`{"code":200,"msg":"ok"}`。参数错误为 HTTP 400 + `40000`；设备不存在或已解绑为 HTTP 410 + `6006`；存储失败为 HTTP 500 + `50000`。已解绑设备不能写入，设备能力不包含用户信息，重绑后仍可展示并由设备重新上报覆盖。
+
+用户设备列表返回 `media_profiles`。尚未通过此接口上报 `voip` 场景的旧设备，沿用现有 VoIP profile；一旦显式上报该场景，以此接口的快照为准。微信 VoIP 业务仍须按原流程调用 `/v1/voip/device/profile` 完成业务注册。
+
+---
+
 ## user-server
 
 面向 H5 浏览器和微信小程序，处理账号与设备管理。
@@ -565,6 +623,9 @@ JWT 由 register / login 返回的 `token` 提供，含 `user_id` claim。缺失
 ---
 
 ### `GET /v1/user/device/list`
+
+响应设备条目的 `media_profiles` 按业务场景提供明确上报的媒体字段。包含可选的 `stream`、`call`、`voip` 对象，由 device-server 的媒体能力上报接口提供；旧设备的 `voip` 可沿用原 VoIP profile；没有场景键时表示该场景能力未上报，不能从其他场景补值。对象仅含已上报的上下行媒体格式、音频采样率/声道数及视频显示字段，不含设备凭证。原有顶层媒体字段保持兼容；设备信息页面使用场景对象区分缺失、`false` 与 `0`。
+
 
 获取当前用户已绑定设备列表（含在线状态）。
 
@@ -3064,3 +3125,67 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 | 5 | 签名校验失败 |
 | 9 | 请求体无效 |
 | 10 | TiRTC/MQTT 处理失败，或同一房间的上一笔回调仍在处理中 |
+
+## 多人对讲（call-server）
+
+页面入口：`GET /v1/call/room/page?device_id=<设备ID>`。完整设备状态与音频约束见 [设备多人对讲](device-room.md)。
+
+| 方法 | 路径 | 鉴权与用途 |
+|---|---|---|
+| GET | `/v1/call/room/web/device/:device_id` | 用户 JWT，查询自己设备的关系 |
+| POST | `/v1/call/room/web/device/:device_id/create` | 用户 JWT，新建房间并安排设备加入 |
+| POST | `/v1/call/room/web/device/:device_id/join` | 用户 JWT，安排设备加入 |
+| POST | `/v1/call/room/web/device/:device_id/leave` | 用户 JWT，安排设备退出 |
+| GET | `/v1/call/room/device/assignment` | 设备 JWT，读取自身关系 |
+| POST | `/v1/call/room/device/create` | 设备 JWT，本机建房 |
+| POST | `/v1/call/room/device/join` | 设备 JWT，本机加入 |
+| POST | `/v1/call/room/device/leave` | 设备 JWT，本机退出 |
+| POST | `/v1/call/room/device/connect-token` | 设备 JWT，预占连接名额并领取当前房间凭证 |
+| POST | `/v1/call/room/device/presence` | 设备 JWT，报告连接状态或续租 |
+
+`create`、`join`、`leave` 必须携带 8–64 字符的 `Idempotency-Key`；同一操作重试必须复用键及请求体。创建请求为 `{"password":"0573"}`，密码可空；加入请求为 `{"room_code":"001234","password":"0573"}`；退出请求可带 `{"room_id":"<内部房间ID>","assignment_version":3}`，版本或房间不匹配时拒绝操作。设备本机退出可发送 `{}` 表示退出当前房间。
+
+查询和变更成功返回 HTTP 200：
+
+```json
+{"code":200,"msg":"ok","data":{"device_id":"device-1","room_id":"<内部房间ID>","room_code":"001234","desired_state":"joined","assignment_version":3,"state":"assigned","password_set":true,"online_count":0,"online":false}}
+```
+
+`desired_state` 为 `joined` 或 `left`；`state` 包括 `assigned`、`waiting_device`、`connecting`、`joined`、`suspended`、`connect_failed`、`left`、`room_closed`。`online_count` 是尚未过期且已报告 `joined` 的设备数，连接预占计入容量但不计入这个值。变更响应表示期望关系已保存，执行状态以之后的查询结果为准。
+
+领取 token 和上报均携带 `room_id`、`assignment_version`、8–64 字符的设备生成 `session_id`。上报还必须带 `state`，可为 `connecting`、`joined`、`suspended`、`left`、`connect_failed`。领取 token 的响应 `data` 包含 `peer_id`、`token`、`heartbeat_seconds`、`lease_seconds`，上游提供过期时间时包含 `expires_at`；响应禁止缓存。上报成功的 `data` 为 `null`。上报 `left` 只释放本次连接，持久退出必须调用 `leave`。
+
+| 业务码 | 含义与处理 |
+|---|---|
+| 40000 | 参数或幂等键不合法，检查六位数字房间号、可选四位数字密码及会话标识 |
+| 40300 | 当前账号无设备权限或设备未绑定，刷新绑定状态 |
+| 40320 | 房间密码错误，重新输入 |
+| 40400 | 房间不存在或已关闭，重新同步 |
+| 40920 | 房间容量已满，稍后重试 |
+| 40921 | 关系版本或连接代次过期，读取最新关系 |
+| 40922 | 幂等键被用于不同请求体，重新生成操作键 |
+| 42900 | 请求过频，退避重试 |
+| 42920 | 同一设备连续五次密码错误，十分钟后重试 |
+| 50200 | 连接凭证服务不可用，退避重试 |
+
+业务错误使用 HTTP 200 和数值 `code`；鉴权失败遵循 call-server 现有 JWT 中间件约定。客户端按 `code` 判断，不按 `msg` 文本分支。接口不会向 H5 返回密码、密码校验值或设备连接凭证。
+
+### `GET /v1/config/navigation`
+
+公开读取用户 Web 的顶部导航，无需鉴权。成功为 HTTP 200：
+
+```json
+{"code":200,"msg":"ok","data":{"links":[{"name":"接入文档","url":"https://docs.example.com","enabled":true}],"revision":1}}
+```
+
+仅返回已启用链接，最多 3 项，按配置列表顺序排列；无配置时 `links` 为 `[]`，前端隐藏入口。使用 `_blank` 和 `rel="noopener noreferrer"` 打开。响应 `Cache-Control: no-store`；页面首次加载读取，不定时刷新。`revision=0` 表示使用本地回退配置。
+
+### `GET /v1/user/me`
+
+使用用户 JWT 查询当前账号，不接受用户 ID 参数。成功为 HTTP 200：
+
+```json
+{"code":200,"msg":"ok","data":{"user_id":1,"email":"user@example.com"}}
+```
+
+响应禁止缓存，不返回密码或令牌。鉴权失败返回 HTTP 401 + `401`，内部错误为 HTTP 500 + `50000`。Web 遇到受保护接口的鉴权失败时清除失效令牌，进入登录页并提示重新登录。

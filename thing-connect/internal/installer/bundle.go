@@ -348,9 +348,6 @@ func validateDraft(draft Draft) error {
 	if runtimeUser == "" || draft.Database.RuntimePassword == "" {
 		return fmt.Errorf("%w: MySQL DML 运行账号和密码不能为空", ErrInvalidInput)
 	}
-	if runtimeUser == migrationUser {
-		return fmt.Errorf("%w: MySQL 运行账号必须与迁移账号分离", ErrInvalidInput)
-	}
 	if strings.TrimSpace(draft.Redis.Host) == "" || strings.ContainsAny(draft.Redis.Host, "/?#@") || draft.Redis.Port < 1 || draft.Redis.Port > 65535 {
 		return fmt.Errorf("%w: Redis 地址或端口无效", ErrInvalidInput)
 	}

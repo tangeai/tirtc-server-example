@@ -20,6 +20,7 @@ typedef enum {
     TIRTC_SERVICE_VOIP,
     TIRTC_SERVICE_AI,
     TIRTC_SERVICE_CALL,
+    TIRTC_SERVICE_ROOM,
     TIRTC_SERVICE_COUNT
 } TirtcService;
 

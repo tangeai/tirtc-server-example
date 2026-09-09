@@ -106,6 +106,7 @@ func main() {
 	probes := map[string]servicestatus.DependencyProbe{"database": servicestatus.SQLProbe(sqlDB), "redis": servicestatus.RedisProbe(rdb)}
 	servicestatus.RegisterHealth(r, probes)
 	devhandler.NewServer(devSvc).Register(r)
+	devhandler.RegisterDeviceProfile(r, service.NewDeviceMediaService(mysqlstore.NewDeviceMediaStore(sqlDB)), cfg.JWTSecret)
 	statusCtx, statusCancel := context.WithCancel(context.Background())
 	reporter, err := servicestatus.NewReporter(rdb, "device-server", probes, dynamicClient.Revisions)
 	if err != nil {

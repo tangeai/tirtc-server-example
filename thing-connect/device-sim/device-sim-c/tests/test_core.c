@@ -36,6 +36,40 @@ typedef struct {
     DeviceProductEvent last_event;
 } AdapterContractContext;
 
+static void test_device_media_profile(void) {
+    char body[1024];
+    assert(device_media_profile_json(body, sizeof(body), "pcm_s16le_16khz",
+                                     "opus_16khz", "h265", "mjpeg", 1) == 0);
+    cJSON *root = cJSON_Parse(body);
+    assert(root);
+    cJSON *profiles = cJSON_GetObjectItem(root, "media_profiles");
+    cJSON *stream = cJSON_GetObjectItem(profiles, "stream");
+    cJSON *call = cJSON_GetObjectItem(profiles, "call");
+    assert(!cJSON_GetObjectItem(profiles, "voip"));
+    assert(strcmp(cJSON_GetStringValue(cJSON_GetArrayItem(
+        cJSON_GetObjectItem(stream, "down_audio_mt"), 0)), "alaw") == 0);
+    assert(strcmp(cJSON_GetStringValue(cJSON_GetArrayItem(
+        cJSON_GetObjectItem(call, "down_audio_mt"), 0)), "opus") == 0);
+    assert(strcmp(cJSON_GetStringValue(cJSON_GetArrayItem(
+        cJSON_GetObjectItem(call, "down_video_mt"), 0)), "mjpeg") == 0);
+    assert(cJSON_IsFalse(cJSON_GetObjectItem(call, "no_video")));
+    assert(!cJSON_GetObjectItem(stream, "camera_rotation"));
+    cJSON_Delete(root);
+    assert(device_media_profile_json(body, sizeof(body), "alaw_8khz",
+                                     "alaw_8khz", "h264", "h264", 0) == 0);
+    root = cJSON_Parse(body);
+    call = cJSON_GetObjectItem(cJSON_GetObjectItem(root, "media_profiles"), "call");
+    assert(cJSON_GetArraySize(cJSON_GetObjectItem(call, "up_video_mt")) == 0);
+    assert(cJSON_GetArraySize(cJSON_GetObjectItem(call, "down_video_mt")) == 0);
+    assert(cJSON_IsTrue(cJSON_GetObjectItem(call, "no_video")));
+    cJSON_Delete(root);
+    assert(device_media_profile_json(body, 8, "alaw_8khz",
+                                     "alaw_8khz", "h264", "h264", 1) == -1);
+    assert(body[0] == '\0');
+    assert(device_media_profile_json(body, sizeof(body), "invalid",
+                                     "alaw_8khz", "h264", "h264", 1) == -1);
+}
+
 static void test_hmac_sha256_b64(void) {
     char signature[64];
     assert(hmac_sha256_b64(
@@ -1069,6 +1103,29 @@ static void test_session_arbiter_policy(void) {
     assert(session_arbiter_current(&arbiter) == SESSION_NONE);
     assert(session_coordinator_current(&coordinator) == SESSION_STREAM);
 
+    ArbiterAdapterContext group_room = {0};
+    coordinator.adapters[SESSION_ROOM] = (SessionAdapter){
+        arbiter_adapter_start, arbiter_adapter_stop, &group_room};
+    SessionLease room_lease;
+    assert(session_arbiter_begin_id(&arbiter, SESSION_ROOM, 0,
+                                   "group-room-1", &room_lease) == 0);
+    assert(session_arbiter_admit_incoming_id(&arbiter, SESSION_CALL,
+               "preempt-room", 45000) == SESSION_INCOMING_PENDING);
+    assert(session_arbiter_begin_id(&arbiter, SESSION_CALL, 1,
+               "preempt-room", NULL) == 0);
+    assert(group_room.stops == 1);
+    session_arbiter_finish_lease(&arbiter, &room_lease);
+    assert(session_arbiter_current(&arbiter) == SESSION_CALL);
+    assert(session_arbiter_begin_id(&arbiter, SESSION_ROOM, 0,
+               "room-must-wait", NULL) != 0);
+    session_arbiter_finish(&arbiter, SESSION_CALL);
+    assert(session_arbiter_begin_id(&arbiter, SESSION_ROOM, 0,
+               "group-room-2", &room_lease) == 0);
+    assert(session_arbiter_begin_id(&arbiter, SESSION_AI, 0,
+               "ai-preempt-room", NULL) == 0);
+    assert(group_room.stops == 2);
+    session_arbiter_finish(&arbiter, SESSION_AI);
+
     assert(session_arbiter_begin_id(
                &arbiter, SESSION_AI, 0, "ai-recovery", NULL) == 0);
     stream.fail_start = 1;
@@ -1464,6 +1521,7 @@ int main(void) {
     assert(linux_device_adapter_install_default() == 0);
     test_device_adapter_contract();
     test_format_tables();
+    test_device_media_profile();
     test_audio_recorder_files();
     test_ai_start_session_json_declares_codecs();
     test_media_subscription_policy();

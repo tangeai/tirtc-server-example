@@ -20,7 +20,8 @@ TERMINAL_COMMAND_QUEUE_SIZE = 32
 class SessionMessageRouter:
     """保持各协议状态机独立，只转发其所属的 MQTT 消息。"""
 
-    def __init__(self, arbiter, voip, call):
+    def __init__(self, arbiter, voip, call, room=None):
+        self.room = room
         self.arbiter = arbiter
         self.voip = voip
         self.call = call
@@ -133,6 +134,13 @@ class SessionMessageRouter:
             previous.cancel()
         timer.start()
 
+    def on_room_assignment_changed(self, payload=None):
+        if self.room is not None:
+            self.room.sync()
+
+    def on_mqtt_connected(self):
+        self.on_room_assignment_changed()
+
     def on_call_incoming(self, payload):
         room_id = payload.get("wx_room_id", "")
         if not room_id:
@@ -217,7 +225,8 @@ class TerminalController:
         "ct": "contact",
     }
 
-    def __init__(self, arbiter, voip, ai, call, video_capable: bool = True):
+    def __init__(self, arbiter, voip, ai, call, video_capable: bool = True, room=None):
+        self.room = room
         self.arbiter = arbiter
         self.voip = voip
         self.ai = ai
@@ -410,6 +419,8 @@ class TerminalController:
 
     def _execute(self, line: str, stop_event) -> None:
         parts = line.split()
+        if self.room is not None and self.room.command(parts):
+            return
         command = self._COMMAND_ALIASES.get(parts[0].lower(), parts[0].lower())
         if self._pending_selection:
             if self._try_execute_pending_selection(parts):

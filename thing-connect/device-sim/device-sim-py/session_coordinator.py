@@ -16,6 +16,7 @@ class SessionKind(str, Enum):
     VOIP = "voip"
     AI = "ai"
     CALL = "call"
+    ROOM = "room"
 
 
 @dataclass(frozen=True)
@@ -55,7 +56,7 @@ class SessionCoordinator:
         with self._transition_lock:
             self._ensure_open()
             current = self.current
-            if current not in (None, SessionKind.STREAM, kind):
+            if current not in (None, SessionKind.STREAM, SessionKind.ROOM, kind):
                 raise RuntimeError(f"{current.value} 会话正在进行中")
             self._cancel_pending(kind)
             if self.current != kind:

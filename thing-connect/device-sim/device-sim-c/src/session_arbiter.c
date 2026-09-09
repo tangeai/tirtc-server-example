@@ -9,6 +9,7 @@ static DeviceBusiness _device_business(SessionKind kind) {
     case SESSION_VOIP: return DEVICE_BUSINESS_VOIP;
     case SESSION_AI: return DEVICE_BUSINESS_AI;
     case SESSION_CALL: return DEVICE_BUSINESS_CALL;
+    case SESSION_ROOM: return DEVICE_BUSINESS_ROOM;
     default: return DEVICE_BUSINESS_NONE;
     }
 }
@@ -26,7 +27,7 @@ static void _notify_incoming(SessionKind kind, const char *session_id) {
 }
 
 static uint32_t _kind_bit(SessionKind kind) {
-    return kind > SESSION_NONE && kind <= SESSION_CALL
+    return kind > SESSION_NONE && kind <= SESSION_ROOM
                ? (1U << (unsigned int)kind) : 0;
 }
 
@@ -149,7 +150,7 @@ int session_arbiter_offer_pending_id(SessionArbiter *arbiter, SessionKind kind,
     if (!arbiter || !bit || kind == SESSION_STREAM) return -1;
     pthread_mutex_lock(&arbiter->state_lock);
     _expire_pending_locked(arbiter);
-    int granted = !arbiter->closed && arbiter->owner == SESSION_NONE &&
+    int granted = !arbiter->closed && (arbiter->owner == SESSION_NONE || arbiter->owner == SESSION_ROOM) &&
                   arbiter->pending_mask == 0;
     if (granted) {
         arbiter->pending_mask = bit;
@@ -193,7 +194,7 @@ SessionIncomingDecision session_arbiter_admit_incoming_id(
             arbiter->pending_session_id[0] &&
             strcmp(arbiter->pending_session_id, session_id) == 0)
             decision = SESSION_INCOMING_DUPLICATE;
-    } else if (!arbiter->closed && arbiter->owner == SESSION_NONE &&
+    } else if (!arbiter->closed && (arbiter->owner == SESSION_NONE || arbiter->owner == SESSION_ROOM) &&
                arbiter->pending_mask == 0) {
         arbiter->pending_mask = bit;
         arbiter->pending_generation++;
@@ -279,7 +280,7 @@ int session_arbiter_begin_id_ex(SessionArbiter *arbiter, SessionKind kind,
                                _id_matches(arbiter->pending_session_id,
                                            session_id)
                          : arbiter->pending_mask == 0;
-    if (arbiter->closed || arbiter->owner != SESSION_NONE || !pending_ok) {
+    if (arbiter->closed || (arbiter->owner != SESSION_NONE && !(arbiter->owner == SESSION_ROOM && kind != SESSION_ROOM)) || !pending_ok) {
         SessionKind owner = arbiter->owner;
         uint32_t pending = arbiter->pending_mask;
         pthread_mutex_unlock(&arbiter->state_lock);

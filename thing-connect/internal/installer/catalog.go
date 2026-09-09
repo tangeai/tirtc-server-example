@@ -3,6 +3,7 @@ package installer
 import (
 	_ "embed"
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"io"
 	"path"
@@ -51,19 +52,6 @@ func adminService() serviceSpec {
 	panic("installer service catalog has no Admin service")
 }
 
-func optionalServicesSelected(optional []string, names ...string) bool {
-	selected := make(map[string]bool, len(optional))
-	for _, name := range optional {
-		selected[name] = true
-	}
-	for _, name := range names {
-		if !selected[name] {
-			return false
-		}
-	}
-	return true
-}
-
 func mustLoadServiceCatalog(raw string) []serviceSpec {
 	reader := csv.NewReader(strings.NewReader(raw))
 	reader.Comma = '\t'
@@ -75,7 +63,7 @@ func mustLoadServiceCatalog(raw string) []serviceSpec {
 	adminCount := 0
 	for {
 		record, err := reader.Read()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {

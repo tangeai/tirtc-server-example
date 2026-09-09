@@ -28,6 +28,7 @@ import (
 	"thing-connect/internal/servicestatus"
 	mysqlstore "thing-connect/internal/store/mysql"
 	mysqlmigrate "thing-connect/internal/store/mysql/migrate"
+	"thing-connect/internal/webnav"
 	usrhandler "thing-connect/user-server/handler"
 )
 
@@ -91,6 +92,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("dynamic config: %v", err)
 	}
+	navigation, err := webnav.New(cfg.Navigation)
+	if err != nil {
+		log.Fatalf("navigation config: %v", err)
+	}
+	dynamicRefs = append(dynamicRefs, dynamicconfig.Ref{Namespace: "user-server", Key: "web.navigation", Apply: func(snapshot dynamicconfig.Snapshot) error {
+		return navigation.Apply(snapshot.Value, snapshot.Revision)
+	}})
 	configCtx, cancelConfig := context.WithTimeout(context.Background(), 10*time.Second)
 	if err := dynamicClient.ApplyInitial(configCtx, dynamicRefs); err != nil {
 		cancelConfig()
@@ -108,6 +116,8 @@ func main() {
 	probes := map[string]servicestatus.DependencyProbe{"database": servicestatus.SQLProbe(sqlDB), "redis": servicestatus.RedisProbe(rdb)}
 	probes["mqtt"] = broker.Ping
 	servicestatus.RegisterHealth(r, probes)
+	usrhandler.RegisterNavigation(r, navigation)
+	usrhandler.RegisterAccount(r, usrhandler.JWTAuth(cfg.JWTSecret, rdb, sqlDB), service.NewAccountService(mysqlstore.NewAccountReader(sqlDB)))
 	if err := registerServiceDiscovery(r, cfg.Discovery); err != nil {
 		log.Fatalf("service discovery: %v", err)
 	}

@@ -24,6 +24,9 @@ type mqttBroker interface {
 }
 
 type Server struct {
+	intercom interface {
+		Unbind(context.Context, string) error
+	}
 	mu     sync.RWMutex
 	cfg    *config.Config
 	db     *sqlx.DB
@@ -150,4 +153,10 @@ func currentUserID(c *gin.Context) int64 {
 	v, _ := c.Get("user_id")
 	id, _ := v.(int64)
 	return id
+}
+
+func (s *Server) SetIntercom(service interface {
+	Unbind(context.Context, string) error
+}) {
+	s.intercom = service
 }

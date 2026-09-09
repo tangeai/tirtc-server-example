@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>多人对讲 — ThingConnect</title>
+  <link rel="stylesheet" href="/static/css/tailwind.css">
+  <style>[hidden] { display: none !important; }</style>
+  <script src="/static/user-shell.js?v=a3b29baae127"></script>
+</head>
+<body class="bg-gray-50 min-h-screen font-sans text-gray-900">
+<header class="sticky top-0 z-50 flex items-center justify-between h-[56px] px-4 sm:px-8 bg-white border-b border-gray-200 max-sm:h-[50px] max-sm:px-3.5">
+  <div class="flex items-center gap-2 sm:gap-3 min-w-0">
+    <a href="/devices" aria-label="返回我的设备" class="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 transition-colors shrink-0">
+      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+      返回
+    </a>
+    <span class="w-px h-5 bg-gray-200"></span>
+    <span class="text-sm font-semibold truncate">多人对讲</span>
+  </div>
+  <a href="/devices" class="text-sm text-gray-500 hover:text-gray-700 transition-colors shrink-0">首页</a>
+</header>
+<main class="max-w-[640px] mx-auto px-3.5 sm:px-8 pt-5 sm:pt-8 pb-12">
+  <div class="mb-6">
+    <h1 class="text-2xl font-bold tracking-tight">多人对讲</h1>
+    <div class="flex items-start justify-between gap-3 mt-4">
+      <div class="min-w-0">
+        <p id="deviceName" class="text-sm font-semibold break-words">正在加载设备…</p>
+        <p id="device" class="font-mono text-xs text-gray-500 mt-1 break-all"></p>
+      </div>
+      <p id="deviceOnline" class="text-xs text-gray-500 shrink-0 pt-0.5" aria-live="polite"></p>
+    </div>
+  </div>
+  <div id="loading" role="status" class="bg-white border border-gray-200 rounded-2xl p-6 text-sm text-gray-500 mb-4">正在加载房间信息…</div>
+  <p id="message" role="alert" hidden class="mb-4 px-4 py-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 break-words"></p>
+  <p id="successMessage" role="status" hidden class="mb-4 px-4 py-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-700"></p>
+  <p id="syncMessage" role="status" hidden class="mb-4 px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700"></p>
+  <button id="retry" type="button" hidden class="mb-4 px-4 py-2.5 text-sm bg-white border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50">重新加载</button>
+  <section id="current" hidden aria-labelledby="currentTitle" class="bg-white border border-gray-200 rounded-2xl p-5 sm:p-6 shadow-sm">
+    <div class="flex items-center justify-between gap-3">
+      <h2 id="currentTitle" tabindex="-1" class="text-base font-semibold outline-none">当前房间</h2>
+      <span id="passwordState" class="text-xs text-gray-500"></span>
+    </div>
+    <div class="my-6 px-4 py-5 rounded-xl bg-gray-50 text-center">
+      <p class="text-xs text-gray-500 mb-2">房间号</p>
+      <p id="code" class="font-mono text-4xl font-semibold tracking-widest text-gray-900 select-all"></p>
+      <p class="text-xs text-gray-500 mt-3">其他设备可通过此房间号加入</p>
+    </div>
+    <div class="flex items-start justify-between gap-3 text-sm">
+      <p id="state" class="font-medium text-emerald-600" aria-live="polite"></p>
+      <p id="count" class="text-gray-500 shrink-0"></p>
+    </div>
+    <p id="stateHelp" class="mt-2 text-sm text-gray-500 leading-relaxed"></p>
+    <div class="flex gap-2.5 mt-6">
+      <a id="home" href="/devices" class="flex-1 text-center py-2.5 px-3 text-sm font-semibold text-white bg-emerald-500 rounded-lg hover:bg-emerald-600 transition-colors">返回首页</a>
+      <button id="leave" type="button" class="flex-1 py-2.5 px-3 text-sm font-medium text-red-600 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 transition-colors disabled:opacity-50">退出房间</button>
+    </div>
+  </section>
+  <section id="actions" hidden class="space-y-4">
+    <form id="create" class="bg-white border border-gray-200 rounded-2xl p-5 sm:p-6 shadow-sm">
+      <h2 class="text-base font-semibold">创建房间</h2>
+      <p class="text-sm text-gray-500 mt-1 mb-5">创建后，此设备自动加入房间。</p>
+      <fieldset>
+        <legend class="text-xs font-medium text-gray-600 mb-2">房间密码</legend>
+        <div class="flex flex-wrap gap-5 text-sm">
+          <label class="inline-flex items-center gap-2 py-2 cursor-pointer"><input type="radio" name="passwordMode" value="none" checked class="accent-emerald-500 w-4 h-4">无密码</label>
+          <label class="inline-flex items-center gap-2 py-2 cursor-pointer"><input type="radio" name="passwordMode" value="password" class="accent-emerald-500 w-4 h-4">设置密码</label>
+        </div>
+      </fieldset>
+      <div id="passwordFields" hidden class="mt-4">
+        <label for="newPassword" class="block text-xs font-medium text-gray-600 mb-1.5">4 位数字密码</label>
+        <input id="newPassword" type="password" inputmode="numeric" maxlength="4" pattern="[0-9]{4}" autocomplete="new-password" disabled placeholder="输入 4 位数字" class="w-full px-3.5 py-2.5 text-base border border-gray-200 rounded-lg outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20">
+      </div>
+      <button id="createSubmit" type="submit" class="w-full mt-5 py-2.5 text-sm font-semibold text-white bg-emerald-500 rounded-lg hover:bg-emerald-600 transition-colors disabled:opacity-50 disabled:cursor-wait">创建房间</button>
+    </form>
+    <form id="join" class="bg-white border border-gray-200 rounded-2xl p-5 sm:p-6 shadow-sm">
+      <h2 class="text-base font-semibold">加入房间</h2>
+      <p class="text-sm text-gray-500 mt-1 mb-5">输入已有房间的房间号，与其他设备对讲。</p>
+      <label for="roomCode" class="block text-xs font-medium text-gray-600 mb-1.5">6 位房间号</label>
+      <input id="roomCode" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" required autocomplete="off" placeholder="输入 6 位房间号" class="w-full px-3.5 py-2.5 text-base border border-gray-200 rounded-lg outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20">
+      <label for="joinPassword" class="block text-xs font-medium text-gray-600 mt-4 mb-1.5">房间密码 <span class="font-normal text-gray-400">（无密码房间留空）</span></label>
+      <input id="joinPassword" type="password" inputmode="numeric" maxlength="4" pattern="[0-9]{4}" autocomplete="off" placeholder="输入 4 位数字密码" class="w-full px-3.5 py-2.5 text-base border border-gray-200 rounded-lg outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20">
+      <button id="joinSubmit" type="submit" class="w-full mt-5 py-2.5 text-sm font-semibold text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition-colors disabled:opacity-50 disabled:cursor-wait">加入房间</button>
+    </form>
+  </section>
+  <div class="mt-5 text-xs text-gray-500 leading-relaxed space-y-1">
+    <p>加入后默认收听，按住设备上的说话键发言。</p>
+    <p>离线设备上线后自动加入；房间连续无人在线 24 小时后自动解散。</p>
+  </div>
+</main>
+<dialog id="leaveDialog" aria-labelledby="leaveTitle" class="w-[360px] max-w-[calc(100vw-32px)] p-6 bg-white border border-gray-200 rounded-2xl shadow-xl backdrop:bg-black/50">
+  <h2 id="leaveTitle" class="text-base font-semibold text-gray-900">退出房间？</h2>
+  <p id="leaveDescription" class="text-sm text-gray-500 leading-relaxed break-words mt-2 mb-5"></p>
+  <div class="flex gap-2.5">
+    <button id="cancelLeave" type="button" autofocus class="flex-1 py-2.5 text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100">取消</button>
+    <button id="confirmLeave" type="button" class="flex-1 py-2.5 text-sm font-semibold text-red-600 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100">确认退出</button>
+  </div>
+</dialog>
+<script>
+        "use strict";
+        const $ = (id) => document.getElementById(id),
+          device = new URLSearchParams(location.search).get("device_id"),
+          token = localStorage.getItem("token");
+        const states = {
+          assigned: "已安排加入",
+          waiting_device: "设备离线",
+          suspended: "设备忙，空闲后加入",
+          connecting: "正在加入",
+          joined: "已加入",
+          connect_failed: "加入失败，将重试",
+          left: "已退出",
+          room_closed: "房间已解散",
+        };
+        let snapshot = null,
+          busy = false,
+          stopped = false,
+          pending = null,
+          sequence = 0,
+          deviceReady = false,
+          deviceName = "",
+          messageKind = "",
+          refreshing = false,
+          leaveTarget = null;
+        $("device").textContent = "设备 ID：" + (device || "未选择");
+        function message(text, kind = "operation") {
+          $("message").textContent = text;
+          $("message").hidden = !text;
+          messageKind = kind;
+        }
+        function errorText(e) {
+          if (e.name === "TimeoutError" || e.name === "AbortError")
+            return "请求超时，请检查网络后重试";
+          if (e instanceof TypeError) return "网络连接失败，请检查网络后重试";
+          if (e instanceof SyntaxError) return "服务暂时不可用，请稍后重试";
+          return e.message || "操作失败，请重试";
+        }
+        async function loadDevice() {
+          $("retry").disabled = true;
+          $("loading").hidden = !!snapshot;
+          try {
+            const r = await fetch("/v1/user/device/list", {
+              headers: { Authorization: "Bearer " + token },
+              signal: AbortSignal.timeout(10000),
+            });
+            const body = await r.json();
+            if (r.status === 401 || body.code === 401) {
+              location.href = "/login";
+              return;
+            }
+            if (body.code !== 200) throw Error(body.msg || "设备信息加载失败");
+            const d = body.data.find((d) => d.device_id === device);
+            if (!d) throw Error("设备不属于当前账号，请返回设备列表");
+            deviceName = d.device_name || "未命名设备";
+            $("deviceName").textContent = deviceName;
+            deviceReady = true;
+            $("retry").hidden = true;
+            await refresh();
+          } catch (e) {
+            message(errorText(e), "load");
+            $("retry").hidden = false;
+          } finally {
+            $("loading").hidden = true;
+            $("retry").disabled = false;
+          }
+        }
+        $("retry").onclick = loadDevice;
+        document.querySelectorAll("[name=passwordMode]").forEach(
+          (input) =>
+            (input.onchange = () => {
+              const enabled =
+                document.querySelector("[name=passwordMode]:checked").value ===
+                "password";
+              $("passwordFields").hidden = !enabled;
+              $("newPassword").disabled = !enabled;
+              $("newPassword").required = enabled;
+              if (!enabled) $("newPassword").value = "";
+              else $("newPassword").focus();
+            }),
+        );
+        async function api(path, options = {}) {
+          const response = await fetch(
+            "/v1/call/room/web/device/" + encodeURIComponent(device) + path,
+            {
+              ...options,
+              headers: {
+                Authorization: "Bearer " + token,
+                "Content-Type": "application/json",
+                ...options.headers,
+              },
+              signal: AbortSignal.timeout(10000),
+            },
+          );
+          const body = await response.json();
+          if (response.status === 401 || body.code === 401) {
+            stopped = true;
+            location.href = "/login";
+            throw Error("登录已过期，请重新登录");
+          }
+          if (body.code !== 200) {
+            const error = Error(body.msg || "操作失败，请重试");
+            error.code = body.code;
+            throw error;
+          }
+          return body.data;
+        }
+        function render(a) {
+          snapshot = a;
+          $("loading").hidden = true;
+          $("retry").hidden = true;
+          $("syncMessage").hidden = true;
+          $("deviceOnline").textContent = a.online ? "● 在线" : "○ 离线";
+          $("deviceOnline").style.color = a.online ? "#059669" : "#6b7280";
+          const joined = a.desired_state === "joined";
+          $("current").hidden = !joined;
+          $("actions").hidden = joined;
+          if (!joined && a.state === "room_closed")
+            message("房间已解散，可新建或加入其他房间", "status");
+          else if (messageKind === "status") message("");
+          $("code").textContent = a.room_code || "";
+          $("state").textContent = states[a.state] || "正在同步";
+          $("count").textContent = "在线设备：" + (a.online_count || 0);
+          $("stateHelp").textContent = {
+            assigned: "加入请求已保存，设备正在处理。",
+            waiting_device: "请开机联网，联网后自动加入。",
+            suspended: "设备正在通话，结束后会自动回到房间。",
+            connecting: "设备正在连接房间，请稍候。",
+            joined: "设备已进入房间，可以收听并按住说话键发言。",
+            connect_failed: "设备暂未连接成功，正在自动重试，请检查设备网络。",
+          }[a.state] || "正在同步设备状态，请稍候。";
+          $("passwordState").textContent = a.password_set
+            ? "已设置房间密码"
+            : "无密码房间";
+        }
+        async function refresh() {
+          if (stopped || busy || refreshing || !deviceReady) return;
+          refreshing = true;
+          const started = sequence;
+          try {
+            const a = await api("");
+            if (!stopped && !busy && started === sequence) {
+              render(a);
+              if (messageKind === "load") message("", "load");
+            }
+          } catch (e) {
+            if (!stopped && started === sequence) {
+              if (snapshot) {
+                $("syncMessage").textContent = "状态更新失败，当前显示上次结果；请返回设备列表刷新后重试。";
+                $("syncMessage").hidden = false;
+              } else {
+                message(errorText(e), "load");
+                $("retry").hidden = false;
+                $("loading").hidden = true;
+              }
+            }
+          } finally {
+            refreshing = false;
+          }
+        }
+        function operationKey() {
+          if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+          // getRandomValues also works on HTTP development origins.
+          return Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
+            byte.toString(16).padStart(2, "0"),
+          ).join("");
+        }
+        async function change(kind, body) {
+          if (busy || !deviceReady) return;
+          busy = true;
+          sequence++;
+          message("");
+          $("successMessage").hidden = true;
+          const controls = Array.from(document.querySelectorAll("button, input"));
+          const disabled = controls.map((control) => control.disabled);
+          const submit = $({create: "createSubmit", join: "joinSubmit", leave: "leave"}[kind]);
+          const label = submit.textContent;
+          submit.textContent = {create: "正在创建…", join: "正在加入…", leave: "正在退出…"}[kind];
+          document
+            .querySelectorAll("button, input")
+            .forEach((b) => (b.disabled = true));
+          try {
+            const raw = JSON.stringify(body);
+            if (!pending || pending.kind !== kind || pending.raw !== raw)
+              pending = { kind, raw, key: operationKey() };
+            render(
+              await api("/" + kind, {
+                method: "POST",
+                headers: { "Idempotency-Key": pending.key },
+                body: pending.raw,
+              }),
+            );
+            pending = null;
+            message("");
+            $("newPassword").value = "";
+            $("joinPassword").value = "";
+            $("successMessage").textContent = {
+              create: "房间已创建，设备加入进度见下方。",
+              join: "加入请求已保存，设备加入进度见下方。",
+              leave: "已退出房间，可重新创建或加入其他房间。",
+            }[kind];
+            $("successMessage").hidden = false;
+            if (kind !== "leave") $("currentTitle").focus();
+            else $("createSubmit").focus();
+          } catch (e) {
+            if (e.code) pending = null;
+            message(errorText(e));
+          } finally {
+            busy = false;
+            controls.forEach((control, i) => (control.disabled = disabled[i]));
+            submit.textContent = label;
+          }
+        }
+        $("create").onsubmit = (e) => {
+          e.preventDefault();
+          change("create", {
+            password: $("newPassword").disabled ? "" : $("newPassword").value,
+          });
+        };
+        $("join").onsubmit = (e) => {
+          e.preventDefault();
+          change("join", {
+            room_code: $("roomCode").value,
+            password: $("joinPassword").value,
+          });
+        };
+        $("leave").onclick = () => {
+          if (busy || !snapshot || snapshot.desired_state !== "joined") return;
+          leaveTarget = {room_id: snapshot.room_id, assignment_version: snapshot.assignment_version};
+          $("leaveDescription").textContent = "设备“" + deviceName + "”将退出房间 " + snapshot.room_code + "。退出后可再次通过房间号加入。";
+          $("leaveDialog").showModal();
+        };
+        $("cancelLeave").onclick = () => $("leaveDialog").close();
+        $("confirmLeave").onclick = () => {
+          $("leaveDialog").close();
+          if (leaveTarget) change("leave", leaveTarget);
+          leaveTarget = null;
+        };
+        if (!token) {
+          location.href = "/login";
+        } else if (!device) {
+          $("loading").hidden = true;
+          $("deviceName").textContent = "未选择设备";
+          message("请返回我的设备，选择一台设备后打开多人对讲");
+        } else {
+          loadDevice();
+          addEventListener("pagehide", () => {
+            stopped = true;
+          });
+          addEventListener("pageshow", (event) => {
+            if (!event.persisted) return;
+            stopped = false;
+            });
+        }
+      </script>
+</body>
+</html>
