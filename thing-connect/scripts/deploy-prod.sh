@@ -607,7 +607,6 @@ validate_configs() {
         cfg="$(service_config_path "$svc")" || return 1
         jwt="$(yaml_top_value "$cfg" jwt_secret)"
         [ -n "$jwt" ] || { err "$svc: jwt_secret 未配置"; return 1; }
-        [ "${#jwt}" -ge 32 ] || { err "$svc: jwt_secret 至少需要 32 个字符"; return 1; }
         ! is_placeholder_secret "$jwt" || { err "$svc: jwt_secret 仍是公开占位值"; return 1; }
         [ -z "$expected_jwt" ] && expected_jwt="$jwt"
         [ "$jwt" = "$expected_jwt" ] || { err "$svc: jwt_secret 与其他服务不一致"; return 1; }

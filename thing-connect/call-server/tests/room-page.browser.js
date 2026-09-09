@@ -12,10 +12,10 @@ async (page) => {
   let mode = 'ok';
   const requests = [];
   await page.route('**/v1/user/device/list', r => r.fulfill({json: {code: 200, data: [device]}}));
-  await page.route('**/v1/call/room/web/device/**', async route => {
+  await page.route('**/v1/call/group/web/device/**', async route => {
     const request = route.request();
     if (request.method() === 'POST') {
-      requests.push({url: request.url(), key: request.headers()['idempotency-key'], body: request.postDataJSON()});
+      requests.push({url: request.url(), body: request.postDataJSON()});
       if (mode === 'network') return route.abort('failed');
       if (mode === 'password') return route.fulfill({json: {code: 40320, msg: '房间密码错误，请重新输入'}});
       await page.waitForTimeout(180);
@@ -26,7 +26,7 @@ async (page) => {
     return route.fulfill({json: {code: 200, data: state}});
   });
   const check = (value, message) => {if (!value) throw Error(message);};
-  const open = () => page.goto(base + '/v1/call/room/page?device_id=' + device.device_id);
+  const open = () => page.goto(base + '/v1/call/group/page?device_id=' + device.device_id);
   mode = 'load';
   await open();
   await page.locator('#retry').waitFor({state: 'visible'});
@@ -52,7 +52,7 @@ async (page) => {
   await page.locator('#createSubmit').click();
   check(await page.locator('#createSubmit').isDisabled(), 'submit not disabled');
   await page.locator('#current').waitFor({state: 'visible'});
-  check(requests[0].key === requests[1].key, 'retry changed idempotency key');
+  check(requests[0].url === requests[1].url, 'retry changed operation endpoint');
   check(await page.locator('#successMessage').isVisible(), 'creation success invisible');
   check(await page.locator('#code').textContent() === '001234', 'room code loses zero');
   check((await page.locator('#stateHelp').textContent()).includes('请开机联网'), 'offline explanation missing');

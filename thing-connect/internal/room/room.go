@@ -23,7 +23,7 @@ var (
 	ErrLimited     = errors.New("操作过于频繁，请稍后重试")
 	ErrFull        = errors.New("房间已满，请稍后重试")
 	ErrStale       = errors.New("房间状态已变化，请重新同步")
-	ErrConflict    = errors.New("请求标识已用于其他操作，请重新提交")
+	ErrAssigned    = errors.New("设备已在其他多人对讲房间，请先退出")
 	ErrUnavailable = errors.New("对讲连接服务暂不可用，请稍后重试")
 	ErrCodeTaken   = errors.New("room code occupied")
 )
@@ -81,7 +81,6 @@ type Lease struct {
 type Operation struct {
 	DeviceID string `json:"-"`
 	UserID   int64  `json:"-"`
-	Key      string `json:"-"`
 	Kind     string `json:"-"`
 	IP       string `json:"-"`
 	Code     string `json:"room_code"`
@@ -123,8 +122,6 @@ type Tx interface {
 	SaveLease(Lease) error
 	PasswordFailures(string) (int, time.Time, error)
 	SetPasswordFailures(string, int, time.Time) error
-	Replay(string) (string, Assignment, bool, error)
-	SaveReplay(string, string, Assignment) error
 	Notify(Event) error
 	CloseAssignments(string) error
 }
@@ -195,14 +192,6 @@ func (s *Service) verifier(id, password string) []byte {
 	h.Write([]byte(id + "\x00" + password))
 	return h.Sum(nil)
 }
-func replayKey(o Operation) string {
-	return fmt.Sprintf("%d:%s:%s:%s", o.UserID, o.DeviceID, o.Kind, o.Key)
-}
-func (s *Service) fingerprint(o Operation) string {
-	h := hmac.New(sha256.New, s.pepper)
-	_, _ = fmt.Fprintf(h, "%s\x00%s\x00%s\x00%d", o.Code, o.Password, o.RoomID, o.Version) // hash.Hash writes never fail.
-	return hex.EncodeToString(h.Sum(nil))
-}
 func authorize(tx Tx, device string, user int64) (int64, error) {
 	owner, err := tx.Owner(device)
 	if err != nil {
@@ -215,7 +204,7 @@ func authorize(tx Tx, device string, user int64) (int64, error) {
 }
 
 func (s *Service) Change(ctx context.Context, o Operation) (Assignment, error) {
-	if o.DeviceID == "" || len(o.Key) < 8 || len(o.Key) > 64 || (o.Password != "" && !Digits(o.Password, 4)) || (o.Kind == "join" && !Digits(o.Code, 6)) || (o.Kind != "create" && o.Kind != "join" && o.Kind != "leave") {
+	if o.DeviceID == "" || (o.Password != "" && !Digits(o.Password, 4)) || (o.Kind == "join" && !Digits(o.Code, 6)) || (o.Kind != "create" && o.Kind != "join" && o.Kind != "leave") {
 		return Assignment{}, ErrInvalid
 	}
 	allowed, err := s.signals.Allow(ctx, o)
@@ -237,19 +226,35 @@ func (s *Service) Change(ctx context.Context, o Operation) (Assignment, error) {
 			if e != nil {
 				return e
 			}
-			fingerprint, prior, found, e := tx.Replay(replayKey(o))
-			if e != nil {
-				return e
-			}
-			if found {
-				if fingerprint != s.fingerprint(o) {
-					return ErrConflict
-				}
-				result = prior
-				return nil
-			}
 			now := s.now()
 			p := s.policy.Load()
+			if a.Desired == "joined" && a.RoomID != "" {
+				current, e := tx.Room(a.RoomID, false)
+				if e != nil {
+					return e
+				}
+				if e = s.refresh(tx, &current, now); e != nil {
+					return e
+				}
+				if current.Status == "closed" {
+					a, e = tx.Assignment(o.DeviceID)
+					if e != nil {
+						return e
+					}
+				} else if o.Kind == "join" && current.Code == o.Code {
+					a.RoomCode = current.Code
+					a.PasswordSet = len(current.Verifier) > 0
+					result = a
+					return nil
+				} else if o.Kind == "create" || o.Kind == "join" {
+					result = a
+					return ErrAssigned
+				}
+			}
+			if o.Kind == "leave" && a.Desired != "joined" {
+				result = a
+				return nil
+			}
 			var target Room
 			switch o.Kind {
 			case "create":
@@ -367,7 +372,7 @@ func (s *Service) Change(ctx context.Context, o Operation) (Assignment, error) {
 				return e
 			}
 			result = a
-			return tx.SaveReplay(replayKey(o), s.fingerprint(o), a)
+			return nil
 		})
 		if errors.Is(err, ErrCodeTaken) {
 			continue

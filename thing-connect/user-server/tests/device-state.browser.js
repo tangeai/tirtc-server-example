@@ -16,7 +16,7 @@ async (page) => {
   ]}}));
   await page.route('**/v1/ai/device/**/role', r => r.fulfill({json:{code:200,data:{role_id:'',default_role_id:'default-1'}}}));
   await page.route('**/v1/ai/roles/default', r => {defaults++;return r.fulfill({json:{code:200,data:{name:'默认助手'}}});});
-  await page.route('**/v1/call/room/web/device/**', r => failure ? r.abort('failed') : r.fulfill({json:{code:200,data:{desired_state:'left',online}}}));
+  await page.route('**/v1/call/group/web/device/**', r => failure ? r.abort('failed') : r.fulfill({json:{code:200,data:{desired_state:'left',online}}}));
   await page.goto('http://dev-demo-open.tangeai.cn:8080/devices');
   await page.waitForFunction(() => [...document.querySelectorAll('[data-role]')].length === 2 && [...document.querySelectorAll('[data-role]')].every(e=>e.textContent==='默认助手（默认）'));
   if (defaults !== 1) throw Error('default role request not shared');

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>探鸽 · 小钛 — 绑定设备</title>
+  <title>探鸽 · 小钛 — 添加设备</title>
   <link rel="stylesheet" href="/static/css/tailwind.css">
   <script src="/static/user-shell.js?v=a3b29baae127"></script>
 </head>
@@ -17,7 +17,7 @@
         <path d="M19 12H5M12 19l-7-7 7-7"/>
       </svg>
     </a>
-    <span class="text-[15px] font-semibold text-gray-900">绑定新设备</span>
+    <span class="text-[15px] font-semibold text-gray-900">添加设备</span>
   </div>
 </header>
 
@@ -39,35 +39,38 @@
   <!-- ── 验证码方式 ── -->
   <div id="panel-code">
     <!-- 步骤说明 -->
-    <div class="bg-emerald-50 border border-emerald-200/60 rounded-xl p-5 mb-5">
-      <p class="flex items-center gap-1.5 text-[13px] font-semibold text-emerald-600 mb-2.5">
-        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-          <circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>
-        </svg>
+    <div class="bg-white border border-gray-200 rounded-2xl p-7 shadow-sm mb-5 max-sm:p-5">
+      <p class="text-base font-semibold text-gray-900 mb-5">
         操作步骤
       </p>
-      <ol class="flex flex-col gap-1.5">
-        <li class="flex items-start gap-2.5 text-[13px] text-gray-600 leading-relaxed">
-          <span class="w-[18px] h-[18px] rounded-full bg-emerald-100 border border-emerald-300 text-emerald-600 text-[10px] font-bold flex items-center justify-center flex-shrink-0 mt-[1px]">1</span>
-          给设备上电并接入 Wi-Fi
+      <ol class="flex flex-col gap-5">
+        <li class="flex items-start gap-3.5">
+          <span class="w-7 h-7 rounded-full bg-emerald-500 text-white text-sm font-bold flex items-center justify-center flex-shrink-0">1</span>
+          <div>
+            <p class="text-[15px] font-semibold text-gray-900 leading-7">开机并联网</p>
+            <p class="mt-1 text-[13px] text-gray-500 leading-6">Wi-Fi 设备请先配网。<br>4G 设备请确认 SIM 卡可用，等待联网。</p>
+          </div>
         </li>
-        <li class="flex items-start gap-2.5 text-[13px] text-gray-600 leading-relaxed">
-          <span class="w-[18px] h-[18px] rounded-full bg-emerald-100 border border-emerald-300 text-emerald-600 text-[10px] font-bold flex items-center justify-center flex-shrink-0 mt-[1px]">2</span>
-          等待设备语音播报 6 位数字验证码
+        <li class="flex items-start gap-3.5">
+          <span class="w-7 h-7 rounded-full bg-emerald-500 text-white text-sm font-bold flex items-center justify-center flex-shrink-0">2</span>
+          <div>
+            <p class="text-[15px] font-semibold text-gray-900 leading-7">获取 6 位验证码</p>
+            <p class="mt-1 text-[13px] text-gray-500 leading-6">留意设备的语音播报或屏幕提示。</p>
+          </div>
         </li>
-        <li class="flex items-start gap-2.5 text-[13px] text-gray-600 leading-relaxed">
-          <span class="w-[18px] h-[18px] rounded-full bg-emerald-100 border border-emerald-300 text-emerald-600 text-[10px] font-bold flex items-center justify-center flex-shrink-0 mt-[1px]">3</span>
-          在下方输入您听到的验证码
+        <li class="flex items-start gap-3.5">
+          <span class="w-7 h-7 rounded-full bg-emerald-500 text-white text-sm font-bold flex items-center justify-center flex-shrink-0">3</span>
+          <div>
+            <p class="text-[15px] font-semibold text-gray-900 leading-7">完成绑定</p>
+            <p class="mt-1 text-[13px] text-gray-500 leading-6">在下方输入验证码，点击“绑定设备”。</p>
+          </div>
         </li>
       </ol>
-      <p class="mt-2.5 text-[11px] text-gray-400 font-mono">验证码有效期 190 秒，超时请重新触发设备</p>
+      <p class="mt-5 text-xs text-gray-400">验证码已过期时，请按设备提示重新获取。</p>
     </div>
 
     <!-- 输入表单 -->
     <div class="bg-white border border-gray-200 rounded-2xl p-7 shadow-sm" id="form-card-code">
-      <h2 class="text-base font-semibold text-gray-900 mb-1.5">输入验证码</h2>
-      <p class="text-[13px] text-gray-500 mb-6 leading-relaxed">请确认当前仅有一台设备处于激活播报状态</p>
-
       <div class="mb-5">
         <label class="block text-xs font-medium text-gray-500 mb-2">6 位数字验证码</label>
         <input
@@ -83,7 +86,7 @@
 
       <button id="btn-bind-code" onclick="doBindByCode()" disabled
         class="w-full bg-emerald-500 text-white font-bold py-3 rounded-xl hover:opacity-90 active:scale-[0.99] disabled:opacity-35 disabled:cursor-not-allowed transition-all">
-        确认绑定
+        绑定设备
       </button>
       <p class="mt-3 text-xs text-red-400 text-center min-h-[16px]" id="err-msg-code"></p>
     </div>
@@ -221,7 +224,7 @@
       showErr('code', '网络错误，请检查连接后重试');
     } finally {
       btn.disabled = $('code-input').value.trim().length !== 6;
-      btn.textContent = '确认绑定';
+      btn.textContent = '绑定设备';
     }
   }
 
@@ -229,7 +232,7 @@
     $('result-card').classList.add('hidden');
     $('panel-code').classList.remove('hidden');
     const input = $('code-input');
-    $('btn-bind-code').textContent = '确认绑定';
+    $('btn-bind-code').textContent = '绑定设备';
     input.value = '';
     checkCodeReady();
     input.focus();

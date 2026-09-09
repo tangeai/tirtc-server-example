@@ -394,7 +394,7 @@ CREATE TABLE IF NOT EXISTS call_room_codes (
 CREATE TABLE IF NOT EXISTS call_assignments (
  device_id VARCHAR(64) NOT NULL COMMENT '目标设备',
  owner_user_id BIGINT NOT NULL DEFAULT 0 COMMENT '关系所属账号',
- room_id VARCHAR(64) NOT NULL DEFAULT '' COMMENT '期望房间',
+ room_id VARCHAR(64) NOT NULL DEFAULT '' COMMENT '唯一期望房间，切换前必须退出',
  desired_state VARCHAR(16) NOT NULL DEFAULT 'left' COMMENT 'joined left',
  assignment_version BIGINT NOT NULL DEFAULT 0 COMMENT '关系单调版本',
  state VARCHAR(24) NOT NULL DEFAULT 'left' COMMENT '设备执行状态',
@@ -405,7 +405,7 @@ CREATE TABLE IF NOT EXISTS call_assignments (
  updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6) COMMENT '更新时间',
  PRIMARY KEY (device_id),
  KEY idx_intercom_assignment_room (room_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin COMMENT='设备多人对讲期望状态';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin COMMENT='设备唯一多人对讲房间关系';
 
 CREATE TABLE IF NOT EXISTS call_leases (
  device_id VARCHAR(64) NOT NULL COMMENT '同一设备唯一租约',
@@ -419,15 +419,6 @@ CREATE TABLE IF NOT EXISTS call_leases (
  PRIMARY KEY (device_id),
  KEY idx_intercom_lease_room (room_id, expires_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin COMMENT='多人对讲在线租约及容量预占';
-
-CREATE TABLE IF NOT EXISTS call_requests (
- request_key VARCHAR(200) NOT NULL COMMENT '账号设备操作及客户端幂等键',
- fingerprint CHAR(64) NOT NULL COMMENT '带密钥的请求摘要',
- response JSON NOT NULL COMMENT '首次提交的无凭证状态响应',
- created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '创建时间',
- updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6) COMMENT '更新时间',
- PRIMARY KEY (request_key)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin COMMENT='多人对讲控制操作幂等记录';
 
 CREATE TABLE IF NOT EXISTS call_outbox (
  event_id CHAR(32) NOT NULL COMMENT '稳定通知去重标识',
@@ -448,3 +439,6 @@ CREATE TABLE IF NOT EXISTS device_profile (
     updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6) COMMENT '更新时间',
     PRIMARY KEY (device_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='设备上报的媒体能力';
+
+INSERT IGNORE INTO schema_migrations (component, version) VALUES
+    ('core', 2);

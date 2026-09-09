@@ -21,8 +21,8 @@ type Intercom interface {
 }
 
 func RegisterIntercom(r *gin.Engine, secret string, service Intercom) {
-	r.GET("/v1/call/room/page", func(c *gin.Context) { c.Data(200, "text/html; charset=utf-8", []byte(roomPage)) })
-	web := r.Group("/v1/call/room/web", UserJWTAuth(secret))
+	r.GET("/v1/call/group/page", func(c *gin.Context) { c.Data(200, "text/html; charset=utf-8", []byte(roomPage)) })
+	web := r.Group("/v1/call/group/web", UserJWTAuth(secret))
 	web.GET("/device/:device_id", func(c *gin.Context) {
 		a, e := service.Current(c.Request.Context(), c.Param("device_id"), currentUserID(c))
 		intercomResponse(c, a, e)
@@ -37,13 +37,12 @@ func RegisterIntercom(r *gin.Engine, secret string, service Intercom) {
 			o.DeviceID = c.Param("device_id")
 			o.UserID = currentUserID(c)
 			o.Kind = operation
-			o.Key = c.GetHeader("Idempotency-Key")
 			o.IP = c.ClientIP()
 			a, e := service.Change(c.Request.Context(), o)
 			intercomResponse(c, a, e)
 		})
 	}
-	device := r.Group("/v1/call/room/device", JWTAuth(secret))
+	device := r.Group("/v1/call/group/device", JWTAuth(secret))
 	device.GET("/assignment", func(c *gin.Context) {
 		a, e := service.Current(c.Request.Context(), currentDeviceID(c), 0)
 		intercomResponse(c, a, e)
@@ -73,7 +72,6 @@ func RegisterIntercom(r *gin.Engine, secret string, service Intercom) {
 			}
 			o.DeviceID = currentDeviceID(c)
 			o.Kind = operation
-			o.Key = c.GetHeader("Idempotency-Key")
 			o.IP = c.ClientIP()
 			a, e := service.Change(c.Request.Context(), o)
 			intercomResponse(c, a, e)
@@ -99,7 +97,7 @@ func intercomResponse(c *gin.Context, data any, err error) {
 	for _, entry := range []struct {
 		err  error
 		code int
-	}{{intercom.ErrInvalid, 40000}, {intercom.ErrForbidden, 40300}, {intercom.ErrNotFound, 40400}, {intercom.ErrPassword, 40320}, {intercom.ErrLocked, 42920}, {intercom.ErrLimited, 42900}, {intercom.ErrFull, 40920}, {intercom.ErrStale, 40921}, {intercom.ErrConflict, 40922}, {intercom.ErrUnavailable, 50200}} {
+	}{{intercom.ErrInvalid, 40000}, {intercom.ErrForbidden, 40300}, {intercom.ErrNotFound, 40400}, {intercom.ErrPassword, 40320}, {intercom.ErrLocked, 42920}, {intercom.ErrLimited, 42900}, {intercom.ErrFull, 40920}, {intercom.ErrStale, 40921}, {intercom.ErrAssigned, 40923}, {intercom.ErrUnavailable, 50200}} {
 		if errors.Is(err, entry.err) {
 			code = entry.code
 			message = entry.err.Error()

@@ -97,19 +97,15 @@ static size_t write_response(void *ptr, size_t size, size_t n, void *user) {
     b->buf[b->len] = 0;
     return bytes;
 }
-static cJSON *request(RoomState *r, const char *path, cJSON *body, const char *key) {
+static cJSON *request(RoomState *r, const char *path, cJSON *body) {
     CURL *curl = curl_easy_init();
     if (!curl)
         return NULL;
-    char url[768], auth[2200], idempotency[100], buffer[16384];
-    snprintf(url, sizeof(url), "%s/v1/call/room/device/%s", r->server, path);
+    char url[768], auth[2200], buffer[16384];
+    snprintf(url, sizeof(url), "%s/v1/call/group/device/%s", r->server, path);
     snprintf(auth, sizeof(auth), "Authorization: Bearer %s", r->bearer);
     struct curl_slist *headers = curl_slist_append(NULL, auth);
     headers = curl_slist_append(headers, "Content-Type: application/json");
-    if (key) {
-        snprintf(idempotency, sizeof(idempotency), "Idempotency-Key: %s", key);
-        headers = curl_slist_append(headers, idempotency);
-    }
     StrBuf response;
     sb_init(&response, buffer, sizeof(buffer));
     char *raw = body ? cJSON_PrintUnformatted(body) : NULL;
@@ -187,7 +183,7 @@ static cJSON *presence_locked(RoomState *r, const char *state) {
     return body;
 }
 static void report(RoomState *r, cJSON *body) {
-    cJSON *data = request(r, "presence", body, NULL);
+    cJSON *data = request(r, "presence", body);
     cJSON_Delete(data);
     cJSON_Delete(body);
 }
@@ -435,12 +431,7 @@ static int process_event(RoomState *r, RoomEvent *event) {
             cJSON_Delete(body);
             return 0;
         }
-        char key[33];
-        if (random_id(key) != 0) {
-            cJSON_Delete(body);
-            return 0;
-        }
-        cJSON *data = request(r, kind, body, key);
+        cJSON *data = request(r, kind, body);
         cJSON_Delete(body);
         cJSON_Delete(data);
         room_sync(r);
@@ -502,7 +493,7 @@ static int connect_action(void *ctx) {
                             (void *)(uintptr_t)gen);
 }
 static int reconcile(RoomState *r) {
-    cJSON *a = request(r, "assignment", NULL, NULL);
+    cJSON *a = request(r, "assignment", NULL);
     if (!a)
         return -1;
     const char *id = string_field(a, "room_id"), *code = string_field(a, "room_code");
@@ -545,7 +536,7 @@ static int reconcile(RoomState *r) {
         report(r, p);
         return 0;
     }
-    cJSON *token = request(r, "connect-token", p, NULL);
+    cJSON *token = request(r, "connect-token", p);
     cJSON_Delete(p);
     if (!token)
         return -1;
@@ -680,7 +671,7 @@ static void *control_worker(void *ctx) {
         if (expired)
             rc = -1;
         if (p) {
-            cJSON *data = request(r, "presence", p, NULL);
+            cJSON *data = request(r, "presence", p);
             cJSON_Delete(p);
             if (!data)
                 rc = -1;

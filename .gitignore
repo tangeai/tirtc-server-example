@@ -1,4 +1,5 @@
 # Local agent and workspace state
+/.agents/
 /.claude/
 /.codex_tmp/
 /.playwright-cli/

@@ -47,7 +47,7 @@ sudo /opt/thing-connect/deploy-local.sh status
 
 - 用户 H5：`http://127.0.0.1:18080/`
 - Admin：`http://127.0.0.1:18080/admin/`
-- 多人对讲 `/v1/call/room/*` 转发到 call-server（9005）。
+- 多人对讲 `/v1/call/group/*` 转发到 call-server（9005）。
 - 设备资料 `/v1/device/profile` 转发到 device-server（9001）。
 
 独立 Nginx 仅监听本机，配置、PID 和日志位于 `/opt/thing-connect/nginx-local/`，
@@ -55,9 +55,9 @@ sudo /opt/thing-connect/deploy-local.sh status
 首次安装接口不通过该入口代理，安装时直接访问 9000。
 设备模拟器可按各自 README 指定服务地址；独立入口不提供 `/services` 发现文件。
 
-安装完成后的数据库应有 `device_profile` 和六张房间业务表：
-`call_rooms`、`call_room_codes`、`call_assignments`、`call_leases`、`call_requests`、
-`call_outbox`。`prepare` 只构建代码，不安装数据库，不会创建这些表。
+安装完成后的数据库应有 `device_profile` 和五张房间业务表：
+`call_rooms`、`call_room_codes`、`call_assignments`、`call_leases`、`call_outbox`。
+`prepare` 只构建代码，不安装数据库，不会创建这些表。
 
 ## 构建与后续更新
 
@@ -70,23 +70,22 @@ sudo bash thing-connect/scripts/deploy-local.sh prepare
 源码快照、构建日志和 SHA-256 摘要保存在 `/opt/thing-connect.sources/`。该目录包含源码，
 仅部署用户可读。源码中的忽略文件不会进入快照；符号链接会被拒绝。快照不自动删除。
 
-保留已安装实例的数据更新时，使用 Admin 专用迁移账号配置，并遵守现有迁移备份门槛：
+保留已安装实例的数据更新时，默认复用当前已激活的
+`/opt/thing-connect/config-current/admin-server/config.yaml` 执行迁移。开发联调环境可以让运行账号同时拥有
+DDL 权限；如需使用独立迁移账号，再通过 `MIGRATION_CONFIG` 指定配置。本地更新不要求生产环境的
+数据库恢复演练确认：
 
 ```bash
 sudo /opt/thing-connect/deploy-local.sh gateway-stop
 sudo /opt/thing-connect/deploy-local.sh stop
 sudo env \
   SOURCE_ROOT=/home/workspace/tirtc-server-example \
-  MIGRATION_CONFIG=/opt/thing-connect/admin-server/migration-config.yaml \
-  DATABASE_BACKUP_FILE=/absolute/path/verified-backup.sql \
-  DATABASE_BACKUP_RESTORE_VERIFIED=1 \
   bash thing-connect/scripts/deploy-local.sh update
 sudo /opt/thing-connect/deploy-local.sh gateway
 ```
 
-备份必须真实完成恢复演练，不能仅设置确认变量。有待执行的迁移时，脚本复用
-`deploy-prod.sh` 的备份与失败处理；迁移失败后不自动启动旧版本。备份和恢复步骤见
-[部署指南](deployment.md)。
+本地脚本仍复用 `deploy-prod.sh` 的迁移失败处理；数据库结构发生变化后迁移失败时，不自动启动旧版本。
+需要保留重要联调数据时，应在更新前自行备份。生产环境的备份和恢复步骤见[部署指南](deployment.md)。
 
 如果预检提示数据库版本比二进制新，可能是另一个迁移历史的旧开发库。
 此时不替换服务文件，不改台账，也不补写 SQL 绕过检查。需要保留数据时先完成兼容升级；

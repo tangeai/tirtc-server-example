@@ -114,7 +114,6 @@
         let snapshot = null,
           busy = false,
           stopped = false,
-          pending = null,
           sequence = 0,
           deviceReady = false,
           deviceName = "",
@@ -179,7 +178,7 @@
         );
         async function api(path, options = {}) {
           const response = await fetch(
-            "/v1/call/room/web/device/" + encodeURIComponent(device) + path,
+            "/v1/call/group/web/device/" + encodeURIComponent(device) + path,
             {
               ...options,
               headers: {
@@ -256,13 +255,6 @@
             refreshing = false;
           }
         }
-        function operationKey() {
-          if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
-          // getRandomValues also works on HTTP development origins.
-          return Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
-            byte.toString(16).padStart(2, "0"),
-          ).join("");
-        }
         async function change(kind, body) {
           if (busy || !deviceReady) return;
           busy = true;
@@ -278,18 +270,13 @@
             .querySelectorAll("button, input")
             .forEach((b) => (b.disabled = true));
           try {
-            const raw = JSON.stringify(body);
-            if (!pending || pending.kind !== kind || pending.raw !== raw)
-              pending = { kind, raw, key: operationKey() };
             render(
               await api("/" + kind, {
                 method: "POST",
-                headers: { "Idempotency-Key": pending.key },
-                body: pending.raw,
+                body: JSON.stringify(body),
               }),
               false,
             );
-            pending = null;
             // A successful command acknowledges the assignment, not live presence.
             // Query once after the explicit operation; never poll the page.
             try {
@@ -311,7 +298,6 @@
             if (kind !== "leave") $("currentTitle").focus();
             else $("createSubmit").focus();
           } catch (e) {
-            if (e.code) pending = null;
             message(errorText(e));
           } finally {
             busy = false;

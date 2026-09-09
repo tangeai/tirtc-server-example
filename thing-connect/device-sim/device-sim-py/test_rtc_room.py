@@ -104,7 +104,7 @@ class RoomSessionTests(unittest.TestCase):
             for path in ('assignment', 'create', 'join', 'leave', 'connect-token', 'presence'):
                 self.room._api('GET' if path == 'assignment' else 'POST', path)
                 self.assertEqual(request.call_args.args[1],
-                                 'https://call.example.test/v1/call/room/device/' + path)
+                                 'https://call.example.test/v1/call/group/device/' + path)
 
     def test_join_and_members_are_announced_without_private_payloads(self):
         import io

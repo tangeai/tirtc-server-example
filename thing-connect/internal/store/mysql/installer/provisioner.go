@@ -31,7 +31,7 @@ var managedTableNames = []string{
 	"schema_migrations", "users", "device_pool", "device_bind", "device_bind_log",
 	"voip_device_profile", "voip_device_auth", "voip_user_profile", "ai_user_role",
 	"ai_device_role", "ai_user_resource", "call_contact", "cleanup_outbox",
-	"call_rooms", "call_room_codes", "call_assignments", "call_leases", "call_requests", "call_outbox",
+	"call_rooms", "call_room_codes", "call_assignments", "call_leases", "call_outbox",
 	"admin_users", "admin_roles", "admin_user_roles", "admin_role_permissions",
 	"admin_menus", "admin_role_menus", "admin_sessions", "admin_mfa_factors",
 	"admin_mfa_recovery_codes", "admin_login_log", "admin_dict_types", "admin_dict_items",
@@ -736,11 +736,8 @@ func validateLegacyFingerprint(tables map[string]bool, versions map[string]int, 
 			"call_contact", "cleanup_outbox",
 		)
 	}
-	if versions["core"] >= 4 {
-		required = append(required, "device_profile")
-	}
 	if versions["core"] >= 2 {
-		required = append(required, "call_rooms", "call_room_codes", "call_assignments", "call_leases", "call_requests", "call_outbox")
+		required = append(required, "device_profile", "call_rooms", "call_room_codes", "call_assignments", "call_leases", "call_outbox")
 	}
 	if versions["admin"] > 0 {
 		required = append(required,
@@ -763,7 +760,7 @@ func validateLegacyFingerprint(tables map[string]bool, versions map[string]int, 
 		"schema_migrations": true, "users": true, "device_pool": true, "device_bind": true,
 		"device_profile": true, "device_bind_log": true, "call_contact": true, "voip_device_profile": true,
 		"call_rooms": true, "call_room_codes": true, "call_assignments": true,
-		"call_leases": true, "call_requests": true, "call_outbox": true,
+		"call_leases": true, "call_outbox": true,
 		"voip_device_auth": true, "voip_user_profile": true, "ai_user_role": true,
 		"ai_device_role": true, "ai_user_resource": true, "cleanup_outbox": true,
 		"admin_users": true, "admin_roles": true, "admin_user_roles": true,

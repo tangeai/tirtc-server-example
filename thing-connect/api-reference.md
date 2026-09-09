@@ -15,6 +15,10 @@
 | 创建对讲房间、加入和续租 | [多人对讲](#多人对讲call-server) | [多人对讲接入](device-room.md) |
 | 判断请求是否成功 | [响应约定](#约定)、[错误码汇总](#错误码汇总) | [错误响应规范](error-response-policy.md) |
 
+“调用方”标明接口的接入用途：设备包括开发板和模拟器，Web 包括 H5 页面，小程序指微信小程序原生页面。共用接口列出多个调用方；小程序内嵌 Web 页面使用对应的 Web 接口。调用方标记不代替鉴权，仍须使用各接口指定的凭证。
+
+接口列表中的 JWT 均通过 `Authorization: Bearer <token>` 传入；HMAC 使用签名请求头，内部密钥使用 `X-Internal-Key`。具体字段见[鉴权方式](#鉴权方式)及各接口详情。无需登录的接口仍可能要求邮箱验证码或人机验证。
+
 Admin 接口见 [Admin API](admin/admin-server/API.md)。标记为内部服务的接口仅供服务间调用，不应暴露到公网。
 
 <a id="service-discovery"></a>
@@ -23,15 +27,17 @@ Admin 接口见 [Admin API](admin/admin-server/API.md)。标记为内部服务�
 
 **接口列表**
 
-| 接口名称 | 方法 | 路径 |
-|---|---|---|
-| [获取服务地址](#get-services) | GET | `/services` |
+| 接口名称 | 调用方 | 方法 | 路径 | 鉴权要求与方式 |
+|---|---|---|---|---|
+| [获取服务地址](#get-services) | 设备、Web、小程序 | GET | `/services` | 无需登录鉴权 |
 
 <a id="get-services"></a>
 
 ### 获取服务地址
 
 **接口**：`GET /services`
+
+**调用方**：设备、Web、小程序。
 
 **请求参数**：无。
 
@@ -55,6 +61,22 @@ Admin 接口见 [Admin API](admin/admin-server/API.md)。标记为内部服务�
 
 ---
 
+### 一对一通话与多人对讲
+
+两类房间均由 `call-server` 管理，但接口、用途和生命周期不同，`room_id` 不能混用。
+
+| 区别 | 一对一通话房间 | 多人对讲房间 |
+|---|---|---|
+| 用途 | 设备发起呼叫，对方接听后通话 | 多台设备加入同一房间进行对讲 |
+| 创建方式 | [发起设备呼叫](#post-v1callrequest)，服务端为本次呼叫创建房间 | Web 或设备调用多人对讲 `create` 接口 |
+| 设备查询 | `GET /v1/call/room` | `GET /v1/call/group/device/assignment` |
+| Web 查询 | 本文不提供一对一通话房间的 Web 查询接口 | `GET /v1/call/group/web/device/:device_id` |
+| 房间 ID | `d_roomid_` 开头，仅用于本次通话 | `group_room_` 开头；已有 `xiaotai_room_` ID 仍有效 |
+| 加入方式 | 来电设备调用 `/v1/call/device/info` 接听 | 使用六位 `room_code` 加入，再领取连接凭证 |
+| 结束或退出 | `/v1/call/cancel`、`reject`、`hangup`，按通话阶段调用 | 多人对讲 `leave` 接口；设备断线不等于退出房间关系 |
+
+`room_code` 是多人对讲的六位房间号，不是 `room_id`。客户端应保存服务端返回的完整 `room_id`，按业务流程选择接口，不自行生成、截取或替换前缀。微信 VoIP 的 `wx_room_id` 属于微信呼叫流程，也不能与这两类 ID 混用。
+
 ## 约定
 
 ### 响应格式
@@ -63,14 +85,14 @@ Admin 接口见 [Admin API](admin/admin-server/API.md)。标记为内部服务�
 |---|---|---|
 | `code` | integer | 业务结果码，成功值按服务区分，见下表 |
 | `msg` | string | 结果说明；成功为 `ok`，错误为可展示的提示，不能用于程序分支 |
-| `data` | object / array / null | 接口业务数据，字段结构见各接口；普通接口无业务数据时省略，多人对讲 `presence` 成功时为 `null` |
+| `data` | object / array / null | 接口业务数据，字段结构见各接口；普通操作接口无业务数据时省略；多人对讲 `presence` 成功和部分云端资源空结果会返回 `null`，具体见接口说明 |
 
 
 | 服务 | 成功 `code` | 成功 `msg` | 错误 HTTP 状态 | 说明 |
 |------|:--:|:--:|:--:|------|
 | device-server | 200 | `"ok"` | 实际状态码 | 错误通过 HTTP 状态码 + body `code` 字段区分 |
 | user-server | 200 | `"ok"` | 实际状态码 | 同上 |
-| ai-server | 200 | `"ok"` | 实际状态码 | 同上；上游与内部原始错误会清洗后返回 |
+| ai-server | 200 | `"ok"` | 通常为实际状态码 | `/v1/ai/token` 的上游错误例外使用 HTTP 200，见该接口错误表 |
 | voip-server | 0 | `"ok"` | 200（鉴权 401 除外） | 错误通过 body `code` 字段区分 |
 | call-server | 200 | `"ok"` | 200（鉴权 401 除外） | 成功码为 200；业务错误仍返回 HTTP 200，以 body `code` 判断 |
 
@@ -131,18 +153,20 @@ voip-server、ai-server 和 call-server 使用相同的 `jwt_secret` 验证。�
 
 **接口列表**
 
-| 接口名称 | 方法 | 路径 |
-|---|---|---|
-| [获取设备绑定验证码](#post-v1devicereport) | POST | `/v1/device/report` |
-| [获取验证码语音](#get-v1devicetts) | GET | `/v1/device/tts` |
-| [获取设备登录凭证](#post-v1devicetoken) | POST | `/v1/device/token` |
-| [上报设备能力](#post-v1deviceprofile) | POST | `/v1/device/profile` |
+| 接口名称 | 调用方 | 方法 | 路径 | 鉴权要求与方式 |
+|---|---|---|---|---|
+| [获取设备绑定验证码](#post-v1devicereport) | 设备 | POST | `/v1/device/report` | 可选：设备 HMAC 签名 |
+| [获取验证码语音](#get-v1devicetts) | 设备 | GET | `/v1/device/tts` | 必需：临时设备 JWT（temp_token） |
+| [获取设备登录凭证](#post-v1devicetoken) | 设备 | POST | `/v1/device/token` | 必需：设备 HMAC 签名 |
+| [上报设备能力](#post-v1deviceprofile) | 设备 | POST | `/v1/device/profile` | 必需：正式设备 JWT（mqtt_token） |
 
 <a id="post-v1devicereport"></a>
 
 ### 获取设备绑定验证码
 
 **接口**：`POST /v1/device/report`
+
+**调用方**：设备。
 
 上报设备 MAC，获取 6 位验证码和临时 MQTT 连接凭证。
 
@@ -153,9 +177,9 @@ voip-server、ai-server 和 call-server 使用相同的 `jwt_secret` 验证。�
 | 字段 | 必填 | 说明 |
 |------|:--:|------|
 | Content-Type | ✅ | `application/json` |
-| X-Device-Id | 情况1 | 设备 ID（来自 `device_pool`） |
+| X-Device-Id | 情况1 | 设备 ID |
 | X-Timestamp | 情况1 | Unix 秒级时间戳，与服务器偏差 ≤300s |
-| X-Nonce | 情况1 | 16 位随机十六进制，300s 内不可重复 |
+| X-Nonce | 情况1 | 随机串，建议使用 16 位十六进制；300 秒内不可重复，服务端不限定为 16 位 |
 | X-Signature | 情况1 | `Base64(HMAC-SHA256(device_key, device_id + timestamp + nonce))` |
 
 > 四个签名 Header **要么全不带，要么全带**。部分带 = 签名失败（6008）。
@@ -164,7 +188,7 @@ voip-server、ai-server 和 call-server 使用相同的 `jwt_secret` 验证。�
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|:--:|------|
-| mac | string | ✅ | 设备 MAC 地址，格式 `AA:BB:CC:DD:EE:FF`，不可为空 |
+| mac | string | ✅ | 设备 MAC 地址，建议使用 `AA:BB:CC:DD:EE:FF` 格式；不能为空 |
 
 **请求示例**
 
@@ -195,9 +219,9 @@ voip-server、ai-server 和 call-server 使用相同的 `jwt_secret` 验证。�
 
 | 字段 | 说明 |
 |------|------|
-| code | 6 位验证码，H5 扫码绑定用 |
-| temp_token | JWT，临时 MQTT 连接 Password，TTL = `code_ttl` |
-| temp_client_id | 临时 MQTT ClientID / Username，格式 `tmp_{8位hex}` |
+| data.code | string，6 位验证码，供用户绑定设备；与顶层数字业务码 code 区分 |
+| data.temp_token | string，JWT，临时 MQTT 连接 Password，TTL = `code_ttl` |
+| data.temp_client_id | string，临时 MQTT ClientID / Username，格式 `tmp_{8位hex}` |
 
 **错误码**
 
@@ -243,6 +267,8 @@ voip-server、ai-server 和 call-server 使用相同的 `jwt_secret` 验证。�
 
 **接口**：`GET /v1/device/tts`
 
+**调用方**：设备。
+
 把 `/v1/device/report` 返回的 6 位设备验证码合成为 8kHz、单声道、16-bit little-endian PCM。该接口只接受与验证码同一次 Report 返回的 `temp_token`，不能使用正式 `mqtt_token` 或其他设备的临时 token。
 
 **鉴权**: ✅ `Authorization: Bearer <temp_token>`
@@ -280,6 +306,8 @@ Authorization: Bearer <temp_token>
 
 **接口**：`POST /v1/device/token`
 
+**调用方**：设备。
+
 已持有 device_id + device_key 的设备，用 HMAC 签名换取正式 MQTT 连接 token。
 
 **鉴权**: 无（HMAC 签名）
@@ -290,7 +318,7 @@ Authorization: Bearer <temp_token>
 |------|:--:|------|
 | X-Device-Id | ✅ | 设备 ID |
 | X-Timestamp | ✅ | Unix 秒级时间戳，与服务器偏差 ≤300s |
-| X-Nonce | ✅ | 16 位随机十六进制，300s 内不可重复 |
+| X-Nonce | ✅ | 随机串，建议使用 16 位十六进制；300 秒内不可重复，服务端不限定为 16 位 |
 | X-Signature | ✅ | `Base64(HMAC-SHA256(device_key, device_id + timestamp + nonce))` |
 | X-MAC | 否 | 设备 MAC。带上才启用 device_id↔MAC 一致性校验（不一致→`6013`）与「同账号同 MAC 不能绑多个 device_id」校验（冲突→`6015`）；省略则跳过这两项校验 |
 
@@ -358,6 +386,8 @@ int device_sign(const char *device_id, const char *device_key,
 ### 上报设备能力
 
 **接口**：`POST /v1/device/profile`
+
+**调用方**：设备。
 
 设备信息上报接口。请求体中的 `profiles` 提供媒体能力，供“我的设备 → 更多 → 设备信息”按场景展示。该接口不修改正在进行的通话或媒体协商参数。
 
@@ -436,29 +466,31 @@ int device_sign(const char *device_id, const char *device_key,
 
 **接口列表**
 
-| 接口名称 | 方法 | 路径 |
-|---|---|---|
-| [获取人机验证配置](#get-v1configcaptcha) | GET | `/v1/config/captcha` |
-| [发送注册验证码](#post-v1usersend-code) | POST | `/v1/user/send-code` |
-| [注册账号](#post-v1userregister) | POST | `/v1/user/register` |
-| [登录账号](#post-v1userlogin) | POST | `/v1/user/login` |
-| [发送密码重置验证码](#post-v1userpassword-resetsend-code) | POST | `/v1/user/password-reset/send-code` |
-| [重置密码](#post-v1userpassword-reset) | POST | `/v1/user/password-reset` |
-| [查询设备绑定额度](#get-v1userquota) | GET | `/v1/user/quota` |
-| [查询我的设备](#get-v1userdevicelist) | GET | `/v1/user/device/list` |
-| [修改设备名称](#put-v1userdevicename) | PUT | `/v1/user/device/name` |
-| [通过验证码绑定设备](#post-v1userdevicebind) | POST | `/v1/user/device/bind` |
-| [通过设备 ID 绑定](#post-v1userdevicebind-by-id) | POST | `/v1/user/device/bind-by-id` |
-| [解绑设备](#delete-v1userdevicereset) | DELETE | `/v1/user/device/reset` |
-| [获取实时音视频凭证](#get-v1userdevicertc-token) | GET | `/v1/user/device/rtc-token` |
-| [获取顶部导航链接](#get-v1confignavigation) | GET | `/v1/config/navigation` |
-| [查询当前账号](#get-v1userme) | GET | `/v1/user/me` |
+| 接口名称 | 调用方 | 方法 | 路径 | 鉴权要求与方式 |
+|---|---|---|---|---|
+| [获取人机验证配置](#get-v1configcaptcha) | Web、小程序 | GET | `/v1/config/captcha` | 无需登录鉴权 |
+| [发送注册验证码](#post-v1usersend-code) | Web、小程序 | POST | `/v1/user/send-code` | 无需登录鉴权 |
+| [注册账号](#post-v1userregister) | Web、小程序 | POST | `/v1/user/register` | 无需登录；邮箱验证码校验 |
+| [登录账号](#post-v1userlogin) | Web、小程序 | POST | `/v1/user/login` | 无需登录鉴权 |
+| [发送密码重置验证码](#post-v1userpassword-resetsend-code) | Web、小程序 | POST | `/v1/user/password-reset/send-code` | 无需登录鉴权 |
+| [重置密码](#post-v1userpassword-reset) | Web、小程序 | POST | `/v1/user/password-reset` | 无需登录；邮箱验证码校验 |
+| [查询设备绑定额度](#get-v1userquota) | Web、小程序 | GET | `/v1/user/quota` | 必需：用户 JWT（user_jwt） |
+| [查询我的设备](#get-v1userdevicelist) | Web、小程序 | GET | `/v1/user/device/list` | 必需：用户 JWT（user_jwt） |
+| [修改设备名称](#put-v1userdevicename) | Web、小程序 | PUT | `/v1/user/device/name` | 必需：用户 JWT（user_jwt） |
+| [通过验证码绑定设备](#post-v1userdevicebind) | Web、小程序 | POST | `/v1/user/device/bind` | 必需：用户 JWT（user_jwt） |
+| [通过设备 ID 绑定](#post-v1userdevicebind-by-id) | Web、小程序 | POST | `/v1/user/device/bind-by-id` | 必需：用户 JWT（user_jwt） |
+| [解绑设备](#delete-v1userdevicereset) | Web、小程序 | DELETE | `/v1/user/device/reset` | 必需：用户 JWT（user_jwt） |
+| [获取实时音视频凭证](#get-v1userdevicertc-token) | Web、小程序 | GET | `/v1/user/device/rtc-token` | 必需：用户 JWT（user_jwt） |
+| [获取顶部导航链接](#get-v1confignavigation) | Web | GET | `/v1/config/navigation` | 无需登录鉴权 |
+| [查询当前账号](#get-v1userme) | Web、小程序 | GET | `/v1/user/me` | 必需：用户 JWT（user_jwt） |
 
 <a id="get-v1configcaptcha"></a>
 
 ### 获取人机验证配置
 
 **接口**：`GET /v1/config/captcha`
+
+**调用方**：Web、小程序。
 
 获取当前人机验证 Provider 及其可公开的控件配置，用于初始化客户端控件。
 
@@ -502,6 +534,8 @@ int device_sign(const char *device_id, const char *device_key,
 ### 发送注册验证码
 
 **接口**：`POST /v1/user/send-code`
+
+**调用方**：Web、小程序。
 
 发送邮箱验证码（注册前调用）。
 
@@ -555,6 +589,8 @@ int device_sign(const char *device_id, const char *device_key,
 ### 注册账号
 
 **接口**：`POST /v1/user/register`
+
+**调用方**：Web、小程序。
 
 注册新用户。
 
@@ -622,6 +658,8 @@ int device_sign(const char *device_id, const char *device_key,
 ### 登录账号
 
 **接口**：`POST /v1/user/login`
+
+**调用方**：Web、小程序。
 
 用户登录。
 
@@ -698,6 +736,8 @@ int device_sign(const char *device_id, const char *device_key,
 
 **接口**：`POST /v1/user/password-reset/send-code`
 
+**调用方**：Web、小程序。
+
 发送找回密码的邮箱验证码。为避免泄露邮箱是否已注册，格式正确且通过人机验证的请求均返回成功；只有已注册邮箱会收到邮件。
 
 成功响应表示请求已受理；验证码邮件由后台异步投递，可能有短暂延迟。未收到邮件时可稍后重新发起请求。
@@ -743,6 +783,8 @@ int device_sign(const char *device_id, const char *device_key,
 ### 重置密码
 
 **接口**：`POST /v1/user/password-reset`
+
+**调用方**：Web、小程序。
 
 使用找回密码验证码设置新密码。验证码仅可使用一次，且不能用于注册。
 
@@ -798,6 +840,8 @@ Authorization: Bearer <user_jwt>
 
 **接口**：`GET /v1/user/quota`
 
+**调用方**：Web、小程序。
+
 查询当前用户剩余设备配额。
 
 **鉴权**: ✅
@@ -839,6 +883,8 @@ Authorization: Bearer <user_jwt>
 
 **接口**：`GET /v1/user/device/list`
 
+**调用方**：Web、小程序。
+
 响应设备条目的 `profiles` 按业务场景提供明确上报的媒体字段。包含可选的 `stream`、`call`、`voip` 对象，由 device-server 的媒体能力上报接口提供；旧设备的 `voip` 可沿用原 VoIP profile；没有场景键时表示该场景能力未上报，不能从其他场景补值。对象仅含已上报的上下行媒体格式、音频采样率/声道数及视频显示字段，不含设备凭证。原有顶层媒体字段保持兼容；设备信息页面使用场景对象区分缺失、`false` 与 `0`。
 
 
@@ -873,7 +919,29 @@ Authorization: Bearer <user_jwt>
       "object_fit": "contain",
       "has_camera": true,
       "has_screen": true,
-      "voip_room_type": "video"
+      "voip_room_type": "video",
+      "profiles": {
+        "stream": {
+          "up_audio_mt": [
+            "alaw"
+          ],
+          "up_video_mt": [
+            "h264"
+          ],
+          "audio_rate": 8000
+        },
+        "voip": {
+          "up_video_mt": "h264",
+          "down_video_mt": "mjpeg",
+          "down_audio_mt": "amr",
+          "audio_rate": 8000,
+          "camera_rotation": 90,
+          "aspect_ratio": 1.7777777778,
+          "hor_mirror": true,
+          "vert_mirror": false,
+          "object_fit": "contain"
+        }
+      }
     }
   ]
 }
@@ -916,7 +984,7 @@ Authorization: Bearer <user_jwt>
 | `data[].profiles.call` | object | 可选，设备通话能力 |
 | `data[].profiles.voip` | object | 可选，微信 VoIP 能力，支持旧 profile 回退 |
 
-各场景的完整字段、类型与枚举见 [`POST /v1/device/profile`](#post-v1deviceprofile)。`bind_time` 在没有绑定时间时可为 `null`；镜像、旋转、宽高比和缩放方式未上报时可能省略。
+由 `/v1/device/profile` 上报的场景，其完整字段、类型与枚举见 [`POST /v1/device/profile`](#post-v1deviceprofile)。旧 VoIP 回退快照保留原始 JSON 值，还可能包含 `video_mt`（string，旧设备上下行统一视频编码）；该兼容字段不能用于 `/v1/device/profile` 上报。`bind_time` 在没有绑定时间时可为 `null`；镜像、旋转、宽高比和缩放方式未上报时可能省略。
 
 **请求参数**：无。
 
@@ -927,6 +995,8 @@ Authorization: Bearer <user_jwt>
 ### 修改设备名称
 
 **接口**：`PUT /v1/user/device/name`
+
+**调用方**：Web、小程序。
 
 修改当前用户已绑定设备的名称。名称用于 `wx.requestDeviceVoIP.deviceName` 和
 `wmpfVoip.callDevice.deviceName`；最多 13 个 Unicode 字符。修改接口只保存当前名称，
@@ -979,6 +1049,8 @@ Authorization: Bearer <user_jwt>
 ### 通过验证码绑定设备
 
 **接口**：`POST /v1/user/device/bind`
+
+**调用方**：Web、小程序。
 
 验证码绑定设备（用户输入设备 TTS 播报的 6 位码）。
 
@@ -1050,6 +1122,8 @@ Authorization: Bearer <user_jwt>
 
 **接口**：`POST /v1/user/device/bind-by-id`
 
+**调用方**：Web、小程序。
+
 按 device_id 直接绑定（无需验证码，device_id 须已存在于 `device_pool`）。
 
 **鉴权**: ✅
@@ -1119,6 +1193,8 @@ Authorization: Bearer <user_jwt>
 
 **接口**：`DELETE /v1/user/device/reset`
 
+**调用方**：Web、小程序。
+
 解绑设备并释放配额。若设备在线，推送 `unbind` 通知并踢除 MQTT 连接。解绑同时清空
 `device_name`，并删除该设备的 VoIP 授权和 profile，避免下一个绑定用户继承上一用户的名称。
 
@@ -1177,6 +1253,8 @@ Authorization: Bearer <user_jwt>
 ### 获取实时音视频凭证
 
 **接口**：`GET /v1/user/device/rtc-token`
+
+**调用方**：Web、小程序。
 
 获取 TiRTC token（H5 直连 TiRTC 用）。
 
@@ -1242,6 +1320,8 @@ Authorization: Bearer <user_jwt>
 
 **接口**：`GET /v1/config/navigation`
 
+**调用方**：Web。
+
 公开读取用户 Web 的顶部导航，无需鉴权。成功为 HTTP 200：
 
 ```json
@@ -1281,6 +1361,8 @@ Authorization: Bearer <user_jwt>
 
 **接口**：`GET /v1/user/me`
 
+**调用方**：Web、小程序。
+
 使用用户 JWT 查询当前账号，不接受用户 ID 参数。成功为 HTTP 200：
 
 ```json
@@ -1317,30 +1399,32 @@ Authorization: Bearer <user_jwt>
 
 **接口列表**
 
-| 接口名称 | 方法 | 路径 |
-|---|---|---|
-| [验证微信回调地址](#get-v1voipnotificationwx_app_id) | GET | `/v1/voip/notification/:wx_app_id` |
-| [接收微信呼叫通知](#post-v1voipnotificationwx_app_id) | POST | `/v1/voip/notification/:wx_app_id` |
-| [上报微信 VoIP 配置](#post-v1voipdeviceprofile) | POST | `/v1/voip/device/profile` |
-| [查询设备的微信联系人](#get-v1voipdevicecontacts) | GET | `/v1/voip/device/contacts` |
-| [查询微信联系人（兼容字段）](#get-v1voipdevicecallers) | GET | `/v1/voip/device/callers` |
-| [设备发起微信呼叫](#post-v1voipdevicecall) | POST | `/v1/voip/device/call` |
-| [关联微信登录](#post-v1voipuserwechat-mini-login) | POST | `/v1/voip/user/wechat-mini-login` |
-| [查询指定设备的微信联系人](#get-v1voipusercontacts) | GET | `/v1/voip/user/contacts` |
-| [查询微信授权设备](#get-v1voipuserauth-list) | GET | `/v1/voip/user/auth-list` |
-| [查询微信联系人名称](#get-v1voipusercontact-remark) | GET | `/v1/voip/user/contact-remark` |
-| [修改微信联系人名称](#put-v1voipusercontact-remark) | PUT | `/v1/voip/user/contact-remark` |
-| [保存微信设备授权](#post-v1voipuserreport-auth) | POST | `/v1/voip/user/report-auth` |
-| [移除微信设备授权](#post-v1voipuserdelete-auth) | POST | `/v1/voip/user/delete-auth` |
-| [获取微信设备授权票据](#post-v1voipusersn-ticket) | POST | `/v1/voip/user/sn-ticket` |
-| [取消微信呼叫](#post-v1voipusercancel) | POST | `/v1/voip/user/cancel` |
-| [清理设备业务关联（内部）](#post-v1voipinternalunbind) | POST | `/v1/voip/internal/unbind` |
+| 接口名称 | 调用方 | 方法 | 路径 | 鉴权要求与方式 |
+|---|---|---|---|---|
+| [验证微信回调地址](#get-v1voipnotificationwx_app_id) | 微信服务器 | GET | `/v1/voip/notification/:wx_app_id` | 必需：微信签名 |
+| [接收微信呼叫通知](#post-v1voipnotificationwx_app_id) | 微信服务器 | POST | `/v1/voip/notification/:wx_app_id` | 必需：微信签名；AES 模式另验消息签名 |
+| [上报微信 VoIP 配置](#post-v1voipdeviceprofile) | 设备 | POST | `/v1/voip/device/profile` | 必需：正式设备 JWT（mqtt_token） |
+| [查询设备的微信联系人](#get-v1voipdevicecontacts) | 设备 | GET | `/v1/voip/device/contacts` | 必需：正式设备 JWT（mqtt_token） |
+| [查询微信联系人（兼容字段）](#get-v1voipdevicecallers) | 设备 | GET | `/v1/voip/device/callers` | 必需：正式设备 JWT（mqtt_token） |
+| [设备发起微信呼叫](#post-v1voipdevicecall) | 设备 | POST | `/v1/voip/device/call` | 必需：正式设备 JWT（mqtt_token） |
+| [关联微信登录](#post-v1voipuserwechat-mini-login) | 小程序 | POST | `/v1/voip/user/wechat-mini-login` | 必需：用户 JWT（user_jwt） |
+| [查询指定设备的微信联系人](#get-v1voipusercontacts) | Web | GET | `/v1/voip/user/contacts` | 必需：用户 JWT（user_jwt） |
+| [查询微信授权设备](#get-v1voipuserauth-list) | 小程序 | GET | `/v1/voip/user/auth-list` | 必需：用户 JWT（user_jwt） |
+| [查询微信联系人名称](#get-v1voipusercontact-remark) | 小程序 | GET | `/v1/voip/user/contact-remark` | 必需：用户 JWT（user_jwt） |
+| [修改微信联系人名称](#put-v1voipusercontact-remark) | 小程序 | PUT | `/v1/voip/user/contact-remark` | 必需：用户 JWT（user_jwt） |
+| [保存微信设备授权](#post-v1voipuserreport-auth) | 小程序 | POST | `/v1/voip/user/report-auth` | 必需：用户 JWT（user_jwt） |
+| [移除微信设备授权](#post-v1voipuserdelete-auth) | 小程序 | POST | `/v1/voip/user/delete-auth` | 必需：用户 JWT（user_jwt） |
+| [获取微信设备授权票据](#post-v1voipusersn-ticket) | 小程序 | POST | `/v1/voip/user/sn-ticket` | 必需：用户 JWT（user_jwt） |
+| [取消微信呼叫](#post-v1voipusercancel) | 小程序 | POST | `/v1/voip/user/cancel` | 必需：用户 JWT（user_jwt） |
+| [清理设备业务关联（内部）](#post-v1voipinternalunbind) | 内部服务 | POST | `/v1/voip/internal/unbind` | 必需：内部密钥（X-Internal-Key） |
 
 <a id="get-v1voipnotificationwx_app_id"></a>
 
 ### 验证微信回调地址
 
 **接口**：`GET /v1/voip/notification/:wx_app_id`
+
+**调用方**：微信服务器。
 
 微信服务器 URL 验证回调。
 
@@ -1374,6 +1458,8 @@ Authorization: Bearer <user_jwt>
 ### 接收微信呼叫通知
 
 **接口**：`POST /v1/voip/notification/:wx_app_id`
+
+**调用方**：微信服务器。
 
 微信服务器事件推送。处理 `iot_voip_notify` 事件。
 
@@ -1494,6 +1580,8 @@ Authorization: Bearer <user_jwt>
 
 **接口**：`POST /v1/voip/device/profile`
 
+**调用方**：设备。
+
 上报设备媒体能力（设备上线时调用，**必须在接受来电前调用**）。
 
 **鉴权**: ✅ `Authorization: Bearer <mqtt_token>`（JWT 需含 `device_id` claim）
@@ -1605,6 +1693,8 @@ Authorization: Bearer <user_jwt>
 | 40000 | 200 | JSON 解析失败、请求体不是 JSON 对象、超过 512 字节，或视频 UI 字段类型/取值不合法 |
 | 50000 | 200 | 数据库保存失败 |
 
+**校验范围**：此接口检查 JSON 对象、512 字节上限和五个视频 UI 字段。`audio_rate`、`audio_channels` 等媒体参数是接入时需要提供的会话配置，不在此接口逐项校验；保存成功不能证明后续 TiRTC 呼叫一定能建立。
+
 ---
 
 <a id="get-v1voipdevicecontacts"></a>
@@ -1612,6 +1702,8 @@ Authorization: Bearer <user_jwt>
 ### 查询设备的微信联系人
 
 **接口**：`GET /v1/voip/device/contacts`
+
+**调用方**：设备。
 
 设备查询有效授权的小程序 VoIP 联系人。此接口只返回 `voip_device_auth` 中
 `auth_status=active` 的联系人，
@@ -1668,6 +1760,8 @@ Authorization: Bearer <user_jwt>
 
 **接口**：`GET /v1/voip/device/callers`
 
+**调用方**：设备。
+
 查询设备的微信联系人，供使用 `list` 返回字段的既有设备调用。
 
 **鉴权**：`Authorization: Bearer <mqtt_token>`（设备 JWT）。
@@ -1694,6 +1788,8 @@ Authorization: Bearer <user_jwt>
 ### 设备发起微信呼叫
 
 **接口**：`POST /v1/voip/device/call`
+
+**调用方**：设备。
 
 设备主动呼叫用户。
 
@@ -1797,6 +1893,8 @@ Authorization: Bearer <user_jwt>
 
 **接口**：`POST /v1/voip/user/wechat-mini-login`
 
+**调用方**：小程序。
+
 微信 code 换 openid。
 
 **鉴权**: ✅ `Authorization: Bearer <user_jwt>`（JWT 需含 `user_id` claim）
@@ -1857,6 +1955,8 @@ Authorization: Bearer <user_jwt>
 ### 查询指定设备的微信联系人
 
 **接口**：`GET /v1/voip/user/contacts`
+
+**调用方**：Web。
 
 H5 查询指定设备的小程序 VoIP 联系人。此接口与设备接口分开鉴权，且只返回
 `voip_device_auth` 中的联系人；查询完整联系人列表使用 call-server 的
@@ -1919,6 +2019,8 @@ H5 查询指定设备的小程序 VoIP 联系人。此接口与设备接口分�
 
 **接口**：`GET /v1/voip/user/auth-list`
 
+**调用方**：小程序。
+
 查询当前微信用户在当前账号名下设备上的 VoIP 授权记录。只读取统一联系人名称时使用
 `GET /v1/voip/user/contact-remark`。
 
@@ -1980,6 +2082,8 @@ H5 查询指定设备的小程序 VoIP 联系人。此接口与设备接口分�
 
 **接口**：`GET /v1/voip/user/contact-remark`
 
+**调用方**：小程序。
+
 查询当前小程序 OpenID 的统一联系人名称。小程序应先调用 `wechat-mini-login`；服务端
 据此确定 OpenID，客户端不传 `wx_open_id`。
 
@@ -2032,6 +2136,8 @@ H5 查询指定设备的小程序 VoIP 联系人。此接口与设备接口分�
 
 **接口**：`PUT /v1/voip/user/contact-remark`
 
+**调用方**：小程序。
+
 修改当前小程序 OpenID 的统一联系人名称。该名称会同步到同一
 `wx_open_id + wx_app_id` 的全部设备授权记录；它不是设备名称。设备端、H5 和小程序
 均可修改，最后一次成功写入生效，并向所有受影响设备推送 `callers_update`。
@@ -2067,6 +2173,8 @@ H5 查询指定设备的小程序 VoIP 联系人。此接口与设备接口分�
 ### 保存微信设备授权
 
 **接口**：`POST /v1/voip/user/report-auth`
+
+**调用方**：小程序。
 
 上报 VoIP 授权（用户在小程序完成 `wx.requestDeviceVoIP` 后调用）。成功后推送 `callers_update` 通知到设备。
 
@@ -2137,6 +2245,8 @@ H5 查询指定设备的小程序 VoIP 联系人。此接口与设备接口分�
 
 **接口**：`POST /v1/voip/user/delete-auth`
 
+**调用方**：小程序。
+
 删除授权。实际删除到授权记录时推送 `callers_update` 通知到设备；重复删除保持幂等，
 不会重复推送。
 
@@ -2194,6 +2304,8 @@ H5 查询指定设备的小程序 VoIP 联系人。此接口与设备接口分�
 ### 获取微信设备授权票据
 
 **接口**：`POST /v1/voip/user/sn-ticket`
+
+**调用方**：小程序。
 
 获取 SN ticket。`device_id` 必须属于当前用户。响应中的 `device_name` 为设备绑定名称；
 未设置名称时返回 `device_id`。
@@ -2265,6 +2377,8 @@ H5 查询指定设备的小程序 VoIP 联系人。此接口与设备接口分�
 
 **接口**：`POST /v1/voip/user/cancel`
 
+**调用方**：小程序。
+
 取消呼叫（小程序挂断后调用）。推送 `call_cancel` 通知到设备。`device_id` 必须属于当前用户。
 
 **鉴权**: ✅ `Authorization: Bearer <user_jwt>`（JWT 需含 `user_id` claim）
@@ -2315,6 +2429,8 @@ H5 查询指定设备的小程序 VoIP 联系人。此接口与设备接口分�
 
 **接口**：`POST /v1/voip/internal/unbind`
 
+**调用方**：内部服务。
+
 服务间调用：设备解绑后清空设备名称，删除该设备的 VoIP profile 和全部授权记录，
 清理未完成的外呼防重状态，并通知设备刷新联系人。
 
@@ -2352,50 +2468,52 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **接口列表**
 
-| 接口名称 | 方法 | 路径 |
-|---|---|---|
-| [获取 AI 对话凭证](#get-v1aitoken) | GET | `/v1/ai/token` |
-| [列出角色](#get-v1airoles) | GET | `/v1/ai/roles` |
-| [查询默认角色](#get-v1airolesdefault) | GET | `/v1/ai/roles/default` |
-| [创建角色](#post-v1airoles) | POST | `/v1/ai/roles` |
-| [查询角色](#get-v1airolesid) | GET | `/v1/ai/roles/:id` |
-| [更新角色](#put-v1airolesid) | PUT | `/v1/ai/roles/:id` |
-| [删除角色](#delete-v1airolesid) | DELETE | `/v1/ai/roles/:id` |
-| [查询设备角色](#get-v1aidevicedevice_idrole) | GET | `/v1/ai/device/:device_id/role` |
-| [设置设备角色](#put-v1aidevicedevice_idrole) | PUT | `/v1/ai/device/:device_id/role` |
-| [清除设备角色](#delete-v1aidevicedevice_idrole) | DELETE | `/v1/ai/device/:device_id/role` |
-| [批量绑定角色](#post-v1aidevice-roles) | POST | `/v1/ai/device-roles` |
-| [批量查询角色绑定](#post-v1aidevice-rolesquery) | POST | `/v1/ai/device-roles/query` |
-| [批量删除角色绑定](#delete-v1aidevice-roles) | DELETE | `/v1/ai/device-roles` |
-| [查询 TTS 音色](#get-v1aivoiceslanguagezh-cn) | GET | `/v1/ai/voices` |
-| [列出全局 MCP 工具](#get-v1aimcptools) | GET | `/v1/ai/mcp/tools` |
-| [查询全局 MCP 工具](#get-v1aimcptoolsid) | GET | `/v1/ai/mcp/tools/:id` |
-| [列出应用 MCP 工具](#get-v1aimcpapp-tools) | GET | `/v1/ai/mcp/app-tools` |
-| [创建应用 MCP 工具](#post-v1aimcpapp-tools) | POST | `/v1/ai/mcp/app-tools` |
-| [查询应用 MCP 工具](#get-v1aimcpapp-toolsid) | GET | `/v1/ai/mcp/app-tools/:id` |
-| [更新应用 MCP 工具](#put-v1aimcpapp-toolsid) | PUT | `/v1/ai/mcp/app-tools/:id` |
-| [删除应用 MCP 工具](#delete-v1aimcpapp-toolsid) | DELETE | `/v1/ai/mcp/app-tools/:id` |
-| [列出设备插件](#get-v1aiplugins) | GET | `/v1/ai/plugins` |
-| [创建设备插件](#post-v1aiplugins) | POST | `/v1/ai/plugins` |
-| [查询设备插件](#get-v1aipluginsid) | GET | `/v1/ai/plugins/:id` |
-| [更新设备插件](#put-v1aipluginsid) | PUT | `/v1/ai/plugins/:id` |
-| [删除设备插件](#delete-v1aipluginsid) | DELETE | `/v1/ai/plugins/:id` |
-| [列出知识库索引](#get-v1aiknowledgeindexes) | GET | `/v1/ai/knowledge/indexes` |
-| [创建知识库索引](#post-v1aiknowledgeindexes) | POST | `/v1/ai/knowledge/indexes` |
-| [查询知识库索引](#get-v1aiknowledgeindexesid) | GET | `/v1/ai/knowledge/indexes/:id` |
-| [更新知识库索引](#put-v1aiknowledgeindexesid) | PUT | `/v1/ai/knowledge/indexes/:id` |
-| [删除知识库索引](#delete-v1aiknowledgeindexesid) | DELETE | `/v1/ai/knowledge/indexes/:id` |
-| [分页查询知识库文档](#get-v1aiknowledgeindexesiddocumentspage1page_size20) | GET | `/v1/ai/knowledge/indexes/:id/documents` |
-| [列出知识库文件](#get-v1aiknowledgefiles) | GET | `/v1/ai/knowledge/files` |
-| [上传知识库文件](#post-v1aiknowledgefiles) | POST | `/v1/ai/knowledge/files` |
-| [删除知识库文件](#delete-v1aiknowledgefilesid) | DELETE | `/v1/ai/knowledge/files/:id` |
-| [清理设备业务关联（内部）](#post-v1aiinternalunbind) | POST | `/v1/ai/internal/unbind` |
+| 接口名称 | 调用方 | 方法 | 路径 | 鉴权要求与方式 |
+|---|---|---|---|---|
+| [获取 AI 对话凭证](#get-v1aitoken) | 设备 | GET | `/v1/ai/token` | 必需：正式设备 JWT（mqtt_token） |
+| [列出角色](#get-v1airoles) | Web（含小程序内嵌页面） | GET | `/v1/ai/roles` | 必需：用户 JWT（user_jwt） |
+| [查询默认角色](#get-v1airolesdefault) | Web（含小程序内嵌页面） | GET | `/v1/ai/roles/default` | 必需：用户 JWT（user_jwt） |
+| [创建角色](#post-v1airoles) | Web（含小程序内嵌页面） | POST | `/v1/ai/roles` | 必需：用户 JWT（user_jwt） |
+| [查询角色](#get-v1airolesid) | Web（含小程序内嵌页面） | GET | `/v1/ai/roles/:id` | 必需：用户 JWT（user_jwt） |
+| [更新角色](#put-v1airolesid) | Web（含小程序内嵌页面） | PUT | `/v1/ai/roles/:id` | 必需：用户 JWT（user_jwt） |
+| [删除角色](#delete-v1airolesid) | Web（含小程序内嵌页面） | DELETE | `/v1/ai/roles/:id` | 必需：用户 JWT（user_jwt） |
+| [查询设备角色](#get-v1aidevicedevice_idrole) | Web（含小程序内嵌页面） | GET | `/v1/ai/device/:device_id/role` | 必需：用户 JWT（user_jwt） |
+| [设置设备角色](#put-v1aidevicedevice_idrole) | Web（含小程序内嵌页面） | PUT | `/v1/ai/device/:device_id/role` | 必需：用户 JWT（user_jwt） |
+| [清除设备角色](#delete-v1aidevicedevice_idrole) | Web（含小程序内嵌页面） | DELETE | `/v1/ai/device/:device_id/role` | 必需：用户 JWT（user_jwt） |
+| [批量绑定角色](#post-v1aidevice-roles) | Web（含小程序内嵌页面） | POST | `/v1/ai/device-roles` | 必需：用户 JWT（user_jwt） |
+| [批量查询角色绑定](#post-v1aidevice-rolesquery) | Web（含小程序内嵌页面） | POST | `/v1/ai/device-roles/query` | 必需：用户 JWT（user_jwt） |
+| [批量删除角色绑定](#delete-v1aidevice-roles) | Web（含小程序内嵌页面） | DELETE | `/v1/ai/device-roles` | 必需：用户 JWT（user_jwt） |
+| [查询 TTS 音色](#get-v1aivoiceslanguagezh-cn) | Web（含小程序内嵌页面） | GET | `/v1/ai/voices` | 必需：用户 JWT（user_jwt） |
+| [列出全局 MCP 工具](#get-v1aimcptools) | Web（含小程序内嵌页面） | GET | `/v1/ai/mcp/tools` | 必需：用户 JWT（user_jwt） |
+| [查询全局 MCP 工具](#get-v1aimcptoolsid) | Web（含小程序内嵌页面） | GET | `/v1/ai/mcp/tools/:id` | 必需：用户 JWT（user_jwt） |
+| [列出应用 MCP 工具](#get-v1aimcpapp-tools) | Web（含小程序内嵌页面） | GET | `/v1/ai/mcp/app-tools` | 必需：用户 JWT（user_jwt） |
+| [创建应用 MCP 工具](#post-v1aimcpapp-tools) | Web（含小程序内嵌页面） | POST | `/v1/ai/mcp/app-tools` | 必需：用户 JWT（user_jwt） |
+| [查询应用 MCP 工具](#get-v1aimcpapp-toolsid) | Web（含小程序内嵌页面） | GET | `/v1/ai/mcp/app-tools/:id` | 必需：用户 JWT（user_jwt） |
+| [更新应用 MCP 工具](#put-v1aimcpapp-toolsid) | Web（含小程序内嵌页面） | PUT | `/v1/ai/mcp/app-tools/:id` | 必需：用户 JWT（user_jwt） |
+| [删除应用 MCP 工具](#delete-v1aimcpapp-toolsid) | Web（含小程序内嵌页面） | DELETE | `/v1/ai/mcp/app-tools/:id` | 必需：用户 JWT（user_jwt） |
+| [列出设备插件](#get-v1aiplugins) | Web（含小程序内嵌页面） | GET | `/v1/ai/plugins` | 必需：用户 JWT（user_jwt） |
+| [创建设备插件](#post-v1aiplugins) | Web（含小程序内嵌页面） | POST | `/v1/ai/plugins` | 必需：用户 JWT（user_jwt） |
+| [查询设备插件](#get-v1aipluginsid) | Web（含小程序内嵌页面） | GET | `/v1/ai/plugins/:id` | 必需：用户 JWT（user_jwt） |
+| [更新设备插件](#put-v1aipluginsid) | Web（含小程序内嵌页面） | PUT | `/v1/ai/plugins/:id` | 必需：用户 JWT（user_jwt） |
+| [删除设备插件](#delete-v1aipluginsid) | Web（含小程序内嵌页面） | DELETE | `/v1/ai/plugins/:id` | 必需：用户 JWT（user_jwt） |
+| [列出知识库索引](#get-v1aiknowledgeindexes) | Web（含小程序内嵌页面） | GET | `/v1/ai/knowledge/indexes` | 必需：用户 JWT（user_jwt） |
+| [创建知识库索引](#post-v1aiknowledgeindexes) | Web（含小程序内嵌页面） | POST | `/v1/ai/knowledge/indexes` | 必需：用户 JWT（user_jwt） |
+| [查询知识库索引](#get-v1aiknowledgeindexesid) | Web（含小程序内嵌页面） | GET | `/v1/ai/knowledge/indexes/:id` | 必需：用户 JWT（user_jwt） |
+| [更新知识库索引](#put-v1aiknowledgeindexesid) | Web（含小程序内嵌页面） | PUT | `/v1/ai/knowledge/indexes/:id` | 必需：用户 JWT（user_jwt） |
+| [删除知识库索引](#delete-v1aiknowledgeindexesid) | Web（含小程序内嵌页面） | DELETE | `/v1/ai/knowledge/indexes/:id` | 必需：用户 JWT（user_jwt） |
+| [分页查询知识库文档](#get-v1aiknowledgeindexesiddocumentspage1page_size20) | Web（含小程序内嵌页面） | GET | `/v1/ai/knowledge/indexes/:id/documents` | 必需：用户 JWT（user_jwt） |
+| [列出知识库文件](#get-v1aiknowledgefiles) | Web（含小程序内嵌页面） | GET | `/v1/ai/knowledge/files` | 必需：用户 JWT（user_jwt） |
+| [上传知识库文件](#post-v1aiknowledgefiles) | Web（含小程序内嵌页面） | POST | `/v1/ai/knowledge/files` | 必需：用户 JWT（user_jwt） |
+| [删除知识库文件](#delete-v1aiknowledgefilesid) | Web（含小程序内嵌页面） | DELETE | `/v1/ai/knowledge/files/:id` | 必需：用户 JWT（user_jwt） |
+| [清理设备业务关联（内部）](#post-v1aiinternalunbind) | 内部服务 | POST | `/v1/ai/internal/unbind` | 必需：内部密钥（X-Internal-Key） |
 
 <a id="get-v1aitoken"></a>
 
 ### 获取 AI 对话凭证
 
 **接口**：`GET /v1/ai/token`
+
+**调用方**：设备。
 
 获取 AI 连接凭证。
 
@@ -2578,6 +2696,8 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **接口**：`GET /v1/ai/roles`
 
+**调用方**：Web（含小程序内嵌页面）。
+
 列出当前用户创建的角色。
 
 **鉴权**：`Authorization: Bearer <user_jwt>`（用户 JWT）
@@ -2609,6 +2729,8 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 #### 查询默认角色
 
 **接口**：`GET /v1/ai/roles/default`
+
+**调用方**：Web（含小程序内嵌页面）。
 
 获取全局默认角色详情。
 
@@ -2649,6 +2771,8 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 #### 创建角色
 
 **接口**：`POST /v1/ai/roles`
+
+**调用方**：Web（含小程序内嵌页面）。
 
 创建角色（代理至探鸽云，成功后记录到本地 `ai_user_role`）。
 
@@ -2703,6 +2827,8 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **接口**：`GET /v1/ai/roles/:id`
 
+**调用方**：Web（含小程序内嵌页面）。
+
 查看角色详情。
 
 **鉴权**：`Authorization: Bearer <user_jwt>`（用户 JWT）
@@ -2715,11 +2841,15 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **返回字段**：`data` 为角色返回对象，完整字段及嵌套配置见 [AI 资源字段](#ai-资源字段)。
 
+**空结果**：本地所有权校验通过后，若云端角色已不存在并返回空数据，本接口仍为 HTTP 200 + `code=200`，`data=null`。这与默认角色接口的 HTTP 404 不同。
+
 <a id="put-v1airolesid"></a>
 
 #### 更新角色
 
 **接口**：`PUT /v1/ai/roles/:id`
+
+**调用方**：Web（含小程序内嵌页面）。
 
 更新角色。
 
@@ -2742,6 +2872,8 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 #### 删除角色
 
 **接口**：`DELETE /v1/ai/roles/:id`
+
+**调用方**：Web（含小程序内嵌页面）。
 
 删除角色（云端 + 本地 `ai_user_role` 同步删除）。
 
@@ -2774,6 +2906,8 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 #### 查询设备角色
 
 **接口**：`GET /v1/ai/device/:device_id/role`
+
+**调用方**：Web（含小程序内嵌页面）。
 
 查询设备的角色绑定。
 
@@ -2812,6 +2946,8 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 #### 设置设备角色
 
 **接口**：`PUT /v1/ai/device/:device_id/role`
+
+**调用方**：Web（含小程序内嵌页面）。
 
 绑定设备到角色。
 
@@ -2857,6 +2993,8 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **接口**：`DELETE /v1/ai/device/:device_id/role`
 
+**调用方**：Web（含小程序内嵌页面）。
+
 解除设备角色绑定。
 
 **鉴权**：`Authorization: Bearer <user_jwt>`（用户 JWT）
@@ -2899,6 +3037,8 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **接口**：`POST /v1/ai/device-roles`
 
+**调用方**：Web（含小程序内嵌页面）。
+
 批量创建设备-角色绑定。
 
 **鉴权**：`Authorization: Bearer <user_jwt>`（用户 JWT）
@@ -2933,6 +3073,8 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 ##### 批量查询角色绑定
 
 **接口**：`POST /v1/ai/device-roles/query`
+
+**调用方**：Web（含小程序内嵌页面）。
 
 批量查询设备-角色绑定。
 
@@ -2985,6 +3127,8 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **接口**：`DELETE /v1/ai/device-roles`
 
+**调用方**：Web（含小程序内嵌页面）。
+
 批量删除设备-角色绑定。
 
 **鉴权**：`Authorization: Bearer <user_jwt>`（用户 JWT）
@@ -3025,6 +3169,8 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 ##### 查询 TTS 音色
 
 **接口**：`GET /v1/ai/voices?language=zh-CN`
+
+**调用方**：Web（含小程序内嵌页面）。
 
 获取可用 TTS 音色列表。
 
@@ -3075,11 +3221,15 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 #### MCP 工具（全局）
 
+**空列表**：上游返回空数组时 `data.items` 为 `[]`；上游省略列表或返回 `null` 时，本接口的 `data.items` 也为 `null`。客户端需兼容这两种无结果形式。
+
 <a id="get-v1aimcptools"></a>
 
 ##### 列出全局 MCP 工具
 
 **接口**：`GET /v1/ai/mcp/tools`
+
+**调用方**：Web（含小程序内嵌页面）。
 
 列出内置全局 MCP 工具。
 
@@ -3114,11 +3264,15 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **请求参数**：无。
 
+**空列表**：上游返回空数组时 `data.items` 为 `[]`；上游省略列表或返回 `null` 时，本接口的 `data.items` 也为 `null`。客户端需兼容这两种无结果形式。
+
 <a id="get-v1aimcptoolsid"></a>
 
 ##### 查询全局 MCP 工具
 
 **接口**：`GET /v1/ai/mcp/tools/:id`
+
+**调用方**：Web（含小程序内嵌页面）。
 
 查看单个全局 MCP 工具详情。
 
@@ -3164,6 +3318,8 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **接口**：`GET /v1/ai/mcp/app-tools`
 
+**调用方**：Web（含小程序内嵌页面）。
+
 列出当前用户创建的应用级 MCP 工具，以及配置为全局默认的 MCP 工具。列表从本地索引
 读取，只返回轻量引用；完整配置需调用单项详情接口。
 
@@ -3201,6 +3357,8 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 ##### 创建应用 MCP 工具
 
 **接口**：`POST /v1/ai/mcp/app-tools`
+
+**调用方**：Web（含小程序内嵌页面）。
 
 创建应用级 MCP 工具。
 
@@ -3260,6 +3418,8 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **接口**：`GET /v1/ai/mcp/app-tools/:id`
 
+**调用方**：Web（含小程序内嵌页面）。
+
 查看单个应用级 MCP 工具。
 
 **鉴权**：`Authorization: Bearer <user_jwt>`（用户 JWT）
@@ -3277,6 +3437,8 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 ##### 更新应用 MCP 工具
 
 **接口**：`PUT /v1/ai/mcp/app-tools/:id`
+
+**调用方**：Web（含小程序内嵌页面）。
 
 更新应用级 MCP 工具。
 
@@ -3317,6 +3479,8 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **接口**：`DELETE /v1/ai/mcp/app-tools/:id`
 
+**调用方**：Web（含小程序内嵌页面）。
+
 删除应用级 MCP 工具。
 
 **鉴权**：`Authorization: Bearer <user_jwt>`（用户 JWT）
@@ -3355,6 +3519,8 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **接口**：`GET /v1/ai/plugins`
 
+**调用方**：Web（含小程序内嵌页面）。
+
 列出当前用户创建的设备插件，以及配置为全局默认的设备插件。列表从本地索引读取，
 只返回轻量引用；完整配置需调用单项详情接口。
 
@@ -3392,6 +3558,8 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 ##### 创建设备插件
 
 **接口**：`POST /v1/ai/plugins`
+
+**调用方**：Web（含小程序内嵌页面）。
 
 创建设备插件。
 
@@ -3440,6 +3608,8 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **接口**：`GET /v1/ai/plugins/:id`
 
+**调用方**：Web（含小程序内嵌页面）。
+
 查看单个设备插件。
 
 **鉴权**：`Authorization: Bearer <user_jwt>`（用户 JWT）
@@ -3457,6 +3627,8 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 ##### 更新设备插件
 
 **接口**：`PUT /v1/ai/plugins/:id`
+
+**调用方**：Web（含小程序内嵌页面）。
 
 更新设备插件。
 
@@ -3477,6 +3649,8 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 ##### 删除设备插件
 
 **接口**：`DELETE /v1/ai/plugins/:id`
+
+**调用方**：Web（含小程序内嵌页面）。
 
 删除设备插件。
 
@@ -3515,6 +3689,8 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 ##### 列出知识库索引
 
 **接口**：`GET /v1/ai/knowledge/indexes`
+
+**调用方**：Web（含小程序内嵌页面）。
 
 列出当前用户创建的知识库索引，以及配置为全局默认的知识库索引。
 
@@ -3559,6 +3735,8 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **接口**：`POST /v1/ai/knowledge/indexes`
 
+**调用方**：Web（含小程序内嵌页面）。
+
 创建知识库索引。返回的 `data` 为[AI 资源字段](#ai-资源字段)中的知识库索引对象，包含 `index_id`、`name` 及可选的 `description`、`document_ids`。
 
 **鉴权**：`Authorization: Bearer <user_jwt>`（用户 JWT）
@@ -3600,6 +3778,8 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **接口**：`GET /v1/ai/knowledge/indexes/:id`
 
+**调用方**：Web（含小程序内嵌页面）。
+
 查看单个知识库索引。
 
 **鉴权**：`Authorization: Bearer <user_jwt>`（用户 JWT）
@@ -3617,6 +3797,8 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 ##### 更新知识库索引
 
 **接口**：`PUT /v1/ai/knowledge/indexes/:id`
+
+**调用方**：Web（含小程序内嵌页面）。
 
 更新知识库索引。
 
@@ -3650,6 +3832,8 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **接口**：`DELETE /v1/ai/knowledge/indexes/:id`
 
+**调用方**：Web（含小程序内嵌页面）。
+
 删除知识库索引。
 
 **鉴权**：`Authorization: Bearer <user_jwt>`（用户 JWT）
@@ -3669,6 +3853,8 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 ##### 分页查询知识库文档
 
 **接口**：`GET /v1/ai/knowledge/indexes/:id/documents?page=1&page_size=20`
+
+**调用方**：Web（含小程序内嵌页面）。
 
 分页列出索引下的文档。当前用户必须拥有该索引，配置的默认知识库也允许读取。
 
@@ -3722,11 +3908,15 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 |---|---|---|---|
 | `id` | string | 是 | 当前用户可访问的知识库索引 ID |
 
+**空列表**：上游返回空数组时 `data.items` 为 `[]`；上游省略列表或返回 `null` 时，本接口的 `data.items` 也为 `null`。客户端需兼容这两种无结果形式。
+
 <a id="get-v1aiknowledgefiles"></a>
 
 ##### 列出知识库文件
 
 **接口**：`GET /v1/ai/knowledge/files`
+
+**调用方**：Web（含小程序内嵌页面）。
 
 列出当前用户已上传的知识库文件。服务端按本地所有权记录过滤上游结果，
 不会返回其他用户上传的文件。
@@ -3774,6 +3964,8 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **接口**：`POST /v1/ai/knowledge/files`
 
+**调用方**：Web（含小程序内嵌页面）。
+
 上传知识库文件。上传成功后，文件 ID 会记录为当前用户资源，供后续列表
 过滤和删除鉴权使用。
 
@@ -3799,7 +3991,7 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 { "code": 200, "msg": "ok", "data": { "file_id": "file_001" } }
 ```
 
-**错误码**: `40000`（缺少 file 或读取失败）、`401`（鉴权失败）、`50200`（上游 AI 服务不可用）
+**错误码**: `40000`（缺少 file 或读取失败）、`401`（鉴权失败）、`50200`（上游 AI 服务不可用）、`50000`（上传响应缺少文件 ID 或本地所有权记录失败）
 
 **返回字段说明**
 
@@ -3812,6 +4004,8 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 ##### 删除知识库文件
 
 **接口**：`DELETE /v1/ai/knowledge/files/:id`
+
+**调用方**：Web（含小程序内嵌页面）。
 
 删除当前用户拥有的知识库文件。文件 ID 不属于当前用户时返回 HTTP 403 +
 `code=40300`，且不会调用上游删除接口。
@@ -3848,6 +4042,8 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 
 **接口**：`POST /v1/ai/internal/unbind`
 
+**调用方**：内部服务。
+
 服务间调用：设备解绑后删除本地设备角色绑定，并清理 AI 云服务中的设备角色绑定。
 
 **鉴权**：`X-Internal-Key` 请求头，值需匹配服务端配置的内部调用密钥。
@@ -3877,7 +4073,7 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 
 服务：`call-server`
 
-面向 IoT 硬件设备（+ H5 联系人管理），实现设备间音视频通话。
+提供设备间音视频通话，以及设备端和 Web 端的联系人管理接口。
 
 > **响应格式约定：**
 >
@@ -3887,37 +4083,36 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 > - JWT 鉴权后的资源权限错误使用 `40300`，内部服务凭证错误使用 `40301`。
 > - 所有端点都可能返回 HTTP 200 + `code=50000`（服务器内部错误），下列端点不再重复列出该通用错误。
 >
-> **跨域**: call-server 不加 CORS。H5 联系人页面通过 nginx 反向代理跟 user-server 统一到同一个域名下（见 [`thing-connect.nginx.conf`](deploy/nginx/thing-connect.nginx.conf)：`/v1/call/*` 转发到 call-server，其余转发到 user-server），浏览器全程同源。
+> **跨域**: call-server 不加 CORS。H5 联系人页面通过 nginx 反向代理跟 user-server 统一到同一个域名下（见 [`thing-connect.nginx.conf`](deploy/nginx/thing-connect.nginx.conf)：公开 `/v1/call/*` 接口转发到 call-server，页面由 user-server 提供；内部接口禁止公网访问），浏览器全程同源。
+
+### 设备端接口
+
+用于设备发起和处理通话、管理本机联系人。请求头使用 `Authorization: Bearer <mqtt_token>`（正式设备 JWT）。
 
 **接口列表**
 
-| 接口名称 | 方法 | 路径 |
-|---|---|---|
-| [发起设备呼叫](#post-v1callrequest) | POST | `/v1/call/request` |
-| [获取接听凭证](#post-v1calldeviceinfo) | POST | `/v1/call/device/info` |
-| [拒绝呼叫](#post-v1callreject) | POST | `/v1/call/reject` |
-| [挂断通话](#post-v1callhangup) | POST | `/v1/call/hangup` |
-| [取消呼叫](#post-v1callcancel) | POST | `/v1/call/cancel` |
-| [查询一对一通话房间](#get-v1callroom) | GET | `/v1/call/room` |
-| [查询本机联系人](#get-v1calldevicecontacts) | GET | `/v1/call/device/contacts` |
-| [查询本机待审批申请](#get-v1calldevicecontactspending) | GET | `/v1/call/device/contacts/pending` |
-| [发起联系人申请](#post-v1calldevicecontactsrequest) | POST | `/v1/call/device/contacts/request` |
-| [审批联系人申请](#post-v1calldevicecontactsrespond) | POST | `/v1/call/device/contacts/respond` |
-| [修改本机联系人备注](#put-v1calldevicecontactsremark) | PUT | `/v1/call/device/contacts/remark` |
-| [删除本机联系人](#delete-v1calldevicecontacts) | DELETE | `/v1/call/device/contacts` |
-| [查询设备联系人](#get-v1callusercontactsdevice_idxxx) | GET | `/v1/call/user/contacts` |
-| [查询账号待审批申请](#get-v1callusercontactspending) | GET | `/v1/call/user/contacts/pending` |
-| [为设备申请联系人](#post-v1callusercontactsrequest) | POST | `/v1/call/user/contacts/request` |
-| [审批设备联系人申请](#post-v1callusercontactsrespond) | POST | `/v1/call/user/contacts/respond` |
-| [修改设备联系人备注](#put-v1callusercontactsremark) | PUT | `/v1/call/user/contacts/remark` |
-| [删除设备联系人](#delete-v1callusercontactsid) | DELETE | `/v1/call/user/contacts/:id` |
-| [清理设备业务关联（内部）](#post-v1callinternalunbind) | POST | `/v1/call/internal/unbind` |
+| 接口名称 | 调用方 | 方法 | 路径 | 鉴权要求与方式 |
+|---|---|---|---|---|
+| [发起设备呼叫](#post-v1callrequest) | 设备 | POST | `/v1/call/request` | 必需：正式设备 JWT（mqtt_token） |
+| [获取接听凭证](#post-v1calldeviceinfo) | 设备 | POST | `/v1/call/device/info` | 必需：正式设备 JWT（mqtt_token） |
+| [拒绝呼叫](#post-v1callreject) | 设备 | POST | `/v1/call/reject` | 必需：正式设备 JWT（mqtt_token） |
+| [挂断通话](#post-v1callhangup) | 设备 | POST | `/v1/call/hangup` | 必需：正式设备 JWT（mqtt_token） |
+| [取消呼叫](#post-v1callcancel) | 设备 | POST | `/v1/call/cancel` | 必需：正式设备 JWT（mqtt_token） |
+| [查询一对一通话房间](#get-v1callroom) | 设备 | GET | `/v1/call/room` | 必需：正式设备 JWT（mqtt_token） |
+| [查询本机联系人](#get-v1calldevicecontacts) | 设备 | GET | `/v1/call/device/contacts` | 必需：正式设备 JWT（mqtt_token） |
+| [查询本机待审批申请](#get-v1calldevicecontactspending) | 设备 | GET | `/v1/call/device/contacts/pending` | 必需：正式设备 JWT（mqtt_token） |
+| [发起联系人申请](#post-v1calldevicecontactsrequest) | 设备 | POST | `/v1/call/device/contacts/request` | 必需：正式设备 JWT（mqtt_token） |
+| [审批联系人申请](#post-v1calldevicecontactsrespond) | 设备 | POST | `/v1/call/device/contacts/respond` | 必需：正式设备 JWT（mqtt_token） |
+| [修改本机联系人备注](#put-v1calldevicecontactsremark) | 设备 | PUT | `/v1/call/device/contacts/remark` | 必需：正式设备 JWT（mqtt_token） |
+| [删除本机联系人](#delete-v1calldevicecontacts) | 设备 | DELETE | `/v1/call/device/contacts` | 必需：正式设备 JWT（mqtt_token） |
 
 <a id="post-v1callrequest"></a>
 
-### 发起设备呼叫
+#### 发起设备呼叫
 
 **接口**：`POST /v1/call/request`
+
+**调用方**：设备。
 
 发起呼叫（一对多）。
 
@@ -3953,7 +4148,7 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 |------|------|
 | room_id | 房间 ID，格式 `d_roomid_` + 32 位十六进制（UUID v4 去横线） |
 | online | 目标设备在线状态映射，`true`=在线、`false`=离线 |
-| offline | 建房间时已离线的设备 ID 列表（直接计入 rejected_by） |
+| offline | string[] / null；建房时离线的设备 ID 列表，直接计入 rejected_by；所有被叫在线时为 null |
 
 > `room_id` 前缀 `d_` 与微信 VoIP 的 `wx_room_id` 区分，避免跨系统排查时混淆。
 
@@ -3972,9 +4167,11 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 
 <a id="post-v1calldeviceinfo"></a>
 
-### 获取接听凭证
+#### 获取接听凭证
 
 **接口**：`POST /v1/call/device/info`
+
+**调用方**：设备。
 
 接听来电（`purpose=call`）。该操作会执行 SETNX/DEL 并发送 MQTT 通知，因此使用 POST。
 
@@ -4027,9 +4224,11 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 
 <a id="post-v1callreject"></a>
 
-### 拒绝呼叫
+#### 拒绝呼叫
 
 **接口**：`POST /v1/call/reject`
+
+**调用方**：设备。
 
 拒接来电。
 
@@ -4054,9 +4253,11 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 
 <a id="post-v1callhangup"></a>
 
-### 挂断通话
+#### 挂断通话
 
 **接口**：`POST /v1/call/hangup`
+
+**调用方**：设备。
 
 挂断，释放房间。**鉴权**: ✅ 设备 JWT，且必须是 caller 或 answered_by。
 
@@ -4077,9 +4278,11 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 
 <a id="post-v1callcancel"></a>
 
-### 取消呼叫
+#### 取消呼叫
 
 **接口**：`POST /v1/call/cancel`
+
+**调用方**：设备。
 
 主叫取消呼叫（仅 caller 可调用）。**鉴权**: ✅ 设备 JWT。
 
@@ -4099,15 +4302,17 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 
 <a id="get-v1callroom"></a>
 
-### 查询一对一通话房间
+#### 查询一对一通话房间
 
 **接口**：`GET /v1/call/room`
 
-查询当前设备的一对一通话房间，用于进程重启后恢复状态。多人对讲的房间关系使用 [`GET /v1/call/room/device/assignment`](#多人对讲call-server) 查询。
+**调用方**：设备。
+
+查询当前设备的一对一通话房间，用于进程重启后恢复状态。多人对讲的房间关系使用 [`GET /v1/call/group/device/assignment`](#get-v1callroomdeviceassignment) 查询。
 
 **鉴权**: ✅ 设备 JWT
 
-**成功响应** — 不在任何房间时省略 `data`
+**成功响应** — 不在一对一通话房间时省略 `data`；这不表示设备未加入多人对讲房间
 
 ```json
 { "code": 200, "msg": "ok", "data": {
@@ -4121,7 +4326,7 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 
 | 字段 | 说明 |
 |------|------|
-| room_id | 房间 ID，格式 `d_roomid_` + 32 位十六进制 |
+| room_id | 一对一通话房间 ID，格式 `d_roomid_` + 32 位十六进制；不能用于多人对讲接口 |
 | status | `active`=呼叫中（未接听）、`answered`=已接听 |
 | caller | 主叫设备 ID |
 | call_type | `audio` 或 `video` |
@@ -4133,9 +4338,11 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 
 <a id="get-v1calldevicecontacts"></a>
 
-### 查询本机联系人
+#### 查询本机联系人
 
 **接口**：`GET /v1/call/device/contacts`
+
+**调用方**：设备。
 
 设备侧联系人列表，同时返回**设备联系人**（`call_contact` 表）和 **VoIP 联系人**（`voip_device_auth` 表，微信小程序授权用户）。用 `type` 字段区分。
 
@@ -4197,9 +4404,11 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 
 <a id="get-v1calldevicecontactspending"></a>
 
-### 查询本机待审批申请
+#### 查询本机待审批申请
 
 **接口**：`GET /v1/call/device/contacts/pending`
+
+**调用方**：设备。
 
 查询当前设备可以审批的联系人申请。只返回当前设备是非发起方的 pending 请求。
 
@@ -4236,9 +4445,11 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 
 <a id="post-v1calldevicecontactsrequest"></a>
 
-### 发起联系人申请
+#### 发起联系人申请
 
 **接口**：`POST /v1/call/device/contacts/request`
+
+**调用方**：设备。
 
 发起跨账号联系人申请。同账号设备会直接自动接受，不走 pending 流程。该接口只适用于设备联系人；VoIP 联系人没有申请流程。
 
@@ -4281,9 +4492,11 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 
 <a id="post-v1calldevicecontactsrespond"></a>
 
-### 审批联系人申请
+#### 审批联系人申请
 
 **接口**：`POST /v1/call/device/contacts/respond`
+
+**调用方**：设备。
 
 审批联系人申请（仅接收方可调用）。
 
@@ -4308,9 +4521,11 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 
 <a id="put-v1calldevicecontactsremark"></a>
 
-### 修改本机联系人备注
+#### 修改本机联系人备注
 
 **接口**：`PUT /v1/call/device/contacts/remark`
+
+**调用方**：设备。
 
 修改联系人备注，设备联系人和 VoIP 联系人统一走这一个接口，服务端按 `peer_id` 自动判断类型。
 当 `peer_id` 是 VoIP 联系人的 `wx_open_id` 时，修改的是该 OpenID 的统一联系人名称，
@@ -4339,9 +4554,11 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 
 <a id="delete-v1calldevicecontacts"></a>
 
-### 删除本机联系人
+#### 删除本机联系人
 
 **接口**：`DELETE /v1/call/device/contacts`
+
+**调用方**：设备。
 
 删除已接受的跨账号手动联系人（`source:"manual"`，软删除为 status=3，**双向生效**：自己和对方都失去该联系人），成功后向对端推送 `channel:"device"` 的 `callers_update`，对端应重新拉取联系人。同账号 `source:"auto"` 联系人属于账号内设备拓扑，不允许删除；VoIP 联系人的移除走小程序取消授权，不在此接口。
 
@@ -4373,7 +4590,22 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 
 ---
 
-### H5 侧联系人管理（`UserJWTAuth`，鉴权同 voip-server `/v1/voip/user/*`）
+### Web 端联系人管理
+
+由 `call-server` 提供，路径前缀为 `/v1/call/user/contacts`。用户可查询和管理自己绑定设备的联系人。
+
+**鉴权**：请求头使用 `Authorization: Bearer <user_jwt>`。`user_jwt` 为注册或登录接口返回的 `token`，不能使用设备的 `mqtt_token`。凭证缺失、无效或过期时返回 HTTP 401、`code=401`；无权操作目标设备或联系人时返回 HTTP 200、`code=40300`。
+
+**接口列表**
+
+| 接口名称 | 调用方 | 方法 | 路径 | 鉴权要求与方式 |
+|---|---|---|---|---|
+| [查询设备联系人](#get-v1callusercontactsdevice_idxxx) | Web | GET | `/v1/call/user/contacts` | 必需：用户 JWT（user_jwt） |
+| [查询账号待审批申请](#get-v1callusercontactspending) | Web | GET | `/v1/call/user/contacts/pending` | 必需：用户 JWT（user_jwt） |
+| [为设备申请联系人](#post-v1callusercontactsrequest) | Web | POST | `/v1/call/user/contacts/request` | 必需：用户 JWT（user_jwt） |
+| [审批设备联系人申请](#post-v1callusercontactsrespond) | Web | POST | `/v1/call/user/contacts/respond` | 必需：用户 JWT（user_jwt） |
+| [修改设备联系人备注](#put-v1callusercontactsremark) | Web | PUT | `/v1/call/user/contacts/remark` | 必需：用户 JWT（user_jwt） |
+| [删除设备联系人](#delete-v1callusercontactsid) | Web | DELETE | `/v1/call/user/contacts/:id` | 必需：用户 JWT（user_jwt） |
 
 <a id="get-v1callusercontactsdevice_idxxx"></a>
 
@@ -4381,9 +4613,17 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 
 **接口**：`GET /v1/call/user/contacts?device_id=xxx`
 
+**调用方**：Web。
+
 查询当前用户某台设备的完整联系人列表，同时返回设备联系人和 VoIP 联系人。
 
-**查询参数**：`device_id` 必填，且必须属于当前用户。
+**查询参数**
+
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `device_id` | string | 是 | 当前用户绑定的设备 ID |
+
+**请求体**：无。
 
 **成功响应**：
 
@@ -4437,6 +4677,8 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 
 **接口**：`GET /v1/call/user/contacts/pending`
 
+**调用方**：Web。
+
 查询当前用户名下所有设备可以审批的联系人申请。
 
 **成功响应**：
@@ -4465,6 +4707,8 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 
 **接口**：`POST /v1/call/user/contacts/request`
 
+**调用方**：Web。
+
 **鉴权**：用户 JWT。
 
 **请求体**
@@ -4485,6 +4729,8 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 #### 审批设备联系人申请
 
 **接口**：`POST /v1/call/user/contacts/respond`
+
+**调用方**：Web。
 
 **鉴权**：用户 JWT。
 
@@ -4507,6 +4753,8 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 
 **接口**：`PUT /v1/call/user/contacts/remark`
 
+**调用方**：Web。
+
 **鉴权**：用户 JWT。
 
 **请求体**
@@ -4519,7 +4767,7 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 
 **成功响应**：HTTP 200，`code=200`、`msg=ok`。无 `data` 字段。VoIP 名称同步到同一小程序下的授权设备。
 
-**错误码**：JWT 失败为 HTTP 401 + `401`；业务错误为 HTTP 200。`40000` 参数错误、`40300` 无权操作、`40400` 联系人或设备不存在、`50000` 内部错误。
+**错误码**：JWT 失败为 HTTP 401 + `401`；业务错误为 HTTP 200。`40000` 参数错误、`40300` 无权操作、`40205` 联系人不存在、`50000` 内部错误。
 
 ---
 
@@ -4528,6 +4776,8 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 #### 删除设备联系人
 
 **接口**：`DELETE /v1/call/user/contacts/:id`
+
+**调用方**：Web。
 
 **鉴权**：用户 JWT。
 
@@ -4545,11 +4795,23 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 
 ---
 
+### 内部服务接口
+
+仅供服务间调用，使用 `X-Internal-Key`，不对公网开放。
+
+**接口列表**
+
+| 接口名称 | 调用方 | 方法 | 路径 | 鉴权要求与方式 |
+|---|---|---|---|---|
+| [清理设备业务关联（内部）](#post-v1callinternalunbind) | 内部服务 | POST | `/v1/call/internal/unbind` | 必需：内部密钥（X-Internal-Key） |
+
 <a id="post-v1callinternalunbind"></a>
 
-### 清理设备业务关联（内部）
+#### 清理设备业务关联（内部）
 
 **接口**：`POST /v1/call/internal/unbind`
+
+**调用方**：内部服务。
 
 服务间调用：设备解绑时永久删除所有涉及该设备的 `call_contact` 记录（包括待审批、已拒绝和已软删除记录），释放房间，并向原有未删除联系人的对端发送 `callers_update`。
 
@@ -4573,21 +4835,7 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 
 操作流程和设备信令见[设备多人对讲](device-room.md)。下列 JSON 接口均禁止缓存，请求体上限为 4096 字节。
 
-**接口列表**
-
-| 接口名称 | 方法 | 路径 |
-|---|---|---|
-| [打开对讲页面](#get-v1callroompage) | GET | `/v1/call/room/page` |
-| [查询设备房间](#get-v1callroomwebdevicedevice_id) | GET | `/v1/call/room/web/device/:device_id` |
-| [为设备创建房间](#post-v1callroomwebdevicedevice_idcreate) | POST | `/v1/call/room/web/device/:device_id/create` |
-| [安排设备加入](#post-v1callroomwebdevicedevice_idjoin) | POST | `/v1/call/room/web/device/:device_id/join` |
-| [安排设备退出](#post-v1callroomwebdevicedevice_idleave) | POST | `/v1/call/room/web/device/:device_id/leave` |
-| [查询本机房间](#get-v1callroomdeviceassignment) | GET | `/v1/call/room/device/assignment` |
-| [本机创建房间](#post-v1callroomdevicecreate) | POST | `/v1/call/room/device/create` |
-| [本机加入房间](#post-v1callroomdevicejoin) | POST | `/v1/call/room/device/join` |
-| [本机退出房间](#post-v1callroomdeviceleave) | POST | `/v1/call/room/device/leave` |
-| [领取连接凭证](#post-v1callroomdeviceconnect-token) | POST | `/v1/call/room/device/connect-token` |
-| [上报状态和续租](#post-v1callroomdevicepresence) | POST | `/v1/call/room/device/presence` |
+每台设备同一时间只能加入一个多人对讲房间。设备已有房间关系时，创建新房间或加入其他房间会被拒绝；客户端须先调用退出接口，再创建或加入。
 
 **公共请求头**
 
@@ -4595,13 +4843,28 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 |---|---|---|
 | `Authorization` | string | JSON 接口必填，`Bearer <JWT>`；Web 接口用用户 JWT，设备接口用正式设备 JWT |
 | `Content-Type` | string | POST 必填，`application/json` |
-| `Idempotency-Key` | string | create、join、leave 必填，8–64 字符；同一操作重试时复用原键和请求体 |
+
+### Web 端接口
+
+用于用户在 Web 页面查询和管理自己绑定设备的房间。JSON 接口使用 `Authorization: Bearer <user_jwt>`；对讲页面本身无需鉴权。
+
+**接口列表**
+
+| 接口名称 | 调用方 | 方法 | 路径 | 鉴权要求与方式 |
+|---|---|---|---|---|
+| [打开多人对讲页面](#get-v1callroompage) | Web | GET | `/v1/call/group/page` | 页面无需鉴权；页面操作需用户 JWT |
+| [查询设备的多人对讲房间](#get-v1callroomwebdevicedevice_id) | Web | GET | `/v1/call/group/web/device/:device_id` | 必需：用户 JWT（user_jwt） |
+| [为设备创建多人对讲房间](#post-v1callroomwebdevicedevice_idcreate) | Web | POST | `/v1/call/group/web/device/:device_id/create` | 必需：用户 JWT（user_jwt） |
+| [安排设备加入多人对讲](#post-v1callroomwebdevicedevice_idjoin) | Web | POST | `/v1/call/group/web/device/:device_id/join` | 必需：用户 JWT（user_jwt） |
+| [安排设备退出多人对讲](#post-v1callroomwebdevicedevice_idleave) | Web | POST | `/v1/call/group/web/device/:device_id/leave` | 必需：用户 JWT（user_jwt） |
 
 <a id="get-v1callroompage"></a>
 
-### 打开对讲页面
+#### 打开多人对讲页面
 
-**接口**：`GET /v1/call/room/page`
+**接口**：`GET /v1/call/group/page`
+
+**调用方**：Web。
 
 返回多人对讲 H5 页面。HTML 本身无需鉴权，页面查询和操作仍需用户 JWT。
 
@@ -4613,9 +4876,11 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 
 <a id="get-v1callroomwebdevicedevice_id"></a>
 
-### 查询设备房间
+#### 查询设备的多人对讲房间
 
-**接口**：`GET /v1/call/room/web/device/:device_id`
+**接口**：`GET /v1/call/group/web/device/:device_id`
+
+**调用方**：Web。
 
 **鉴权**：用户 JWT，只能操作自己绑定的设备。
 
@@ -4633,9 +4898,11 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 
 <a id="post-v1callroomwebdevicedevice_idcreate"></a>
 
-### 为设备创建房间
+#### 为设备创建多人对讲房间
 
-**接口**：`POST /v1/call/room/web/device/:device_id/create`
+**接口**：`POST /v1/call/group/web/device/:device_id/create`
+
+**调用方**：Web。
 
 **鉴权**：用户 JWT，只能操作自己绑定的设备。
 
@@ -4653,15 +4920,19 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 
 没有密码时也需发送 `{}`。创建成功后保存设备的加入关系。
 
+设备已有房间关系时返回 `40923`，须先退出当前房间。
+
 **成功响应**：HTTP 200，`code=200`、`msg=ok`，`data` 的全部字段见[房间关系返回字段](#房间关系返回字段)。变更接口成功表示关系已保存，设备连接结果需再次查询。
 
 **失败响应**：见[多人对讲错误处理](#多人对讲错误处理)，客户端按数值 `code` 判断。
 
 <a id="post-v1callroomwebdevicedevice_idjoin"></a>
 
-### 安排设备加入
+#### 安排设备加入多人对讲
 
-**接口**：`POST /v1/call/room/web/device/:device_id/join`
+**接口**：`POST /v1/call/group/web/device/:device_id/join`
+
+**调用方**：Web。
 
 **鉴权**：用户 JWT，只能操作自己绑定的设备。
 
@@ -4678,15 +4949,19 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 | `room_code` | string | 是 | 六位 ASCII 数字房间号，保留前导零 |
 | `password` | string | 有密码时 | 四位数字密码，无密码房间可省略 |
 
+重复加入当前房间直接返回已有关系；设备已在其他房间时返回 `40923`，须先退出当前房间。
+
 **成功响应**：HTTP 200，`code=200`、`msg=ok`，`data` 的全部字段见[房间关系返回字段](#房间关系返回字段)。变更接口成功表示关系已保存，设备连接结果需再次查询。
 
 **失败响应**：见[多人对讲错误处理](#多人对讲错误处理)，客户端按数值 `code` 判断。
 
 <a id="post-v1callroomwebdevicedevice_idleave"></a>
 
-### 安排设备退出
+#### 安排设备退出多人对讲
 
-**接口**：`POST /v1/call/room/web/device/:device_id/leave`
+**接口**：`POST /v1/call/group/web/device/:device_id/leave`
+
+**调用方**：Web。
 
 **鉴权**：用户 JWT，只能操作自己绑定的设备。
 
@@ -4705,15 +4980,34 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 
 发送 `{}` 表示退出当前房间；携带校验字段可避免误退出已切换的房间。
 
+设备当前没有房间关系时直接返回成功，关系版本保持不变。
+
 **成功响应**：HTTP 200，`code=200`、`msg=ok`，`data` 的全部字段见[房间关系返回字段](#房间关系返回字段)。变更接口成功表示关系已保存，设备连接结果需再次查询。
 
 **失败响应**：见[多人对讲错误处理](#多人对讲错误处理)，客户端按数值 `code` 判断。
 
+### 设备端接口
+
+用于设备查询本机房间、加入或退出房间、领取连接凭证和上报状态。使用 `Authorization: Bearer <mqtt_token>`（正式设备 JWT），设备身份由 token 确定，不能使用用户 JWT 或临时设备 token。
+
+**接口列表**
+
+| 接口名称 | 调用方 | 方法 | 路径 | 鉴权要求与方式 |
+|---|---|---|---|---|
+| [查询本机多人对讲房间](#get-v1callroomdeviceassignment) | 设备 | GET | `/v1/call/group/device/assignment` | 必需：正式设备 JWT（mqtt_token） |
+| [本机创建多人对讲房间](#post-v1callroomdevicecreate) | 设备 | POST | `/v1/call/group/device/create` | 必需：正式设备 JWT（mqtt_token） |
+| [本机加入多人对讲房间](#post-v1callroomdevicejoin) | 设备 | POST | `/v1/call/group/device/join` | 必需：正式设备 JWT（mqtt_token） |
+| [本机退出多人对讲房间](#post-v1callroomdeviceleave) | 设备 | POST | `/v1/call/group/device/leave` | 必需：正式设备 JWT（mqtt_token） |
+| [领取多人对讲连接凭证](#post-v1callroomdeviceconnect-token) | 设备 | POST | `/v1/call/group/device/connect-token` | 必需：正式设备 JWT（mqtt_token） |
+| [上报多人对讲状态和续租](#post-v1callroomdevicepresence) | 设备 | POST | `/v1/call/group/device/presence` | 必需：正式设备 JWT（mqtt_token） |
+
 <a id="get-v1callroomdeviceassignment"></a>
 
-### 查询本机房间
+#### 查询本机多人对讲房间
 
-**接口**：`GET /v1/call/room/device/assignment`
+**接口**：`GET /v1/call/group/device/assignment`
+
+**调用方**：设备。
 
 **鉴权**：正式设备 JWT，设备身份取自 token。
 
@@ -4727,9 +5021,11 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 
 <a id="post-v1callroomdevicecreate"></a>
 
-### 本机创建房间
+#### 本机创建多人对讲房间
 
-**接口**：`POST /v1/call/room/device/create`
+**接口**：`POST /v1/call/group/device/create`
+
+**调用方**：设备。
 
 **鉴权**：正式设备 JWT，设备身份取自 token。
 
@@ -4743,15 +5039,19 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 
 没有密码时也需发送 `{}`。创建成功后保存设备的加入关系。
 
+设备已有房间关系时返回 `40923`，须先退出当前房间。
+
 **成功响应**：HTTP 200，`code=200`、`msg=ok`，`data` 的全部字段见[房间关系返回字段](#房间关系返回字段)。变更接口成功表示关系已保存，设备连接结果需再次查询。
 
 **失败响应**：见[多人对讲错误处理](#多人对讲错误处理)，客户端按数值 `code` 判断。
 
 <a id="post-v1callroomdevicejoin"></a>
 
-### 本机加入房间
+#### 本机加入多人对讲房间
 
-**接口**：`POST /v1/call/room/device/join`
+**接口**：`POST /v1/call/group/device/join`
+
+**调用方**：设备。
 
 **鉴权**：正式设备 JWT，设备身份取自 token。
 
@@ -4764,15 +5064,19 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 | `room_code` | string | 是 | 六位 ASCII 数字房间号，保留前导零 |
 | `password` | string | 有密码时 | 四位数字密码，无密码房间可省略 |
 
+重复加入当前房间直接返回已有关系；设备已在其他房间时返回 `40923`，须先退出当前房间。
+
 **成功响应**：HTTP 200，`code=200`、`msg=ok`，`data` 的全部字段见[房间关系返回字段](#房间关系返回字段)。变更接口成功表示关系已保存，设备连接结果需再次查询。
 
 **失败响应**：见[多人对讲错误处理](#多人对讲错误处理)，客户端按数值 `code` 判断。
 
 <a id="post-v1callroomdeviceleave"></a>
 
-### 本机退出房间
+#### 本机退出多人对讲房间
 
-**接口**：`POST /v1/call/room/device/leave`
+**接口**：`POST /v1/call/group/device/leave`
+
+**调用方**：设备。
 
 **鉴权**：正式设备 JWT，设备身份取自 token。
 
@@ -4787,15 +5091,19 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 
 发送 `{}` 表示退出当前房间；携带校验字段可避免误退出已切换的房间。
 
+设备当前没有房间关系时直接返回成功，关系版本保持不变。
+
 **成功响应**：HTTP 200，`code=200`、`msg=ok`，`data` 的全部字段见[房间关系返回字段](#房间关系返回字段)。变更接口成功表示关系已保存，设备连接结果需再次查询。
 
 **失败响应**：见[多人对讲错误处理](#多人对讲错误处理)，客户端按数值 `code` 判断。
 
 <a id="post-v1callroomdeviceconnect-token"></a>
 
-### 领取连接凭证
+#### 领取多人对讲连接凭证
 
-**接口**：`POST /v1/call/room/device/connect-token`
+**接口**：`POST /v1/call/group/device/connect-token`
+
+**调用方**：设备。
 
 **鉴权**：正式设备 JWT，设备身份取自 token。
 
@@ -4805,9 +5113,9 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `room_id` | string | 原始业务房间 ID，长度 1–64 字符 |
+| `room_id` | string | 原始业务房间 ID，长度 1–64 字节 |
 | `assignment_version` | integer | 当前关系版本，大于 0 |
-| `session_id` | string | 设备生成的会话 ID，长度 8–64 字符；每次重建连接使用新 ID |
+| `session_id` | string | 设备生成的会话 ID，长度 8–64 字节；每次重建连接使用新 ID |
 
 **成功响应**：HTTP 200，`code=200`、`msg=ok`，`data` 为以下对象。
 
@@ -4825,9 +5133,11 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 
 <a id="post-v1callroomdevicepresence"></a>
 
-### 上报状态和续租
+#### 上报多人对讲状态和续租
 
-**接口**：`POST /v1/call/room/device/presence`
+**接口**：`POST /v1/call/group/device/presence`
+
+**调用方**：设备。
 
 **鉴权**：正式设备 JWT，设备身份取自 token。
 
@@ -4837,9 +5147,9 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `room_id` | string | 原始业务房间 ID，长度 1–64 字符 |
+| `room_id` | string | 原始业务房间 ID，长度 1–64 字节 |
 | `assignment_version` | integer | 当前关系版本，大于 0 |
-| `session_id` | string | 设备生成的会话 ID，长度 8–64 字符；每次重建连接使用新 ID |
+| `session_id` | string | 设备生成的会话 ID，长度 8–64 字节；每次重建连接使用新 ID |
 | `state` | string | connecting、joined、suspended、left 或 connect_failed |
 
 **成功响应**：HTTP 200，`{"code":200,"msg":"ok","data":null}`。
@@ -4858,7 +5168,7 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
   "msg": "ok",
   "data": {
     "device_id": "device-1",
-    "room_id": "<内部房间ID>",
+    "room_id": "group_room_78c2cdf66ee1283cb84fcb15444fdf68",
     "room_code": "001234",
     "desired_state": "joined",
     "assignment_version": 3,
@@ -4873,7 +5183,7 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 | 字段 | 类型 | 含义 |
 |---|---|---|
 | `device_id` | string | 当前设备 ID |
-| `room_id` | string | 内部房间 ID，后续连接和上报时原样传递 |
+| `room_id` | string | 多人对讲房间 ID，后续连接和上报时原样传递；不是六位 `room_code` 或一对一通话 ID |
 | `room_code` | string | 六位数字房间号，按字符串处理并保留前导零 |
 | `desired_state` | string | 设备应保持的房间关系 |
 | `assignment_version` | integer | 房间关系版本，连接和上报时携带查询到的版本 |
@@ -4897,17 +5207,19 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 
 连接预占计入房间容量，但不计入 `online_count`。
 
+`online` 和 `online_count` 的实时值来自查询接口。create、join、leave 返回保存的关系快照，不能用其中的在线字段判断当前连接；需要时再调用查询接口。
+
 ### 多人对讲错误处理
 
 | 业务码 | 含义与处理 |
 |---|---|
-| 40000 | 参数或幂等键不合法，检查六位数字房间号、可选四位数字密码及会话标识 |
+| 40000 | 参数不合法，检查六位数字房间号、可选四位数字密码及会话标识 |
 | 40300 | 当前账号无设备权限或设备未绑定，刷新绑定状态 |
 | 40320 | 房间密码错误，重新输入 |
 | 40400 | 房间不存在或已关闭，重新同步 |
 | 40920 | 房间容量已满，稍后重试 |
 | 40921 | 关系版本或连接代次过期，读取最新关系 |
-| 40922 | 幂等键被用于不同请求体，重新生成操作键 |
+| 40923 | 设备已在其他多人对讲房间，先退出当前房间再创建或加入 |
 | 42900 | 请求过频，退避重试 |
 | 42920 | 同一设备连续五次密码错误，十分钟后重试 |
 | 50200 | 连接凭证服务不可用，退避重试 |

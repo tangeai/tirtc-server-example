@@ -32,6 +32,14 @@ BEFORE="$(git -C "$FIXTURE" status --porcelain)"
 run() { env SOURCE_ROOT="$FIXTURE" DEPLOY_ROOT="$TEST_ROOT/deploy with spaces" "$SCRIPTS/deploy-local.sh" "$@"; }
 run help >"$TEST_ROOT/help"
 rg -q -- '--archive-existing' "$TEST_ROOT/help"
+if rg -q 'DATABASE_BACKUP_FILE|DATABASE_BACKUP_RESTORE_VERIFIED|恢复演练确认' "$TEST_ROOT/help"; then
+    echo 'FAIL: local update help must not require the production backup gate' >&2
+    exit 1
+fi
+OVERRIDE_LINE="$(grep -n '^    validate_database_backup()' "$SCRIPTS/deploy-local.sh" | head -1 | cut -d: -f1)"
+DEPLOY_LINE="$(grep -n '^    full_deploy$' "$SCRIPTS/deploy-local.sh" | head -1 | cut -d: -f1)"
+[ -n "$OVERRIDE_LINE" ] && [ -n "$DEPLOY_LINE" ] && [ "$OVERRIDE_LINE" -lt "$DEPLOY_LINE" ]
+echo 'PASS: local update bypasses only the production backup restore gate'
 run prepare >"$TEST_ROOT/prepare.log" 2>&1
 SNAPSHOT="$(find "$TEST_ROOT/deploy with spaces.sources" -mindepth 1 -maxdepth 1 -type d)"
 [ -f "$SNAPSHOT/repository/thing-connect/new-feature.go" ]
@@ -55,8 +63,8 @@ rg -q 'keep' "$TEST_ROOT/deploy with spaces/var/installer/installed.json"
 echo 'PASS: installed instance cannot be overwritten by install'
 
 if run update >"$TEST_ROOT/update.log" 2>&1; then exit 1; fi
-rg -q MIGRATION_CONFIG "$TEST_ROOT/update.log"
-echo 'PASS: update requires migration credentials'
+rg -q 'config-current/admin-server/config.yaml' "$TEST_ROOT/update.log"
+echo 'PASS: update defaults to the installed Admin database configuration'
 
 (
     exec 8>"$TEST_ROOT/deploy with spaces/deploy.lock"

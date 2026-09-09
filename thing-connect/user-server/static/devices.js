@@ -167,7 +167,7 @@ async function refreshSummaries() {
         (async () => {
           try {
             const response = await api(
-              "/v1/call/room/web/device/" + encodeURIComponent(d.device_id),
+              "/v1/call/group/web/device/" + encodeURIComponent(d.device_id),
             );
             if (response.code !== 200) throw Error();
             if (generation !== summaryGeneration) return;
@@ -232,7 +232,7 @@ async function refreshSummaries() {
   }
 }
 function goRoom(id) {
-  location.href = "/v1/call/room/page?device_id=" + encodeURIComponent(id);
+  location.href = "/v1/call/group/page?device_id=" + encodeURIComponent(id);
 }
 let selectedDeviceID = null;
 let menuTrigger = null;

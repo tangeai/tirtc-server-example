@@ -8,7 +8,7 @@ async (page) => {
   await page.route('**/v1/user/me', route => route.fulfill({json:{code:200,data:{user_id:1,email:'browser@example.com'}}}));
   await page.route('**/v1/user/device/list', r => r.fulfill({json: {code:200, data:[{device_id:'test-device-menu',device_name:'客厅设备名称十三字测试设备', online:true}]}}));
   await page.route('**/v1/ai/device/**/role', r => r.fulfill({json:{code:200,data:{role_id:''}}}));
-  await page.route('**/v1/call/room/web/device/**', r => r.fulfill({json:{code:200,data:{desired_state:'left'}}}));
+  await page.route('**/v1/call/group/web/device/**', r => r.fulfill({json:{code:200,data:{desired_state:'left'}}}));
   await page.goto(base + '/devices');
   const check = (ok, message) => { if (!ok) throw Error(message); };
   const trigger = page.locator('[aria-haspopup=menu]');

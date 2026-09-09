@@ -54,6 +54,11 @@ jobs:
       - name: Go vet
         working-directory: thing-connect
         run: go vet ./...
+      - name: API documentation checks
+        working-directory: thing-connect
+        run: |
+          python3 scripts/check-api-docs.py
+          python3 -m unittest discover -s scripts -p 'test_check_api_docs.py'
       - name: Go tests
         working-directory: thing-connect
         env:

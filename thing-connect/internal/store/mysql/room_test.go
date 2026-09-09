@@ -32,7 +32,7 @@ func TestIntercomTransactions(t *testing.T) {
 	db := openTestDB(t)
 	db.SetMaxOpenConns(12)
 	ctx := context.Background()
-	for _, table := range []string{"call_outbox", "call_requests", "call_leases", "call_assignments", "call_room_codes", "call_rooms"} {
+	for _, table := range []string{"call_outbox", "call_leases", "call_assignments", "call_room_codes", "call_rooms"} {
 		if _, e := db.Exec("DELETE FROM " + table); e != nil {
 			t.Fatal(e)
 		}
@@ -47,7 +47,7 @@ func TestIntercomTransactions(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	op := room.Operation{DeviceID: "intercom-0", UserID: 1, Key: "create-request-1", Kind: "create", Password: "0573"}
+	op := room.Operation{DeviceID: "intercom-0", UserID: 1, Kind: "create", Password: "0573"}
 	a, e := service.Change(ctx, op)
 	if e != nil {
 		t.Fatal(e)
@@ -55,19 +55,14 @@ func TestIntercomTransactions(t *testing.T) {
 	if !room.Digits(a.RoomCode, 6) || !strings.HasPrefix(a.RoomID, "group_room_") {
 		t.Fatalf("code=%q", a.RoomCode)
 	}
-	replay, e := service.Change(ctx, op)
-	if e != nil || replay.RoomID != a.RoomID || replay.Version != a.Version {
-		t.Fatalf("duplicate create: %+v %v", replay, e)
-	}
-	op.Password = "1234"
-	if _, e = service.Change(ctx, op); !errors.Is(e, room.ErrConflict) {
-		t.Fatalf("idempotency conflict=%v", e)
+	if _, e = service.Change(ctx, op); !errors.Is(e, room.ErrAssigned) {
+		t.Fatalf("duplicate create=%v", e)
 	}
 	if _, e = service.Current(ctx, "intercom-0", 2); !errors.Is(e, room.ErrForbidden) {
 		t.Fatalf("ownership=%v", e)
 	}
 	for i := 0; i < 5; i++ {
-		_, e = service.Change(ctx, room.Operation{DeviceID: "intercom-101", UserID: 1, Key: fmt.Sprintf("password-wrong-%d", i), Kind: "join", Code: a.RoomCode, Password: "9999"})
+		_, e = service.Change(ctx, room.Operation{DeviceID: "intercom-101", UserID: 1, Kind: "join", Code: a.RoomCode, Password: "9999"})
 		want := room.ErrPassword
 		if i == 4 {
 			want = room.ErrLocked
@@ -76,7 +71,7 @@ func TestIntercomTransactions(t *testing.T) {
 			t.Fatalf("failure %d=%v", i, e)
 		}
 	}
-	if _, e = service.Change(ctx, room.Operation{DeviceID: "intercom-101", UserID: 1, Key: "locked-join", Kind: "join", Code: a.RoomCode, Password: "0573"}); !errors.Is(e, room.ErrLocked) {
+	if _, e = service.Change(ctx, room.Operation{DeviceID: "intercom-101", UserID: 1, Kind: "join", Code: a.RoomCode, Password: "0573"}); !errors.Is(e, room.ErrLocked) {
 		t.Fatalf("locked correct password=%v", e)
 	}
 	if _, e = service.Connect(ctx, "intercom-0", room.Presence{RoomID: a.RoomID, Version: 1, SessionID: "session-0"}); e != nil {
@@ -90,7 +85,7 @@ func TestIntercomTransactions(t *testing.T) {
 			defer wg.Done()
 			device := fmt.Sprintf("intercom-%d", i)
 			if i != 0 {
-				_, e := service.Change(ctx, room.Operation{DeviceID: device, UserID: 1, Key: fmt.Sprintf("join-request-%d", i), Kind: "join", Code: a.RoomCode, Password: "0573"})
+				_, e := service.Change(ctx, room.Operation{DeviceID: device, UserID: 1, Kind: "join", Code: a.RoomCode, Password: "0573"})
 				if e != nil {
 					errs <- e
 					return
@@ -147,6 +142,57 @@ func TestIntercomTransactions(t *testing.T) {
 	}
 }
 
+func TestIntercomDeviceMustLeaveBeforeChangingRooms(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	firstDevice, secondDevice := uniqueDevID(), uniqueDevID()
+	for _, device := range []string{firstDevice, secondDevice} {
+		if _, err := db.Exec("INSERT INTO device_bind(device_id,user_id) VALUES(?,31)", device); err != nil {
+			t.Fatal(err)
+		}
+	}
+	service, err := room.New(mysqlstore.NewRoomStore(db), roomTokenStub{}, roomSignalsStub{}, []byte(strings.Repeat("p", 32)), room.DefaultPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := service.Change(ctx, room.Operation{DeviceID: firstDevice, UserID: 31, Kind: "create"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := service.Change(ctx, room.Operation{DeviceID: secondDevice, UserID: 31, Kind: "create"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocked, err := service.Change(ctx, room.Operation{DeviceID: firstDevice, UserID: 31, Kind: "create"})
+	if !errors.Is(err, room.ErrAssigned) || blocked.RoomID != first.RoomID {
+		t.Fatalf("duplicate create changed assignment: %+v %v", blocked, err)
+	}
+	same, err := service.Change(ctx, room.Operation{DeviceID: firstDevice, UserID: 31, Kind: "join", Code: first.RoomCode})
+	if err != nil || same.RoomID != first.RoomID || same.Version != first.Version {
+		t.Fatalf("joining current room should be a no-op: %+v %v", same, err)
+	}
+	blocked, err = service.Change(ctx, room.Operation{DeviceID: firstDevice, UserID: 31, Kind: "join", Code: second.RoomCode})
+	if !errors.Is(err, room.ErrAssigned) || blocked.RoomID != first.RoomID {
+		t.Fatalf("joining another room changed assignment: %+v %v", blocked, err)
+	}
+	left, err := service.Change(ctx, room.Operation{DeviceID: firstDevice, UserID: 31, Kind: "leave", RoomID: first.RoomID, Version: first.Version})
+	if err != nil || left.Desired != "left" {
+		t.Fatalf("leave failed: %+v %v", left, err)
+	}
+	again, err := service.Change(ctx, room.Operation{DeviceID: firstDevice, UserID: 31, Kind: "leave"})
+	if err != nil || again.Version != left.Version {
+		t.Fatalf("repeated leave changed state: %+v %v", again, err)
+	}
+	joined, err := service.Change(ctx, room.Operation{DeviceID: firstDevice, UserID: 31, Kind: "join", Code: second.RoomCode})
+	if err != nil || joined.RoomID != second.RoomID {
+		t.Fatalf("join after leave failed: %+v %v", joined, err)
+	}
+	var count int
+	if err = db.Get(&count, "SELECT COUNT(*) FROM call_rooms WHERE room_id IN (?,?)", first.RoomID, second.RoomID); err != nil || count != 2 {
+		t.Fatalf("unexpected room count=%d err=%v", count, err)
+	}
+}
+
 func TestIntercomLeaveDuringTokenRequest(t *testing.T) {
 	db := openTestDB(t)
 	db.SetMaxOpenConns(12)
@@ -159,7 +205,7 @@ func TestIntercomLeaveDuringTokenRequest(t *testing.T) {
 	var svc *room.Service
 	var a room.Assignment
 	issuer := roomTokenStub{before: func() {
-		_, e := svc.Change(ctx, room.Operation{DeviceID: device, UserID: 9, Kind: "leave", Key: "leave-during-token", RoomID: a.RoomID, Version: a.Version})
+		_, e := svc.Change(ctx, room.Operation{DeviceID: device, UserID: 9, Kind: "leave", RoomID: a.RoomID, Version: a.Version})
 		if e != nil {
 			t.Error(e)
 		}
@@ -169,7 +215,7 @@ func TestIntercomLeaveDuringTokenRequest(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	a, e = svc.Change(ctx, room.Operation{DeviceID: device, UserID: 9, Kind: "create", Key: "create-token-race"})
+	a, e = svc.Change(ctx, room.Operation{DeviceID: device, UserID: 9, Kind: "create"})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -190,7 +236,7 @@ func TestIntercomSessionFencingAndUnbind(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a, err := svc.Change(ctx, room.Operation{DeviceID: device, UserID: 1, Kind: "create", Key: "create-room-request"})
+	a, err := svc.Change(ctx, room.Operation{DeviceID: device, UserID: 1, Kind: "create"})
 	if err != nil {
 		t.Fatal(err)
 	}

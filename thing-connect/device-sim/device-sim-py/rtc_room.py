@@ -298,14 +298,12 @@ class RoomSession:
             mic = '正在说话' if member.get('mic_state') == 'speaking' else '收听中'
             print(f'[room]   {i}. {label(device)}{own} · {mic}', flush=True)
 
-    def _api(self, method, path, body=None, key=None):
+    def _api(self, method, path, body=None):
         headers = {'Authorization': 'Bearer ' + self.config.mqtt_token}
-        if key:
-            headers['Idempotency-Key'] = key
         started = time.monotonic()
         try:
             response = self.http.request(method, self.config.call_server.rstrip('/') +
-                                         '/v1/call/room/device/' + path, json=body,
+                                         '/v1/call/group/device/' + path, json=body,
                                          headers=headers, timeout=5)
         except Exception:
             self._diagnostic(f'HTTP {method} {path} 失败 耗时={(time.monotonic()-started)*1000:.0f}ms')
@@ -409,7 +407,7 @@ class RoomSession:
                     return
                 body = {'room_code': parts[1], 'password': parts[2] if len(parts) == 3 else ''}
             try:
-                self._api('POST', parts[0], body, uuid.uuid4().hex)
+                self._api('POST', parts[0], body)
             except Exception as exc:
                 print('[room] 操作失败 code=' + str(getattr(exc, 'code', 50200)), flush=True)
             self.sync()

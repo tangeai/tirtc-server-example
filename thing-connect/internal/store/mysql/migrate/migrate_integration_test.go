@@ -70,8 +70,16 @@ func TestMigrateNewTables(t *testing.T) {
 	if err := sqlDB.Get(&count, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='admin_users'`); err != nil || count == 0 {
 		t.Errorf("admin_users table missing: n=%d err=%v", count, err)
 	}
-	if err := sqlDB.Get(&count, `SELECT COUNT(*) FROM schema_migrations WHERE component IN ('core','admin')`); err != nil || count != 5 {
+	if err := sqlDB.Get(&count, `SELECT COUNT(*) FROM schema_migrations WHERE component IN ('core','admin')`); err != nil || count != 3 {
 		t.Errorf("schema_migrations entries: n=%d err=%v", count, err)
+	}
+	if err := sqlDB.Get(&count, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='call_requests'`); err != nil || count != 0 {
+		t.Errorf("unreleased call_requests table exists: n=%d err=%v", count, err)
+	}
+	for _, table := range []string{"call_rooms", "call_room_codes", "call_assignments", "call_leases", "call_outbox", "device_profile"} {
+		if err := sqlDB.Get(&count, `SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name=? AND column_name IN ('created_at','updated_at') AND is_nullable='NO'`, table); err != nil || count != 2 {
+			t.Errorf("%s audit timestamps: n=%d err=%v", table, count, err)
+		}
 	}
 	if err := sqlDB.Get(&count, `SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='config_entries' AND column_name='secret_value'`); err != nil || count != 1 {
 		t.Errorf("config plaintext secret column missing: n=%d err=%v", count, err)
@@ -118,64 +126,5 @@ func resetTestSchema(t *testing.T, sqlDB *sqlx.DB) {
 		if _, err := conn.ExecContext(ctx, `DROP TABLE IF EXISTS `+quoted); err != nil {
 			t.Fatalf("drop test table %s: %v", quoted, err)
 		}
-	}
-}
-
-func TestCallTimestampUpgradePreservesDataAndMaintainsAuditTimes(t *testing.T) {
-	cfg := testenv.LoadConfigOrSkip(t, "../../../../tests/testdata/config.yaml")
-	db := testenv.OpenDBOrSkip(t, cfg)
-	defer db.Close()
-	resetTestSchema(t, db)
-	if err := migrate.Migrate(db); err != nil {
-		t.Fatal(err)
-	}
-	tables := []string{"call_rooms", "call_room_codes", "call_assignments", "call_leases", "call_requests", "call_outbox"}
-	// Reproduce the already-applied v2 schema from before timestamp unification.
-	if _, err := db.Exec("DROP TABLE device_profile"); err != nil {
-		t.Fatal(err)
-	}
-	for _, table := range tables {
-		if _, err := db.Exec("ALTER TABLE " + table + " DROP COLUMN updated_at"); err != nil {
-			t.Fatal(err)
-		}
-		if table != "call_rooms" && table != "call_requests" {
-			if _, err := db.Exec("ALTER TABLE " + table + " DROP COLUMN created_at"); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-	if _, err := db.Exec("DELETE FROM schema_migrations WHERE component='core' AND version>=3"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec("INSERT INTO call_rooms(room_id,room_code,owner_user_id,status,created_at,participant_limit) VALUES('audit-room','001234',1,'waiting_join','2020-01-02 03:04:05.123456',100)"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec("INSERT INTO call_assignments(device_id) VALUES('audit-device')"); err != nil {
-		t.Fatal(err)
-	}
-	for i := 0; i < 2; i++ {
-		if err := migrate.Migrate(db); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for _, table := range tables {
-		var count int
-		if err := db.Get(&count, "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name=? AND column_name IN ('created_at','updated_at') AND is_nullable='NO'", table); err != nil || count != 2 {
-			t.Fatalf("%s timestamps=%d %v", table, count, err)
-		}
-	}
-	var preserved string
-	if err := db.Get(&preserved, "SELECT DATE_FORMAT(created_at,'%Y-%m-%d %H:%i:%s.%f') FROM call_rooms WHERE room_id='audit-room'"); err != nil || preserved != "2020-01-02 03:04:05.123456" {
-		t.Fatalf("creation time=%s %v", preserved, err)
-	}
-	if _, err := db.Exec("UPDATE call_assignments SET created_at='2020-01-01',updated_at='2020-01-02' WHERE device_id='audit-device'"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec("UPDATE call_assignments SET state='joined' WHERE device_id='audit-device'"); err != nil {
-		t.Fatal(err)
-	}
-	var valid bool
-	if err := db.Get(&valid, "SELECT created_at='2020-01-01' AND updated_at>'2020-01-02' FROM call_assignments WHERE device_id='audit-device'"); err != nil || !valid {
-		t.Fatalf("automatic update=%v %v", valid, err)
 	}
 }

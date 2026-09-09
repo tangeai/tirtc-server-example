@@ -3,7 +3,6 @@ package mysql
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"time"
 
@@ -152,28 +151,6 @@ func (t *roomTx) SetPasswordFailures(device string, n int, until time.Time) erro
 		nullable = until
 	}
 	_, e := t.tx.ExecContext(t.ctx, "UPDATE call_assignments SET password_failures=?,locked_until=? WHERE device_id=?", n, nullable, device)
-	return e
-}
-func (t *roomTx) Replay(key string) (string, room.Assignment, bool, error) {
-	var fp string
-	var raw []byte
-	e := t.tx.QueryRowContext(t.ctx, "SELECT fingerprint,response FROM call_requests WHERE request_key=?", key).Scan(&fp, &raw)
-	if errors.Is(e, sql.ErrNoRows) {
-		return "", room.Assignment{}, false, nil
-	}
-	if e != nil {
-		return "", room.Assignment{}, false, e
-	}
-	var a room.Assignment
-	e = json.Unmarshal(raw, &a)
-	return fp, a, true, e
-}
-func (t *roomTx) SaveReplay(key, fp string, a room.Assignment) error {
-	raw, e := json.Marshal(a)
-	if e != nil {
-		return e
-	}
-	_, e = t.tx.ExecContext(t.ctx, "INSERT INTO call_requests(request_key,fingerprint,response) VALUES(?,?,?)", key, fp, raw)
 	return e
 }
 func (t *roomTx) Notify(e room.Event) error {

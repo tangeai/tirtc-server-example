@@ -19,12 +19,13 @@ type intercomFixture struct {
 	device    string
 	user      int64
 	calls     int
+	err       error
 }
 
 func (f *intercomFixture) Change(_ context.Context, o roomapp.Operation) (roomapp.Assignment, error) {
 	f.operation = o
 	f.calls++
-	return roomapp.Assignment{DeviceID: o.DeviceID, Owner: 99, SessionID: "private-session", RoomCode: "001234"}, nil
+	return roomapp.Assignment{DeviceID: o.DeviceID, Owner: 99, SessionID: "private-session", RoomCode: "001234"}, f.err
 }
 func (f *intercomFixture) Current(_ context.Context, d string, u int64) (roomapp.Assignment, error) {
 	f.device = d
@@ -60,17 +61,16 @@ func TestIntercomHTTPIdentityAndCredentialBoundary(t *testing.T) {
 	request := func(method, path, bearer, body string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(method, path, strings.NewReader(body))
 		req.Header.Set("Authorization", "Bearer "+bearer)
-		req.Header.Set("Idempotency-Key", "request-001")
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
 		return w
 	}
-	w := request("POST", "/v1/call/room/device/create", device, `{"device_id":"forged","user_id":99,"password":"0573"}`)
+	w := request("POST", "/v1/call/group/device/create", device, `{"device_id":"forged","user_id":99,"password":"0573"}`)
 	if w.Code != 200 || f.operation.DeviceID != "jwt-device" || f.operation.UserID != 0 {
 		t.Fatalf("device identity: %+v %s", f.operation, w.Body.String())
 	}
-	w = request("POST", "/v1/call/room/web/device/path-device/join", user, `{"device_id":"forged","user_id":99,"room_code":"001234"}`)
+	w = request("POST", "/v1/call/group/web/device/path-device/join", user, `{"device_id":"forged","user_id":99,"room_code":"001234"}`)
 	if w.Code != 200 || f.operation.DeviceID != "path-device" || f.operation.UserID != 17 || f.operation.Code != "001234" {
 		t.Fatalf("web identity: %+v %s", f.operation, w.Body.String())
 	}
@@ -78,20 +78,20 @@ func TestIntercomHTTPIdentityAndCredentialBoundary(t *testing.T) {
 		t.Fatal("public response exposed private fields or was cacheable")
 	}
 	prior := f.calls
-	w = request("POST", "/v1/call/room/device/connect-token", user, `{}`)
+	w = request("POST", "/v1/call/group/device/connect-token", user, `{}`)
 	if w.Code != http.StatusUnauthorized || f.calls != prior {
 		t.Fatal("user token reached device credential service")
 	}
-	w = request("GET", "/v1/call/room/web/device/target", device, ``)
+	w = request("GET", "/v1/call/group/web/device/target", device, ``)
 	if w.Code != http.StatusUnauthorized || f.calls != prior {
 		t.Fatal("device token reached user controls")
 	}
-	w = request("POST", "/v1/call/room/device/connect-token", device, `{}`)
+	w = request("POST", "/v1/call/group/device/connect-token", device, `{}`)
 	if w.Code != 200 || !strings.Contains(w.Body.String(), "private-token") || w.Header().Get("Cache-Control") != "no-store" {
 		t.Fatal("device credential response incorrect")
 	}
 	prior = f.calls
-	w = request("POST", "/v1/call/room/device/create", device, `{"password":"`+strings.Repeat("1", 5000)+`"}`)
+	w = request("POST", "/v1/call/group/device/create", device, `{"password":"`+strings.Repeat("1", 5000)+`"}`)
 	var result struct {
 		Code int `json:"code"`
 	}
@@ -100,6 +100,14 @@ func TestIntercomHTTPIdentityAndCredentialBoundary(t *testing.T) {
 	}
 	if result.Code != 40000 || f.calls != prior {
 		t.Fatal("oversized request reached service")
+	}
+	f.err = roomapp.ErrAssigned
+	w = request("POST", "/v1/call/group/device/create", device, `{}`)
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Code != 40923 || !strings.Contains(w.Body.String(), "先退出") {
+		t.Fatalf("assigned room response=%s", w.Body.String())
 	}
 }
 
@@ -111,12 +119,12 @@ func TestIntercomRoutesUseCallNamespace(t *testing.T) {
 		t.Fatalf("unexpected room route count: %d", len(r.Routes()))
 	}
 	for _, route := range r.Routes() {
-		if !strings.HasPrefix(route.Path, "/v1/call/room/") {
+		if !strings.HasPrefix(route.Path, "/v1/call/group/") {
 			t.Errorf("room route outside call namespace: %s", route.Path)
 		}
 	}
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, httptest.NewRequest("GET", "/v1/call/room/page?device_id=test", nil))
+	r.ServeHTTP(w, httptest.NewRequest("GET", "/v1/call/group/page?device_id=test", nil))
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `id="home" href="/devices"`) {
 		t.Fatal("room page or home navigation missing")
 	}

@@ -26,9 +26,7 @@ local_usage() {
   SOURCE_ROOT       本地仓库根目录，默认脚本所在仓库（包含未提交文件）
   DEPLOY_ROOT       安装目录，默认 /opt/thing-connect
   GATEWAY_PORT      独立 Nginx 端口，默认 18080
-  MIGRATION_CONFIG  update 使用的 Admin 迁移账号 YAML，不能使用 DML 运行账号
-  DATABASE_BACKUP_FILE / DATABASE_BACKUP_RESTORE_VERIFIED
-                    update 有待执行迁移时要求有效备份与恢复演练确认，见 deployment.md
+  MIGRATION_CONFIG  update 使用的数据库配置；默认复用当前已激活的 Admin 配置
 
 install --archive-existing 仅用于全新安装：要求旧服务全部停止，将旧目录
 整体移动到旁边的带时间戳目录，旧数据库保持原样。Web 安装必须填写新的空库。
@@ -199,8 +197,15 @@ local_install() (
 )
 
 local_update() (
-    [ -n "${MIGRATION_CONFIG:-}" ] && [ -r "$MIGRATION_CONFIG" ] || {
-        local_error 'update 要求 MIGRATION_CONFIG 指向专用迁移账号 YAML'; return 1;
+    if [ -z "${MIGRATION_CONFIG:-}" ]; then
+        if [ -r "$LOCAL_DEPLOY_ROOT/admin-server/config.yaml" ]; then
+            MIGRATION_CONFIG="$LOCAL_DEPLOY_ROOT/admin-server/config.yaml"
+        else
+            MIGRATION_CONFIG="$LOCAL_DEPLOY_ROOT/config-current/admin-server/config.yaml"
+        fi
+    fi
+    [ -r "$MIGRATION_CONFIG" ] || {
+        local_error "迁移配置不可读: $MIGRATION_CONFIG"; return 1;
     }
     [ "${SKIP_MIGRATIONS:-0}" = 0 ] || { local_error '本地模拟生产部署必须检查迁移，不能跳过'; return 1; }
     local_prepare
@@ -214,6 +219,13 @@ local_update() (
     source "$BUILD_DIR/scripts/deploy-prod.sh"
     pull_code() { [ -f "$BUILD_DIR/bin/.release-commit" ]; }
     build_services() { validate_build_release "$@"; }
+    # Production updates require a verified restorable backup. This command is
+    # explicitly for the disposable local integration environment, so keep the
+    # production gate intact and override it only inside this subshell.
+    validate_database_backup() {
+        local_log '本地开发部署跳过生产数据库恢复演练门槛'
+        return 0
+    }
     full_deploy
     if ! DEPLOY_ROOT="$LOCAL_DEPLOY_ROOT" "$LOCAL_DEPLOY_ROOT/service-local.sh" start-all; then
         DEPLOY_ROOT="$LOCAL_DEPLOY_ROOT" "$LOCAL_DEPLOY_ROOT/service-local.sh" stop-all || true

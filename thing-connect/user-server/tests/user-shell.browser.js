@@ -8,7 +8,7 @@ async page => {
  await page.route('**/v1/user/me',r=>r.fulfill({status:expired?401:200,json:expired?{code:401}:{code:200,data:{user_id:1,email:'test@example.com'}}}));
  await page.route('**/v1/user/device/list',r=>r.fulfill({json:{code:200,data:[{device_id:'test-device',device_name:'测试设备',online:!offline}]}}));
  await page.route('**/v1/ai/device/**/role',r=>r.fulfill({json:{code:200,data:{role_id:''}}}));
- await page.route('**/v1/call/room/web/device/**',r=>r.fulfill({json:{code:200,data:{desired_state:'joined',state:offline?'waiting_device':'joined',room_code:'610337',online:!offline,online_count:2}}}));
+ await page.route('**/v1/call/group/web/device/**',r=>r.fulfill({json:{code:200,data:{desired_state:'joined',state:offline?'waiting_device':'joined',room_code:'610337',online:!offline,online_count:2}}}));
  await page.goto(base+'/devices');
  await page.locator('[data-room]').filter({hasText:/^610337$/}).waitFor();
  check(await page.locator('[data-navigation]').isHidden(),'empty navigation visible');
@@ -24,7 +24,7 @@ async page => {
   check(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'horizontal overflow '+width);
   await page.screenshot({path:'output/playwright/navigation-'+width+'.png',fullPage:true});
  }
- await page.locator('.device-summary button').last().click();await page.waitForURL('**/v1/call/room/page?device_id=test-device');
+ await page.locator('.device-summary button').last().click();await page.waitForURL('**/v1/call/group/page?device_id=test-device');
  await page.goto(base+'/devices');await page.locator('.device-summary button').first().click();await page.waitForURL('**/v1/ai/agent?device_id=test-device');
  await page.goto(base+'/devices');await page.evaluate(()=>sessionStorage.setItem('testing-expiry','1'));expired=true;await page.reload();await page.waitForURL('**/login');
  await page.getByText('登录状态已失效，请重新登录',{exact:true}).waitFor();

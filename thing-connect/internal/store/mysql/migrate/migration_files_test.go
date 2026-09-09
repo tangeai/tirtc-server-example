@@ -34,6 +34,7 @@ func TestEmbeddedMigrationFilesAreNonEmpty(t *testing.T) {
 		"migrations/core/001_user.sql", "migrations/core/001_device.sql",
 		"migrations/core/001_voip.sql", "migrations/core/001_ai.sql",
 		"migrations/core/001_call.sql", "migrations/core/001_zzz_schema_comments.sql",
+		"migrations/core/002_device_capabilities.sql",
 		"migrations/admin/001_schema.sql", "migrations/admin/001_installation_state.sql",
 		"migrations/admin/001_schema_comments.sql",
 	}
@@ -46,9 +47,22 @@ func TestEmbeddedMigrationFilesAreNonEmpty(t *testing.T) {
 }
 
 func TestCurrentMigrationCatalogVersions(t *testing.T) {
-	want := map[string]int{"core": 4, "admin": 1}
+	want := map[string]int{"core": 2, "admin": 1}
 	if got := CurrentMigrationVersions(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("versions=%v want=%v", got, want)
+	}
+}
+
+func TestCurrentSchemaContainsOnlyFinalGroupRoomTables(t *testing.T) {
+	shape, err := CurrentSchemaShape()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := shape["call_requests"]; exists {
+		t.Fatal("unreleased call_requests table entered the final schema")
+	}
+	if _, exists := shape["call_assignments"]; !exists {
+		t.Fatal("current schema lost call_assignments table")
 	}
 }
 
@@ -320,10 +334,20 @@ func TestEmbeddedMigrationsAndBootstrapSchemaHaveSameObjects(t *testing.T) {
 		regexp.MustCompile(`CREATE TABLE IF NOT EXISTS [a-z_]+`),
 		regexp.MustCompile(`(?:UNIQUE KEY|KEY|INDEX) [A-Za-z0-9_]+`),
 	}
+	embeddedShape, err := CurrentSchemaShape()
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, pattern := range patterns {
 		want := matchSet(pattern, embedded.String())
 		got := matchSet(pattern, string(bootstrap))
 		for object := range want {
+			if strings.HasPrefix(object, "CREATE TABLE IF NOT EXISTS ") {
+				table := strings.TrimPrefix(object, "CREATE TABLE IF NOT EXISTS ")
+				if _, active := embeddedShape[table]; !active {
+					continue
+				}
+			}
 			if !got[object] {
 				t.Errorf("scripts/schema.sql is missing %q", object)
 			}
@@ -339,10 +363,6 @@ func TestEmbeddedMigrationsAndBootstrapSchemaHaveSameObjects(t *testing.T) {
 		t.Fatal(err)
 	}
 	bootstrapShape, err := schemaShapeFromStatements(bootstrapStatements)
-	if err != nil {
-		t.Fatal(err)
-	}
-	embeddedShape, err := CurrentSchemaShape()
 	if err != nil {
 		t.Fatal(err)
 	}
