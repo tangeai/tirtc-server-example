@@ -279,6 +279,7 @@ class MicCapture:
         self._stream = None
         self._rate = SAMPLE_RATE
         self._resampler = None
+        self._pcm_pending = bytearray()
         self._open()
 
     def _open(self):
@@ -344,38 +345,33 @@ class MicCapture:
             return None
 
     def read(self) -> bytes:
-        """读取一帧 PCM 16kHz int16，640 samples (1280 bytes) = 40ms"""
-        frames = self._rate * AUDIO_PKT_MS // 1000
-        for attempt in range(2):
-            try:
-                pkt, overflowed = self._stream.read(frames)
-                if overflowed:
-                    print("[audio_device] WARNING: 麦克风输入溢出", file=sys.stderr, flush=True)
-                break
-            except sd.PortAudioError:
-                if attempt == 0:
-                    print("[audio_device] 麦克风流已停止，尝试重新打开...", file=sys.stderr, flush=True)
-                    self.close()
-                    time.sleep(0.5)
-                    self._open()
-                else:
-                    raise
-
-        pcm = np.frombuffer(bytes(pkt), dtype=np.int16)
-        if self._resampler is not None:
-            pcm = self._resampler.resample_chunk(pcm)
-            if len(pcm) == 0:
-                return b'\x00' * AUDIO_PKT_BYTES
-
-        raw = pcm.tobytes()
-        # 对齐到 AUDIO_PKT_BYTES
-        if len(raw) < AUDIO_PKT_BYTES:
-            raw = raw + b'\x00' * (AUDIO_PKT_BYTES - len(raw))
-        elif len(raw) > AUDIO_PKT_BYTES:
-            raw = raw[:AUDIO_PKT_BYTES]
+        """返回连续的 40ms PCM；重采样器输出按样本缓存，不补零或截断。"""
+        while len(self._pcm_pending) < AUDIO_PKT_BYTES:
+            for attempt in range(2):
+                frames = self._rate * AUDIO_PKT_MS // 1000
+                try:
+                    pkt, overflowed = self._stream.read(frames)
+                    if overflowed:
+                        print("[audio_device] WARNING: 麦克风输入溢出", file=sys.stderr, flush=True)
+                    break
+                except sd.PortAudioError:
+                    if attempt == 0:
+                        print("[audio_device] 麦克风流已停止，尝试重新打开...", file=sys.stderr, flush=True)
+                        self.close()
+                        time.sleep(0.5)
+                        self._open()
+                    else:
+                        raise
+            pcm = np.frombuffer(bytes(pkt), dtype=np.int16)
+            if self._resampler is not None:
+                pcm = self._resampler.resample_chunk(pcm)
+            self._pcm_pending.extend(pcm.tobytes())
+        raw = bytes(self._pcm_pending[:AUDIO_PKT_BYTES])
+        del self._pcm_pending[:AUDIO_PKT_BYTES]
         return raw
 
     def close(self):
+        self._pcm_pending.clear()
         if self._stream:
             try:
                 self._stream.stop()
@@ -395,6 +391,8 @@ class SpeakerPlayback:
             raise RuntimeError("sounddevice 未安装，无法使用扬声器")
         self._diagnostic = diagnostic
         self._written_frames = 0
+        self._written_samples = 0
+        self._playback_dropped = 0
         self._next_diagnostic = 0
         self._device = device
         self._stream = None
@@ -484,11 +482,13 @@ class SpeakerPlayback:
                     self._current_source_rate = None
                 try:
                     self._stream.write(data)
+                    self._written_samples += len(data) // 2
                     self._written_frames += 1
                     if self._diagnostic and time.monotonic() >= self._next_diagnostic:
                         self._next_diagnostic = time.monotonic() + 2
                         print(f'[room-audio] 扬声器声卡写入 frames={self._written_frames} '
-                              f'rate={self._native_rate} queue={self._queue.qsize()}', flush=True)
+                              f'rate={self._native_rate} audio_ms={self._written_samples*1000//self._native_rate} '
+                              f'queue={self._queue.qsize()} dropped={self._playback_dropped}', flush=True)
                 except sd.PortAudioError:
                     if self._diagnostic:
                         print('[room-audio] 扬声器声卡写入失败，播放线程停止', flush=True)
@@ -504,6 +504,7 @@ class SpeakerPlayback:
         try:
             self._queue.put_nowait((data, source_rate))
         except queue.Full:
+            self._playback_dropped += 1
             try:
                 self._queue.get_nowait()
             except queue.Empty:

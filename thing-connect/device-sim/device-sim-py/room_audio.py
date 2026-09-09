@@ -23,7 +23,7 @@ class RoomAudio:
         now = time.monotonic()
         if last is None or now - last >= 2:
             print(f'[room-audio] {direction} frames={count} peak={maximum}/32768 '
-                  f'静音={"是" if maximum == 0 else "否"}', flush=True)
+                  f'近静音={"是" if maximum <= 8 else "否"}', flush=True)
             maximum, last = 0, now
         self._stats[direction] = (count, maximum, last)
 

@@ -27,7 +27,14 @@ class RoomAudioDiagnosticsTests(unittest.TestCase):
             for _ in range(3):
                 audio._level('test', b'\0\0' * 640)
         self.assertEqual(output.getvalue().count('[room-audio]'), 2)
-        self.assertIn('frames=3 peak=0/32768 静音=是', output.getvalue())
+        self.assertIn('frames=3 peak=0/32768 近静音=是', output.getvalue())
+
+    def test_alaw_silence_is_near_silence(self):
+        audio = RoomAudio('alaw_8khz', 'alaw_8khz')
+        audio.speaker = mock.Mock()
+        with redirect_stdout(io.StringIO()) as output:
+            audio.play(audio.down.media, audio.down.flags, b'\xd5' * 320)
+        self.assertIn('peak=8/32768 近静音=是', output.getvalue())
 
     def test_downlink_logs_decoded_level_and_preserves_playback(self):
         audio = RoomAudio('alaw_8khz', 'alaw_8khz')

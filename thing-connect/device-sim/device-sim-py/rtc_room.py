@@ -463,6 +463,11 @@ class RoomSession:
             self._request_members()
         params = message.get('params', {})
         if params.get('room_id') not in (None, self.assignment['room_id']):
+            def safe_id(value):
+                return ''.join(c for c in str(value)[:128] if c.isprintable())
+            self._diagnostic(
+                f"忽略房间不匹配的信令 received_room={safe_id(params.get('room_id'))} "
+                f"expected_room={safe_id(self.assignment['room_id'])}")
             return
         method = message.get('method')
         if method == 'room_snapshot':

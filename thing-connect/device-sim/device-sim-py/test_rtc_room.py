@@ -66,6 +66,13 @@ class RoomSessionTests(unittest.TestCase):
         self.assertNotIn('secret', str(log.call_args_list))
         self.assertIn('123', str(log.call_args_list))
 
+    def test_mismatched_snapshot_logs_reason_without_applying(self):
+        with mock.patch.object(self.room, '_diagnostic') as log:
+            self.room._signal({'jsonrpc': '2.0', 'method': 'room_snapshot',
+                               'params': {'room_id': 'other-room', 'participants': []}})
+        self.assertFalse(self.room.members_synced)
+        self.assertIn('received_room=other-room expected_room=room-1', log.call_args.args[0])
+
     def test_room_requests_use_call_namespace(self):
         response = mock.Mock(content=b'{}')
         response.json.return_value = {'code': 200, 'data': {}}

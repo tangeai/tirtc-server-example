@@ -56,6 +56,25 @@ class MicCaptureTests(unittest.TestCase):
         self.assertTrue(streams[0].closed)
 
 
+class MicResamplingContinuityTests(unittest.TestCase):
+    def test_usb_48k_stream_preserves_samples_across_40ms_reads(self):
+        import numpy as np
+        import soxr
+        signal = (np.sin(np.arange(1920 * 80) * 2 * np.pi * 437 / 48000) * 12000).astype(np.int16)
+        chunks = [signal[i:i+1920] for i in range(0, len(signal), 1920)]
+        reference = soxr.ResampleStream(48000, 16000, 1, dtype='int16', quality='HQ')
+        expected = np.concatenate([reference.resample_chunk(chunk) for chunk in chunks])
+        capture = audio_device.MicCapture.__new__(audio_device.MicCapture)
+        capture._rate = 48000
+        capture._resampler = soxr.ResampleStream(48000, 16000, 1, dtype='int16', quality='HQ')
+        capture._pcm_pending = bytearray()
+        capture._stream = mock.Mock()
+        capture._stream.read.side_effect = [(chunk.tobytes(), False) for chunk in chunks]
+        output = b''.join(capture.read() for _ in range(60))
+        self.assertEqual(len(output), 60 * audio_device.AUDIO_PKT_BYTES)
+        self.assertEqual(output, expected[:60*640].tobytes())
+
+
 class AudioSelectionTests(unittest.TestCase):
     def setUp(self):
         self.devices = [
