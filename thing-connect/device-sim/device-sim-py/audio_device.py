@@ -412,6 +412,10 @@ class SpeakerPlayback:
         self._thread.start()
         self._opened.wait(timeout=5.0)
 
+    def set_diagnostics(self, enabled):
+        self._diagnostic = bool(enabled)
+        self._next_diagnostic = 0
+
     def _open_output(self, device: int, rate: int) -> "sd.RawOutputStream | None":
         frames = rate * AUDIO_PKT_MS // 1000
         try:

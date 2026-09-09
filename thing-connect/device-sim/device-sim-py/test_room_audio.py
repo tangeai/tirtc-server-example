@@ -9,8 +9,14 @@ from room_audio import RoomAudio
 
 
 class RoomAudioDiagnosticsTests(unittest.TestCase):
-    def test_capture_logs_peak_and_preserves_alaw_frame(self):
+    def test_default_audio_diagnostics_are_quiet(self):
         audio = RoomAudio('alaw_8khz', 'alaw_8khz')
+        with redirect_stdout(io.StringIO()) as output:
+            audio._level('test', b'\0\0' * 640)
+        self.assertEqual(output.getvalue(), '')
+
+    def test_capture_logs_peak_and_preserves_alaw_frame(self):
+        audio = RoomAudio('alaw_8khz', 'alaw_8khz', diagnostic=True)
         audio.mic = mock.Mock()
         audio.mic.read.return_value = np.full(320, -32768, dtype=np.int16).tobytes()
         output = io.StringIO()
@@ -21,7 +27,7 @@ class RoomAudioDiagnosticsTests(unittest.TestCase):
         self.assertIn('静音=否', output.getvalue())
 
     def test_level_is_rate_limited_and_reports_silence(self):
-        audio = RoomAudio('alaw_8khz', 'alaw_8khz')
+        audio = RoomAudio('alaw_8khz', 'alaw_8khz', diagnostic=True)
         output = io.StringIO()
         with redirect_stdout(output), mock.patch('room_audio.time.monotonic', side_effect=[0, 1, 2]):
             for _ in range(3):
@@ -30,14 +36,14 @@ class RoomAudioDiagnosticsTests(unittest.TestCase):
         self.assertIn('frames=3 peak=0/32768 近静音=是', output.getvalue())
 
     def test_alaw_silence_is_near_silence(self):
-        audio = RoomAudio('alaw_8khz', 'alaw_8khz')
+        audio = RoomAudio('alaw_8khz', 'alaw_8khz', diagnostic=True)
         audio.speaker = mock.Mock()
         with redirect_stdout(io.StringIO()) as output:
             audio.play(audio.down.media, audio.down.flags, b'\xd5' * 320)
         self.assertIn('peak=8/32768 近静音=是', output.getvalue())
 
     def test_downlink_logs_decoded_level_and_preserves_playback(self):
-        audio = RoomAudio('alaw_8khz', 'alaw_8khz')
+        audio = RoomAudio('alaw_8khz', 'alaw_8khz', diagnostic=True)
         audio.speaker = mock.Mock()
         with redirect_stdout(io.StringIO()) as output:
             audio.play(audio.down.media, audio.down.flags, b'\xd5' * 320)

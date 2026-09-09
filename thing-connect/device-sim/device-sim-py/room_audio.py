@@ -5,7 +5,8 @@ from media_formats import AUDIO_FORMATS
 
 
 class RoomAudio:
-    def __init__(self, up_format, down_format):
+    def __init__(self, up_format, down_format, diagnostic=False):
+        self.diagnostic = diagnostic
         self.up = AUDIO_FORMATS[up_format]
         self.down = AUDIO_FORMATS[down_format]
         if self.up.codec not in ('pcm', 'alaw') or self.down.codec not in ('pcm', 'alaw'):
@@ -15,6 +16,8 @@ class RoomAudio:
         self._stats = {}
 
     def _level(self, direction, pcm):
+        if not self.diagnostic:
+            return
         samples = np.frombuffer(pcm, dtype=np.int16).astype(np.int32)
         peak = int(np.max(np.abs(samples))) if len(samples) else 0
         count, maximum, last = self._stats.get(direction, (0, 0, None))
@@ -27,10 +30,16 @@ class RoomAudio:
             maximum, last = 0, now
         self._stats[direction] = (count, maximum, last)
 
+    def set_diagnostics(self, enabled):
+        self.diagnostic = bool(enabled)
+        self._stats.clear()
+        if self.speaker is not None:
+            self.speaker.set_diagnostics(enabled)
+
     def open_speaker(self):
         from audio_device import SpeakerPlayback, select_speaker
         if self.speaker is None:
-            self.speaker = SpeakerPlayback(select_speaker(), diagnostic=True)
+            self.speaker = SpeakerPlayback(select_speaker(), diagnostic=self.diagnostic)
 
     def capture(self):
         from audio_device import MicCapture, select_mic

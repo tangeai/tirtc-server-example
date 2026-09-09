@@ -38,6 +38,7 @@ class RoomError(RuntimeError):
 class RoomSession:
     def __init__(self, config, runtime, begin, finish, idle):
         self.config, self.runtime = config, runtime
+        self.diagnostics = False
         self.begin, self.finish, self.idle = begin, finish, idle
         self.lock = threading.RLock()
         self.events = queue.Queue(128)
@@ -218,6 +219,10 @@ class RoomSession:
             if self.ptt and not prior_ptt:
                 self.audio_timestamp = None
                 self.next_audio = 0
+            if prior_ptt != self.ptt:
+                print('[room] 开始发言' if self.ptt else '[room] 已停止发言，继续收听', flush=True)
+            elif pressed and self.state != 'joined':
+                print('[room] 尚未加入房间，无法发言', flush=True)
             if pressed or prior_ptt != self.ptt:
                 self._diagnostic(f'PTT 请求={"按下" if pressed else "松开"} 生效={self.ptt} state={self.state}')
             if self.conn:
@@ -227,7 +232,12 @@ class RoomSession:
     def command(self, parts):
         if len(parts) < 2 or parts[0] != 'room':
             return False
-        if parts[1:] == ['ptt', 'down']:
+        if len(parts) == 3 and parts[1] == 'debug' and parts[2] in ('on', 'off'):
+            self.diagnostics = parts[2] == 'on'
+            if self.hardware:
+                self.hardware.set_diagnostics(self.diagnostics)
+            print('[room] 详细诊断已' + ('开启（room debug off 关闭）' if self.diagnostics else '关闭'), flush=True)
+        elif parts[1:] == ['ptt', 'down']:
             self.set_ptt(True)
         elif parts[1:] == ['ptt', 'up']:
             self.set_ptt(False)
@@ -238,7 +248,7 @@ class RoomSession:
         elif len(parts) >= 2 and parts[1] in ('create', 'join', 'leave'):
             self._enqueue(('operation', tuple(parts[1:])))
         else:
-            print('room create [四位密码] | room join 六位房间号 [密码] | room leave | room status | room ptt down/up')
+            print('room create [四位密码] | room join 六位房间号 [密码] | room leave | room status | room ptt down/up | room debug on/off')
         return True
 
     def _request_members(self):
@@ -254,12 +264,15 @@ class RoomSession:
               f'[room] 成员查询发送失败 code={rc}，请输入 room status 重试', flush=True)
 
     def _diagnostic(self, text):
+        if not self.diagnostics:
+            return
         print(f'[room-diag] generation={self.generation} {text}', flush=True)
 
     def _check_snapshot_wait(self, now):
         if (self.state == 'joined' and self.snapshot_started is not None
                 and not self.snapshot_warned and now - self.snapshot_started >= 5):
             self.snapshot_warned = True
+            print("[room] 成员列表暂未同步，可输入 room status 重试", flush=True)
             last = self.last_command
             received = f'0x{last[0]:08x}/{last[1]}B' if last else '无'
             self._diagnostic(
@@ -500,9 +513,12 @@ class RoomSession:
             participants = params.get('participants', [])
             if len(participants) > 100:
                 raise RoomError(50200, '房间成员列表超限')
-            self.members = {p['participant_id']: p for p in participants}
+            updated = {p['participant_id']: p for p in participants}
+            changed = not self.members_synced or updated != self.members
+            self.members = updated
             self.members_synced = True
-            self._print_status()
+            if changed:
+                self._print_status()
         elif method == 'participant_joined':
             p = params.get('participant', {})
             if p.get('participant_id') and (p['participant_id'] in self.members or len(self.members) < 100):
@@ -577,7 +593,7 @@ class RoomSession:
                             self._enqueue(('disconnected', generation, conn))
                     self.next_audio = time.monotonic() + duration/1000
                 now = time.monotonic()
-                if joined and now >= self.next_audio_diagnostic:
+                if self.diagnostics and joined and now >= self.next_audio_diagnostic:
                     self.next_audio_diagnostic = now + 2
                     print(f'[room-audio] generation={generation} ptt={pressed} '
                           f'发送成功={self.audio_sent} 发送失败={self.audio_send_failed} rc={self.last_send_rc} '

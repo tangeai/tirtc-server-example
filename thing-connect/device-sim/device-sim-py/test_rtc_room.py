@@ -83,6 +83,20 @@ class RoomSessionTests(unittest.TestCase):
         self.assertFalse(self.room._matches_room('2818153:not-room-1'))
         self.assertTrue(self.room._matches_room('room-1'))
 
+    def test_room_diagnostics_are_opt_in_and_can_be_disabled(self):
+        import io
+        from contextlib import redirect_stdout
+        with redirect_stdout(io.StringIO()) as output:
+            self.room._diagnostic('hidden')
+        self.assertEqual(output.getvalue(), '')
+        with redirect_stdout(io.StringIO()) as output:
+            self.room.command(['room', 'debug', 'on'])
+            self.room._diagnostic('visible')
+            self.room.command(['room', 'debug', 'off'])
+            self.room._diagnostic('hidden')
+        self.assertIn('visible', output.getvalue())
+        self.assertNotIn('hidden', output.getvalue())
+
     def test_room_requests_use_call_namespace(self):
         response = mock.Mock(content=b'{}')
         response.json.return_value = {'code': 200, 'data': {}}
