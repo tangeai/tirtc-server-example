@@ -29,6 +29,43 @@ class RoomSessionTests(unittest.TestCase):
         self.addCleanup(mock.patch.stopall)
         self.addCleanup(self.room.http.close)
 
+    def test_snapshot_timeout_diagnostic_is_once_per_query(self):
+        self.room.state = 'joined'
+        with mock.patch.object(rtc_room.time, 'monotonic', return_value=10), \
+                mock.patch.object(self.room, '_diagnostic') as log:
+            self.room._request_members()
+            log.reset_mock()
+            self.room._check_snapshot_wait(14.9)
+            log.assert_not_called()
+            self.room._check_snapshot_wait(15)
+            self.room._check_snapshot_wait(20)
+            log.assert_called_once()
+            self.assertIn('成员快照等待 5.0s', log.call_args.args[0])
+            self.room._request_members()
+            log.reset_mock()
+            self.room._check_snapshot_wait(16)
+            log.assert_called_once()
+
+    def test_snapshot_arrival_clears_pending_wait_and_reports_duration(self):
+        self.room.state = 'joined'
+        self.room.snapshot_started = 10
+        with mock.patch.object(rtc_room.time, 'monotonic', return_value=12), \
+                mock.patch.object(self.room, '_diagnostic') as log:
+            self.room._signal({'jsonrpc': '2.0', 'method': 'room_snapshot',
+                               'params': {'participants': []}})
+            self.assertTrue(any('2000ms' in c.args[0] for c in log.call_args_list))
+            log.reset_mock()
+            self.room._check_snapshot_wait(30)
+            log.assert_not_called()
+        self.assertIsNone(self.room.snapshot_started)
+
+    def test_diagnostics_do_not_print_remote_error_or_unknown_method(self):
+        with mock.patch.object(self.room, '_diagnostic') as log:
+            self.room._signal({'jsonrpc': '2.0', 'method': 'secret-remote-text',
+                               'error': {'code': 123, 'message': 'secret-token'}})
+        self.assertNotIn('secret', str(log.call_args_list))
+        self.assertIn('123', str(log.call_args_list))
+
     def test_room_requests_use_call_namespace(self):
         response = mock.Mock(content=b'{}')
         response.json.return_value = {'code': 200, 'data': {}}

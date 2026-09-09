@@ -390,9 +390,12 @@ class MicCapture:
 class SpeakerPlayback:
     """扬声器播放：接收 PCM int16，自动重采样到扬声器原生率"""
 
-    def __init__(self, device: "int | None" = None):
+    def __init__(self, device: "int | None" = None, diagnostic=False):
         if not HAS_SD:
             raise RuntimeError("sounddevice 未安装，无法使用扬声器")
+        self._diagnostic = diagnostic
+        self._written_frames = 0
+        self._next_diagnostic = 0
         self._device = device
         self._stream = None
         self._native_rate = SAMPLE_RATE
@@ -481,12 +484,22 @@ class SpeakerPlayback:
                     self._current_source_rate = None
                 try:
                     self._stream.write(data)
+                    self._written_frames += 1
+                    if self._diagnostic and time.monotonic() >= self._next_diagnostic:
+                        self._next_diagnostic = time.monotonic() + 2
+                        print(f'[room-audio] 扬声器声卡写入 frames={self._written_frames} '
+                              f'rate={self._native_rate} queue={self._queue.qsize()}', flush=True)
                 except sd.PortAudioError:
+                    if self._diagnostic:
+                        print('[room-audio] 扬声器声卡写入失败，播放线程停止', flush=True)
                     break
 
     def play(self, data: bytes, source_rate: int = 16000):
         """推入播放队列。source_rate: 输入数据的采样率（默认 16kHz）。"""
-        if not self._opened.is_set():
+        if not self._opened.is_set() or not self._thread.is_alive():
+            if self._diagnostic and time.monotonic() >= self._next_diagnostic:
+                self._next_diagnostic = time.monotonic() + 2
+                print('[room-audio] 扬声器未就绪或播放线程已停止，音频未入队', flush=True)
             return
         try:
             self._queue.put_nowait((data, source_rate))

@@ -55,6 +55,13 @@ class RoomSession:
         self.ptt = False
         self.members = {}
         self.members_synced = False
+        self.connect_started = None
+        self.join_started = None
+        self.snapshot_started = None
+        self.snapshot_warned = False
+        self.command_received = 0
+        self.command_dropped = 0
+        self.last_command = None
         self.deadline = 0
         self.next_heartbeat = 0
         self.lease_deadline = 0
@@ -66,6 +73,15 @@ class RoomSession:
         self.audio_lock = threading.Lock()
         self.hardware = None
         self.audio_queue = queue.Queue(64)
+        self.audio_received = 0
+        self.audio_rejected = 0
+        self.audio_dropped = 0
+        self.audio_sent = 0
+        self.audio_send_failed = 0
+        self.last_send_rc = None
+        self.last_audio_format = None
+        self.next_audio_diagnostic = 0
+        self.next_media_error = 0
         if config.hardware_audio:
             from room_audio import RoomAudio
             self.hardware = RoomAudio(config.up_audio_format, config.down_audio_format)
@@ -98,10 +114,13 @@ class RoomSession:
         def disconnected(conn):
             self._enqueue(('disconnected', self.generation, conn))
         def command(conn, command, data, length):
+            self.command_received += 1
+            self.last_command = (int(command), int(length))
             # The SDK command word may carry a sequence and the response bit.
             if (command & 0xfffe) == ROOM_COMMAND and data and 0 < length <= 32768:
-                self._enqueue(('command', self.generation, conn,
-                               ctypes.string_at(data, length)))
+                if not self._enqueue(('command', self.generation, conn,
+                                      ctypes.string_at(data, length), time.monotonic(), int(command))):
+                    self.command_dropped += 1
         cbs.on_disconnected = sdk.OnDisconnCB(disconnected)
         cbs.on_conn_error = sdk.OnConnErrCB(lambda conn, error: disconnected(conn))
         cbs.on_command = sdk.OnCmdCB(command)
@@ -112,6 +131,8 @@ class RoomSession:
             if not data or not frame:
                 return
             fi = ctypes.cast(frame, ctypes.POINTER(sdk.TIRTCFRAMEINFO)).contents
+            self.audio_received += 1
+            self.last_audio_format = (int(fi.stream_id), int(fi.media), int(fi.flags), int(fi.length))
             spec = AUDIO_FORMATS[self.config.down_audio_format]
             if (0 < fi.length <= 8192 and fi.stream_id == 1 and
                     fi.media == spec.media and fi.flags == spec.flags):
@@ -119,7 +140,9 @@ class RoomSession:
                     self.audio_queue.put_nowait((self.generation, conn, fi.media, fi.flags,
                                                 ctypes.string_at(data, fi.length)))
                 except queue.Full:
-                    pass
+                    self.audio_dropped += 1
+            else:
+                self.audio_rejected += 1
         cbs.on_audio = sdk.OnAudioCB(audio)
         cbs._refs = [cbs.on_disconnected, cbs.on_conn_error, cbs.on_command,
                      cbs.on_subscribe_audio, cbs.on_audio]
@@ -165,6 +188,7 @@ class RoomSession:
             conn, self.conn = self.conn, None
             prior = self._presence('suspended') if self.assignment else None
             self.state = 'idle'
+            self.snapshot_started = None
             self.reader = None
             self.members = {}
             self.members_synced = False
@@ -185,7 +209,10 @@ class RoomSession:
         # Release closes the media gate synchronously, including while HTTP is
         # waiting. Only local terminal/button handlers call this method.
         with self.lock:
+            prior_ptt = self.ptt
             self.ptt = bool(pressed) and self.state == 'joined'
+            if pressed or prior_ptt != self.ptt:
+                self._diagnostic(f'PTT 请求={"按下" if pressed else "松开"} 生效={self.ptt} state={self.state}')
             if self.conn:
                 self._send(self.conn, {'jsonrpc': '2.0', 'method': 'set_mic_state',
                                       'params': {'mic_state': 'speaking' if self.ptt else 'off'}})
@@ -211,9 +238,28 @@ class RoomSession:
         # Called under the session lock so a query cannot target a replaced connection.
         if self.state != 'joined' or not self.conn:
             return
+        self.snapshot_started = time.monotonic()
+        self.snapshot_warned = False
         rc = self._send(self.conn, {'jsonrpc': '2.0', 'method': 'get_room_snapshot'})
+        if rc <= 0:
+            self.snapshot_started = None
         print('[room] 正在查询房间成员…' if rc > 0 else
               f'[room] 成员查询发送失败 code={rc}，请输入 room status 重试', flush=True)
+
+    def _diagnostic(self, text):
+        print(f'[room-diag] generation={self.generation} {text}', flush=True)
+
+    def _check_snapshot_wait(self, now):
+        if (self.state == 'joined' and self.snapshot_started is not None
+                and not self.snapshot_warned and now - self.snapshot_started >= 5):
+            self.snapshot_warned = True
+            last = self.last_command
+            received = f'0x{last[0]:08x}/{last[1]}B' if last else '无'
+            self._diagnostic(
+                f'成员快照等待 {(now - self.snapshot_started):.1f}s，尚未处理到 room_snapshot；'
+                f'回调指令数={self.command_received} 最后指令={received} '
+                f'控制队列={self.events.qsize()} 丢弃指令数={self.command_dropped}；'
+                '可输入 room status 重试')
 
     def _print_status(self):
         # Call under the session lock; never print raw member payloads or credentials.
@@ -236,9 +282,17 @@ class RoomSession:
         headers = {'Authorization': 'Bearer ' + self.config.mqtt_token}
         if key:
             headers['Idempotency-Key'] = key
-        response = self.http.request(method, self.config.call_server.rstrip('/') +
-                                     '/v1/call/room/device/' + path, json=body,
-                                     headers=headers, timeout=5)
+        started = time.monotonic()
+        try:
+            response = self.http.request(method, self.config.call_server.rstrip('/') +
+                                         '/v1/call/room/device/' + path, json=body,
+                                         headers=headers, timeout=5)
+        except Exception:
+            self._diagnostic(f'HTTP {method} {path} 失败 耗时={(time.monotonic()-started)*1000:.0f}ms')
+            raise
+        elapsed = (time.monotonic() - started) * 1000
+        if elapsed >= 500 or path == 'connect-token' or response.status_code != 200:
+            self._diagnostic(f'HTTP {method} {path} status={response.status_code} 耗时={elapsed:.0f}ms')
         if len(response.content) > 65536:
             raise RoomError(50200, '房间响应过大')
         data = response.json()
@@ -251,10 +305,13 @@ class RoomSession:
         return {'room_id': a.get('room_id', ''), 'assignment_version': a.get('assignment_version', 0),
                 'session_id': self.session_id, 'state': state}
 
-    @staticmethod
-    def _send(conn, message):
+    def _send(self, conn, message):
         raw = json.dumps(message, separators=(',', ':')).encode()
-        return sdk.TiRtcSendCommand(conn, ROOM_COMMAND, raw, len(raw))
+        started = time.monotonic()
+        rc = sdk.TiRtcSendCommand(conn, ROOM_COMMAND, raw, len(raw))
+        self._diagnostic(f"发送 {message.get('method')} cmd=0x{ROOM_COMMAND:04x} "
+                         f"bytes={len(raw)} rc={rc} 耗时={(time.monotonic()-started)*1000:.0f}ms")
+        return rc
 
     def _reconcile(self):
         a = self._api('GET', 'assignment')
@@ -294,6 +351,10 @@ class RoomSession:
                 self.generation += 1
                 generation = self.generation
                 self.state = 'connecting'
+                self.connect_started = time.monotonic()
+                self.command_received = self.command_dropped = 0
+                self.last_command = None
+                self._diagnostic('开始 RTC 连接')
                 self.deadline = time.monotonic() + 10
                 rc = sdk.TiRtcWhipConnect(credentials['peer_id'].encode(),
                                          credentials['token'].encode(), self.connect_cb,
@@ -344,6 +405,8 @@ class RoomSession:
                     sdk.TiRtcDisconnect(conn)
                 return
             if kind == 'connected':
+                elapsed = (time.monotonic() - self.connect_started) * 1000 if self.connect_started is not None else 0
+                self._diagnostic(f'RTC 连接回调 code={args[0]} 耗时={elapsed:.0f}ms')
                 if args[0] or not conn:
                     raise RoomError(50200, '多人对讲连接失败')
                 if not self.runtime.bind_active_connection(ServiceKind.ROOM, conn):
@@ -351,6 +414,7 @@ class RoomSession:
                     return
                 self.conn = conn
                 self.state = 'joining'
+                self.join_started = time.monotonic()
                 self.deadline = time.monotonic() + 8
                 self._send(conn, {'jsonrpc': '2.0', 'id': 1, 'method': 'join_room',
                                   'params': {'room_id': self.assignment['room_id'],
@@ -363,9 +427,19 @@ class RoomSession:
                 if self.state == 'joined':
                     self.on_audio(*args)
             elif kind == 'command':
+                delay = (time.monotonic() - args[1]) * 1000 if len(args) > 1 else 0
+                word = args[2] if len(args) > 2 else ROOM_COMMAND
+                self._diagnostic(f'接收 cmd=0x{word:08x} bytes={len(args[0])} 队列等待={delay:.0f}ms')
                 self._signal(json.loads(args[0]))
 
     def _signal(self, message):
+        method = message.get('method')
+        known = ('room_snapshot', 'participant_joined', 'participant_left',
+                 'participant_mic_state_changed', 'room_closed')
+        kind = method if method in known else ('响应' if 'id' in message else '未知通知')
+        error = message.get('error')
+        code = error.get('code') if isinstance(error, dict) else None
+        self._diagnostic(f'信令 type={kind} error_code={code if type(code) is int else "无"}')
         if message.get('jsonrpc') != '2.0':
             return
         if message.get('id') == 1 and self.state == 'joining':
@@ -374,6 +448,8 @@ class RoomSession:
                     result.get('input_audio') != descriptor(self.config.up_audio_format) or
                     result.get('output_audio') != descriptor(self.config.down_audio_format)):
                 raise RoomError(50200, '房间未接受设备音频格式')
+            elapsed = (time.monotonic() - self.join_started) * 1000 if self.join_started is not None else 0
+            self._diagnostic(f'join_room 成功 耗时={elapsed:.0f}ms')
             self.state = 'joined'
             self._print_status()
             self.ptt = False
@@ -390,6 +466,9 @@ class RoomSession:
             return
         method = message.get('method')
         if method == 'room_snapshot':
+            if self.snapshot_started is not None:
+                self._diagnostic(f'成员快照到达 查询耗时={(time.monotonic()-self.snapshot_started)*1000:.0f}ms')
+                self.snapshot_started = None
             participants = params.get('participants', [])
             if len(participants) > 100:
                 raise RoomError(50200, '房间成员列表超限')
@@ -415,6 +494,7 @@ class RoomSession:
 
     def _media_loop(self):
         while not self.closed.wait(.005):
+            stage = "准备"
             try:
                 with self.lock:
                     generation, conn = self.generation, self.conn
@@ -424,8 +504,10 @@ class RoomSession:
                 with self.audio_lock:
                     if self.hardware:
                         if joined:
+                            stage = "打开扬声器"
                             self.hardware.open_speaker()
                         if joined and pressed:
+                            stage = "麦克风采集/编码"
                             payload, duration = self.hardware.capture()
                         else:
                             self.hardware.release_mic()
@@ -440,6 +522,7 @@ class RoomSession:
                             break
                         if gen == generation and handle == conn and joined:
                             if self.hardware:
+                                stage = "下行解码/播放入队"
                                 self.hardware.play(media, flags, audio)
                             else:
                                 self.on_audio(media, flags, audio)
@@ -452,11 +535,27 @@ class RoomSession:
                     with self.lock:
                         if generation != self.generation or conn != self.conn or not self.ptt:
                             continue
+                        stage = "SDK发送音频"
                         rc = sdk.TiRtcSendAudioStream(conn, ctypes.byref(frame), data)
+                        self.last_send_rc = rc
+                        if rc < 0:
+                            self.audio_send_failed += 1
+                        else:
+                            self.audio_sent += 1
                         if rc in sdk.CONN_FATAL_ERRORS:
                             self._enqueue(('disconnected', generation, conn))
                     self.next_audio = time.monotonic() + duration/1000
-            except Exception:
+                now = time.monotonic()
+                if joined and now >= self.next_audio_diagnostic:
+                    self.next_audio_diagnostic = now + 2
+                    print(f'[room-audio] generation={generation} ptt={pressed} '
+                          f'发送成功={self.audio_sent} 发送失败={self.audio_send_failed} rc={self.last_send_rc} '
+                          f'接收={self.audio_received} 格式拒绝={self.audio_rejected} 队列丢弃={self.audio_dropped} '
+                          f'最后接收(stream,media,flags,bytes)={self.last_audio_format}', flush=True)
+            except Exception as exc:
+                if time.monotonic() >= self.next_media_error:
+                    self.next_media_error = time.monotonic() + 2
+                    print(f'[room-audio] 阶段={stage} 失败 type={type(exc).__name__}，已停止发言', flush=True)
                 self.set_ptt(False)
                 self.sync()
 
@@ -470,6 +569,7 @@ class RoomSession:
                     pass
                 now = time.monotonic()
                 with self.lock:
+                    self._check_snapshot_wait(now)
                     expired = ((self.state in ('connecting', 'joining') and now >= self.deadline) or
                                (self.state == 'joined' and now >= self.lease_deadline))
                     heartbeat = self.state == 'joined' and now >= self.next_heartbeat
