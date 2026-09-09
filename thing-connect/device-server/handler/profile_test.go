@@ -39,13 +39,13 @@ func TestMediaProfileHTTPIdentityAndErrors(t *testing.T) {
 		status, code      int
 		called            bool
 	}{
-		{"valid", device, `{"media_profiles":{"stream":{}}}`, nil, 200, 200, true},
+		{"valid", device, `{"profiles":{"stream":{}}}`, nil, 200, 200, true},
 		{"missing token", "", `{}`, nil, 401, 401, false},
 		{"user token", sign(jwt.MapClaims{"user_id": 1, "exp": time.Now().Add(time.Hour).Unix()}), `{}`, nil, 401, 401, false},
 		{"temporary token", sign(jwt.MapClaims{"device_id": "tmp_fake", "exp": time.Now().Add(time.Hour).Unix()}), `{}`, nil, 401, 401, false},
 		{"missing expiry", sign(jwt.MapClaims{"device_id": "device-a"}), `{}`, nil, 401, 401, false},
 		{"expired", sign(jwt.MapClaims{"device_id": "device-a", "exp": 1}), `{}`, nil, 401, 401, false},
-		{"spoof identity", device, `{"device_id":"device-b","media_profiles":{"stream":{}}}`, nil, 400, 40000, false},
+		{"spoof identity", device, `{"device_id":"device-b","profiles":{"stream":{}}}`, nil, 400, 40000, false},
 		{"trailing body", device, `{} {}`, nil, 400, 40000, false},
 		{"oversized", device, strings.Repeat(" ", 17000) + `{}`, nil, 400, 40000, false},
 		{"validation", device, `{}`, service.ErrInvalidMediaProfile, 400, 40000, true},

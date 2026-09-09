@@ -178,8 +178,8 @@ class DeviceRtcRuntime:
                 c.tirtc_endpoint or None,
             )
             if c.device_server:
-                from device_flow import report_media_profiles
-                report_media_profiles(c.device_server, c.mqtt_token, self.media_profiles())
+                from device_flow import report_profiles
+                report_profiles(c.device_server, c.mqtt_token, self.profiles())
             self._prime_voip_profile()
             self.coordinator.start_stream()
             self.room.start()
@@ -357,7 +357,7 @@ class DeviceRtcRuntime:
         if active_generation is not None:
             self.sdk_runtime.deactivate(service, active_generation)
 
-    def media_profiles(self) -> dict:
+    def profiles(self) -> dict:
         """按实际配置分别描述实时流与设备互呼；VoIP 保留其专用上报。"""
         from media_formats import AUDIO_FORMATS, VIDEO_FORMATS
         c = self.config

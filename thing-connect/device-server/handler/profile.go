@@ -42,7 +42,7 @@ func RegisterDeviceProfile(r *gin.Engine, reporter MediaReporter, secret string)
 			return
 		}
 		var req struct {
-			MediaProfiles map[string]json.RawMessage `json:"media_profiles"`
+			Profiles map[string]json.RawMessage `json:"profiles"`
 		}
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 16*1024)
 		decoder := json.NewDecoder(c.Request.Body)
@@ -58,7 +58,7 @@ func RegisterDeviceProfile(r *gin.Engine, reporter MediaReporter, secret string)
 		}
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 		defer cancel()
-		if err = reporter.Report(ctx, deviceID, req.MediaProfiles); err != nil {
+		if err = reporter.Report(ctx, deviceID, req.Profiles); err != nil {
 			if errors.Is(err, service.ErrInvalidMediaProfile) {
 				apiresp.BadParam(c, err.Error())
 				return

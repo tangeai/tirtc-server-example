@@ -702,6 +702,7 @@ HTTP 接口的请求和返回字段、成功码、业务错误码及微信回调
 | [AI 对讲设备接入](device-ai.md) | 扩展：AI 对讲 |
 | [微信 VoIP 对讲设备接入](device-voip.md) | 扩展：VoIP / 小程序 |
 | [设备呼设备接入](device-call.md) | 扩展：设备互呼 |
+| [设备多人对讲](device-room.md) | 创建和加入房间、PTT、成员同步与异常恢复 |
 | [设备统一状态机](device-session-model.md) | 一台设备承载多类业务时 |
 | [设备会话竞态仲裁](device-session-arbiter.md) | 待处理来电、会话代次、迟到回调与事件队列 |
 | [从 Linux C 参考实现进行二次开发](device-porting.md) | Linux 交叉编译 / 十项产品 TODO 与验收 |

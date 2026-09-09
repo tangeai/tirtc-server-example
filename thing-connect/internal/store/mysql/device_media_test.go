@@ -49,11 +49,11 @@ func TestDeviceMediaReportsPersistAndIsolateScenes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 1 || rows[0].MediaProfiles == nil {
+	if len(rows) != 1 || rows[0].Profiles == nil {
 		t.Fatalf("rows=%+v", rows)
 	}
 	var profiles map[string]map[string]json.RawMessage
-	if err = json.Unmarshal([]byte(*rows[0].MediaProfiles), &profiles); err != nil {
+	if err = json.Unmarshal([]byte(*rows[0].Profiles), &profiles); err != nil {
 		t.Fatal(err)
 	}
 	if string(profiles["stream"]["camera_rotation"]) != "0" || string(profiles["stream"]["hor_mirror"]) != "false" {

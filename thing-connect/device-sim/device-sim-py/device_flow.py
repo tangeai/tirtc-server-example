@@ -553,14 +553,14 @@ def connect_mqtt_blocking(broker_host: str, broker_port: int,
     _ok("已断开 MQTT 连接")
 
 
-def report_media_profiles(server: str, mqtt_token: str, profiles: dict) -> bool:
+def report_profiles(server: str, mqtt_token: str, profiles: dict) -> bool:
     """上报显式场景快照；启动线程最多尝试三次，永久错误不重试。"""
     for attempt in range(3):
         try:
             response = http_trace.request(
                 "POST", f"{server.rstrip('/')}/v1/device/profile",
                 headers={"Authorization": f"Bearer {mqtt_token}"},
-                json={"media_profiles": profiles}, timeout=10)
+                json={"profiles": profiles}, timeout=10)
             data = response.json()
             code = data.get("code") if isinstance(data, dict) else None
             if response.status_code == 200 and code == 200:

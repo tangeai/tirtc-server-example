@@ -300,7 +300,7 @@ function showMedia(scene) {
     b.tabIndex = b.dataset.scene === scene ? 0 : -1;
   });
   $("media-details").setAttribute("aria-labelledby", "tab-" + scene);
-  const rows = DevicePresentation.mediaRows(d.media_profiles, scene);
+  const rows = DevicePresentation.mediaRows(d.profiles, scene);
   $("media-details").innerHTML = rows
     ? detailList(rows)
     : '<p class="detail-muted">该场景能力未上报</p>';

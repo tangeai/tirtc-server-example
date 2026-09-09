@@ -43,7 +43,7 @@ func TestDeviceProfileReportToUserDeviceList(t *testing.T) {
 	post := func(body any) *apiResp { return doPost(t, s.devSrv.URL+"/v1/device/profile", deviceToken, body) }
 	type deviceInfo struct {
 		DeviceID string                                `json:"device_id"`
-		Profiles map[string]map[string]json.RawMessage `json:"media_profiles"`
+		Profiles map[string]map[string]json.RawMessage `json:"profiles"`
 	}
 	list := func(token string) []deviceInfo {
 		r := s.usrGET(t, "/v1/user/device/list", token)
@@ -56,7 +56,7 @@ func TestDeviceProfileReportToUserDeviceList(t *testing.T) {
 		}
 		return rows
 	}
-	snapshot := map[string]any{"media_profiles": map[string]any{
+	snapshot := map[string]any{"profiles": map[string]any{
 		"stream": map[string]any{"up_audio_mt": []string{"pcm"}, "up_video_mt": []string{}, "camera_rotation": 0, "hor_mirror": false},
 		"call":   map[string]any{"down_audio_mt": []string{"opus", "amr"}, "audio_rate": 16000},
 	}}
@@ -94,7 +94,7 @@ func TestDeviceProfileReportToUserDeviceList(t *testing.T) {
 	}
 	var before string
 	_ = s.sqlDB.Get(&before, `SELECT profile FROM device_profile WHERE device_id=?`, device)
-	invalid := post(map[string]any{"media_profiles": map[string]any{"stream": map[string]any{"device_key": "not-allowed"}}})
+	invalid := post(map[string]any{"profiles": map[string]any{"stream": map[string]any{"device_key": "not-allowed"}}})
 	if invalid.HTTPStatus != 400 || invalid.Code != 40000 {
 		t.Fatal("invalid field accepted", invalid)
 	}
@@ -107,7 +107,7 @@ func TestDeviceProfileReportToUserDeviceList(t *testing.T) {
 	if denied.HTTPStatus != 401 || denied.Code != 401 {
 		t.Fatal("user token accepted for device report", denied)
 	}
-	cleared := post(map[string]any{"media_profiles": map[string]any{"stream": map[string]any{}, "voip": map[string]any{}}})
+	cleared := post(map[string]any{"profiles": map[string]any{"stream": map[string]any{}, "voip": map[string]any{}}})
 	if cleared.Code != 200 {
 		t.Fatal(cleared)
 	}

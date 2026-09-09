@@ -42,7 +42,7 @@ static void test_device_media_profile(void) {
                                      "opus_16khz", "h265", "mjpeg", 1) == 0);
     cJSON *root = cJSON_Parse(body);
     assert(root);
-    cJSON *profiles = cJSON_GetObjectItem(root, "media_profiles");
+    cJSON *profiles = cJSON_GetObjectItem(root, "profiles");
     cJSON *stream = cJSON_GetObjectItem(profiles, "stream");
     cJSON *call = cJSON_GetObjectItem(profiles, "call");
     assert(!cJSON_GetObjectItem(profiles, "voip"));
@@ -58,7 +58,7 @@ static void test_device_media_profile(void) {
     assert(device_media_profile_json(body, sizeof(body), "alaw_8khz",
                                      "alaw_8khz", "h264", "h264", 0) == 0);
     root = cJSON_Parse(body);
-    call = cJSON_GetObjectItem(cJSON_GetObjectItem(root, "media_profiles"), "call");
+    call = cJSON_GetObjectItem(cJSON_GetObjectItem(root, "profiles"), "call");
     assert(cJSON_GetArraySize(cJSON_GetObjectItem(call, "up_video_mt")) == 0);
     assert(cJSON_GetArraySize(cJSON_GetObjectItem(call, "down_video_mt")) == 0);
     assert(cJSON_IsTrue(cJSON_GetObjectItem(call, "no_video")));

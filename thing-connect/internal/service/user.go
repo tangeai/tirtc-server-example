@@ -23,7 +23,7 @@ import (
 
 // DeviceInfo is the service-layer device list item (online status added by service).
 type DeviceInfo struct {
-	MediaProfiles  map[string]map[string]json.RawMessage `json:"media_profiles"`
+	Profiles       map[string]map[string]json.RawMessage `json:"profiles"`
 	DeviceID       string                                `json:"device_id"`
 	DeviceName     string                                `json:"device_name"`
 	Status         int8                                  `json:"status"`
@@ -569,7 +569,7 @@ func (s *UserService) DeviceList(ctx context.Context, userID int64, checker Onli
 	for _, r := range rows {
 		media := parseVoipProfile(r.VoipProfile)
 		di := DeviceInfo{
-			MediaProfiles:  reportedDeviceMediaProfiles(r.MediaProfiles, r.VoipProfile),
+			Profiles:       reportedDeviceMediaProfiles(r.Profiles, r.VoipProfile),
 			DeviceID:       r.DeviceID,
 			DeviceName:     r.DeviceName,
 			Status:         r.Status,

@@ -1028,7 +1028,7 @@ int device_media_profile_json(char *out, size_t capacity,
         (has_video && (!up_v || !down_v))) return -1;
     /* Only constant codec names from the format registry enter the JSON. */
     int n = snprintf(out, capacity,
-        "{\"media_profiles\":{"
+        "{\"profiles\":{"
         "\"stream\":{\"up_audio_mt\":[\"%s\"],\"up_video_mt\":%s%s%s,"
         "\"down_audio_mt\":[\"alaw\"],\"down_video_mt\":[],"
         "\"audio_rate\":8000,\"audio_channels\":1},"
