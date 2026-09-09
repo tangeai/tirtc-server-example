@@ -33,6 +33,8 @@ MQTT 下行使用现有 `device/sn_<device_id>/cmd` topic，消息为：
 
 音频使用流 ID `1`；下行仅接收协商格式对应的 `media`、`flags`，其余帧丢弃。TiRTC 字段定义见[官方设备集成说明](https://docs.tange.ai/products/room/guides/device-integration.html)。
 
+房间事件中的 `room_id` 可以是业务房间 ID，也可以是 `<应用命名空间>:<业务房间 ID>`。设备在当前连接内校验业务 ID 并固定命名空间，重连时清除该映射；上报接口仍使用原始业务房间 ID。
+
 设备处理 `room_snapshot`、`participant_joined`、`participant_left`、`participant_mic_state_changed` 和 `room_closed`，维护有界成员列表。成员列表属于当前连接，重连后重新接收快照。
 
 加入房间默认只收听。只有本机 `room ptt down` 或产品按键打开上行音频；`room ptt up`、业务抢占、断开和关闭流程都关闭发送。`set_mic_state` 只同步显示状态，不能代替本地音频发送开关。多人可同时按住说话，房间服务负责混音。示例不保存多人对讲下行录音。

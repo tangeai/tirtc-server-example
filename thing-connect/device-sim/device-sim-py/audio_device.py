@@ -272,9 +272,13 @@ def _pick_device(keywords: list, want_input: bool) -> "int | None":
 class MicCapture:
     """麦克风采集：16kHz mono int16 PCM"""
 
-    def __init__(self, device: "int | None" = None):
+    def __init__(self, device: "int | None" = None, pkt_ms: int = AUDIO_PKT_MS):
         if not HAS_SD:
             raise RuntimeError("sounddevice 未安装，无法使用麦克风")
+        if pkt_ms not in (20, 40):
+            raise ValueError("麦克风帧长必须为 20 或 40ms")
+        self._pkt_ms = pkt_ms
+        self._packet_bytes = SAMPLE_RATE * 2 * pkt_ms // 1000
         self._device = device
         self._stream = None
         self._rate = SAMPLE_RATE
@@ -284,12 +288,12 @@ class MicCapture:
 
     def _open(self):
         dev = self._device if self._device is not None else sd.default.device[0]
-        frames = SAMPLE_RATE * AUDIO_PKT_MS // 1000
+        frames = SAMPLE_RATE * self._pkt_ms // 1000
         self._resampler = None
         self._rate = SAMPLE_RATE
 
         # 三级策略：直开 → MME → 原生率+重采样
-        s = self._try_open_input(dev, SAMPLE_RATE)
+        s = self._try_open_input(dev, SAMPLE_RATE, self._pkt_ms)
         if s:
             self._stream = s
             self._rate = SAMPLE_RATE
@@ -297,7 +301,7 @@ class MicCapture:
 
         mme = _find_mme_peer(dev, want_input=True)
         if mme is not None:
-            s = self._try_open_input(mme, SAMPLE_RATE)
+            s = self._try_open_input(mme, SAMPLE_RATE, self._pkt_ms)
             if s:
                 self._stream = s
                 self._rate = SAMPLE_RATE
@@ -305,7 +309,7 @@ class MicCapture:
 
         if HAS_SOXR:
             native = int(sd.query_devices(dev)["default_samplerate"])
-            frames = native * AUDIO_PKT_MS // 1000
+            frames = native * self._pkt_ms // 1000
             stream = sd.RawInputStream(
                 samplerate=native, channels=CHANNELS, dtype=DTYPE,
                 blocksize=frames, device=dev, latency="low",
@@ -326,8 +330,8 @@ class MicCapture:
             raise RuntimeError("无法以 16kHz 打开麦克风，且 soxr 未安装")
 
     @staticmethod
-    def _try_open_input(device: int, rate: int) -> "sd.RawInputStream | None":
-        frames = rate * AUDIO_PKT_MS // 1000
+    def _try_open_input(device: int, rate: int, pkt_ms: int = AUDIO_PKT_MS) -> "sd.RawInputStream | None":
+        frames = rate * pkt_ms // 1000
         stream = None
         try:
             stream = sd.RawInputStream(
@@ -345,10 +349,10 @@ class MicCapture:
             return None
 
     def read(self) -> bytes:
-        """返回连续的 40ms PCM；重采样器输出按样本缓存，不补零或截断。"""
-        while len(self._pcm_pending) < AUDIO_PKT_BYTES:
+        """返回连续的指定帧长 PCM；重采样器输出按样本缓存，不补零或截断。"""
+        while len(self._pcm_pending) < self._packet_bytes:
             for attempt in range(2):
-                frames = self._rate * AUDIO_PKT_MS // 1000
+                frames = self._rate * self._pkt_ms // 1000
                 try:
                     pkt, overflowed = self._stream.read(frames)
                     if overflowed:
@@ -366,8 +370,8 @@ class MicCapture:
             if self._resampler is not None:
                 pcm = self._resampler.resample_chunk(pcm)
             self._pcm_pending.extend(pcm.tobytes())
-        raw = bytes(self._pcm_pending[:AUDIO_PKT_BYTES])
-        del self._pcm_pending[:AUDIO_PKT_BYTES]
+        raw = bytes(self._pcm_pending[:self._packet_bytes])
+        del self._pcm_pending[:self._packet_bytes]
         return raw
 
     def close(self):

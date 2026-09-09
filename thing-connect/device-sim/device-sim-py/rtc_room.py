@@ -55,6 +55,7 @@ class RoomSession:
         self.ptt = False
         self.members = {}
         self.members_synced = False
+        self.wire_room_id = None
         self.connect_started = None
         self.join_started = None
         self.snapshot_started = None
@@ -69,6 +70,7 @@ class RoomSession:
         self.lease_seconds = 45
         self.reader = None
         self.next_audio = 0
+        self.audio_timestamp = None
         self.http = requests.Session()
         self.audio_lock = threading.Lock()
         self.hardware = None
@@ -190,8 +192,10 @@ class RoomSession:
             self.state = 'idle'
             self.snapshot_started = None
             self.reader = None
+            self.audio_timestamp = None
             self.members = {}
             self.members_synced = False
+            self.wire_room_id = None
             if conn:
                 self._send(conn, {'jsonrpc': '2.0', 'method': 'leave_room'})
                 sdk.TiRtcDisconnect(conn)
@@ -211,6 +215,9 @@ class RoomSession:
         with self.lock:
             prior_ptt = self.ptt
             self.ptt = bool(pressed) and self.state == 'joined'
+            if self.ptt and not prior_ptt:
+                self.audio_timestamp = None
+                self.next_audio = 0
             if pressed or prior_ptt != self.ptt:
                 self._diagnostic(f'PTT 请求={"按下" if pressed else "松开"} 生效={self.ptt} state={self.state}')
             if self.conn:
@@ -432,6 +439,22 @@ class RoomSession:
                 self._diagnostic(f'接收 cmd=0x{word:08x} bytes={len(args[0])} 队列等待={delay:.0f}ms')
                 self._signal(json.loads(args[0]))
 
+    def _matches_room(self, value):
+        expected = self.assignment['room_id']
+        if value is None or value == expected:
+            return True
+        if not isinstance(value, str) or len(value) > 255:
+            return False
+        if self.wire_room_id is not None:
+            return value == self.wire_room_id
+        namespace, separator, business_id = value.partition(':')
+        if namespace and separator and business_id == expected:
+            # Events are already scoped to the current authenticated connection.
+            # Pin the first qualified ID; do not accept namespace changes later.
+            self.wire_room_id = value
+            return True
+        return False
+
     def _signal(self, message):
         method = message.get('method')
         known = ('room_snapshot', 'participant_joined', 'participant_left',
@@ -462,7 +485,7 @@ class RoomSession:
                                    'params': {'mic_state': 'off'}})
             self._request_members()
         params = message.get('params', {})
-        if params.get('room_id') not in (None, self.assignment['room_id']):
+        if not self._matches_room(params.get('room_id')):
             def safe_id(value):
                 return ''.join(c for c in str(value)[:128] if c.isprintable())
             self._diagnostic(
@@ -511,10 +534,10 @@ class RoomSession:
                         if joined:
                             stage = "打开扬声器"
                             self.hardware.open_speaker()
-                        if joined and pressed:
+                        if joined and pressed and time.monotonic() >= self.next_audio:
                             stage = "麦克风采集/编码"
                             payload, duration = self.hardware.capture()
-                        else:
+                        elif not joined or not pressed:
                             self.hardware.release_mic()
                     elif joined and pressed and reader and time.monotonic() >= self.next_audio:
                         packet = reader.next_packet()
@@ -535,7 +558,10 @@ class RoomSession:
                     spec = AUDIO_FORMATS[self.config.up_audio_format]
                     frame = sdk.TIRTCFRAMEINFO()
                     frame.stream_id, frame.media, frame.flags = 1, spec.media, spec.flags
-                    frame.ts, frame.length = int(time.monotonic()*1000)&0xffffffff, len(payload)
+                    if self.audio_timestamp is None:
+                        self.audio_timestamp = int(time.monotonic() * 1000)
+                    frame.ts, frame.length = self.audio_timestamp & 0xffffffff, len(payload)
+                    self.audio_timestamp += duration
                     data = ctypes.create_string_buffer(payload)
                     with self.lock:
                         if generation != self.generation or conn != self.conn or not self.ptt:

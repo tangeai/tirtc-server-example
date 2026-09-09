@@ -33,7 +33,7 @@ struct RoomState {
     pthread_t worker, media_worker;
     int started, media_started, closed, wake, active, ptt, joined;
     char server[512], device[65], bearer[2048], audio[512];
-    char room_id[65], room_code[7], session_id[65];
+    char room_id[65], room_code[7], session_id[65], wire_room_id[256];
     int64_t version, deadline, next_heartbeat, lease_deadline;
     int heartbeat_seconds, lease_seconds;
     _Atomic uint64_t generation;
@@ -207,6 +207,7 @@ static void stop_service(void *ctx) {
     r->active = 0;
     r->ptt = 0;
     r->joined = 0;
+    r->wire_room_id[0] = 0;
     tirtc_conn_t conn = r->conn;
     r->conn = NULL;
     uint64_t rtc_generation = r->rtc_generation;
@@ -327,6 +328,20 @@ static void print_status_locked(RoomState *r) {
               strcmp(string_field(member, "mic_state"), "speaking") == 0 ? "正在说话" : "收听中");
     }
 }
+static int matches_room(RoomState *r, const char *id) {
+    if (!id[0] || strcmp(id, r->room_id) == 0)
+        return 1;
+    if (r->wire_room_id[0])
+        return strcmp(id, r->wire_room_id) == 0;
+    const char *separator = strchr(id, ':');
+    if (separator && separator != id && strlen(id) < sizeof(r->wire_room_id) &&
+        strcmp(separator + 1, r->room_id) == 0) {
+        str_copy(r->wire_room_id, sizeof(r->wire_room_id), id);
+        return 1;
+    }
+    return 0;
+}
+
 static int signal_locked(RoomState *r, const cJSON *msg) {
     if (strcmp(string_field(msg, "jsonrpc"), "2.0") != 0)
         return 0;
@@ -352,7 +367,7 @@ static int signal_locked(RoomState *r, const cJSON *msg) {
     const char *method = string_field(msg, "method");
     const cJSON *params = cJSON_GetObjectItemCaseSensitive(msg, "params");
     const char *room_id = string_field(params, "room_id");
-    if (room_id[0] && strcmp(room_id, r->room_id) != 0)
+    if (!matches_room(r, room_id))
         return 0;
     if (strcmp(method, "room_closed") == 0)
         return -1;

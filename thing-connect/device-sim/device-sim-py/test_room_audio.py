@@ -12,11 +12,11 @@ class RoomAudioDiagnosticsTests(unittest.TestCase):
     def test_capture_logs_peak_and_preserves_alaw_frame(self):
         audio = RoomAudio('alaw_8khz', 'alaw_8khz')
         audio.mic = mock.Mock()
-        audio.mic.read.return_value = np.full(640, -32768, dtype=np.int16).tobytes()
+        audio.mic.read.return_value = np.full(320, -32768, dtype=np.int16).tobytes()
         output = io.StringIO()
         with redirect_stdout(output):
             packet, duration = audio.capture()
-        self.assertEqual((len(packet), duration), (320, 40))
+        self.assertEqual((len(packet), duration), (160, 20))
         self.assertIn('peak=32768/32768', output.getvalue())
         self.assertIn('静音=否', output.getvalue())
 

@@ -35,7 +35,7 @@ class RoomAudio:
     def capture(self):
         from audio_device import MicCapture, select_mic
         if self.mic is None:
-            self.mic = MicCapture(select_mic())
+            self.mic = MicCapture(select_mic(), pkt_ms=20)
         pcm = self.mic.read()
         self._level("麦克风采集16k", pcm)
         if self.up.sample_rate == 8000:
@@ -45,7 +45,7 @@ class RoomAudio:
         if self.up.codec == 'alaw':
             from alaw import alaw_encode
             pcm = alaw_encode(pcm)
-        return pcm, 40
+        return pcm, 20
 
     def play(self, media, flags, payload):
         if self.speaker is None or media != self.down.media or flags != self.down.flags:

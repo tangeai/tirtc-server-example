@@ -73,6 +73,16 @@ class RoomSessionTests(unittest.TestCase):
         self.assertFalse(self.room.members_synced)
         self.assertIn('received_room=other-room expected_room=room-1', log.call_args.args[0])
 
+    def test_namespaced_snapshot_applies_and_pins_namespace(self):
+        self.room.state = 'joined'
+        self.room._signal({'jsonrpc': '2.0', 'method': 'room_snapshot', 'params': {
+            'room_id': '2818153:room-1', 'participants': [{'participant_id': 'p1'}]}})
+        self.assertTrue(self.room.members_synced)
+        self.assertIn('p1', self.room.members)
+        self.assertFalse(self.room._matches_room('other:room-1'))
+        self.assertFalse(self.room._matches_room('2818153:not-room-1'))
+        self.assertTrue(self.room._matches_room('room-1'))
+
     def test_room_requests_use_call_namespace(self):
         response = mock.Mock(content=b'{}')
         response.json.return_value = {'code': 200, 'data': {}}

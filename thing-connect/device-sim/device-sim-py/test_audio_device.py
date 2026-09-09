@@ -57,22 +57,32 @@ class MicCaptureTests(unittest.TestCase):
 
 
 class MicResamplingContinuityTests(unittest.TestCase):
-    def test_usb_48k_stream_preserves_samples_across_40ms_reads(self):
+    def test_usb_48k_stream_preserves_samples_across_reads(self):
         import numpy as np
         import soxr
-        signal = (np.sin(np.arange(1920 * 80) * 2 * np.pi * 437 / 48000) * 12000).astype(np.int16)
-        chunks = [signal[i:i+1920] for i in range(0, len(signal), 1920)]
-        reference = soxr.ResampleStream(48000, 16000, 1, dtype='int16', quality='HQ')
-        expected = np.concatenate([reference.resample_chunk(chunk) for chunk in chunks])
-        capture = audio_device.MicCapture.__new__(audio_device.MicCapture)
-        capture._rate = 48000
-        capture._resampler = soxr.ResampleStream(48000, 16000, 1, dtype='int16', quality='HQ')
-        capture._pcm_pending = bytearray()
-        capture._stream = mock.Mock()
-        capture._stream.read.side_effect = [(chunk.tobytes(), False) for chunk in chunks]
-        output = b''.join(capture.read() for _ in range(60))
-        self.assertEqual(len(output), 60 * audio_device.AUDIO_PKT_BYTES)
-        self.assertEqual(output, expected[:60*640].tobytes())
+        for packet_ms in (20, 40):
+            with self.subTest(packet_ms=packet_ms):
+                input_size = 48000 * packet_ms // 1000
+                output_size = 16000 * packet_ms // 1000
+                signal = (np.sin(np.arange(input_size * 100) * 2 * np.pi * 437 / 48000) * 12000).astype(np.int16)
+                chunks = [signal[i:i+input_size] for i in range(0, len(signal), input_size)]
+                reference = soxr.ResampleStream(48000, 16000, 1, dtype='int16', quality='HQ')
+                expected = np.concatenate([reference.resample_chunk(chunk) for chunk in chunks])
+                capture = audio_device.MicCapture.__new__(audio_device.MicCapture)
+                capture._pkt_ms = packet_ms
+                capture._packet_bytes = output_size * 2
+                capture._rate = 48000
+                capture._resampler = soxr.ResampleStream(48000, 16000, 1, dtype='int16', quality='HQ')
+                capture._pcm_pending = bytearray()
+                capture._stream = mock.Mock()
+                capture._stream.read.side_effect = [(chunk.tobytes(), False) for chunk in chunks]
+                output = b''.join(capture.read() for _ in range(60))
+                self.assertEqual(len(output), 60 * output_size * 2)
+                # Integer resampler dithering may vary by a few least-significant bits.
+                # Sample alignment must still match the continuous reference.
+                actual = np.frombuffer(output, dtype=np.int16).astype(np.int32)
+                difference = actual - expected[:60*output_size].astype(np.int32)
+                self.assertLessEqual(int(np.max(np.abs(difference))), 4)
 
 
 class AudioSelectionTests(unittest.TestCase):

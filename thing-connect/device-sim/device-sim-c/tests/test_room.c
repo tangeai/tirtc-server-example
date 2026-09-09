@@ -102,6 +102,13 @@ int main(void) {
     r->count--;
     assert(process_event(r, &snapshot_event) == 0);
     assert(cJSON_GetArraySize(r->members) == 2);
+    char qualified[256];
+    snprintf(qualified, sizeof(qualified), "2818153:%s", r->room_id);
+    assert(matches_room(r, qualified));
+    assert(matches_room(r, r->room_id));
+    assert(!matches_room(r, "other:room-1"));
+    assert(!matches_room(r, "2818153:another-room"));
+
     command_cb(r->conn, 0x12342101u, snapshot, (uint32_t)strlen(snapshot));
     assert(r->count == 0);
 
