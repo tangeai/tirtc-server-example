@@ -163,6 +163,18 @@ python device_sim_main.py --device-id DEV000001 --device-key your-key --with-cam
 
 Windows 也可使用文件模式；只有显式传入 `--with-mic` 时，VoIP、AI 或设备间通话才使用 PC 麦克风和扬声器。此模式线上上下行必须同时使用 `alaw_8khz` 或同时使用 `alaw_16khz`（G.711 A-law、单声道）；PCM/AMR/Opus 只能去掉 `--with-mic` 后使用预编码文件测试。
 
+使用 `--with-mic` 时，启动时选择 Windows 默认输入和输出设备，并打印麦克风、扬声器的编号、名称与音频接口。USB 麦克风可作为默认输入设备，也可按编号指定：
+
+```powershell
+# 在模拟器目录执行：列出设备后退出，无需绑定或联网
+.\.venv\Scripts\python.exe device_sim_main.py --list-audio-devices
+
+# 按列表中的实际编号选择，下面的 1、2 仅为示例
+.\.venv\Scripts\python.exe device_sim_main.py --with-mic --mic-device 1 --speaker-device 2
+```
+
+省略任一设备参数时，该方向使用系统默认设备。指定编号不存在、方向不符或使用不支持的音频接口时，启动会报错，不会改用其他设备。设备编号可能随插拔或重启改变；更换设备或修改系统默认设备后，请重新列出设备并重启模拟器。运行期间不自动切换设备。
+
 显式传入 `--with-camera` 时，实时推流、VoIP 和设备间视频通话使用 `--camera-index` 指定的 PC 摄像头，`--up-video-file` 被摄像头替代。画面统一缩放并编码为 `1280x720`、15fps、H.264 Annex-B；`--up-video-format` 必须为 `h264`。未传 `--with-camera` 时，视频继续从 `--up-video-file` 循环读取，支持 `h264/h265/mjpeg`。
 
 如果 Windows 环境没有 `python3` 命令，可用 `py -3` 等价执行。
@@ -261,6 +273,9 @@ python3 device_sim_main.py --device-id DEV000001 --device-key your-key \
 | `--device-key` | `$DEVICE_KEY` | 设备密钥 |
 | `--mac` | `AA:BB:CC:DD:EE:FF` | 设备 MAC（未绑定流程） |
 | `--endpoint` | `http://ep-open.tangeopen.com` | 服务发现入口 |
+| `--list-audio-devices` | — | 列出设备编号、名称、方向及默认设备后退出 |
+| `--mic-device` | 系统默认 | 配合 `--with-mic` 指定输入设备编号 |
+| `--speaker-device` | 系统默认 | 配合 `--with-mic` 指定输出设备编号 |
 | `--with-mic` | — | Windows 下使用 PC 麦克风/扬声器；上下行须同时为 `alaw_8khz` 或 `alaw_16khz` |
 | `--with-camera` | — | Windows 下使用 PC 摄像头替代上行视频文件；输出固定为 720P、15fps、H.264 Annex-B |
 | `--camera-index` | `0` | `--with-camera` 使用的摄像头编号 |
@@ -994,3 +1009,5 @@ WHIP 连接成功后需等 ~300ms KCP 握手再发 `start_session`。
 上报在启动控制线程执行，单次请求最多 10 秒，网络或服务端暂时失败时按 1 秒、2 秒退避，最多尝试三次。鉴权、解绑和参数错误不重试；上报失败会打印提示，修复服务或配置后重新启动模拟器上报。此展示接口失败不阻止既有媒体业务启动。微信 VoIP 继续使用自己的 profile 注册接口。
 
 设备加入多人对讲房间后，终端显示房间号和房间 ID；成员快照同步完成后显示在线设备列表，成员进出时自动更新。`room status` 可随时查询列表，包含本机标记及成员的收听／发言状态。
+
+输入 `room status` 会显示本地房间状态，并向房间服务请求最新成员快照；收到快照后输出在线成员人数、设备 ID 和发言状态。加入成功时也主动请求一次快照。若持续显示“等待房间同步”，可输入 `room status` 重新查询，并检查房间服务的 `get_room_snapshot` / `room_snapshot` 信令。

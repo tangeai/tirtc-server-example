@@ -52,7 +52,7 @@ func TestIntercomTransactions(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if !room.Digits(a.RoomCode, 6) {
+	if !room.Digits(a.RoomCode, 6) || !strings.HasPrefix(a.RoomID, "group_room_") {
 		t.Fatalf("code=%q", a.RoomCode)
 	}
 	replay, e := service.Change(ctx, op)

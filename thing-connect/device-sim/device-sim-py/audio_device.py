@@ -152,13 +152,94 @@ def _find_mme_peer(device_idx: int, want_input: bool) -> "int | None":
     return None
 
 
+# Configured once by the launcher before any media worker starts.
+_selected_devices: "tuple[int, int] | None" = None
+
+
+def _supported_api(hostapi):
+    return sys.platform != "win32" or any(
+        name in hostapi["name"] for name in ("WASAPI", "MME", "Windows Multi"))
+
+
+def _resolve_device(index, want_input):
+    if not HAS_SD:
+        raise RuntimeError("请先安装硬件音频依赖：python -m pip install -r requirements-audio.txt")
+    devices = sd.query_devices()
+    apis = sd.query_hostapis()
+    label = "麦克风" if want_input else "扬声器"
+    key = "max_input_channels" if want_input else "max_output_channels"
+    is_default = index is None
+    if is_default:
+        index = sd.default.device[0 if want_input else 1]
+        # WASAPI exposes the Windows default endpoint without the MME mapper alias.
+        if sys.platform == "win32":
+            default_key = "default_input_device" if want_input else "default_output_device"
+            for api in apis:
+                candidate = api.get(default_key, -1)
+                if "WASAPI" in api["name"] and candidate >= 0:
+                    index = candidate
+                    break
+    if (not isinstance(index, int) or index < 0 or index >= len(devices)
+            or devices[index][key] <= 0
+            or not _supported_api(apis[devices[index]["hostapi"]])):
+        source = "系统默认" if is_default else f"指定的 [{index}]"
+        raise ValueError(f"{source}{label}不可用，请用 --list-audio-devices 查看并指定设备")
+    return index
+
+
+def configure_audio_devices(mic=None, speaker=None):
+    """Validate both endpoints atomically; all media services share this selection."""
+    global _selected_devices
+    selected = (_resolve_device(mic, True), _resolve_device(speaker, False))
+    devices = sd.query_devices()
+    apis = sd.query_hostapis()
+    _selected_devices = selected
+    for label, index in zip(("麦克风", "扬声器"), selected):
+        info = devices[index]
+        print(f"[audio_device] {label}: [{index}] {info['name']} / {apis[info['hostapi']]['name']}")
+
+
+def print_audio_devices():
+    if not HAS_SD:
+        raise RuntimeError("请先安装硬件音频依赖：python -m pip install -r requirements-audio.txt")
+    devices = sd.query_devices()
+    apis = sd.query_hostapis()
+    defaults = []
+    for want_input in (True, False):
+        try:
+            defaults.append(_resolve_device(None, want_input))
+        except ValueError:
+            defaults.append(None)
+    print("[audio_device] 音频设备（编号用于 --mic-device / --speaker-device）")
+    if not devices:
+        print("[audio_device] 未发现音频设备，请连接设备后重启模拟器")
+    for index, info in enumerate(devices):
+        api = apis[info["hostapi"]]
+        labels = []
+        if index == defaults[0]:
+            labels.append("默认输入")
+        if index == defaults[1]:
+            labels.append("默认输出")
+        if not _supported_api(api):
+            labels.append("不支持此音频接口")
+        print(f"[{index}] {info['name']} / {api['name']} / "
+              f"输入 {info['max_input_channels']} 声道 / 输出 {info['max_output_channels']} 声道 "
+              + "、".join(labels))
+
+
 def select_mic() -> "int | None":
-    """自动选择麦克风设备，返回 device index 或 None。"""
+    if _selected_devices is not None:
+        return _selected_devices[0]
+    if sys.platform == "win32":
+        return _resolve_device(None, True)
     return _pick_device(_MIC_PREFER, want_input=True)
 
 
 def select_speaker() -> "int | None":
-    """自动选择扬声器设备，返回 device index 或 None。"""
+    if _selected_devices is not None:
+        return _selected_devices[1]
+    if sys.platform == "win32":
+        return _resolve_device(None, False)
     return _pick_device(_SPK_PREFER, want_input=False)
 
 
@@ -167,38 +248,7 @@ def _pick_device(keywords: list, want_input: bool) -> "int | None":
         return None
 
     devices = sd.query_devices()
-    hostapis = sd.query_hostapis()
-
     ch_key = "max_input_channels" if want_input else "max_output_channels"
-
-    if sys.platform == "win32":
-        # Windows: 排除 WDM-KS（不支持阻塞 API），WASAPI 优于 MME
-        allowed_apis = {
-            i for i, h in enumerate(hostapis)
-            if any(k in h["name"] for k in ("WASAPI", "MME", "Windows Multi"))
-        }
-        wasapi_apis = {
-            i for i, h in enumerate(hostapis) if "WASAPI" in h["name"]
-        }
-        candidates = [
-            (i, d) for i, d in enumerate(devices)
-            if d[ch_key] > 0 and d["hostapi"] in allowed_apis
-        ]
-        wasapi_cands = [(i, d) for i, d in candidates if d["hostapi"] in wasapi_apis]
-        mme_cands = [(i, d) for i, d in candidates if d["hostapi"] not in wasapi_apis]
-
-        for pool in (wasapi_cands, mme_cands):
-            name_lower = [(i, d["name"].lower()) for i, d in pool]
-            for kw in keywords:
-                for i, name in name_lower:
-                    if kw in name:
-                        return i
-
-        if wasapi_cands:
-            return wasapi_cands[0][0]
-        if mme_cands:
-            return mme_cands[0][0]
-        return None
 
     # macOS / Linux: 所有 host API 都可用（CoreAudio / ALSA / PulseAudio）
     candidates = [

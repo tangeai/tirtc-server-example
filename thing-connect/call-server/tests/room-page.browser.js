@@ -20,6 +20,8 @@ async (page) => {
       if (mode === 'password') return route.fulfill({json: {code: 40320, msg: '房间密码错误，请重新输入'}});
       await page.waitForTimeout(180);
       state = request.url().endsWith('/leave') ? {desired_state: 'left', state: 'left'} : {desired_state: 'joined', state: 'waiting_device', room_code: '001234', room_id: 'test-room', assignment_version: 1, online_count: 0, password_set: !!request.postDataJSON().password, online: false};
+      if (mode === 'members' && !request.url().endsWith('/leave')) state = {...state,state:'joined',online:true,online_count:2};
+      return route.fulfill({json:{code:200,data:{...state,state:state.desired_state==='joined'?'assigned':'left',online:false,online_count:0}}});
     } else if (mode === 'load') return route.abort('failed');
     return route.fulfill({json: {code: 200, data: state}});
   });
@@ -67,10 +69,12 @@ async (page) => {
   await page.locator('#joinSubmit').click();
   await page.locator('#message').waitFor({state: 'visible'});
   check((await page.locator('#message').textContent()).includes('密码错误'), 'wrong password feedback missing');
-  mode = 'ok';
+  mode = 'members';
   await page.locator('#joinPassword').fill('0573');
   await page.locator('#joinSubmit').click();
   await page.locator('#current').waitFor({state: 'visible'});
+  await page.locator('#count').filter({hasText:'在线设备：2'}).waitFor();
+  check(await page.locator('#deviceOnline').textContent()==='● 在线','command acknowledgement overwrote live status');
   for (const width of [360, 1440]) {
     await page.setViewportSize({width, height: 900});
     check(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'joined overflow');

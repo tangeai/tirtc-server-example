@@ -148,13 +148,15 @@ static cJSON *request(RoomState *r, const char *path, cJSON *body, const char *k
     cJSON_Delete(root);
     return data ? data : cJSON_CreateObject();
 }
-static void send_json(tirtc_conn_t conn, cJSON *message) {
+static int send_json(tirtc_conn_t conn, cJSON *message) {
+    int rc = -1;
     char *raw = cJSON_PrintUnformatted(message);
     if (raw) {
-        TiRtcSendCommand(conn, ROOM_CMD, raw, (uint32_t)strlen(raw));
+        rc = TiRtcSendCommand(conn, ROOM_CMD, raw, (uint32_t)strlen(raw));
         free(raw);
     }
     cJSON_Delete(message);
+    return rc;
 }
 static cJSON *rpc(const char *method) {
     cJSON *root = cJSON_CreateObject();
@@ -270,7 +272,7 @@ static void conn_error(tirtc_conn_t conn, int error) {
 static void command_cb(tirtc_conn_t conn, uint32_t command, const void *data,
                        uint32_t length) {
     RoomState *r = s_room;
-    if (!r || command != ROOM_CMD || !data || !length || length >= ROOM_JSON_CAP)
+    if (!r || (command & 0xfffeu) != ROOM_CMD || !data || !length || length >= ROOM_JSON_CAP)
         return;
     char text[ROOM_JSON_CAP];
     memcpy(text, data, length);
@@ -298,6 +300,15 @@ static void audio_cb(tirtc_conn_t conn, const TIRTCFRAMEINFO *frame, void *data)
 static int subscribe_audio(tirtc_conn_t conn, uint8_t stream) {
     (void)conn;
     return stream == 1 ? 0 : -1;
+}
+static void request_members_locked(RoomState *r) {
+    if (!r->joined || !r->conn)
+        return;
+    int rc = send_json(r->conn, rpc("get_room_snapshot"));
+    if (rc > 0)
+        LOG_I("正在查询房间成员…");
+    else
+        LOG_W("成员查询发送失败 code=%d，请输入 room status 重试", rc);
 }
 static void print_status_locked(RoomState *r) {
     LOG_I("%s | 房间号：%s | 房间 ID：%s", r->joined ? "已加入" : "未连接",
@@ -336,6 +347,7 @@ static int signal_locked(RoomState *r, const cJSON *msg) {
               *params = cJSON_AddObjectToObject(off, "params");
         cJSON_AddStringToObject(params, "mic_state", "off");
         send_json(r->conn, off);
+        request_members_locked(r);
     }
     const char *method = string_field(msg, "method");
     const cJSON *params = cJSON_GetObjectItemCaseSensitive(msg, "params");
@@ -770,6 +782,7 @@ int room_command(RoomState *r, const char *line) {
     else if (strcmp(line, "room status") == 0) {
         pthread_mutex_lock(&r->lock);
         print_status_locked(r);
+        request_members_locked(r);
         pthread_mutex_unlock(&r->lock);
     } else
         enqueue(r, 5, NULL, 0, 0, line);
@@ -793,6 +806,13 @@ void room_shutdown(RoomState *r) {
     }
     if (r->arbiter)
         finish(r);
+    /* The control worker is stopped; release directly outside adapter locks. */
+    pthread_mutex_lock(&r->lock);
+    cJSON *final_presence = r->session_id[0] && r->room_id[0] && r->version > 0
+                                ? presence_locked(r, "suspended") : NULL;
+    pthread_mutex_unlock(&r->lock);
+    if (final_presence)
+        report(r, final_presence);
 }
 void room_destroy(RoomState *r) {
     if (!r)

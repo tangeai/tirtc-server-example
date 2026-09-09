@@ -10,15 +10,16 @@
     :root {
       --ink: #172026;
       --muted: #687279;
-      --line: #dfe4e2;
-      --soft-line: #edf0ef;
-      --paper: #fbfcfa;
+      --line: #dce6e8;
+      --soft-line: #edf3f4;
+      --paper: #fbfdfd;
       --white: #ffffff;
-      --accent: #0f766e;
-      --accent-dark: #0b5d57;
-      --accent-soft: #e9f6f2;
-      --warm: #f5f3ee;
-      --code: #15201f;
+      --brand: #41b5c2;
+      --accent: #087d89;
+      --accent-dark: #06616b;
+      --accent-soft: #e8f7f9;
+      --surface: #f1f6f7;
+      --code: #142329;
       --shadow: 0 20px 55px rgba(21, 32, 31, 0.1);
       --radius: 18px;
       --max-width: 1120px;
@@ -63,8 +64,8 @@
       position: sticky;
       top: 0;
       z-index: 20;
-      border-bottom: 1px solid rgba(223, 228, 226, 0.85);
-      background: rgba(251, 252, 250, 0.88);
+      border-bottom: 1px solid rgba(220, 230, 232, 0.85);
+      background: rgba(251, 253, 253, 0.9);
       backdrop-filter: blur(16px);
     }
 
@@ -85,7 +86,6 @@
       letter-spacing: -0.02em;
       white-space: nowrap;
     }
-
 
     .nav-links,
     .nav-actions {
@@ -185,7 +185,7 @@
       top: -290px;
       left: 50%;
       border-radius: 50%;
-      background: rgba(111, 201, 188, 0.12);
+      background: rgba(65, 181, 194, 0.14);
       filter: blur(4px);
       pointer-events: none;
     }
@@ -213,7 +213,7 @@
       width: 7px;
       height: 7px;
       border-radius: 50%;
-      background: var(--accent);
+      background: var(--brand);
       box-shadow: 0 0 0 5px var(--accent-soft);
     }
 
@@ -236,6 +236,23 @@
     h1 em {
       color: var(--accent);
       font-style: normal;
+    }
+
+    .hero-features {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 18px;
+      margin: 0 0 18px;
+      padding: 0;
+      list-style: none;
+      color: var(--ink);
+      font-size: 17px;
+      font-weight: 650;
+      line-height: 1.6;
+    }
+
+    .hero-features li {
+      white-space: nowrap;
     }
 
     .hero-copy {
@@ -274,7 +291,7 @@
     .button-primary {
       color: var(--white);
       background: var(--accent);
-      box-shadow: 0 10px 24px rgba(15, 118, 110, 0.2);
+      box-shadow: 0 10px 24px rgba(8, 125, 137, 0.2);
     }
 
     .button-primary:hover {
@@ -412,7 +429,7 @@
       padding: 4px 9px;
       border: 0;
       border-radius: 6px;
-      color: #82918f;
+      color: #a5b9bd;
       background: transparent;
       font: 700 11px/1 ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       white-space: nowrap;
@@ -425,13 +442,13 @@
     }
 
     .terminal-platform.active {
-      color: #dce7e5;
-      background: rgba(121, 210, 196, 0.14);
-      box-shadow: inset 0 0 0 1px rgba(121, 210, 196, 0.12);
+      color: #e0f5f7;
+      background: rgba(65, 181, 194, 0.14);
+      box-shadow: inset 0 0 0 1px rgba(65, 181, 194, 0.12);
     }
 
     .terminal-platform:focus-visible {
-      outline: 2px solid #79d2c4;
+      outline: 2px solid #73d1dc;
       outline-offset: 2px;
     }
 
@@ -454,8 +471,8 @@
 
     .terminal-copy:hover {
       color: #dce5e3;
-      border-color: rgba(121, 210, 196, 0.35);
-      background: rgba(121, 210, 196, 0.08);
+      border-color: rgba(65, 181, 194, 0.35);
+      background: rgba(65, 181, 194, 0.08);
     }
 
     .terminal-copy.copied {
@@ -488,15 +505,15 @@
     }
 
     .terminal-prompt {
-      color: #79d2c4;
+      color: #73d1dc;
     }
 
     .terminal-muted {
-      color: #778986;
+      color: #a5b9bd;
     }
 
-    .terminal-success {
-      color: #86d49e;
+    .terminal-command {
+      color: #a4dfe6;
     }
 
     .terminal-link {
@@ -526,8 +543,8 @@
       width: 7px;
       height: 14px;
       margin-left: 7px;
-      background: #79d2c4;
-      box-shadow: 0 0 8px rgba(121, 210, 196, 0.42);
+      background: #73d1dc;
+      box-shadow: 0 0 8px rgba(65, 181, 194, 0.42);
       animation: terminal-cursor-blink 1.05s steps(1, end) infinite;
     }
 
@@ -556,21 +573,21 @@
       gap: 16px;
       margin-top: 23px;
       padding: 15px 16px;
-      border: 1px solid rgba(121, 210, 196, 0.16);
+      border: 1px solid rgba(65, 181, 194, 0.16);
       border-radius: 11px;
-      background: rgba(121, 210, 196, 0.06);
+      background: rgba(65, 181, 194, 0.06);
     }
 
     .live-status strong {
       display: block;
       margin-bottom: 2px;
-      color: #dbe8e5;
+      color: #e0f5f7;
       font-family: Inter, ui-sans-serif, sans-serif;
       font-size: 13px;
     }
 
     .live-status small {
-      color: #849592;
+      color: #a5b9bd;
     }
 
     .live-badge {
@@ -592,39 +609,9 @@
       box-shadow: 0 0 0 5px rgba(112, 212, 141, 0.1);
     }
 
-    .trust-bar {
-      border-top: 1px solid var(--soft-line);
-      border-bottom: 1px solid var(--soft-line);
-      background: var(--white);
-    }
 
-    .trust-items {
-      min-height: 84px;
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      align-items: center;
-    }
 
-    .trust-item {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 9px;
-      color: #647075;
-      font-size: 13px;
-      white-space: nowrap;
-    }
 
-    .trust-item + .trust-item {
-      border-left: 1px solid var(--soft-line);
-    }
-
-    .trust-item svg {
-      flex-shrink: 0;
-      width: 18px;
-      height: 18px;
-      color: var(--accent);
-    }
 
     .routes {
       padding: 112px 0 40px;
@@ -660,26 +647,56 @@
 
     .setup-step {
       display: grid;
-      grid-template-columns: auto minmax(0, 1fr) minmax(280px, 0.72fr) auto;
+      grid-template-columns: minmax(0, 1fr) auto;
       align-items: center;
-      gap: 28px;
-      padding: 25px 28px;
-      border: 1px solid rgba(15, 118, 110, 0.3);
+      gap: 24px 40px;
+      padding: 36px;
+      border: 1px solid rgba(65, 181, 194, 0.45);
       border-radius: var(--radius);
-      background: linear-gradient(100deg, #eff9f6 0%, #ffffff 48%);
+      background: linear-gradient(110deg, #e5f6f8, #f6fbfc);
     }
 
-    .setup-number {
-      width: 40px;
-      height: 40px;
-      display: grid;
-      place-items: center;
-      border: 1px solid rgba(15, 118, 110, 0.24);
-      border-radius: 50%;
+    .setup-badge {
+      display: inline-flex;
+      margin-bottom: 14px;
+      padding: 4px 10px;
+      border-radius: 6px;
       color: var(--accent);
-      background: var(--white);
+      background: #d1eef2;
       font-size: 12px;
-      font-weight: 800;
+      font-weight: 700;
+    }
+
+    .setup-step--primary .setup-copy h3 {
+      font-size: 28px;
+    }
+
+    .setup-alternatives {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 20px;
+      margin-top: 20px;
+    }
+
+    .setup-alternatives .setup-step {
+      grid-template-columns: minmax(0, 1fr);
+      align-content: start;
+      gap: 18px;
+      padding: 28px;
+      border-color: var(--line);
+      background: var(--white);
+    }
+
+    .setup-alternatives .setup-link {
+      justify-self: start;
+      color: var(--accent);
+      background: transparent;
+      border: 1px solid var(--line);
+    }
+
+    .setup-alternatives .setup-link:hover {
+      background: var(--accent-soft);
+      border-color: var(--accent);
     }
 
     .setup-copy h3 {
@@ -740,7 +757,7 @@
       margin-top: 30px;
       padding: 38px;
       border-radius: 22px;
-      background: var(--warm);
+      background: var(--surface);
     }
 
     .video-step-heading {
@@ -749,10 +766,6 @@
       gap: 17px;
       max-width: 780px;
       margin-bottom: 30px;
-    }
-
-    .video-step-heading .setup-number {
-      flex: 0 0 auto;
     }
 
     .video-step-heading h3 {
@@ -897,239 +910,10 @@
       pointer-events: none;
     }
 
-    .final-cta {
-      padding: 56px 0 112px;
-    }
-
-    .final-cta-inner {
-      max-width: 1120px;
-      margin: 0 auto;
-    }
-
-    .final-cta-heading {
+    .routes-heading {
       max-width: 940px;
       margin: 0 auto 42px;
       text-align: center;
-    }
-
-    .final-cta h2 {
-      margin-bottom: 17px;
-      font-size: clamp(37px, 4.6vw, 56px);
-      line-height: 1.1;
-      letter-spacing: -0.05em;
-    }
-
-    .final-cta p {
-      max-width: 880px;
-      margin: 0 auto;
-      color: var(--muted);
-      font-size: 17px;
-      line-height: 1.7;
-    }
-
-    .product-path {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 16px;
-      text-align: left;
-    }
-
-    .sdk-panel {
-      display: grid;
-      grid-template-columns: minmax(230px, 0.72fr) minmax(0, 1.5fr);
-      align-items: center;
-      gap: 38px;
-      margin-bottom: 16px;
-      padding: 28px;
-      border: 1px solid rgba(15, 118, 110, 0.25);
-      border-radius: var(--radius);
-      background: linear-gradient(115deg, #eff9f6 0%, #ffffff 58%);
-      box-shadow: 0 14px 36px rgba(21, 32, 31, 0.045);
-      text-align: left;
-    }
-
-    .sdk-panel-kicker {
-      display: block;
-      margin-bottom: 8px;
-      color: var(--accent);
-      font-size: 11px;
-      font-weight: 800;
-      letter-spacing: 0.1em;
-    }
-
-    .sdk-panel h3 {
-      margin-bottom: 9px;
-      font-size: 23px;
-      letter-spacing: -0.025em;
-    }
-
-    .sdk-panel p {
-      margin: 0;
-      color: var(--muted);
-      font-size: 14px;
-      line-height: 1.7;
-    }
-
-    .product-step {
-      display: flex;
-      flex-direction: column;
-      padding: 28px;
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      background: var(--white);
-      box-shadow: 0 14px 36px rgba(21, 32, 31, 0.055);
-    }
-
-    .product-step:first-child {
-      border-color: rgba(15, 118, 110, 0.22);
-    }
-
-    .product-step-number {
-      width: 36px;
-      height: 36px;
-      display: grid;
-      place-items: center;
-      margin-bottom: 20px;
-      border: 1px solid rgba(15, 118, 110, 0.24);
-      border-radius: 50%;
-      color: var(--accent);
-      background: var(--white);
-      font-size: 12px;
-      font-weight: 800;
-    }
-
-    .product-step h3 {
-      margin-bottom: 10px;
-      font-size: 21px;
-      letter-spacing: -0.025em;
-    }
-
-    .product-step p {
-      margin: 0 0 12px;
-      color: var(--muted);
-      font-size: 14px;
-      line-height: 1.7;
-    }
-
-    .product-step-link {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      margin-top: auto;
-      color: var(--ink);
-      font-size: 14px;
-      font-weight: 720;
-    }
-
-    .product-step-link:hover {
-      color: var(--accent);
-    }
-
-    .sdk-options {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 10px;
-      margin: 0 0 14px;
-    }
-
-    .sdk-option {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      align-items: center;
-      gap: 18px;
-      padding: 14px 15px;
-      border: 1px solid rgba(15, 118, 110, 0.15);
-      border-radius: 12px;
-      background: rgba(255, 255, 255, 0.76);
-      color: var(--ink);
-    }
-
-    .sdk-option:hover {
-      border-color: rgba(15, 118, 110, 0.4);
-      background: var(--white);
-    }
-
-    .sdk-option strong,
-    .sdk-option small {
-      display: block;
-    }
-
-    .sdk-option strong {
-      margin-bottom: 5px;
-      font-size: 14px;
-    }
-
-    .sdk-option small {
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.45;
-    }
-
-    .sdk-option > span:first-child {
-      min-width: 0;
-    }
-
-    .sdk-option > span:last-child {
-      color: var(--accent);
-      font-size: 12px;
-      font-weight: 750;
-      white-space: nowrap;
-    }
-
-    .sdk-quick-links {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin-top: 2px;
-    }
-
-    .sdk-quick-label {
-      margin: 0 0 9px;
-      color: var(--muted);
-      font-size: 12px;
-      font-weight: 700;
-    }
-
-    .sdk-chip {
-      padding: 7px 10px;
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      background: var(--white);
-      color: var(--muted);
-      font-size: 12px;
-      font-weight: 650;
-    }
-
-    .sdk-chip:hover {
-      border-color: rgba(15, 118, 110, 0.35);
-      color: var(--accent);
-    }
-
-    .product-resource-links {
-      display: grid;
-      gap: 9px;
-      margin-top: 4px;
-      padding-top: 0;
-    }
-
-    .product-resource-links a {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 14px;
-      padding: 12px 0;
-      border-bottom: 1px solid var(--line);
-      color: var(--ink);
-      font-size: 14px;
-      font-weight: 700;
-    }
-
-    .product-resource-links a:hover {
-      color: var(--accent);
-    }
-
-    .product-resource-links span {
-      color: var(--accent);
     }
 
     .site-footer {
@@ -1210,31 +994,8 @@
         transform: none;
       }
 
-      .setup-step {
-        grid-template-columns: auto minmax(0, 1fr);
-        align-items: start;
-      }
-
-      .setup-requirements,
-      .setup-link {
-        grid-column: 2;
-      }
-
       .setup-link {
         justify-self: start;
-      }
-
-      .product-path {
-        grid-template-columns: 1fr;
-      }
-
-      .sdk-panel {
-        grid-template-columns: 1fr;
-        gap: 22px;
-      }
-
-      .sdk-option {
-        grid-template-columns: minmax(0, 1fr) auto;
       }
 
     }
@@ -1298,7 +1059,7 @@
       }
 
       .nav.menu-open .nav-links a:hover {
-        background: var(--warm);
+        background: var(--surface);
       }
 
       .nav.menu-open .nav-links .mobile-only {
@@ -1306,17 +1067,6 @@
       }
     }
 
-    @media (max-width: 820px) {
-      .trust-items {
-        grid-template-columns: repeat(3, 1fr);
-        padding: 16px 0;
-        row-gap: 16px;
-      }
-
-      .trust-item + .trust-item {
-        border-left: 0;
-      }
-    }
 
     @media (max-width: 620px) {
       .shell {
@@ -1362,24 +1112,9 @@
         flex-direction: column;
       }
 
-      .trust-items {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-      }
-
-      .trust-item {
-        min-width: 0;
-        white-space: normal;
-        justify-content: flex-start;
-        padding-left: 8px;
-        font-size: 12px;
-      }
 
       .routes {
         padding: 78px 0 40px;
-      }
-
-      .final-cta {
-        padding: 56px 0 78px;
       }
 
       .section-heading {
@@ -1392,9 +1127,18 @@
         padding: 22px;
       }
 
-      .setup-requirements,
-      .setup-link {
-        grid-column: auto;
+      .setup-alternatives {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 16px;
+        margin-top: 16px;
+      }
+
+      .setup-alternatives .setup-step {
+        padding: 22px;
+      }
+
+      .setup-step--primary .setup-copy h3 {
+        font-size: 24px;
       }
 
       .setup-link {
@@ -1414,15 +1158,6 @@
       .video-grid {
         grid-template-columns: 1fr;
         gap: 34px;
-      }
-
-      .sdk-option {
-        grid-template-columns: 1fr;
-        gap: 7px;
-      }
-
-      .sdk-options {
-        grid-template-columns: 1fr;
       }
 
       .video-frame {
@@ -1487,10 +1222,13 @@
     <section class="hero">
       <div class="hero-grid shell">
         <div class="reveal">
-          <div class="eyebrow"><span class="eyebrow-dot"></span>开发板即刻体验 · 设备到应用整套开源</div>
-          <h1>烧录即可体验<br><em>整套开源，按需部署</em></h1>
+          <div class="eyebrow"><span class="eyebrow-dot"></span>设备音视频 · 从开发板到应用整套开源</div>
+          <h1>烧录即享实时音视频<br><em>整套开源，按需部署</em></h1>
+          <ul class="hero-features" aria-label="核心功能">
+            <li>实时音视频</li><li>微信 VoIP 呼叫</li><li>设备互呼</li><li>多人对讲</li><li>AI 对话</li>
+          </ul>
           <p class="hero-copy">
-            为已适配的开发板烧录固件，联网绑定后即可体验实时音视频、AI 对话和多人对讲。服务端、Web 与微信小程序可直接复用，也可下载源码自行部署，继续开发自己的产品。
+            烧录适配固件，联网绑定即可体验。配套服务端、Web 与微信小程序可直接复用或自行部署。
           </p>
           <div class="hero-actions">
             <a class="button button-primary" href="#routes">选择体验方式 <span class="arrow">→</span></a>
@@ -1528,38 +1266,38 @@
           </div>
           <div class="terminal-body">
             <div class="terminal-platform-content" id="terminal-panel-windows" role="tabpanel" aria-labelledby="terminal-tab-windows" data-terminal-panel="windows">
-              <div class="terminal-line terminal-success terminal-command"><span class="terminal-prompt">PS&gt; </span>winget install -e --id Python.Python.3.14</div>
-              <div class="terminal-line terminal-success terminal-command">git clone https://github.com/tangeai/tirtc-server-example</div>
-              <div class="terminal-line terminal-success terminal-command">cd tirtc-server-example</div>
-              <div class="terminal-line terminal-success terminal-command">cd thing-connect/device-sim/device-sim-py</div>
-              <div class="terminal-line terminal-success terminal-command">py -3.14 -m venv .venv</div>
-              <div class="terminal-line terminal-success terminal-command">.\.venv\Scripts\python.exe -m pip install --upgrade pip</div>
-              <div class="terminal-line terminal-success terminal-command">.\.venv\Scripts\python.exe -m pip install -r requirements.txt</div>
-              <div class="terminal-line terminal-success terminal-command terminal-running">
+              <div class="terminal-line terminal-command"><span class="terminal-prompt">PS&gt; </span>winget install -e --id Python.Python.3.14</div>
+              <div class="terminal-line terminal-command">git clone https://github.com/tangeai/tirtc-server-example</div>
+              <div class="terminal-line terminal-command">cd tirtc-server-example</div>
+              <div class="terminal-line terminal-command">cd thing-connect/device-sim/device-sim-py</div>
+              <div class="terminal-line terminal-command">py -3.14 -m venv .venv</div>
+              <div class="terminal-line terminal-command">.\.venv\Scripts\python.exe -m pip install --upgrade pip</div>
+              <div class="terminal-line terminal-command">.\.venv\Scripts\python.exe -m pip install -r requirements.txt</div>
+              <div class="terminal-line terminal-command terminal-running">
                 <span class="terminal-command-text">.\.venv\Scripts\python.exe device_sim_main.py --mac AA:BB:CC:DD:EE:FF</span>
                 <span class="terminal-cursor" aria-hidden="true"></span>
               </div>
             </div>
             <div class="terminal-platform-content" id="terminal-panel-ubuntu-python" role="tabpanel" aria-labelledby="terminal-tab-ubuntu-python" data-terminal-panel="ubuntu-python" hidden>
-              <div class="terminal-line terminal-success terminal-command"><span class="terminal-prompt">$ </span>sudo apt update &amp;&amp; sudo apt install -y git python3 python3-venv</div>
-              <div class="terminal-line terminal-success terminal-command">git clone https://github.com/tangeai/tirtc-server-example</div>
-              <div class="terminal-line terminal-success terminal-command">cd tirtc-server-example</div>
-              <div class="terminal-line terminal-success terminal-command">cd thing-connect/device-sim/device-sim-py</div>
-              <div class="terminal-line terminal-success terminal-command">python3 -m venv .venv</div>
-              <div class="terminal-line terminal-success terminal-command">./.venv/bin/python -m pip install --upgrade pip</div>
-              <div class="terminal-line terminal-success terminal-command">./.venv/bin/python -m pip install -r requirements.txt</div>
-              <div class="terminal-line terminal-success terminal-command terminal-running">
+              <div class="terminal-line terminal-command"><span class="terminal-prompt">$ </span>sudo apt update &amp;&amp; sudo apt install -y git python3 python3-venv</div>
+              <div class="terminal-line terminal-command">git clone https://github.com/tangeai/tirtc-server-example</div>
+              <div class="terminal-line terminal-command">cd tirtc-server-example</div>
+              <div class="terminal-line terminal-command">cd thing-connect/device-sim/device-sim-py</div>
+              <div class="terminal-line terminal-command">python3 -m venv .venv</div>
+              <div class="terminal-line terminal-command">./.venv/bin/python -m pip install --upgrade pip</div>
+              <div class="terminal-line terminal-command">./.venv/bin/python -m pip install -r requirements.txt</div>
+              <div class="terminal-line terminal-command terminal-running">
                 <span class="terminal-command-text">./.venv/bin/python device_sim_main.py --mac AA:BB:CC:DD:EE:FF</span>
                 <span class="terminal-cursor" aria-hidden="true"></span>
               </div>
             </div>
             <div class="terminal-platform-content" id="terminal-panel-ubuntu-c" role="tabpanel" aria-labelledby="terminal-tab-ubuntu-c" data-terminal-panel="ubuntu-c" hidden>
-              <div class="terminal-line terminal-success terminal-command"><span class="terminal-prompt">$ </span>sudo apt update &amp;&amp; sudo apt install -y git build-essential pkg-config libcurl4-openssl-dev libmosquitto-dev libcjson-dev</div>
-              <div class="terminal-line terminal-success terminal-command">git clone https://github.com/tangeai/tirtc-server-example</div>
-              <div class="terminal-line terminal-success terminal-command">cd tirtc-server-example</div>
-              <div class="terminal-line terminal-success terminal-command">cd thing-connect/device-sim/device-sim-c</div>
-              <div class="terminal-line terminal-success terminal-command">make WERROR=1</div>
-              <div class="terminal-line terminal-success terminal-command terminal-running">
+              <div class="terminal-line terminal-command"><span class="terminal-prompt">$ </span>sudo apt update &amp;&amp; sudo apt install -y git build-essential pkg-config libcurl4-openssl-dev libmosquitto-dev libcjson-dev</div>
+              <div class="terminal-line terminal-command">git clone https://github.com/tangeai/tirtc-server-example</div>
+              <div class="terminal-line terminal-command">cd tirtc-server-example</div>
+              <div class="terminal-line terminal-command">cd thing-connect/device-sim/device-sim-c</div>
+              <div class="terminal-line terminal-command">make WERROR=1</div>
+              <div class="terminal-line terminal-command terminal-running">
                 <span class="terminal-command-text">./device-sim --mac AA:BB:CC:DD:EE:FF</span>
                 <span class="terminal-cursor" aria-hidden="true"></span>
               </div>
@@ -1581,74 +1319,52 @@
       </div>
     </section>
 
-    <section class="trust-bar" aria-label="TiRTC 示例功能">
-      <div class="trust-items shell">
-        <div class="trust-item">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="m9 9 6 3-6 3V9Z"/></svg>
-          远程查看实时音视频
-        </div>
-        <div class="trust-item">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M12 3a7 7 0 0 0-4 12.74V21l4-2 4 2v-5.26A7 7 0 0 0 12 3Z"/><path d="m9.5 10.5 1.5 1.5 3.5-3.5"/></svg>
-          AI 音视频对讲
-        </div>
-        <div class="trust-item">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M7 11a5 5 0 0 1 10 0v2a5 5 0 0 1-10 0v-2Z"/><path d="M4 12v1a8 8 0 0 0 16 0v-1M12 21v-3"/></svg>
-          设备间音视频对讲
-        </div>
-        <div class="trust-item">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M8 3h8a5 5 0 0 1 5 5v4a5 5 0 0 1-5 5h-3l-5 4v-4a5 5 0 0 1-5-5V8a5 5 0 0 1 5-5Z"/></svg>
-          设备呼叫微信小程序 VoIP 对讲
-        </div>
-      </div>
-    </section>
 
     <section class="routes" id="routes">
       <div class="shell">
-        <div class="section-heading final-cta-heading reveal">
+        <div class="section-heading routes-heading reveal">
           <div class="section-kicker">选择适合你的开始方式</div>
           <h2>开发板直接体验，应用按需部署</h2>
-          <p>有开发板，烧录固件即可开始；没有硬件，也能用电脑模拟器体验。需要接入自己的业务，可复用服务端、Web 与微信小程序，部署到自己的环境。</p>
+          <p>从开发板开始，烧录固件即可体验。也可用电脑模拟，或下载整套源码自行部署。</p>
         </div>
 
-        <article class="setup-step reveal">
-          <span class="setup-number">01</span>
+        <article class="setup-step setup-step--primary reveal">
           <div class="setup-copy">
+            <span class="setup-badge">推荐体验</span>
             <h3>烧录开发板，直接体验</h3>
-            <p>选择已适配的开发板和对应固件，按说明烧录、联网并绑定设备，即可通过 Web 或微信小程序体验。</p>
+            <p>选择已适配的开发板，烧录对应固件。联网绑定后，即可通过 Web 或微信小程序体验。</p>
           </div>
-          <ul class="setup-requirements"><li>匹配板型与固件</li><li>联网后绑定设备</li></ul>
-          <a class="setup-link" href="https://github.com/tangeai/tirtc-device-qiming/releases" target="_blank" rel="noopener noreferrer">查看开发板固件 <span>→</span></a>
+          <a class="setup-link" href="https://github.com/tangeai/tirtc-device-qiming/releases" target="_blank" rel="noopener noreferrer">查看开发板固件 <span aria-hidden="true">→</span></a>
         </article>
 
-        <article class="setup-step reveal">
-          <span class="setup-number">02</span>
-          <div class="setup-copy">
-            <h3>没有开发板？用电脑体验</h3>
-            <p>安装 CPython 3.10–3.14，按照教程启动模拟设备，完成设备上线、绑定及音视频收发验证。</p>
-          </div>
-          <ul class="setup-requirements">
-            <li>Windows/Ubuntu x86_64</li>
-            <li>macOS Apple Silicon</li>
-            <li>无需开发板</li>
-          </ul>
-          <a class="setup-link" href="https://github.com/tangeai/tirtc-server-example/blob/main/thing-connect/device-sim/device-sim-py/README.md" target="_blank" rel="noreferrer">查看模拟器教程 <span>→</span></a>
-        </article>
+        <div class="setup-alternatives">
+          <article class="setup-step reveal">
+            <div class="setup-copy">
+              <h3>没有开发板？用电脑体验</h3>
+              <p>运行设备模拟器，体验设备上线、绑定与音视频功能，无需硬件。</p>
+            </div>
+            <ul class="setup-requirements">
+              <li>Windows / Ubuntu x86_64</li>
+              <li>macOS Apple Silicon</li>
+            </ul>
+            <a class="setup-link" href="https://github.com/tangeai/tirtc-server-example/blob/main/thing-connect/device-sim/device-sim-py/README.md" target="_blank" rel="noopener noreferrer">查看模拟器教程 <span aria-hidden="true">→</span></a>
+          </article>
 
-        <article class="setup-step reveal">
-          <span class="setup-number">03</span>
-          <div class="setup-copy">
-            <h3>复用整套应用，自行部署</h3>
-            <p>下载服务端、Web 与微信小程序源码，按照部署指南配置运行环境和服务，即可搭建自己的平台并继续扩展业务。</p>
-          </div>
-          <ul class="setup-requirements"><li>服务端与 Web</li><li>微信小程序</li><li>设备端源码</li></ul>
-          <a class="setup-link" href="https://github.com/tangeai/tirtc-server-example/blob/main/thing-connect/deployment.md" target="_blank" rel="noopener noreferrer">查看部署指南 <span>→</span></a>
-        </article>
+          <article class="setup-step reveal">
+            <div class="setup-copy">
+              <h3>复用整套应用，自行部署</h3>
+              <p>下载源码，搭建自己的平台，按业务需要继续开发。</p>
+            </div>
+            <ul class="setup-requirements"><li>服务端、Web 与微信小程序</li><li>设备端源码</li></ul>
+            <a class="setup-link" href="https://github.com/tangeai/tirtc-server-example/blob/main/thing-connect/deployment.md" target="_blank" rel="noopener noreferrer">查看部署指南 <span aria-hidden="true">→</span></a>
+          </article>
+        </div>
 
         <div class="video-step" id="demo">
           <div class="video-step-heading reveal">
             <div>
-              <h3>常用功能演示</h3>
-              <p>开发板或模拟器上线并完成绑定后，可参照视频体验各项功能。</p>
+              <h3>核心功能演示</h3>
+              <p>通过视频，了解设备连接后的实际体验。</p>
             </div>
           </div>
 
@@ -1709,73 +1425,6 @@
       </div>
     </section>
 
-    <section class="final-cta">
-      <div class="final-cta-inner shell reveal">
-        <div class="final-cta-heading">
-          <div class="section-kicker">Build with TiRTC</div>
-          <h2>完成设备验证，接入产品工程</h2>
-          <p>根据设备的操作系统和芯片选择 SDK 或预编译固件，在设备上完成音视频验证后接入产品工程。</p>
-        </div>
-
-        <div class="sdk-panel">
-          <div>
-            <span class="sdk-panel-kicker">选择设备平台</span>
-            <h3>下载匹配设备的 SDK</h3>
-            <p>请根据实际硬件选择与操作系统、芯片和工具链匹配的 SDK。</p>
-          </div>
-
-          <div>
-            <div class="sdk-options">
-              <a class="sdk-option" href="https://docs.tange.ai/products/tirtc/download.html" target="_blank" rel="noreferrer">
-                <span>
-                  <strong>Linux/嵌入式 Linux</strong>
-                  <small>x86_64、ARM、MIPS 等平台，需根据工具链和 ABI 选择</small>
-                </span>
-                <span>查看 SDK →</span>
-              </a>
-              <a class="sdk-option" href="https://docs.tange.ai/products/tirtc/download.html" target="_blank" rel="noreferrer">
-                <span>
-                  <strong>RTOS/芯片平台</strong>
-                  <small>FreeRTOS、LiteOS 等平台，请下载对应芯片的专用 SDK</small>
-                </span>
-                <span>查看 SDK →</span>
-              </a>
-            </div>
-
-            <div class="sdk-quick-label">常用芯片平台</div>
-            <div class="sdk-quick-links" aria-label="常用芯片 SDK 快捷入口">
-              <a class="sdk-chip" href="https://repo-sdk.tange-ai.com/service/rest/repository/browse/tirtc-sdks/releases/espressif_esp32s3/" target="_blank" rel="noreferrer">ESP32-S3</a>
-              <a class="sdk-chip" href="https://repo-sdk.tange-ai.com/service/rest/repository/browse/tirtc-sdks/releases/espressif_esp32p4/" target="_blank" rel="noreferrer">ESP32-P4</a>
-              <a class="sdk-chip" href="https://repo-sdk.tange-ai.com/service/rest/repository/browse/tirtc-sdks/releases/taixin-txw82x/" target="_blank" rel="noreferrer">泰芯系列</a>
-              <a class="sdk-chip" href="https://docs.tange.ai/products/tirtc/download.html" target="_blank" rel="noreferrer">更多芯片</a>
-            </div>
-          </div>
-        </div>
-
-        <div class="product-path">
-          <article class="product-step">
-            <span class="product-step-number">01</span>
-            <h3>在真实设备上验证示例</h3>
-            <p>如有预编译固件，可直接烧录；否则使用对应 SDK 编译示例工程。完成设备上线与绑定后，验证音视频收发是否正常。</p>
-            <div class="product-resource-links">
-              <a href="https://github.com/tangeai/tirtc-device-qiming/releases" target="_blank" rel="noreferrer">ESP32 预编译固件<span>→</span></a>
-              <a href="https://github.com/tangeai/tirtc-device-qiming" target="_blank" rel="noreferrer">ESP32 示例工程 <span>→</span></a>
-            </div>
-          </article>
-
-          <article class="product-step">
-            <span class="product-step-number">02</span>
-            <h3>接入产品工程</h3>
-            <p>参考 C 示例和移植文档，完成摄像头、麦克风、网络、存储等接口适配，并将验证过的音视频链路集成到产品中。</p>
-            <div class="product-resource-links">
-              <a href="https://github.com/tangeai/tirtc-server-example/tree/main/thing-connect/device-sim/device-sim-c" target="_blank" rel="noreferrer">Linux C 参考实现 <span>→</span></a>
-              <a href="https://github.com/tangeai/tirtc-server-example/blob/main/thing-connect/device-porting.md" target="_blank" rel="noreferrer">设备端移植指南 <span>→</span></a>
-              <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html" target="_blank" rel="noreferrer">TiRTC C API <span>→</span></a>
-            </div>
-          </article>
-        </div>
-      </div>
-    </section>
   </main>
 
   <footer class="site-footer">

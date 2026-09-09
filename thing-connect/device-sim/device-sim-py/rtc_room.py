@@ -98,7 +98,8 @@ class RoomSession:
         def disconnected(conn):
             self._enqueue(('disconnected', self.generation, conn))
         def command(conn, command, data, length):
-            if command == ROOM_COMMAND and data and 0 < length <= 32768:
+            # The SDK command word may carry a sequence and the response bit.
+            if (command & 0xfffe) == ROOM_COMMAND and data and 0 < length <= 32768:
                 self._enqueue(('command', self.generation, conn,
                                ctypes.string_at(data, length)))
         cbs.on_disconnected = sdk.OnDisconnCB(disconnected)
@@ -139,7 +140,16 @@ class RoomSession:
         if self.media_worker:
             self.media_worker.join()
         self.stop_service()
-        self.http.close()
+        # The control worker has exited, so a queued release cannot be delivered.
+        with self.lock:
+            final_presence = self._presence('suspended') if self.assignment and self.session_id else None
+        try:
+            if final_presence:
+                self._report(final_presence)
+        except Exception:
+            print('[room] 会话释放上报失败，将在租约到期后自动释放', flush=True)
+        finally:
+            self.http.close()
 
     def sync(self):
         self.wake.set()
@@ -190,11 +200,20 @@ class RoomSession:
         elif parts[1:] == ['status']:
             with self.lock:
                 self._print_status()
+                self._request_members()
         elif len(parts) >= 2 and parts[1] in ('create', 'join', 'leave'):
             self._enqueue(('operation', tuple(parts[1:])))
         else:
             print('room create [四位密码] | room join 六位房间号 [密码] | room leave | room status | room ptt down/up')
         return True
+
+    def _request_members(self):
+        # Called under the session lock so a query cannot target a replaced connection.
+        if self.state != 'joined' or not self.conn:
+            return
+        rc = self._send(self.conn, {'jsonrpc': '2.0', 'method': 'get_room_snapshot'})
+        print('[room] 正在查询房间成员…' if rc > 0 else
+              f'[room] 成员查询发送失败 code={rc}，请输入 room status 重试', flush=True)
 
     def _print_status(self):
         # Call under the session lock; never print raw member payloads or credentials.
@@ -365,6 +384,7 @@ class RoomSession:
                                                self.config.up_audio_format)
             self._send(self.conn, {'jsonrpc': '2.0', 'method': 'set_mic_state',
                                    'params': {'mic_state': 'off'}})
+            self._request_members()
         params = message.get('params', {})
         if params.get('room_id') not in (None, self.assignment['room_id']):
             return
@@ -468,7 +488,10 @@ class RoomSession:
 
             except Exception as exc:
                 # Never print HTTP exceptions containing request credentials.
-                print('[room] 同步失败 code=' + str(getattr(exc, 'code', 50200)), flush=True)
+                if getattr(exc, 'code', None) == 40921:
+                    print('[room] 正在同步房间会话，稍后自动重连', flush=True)
+                else:
+                    print('[room] 同步失败 code=' + str(getattr(exc, 'code', 50200)), flush=True)
                 self.finish()
                 self.closed.wait(retry)
                 retry = min(30, retry * 2)

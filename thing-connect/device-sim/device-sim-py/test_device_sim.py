@@ -34,6 +34,21 @@ class JsonResponse:
 
 
 class DeviceSimulatorTests(unittest.TestCase):
+    def test_audio_list_exits_without_discovery(self):
+        with mock.patch("audio_device.print_audio_devices") as listing, \
+                mock.patch.object(device_sim_main, "fetch_services") as discovery, \
+                mock.patch.object(device_sim_main.sys, "argv", ["device_sim_main.py", "--list-audio-devices"]):
+            device_sim_main.main()
+        listing.assert_called_once_with()
+        discovery.assert_not_called()
+
+    def test_audio_selection_requires_hardware_mode(self):
+        with mock.patch.object(device_sim_main.sys, "argv", ["device_sim_main.py", "--mic-device", "1"]), \
+                redirect_stderr(io.StringIO()) as error, self.assertRaises(SystemExit) as raised:
+            device_sim_main.main()
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("--with-mic", error.getvalue())
+
     def test_without_mic_does_not_probe_audio_dependencies(self):
         stderr = io.StringIO()
         with mock.patch.object(

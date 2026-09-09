@@ -203,13 +203,13 @@
           }
           return body.data;
         }
-        function render(a) {
+        function render(a, verified = true) {
           snapshot = a;
           $("loading").hidden = true;
           $("retry").hidden = true;
           $("syncMessage").hidden = true;
-          $("deviceOnline").textContent = a.online ? "● 在线" : "○ 离线";
-          $("deviceOnline").style.color = a.online ? "#059669" : "#6b7280";
+          $("deviceOnline").textContent = verified ? (a.online ? "● 在线" : "○ 离线") : "状态待更新";
+          $("deviceOnline").style.color = verified && a.online ? "#059669" : "#6b7280";
           const joined = a.desired_state === "joined";
           $("current").hidden = !joined;
           $("actions").hidden = joined;
@@ -218,7 +218,7 @@
           else if (messageKind === "status") message("");
           $("code").textContent = a.room_code || "";
           $("state").textContent = states[a.state] || "正在同步";
-          $("count").textContent = "在线设备：" + (a.online_count || 0);
+          $("count").textContent = "在线设备：" + (verified && Number.isInteger(a.online_count) ? a.online_count : "待更新");
           $("stateHelp").textContent = {
             assigned: "加入请求已保存，设备正在处理。",
             waiting_device: "请开机联网，联网后自动加入。",
@@ -287,8 +287,18 @@
                 headers: { "Idempotency-Key": pending.key },
                 body: pending.raw,
               }),
+              false,
             );
             pending = null;
+            // A successful command acknowledges the assignment, not live presence.
+            // Query once after the explicit operation; never poll the page.
+            try {
+              render(await api(""));
+            } catch (e) {
+              if (stopped) return;
+              $("syncMessage").textContent = "操作已成功，状态更新失败；请返回设备列表刷新后重试。";
+              $("syncMessage").hidden = false;
+            }
             message("");
             $("newPassword").value = "";
             $("joinPassword").value = "";

@@ -262,7 +262,7 @@ func (s *Service) Change(ctx context.Context, o Operation) (Assignment, error) {
 					return e
 				}
 				deadline := now.Add(p.EmptyTTL)
-				target = Room{ID: "xiaotai_room_" + id, Code: fmt.Sprintf("%06d", number.Int64()), Owner: owner, Status: "waiting_join", EmptyDeadline: &deadline, CreatedAt: now, Limit: p.ParticipantLimit}
+				target = Room{ID: "group_room_" + id, Code: fmt.Sprintf("%06d", number.Int64()), Owner: owner, Status: "waiting_join", EmptyDeadline: &deadline, CreatedAt: now, Limit: p.ParticipantLimit}
 				target.Verifier = s.verifier(target.ID, o.Password)
 				if e = tx.CreateRoom(target); e != nil {
 					return e

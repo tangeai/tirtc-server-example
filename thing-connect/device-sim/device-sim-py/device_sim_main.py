@@ -265,6 +265,12 @@ def main():
     parser.add_argument("--with-mic", action="store_true", dest="with_mic",
                         help="Windows 使用本机麦克风/扬声器；上下行必须使用相同的 "
                              "alaw_8khz 或 alaw_16khz")
+    parser.add_argument("--list-audio-devices", action="store_true",
+                        help="列出音频设备编号与名称后退出，不连接服务端")
+    parser.add_argument("--mic-device", type=int, default=None,
+                        help="--with-mic 使用的麦克风编号，默认 Windows 默认输入设备")
+    parser.add_argument("--speaker-device", type=int, default=None,
+                        help="--with-mic 使用的扬声器编号，默认 Windows 默认输出设备")
     parser.add_argument("--with-camera", action="store_true", dest="with_camera",
                         help="Windows 使用 PC 摄像头替代上行视频文件，输出 "
                              "1280x720、15fps、H.264")
@@ -305,6 +311,15 @@ def main():
                              "也可用 TIRTC_SDK_VERSION 环境变量覆盖）")
     args = parser.parse_args()
 
+    if args.list_audio_devices:
+        try:
+            from audio_device import print_audio_devices
+            print_audio_devices()
+        except Exception as exc:
+            parser.error(f"无法列出音频设备：{exc}")
+        return
+    if not args.with_mic and (args.mic_device is not None or args.speaker_device is not None):
+        parser.error("--mic-device / --speaker-device 需要同时指定 --with-mic")
     if args.with_mic and not sys.platform.startswith("win"):
         parser.error("--with-mic 仅支持 Windows；其他平台请使用媒体文件模式")
     if args.with_camera and not sys.platform.startswith("win"):
@@ -332,6 +347,11 @@ def main():
                 "python -m pip install -r requirements-audio.txt "
                 f"（缺少: {missing}）"
             )
+        try:
+            from audio_device import configure_audio_devices
+            configure_audio_devices(args.mic_device, args.speaker_device)
+        except Exception as exc:
+            parser.error(f"音频设备配置失败：{exc}")
         try:
             import rtc_ai_hw as _rtc_ai_hw
         except (ImportError, OSError, SystemExit) as exc:

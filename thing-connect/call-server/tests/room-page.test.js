@@ -6,7 +6,7 @@ const {webcrypto} = require('node:crypto');
 const html = fs.readFileSync(require('node:path').join(__dirname, '../handler/room_page.html'), 'utf8');
 const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 
-async function page(crypto, respond = async () => ({code: 200, data: {desired_state: 'joined', state: 'waiting_device', room_code: '001234'}})) {
+async function page(crypto, respond = async () => ({code: 200, data: {desired_state: 'joined', state: 'waiting_device', room_code: '001234'}}), readCurrent = null) {
   const nodes = new Map();
   const node = id => {
     if (!nodes.has(id)) nodes.set(id, {textContent: '', value: '', hidden: false, disabled: false, style: {}, focus() {}, showModal() {}, close() {}});
@@ -14,6 +14,8 @@ async function page(crypto, respond = async () => ({code: 200, data: {desired_st
   };
   const buttons = [{disabled: false}, {disabled: false}];
   const posts = [];
+  let latest = {desired_state: 'left'};
+  let reads = 0;
   const context = vm.createContext({
     document: {getElementById: node, querySelectorAll: selector => selector === 'button, input' ? buttons : []},
     location: {search: '?device_id=test-device'},
@@ -23,14 +25,16 @@ async function page(crypto, respond = async () => ({code: 200, data: {desired_st
     fetch: async (url, options) => {
       if (options.method === 'POST') {
         posts.push({url, ...options});
-        return {status: 200, json: async () => respond()};
+        return {status: 200, json: async () => {const body = await respond(); if(body.code === 200) latest = body.data; return body;}};
       }
-      return {status: 200, json: async () => ({code: 200, data: url.endsWith('/list') ? [{device_id: 'test-device'}] : {desired_state: 'left'}})};
+      if (url.endsWith('/list')) return {status:200, json:async()=>({code:200,data:[{device_id:'test-device'}]})};
+      reads++;
+      return {status:200, json:async()=>({code:200,data:readCurrent ? await readCurrent(posts.length) : latest})};
     },
   });
   vm.runInContext(script, context);
   await new Promise(resolve => setImmediate(resolve));
-  return {node, buttons, posts, change: (kind = 'create', body = {password: ''}) => context.change(kind, body)};
+  return {node, buttons, posts, reads: () => reads, change: (kind = 'create', body = {password: ''}) => context.change(kind, body)};
 }
 
 const httpCrypto = () => ({getRandomValues: array => webcrypto.getRandomValues(array)});
@@ -103,4 +107,27 @@ test('business rejection preserves entered password and shows the reason', async
   assert.equal(p.node('message').hidden, false);
   assert.equal(p.node('joinPassword').value, '1234');
   assert.ok(p.buttons.every(b => !b.disabled));
+});
+
+
+test('joining reads authoritative room counts instead of command defaults without polling', async () => {
+  const p = await page(httpCrypto(), async () => ({code:200,data:{desired_state:'joined',state:'assigned',room_code:'668740',online:false,online_count:0}}), async posts => posts ? {desired_state:'joined',state:'joined',room_code:'668740',online:true,online_count:2} : {desired_state:'left'});
+  await p.change('join', {room_code:'668740',password:''});
+  assert.equal(p.node('count').textContent,'在线设备：2');
+  assert.equal(p.node('deviceOnline').textContent,'● 在线');
+  assert.equal(p.node('state').textContent,'已加入');
+  assert.equal(p.posts.length,1);
+  assert.equal(p.reads(),2);
+});
+
+test('successful command with failed status read preserves success and never invents zero participants', async () => {
+  const p = await page(httpCrypto(), async () => ({code:200,data:{desired_state:'joined',state:'assigned',room_code:'668740',online:false,online_count:0}}), async posts => {if(posts)throw Error('network');return {desired_state:'left'};});
+  await p.change('join',{room_code:'668740',password:''});
+  assert.equal(p.node('count').textContent,'在线设备：待更新');
+  assert.equal(p.node('deviceOnline').textContent,'状态待更新');
+  assert.equal(p.node('successMessage').hidden,false);
+  assert.match(p.node('syncMessage').textContent,/状态更新失败/);
+  assert.equal(p.node('syncMessage').hidden,false);
+  assert.equal(p.posts.length,1);
+  assert.ok(p.buttons.every(b=>!b.disabled));
 });

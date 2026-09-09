@@ -24,7 +24,7 @@ class RoomSessionTests(unittest.TestCase):
         self.room.generation = 3
         self.room.conn = 123
         self.room.state = 'joining'
-        self.send = mock.patch.object(rtc_room.sdk, 'TiRtcSendCommand', return_value=0).start()
+        self.send = mock.patch.object(rtc_room.sdk, 'TiRtcSendCommand', side_effect=lambda conn, cmd, data, length: length).start()
         self.disconnect = mock.patch.object(rtc_room.sdk, 'TiRtcDisconnect').start()
         self.addCleanup(mock.patch.stopall)
         self.addCleanup(self.room.http.close)
@@ -63,6 +63,69 @@ class RoomSessionTests(unittest.TestCase):
             self.room._signal({'jsonrpc': '2.0', 'method': 'participant_left',
                                'params': {'participant_id': 'p2'}})
         self.assertIn('在线成员（1）', output.getvalue())
+
+    def test_missing_initial_snapshot_can_be_requested_again(self):
+        self.joined()
+        methods = [json.loads(call.args[2])['method'] for call in self.send.call_args_list]
+        self.assertIn('get_room_snapshot', methods)
+        self.send.reset_mock()
+        self.room.command(['room', 'status'])
+        self.assertEqual(json.loads(self.send.call_args.args[2]),
+                         {'jsonrpc': '2.0', 'method': 'get_room_snapshot'})
+        self.assertFalse(self.room.members_synced)
+        self.room._signal({'jsonrpc': '2.0', 'method': 'room_snapshot', 'params': {
+            'room_id': 'room-1', 'participants': [
+                {'participant_id': 'p1', 'device_id': 'device-1'},
+                {'participant_id': 'p2', 'device_id': 'device-2'}]}})
+        self.assertTrue(self.room.members_synced)
+        self.assertEqual(len(self.room.members), 2)
+        self.room.state = 'idle'
+        self.send.reset_mock()
+        self.room.command(['room', 'status'])
+        self.send.assert_not_called()
+
+    def test_snapshot_send_uses_sdk_byte_count_success(self):
+        import io
+        from contextlib import redirect_stdout
+        self.room.state = 'joined'
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.room.command(['room', 'status'])
+        self.assertIn('正在查询房间成员', output.getvalue())
+        self.assertNotIn('发送失败', output.getvalue())
+        self.send.side_effect = None
+        self.send.return_value = -40004
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.room.command(['room', 'status'])
+        self.assertIn('成员查询发送失败 code=-40004', output.getvalue())
+
+    def test_snapshot_callback_accepts_sdk_sequence_and_response_flag(self):
+        self.joined()
+        raw = json.dumps({'jsonrpc': '2.0', 'method': 'room_snapshot', 'params': {
+            'room_id': 'room-1', 'participants': [{'participant_id': 'p1', 'device_id': 'device-1'}]}}).encode()
+        buf = ctypes.create_string_buffer(raw)
+        self.room.callbacks.on_command(123, 0x12342201, buf, len(raw))
+        self.room._event(self.room.events.get_nowait())
+        self.assertTrue(self.room.members_synced)
+        self.assertEqual(len(self.room.members), 1)
+        self.room.callbacks.on_command(123, 0x12342101, buf, len(raw))
+        self.assertTrue(self.room.events.empty())
+
+    def test_shutdown_releases_lease_after_control_worker_stops(self):
+        self.joined()
+        self.room.worker = mock.Mock()
+        self.room.media_worker = mock.Mock()
+        with mock.patch.object(self.room, '_api') as request:
+            def after_stop(*args):
+                self.room.worker.join.assert_called_once()
+                self.room.media_worker.join.assert_called_once()
+                self.assertIsNone(self.room.conn)
+            request.side_effect = after_stop
+            self.room.shutdown()
+        request.assert_called_once_with('POST', 'presence', {
+            'room_id': 'room-1', 'assignment_version': 1,
+            'session_id': 'session-1', 'state': 'suspended'})
 
     def joined(self):
         self.room._signal({'jsonrpc': '2.0', 'id': 1, 'result': {

@@ -5,9 +5,17 @@
 
 static _Atomic int sent_audio, received_audio, disconnects, send_result;
 static unsigned char packet_data[160];
+static int snapshot_requests;
 int TiRtcSendCommand(tirtc_conn_t conn, uint32_t cmd, const void *data, uint32_t len) {
     assert(conn && cmd == ROOM_CMD && data && len);
-    return 0;
+    cJSON *message = cJSON_ParseWithLength(data, len);
+    assert(message);
+    if (strcmp(string_field(message, "method"), "get_room_snapshot") == 0) {
+        assert(!cJSON_GetObjectItemCaseSensitive(message, "id"));
+        snapshot_requests++;
+    }
+    cJSON_Delete(message);
+    return (int)len;
 }
 int TiRtcSendAudioStream(tirtc_conn_t conn, const TIRTCFRAMEINFO *frame,
                          const void *data) {
@@ -71,6 +79,13 @@ int main(void) {
             "audio\":{\"codec\":\"g711a\",\"sample_rate\":8000,\"channels\":1},\"output_"
             "audio\":{\"codec\":\"g711a\",\"sample_rate\":8000,\"channels\":1}}}");
     assert(r->joined && !r->ptt);
+    assert(snapshot_requests == 1);
+    assert(room_command(r, "room status") == 1);
+    assert(snapshot_requests == 2);
+    r->joined = 0;
+    room_command(r, "room status");
+    assert(snapshot_requests == 2);
+    r->joined = 1;
     RoomEvent invalid_operation = {.type = 5};
     str_copy(invalid_operation.text, sizeof(invalid_operation.text), "room invalid");
     assert(process_event(r, &invalid_operation) == 0 && r->joined);
@@ -79,6 +94,17 @@ int main(void) {
     deliver(r, "{\"jsonrpc\":\"2.0\",\"method\":\"participant_joined\",\"params\":{"
                "\"participant\":{\"participant_id\":\"p1\"}}}");
     assert(cJSON_GetArraySize(r->members) == 1);
+    const char *snapshot = "{\"jsonrpc\":\"2.0\",\"method\":\"room_snapshot\",\"params\":{\"participants\":[{\"participant_id\":\"p1\"},{\"participant_id\":\"p2\"}]}}";
+    command_cb(r->conn, 0x12342201u, snapshot, (uint32_t)strlen(snapshot));
+    assert(r->count == 1);
+    RoomEvent snapshot_event = r->queue[r->head];
+    r->head = (r->head + 1) % ROOM_QUEUE;
+    r->count--;
+    assert(process_event(r, &snapshot_event) == 0);
+    assert(cJSON_GetArraySize(r->members) == 2);
+    command_cb(r->conn, 0x12342101u, snapshot, (uint32_t)strlen(snapshot));
+    assert(r->count == 0);
+
     RoomEvent late = {.type = 1, .conn = (tirtc_conn_t)(uintptr_t)2, .generation = 1};
     assert(process_event(r, &late) == 0 && disconnects == 1 &&
            r->conn == (void *)(uintptr_t)1);
