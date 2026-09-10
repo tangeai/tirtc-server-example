@@ -472,6 +472,20 @@ int voip_profile_json(char *profile, size_t capacity) {
         else
             LOG_W("VOIP_CAMERA_ROTATION 仅支持 0/90/180/270，已回退为 0");
     }
+    int down_video_rotation = 0;
+    const char *down_rotation_env = getenv("VOIP_DOWN_VIDEO_ROTATION");
+    if (down_rotation_env) {
+        int parsed = atoi(down_rotation_env);
+        if (parsed == 0 || parsed == 1 || parsed == 2)
+            down_video_rotation = parsed;
+        else
+            LOG_W("VOIP_DOWN_VIDEO_ROTATION 仅支持 0/1/2，已回退为 0");
+    }
+    char down_video_rotation_field[40] = "";
+    if (s_voip_has_video && down_video_rotation != 0) {
+        snprintf(down_video_rotation_field, sizeof(down_video_rotation_field),
+                 "\"down_video_rotation\":%d,", down_video_rotation);
+    }
     double aspect_ratio = 4.0 / 3.0;
     const char *aspect_ratio_env = getenv("VOIP_ASPECT_RATIO");
     if (aspect_ratio_env) {
@@ -511,7 +525,7 @@ int voip_profile_json(char *profile, size_t capacity) {
     int written = snprintf(profile, capacity,
              "{\"screen_width\":%d,\"screen_height\":%d,"
              "\"camera_rotation\":%d,\"aspect_ratio\":%.10g,"
-             "%s"
+             "%s%s"
              "\"hor_mirror\":%s,\"vert_mirror\":%s,"
              "\"audio_rate\":%d,\"audio_channels\":1,"
              "\"up_video_mt\":\"%s\",\"down_video_mt\":\"%s\","
@@ -519,7 +533,8 @@ int voip_profile_json(char *profile, size_t capacity) {
              "\"no_video\":%s,"
              "\"calling_timeout_sec\":30}",
              screen_width, screen_height,
-             camera_rotation, aspect_ratio, object_fit_field,
+             camera_rotation, aspect_ratio, down_video_rotation_field,
+             object_fit_field,
              hor_mirror ? "true" : "false",
              vert_mirror ? "true" : "false",
              down->sample_rate,

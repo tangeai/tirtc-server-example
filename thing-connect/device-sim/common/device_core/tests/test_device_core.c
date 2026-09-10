@@ -163,6 +163,7 @@ int main(void)
     assert(media.video.fps == 8);
     assert(media.video.frame_count == 80);
     assert(media.video.camera_rotation == 0);
+    assert(media.video.down_video_rotation == 0);
     assert(media.video.aspect_ratio > 1.333 && media.video.aspect_ratio < 1.334);
     assert(media.video.object_fit[0] == '\0');
     assert(!media.video.hor_mirror);
@@ -187,6 +188,9 @@ int main(void)
     media.video.camera_rotation = 45;
     assert(!device_media_config_validate(&media, error, sizeof(error)));
     media.video.camera_rotation = 0;
+    media.video.down_video_rotation = 3;
+    assert(!device_media_config_validate(&media, error, sizeof(error)));
+    media.video.down_video_rotation = 2;
     media.video.aspect_ratio = 0;
     assert(!device_media_config_validate(&media, error, sizeof(error)));
     media.video.aspect_ratio = 16.0 / 9.0;

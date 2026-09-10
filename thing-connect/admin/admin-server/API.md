@@ -106,6 +106,7 @@ MFA 验证请求：
 | 微信 VoIP | 应用列表、应用详情、应用设备及设备上报属性 |
 | 任务 | 设备池导入、任务列表、任务结果下载和失败任务重试 |
 | 日志 | `GET /login-logs`、`GET /audit-logs` |
+| 开发板目录 | `GET/POST /boards`、`POST /boards/images`、`PUT/DELETE /boards/:id`、`PUT /boards/:id/status` |
 
 `GET /services/:service/status` 在实例状态外返回 `configuration_ready`、`required_configurations[]`、`start_command` 和 `restart_command`。`required_configurations[]` 列出未发布或无效的启动阻断项。命令仅用于管理员复制到部署服务器执行，Admin 不执行主机进程控制。
 
@@ -145,6 +146,100 @@ MFA 验证请求：
 登录日志和操作日志保留稳定的英文动作码用于筛选与二次开发。`GET /login-logs` 的每条记录包含登录时提交的 `email`；`GET /audit-logs` 的每条记录包含 `admin_user_id` 和当前可查询到的 `email`，账号不存在或已离线清理时 `email` 为空。
 
 ## 动态配置
+
+### 开发板目录
+
+开发板管理页面使用独立接口编辑官网 `/boards` 的目录内容。每条开发板资料单独存储和修改。读接口需要 `board.read` 权限，写接口需要 `board.write` 权限。所有接口均使用管理员访问令牌和 CSRF 请求头，完整路径带 `/v1/admin` 前缀。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/boards` | 读取全部草稿、已上架和已下架条目 |
+| POST | `/boards/images` | 上传一张开发板产品图片 |
+| POST | `/boards` | 新增开发板；服务端生成 ID，初始状态固定为草稿 |
+| PUT | `/boards/:id` | 修改一条开发板资料，不改变上架状态 |
+| PUT | `/boards/:id/status` | 上架或下架一条开发板 |
+| DELETE | `/boards/:id` | 删除一条开发板资料 |
+
+`GET /boards` 无请求参数。成功为 HTTP 200：
+
+```json
+{
+  "code": 200,
+  "msg": "ok",
+  "data": {
+    "items": []
+  }
+}
+```
+
+新增和编辑请求分别使用 `POST /boards` 和 `PUT /boards/:id`：
+
+```json
+{
+  "board": {
+    "vendor": "示例厂商",
+    "name": "音视频开发板",
+    "model": "BOARD-S3-01",
+    "chip": "ESP32-S3",
+    "summary": "适合体验实时音视频和多人对讲。",
+    "capabilities": ["实时音视频", "多人对讲"],
+    "adaptation_status": "ready",
+    "image_url": "https://cdn.example.com/board.webp",
+    "detail_slug": "board-s3-01",
+    "sort_order": 10,
+    "publish_status": "draft"
+  },
+  "expected_revision": 2,
+  "reason": "更新固件资料"
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|:---:|---|
+| `board` | object | 是 | 开发板资料；字段见 [API Reference 的开发板返回字段](../../api-reference.md#get-v1boards) |
+| `expected_revision` | integer | 编辑时是 | GET 返回的该条目 `revision`；新增时省略 |
+| `reason` | string | 是 | 操作说明，写入审计记录 |
+
+后台列表的每条记录除公开字段外还包含 `revision`、`created_by` 和 `updated_by`。`revision` 用于并发修改校验，后两个字段分别是创建管理员和最后修改管理员的数字 ID。
+
+新增接口忽略请求中的 ID、版本和上架状态，返回服务端生成的记录并固定为 `draft`。编辑接口从路径读取 ID，仅修改资料字段。
+
+上架或下架请求为 `{"status":"published","expected_revision":2,"reason":"资料验证完成"}`，`status` 只接受 `published` 或 `offline`。删除请求为 `{"expected_revision":2,"reason":"型号停止维护"}`。每次成功修改后 `revision` 加 1；旧版本请求返回冲突，客户端应刷新列表后重新操作。
+
+产品图片可以使用 HTTPS 地址，也可以先调用 `POST /boards/images` 上传。购买、仓库、固件、烧录指南和视频地址只接受 HTTPS。`detail_slug` 只允许小写字母、数字和连字符，且目录内唯一；`model` 在数据库中忽略大小写唯一。最多允许 100 条记录同时处于 `published` 状态。
+
+图片上传请求使用 `multipart/form-data`，文件字段名为 `file`。支持 JPG、PNG 和 WebP，单张不超过 5 MB。服务端按图片内容生成稳定文件名，相同内容重复上传返回相同地址。
+
+```http
+POST /v1/admin/boards/images
+Authorization: Bearer <access_token>
+X-Admin-Request: 1
+Content-Type: multipart/form-data; boundary=...
+```
+
+成功为 HTTP 200：
+
+```json
+{
+  "code": 200,
+  "msg": "ok",
+  "data": {
+    "url": "/v1/board-images/4f8ca9134f8ca9134f8ca9134f8ca9134f8ca9134f8ca9134f8ca9134f8ca913.webp",
+    "size": 248310,
+    "type": "image/webp"
+  }
+}
+```
+
+| 返回字段 | 类型 | 说明 |
+|---|---|---|
+| `data.url` | string | 可直接保存到开发板 `image_url` 的站内图片地址 |
+| `data.size` | integer | 图片字节数 |
+| `data.type` | string | 检测到的 MIME 类型：`image/jpeg`、`image/png` 或 `image/webp` |
+
+文件缺失、格式不支持或超过大小限制时返回 HTTP 400 + `40000`；文件存储失败返回 HTTP 500 + `50000`。图片保存在部署根目录的 `var/board-images`，发布更新不会覆盖。删除或替换开发板资料不会立即删除旧图片，以免影响仍引用相同图片的其他条目。
+
+成功响应返回更新后的单条开发板；删除成功为 `{"code":200,"msg":"ok"}`。参数错误返回 HTTP 400 + `40000`；记录不存在返回 HTTP 404 + `40400`；型号或详情地址重复、版本冲突、上架数量达到上限时返回 HTTP 409 + `40901`；无权限返回 HTTP 403 + `40300`；存储失败返回 HTTP 500 + `50000`。新增、编辑、上下架和删除与操作审计在同一数据库事务提交。
 
 | 方法 | 路径 | 说明 |
 |---|---|---|

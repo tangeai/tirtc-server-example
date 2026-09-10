@@ -26,7 +26,7 @@ func (s *storeStub) Get(context.Context, string) (*Snapshot, error) {
 }
 
 func TestValidateSceneSpecificFields(t *testing.T) {
-	valid := json.RawMessage(`{"screen_width":640,"screen_height":480,"up_video_mt":"h264","down_video_mt":"mjpeg","down_audio_mt":"amr","audio_rate":8000,"audio_channels":1,"video_res_mode":"fit_screen","calling_timeout_sec":30}`)
+	valid := json.RawMessage(`{"screen_width":640,"screen_height":480,"up_video_mt":"h264","down_video_mt":"mjpeg","down_video_rotation":1,"down_audio_mt":"amr","audio_rate":8000,"audio_channels":1,"video_res_mode":"fit_screen","calling_timeout_sec":30}`)
 	if err := Validate(map[string]json.RawMessage{"voip": valid}); err != nil {
 		t.Fatal(err)
 	}
@@ -36,6 +36,8 @@ func TestValidateSceneSpecificFields(t *testing.T) {
 		{"voip": json.RawMessage(`{"up_audio_mt":"alaw"}`)},
 		{"voip": json.RawMessage(`{"has_camera":true}`)},
 		{"voip": json.RawMessage(`{"calling_timeout_sec":0}`)},
+		{"call": json.RawMessage(`{"down_video_rotation":1}`)},
+		{"voip": json.RawMessage(`{"down_video_rotation":3}`)},
 	} {
 		if err := Validate(scenes); !errors.Is(err, ErrInvalid) {
 			t.Fatalf("accepted invalid scenes: %s", scenes)
@@ -82,10 +84,13 @@ func TestPublicKeepsDerivedStateForEmptyVoIPScene(t *testing.T) {
 }
 
 func TestPublicProjectsMigratedLegacyVoIP(t *testing.T) {
-	profile := `{"voip":{"video_mt":"h264","down_audio_mt":"amr","camera_rotation":90,"device_id":"untrusted","future_option":true}}`
+	profile := `{"voip":{"video_mt":"h264","down_audio_mt":"amr","camera_rotation":90,"down_video_rotation":2,"device_id":"untrusted","future_option":true}}`
 	voip := Public(&profile)["voip"]
 	if string(voip["up_video_mt"]) != `"h264"` || string(voip["down_video_mt"]) != `"h264"` {
 		t.Fatalf("voip=%v", voip)
+	}
+	if string(voip["down_video_rotation"]) != "2" {
+		t.Fatalf("down_video_rotation=%s", voip["down_video_rotation"])
 	}
 	if _, ok := voip["device_id"]; ok {
 		t.Fatal("identity field exposed")

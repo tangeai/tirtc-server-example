@@ -86,6 +86,7 @@ func TestTokenWxvoipRequest_MergesProfile(t *testing.T) {
 	req := TokenWxvoipRequest{
 		Profile: json.RawMessage(`{
 			"video_res_mode":"fit_screen",
+			"down_video_rotation":1,
 			"future_media_option":{"enabled":true},
 			"camera_rotation":90,
 			"aspect_ratio":1.3333333333,
@@ -114,12 +115,13 @@ func TestTokenWxvoipRequest_MergesProfile(t *testing.T) {
 	}
 
 	for key, want := range map[string]any{
-		"video_res_mode": "fit_screen",
-		"device_id":      "server-device",
-		"wx_payload":     "server-payload",
-		"wx_session_key": "session-key",
-		"wx_room_id":     "room-id",
-		"wx_model_id":    "model-id",
+		"video_res_mode":      "fit_screen",
+		"down_video_rotation": float64(1),
+		"device_id":           "server-device",
+		"wx_payload":          "server-payload",
+		"wx_session_key":      "session-key",
+		"wx_room_id":          "room-id",
+		"wx_model_id":         "model-id",
 	} {
 		if got[key] != want {
 			t.Errorf("%s=%v, want %v", key, got[key], want)
@@ -132,6 +134,20 @@ func TestTokenWxvoipRequest_MergesProfile(t *testing.T) {
 		if _, ok := got[key]; ok {
 			t.Errorf("local UI field %s must not be forwarded", key)
 		}
+	}
+}
+
+func TestTokenWxvoipRequest_OmitsDefaultDownVideoRotation(t *testing.T) {
+	body, err := json.Marshal(TokenWxvoipRequest{Profile: json.RawMessage(`{"down_video_rotation":0}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got["down_video_rotation"]; ok {
+		t.Fatalf("default down_video_rotation must be omitted: %s", body)
 	}
 }
 

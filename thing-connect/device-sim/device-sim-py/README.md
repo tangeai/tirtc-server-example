@@ -289,6 +289,7 @@ python3 device_sim_main.py --device-id DEV000001 --device-key your-key \
 | `VOIP_SCREEN_HEIGHT`（环境变量） | `720` | 设备自身屏幕高度（像素），与上行视频素材分辨率无关 |
 | `VOIP_VIDEO_RES_MODE`（环境变量） | `auto` | 微信 VoIP 下行视频分辨率模式：`auto/fit_screen/fill_screen`；后两者要求 `--down-video-format mjpeg` 和有效屏幕宽高 |
 | `VOIP_CAMERA_ROTATION`（环境变量） | `0` | 微信 VoIP 通话 UI 顺时针旋转角度，仅支持 `0/90/180/270`，随 device profile 上报 |
+| `VOIP_DOWN_VIDEO_ROTATION`（环境变量） | `0` | 微信下行视频编码方向：`1` 输出正向画面，`2` 保留旋转画面；`0` 时不上传 |
 | `VOIP_ASPECT_RATIO`（环境变量） | `1.3333333333` | 微信 VoIP 视频宽高比，必须大于 `0` |
 | `VOIP_OBJECT_FIT`（环境变量） | 空 | 微信 VoIP 设备视频缩放方式：`fill/contain`；为空时不上传，使用微信默认值 |
 | `VOIP_HOR_MIRROR`（环境变量） | `false` | 是否水平镜像微信 VoIP 视频 |

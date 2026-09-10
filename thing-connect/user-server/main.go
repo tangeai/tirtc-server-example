@@ -15,6 +15,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"thing-connect/internal/boardcatalog"
 	"thing-connect/internal/cache"
 	captchapkg "thing-connect/internal/captcha"
 	cleanupoutbox "thing-connect/internal/cleanup"
@@ -117,6 +118,8 @@ func main() {
 	probes["mqtt"] = broker.Ping
 	servicestatus.RegisterHealth(r, probes)
 	usrhandler.RegisterNavigation(r, navigation)
+	usrhandler.RegisterBoards(r, boardcatalog.New(mysqlstore.NewBoardCatalogStore(sqlDB)))
+	usrhandler.RegisterBoardImages(r, filepath.Join(filepath.Dir(filepath.Dir(staticDir)), "var", "board-images"))
 	usrhandler.RegisterAccount(r, usrhandler.JWTAuth(cfg.JWTSecret, rdb, sqlDB), service.NewAccountService(mysqlstore.NewAccountReader(sqlDB)))
 	if err := registerServiceDiscovery(r, cfg.Discovery); err != nil {
 		log.Fatalf("service discovery: %v", err)
@@ -130,6 +133,7 @@ func main() {
 	r.StaticFile("/bind", staticDir+"/bind.html")
 	r.StaticFile("/player", staticDir+"/player.html")
 	r.StaticFile("/contacts", staticDir+"/contacts.html")
+	r.StaticFile("/boards", staticDir+"/boards.html")
 	// SDK loads wasm from root path (hardcoded), so expose them at /
 	r.StaticFile("/librender.wasm", staticDir+"/js/librender.wasm")
 	r.StaticFile("/plugin.wasm", staticDir+"/js/plugin.wasm")

@@ -114,6 +114,7 @@ class RtcVoipTests(unittest.TestCase):
 
         with mock.patch.dict(os.environ, {
             "VOIP_CAMERA_ROTATION": "270",
+            "VOIP_DOWN_VIDEO_ROTATION": "1",
             "VOIP_ASPECT_RATIO": "1.7777777778",
             "VOIP_SCREEN_WIDTH": "1024",
             "VOIP_SCREEN_HEIGHT": "600",
@@ -126,6 +127,7 @@ class RtcVoipTests(unittest.TestCase):
             profile = rtc_voip.build_profile(with_video=True)
 
         self.assertEqual(profile["camera_rotation"], 270)
+        self.assertEqual(profile["down_video_rotation"], 1)
         self.assertEqual(profile["screen_width"], 1024)
         self.assertEqual(profile["screen_height"], 600)
         self.assertEqual(profile["aspect_ratio"], 1.7777777778)
@@ -134,6 +136,15 @@ class RtcVoipTests(unittest.TestCase):
         self.assertEqual(profile["object_fit"], "contain")
         self.assertEqual(profile["down_video_mt"], "mjpeg")
         self.assertEqual(profile["video_res_mode"], "fit_screen")
+
+    def test_build_profile_omits_default_down_video_rotation(self):
+        with mock.patch.dict(os.environ, {"VOIP_DOWN_VIDEO_ROTATION": "0"}):
+            profile = rtc_voip.build_profile(with_video=False)
+        self.assertNotIn("down_video_rotation", profile)
+
+        with mock.patch.dict(os.environ, {"VOIP_DOWN_VIDEO_ROTATION": "1"}):
+            profile = rtc_voip.build_profile(with_video=False)
+        self.assertNotIn("down_video_rotation", profile)
 
     def test_start_session_waits_for_0x2000_before_starting_audio_and_video_threads(self):
         with tempfile.TemporaryDirectory() as root:

@@ -8,7 +8,9 @@ const {
 } = require('../utils/voip-ui-config')
 const {
   buildVideoUIConfig,
+  downVideoRotationOption,
   incomingDeviceID,
+  normalizeDownVideoRotation,
   updateDeviceVideoProfileCache,
 } = require('../utils/voip-video-profile')
 const { parseIncomingQuery } = require('../utils/voip-incoming-query')
@@ -187,17 +189,30 @@ test('空旋转值保持未配置，不会被误判为 0 度', () => {
   assert.deepEqual(buildVideoUIConfig({ camera_rotation: '0' }), { cameraRotation: 0 })
 })
 
+test('下行视频旋转缺省为 0，只接受微信定义的 1 和 2', () => {
+  assert.equal(normalizeDownVideoRotation(undefined), 0)
+  assert.equal(normalizeDownVideoRotation(0), 0)
+  assert.equal(normalizeDownVideoRotation('1'), 1)
+  assert.equal(normalizeDownVideoRotation(2), 2)
+  assert.equal(normalizeDownVideoRotation(90), 0)
+  assert.deepEqual(downVideoRotationOption(undefined), {})
+  assert.deepEqual(downVideoRotationOption(0), {})
+  assert.deepEqual(downVideoRotationOption(1), { encodeVideoRotation: 1 })
+  assert.deepEqual(downVideoRotationOption('2'), { encodeVideoRotation: 2 })
+})
+
 test('设备视频配置从 profiles.voip 写入缓存', () => {
   let stored
   global.wx = { setStorageSync: (_key, value) => { stored = value } }
   const profiles = updateDeviceVideoProfileCache([{
     device_id: 'device-1',
     camera_rotation: 180,
-    profiles: { voip: { camera_rotation: 90, aspect_ratio: 16 / 9, object_fit: 'contain' } },
+    profiles: { voip: { camera_rotation: 90, down_video_rotation: 1, aspect_ratio: 16 / 9, object_fit: 'contain' } },
   }])
   assert.equal(profiles['device-1'].camera_rotation, 90)
   assert.equal(stored['device-1'].aspect_ratio, 16 / 9)
   assert.equal(stored['device-1'].object_fit, 'contain')
+  assert.equal(stored['device-1'].down_video_rotation, 1)
   delete global.wx
 })
 

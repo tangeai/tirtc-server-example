@@ -172,7 +172,7 @@ Linux ARM、MIPS 或其他架构必须使用与 CPU、ABI 和 libc 匹配的 TiR
 | `--ca-cert` | `../assets/ca-certificates.crt` | MQTT 与 HTTPS 共用的 CA 证书 |
 | `--insecure` | 关闭 | 禁用 MQTT/HTTPS 证书校验，仅用于隔离测试环境 |
 
-微信 VoIP 显示和分辨率参数通过 `VOIP_SCREEN_WIDTH`、`VOIP_SCREEN_HEIGHT`、`VOIP_VIDEO_RES_MODE`、`VOIP_CAMERA_ROTATION`、`VOIP_ASPECT_RATIO`、`VOIP_OBJECT_FIT`、`VOIP_HOR_MIRROR` 和 `VOIP_VERT_MIRROR` 环境变量配置；其含义见 [微信 VoIP 设备接入](../../device-voip.md#设备侧前提)。
+微信 VoIP 显示和分辨率参数通过 `VOIP_SCREEN_WIDTH`、`VOIP_SCREEN_HEIGHT`、`VOIP_VIDEO_RES_MODE`、`VOIP_CAMERA_ROTATION`、`VOIP_DOWN_VIDEO_ROTATION`、`VOIP_ASPECT_RATIO`、`VOIP_OBJECT_FIT`、`VOIP_HOR_MIRROR` 和 `VOIP_VERT_MIRROR` 环境变量配置；其含义见 [微信 VoIP 设备接入](../../device-voip.md#设备侧前提)。`VOIP_DOWN_VIDEO_ROTATION` 默认为 `0`，此时不上传；`1` 输出正向画面，`2` 保留旋转画面。
 
 使用 MJPEG 下行并将画面完整缩小到设备屏幕范围：
 

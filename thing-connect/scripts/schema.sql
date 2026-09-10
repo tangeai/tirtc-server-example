@@ -440,6 +440,37 @@ CREATE TABLE IF NOT EXISTS device_profile (
     PRIMARY KEY (device_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='设备上报的媒体能力';
 
+CREATE TABLE IF NOT EXISTS board_resources (
+    id CHAR(36) NOT NULL COMMENT '开发板资料稳定标识',
+    vendor VARCHAR(80) NOT NULL COMMENT '厂商名称',
+    name VARCHAR(80) NOT NULL COMMENT '展示名称',
+    model VARCHAR(120) NOT NULL COMMENT '完整型号，忽略大小写唯一',
+    chip VARCHAR(80) NOT NULL COMMENT '芯片或平台名称',
+    summary VARCHAR(640) NOT NULL COMMENT '开发板简介，最多 160 个字符',
+    capabilities JSON NOT NULL COMMENT '能力标签 JSON 数组',
+    adaptation_status VARCHAR(16) NOT NULL COMMENT '适配状态 ready adapting planned',
+    image_url VARCHAR(2048) NOT NULL COMMENT '产品图片 HTTPS 或站内上传地址',
+    purchase_url VARCHAR(2048) NOT NULL DEFAULT '' COMMENT '购买地址',
+    repository_url VARCHAR(2048) NOT NULL DEFAULT '' COMMENT '源码仓库地址',
+    firmware_url VARCHAR(2048) NOT NULL DEFAULT '' COMMENT '固件下载地址',
+    flashing_guide_url VARCHAR(2048) NOT NULL DEFAULT '' COMMENT '烧录指南地址',
+    effect_video_url VARCHAR(2048) NOT NULL DEFAULT '' COMMENT '效果视频地址',
+    detail_slug VARCHAR(80) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL COMMENT '详情地址标识',
+    sort_order INT NOT NULL DEFAULT 0 COMMENT '官网展示顺序',
+    publish_status VARCHAR(16) NOT NULL DEFAULT 'draft' COMMENT '上架状态 draft published offline',
+    revision BIGINT NOT NULL DEFAULT 1 COMMENT '后台并发修改版本',
+    published_at DATETIME(6) NULL COMMENT '最近上架时间',
+    created_by BIGINT NOT NULL DEFAULT 0 COMMENT '创建管理员 ID',
+    updated_by BIGINT NOT NULL DEFAULT 0 COMMENT '最后修改管理员 ID',
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '创建时间',
+    updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6) COMMENT '更新时间',
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_board_resources_model (model),
+    UNIQUE KEY uq_board_resources_slug (detail_slug),
+    KEY idx_board_resources_public (publish_status, sort_order, name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='官网开发板资料';
+
 INSERT IGNORE INTO schema_migrations (component, version) VALUES
     ('core', 2),
-    ('core', 3);
+    ('core', 3),
+    ('core', 4);

@@ -34,6 +34,8 @@ type HTTPServer struct {
 	redis            *redis.Client
 	jobs             *JobService
 	devices          *DeviceService
+	boards           *BoardService
+	boardImages      *BoardImageService
 	cookieSecure     bool
 	serviceRoot      string
 	policyMu         sync.RWMutex
@@ -52,6 +54,9 @@ func (s *HTTPServer) SetServiceCommandRoot(root string) {
 func NewHTTPServer(store *Store, auth *AuthService, access *AccessController, configs *ConfigService, configTester *ConfigTester, statuses *servicestatus.Aggregator, redisClient *redis.Client, jobs *JobService, devices *DeviceService, cookieSecure bool) *HTTPServer {
 	return &HTTPServer{store: store, auth: auth, access: access, configs: configs, configTester: configTester, statuses: statuses, redis: redisClient, jobs: jobs, devices: devices, cookieSecure: cookieSecure, loginWindow: 15 * time.Minute, loginMaxAttempts: 5, mfaWindow: 5 * time.Minute, mfaMaxAttempts: 5}
 }
+
+func (s *HTTPServer) SetBoardService(service *BoardService)           { s.boards = service }
+func (s *HTTPServer) SetBoardImageService(service *BoardImageService) { s.boardImages = service }
 
 func (s *HTTPServer) SetAuthRatePolicy(loginWindow time.Duration, loginMax int64, mfaWindow time.Duration, mfaMax int64) {
 	if loginWindow <= 0 || loginMax <= 0 || mfaWindow <= 0 || mfaMax <= 0 {
@@ -98,6 +103,12 @@ func (s *HTTPServer) Register(r *gin.Engine) {
 	protected.GET("/devices/:device_id", s.Require("device.read"), s.getDevice)
 	protected.GET("/devices/:device_id/bind-logs", s.Require("device.read"), s.deviceBindLogs)
 	protected.POST("/devices/:device_id/force-unbind", s.Require("device.unbind"), s.forceUnbind)
+	protected.GET("/boards", s.Require("board.read"), s.listBoards)
+	protected.POST("/boards/images", s.Require("board.write"), s.uploadBoardImage)
+	protected.POST("/boards", s.Require("board.write"), s.createBoard)
+	protected.PUT("/boards/:id", s.Require("board.write"), s.updateBoard)
+	protected.PUT("/boards/:id/status", s.Require("board.write"), s.updateBoardStatus)
+	protected.DELETE("/boards/:id", s.Require("board.write"), s.deleteBoard)
 	protected.POST("/me/mfa/recovery-codes/regenerate", s.regenerateRecoveryCodes)
 	protected.GET("/roles", s.Require("role.read"), s.listRoles)
 	protected.POST("/roles", s.Require("role.manage"), s.createRole)

@@ -37,6 +37,7 @@ void device_media_config_set_defaults(device_media_config_t *config)
     config->video.width = 640;
     config->video.height = 480;
     config->video.camera_rotation = 0;
+    config->video.down_video_rotation = 0;
     config->video.aspect_ratio = 4.0 / 3.0;
     config->video.object_fit[0] = '\0';
     config->video.hor_mirror = false;
@@ -119,6 +120,9 @@ bool device_media_config_validate(const device_media_config_t *config,
         config->video.camera_rotation != 180 &&
         config->video.camera_rotation != 270) {
         return fail(error, error_size, "camera rotation must be 0, 90, 180, or 270");
+    }
+    if (config->video.down_video_rotation > 2) {
+        return fail(error, error_size, "down video rotation must be 0, 1, or 2");
     }
     if (!isfinite(config->video.aspect_ratio) || config->video.aspect_ratio <= 0) {
         return fail(error, error_size, "video aspect ratio must be greater than 0");

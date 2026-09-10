@@ -60,7 +60,7 @@ func TestDeprecatedProfileEndpointWritesUnifiedScene(t *testing.T) {
 		server.postDeviceProfile(c)
 	})
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/profile", strings.NewReader(`{"up_video_mt":"none","down_video_mt":"none","down_audio_mt":"alaw","audio_rate":8000,"audio_channels":1,"no_video":true}`))
+	request := httptest.NewRequest(http.MethodPost, "/profile", strings.NewReader(`{"up_video_mt":"none","down_video_mt":"none","down_video_rotation":2,"down_audio_mt":"alaw","audio_rate":8000,"audio_channels":1,"no_video":true}`))
 	request.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK || recorder.Header().Get("Deprecation") != "true" {
@@ -68,5 +68,9 @@ func TestDeprecatedProfileEndpointWritesUnifiedScene(t *testing.T) {
 	}
 	if store.deviceID != "device-1" || len(store.scenes["voip"]) == 0 {
 		t.Fatalf("device=%q scenes=%v", store.deviceID, store.scenes)
+	}
+	var scene map[string]json.RawMessage
+	if err := json.Unmarshal(store.scenes["voip"], &scene); err != nil || string(scene["down_video_rotation"]) != "2" {
+		t.Fatalf("down_video_rotation was not stored: %s, err=%v", store.scenes["voip"], err)
 	}
 }

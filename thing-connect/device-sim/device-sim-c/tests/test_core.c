@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <pthread.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 
@@ -70,6 +71,20 @@ static void test_device_media_profile(void) {
     assert(body[0] == '\0');
     assert(device_media_profile_json(body, sizeof(body), "invalid",
                                      "alaw_8khz", "h264", "h264", 1, "{}") == -1);
+
+    assert(unsetenv("VOIP_DOWN_VIDEO_ROTATION") == 0);
+    assert(voip_profile_json(body, sizeof(body)) == 0);
+    root = cJSON_Parse(body);
+    assert(root);
+    assert(!cJSON_GetObjectItem(root, "down_video_rotation"));
+    cJSON_Delete(root);
+    assert(setenv("VOIP_DOWN_VIDEO_ROTATION", "2", 1) == 0);
+    assert(voip_profile_json(body, sizeof(body)) == 0);
+    root = cJSON_Parse(body);
+    assert(root);
+    assert(cJSON_GetNumberValue(cJSON_GetObjectItem(root, "down_video_rotation")) == 2);
+    cJSON_Delete(root);
+    assert(unsetenv("VOIP_DOWN_VIDEO_ROTATION") == 0);
 }
 
 static void test_hmac_sha256_b64(void) {

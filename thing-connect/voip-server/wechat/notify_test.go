@@ -195,7 +195,7 @@ func TestPushJoinToDevice_ForwardsProfileFields(t *testing.T) {
 	defer srv.Close()
 
 	prof := stubProfiler{
-		profile: `{"screen_width":640,"screen_height":480,"camera_rotation":90,"object_fit":"contain","audio_rate":8000,"audio_channels":1,"video_mt":"h264","up_video_mt":"h264","down_video_mt":"mjpeg","down_audio_mt":"amr","video_res_mode":"fit_screen","future_media_option":{"enabled":true},"device_id":"untrusted","wx_payload":"untrusted","calling_timeout_sec":30}`,
+		profile: `{"screen_width":640,"screen_height":480,"camera_rotation":90,"down_video_rotation":1,"object_fit":"contain","audio_rate":8000,"audio_channels":1,"video_mt":"h264","up_video_mt":"h264","down_video_mt":"mjpeg","down_audio_mt":"amr","video_res_mode":"fit_screen","future_media_option":{"enabled":true},"device_id":"untrusted","wx_payload":"untrusted","calling_timeout_sec":30}`,
 		remark:  "客厅联系人",
 	}
 	var pub stubPublisher
@@ -242,14 +242,15 @@ func TestPushJoinToDevice_ForwardsProfileFields(t *testing.T) {
 		t.Fatalf("outgoing correlation fields not forwarded: %+v", push)
 	}
 	for key, want := range map[string]any{
-		"wx_session_key":   "sk",
-		"wx_room_id":       "room",
-		"wx_session_token": "st",
-		"wx_app_id":        "wxapp",
-		"device_id":        "dev1",
-		"wx_payload":       "server-payload",
-		"wx_model_id":      "model",
-		"video_res_mode":   "fit_screen",
+		"wx_session_key":      "sk",
+		"wx_room_id":          "room",
+		"wx_session_token":    "st",
+		"wx_app_id":           "wxapp",
+		"device_id":           "dev1",
+		"wx_payload":          "server-payload",
+		"wx_model_id":         "model",
+		"video_res_mode":      "fit_screen",
+		"down_video_rotation": float64(1),
 	} {
 		if got := gotBody[key]; got != want {
 			t.Errorf("token request %s=%v, want %v", key, got, want)

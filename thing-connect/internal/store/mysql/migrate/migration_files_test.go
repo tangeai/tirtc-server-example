@@ -37,6 +37,7 @@ func TestEmbeddedMigrationFilesAreNonEmpty(t *testing.T) {
 		"migrations/core/001_call.sql", "migrations/core/001_zzz_schema_comments.sql",
 		"migrations/core/002_device_capabilities.sql",
 		"migrations/core/003_unify_device_profile.sql",
+		"migrations/core/004_board_resources.sql",
 		"migrations/admin/001_schema.sql", "migrations/admin/001_installation_state.sql",
 		"migrations/admin/001_schema_comments.sql",
 	}
@@ -49,7 +50,7 @@ func TestEmbeddedMigrationFilesAreNonEmpty(t *testing.T) {
 }
 
 func TestCurrentMigrationCatalogVersions(t *testing.T) {
-	want := map[string]int{"core": 3, "admin": 1}
+	want := map[string]int{"core": 4, "admin": 1}
 	if got := CurrentMigrationVersions(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("versions=%v want=%v", got, want)
 	}

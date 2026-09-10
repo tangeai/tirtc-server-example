@@ -123,7 +123,7 @@ func validField(scene, key string, raw json.RawMessage) bool {
 			}
 		}
 		return true
-	case "audio_rate", "audio_channels", "camera_rotation", "screen_width", "screen_height", "calling_timeout_sec":
+	case "audio_rate", "audio_channels", "camera_rotation", "down_video_rotation", "screen_width", "screen_height", "calling_timeout_sec":
 		var n int
 		if json.Unmarshal(raw, &n) != nil {
 			return false
@@ -135,6 +135,8 @@ func validField(scene, key string, raw json.RawMessage) bool {
 			return n == 1 || n == 2
 		case "camera_rotation":
 			return n == 0 || n == 90 || n == 180 || n == 270
+		case "down_video_rotation":
+			return scene == "voip" && (n == 0 || n == 1 || n == 2)
 		case "screen_width", "screen_height":
 			return scene == "voip" && n > 0 && n <= 16384
 		default:

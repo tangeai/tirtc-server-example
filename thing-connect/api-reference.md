@@ -9,6 +9,7 @@
 | 获取服务地址 | [服务发现](#服务发现) | [设备上线](device-integration.md) |
 | 设备上线、获取凭证、上报能力 | [device-server](#device-server) | [设备上线](device-integration.md) |
 | 注册登录、绑定设备、用户配置 | [user-server](#user-server) | [开发者文档](README.md) |
+| 查询官网开发板及固件资源 | [user-server](#user-server) | 官网 `/boards` 页面 |
 | 微信 VoIP 呼叫与授权 | [voip-server](#voip-server) | [微信 VoIP](device-voip.md) |
 | AI 对话、角色与知识库 | [ai-server](#ai-server) | [AI 接入](device-ai.md) |
 | 设备互呼、联系人管理 | [call-server](#call-server) | [设备互呼](device-call.md) |
@@ -426,6 +427,7 @@ int device_sign(const char *device_id, const char *device_key,
       "audio_rate": 8000,
       "audio_channels": 1,
       "camera_rotation": 90,
+      "down_video_rotation": 1,
       "aspect_ratio": 1.7777777778,
       "hor_mirror": true,
       "vert_mirror": false,
@@ -452,6 +454,7 @@ int device_sign(const char *device_id, const char *device_key,
 | `audio_rate` | integer | 全部 | 否 | 音频采样率：8000、16000、24000、32000、44100 或 48000 Hz |
 | `audio_channels` | integer | 全部 | 否 | 音频声道数：1 或 2 |
 | `camera_rotation` | integer | 全部 | 否 | 画面顺时针旋转角度：0、90、180 或 270 |
+| `down_video_rotation` | integer | `voip` | 否 | 微信下行视频编码方向：`0` 使用默认行为，`1` 输出正向画面，`2` 保留旋转画面；默认 `0`，可省略 |
 | `hor_mirror` | boolean | 全部 | 否 | 是否水平镜像 |
 | `vert_mirror` | boolean | 全部 | 否 | 是否垂直镜像 |
 | `no_video` | boolean | 全部 | 否 | 是否明确声明该场景无视频 |
@@ -481,7 +484,7 @@ int device_sign(const char *device_id, const char *device_key,
 | `profiles.call` | object | 三选一或多选 | 设备通话能力快照 |
 | `profiles.voip` | object | 三选一或多选 | 微信 VoIP 能力快照 |
 
-场景中 `up_*` 表示设备发送能力，`down_*` 表示设备接收能力。`audio_rate`、`audio_channels`、`camera_rotation` 为整数；`hor_mirror`、`vert_mirror`、`no_video` 为布尔值。各编码、比例与显示方式的取值见上表，均无隐式补全值。
+场景中 `up_*` 表示设备发送能力，`down_*` 表示设备接收能力。`audio_rate`、`audio_channels`、`camera_rotation`、`down_video_rotation` 为整数；`hor_mirror`、`vert_mirror`、`no_video` 为布尔值。除 `down_video_rotation` 缺省时按 `0` 处理外，其他字段均无隐式补全值。
 
 ---
 
@@ -510,6 +513,9 @@ int device_sign(const char *device_id, const char *device_key,
 | [通过设备 ID 绑定](#post-v1userdevicebind-by-id) | Web、小程序 | POST | `/v1/user/device/bind-by-id` | 必需：用户 JWT（user_jwt） |
 | [解绑设备](#delete-v1userdevicereset) | Web、小程序 | DELETE | `/v1/user/device/reset` | 必需：用户 JWT（user_jwt） |
 | [获取实时音视频凭证](#get-v1userdevicertc-token) | Web、小程序 | GET | `/v1/user/device/rtc-token` | 必需：用户 JWT（user_jwt） |
+| [查询已上架开发板](#get-v1boards) | Web | GET | `/v1/boards` | 无需登录鉴权 |
+| [查询开发板详情](#get-v1boardsslug) | Web | GET | `/v1/boards/:slug` | 无需登录鉴权 |
+| [读取开发板图片](#get-v1board-imagesname) | Web | GET | `/v1/board-images/:name` | 无需登录鉴权 |
 | [获取顶部导航链接](#get-v1confignavigation) | Web | GET | `/v1/config/navigation` | 无需登录鉴权 |
 | [查询当前账号](#get-v1userme) | Web、小程序 | GET | `/v1/user/me` | 必需：用户 JWT（user_jwt） |
 
@@ -953,6 +959,7 @@ Authorization: Bearer <user_jwt>
           "down_audio_mt": "amr",
           "audio_rate": 8000,
           "camera_rotation": 90,
+          "down_video_rotation": 1,
           "aspect_ratio": 1.7777777778,
           "hor_mirror": true,
           "vert_mirror": false,
@@ -977,6 +984,7 @@ Authorization: Bearer <user_jwt>
 | `data[].bind_time` | string 或 null | 绑定时间，格式 `YYYY-MM-DDTHH:MM:SS`；无记录时为 `null` |
 | `data[].online` | boolean | 设备当前是否在线 |
 | `data[].profiles` | object | 按 `stream`、`call`、`voip` 场景组织的设备能力；未上报时为空对象 |
+| `data[].profiles.voip.down_video_rotation` | integer | 微信下行视频编码方向；`0` 或省略表示使用默认行为，`1` 输出正向画面，`2` 保留旋转画面 |
 
 **错误码**
 
@@ -1327,6 +1335,160 @@ Authorization: Bearer <user_jwt>
 
 ---
 
+<a id="get-v1boards"></a>
+
+### 查询已上架开发板
+
+**接口**：`GET /v1/boards`
+
+**调用方**：Web。
+
+返回官网开发板目录。只包含后台已上架的条目，按 `sort_order` 从小到大排列；顺序相同时按名称排列。页面首次打开时请求一次，不定时刷新。
+
+**鉴权**：无。
+
+**请求参数**：无。
+
+**成功响应** — HTTP 200
+
+```json
+{
+  "code": 200,
+  "msg": "ok",
+  "data": {
+    "boards": [
+      {
+        "id": "6c349438-7fd4-44f1-a363-d728d62ae057",
+        "vendor": "示例厂商",
+        "name": "音视频开发板",
+        "model": "BOARD-S3-01",
+        "chip": "ESP32-S3",
+        "summary": "适合体验实时音视频、微信 VoIP、设备互呼和多人对讲。",
+        "capabilities": ["实时音视频", "微信 VoIP", "多人对讲"],
+        "adaptation_status": "ready",
+        "image_url": "https://cdn.example.com/boards/board-s3-01.webp",
+        "purchase_url": "https://shop.example.com/board-s3-01",
+        "repository_url": "https://github.com/example/board-s3-01",
+        "firmware_url": "https://downloads.example.com/board-s3-01.bin",
+        "flashing_guide_url": "https://docs.example.com/board-s3-01",
+        "effect_video_url": "https://video.example.com/board-s3-01",
+        "detail_slug": "board-s3-01",
+        "sort_order": 10,
+        "publish_status": "published",
+        "created_at": "2026-09-10T10:00:00+08:00",
+        "updated_at": "2026-09-10T10:00:00+08:00"
+      }
+    ]
+  }
+}
+```
+
+**返回字段**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `data.boards` | object[] | 已上架开发板，最多 100 条；无已上架条目时为空数组 |
+| `data.boards[].id` | string | 开发板条目的稳定标识 |
+| `data.boards[].vendor` | string | 厂商名称 |
+| `data.boards[].name` | string | 页面展示名称 |
+| `data.boards[].model` | string | 完整型号，目录内唯一 |
+| `data.boards[].chip` | string | 芯片或平台名称 |
+| `data.boards[].summary` | string | 简介，最多 160 个字符 |
+| `data.boards[].capabilities` | string[] | 能力标签，最多 10 项 |
+| `data.boards[].adaptation_status` | string | 适配状态：`ready`、`adapting` 或 `planned` |
+| `data.boards[].image_url` | string | HTTPS 产品图片地址，或后台上传生成的 `/v1/board-images/<name>` 站内地址 |
+| `data.boards[].purchase_url` | string | HTTPS 购买地址；未配置时不返回 |
+| `data.boards[].repository_url` | string | HTTPS 源码仓库地址；未配置时不返回 |
+| `data.boards[].firmware_url` | string | HTTPS 固件下载地址；未配置时不返回 |
+| `data.boards[].flashing_guide_url` | string | HTTPS 烧录指南地址；未配置时不返回 |
+| `data.boards[].effect_video_url` | string | HTTPS 效果视频地址；未配置时不返回 |
+| `data.boards[].detail_slug` | string | 详情地址标识，用于 `/boards#<detail_slug>` 和详情接口 |
+| `data.boards[].sort_order` | integer | 展示顺序，数值越小越靠前 |
+| `data.boards[].publish_status` | string | 返回条目固定为 `published` |
+| `data.boards[].published_at` | string | 最近上架时间，ISO 8601 |
+| `data.boards[].created_at` | string | 后台创建时间，ISO 8601；未记录时不返回 |
+| `data.boards[].updated_at` | string | 后台最后修改时间，ISO 8601；未记录时不返回 |
+
+响应使用 `Cache-Control: no-store`。页面每次进入时读取最新目录，不定时刷新。
+
+---
+
+<a id="get-v1boardsslug"></a>
+
+### 查询开发板详情
+
+**接口**：`GET /v1/boards/:slug`
+
+**调用方**：Web。
+
+根据详情地址标识查询一款已上架开发板。草稿、已下架和不存在的条目均不返回内容。
+
+**鉴权**：无。
+
+**路径参数**
+
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|:---:|---|
+| `slug` | string | 是 | 开发板的 `detail_slug`，由小写字母、数字和连字符组成 |
+
+**成功响应** — HTTP 200
+
+```json
+{
+  "code": 200,
+  "msg": "ok",
+  "data": {
+    "id": "6c349438-7fd4-44f1-a363-d728d62ae057",
+    "vendor": "示例厂商",
+    "name": "音视频开发板",
+    "model": "BOARD-S3-01",
+    "chip": "ESP32-S3",
+    "summary": "适合体验实时音视频、微信 VoIP、设备互呼和多人对讲。",
+    "capabilities": ["实时音视频", "微信 VoIP", "多人对讲"],
+    "adaptation_status": "ready",
+    "image_url": "https://cdn.example.com/boards/board-s3-01.webp",
+    "firmware_url": "https://downloads.example.com/board-s3-01.bin",
+    "detail_slug": "board-s3-01",
+    "sort_order": 10,
+    "publish_status": "published"
+  }
+}
+```
+
+`data` 字段与目录接口的 `data.boards[]` 相同。未配置的可选资源链接和时间字段不返回。响应使用 `Cache-Control: no-store`。
+
+**错误码**
+
+| code | HTTP | 含义 |
+|---|---|---|
+| 40400 | 404 | 开发板不存在、尚未上架或已下架 |
+
+---
+
+<a id="get-v1board-imagesname"></a>
+
+### 读取开发板图片
+
+**接口**：`GET /v1/board-images/:name`
+
+**调用方**：Web。
+
+读取后台上传的开发板图片。`name` 只能使用上传接口返回的文件名，不应由客户端自行拼接。
+
+**鉴权**：无。
+
+**路径参数**
+
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|:---:|---|
+| `name` | string | 是 | 64 位小写十六进制内容摘要及扩展名；扩展名为 `jpg`、`png` 或 `webp` |
+
+**成功响应** — HTTP 200，响应体为对应图片二进制，`Content-Type` 与图片格式一致。图片地址由内容生成且不可变，响应使用 `Cache-Control: public, max-age=31536000, immutable`。
+
+图片不存在或名称格式无效时返回 HTTP 404，无 JSON 响应体。
+
+---
+
 <a id="get-v1confignavigation"></a>
 
 ### 获取顶部导航链接
@@ -1609,6 +1771,7 @@ Authorization: Bearer <user_jwt>
 | `screen_width` | integer | 否 | 设备显示区域宽度 |
 | `screen_height` | integer | 否 | 设备显示区域高度 |
 | `camera_rotation` | integer | 否 | 顺时针旋转角度：`0`、`90`、`180`、`270` |
+| `down_video_rotation` | integer | 否 | 微信下行视频编码方向：`0` 使用默认行为，`1` 输出正向画面，`2` 保留旋转画面；默认 `0`，可省略 |
 | `aspect_ratio` | number | 否 | 视频宽高比，必须大于 0 |
 | `hor_mirror` | boolean | 否 | 是否水平镜像 |
 | `vert_mirror` | boolean | 否 | 是否垂直镜像 |
@@ -1767,6 +1930,8 @@ ModelID 和 Payload 等会话身份字段不会写入；它们始终由服务端
 | 场景 | 行为 |
 |------|------|
 | profile 已上报视频 UI 字段 | 呼叫使用 profile 中的 `camera_rotation`、`aspect_ratio`、`hor_mirror`、`vert_mirror`、`object_fit` |
+| profile 的 `down_video_rotation` 为 `1` 或 `2` | 设备呼小程序时写入微信 query 的 `encodeVideoRotation`，并传给 TiRTC 的 `down_video_rotation` |
+| profile 未上报 `down_video_rotation`，或值为 `0` | 不传旋转参数，使用微信和 TiRTC 的默认行为 |
 | `wx_query` 包含同名字段 | 以 profile 为准 |
 | profile 未上报某个字段 | 不向 query 添加该字段，使用小程序插件默认值 |
 
@@ -2909,7 +3074,7 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|:--:|------|
-| role_id | string | ✅ | 角色 ID |
+| role_id | string | ✅ | 当前用户创建的角色 ID |
 
 **请求示例**
 

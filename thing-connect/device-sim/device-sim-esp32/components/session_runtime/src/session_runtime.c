@@ -1128,6 +1128,10 @@ static void submit_voip_profile(void)
               cJSON_AddNumberToObject(voip, "screen_height", screen_height) &&
               cJSON_AddNumberToObject(voip, "camera_rotation",
                                      media->video.camera_rotation) &&
+              (!media->video.downlink_enabled ||
+               media->video.down_video_rotation == 0 ||
+               cJSON_AddNumberToObject(voip, "down_video_rotation",
+                                      media->video.down_video_rotation)) &&
               cJSON_AddNumberToObject(voip, "aspect_ratio",
                                      media->video.aspect_ratio) &&
               (media->video.object_fit[0] == '\0' ||

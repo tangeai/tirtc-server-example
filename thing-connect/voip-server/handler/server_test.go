@@ -203,10 +203,26 @@ func TestVideoUIProfile(t *testing.T) {
 			t.Fatalf("rotation %d parsed as %#v", rotation, config.CameraRotation)
 		}
 	}
+	for _, rotation := range []int{0, 1, 2} {
+		profile := json.RawMessage(fmt.Sprintf(`{"down_video_rotation":%d}`, rotation))
+		if err := validateVideoUIProfile(profile); err != nil {
+			t.Fatalf("down rotation %d rejected: %v", rotation, err)
+		}
+		config := videoUIConfigFromProfile(string(profile))
+		if rotation == 0 && config.DownVideoRotation != nil {
+			t.Fatalf("default down rotation parsed as explicit: %#v", config.DownVideoRotation)
+		}
+		if rotation != 0 && (config.DownVideoRotation == nil || *config.DownVideoRotation != rotation) {
+			t.Fatalf("down rotation %d parsed as %#v", rotation, config.DownVideoRotation)
+		}
+	}
 	for _, profile := range []string{
 		`{"camera_rotation":45}`,
 		`{"camera_rotation":"90"}`,
 		`{"camera_rotation":null}`,
+		`{"down_video_rotation":3}`,
+		`{"down_video_rotation":"1"}`,
+		`{"down_video_rotation":null}`,
 		`{"aspect_ratio":0}`,
 		`{"aspect_ratio":"1.777"}`,
 		`{"aspect_ratio":null}`,
@@ -277,19 +293,21 @@ func TestQueryWithVideoUIConfig(t *testing.T) {
 	horMirror := true
 	vertMirror := false
 	objectFit := "contain"
+	downVideoRotation := 1
 	config := videoUIConfig{
-		CameraRotation: &rotation,
-		AspectRatio:    &ratio,
-		HorMirror:      &horMirror,
-		VertMirror:     &vertMirror,
-		ObjectFit:      &objectFit,
+		CameraRotation:    &rotation,
+		DownVideoRotation: &downVideoRotation,
+		AspectRatio:       &ratio,
+		HorMirror:         &horMirror,
+		VertMirror:        &vertMirror,
+		ObjectFit:         &objectFit,
 	}
 	if got := queryWithVideoUIConfig("", config); got !=
-		"aspect_ratio=1.7777777777777777&camera_rotation=90&hor_mirror=true&object_fit=contain&vert_mirror=false" {
+		"aspect_ratio=1.7777777777777777&camera_rotation=90&encodeVideoRotation=1&hor_mirror=true&object_fit=contain&vert_mirror=false" {
 		t.Fatalf("empty query = %q", got)
 	}
 	if got := queryWithVideoUIConfig("foo=bar&camera_rotation=0", config); got !=
-		"aspect_ratio=1.7777777777777777&camera_rotation=90&foo=bar&hor_mirror=true&object_fit=contain&vert_mirror=false" {
+		"aspect_ratio=1.7777777777777777&camera_rotation=90&encodeVideoRotation=1&foo=bar&hor_mirror=true&object_fit=contain&vert_mirror=false" {
 		t.Fatalf("merged query = %q", got)
 	}
 	if got := queryWithVideoUIConfig("foo=bar", videoUIConfig{}); got != "foo=bar" {

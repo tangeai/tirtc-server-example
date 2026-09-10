@@ -3,9 +3,11 @@ const { expireSession } = require('../../utils/session')
 const { userApi, voipApi } = require('../../utils/api')
 const {
   buildVideoUIConfig,
+  downVideoRotationOption,
   normalizeAspectRatio,
   normalizeBoolean,
   normalizeCameraRotation,
+  normalizeDownVideoRotation,
   normalizeObjectFit,
   updateDeviceVideoProfileCache,
 } = require('../../utils/voip-video-profile')
@@ -140,6 +142,7 @@ Page({
     const downAudioMT = normalizeMediaCodec(voip.down_audio_mt)
     const audioRate = Number(voip.audio_rate) || 0
     const cameraRotation = normalizeCameraRotation(voip.camera_rotation)
+    const downVideoRotation = normalizeDownVideoRotation(voip.down_video_rotation)
     const aspectRatio = normalizeAspectRatio(voip.aspect_ratio)
     const horMirror = normalizeBoolean(voip.hor_mirror)
     const vertMirror = normalizeBoolean(voip.vert_mirror)
@@ -159,6 +162,7 @@ Page({
       down_audio_mt: downAudioMT,
       audio_rate: audioRate,
       camera_rotation: cameraRotation,
+      down_video_rotation: downVideoRotation,
       aspect_ratio: aspectRatio,
       hor_mirror: horMirror,
       vert_mirror: vertMirror,
@@ -893,7 +897,7 @@ Page({
       }
       const randUuid = generateUUID()
       const displayDeviceName = device.authorizedDeviceName || device.device_name
-      const { roomId } = await wmpfVoip.callDevice({
+      const callOptions = {
         sn: deviceId,
         modelId: app.globalData.modelId,
         roomType,
@@ -903,7 +907,9 @@ Page({
         deviceName: displayDeviceName,
         isCloud: true,
         payload: randUuid,
-      })
+        ...downVideoRotationOption(device.down_video_rotation),
+      }
+      const { roomId } = await wmpfVoip.callDevice(callOptions)
       if (!roomId) throw new Error('创建房间失败')
       app.globalData.currentCall = { deviceId, roomId }
       wx.hideLoading()

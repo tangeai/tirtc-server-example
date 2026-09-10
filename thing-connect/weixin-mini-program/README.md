@@ -173,12 +173,14 @@ VoIP 和验证码插件声明在 [app.json](app.json)：
 
 | 插件 | 版本 | provider | 用途 |
 |---|---|---|---|
-| `wmpf-voip` | `latest` | `wxf830863afde621eb` | 微信 IoT VoIP；构建时应解析到不低于 2.4.1 |
+| `wmpf-voip` | `latest` | `wxf830863afde621eb` | 微信 IoT VoIP；构建时应解析到不低于 2.4.5 |
 | `captcha` | `1.4.1` | `wxb7c8f9ea9ceb4663` | 易盾验证码 |
 
 小程序的人机验证仅接入网易易盾；服务端启用人机验证时，请选择 `yidun` 并配置小程序验证码 ID。
 
-`callDevice` 要求插件不低于 2.4.0；传入 `deviceName` 时，插件版本需不低于 2.4.1。
+`callDevice` 要求插件不低于 2.4.0；`deviceName` 要求不低于 2.4.1，
+`encodeVideoRotation` 要求不低于 2.4.5。本项目使用 `latest`，上传前应在构建信息中确认
+实际解析版本。
 
 ---
 
@@ -356,7 +358,7 @@ fragment 传入，页面启动时立即清除，只保存在页面内存，不�
 ```js
 const wmpfVoip = requirePlugin('wmpf-voip').default
 const randUuid = generateUUID() // 本项目生成的外呼关联 ID
-const { roomId } = await wmpfVoip.callDevice({
+const options = {
   sn: deviceId,
   modelId: app.globalData.modelId,
   roomType,
@@ -366,7 +368,11 @@ const { roomId } = await wmpfVoip.callDevice({
   deviceName: authorizedDeviceName,
   isCloud: true,
   payload: randUuid,
-})
+}
+if (device.down_video_rotation === 1 || device.down_video_rotation === 2) {
+  options.encodeVideoRotation = device.down_video_rotation
+}
+const { roomId } = await wmpfVoip.callDevice(options)
 wx.redirectTo({ url: wmpfVoip.CALL_PAGE_PATH })
 ```
 
@@ -381,6 +387,7 @@ wx.redirectTo({ url: wmpfVoip.CALL_PAGE_PATH })
 | `deviceName` | 微信端显示的设备名称；应使用授权时的名称快照，要求插件不低于 2.4.1 |
 | `isCloud` | ThingConnect 固定传 `true`，使微信的设备消息回调进入 `voip-server` |
 | `payload` | 本次外呼的开发者透传值；微信回调后由服务端原样下发为 `wx_payload` |
+| `encodeVideoRotation` | 从 `profiles.voip.down_video_rotation` 读取；值为 `1` 或 `2` 时传入，缺省或 `0` 时不传；要求插件不低于 2.4.5 |
 | 返回值 `roomId` | 本次微信 VoIP 房间 ID，保存到 `currentCall` 以关联取消和结束事件 |
 
 官方接口还有计费、时长和视频编码参数；未在本项目示例中使用的字段以
@@ -457,6 +464,7 @@ sequenceDiagram
 
 - 小程序本机画面的 `cameraRotation` 固定为 `0`。
 - 设备的 `camera_rotation`、`hor_mirror`、`vert_mirror` 和 `object_fit` 来自 profile。
+- `down_video_rotation` 控制微信发送给设备的视频编码方向，不属于 `setUIConfig`。
 - 手机通话页容器比例使用 `screenHeight / screenWidth`，不是设备屏幕尺寸，也不是视频
   素材分辨率。
 - 设备呼小程序且 `object_fit=contain` 时，两端 `aspectRatio` 都使用手机屏幕比例，
@@ -578,8 +586,9 @@ node --test thing-connect/weixin-mini-program/tests/*.test.js
 3. 设备呼小程序：应用前台。
 4. 设备呼小程序：冷启动或后台拉起。
 5. `camera_rotation = 0/90/180/270`。
-6. 竖屏素材和横屏素材的 `contain/fill`。
-7. 取消、拒接、对端挂断和网络断开。
+6. `down_video_rotation` 省略、`1` 和 `2`。
+7. 竖屏素材和横屏素材的 `contain/fill`。
+8. 取消、拒接、对端挂断和网络断开。
 
 ---
 

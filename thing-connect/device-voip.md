@@ -91,6 +91,7 @@ Content-Type: application/json
       "screen_width": 640,
       "screen_height": 480,
       "camera_rotation": 0,
+      "down_video_rotation": 1,
       "aspect_ratio": 1.3333333333,
       "hor_mirror": false,
       "vert_mirror": false,
@@ -142,6 +143,7 @@ JSON 代码块保持可直接复制，因此不在其中写注释。示例里的
 | profile 字段 | 作用 | 默认值 |
 |--------------|------|--------|
 | `camera_rotation` | 顺时针旋转设备画面：`0/90/180/270` | `0` |
+| `down_video_rotation` | 微信下行视频编码方向：`1` 输出正向画面，`2` 保留旋转画面；`0` 不传旋转参数 | `0`，可省略 |
 | `aspect_ratio` | 设备视频宽高比，必须大于 `0` | `4/3` |
 | `hor_mirror` | 水平镜像 | `false` |
 | `vert_mirror` | 垂直镜像 | `false` |
@@ -150,6 +152,12 @@ JSON 代码块保持可直接复制，因此不在其中写注释。示例里的
 小程序通过 [`setUIConfig`](https://developers.weixin.qq.com/miniprogram/dev/framework/device/voip-plugin/api/setUIConfig.html)
 应用这些参数。`callerUI`、`listenerUI` 的对应关系见
 [小程序 VoIP 页面参数](weixin-mini-program/README.md#5-callerui-和-listenerui)。
+
+`camera_rotation` 控制通话页怎样显示设备画面；`down_video_rotation` 控制微信发送给
+设备的视频编码方向。两者用途不同。后者设为 `1` 或 `2` 时，同时用于小程序呼设备、
+设备呼小程序和 TiRTC token 请求；设为 `0` 或省略时保留原有默认行为。
+具体取值和版本要求见
+[微信 VoIP 视频方向说明](https://docs.tange.ai/products/wxvoip/troubleshooting/diagnostics-and-logs.html)。
 
 **成功返回：**
 

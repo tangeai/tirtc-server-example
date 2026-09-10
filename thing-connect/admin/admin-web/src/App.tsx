@@ -18,6 +18,7 @@ import {
 } from 'antd';
 import {
   ApiOutlined,
+  BuildOutlined,
   DashboardOutlined,
   DatabaseOutlined,
   LogoutOutlined,
@@ -47,6 +48,9 @@ const UsersPage = lazy(() =>
 );
 const DevicesPage = lazy(() =>
   import('./pages/business/devices').then((module) => ({ default: module.DevicesPage })),
+);
+const BoardsPage = lazy(() =>
+  import('./pages/business/boards').then((module) => ({ default: module.BoardsPage })),
 );
 const ConfigPage = lazy(() =>
   import('./pages/configuration/config-page').then((module) => ({ default: module.ConfigPage })),
@@ -102,6 +106,7 @@ const icons: Record<string, React.ReactNode> = {
   overview: <DashboardOutlined />,
   users: <TeamOutlined />,
   devices: <ApiOutlined />,
+  boards: <BuildOutlined />,
   business: <TeamOutlined />,
   'service-config': <SettingOutlined />,
   'system-management': <SafetyOutlined />,
@@ -118,6 +123,7 @@ const registeredIcons: Record<string, React.ReactNode> = {
   DashboardOutlined: <DashboardOutlined />,
   TeamOutlined: <TeamOutlined />,
   ApiOutlined: <ApiOutlined />,
+  BuildOutlined: <BuildOutlined />,
   SettingOutlined: <SettingOutlined />,
   SafetyOutlined: <SafetyOutlined />,
   UnorderedListOutlined: <UnorderedListOutlined />,
@@ -355,6 +361,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
   else if (path === '/overview') page = <OverviewPage />;
   else if (path === '/users') page = <UsersPage />;
   else if (path === '/devices') page = <DevicesPage />;
+  else if (path === '/boards') page = <BoardsPage />;
   else if (path === '/configs/user-server') page = <UserServicePage />;
   else if (path === '/configs/voip-server') page = <VoIPPage />;
   else if (path.startsWith('/configs/')) page = <ConfigPage namespace={path.split('/')[2]} />;

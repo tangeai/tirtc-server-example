@@ -7,6 +7,18 @@ function normalizeCameraRotation(value) {
   return [0, 90, 180, 270].includes(rotation) ? rotation : null
 }
 
+function normalizeDownVideoRotation(value) {
+  if (value === null || value === undefined) return 0
+  if (typeof value === 'string' && !value.trim()) return 0
+  const rotation = Number(value)
+  return [0, 1, 2].includes(rotation) ? rotation : 0
+}
+
+function downVideoRotationOption(value) {
+  const rotation = normalizeDownVideoRotation(value)
+  return rotation === 0 ? {} : { encodeVideoRotation: rotation }
+}
+
 function normalizeAspectRatio(value) {
   const ratio = Number(value)
   return Number.isFinite(ratio) && ratio > 0 ? ratio : null
@@ -88,6 +100,7 @@ function updateDeviceVideoProfileCache(devices) {
     profiles[deviceID] = {
       device_id: deviceID,
       camera_rotation: normalizeCameraRotation(voip.camera_rotation),
+      down_video_rotation: normalizeDownVideoRotation(voip.down_video_rotation),
       aspect_ratio: normalizeAspectRatio(voip.aspect_ratio),
       hor_mirror: normalizeBoolean(voip.hor_mirror),
       vert_mirror: normalizeBoolean(voip.vert_mirror),
@@ -106,10 +119,12 @@ module.exports = {
   DEVICE_VIDEO_PROFILE_CACHE_KEY,
   buildVideoUIConfig,
   cachedProfile,
+  downVideoRotationOption,
   incomingDeviceID,
   normalizeAspectRatio,
   normalizeBoolean,
   normalizeCameraRotation,
+  normalizeDownVideoRotation,
   normalizeObjectFit,
   updateDeviceVideoProfileCache,
 }

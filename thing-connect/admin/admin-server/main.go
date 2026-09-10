@@ -257,8 +257,15 @@ func main() {
 		apiresp.OK(c, gin.H{"status": "ready"})
 	})
 	deviceService := adminapp.NewDeviceService(adminmysql.NewDeviceCommandStore(sqlDB))
+	boardService := adminapp.NewBoardService(adminmysql.NewBoardCommandStore(sqlDB))
+	boardImageService, err := adminapp.NewBoardImageService(filepath.Join(root, "var", "board-images"))
+	if err != nil {
+		log.Fatalf("board image service: %v", err)
+	}
 	configTester := adminapp.NewConfigTester(configService, adminMQTTConnectionProbe{})
 	adminHTTP := adminapp.NewHTTPServer(store, authService, access, configService, configTester, servicestatus.NewAggregator(redisClient), redisClient, jobService, deviceService, cfg.Admin.CookieSecure)
+	adminHTTP.SetBoardService(boardService)
+	adminHTTP.SetBoardImageService(boardImageService)
 	adminHTTP.SetServiceCommandRoot(root)
 	if value, _, _, loadErr := configService.Resolved(context.Background(), "system", "admin.session_policy", "global", ""); loadErr == nil {
 		var policy struct {
@@ -493,7 +500,7 @@ func resolveDeployRoot(configured, configPath string) (string, error) {
 func securityHeaders() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		headers := c.Writer.Header()
-		headers.Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'")
+		headers.Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'")
 		headers.Set("X-Content-Type-Options", "nosniff")
 		headers.Set("X-Frame-Options", "DENY")
 		headers.Set("Referrer-Policy", "no-referrer")

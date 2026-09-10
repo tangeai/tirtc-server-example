@@ -70,13 +70,13 @@ func TestMigrateNewTables(t *testing.T) {
 	if err := sqlDB.Get(&count, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='admin_users'`); err != nil || count == 0 {
 		t.Errorf("admin_users table missing: n=%d err=%v", count, err)
 	}
-	if err := sqlDB.Get(&count, `SELECT COUNT(*) FROM schema_migrations WHERE component IN ('core','admin')`); err != nil || count != 4 {
+	if err := sqlDB.Get(&count, `SELECT COUNT(*) FROM schema_migrations WHERE component IN ('core','admin')`); err != nil || count != 5 {
 		t.Errorf("schema_migrations entries: n=%d err=%v", count, err)
 	}
 	if err := sqlDB.Get(&count, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='call_requests'`); err != nil || count != 0 {
 		t.Errorf("unreleased call_requests table exists: n=%d err=%v", count, err)
 	}
-	for _, table := range []string{"call_rooms", "call_room_codes", "call_assignments", "call_leases", "call_outbox", "device_profile"} {
+	for _, table := range []string{"call_rooms", "call_room_codes", "call_assignments", "call_leases", "call_outbox", "device_profile", "board_resources"} {
 		if err := sqlDB.Get(&count, `SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name=? AND column_name IN ('created_at','updated_at') AND is_nullable='NO'`, table); err != nil || count != 2 {
 			t.Errorf("%s audit timestamps: n=%d err=%v", table, count, err)
 		}

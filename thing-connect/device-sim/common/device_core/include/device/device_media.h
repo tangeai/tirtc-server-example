@@ -42,6 +42,7 @@ typedef struct {
     uint16_t width;
     uint16_t height;
     uint16_t camera_rotation;
+    uint16_t down_video_rotation;
     double aspect_ratio;
     char object_fit[DEVICE_VIDEO_OBJECT_FIT_MAX];
     bool hor_mirror;

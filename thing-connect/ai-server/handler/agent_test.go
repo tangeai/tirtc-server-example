@@ -950,6 +950,48 @@ func TestSetDeviceRole_Success(t *testing.T) {
 	}
 }
 
+func TestSetDeviceRole_RejectsDefaultAsExplicitBinding(t *testing.T) {
+	roleStore := &mockRoleBindingStore{bindings: map[string]string{}}
+	h := &AgentHandler{
+		agentAPI:      &mockAgentAPI{},
+		roleStore:     roleStore,
+		userRoleStore: &mockUserRoleStore{roles: map[int64][]string{1: {"role-custom"}}},
+		defaultRoleID: "role-default",
+	}
+	router := setupTestRouter(h)
+
+	w := doRequest(router, "PUT", "/v1/ai/device/dev1/role", `{"role_id":"role-default"}`, makeToken(1))
+	resp := parseJSON(t, w)
+
+	if resp.Code != 40300 || resp.Msg != "角色不属于当前用户" {
+		t.Fatalf("default role response code=%d msg=%q", resp.Code, resp.Msg)
+	}
+	if len(roleStore.bindings) != 0 {
+		t.Fatalf("default role changed bindings: %v", roleStore.bindings)
+	}
+}
+
+func TestSetDeviceRole_RejectsForeignNonDefaultRole(t *testing.T) {
+	roleStore := &mockRoleBindingStore{bindings: map[string]string{}}
+	h := &AgentHandler{
+		agentAPI:      &mockAgentAPI{},
+		roleStore:     roleStore,
+		userRoleStore: &mockUserRoleStore{roles: map[int64][]string{1: {"role-owned"}}},
+		defaultRoleID: "role-default",
+	}
+	router := setupTestRouter(h)
+
+	w := doRequest(router, "PUT", "/v1/ai/device/dev1/role", `{"role_id":"role-foreign"}`, makeToken(1))
+	resp := parseJSON(t, w)
+
+	if resp.Code != 40300 || resp.Msg != "角色不属于当前用户" {
+		t.Fatalf("foreign role response code=%d msg=%q", resp.Code, resp.Msg)
+	}
+	if len(roleStore.bindings) != 0 {
+		t.Fatalf("foreign role changed bindings: %v", roleStore.bindings)
+	}
+}
+
 func TestSetDeviceRole_MissingRoleID(t *testing.T) {
 	h := &AgentHandler{agentAPI: &mockAgentAPI{}}
 	router := setupTestRouter(h)

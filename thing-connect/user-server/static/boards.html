@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="查看探鸽 · 小钛支持的开发板、固件、源码仓库和烧录指南。">
+  <title>开发板 — 探鸽 · 小钛</title>
+  <link rel="stylesheet" href="/static/css/boards.css?v=2">
+  <link rel="stylesheet" href="/static/css/brand.css?v=2">
+  <link rel="stylesheet" href="/static/css/site-header.css?v=1">
+</head>
+<body>
+  <header class="site-header">
+    <nav class="nav shell" aria-label="主导航">
+      <a class="brand" href="/" aria-label="探鸽 · 小钛首页"><i class="brand-mark" aria-hidden="true"></i><span>探鸽 · 小钛</span></a>
+      <div class="nav-links" id="nav-links"><a href="/#routes">快速入门</a><a href="/#demo">功能示例</a><a class="active" href="/boards">开发板</a><a href="https://community.tange-ai.com" target="_blank" rel="noreferrer">开放社区</a><a class="mobile-only" href="https://github.com/tangeai/tirtc-server-example" target="_blank" rel="noreferrer">GitHub</a><a class="mobile-only" data-auth-guest href="/login">登录</a><a class="mobile-only" data-auth-guest href="/register">免费注册</a><a class="mobile-only" data-auth-user href="/devices" hidden>进入控制台</a></div>
+      <div class="nav-actions"><a class="nav-github" href="https://github.com/tangeai/tirtc-server-example" target="_blank" rel="noreferrer"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .7a11.5 11.5 0 0 0-3.64 22.4c.58.1.79-.25.79-.56v-2.23c-3.22.7-3.9-1.37-3.9-1.37-.53-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.7.08-.7 1.17.08 1.78 1.2 1.78 1.2 1.03 1.77 2.7 1.26 3.36.97.1-.75.4-1.26.73-1.55-2.57-.29-5.27-1.28-5.27-5.69 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.16 1.18A10.9 10.9 0 0 1 12 6.12c.98 0 1.95.13 2.87.39 2.2-1.49 3.16-1.18 3.16-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.42-2.71 5.39-5.29 5.68.42.36.79 1.07.79 2.16v3.22c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .7Z"/></svg>GitHub</a><a class="nav-login" data-auth-guest href="/login">登录</a><a class="console-link" data-auth-guest href="/register">免费注册</a><a class="console-link" data-auth-user href="/devices" hidden>进入控制台</a></div>
+      <button class="menu-button" type="button" aria-label="打开导航" aria-controls="nav-links" aria-expanded="false"><span></span><span></span></button>
+    </nav>
+  </header>
+  <main class="shell">
+    <section class="intro"><div><span>SUPPORTED BOARDS</span><h1>开发板</h1><p>查看小钛支持的开发板及相关资源。</p></div><strong id="board-count" aria-live="polite"></strong></section>
+    <div id="catalog-error" class="request-board" hidden><div><b>目录加载失败</b><p>请检查网络后重试。</p></div><button id="retry" type="button">重新加载</button></div>
+    <section id="featured-list" class="featured-list" aria-label="开发板"></section>
+    <section id="empty" class="request-board" hidden><div><b>开发板资料正在整理</b><p>你可以前往开放社区提交期望适配的型号和使用场景。</p></div></section>
+    <section id="more-section" hidden>
+      <div class="section-heading more-heading"><h2>更多型号</h2></div>
+      <div class="list-head"><span>厂商 / 开发板</span><span>完整型号</span><span>芯片平台</span><span>核心能力</span><span>状态</span><span></span></div>
+      <section id="board-list" class="board-list" aria-label="更多型号"></section>
+    </section>
+    <section class="request-board"><div><b>没有找到你的开发板？</b><p>提交完整型号、官方资料链接和期望使用场景，我们会评估适配。</p></div><a id="community-link" href="https://community.tange-ai.com" target="_blank" rel="noreferrer">提交适配需求 <span>↗</span></a></section>
+  </main>
+  <dialog id="detail-dialog" class="detail-dialog"><button class="dialog-close" type="button" aria-label="关闭详情">×</button><div class="detail-image"><img id="detail-image" alt=""><a id="detail-video" class="detail-video" target="_blank" rel="noreferrer"><span>▶</span> 播放效果视频</a></div><div class="detail-content"><small id="detail-vendor"></small><h2 id="detail-name"></h2><p id="detail-summary"></p><div id="detail-caps"></div><dl><div><dt>完整型号</dt><dd id="detail-model"></dd></div><div><dt>芯片</dt><dd id="detail-chip"></dd></div><div><dt>厂商</dt><dd id="detail-maker"></dd></div></dl><div class="detail-links"><a id="detail-buy" target="_blank" rel="noreferrer">购买链接 ↗</a><a id="detail-repo" target="_blank" rel="noreferrer">仓库链接 ↗</a><a id="detail-firmware" target="_blank" rel="noreferrer">固件链接 ↗</a><a id="detail-guide" target="_blank" rel="noreferrer">烧录指南 ↗</a></div><p id="merchant-note" class="merchant-note">购买由第三方商家提供，商品、订单及售后问题请联系对应商家。小钛仅提供信息指引，与商家不存在合作、代理或担保关系。</p></div></dialog>
+  <script src="/static/boards.js?v=1" defer></script>
+</body>
+</html>

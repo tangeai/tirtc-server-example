@@ -9,6 +9,7 @@
 - [`core/001_ai.sql`](core/001_ai.sql)：AI 角色与资源。
 - [`core/001_call.sql`](core/001_call.sql)：设备联系人。
 - [`core/001_zzz_schema_comments.sql`](core/001_zzz_schema_comments.sql)：业务表和字段的完整中文元数据注释。
+- [`core/004_board_resources.sql`](core/004_board_resources.sql)：官网开发板资料目录。
 - [`admin/`](admin)：Admin Server 拥有的版本 1 基线；`001_installation_state.sql`
   也是空库领取与中断恢复共用的唯一所有权标记定义。
 

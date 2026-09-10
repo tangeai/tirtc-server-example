@@ -87,6 +87,7 @@
 | `video.file`、`video.codec` | 视频素材文件名和编码；ESP32-S3 纯音频基线保留字段但不加载视频文件 |
 | `video.width`、`video.height`、`video.fps` | 视频尺寸和帧率；纯音频基线固定为 `0` |
 | `video.camera_rotation`、`video.aspect_ratio`、`video.hor_mirror`、`video.vert_mirror` | 设备上报给小程序的视频显示参数；纯音频基线使用默认值 |
+| `video.down_video_rotation` | 可选的微信下行视频编码方向：`0` 不上传，`1` 输出正向画面，`2` 保留旋转画面；缺省为 `0` |
 | `video.duration_ms`、`video.frame_count` | 视频素材时长和帧数；纯音频基线固定为 `0` |
 | `video.uplink_enabled`、`video.downlink_enabled` | 是否启用设备视频上行和下行；ESP32-S3 目标必须同时为 `false` |
 

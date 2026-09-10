@@ -567,6 +567,7 @@ async function init() {
 }
 
 function isDefaultRole(id) { return defaultRole && id === defaultRole.id; }
+function effectiveRoleId() { return boundRoleId || defaultRoleId; }
 
 async function loadAgents() {
   const data = await api('/v1/ai/roles');
@@ -627,7 +628,7 @@ function renderAgentList() {
         <div class="flex items-center gap-1.5 sm:gap-2">
           <span class="text-[13px] sm:text-sm font-medium text-gray-800 truncate">${escapeText(a.name)}</span>
           ${isDefaultRole(a.id) ? '<span class="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-200">默认</span>' : ''}
-          ${a.id === boundRoleId ? '<span class="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-200">已绑定</span>' : ''}
+          ${a.id === effectiveRoleId() ? '<span class="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-200">使用中</span>' : ''}
         </div>
         <p class="text-[11px] sm:text-xs text-gray-400 mt-0.5 truncate">${escapeText(a.user_params?.description || a.agent_config?.prompt?.slice(0, 40) || '暂无描述')}</p>
       </div>
@@ -1482,25 +1483,25 @@ function filterAgents() { renderAgentList(); }
 // ── Bind button state ──
 function updateBindButton() {
   const btn = $('btn-bind');
-  btn.disabled = bindingRole || !currentAgentId || currentAgentId === boundRoleId;
+  const isEffective = currentAgentId === effectiveRoleId();
+  btn.disabled = bindingRole || !currentAgentId || isEffective;
   if (!currentAgentId) {
     btn.textContent = '保存后再绑定';
     btn.classList.add('opacity-50', 'pointer-events-none');
-  } else if (currentAgentId === boundRoleId) {
-    btn.textContent = '✓ 已绑定到此设备';
+  } else if (isEffective) {
+    btn.textContent = '✓ 当前设备使用中';
     btn.classList.remove('opacity-50', 'pointer-events-none');
     btn.classList.add('!border-emerald-400', '!text-emerald-600');
   } else {
     btn.textContent = '绑定到此设备';
-    btn.classList.remove('opacity-50', 'pointer-events-none', '!border-emerald-400');
+    btn.classList.remove('opacity-50', 'pointer-events-none', '!border-emerald-400', '!text-emerald-600');
   }
 }
 
 function updateHeaderBinding() {
-  if (boundRoleId) {
-    const a = agents.find(x => x.id === boundRoleId);
-    $('header-role-name').textContent = a ? a.name : boundRoleId;
-  }
+  const roleId = effectiveRoleId();
+  const a = agents.find(x => x.id === roleId);
+  $('header-role-name').textContent = a ? a.name : (roleId || '未配置');
 }
 
 // ── Actions ──
@@ -1633,7 +1634,7 @@ async function deleteAgent() {
 
 async function bindToDevice() {
   if (savingRole || bindingRole) return;
-  if (!currentAgentId || currentAgentId === boundRoleId) return;
+  if (!currentAgentId || currentAgentId === effectiveRoleId()) return;
   if (!deviceId) { toast('未指定设备', true); return; }
   if (editorDirty) { toast('请先保存角色修改', true); return; }
 
@@ -1641,16 +1642,19 @@ async function bindToDevice() {
   selectingRole += 1;
   $('btn-bind').disabled = true;
   try {
-    const res = await api('/v1/ai/device/' + encodeURIComponent(deviceId) + '/role', {
+    const selectingDefault = isDefaultRole(currentAgentId);
+    const res = await api('/v1/ai/device/' + encodeURIComponent(deviceId) + '/role', selectingDefault ? {
+      method: 'DELETE',
+    } : {
       method: 'PUT',
       body: JSON.stringify({ role_id: currentAgentId }),
     });
     if (res.code === 200) {
-      boundRoleId = currentAgentId;
+      boundRoleId = selectingDefault ? '' : currentAgentId;
       updateHeaderBinding();
       renderAgentList();
       updateBindButton();
-      toast('绑定成功');
+      toast(selectingDefault ? '已恢复默认角色' : '绑定成功');
     } else {
       toast(res.msg || '绑定失败', true);
     }

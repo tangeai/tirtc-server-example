@@ -442,11 +442,12 @@ func validCameraRotation(rotation int) bool {
 }
 
 type videoUIConfig struct {
-	CameraRotation *int
-	AspectRatio    *float64
-	HorMirror      *bool
-	VertMirror     *bool
-	ObjectFit      *string
+	CameraRotation    *int
+	DownVideoRotation *int
+	AspectRatio       *float64
+	HorMirror         *bool
+	VertMirror        *bool
+	ObjectFit         *string
 }
 
 func validateVideoUIProfile(profile json.RawMessage) error {
@@ -458,6 +459,13 @@ func validateVideoUIProfile(profile json.RawMessage) error {
 		var rotation int
 		if isJSONNull(raw) || json.Unmarshal(raw, &rotation) != nil || !validCameraRotation(rotation) {
 			return fmt.Errorf("camera_rotation 必须为 0、90、180 或 270")
+		}
+	}
+	if raw, ok := fields["down_video_rotation"]; ok {
+		var rotation int
+		if isJSONNull(raw) || json.Unmarshal(raw, &rotation) != nil ||
+			(rotation != 0 && rotation != 1 && rotation != 2) {
+			return fmt.Errorf("down_video_rotation 必须为 0、1 或 2")
 		}
 	}
 	if raw, ok := fields["aspect_ratio"]; ok {
@@ -503,6 +511,12 @@ func videoUIConfigFromProfile(profile string) videoUIConfig {
 			config.CameraRotation = &rotation
 		}
 	}
+	if raw, ok := fields["down_video_rotation"]; ok && !isJSONNull(raw) {
+		var rotation int
+		if json.Unmarshal(raw, &rotation) == nil && (rotation == 1 || rotation == 2) {
+			config.DownVideoRotation = &rotation
+		}
+	}
 	if raw, ok := fields["aspect_ratio"]; ok && !isJSONNull(raw) {
 		var ratio float64
 		if json.Unmarshal(raw, &ratio) == nil && ratio > 0 {
@@ -535,6 +549,9 @@ func queryWithVideoUIConfig(rawQuery string, config videoUIConfig) string {
 	uiValues := make(url.Values)
 	if config.CameraRotation != nil {
 		uiValues.Set("camera_rotation", strconv.Itoa(*config.CameraRotation))
+	}
+	if config.DownVideoRotation != nil {
+		uiValues.Set("encodeVideoRotation", strconv.Itoa(*config.DownVideoRotation))
 	}
 	if config.AspectRatio != nil {
 		uiValues.Set("aspect_ratio", strconv.FormatFloat(*config.AspectRatio, 'g', -1, 64))

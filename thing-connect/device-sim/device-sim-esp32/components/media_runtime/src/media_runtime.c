@@ -221,6 +221,8 @@ static esp_err_t load_profile(device_media_config_t *config)
     bool ok = cJSON_IsObject(audio) && cJSON_IsObject(video) &&
               json_optional_u16(video, "camera_rotation",
                                 &config->video.camera_rotation) &&
+              json_optional_u16(video, "down_video_rotation",
+                                &config->video.down_video_rotation) &&
               json_optional_positive_number(video, "aspect_ratio",
                                             &config->video.aspect_ratio) &&
               json_optional_string(video, "object_fit",

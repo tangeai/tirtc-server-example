@@ -1077,6 +1077,13 @@ def build_profile(with_video: bool | None = None, *, up_video_format: str | None
         _warn("VOIP_CAMERA_ROTATION 仅支持 0/90/180/270，已回退为 0")
         camera_rotation = 0
     try:
+        down_video_rotation = int(os.getenv("VOIP_DOWN_VIDEO_ROTATION", "0"))
+    except ValueError:
+        down_video_rotation = 0
+    if down_video_rotation not in (0, 1, 2):
+        _warn("VOIP_DOWN_VIDEO_ROTATION 仅支持 0/1/2，已回退为 0")
+        down_video_rotation = 0
+    try:
         aspect_ratio = float(os.getenv("VOIP_ASPECT_RATIO", str(4 / 3)))
     except ValueError:
         aspect_ratio = 4 / 3
@@ -1125,6 +1132,8 @@ def build_profile(with_video: bool | None = None, *, up_video_format: str | None
     if profile["video_res_mode"] not in ("auto", "fit_screen", "fill_screen"):
         _warn("VOIP_VIDEO_RES_MODE 仅支持 auto/fit_screen/fill_screen，已回退为 auto")
         profile["video_res_mode"] = "auto"
+    if selected_has_video and down_video_rotation != 0:
+        profile["down_video_rotation"] = down_video_rotation
     object_fit = os.getenv("VOIP_OBJECT_FIT", "").strip().lower()
     if object_fit in ("fill", "contain"):
         profile["object_fit"] = object_fit

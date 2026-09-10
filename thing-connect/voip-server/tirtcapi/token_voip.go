@@ -89,6 +89,7 @@ func (r TokenWxvoipRequest) MarshalJSON() ([]byte, error) {
 		}
 	}
 	normalizeLegacyVideoFields(params)
+	omitDefaultDownVideoRotation(params)
 
 	for _, name := range localProfileFields {
 		delete(params, name)
@@ -117,6 +118,19 @@ func (r TokenWxvoipRequest) MarshalJSON() ([]byte, error) {
 		params[name] = value
 	}
 	return json.Marshal(params)
+}
+
+// A zero down_video_rotation keeps the upstream default and is therefore not
+// sent to TiRTC. Values 1 and 2 are forwarded as explicit rotation policies.
+func omitDefaultDownVideoRotation(params map[string]json.RawMessage) {
+	raw, ok := params["down_video_rotation"]
+	if !ok {
+		return
+	}
+	var value int
+	if json.Unmarshal(raw, &value) == nil && value == 0 {
+		delete(params, "down_video_rotation")
+	}
 }
 
 // normalizeLegacyVideoFields preserves the historical video_mt compatibility
