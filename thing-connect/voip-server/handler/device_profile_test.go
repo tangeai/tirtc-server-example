@@ -66,6 +66,13 @@ func TestDeprecatedProfileEndpointWritesUnifiedScene(t *testing.T) {
 	if recorder.Code != http.StatusOK || recorder.Header().Get("Deprecation") != "true" {
 		t.Fatalf("status=%d headers=%v body=%s", recorder.Code, recorder.Header(), recorder.Body.String())
 	}
+	var response struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil || response.Code != 0 || response.Msg != "ok" {
+		t.Fatalf("legacy response changed: body=%s err=%v", recorder.Body.String(), err)
+	}
 	if store.deviceID != "device-1" || len(store.scenes["voip"]) == 0 {
 		t.Fatalf("device=%q scenes=%v", store.deviceID, store.scenes)
 	}

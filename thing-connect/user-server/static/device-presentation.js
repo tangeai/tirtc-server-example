@@ -68,6 +68,16 @@
       ["音频采样率", display("audio_rate", (v) => `${v} Hz`)],
       ["音频声道数", display("audio_channels")],
       ["摄像头旋转", display("camera_rotation", (v) => `${v}°（顺时针）`)],
+      ...(scene === "voip"
+        ? [
+            [
+              "下行视频方向",
+              ({ 0: "默认", 1: "正向画面", 2: "保留旋转画面" })[
+                Number(p.down_video_rotation ?? 0)
+              ] || "默认",
+            ],
+          ]
+        : []),
       ["水平镜像", display("hor_mirror", (v) => (v ? "是" : "否"))],
       ["垂直镜像", display("vert_mirror", (v) => (v ? "是" : "否"))],
       ["画面比例", display("aspect_ratio")],

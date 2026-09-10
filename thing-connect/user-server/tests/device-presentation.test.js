@@ -20,6 +20,17 @@ test('explicit zero, false, empty video and missing data remain distinct', () =>
   assert.equal(rows['上行视频'], '未上报');
 });
 
+test('VoIP downlink video rotation uses product-facing labels and defaults to zero', () => {
+  for (const [value, expected] of [[undefined, '默认'], [0, '默认'], [1, '正向画面'], [2, '保留旋转画面']]) {
+    const profile = {camera_rotation: 0};
+    if (value !== undefined) profile.down_video_rotation = value;
+    const rows = Object.fromEntries(view.mediaRows({voip: profile}, 'voip'));
+    assert.equal(rows['下行视频方向'], expected);
+  }
+  const streamRows = Object.fromEntries(view.mediaRows({stream: {camera_rotation: 0}}, 'stream'));
+  assert.equal(streamRows['下行视频方向'], undefined);
+});
+
 test('room summary preserves leading zeros and reports deferred work', () => {
   const room = {desired_state:'joined', room_code:'001234', online_count:3, state:'joined'};
   assert.equal(view.roomSummary(room), '001234 · 3 人在线');
