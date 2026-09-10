@@ -14,7 +14,8 @@ class DeviceMediaTests(unittest.TestCase):
             up_audio_format="pcm_s16le_16khz", down_audio_format="opus_16khz",
             up_video_file="camera.h265", up_video_format="h265", down_video_format="mjpeg")
         profiles = runtime.profiles()
-        self.assertNotIn("voip", profiles)
+        self.assertEqual(profiles["voip"]["up_video_mt"], "h265")
+        self.assertEqual(profiles["voip"]["down_video_mt"], "mjpeg")
         self.assertEqual(profiles["stream"]["down_audio_mt"], ["alaw"])
         self.assertEqual(profiles["call"]["down_audio_mt"], ["opus"])
         self.assertEqual(profiles["call"]["up_video_mt"], ["h265"])
@@ -24,6 +25,7 @@ class DeviceMediaTests(unittest.TestCase):
         profiles = runtime.profiles()
         self.assertEqual(profiles["call"]["down_video_mt"], [])
         self.assertTrue(profiles["call"]["no_video"])
+        self.assertTrue(profiles["voip"]["no_video"])
 
     @patch("device_flow.time.sleep")
     @patch("device_flow.http_trace.request")

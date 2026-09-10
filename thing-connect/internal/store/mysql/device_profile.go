@@ -10,14 +10,14 @@ import (
 	"strings"
 
 	"github.com/jmoiron/sqlx"
-	"thing-connect/internal/service"
+	"thing-connect/internal/deviceprofile"
 )
 
-type deviceMediaStore struct{ db *sqlx.DB }
+type deviceProfileStore struct{ db *sqlx.DB }
 
-func NewDeviceMediaStore(db *sqlx.DB) service.DeviceMediaStore { return &deviceMediaStore{db: db} }
+func NewDeviceProfileStore(db *sqlx.DB) deviceprofile.Store { return &deviceProfileStore{db: db} }
 
-func (s *deviceMediaStore) ReportMedia(ctx context.Context, deviceID string, profiles map[string]json.RawMessage) (bool, error) {
+func (s *deviceProfileStore) ReplaceScenes(ctx context.Context, deviceID string, profiles map[string]json.RawMessage) (bool, error) {
 	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return false, err
@@ -57,4 +57,16 @@ func (s *deviceMediaStore) ReportMedia(ctx context.Context, deviceID string, pro
 		return false, err
 	}
 	return true, nil
+}
+
+func (s *deviceProfileStore) Get(ctx context.Context, deviceID string) (*deviceprofile.Snapshot, error) {
+	var raw string
+	err := s.db.GetContext(ctx, &raw, `SELECT profile FROM device_profile WHERE device_id=?`, deviceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return &deviceprofile.Snapshot{DeviceID: deviceID}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get device profile: %w", err)
+	}
+	return &deviceprofile.Snapshot{DeviceID: deviceID, Profile: json.RawMessage(raw)}, nil
 }

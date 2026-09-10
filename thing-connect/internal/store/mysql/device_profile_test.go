@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"thing-connect/internal/service"
+	"thing-connect/internal/deviceprofile"
 	mysqlstore "thing-connect/internal/store/mysql"
 )
 
-func TestDeviceMediaReportsPersistAndIsolateScenes(t *testing.T) {
+func TestDeviceProfileReportsPersistAndIsolateScenes(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 	id := uniqueDevID()
@@ -21,7 +21,7 @@ func TestDeviceMediaReportsPersistAndIsolateScenes(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Exec(`DELETE FROM device_profile WHERE device_id=?`, id) })
-	svc := service.NewDeviceMediaService(mysqlstore.NewDeviceMediaStore(db))
+	svc := deviceprofile.NewService(mysqlstore.NewDeviceProfileStore(db))
 	report := func(scene, raw string) error {
 		return svc.Report(ctx, id, map[string]json.RawMessage{scene: json.RawMessage(raw)})
 	}
@@ -89,7 +89,7 @@ func TestDeviceMediaReportsPersistAndIsolateScenes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = report("stream", `{"audio_rate":8000}`); !errors.Is(err, service.ErrDeviceReset) {
+	if err = report("stream", `{"audio_rate":8000}`); !errors.Is(err, deviceprofile.ErrUnbound) {
 		t.Fatal(err)
 	}
 	var after string
@@ -97,7 +97,7 @@ func TestDeviceMediaReportsPersistAndIsolateScenes(t *testing.T) {
 	if after != audit.Profile {
 		t.Fatal("unbound report mutated profile")
 	}
-	if err = svc.Report(ctx, "missing", map[string]json.RawMessage{"call": json.RawMessage(`{}`)}); !errors.Is(err, service.ErrDeviceReset) {
+	if err = svc.Report(ctx, "missing", map[string]json.RawMessage{"call": json.RawMessage(`{}`)}); !errors.Is(err, deviceprofile.ErrUnbound) {
 		t.Fatal(err)
 	}
 }
@@ -110,7 +110,7 @@ func TestDeviceProfileCancelledAndUnboundTransactionsDoNotWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Exec(`DELETE FROM device_profile WHERE device_id=?`, id) })
-	svc := service.NewDeviceMediaService(mysqlstore.NewDeviceMediaStore(db))
+	svc := deviceprofile.NewService(mysqlstore.NewDeviceProfileStore(db))
 	input := map[string]json.RawMessage{"call": json.RawMessage(`{"audio_rate":8000}`)}
 	tx, err := db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -133,7 +133,7 @@ func TestDeviceProfileCancelledAndUnboundTransactionsDoNotWrite(t *testing.T) {
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.Report(ctx, id, input); !errors.Is(err, service.ErrDeviceReset) {
+	if err := svc.Report(ctx, id, input); !errors.Is(err, deviceprofile.ErrUnbound) {
 		t.Fatal("unbind was not observed", err)
 	}
 	var count int

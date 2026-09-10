@@ -431,7 +431,7 @@ func (s *HTTPServer) voipAppDevices(c *gin.Context) {
 	from := ` FROM voip_device_auth a
 		LEFT JOIN device_bind d ON d.device_id=a.device_id
 		LEFT JOIN users u ON u.id=d.user_id
-		LEFT JOIN voip_device_profile p ON p.device_id=a.device_id`
+		LEFT JOIN device_profile p ON p.device_id=a.device_id AND JSON_CONTAINS_PATH(p.profile,'one','$.voip')`
 	var total int
 	if err := s.store.db.GetContext(c, &total, `SELECT COUNT(*)`+from+where, args...); err != nil {
 		apiresp.Internal(c, err.Error())
@@ -496,7 +496,8 @@ func (s *HTTPServer) voipDeviceProfile(c *gin.Context) {
 		Profile   string    `db:"profile" json:"profile"`
 		UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
 	}
-	err := s.store.db.GetContext(c, &row, `SELECT device_id,profile,updated_at FROM voip_device_profile WHERE device_id=?`, c.Param("device_id"))
+	err := s.store.db.GetContext(c, &row, `SELECT device_id,JSON_EXTRACT(profile,'$.voip') profile,updated_at
+		FROM device_profile WHERE device_id=? AND JSON_CONTAINS_PATH(profile,'one','$.voip')`, c.Param("device_id"))
 	if errors.Is(err, sql.ErrNoRows) {
 		c.JSON(http.StatusNotFound, apiresp.JSON{Code: 404, Msg: "设备未上报 VoIP 属性"})
 		return

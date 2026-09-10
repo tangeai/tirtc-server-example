@@ -180,7 +180,7 @@ class DeviceRtcRuntime:
             if c.device_server:
                 from device_flow import report_profiles
                 report_profiles(c.device_server, c.mqtt_token, self.profiles())
-            self._prime_voip_profile()
+            self._refresh_voip_contacts()
             self.coordinator.start_stream()
             self.room.start()
         except BaseException:
@@ -358,12 +358,12 @@ class DeviceRtcRuntime:
             self.sdk_runtime.deactivate(service, active_generation)
 
     def profiles(self) -> dict:
-        """按实际配置分别描述实时流与设备互呼；VoIP 保留其专用上报。"""
+        """按实际配置生成实时流、设备互呼和微信 VoIP 场景。"""
         from media_formats import AUDIO_FORMATS, VIDEO_FORMATS
         c = self.config
         up, down = AUDIO_FORMATS[c.up_audio_format], AUDIO_FORMATS[c.down_audio_format]
         video = [VIDEO_FORMATS[c.up_video_format].codec] if c.up_video_file else []
-        return {
+        profiles = {
             "stream": {
                 "up_audio_mt": [up.codec], "up_video_mt": video,
                 "down_audio_mt": ["alaw"], "down_video_mt": [],
@@ -377,10 +377,16 @@ class DeviceRtcRuntime:
                 "no_video": not bool(video),
             },
         }
+        import rtc_voip
+        profiles["voip"] = rtc_voip.build_profile(
+            bool(video), up_video_format=c.up_video_format,
+            down_video_format=c.down_video_format,
+            down_audio_format=c.down_audio_format)
+        return profiles
 
-    def _prime_voip_profile(self) -> None:
-        """启动实时流前先上报 VoIP profile，确保微信回调能找到设备媒体能力。"""
-        callers = self.voip_module.report_profile(self.config.voip_server, self.config.mqtt_token)
+    def _refresh_voip_contacts(self) -> None:
+        """统一 Profile 上报完成后刷新微信 VoIP 联系人。"""
+        callers = self.voip_module.refresh_contacts(self.config.voip_server, self.config.mqtt_token)
         if callers:
             self.voip.replace_callers(callers)
 

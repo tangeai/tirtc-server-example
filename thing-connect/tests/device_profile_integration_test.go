@@ -31,12 +31,8 @@ func TestDeviceProfileReportToUserDeviceList(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		s.sqlDB.Exec(`DELETE FROM device_profile WHERE device_id=?`, device)
-		s.sqlDB.Exec(`DELETE FROM voip_device_profile WHERE device_id=?`, device)
 		s.sqlDB.Exec(`DELETE FROM device_bind WHERE device_id=?`, device)
 	})
-	if _, err := s.sqlDB.Exec(`INSERT INTO voip_device_profile(device_id,profile) VALUES(?,?)`, device, `{"down_audio_mt":"amr","camera_rotation":90}`); err != nil {
-		t.Fatal(err)
-	}
 	deviceToken := deviceJWT(t, cfg.JWTSecret, device)
 	ownerToken := userJWT(t, cfg.JWTSecret, owner)
 	otherToken := userJWT(t, cfg.JWTSecret, other)
@@ -59,6 +55,7 @@ func TestDeviceProfileReportToUserDeviceList(t *testing.T) {
 	snapshot := map[string]any{"profiles": map[string]any{
 		"stream": map[string]any{"up_audio_mt": []string{"pcm"}, "up_video_mt": []string{}, "camera_rotation": 0, "hor_mirror": false},
 		"call":   map[string]any{"down_audio_mt": []string{"opus", "amr"}, "audio_rate": 16000},
+		"voip":   map[string]any{"down_audio_mt": "amr", "up_video_mt": "none", "down_video_mt": "none", "audio_rate": 8000, "audio_channels": 1, "camera_rotation": 90, "no_video": true},
 	}}
 	for i := 0; i < 2; i++ {
 		r := post(snapshot)
@@ -74,8 +71,8 @@ func TestDeviceProfileReportToUserDeviceList(t *testing.T) {
 	if string(profiles["stream"]["hor_mirror"]) != "false" || string(profiles["stream"]["camera_rotation"]) != "0" {
 		t.Fatal("explicit values lost", profiles)
 	}
-	if string(profiles["voip"]["down_audio_mt"]) != `"amr"` {
-		t.Fatal("legacy VoIP source lost")
+	if string(profiles["voip"]["down_audio_mt"]) != `"amr"` || string(profiles["voip"]["voip_room_type"]) != `"voice"` {
+		t.Fatal("VoIP profile projection invalid", profiles)
 	}
 	var formats []string
 	_ = json.Unmarshal(profiles["call"]["down_audio_mt"], &formats)
@@ -112,7 +109,10 @@ func TestDeviceProfileReportToUserDeviceList(t *testing.T) {
 		t.Fatal(cleared)
 	}
 	profiles = list(ownerToken)[0].Profiles
-	if len(profiles["stream"]) != 0 || len(profiles["voip"]) != 0 || len(profiles["call"]) == 0 {
+	voip := profiles["voip"]
+	if len(profiles["stream"]) != 0 || len(profiles["call"]) == 0 || len(voip) != 3 ||
+		string(voip["has_camera"]) != "false" || string(voip["has_screen"]) != "false" ||
+		string(voip["voip_room_type"]) != `"voice"` {
 		t.Fatal("scene replacement/fallback semantics broken", profiles)
 	}
 	if _, err := s.sqlDB.Exec(`UPDATE device_bind SET user_id=0,unbind_time=NOW() WHERE device_id=?`, device); err != nil {

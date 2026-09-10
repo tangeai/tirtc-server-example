@@ -9,6 +9,7 @@ const {
 const {
   buildVideoUIConfig,
   incomingDeviceID,
+  updateDeviceVideoProfileCache,
 } = require('../utils/voip-video-profile')
 const { parseIncomingQuery } = require('../utils/voip-incoming-query')
 
@@ -184,6 +185,20 @@ test('空旋转值保持未配置，不会被误判为 0 度', () => {
   assert.deepEqual(buildVideoUIConfig({ camera_rotation: '  ' }), {})
   assert.deepEqual(buildVideoUIConfig({ camera_rotation: 0 }), { cameraRotation: 0 })
   assert.deepEqual(buildVideoUIConfig({ camera_rotation: '0' }), { cameraRotation: 0 })
+})
+
+test('设备视频配置从 profiles.voip 写入缓存', () => {
+  let stored
+  global.wx = { setStorageSync: (_key, value) => { stored = value } }
+  const profiles = updateDeviceVideoProfileCache([{
+    device_id: 'device-1',
+    camera_rotation: 180,
+    profiles: { voip: { camera_rotation: 90, aspect_ratio: 16 / 9, object_fit: 'contain' } },
+  }])
+  assert.equal(profiles['device-1'].camera_rotation, 90)
+  assert.equal(stored['device-1'].aspect_ratio, 16 / 9)
+  assert.equal(stored['device-1'].object_fit, 'contain')
+  delete global.wx
 })
 
 test('入呼设备 ID 支持微信 callerId 和已有字段', () => {

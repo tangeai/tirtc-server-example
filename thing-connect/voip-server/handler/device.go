@@ -15,12 +15,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"thing-connect/internal/deviceprofile"
 	"thing-connect/voip-server/apiresp"
 	"thing-connect/voip-server/wechat"
 )
 
-// postDeviceProfile upserts the device's media profile JSON.
-// The body is stored verbatim as VARCHAR(512).
+// postDeviceProfile is the deprecated VoIP-only compatibility adapter.
 func (s *Server) postDeviceProfile(c *gin.Context) {
 	deviceID := currentDeviceID(c)
 
@@ -38,29 +38,70 @@ func (s *Server) postDeviceProfile(c *gin.Context) {
 		apiresp.Fail(c, apiresp.ErrBadParam, err.Error())
 		return
 	}
-
-	_, err := s.db.ExecContext(c.Request.Context(),
-		`INSERT INTO voip_device_profile (device_id, profile, updated_at)
-		 VALUES (?, ?, ?)
-		 ON DUPLICATE KEY UPDATE profile=VALUES(profile), updated_at=VALUES(updated_at)`,
-		deviceID, profileStr, time.Now())
+	voip, err := legacyVoIPScene(body)
 	if err != nil {
-		apiresp.Fail(c, apiresp.ErrInternal, "save profile: "+err.Error())
+		apiresp.Fail(c, apiresp.ErrBadParam, err.Error())
 		return
 	}
+	if s.profiles == nil {
+		apiresp.Fail(c, apiresp.ErrInternal, "设备能力服务未初始化")
+		return
+	}
+	if err = s.profiles.ReportLegacyVoIP(c.Request.Context(), deviceID, voip); err != nil {
+		if errors.Is(err, deviceprofile.ErrInvalid) {
+			apiresp.Fail(c, apiresp.ErrBadParam, err.Error())
+		} else if errors.Is(err, deviceprofile.ErrUnbound) {
+			apiresp.Fail(c, apiresp.ErrDeviceUnbound, "设备已解绑，请重新完成设备绑定")
+		} else {
+			apiresp.Fail(c, apiresp.ErrInternal, "保存设备能力失败")
+		}
+		return
+	}
+	c.Header("Deprecation", "true")
+	c.Header("Link", `</v1/device/profile>; rel="successor-version"`)
 	apiresp.OK(c, nil)
 }
 
 // GetDeviceProfile returns the stored profile JSON for a device.
 // Returns ("", nil) when no profile exists.
 func (s *Server) GetDeviceProfile(ctx context.Context, deviceID string) (string, error) {
-	var profile string
-	err := s.db.QueryRowContext(ctx,
-		`SELECT profile FROM voip_device_profile WHERE device_id=?`, deviceID).Scan(&profile)
-	if errors.Is(err, sql.ErrNoRows) {
+	if s.profiles == nil {
 		return "", nil
 	}
-	return profile, err
+	profile, err := s.profiles.VoIP(ctx, deviceID)
+	return string(profile), err
+}
+
+func legacyVoIPScene(raw json.RawMessage) (json.RawMessage, error) {
+	var input map[string]json.RawMessage
+	if json.Unmarshal(raw, &input) != nil || input == nil {
+		return nil, fmt.Errorf("profile 必须是 JSON 对象")
+	}
+	serverOwned := map[string]bool{
+		"device_id": true, "wx_session_key": true, "wx_room_id": true,
+		"wx_session_token": true, "wx_app_id": true, "wx_payload": true,
+		"wx_model_id": true,
+	}
+	output := make(map[string]json.RawMessage)
+	for key, value := range input {
+		if !serverOwned[key] {
+			output[key] = value
+		}
+	}
+	if legacy, ok := input["video_mt"]; ok {
+		if _, exists := output["up_video_mt"]; !exists {
+			output["up_video_mt"] = legacy
+		}
+		if _, exists := output["down_video_mt"]; !exists {
+			output["down_video_mt"] = legacy
+		}
+		delete(output, "video_mt")
+	}
+	encoded, err := json.Marshal(output)
+	if err != nil {
+		return nil, fmt.Errorf("profile 编码失败")
+	}
+	return encoded, nil
 }
 
 // GetDeviceVoipContactRemark returns the name this device should display for

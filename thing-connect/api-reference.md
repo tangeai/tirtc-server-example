@@ -416,6 +416,23 @@ int device_sign(const char *device_id, const char *device_key,
       "vert_mirror": false,
       "aspect_ratio": "4:3",
       "object_fit": "contain"
+    },
+    "voip": {
+      "screen_width": 640,
+      "screen_height": 480,
+      "up_video_mt": "h264",
+      "down_video_mt": "mjpeg",
+      "down_audio_mt": "amr",
+      "audio_rate": 8000,
+      "audio_channels": 1,
+      "camera_rotation": 90,
+      "aspect_ratio": 1.7777777778,
+      "hor_mirror": true,
+      "vert_mirror": false,
+      "object_fit": "contain",
+      "video_res_mode": "fit_screen",
+      "calling_timeout_sec": 30,
+      "no_video": false
     }
   }
 }
@@ -423,25 +440,37 @@ int device_sign(const char *device_id, const char *device_key,
 
 `profiles` 必须包含至少一个场景：`stream`（实时查看）、`call`（设备通话）、`voip`（微信 VoIP）。正文最大 16 KiB。每个场景的字段均可省略，未知字段和 `null` 被拒绝。
 
-| 字段 | 类型与取值 |
-|---|---|
-| `up_audio_mt` / `down_audio_mt` | 编码字符串数组，最多 8 项；支持 `alaw`、`g711a`、`pcm`、`opus`、`amr`、`amr_nb`、`amr_wb`、`aac` |
-| `up_video_mt` / `down_video_mt` | 编码字符串数组，最多 8 项；支持 `h264`、`h265`、`mjpeg`、`none` |
-| `audio_rate` | 下行音频采样率：8000、16000、24000、32000、44100 或 48000 Hz |
-| `audio_channels` | 下行音频声道数：1 或 2 |
-| `camera_rotation` | 顺时针旋转角度：0、90、180 或 270 |
-| `hor_mirror` / `vert_mirror` | 水平 / 垂直镜像，布尔值 |
-| `no_video` | 布尔值；为 true 时表示该场景无视频 |
-| `aspect_ratio` | 正数比例，或 `宽:高` 字符串（宽、高为 1–9999） |
-| `object_fit` | `fill`、`contain` 或 `cover` |
+| 字段 | 类型 | 适用场景 | 必填 | 说明 |
+|---|---|---|:---:|---|
+| `up_audio_mt` | string[] | `stream`、`call` | 否 | 设备发送音频的编码，最多 8 项，按首选顺序排列 |
+| `down_audio_mt` | string[] | `stream`、`call` | 否 | 设备接收音频的编码，最多 8 项，按首选顺序排列 |
+| `down_audio_mt` | string | `voip` | 否 | 设备接收微信小程序音频的编码 |
+| `up_video_mt` | string[] | `stream`、`call` | 否 | 设备发送视频的编码，最多 8 项，按首选顺序排列 |
+| `down_video_mt` | string[] | `stream`、`call` | 否 | 设备接收视频的编码，最多 8 项，按首选顺序排列 |
+| `up_video_mt` | string | `voip` | 否 | 设备发送给微信小程序的视频编码 |
+| `down_video_mt` | string | `voip` | 否 | 设备接收微信小程序视频的编码 |
+| `audio_rate` | integer | 全部 | 否 | 音频采样率：8000、16000、24000、32000、44100 或 48000 Hz |
+| `audio_channels` | integer | 全部 | 否 | 音频声道数：1 或 2 |
+| `camera_rotation` | integer | 全部 | 否 | 画面顺时针旋转角度：0、90、180 或 270 |
+| `hor_mirror` | boolean | 全部 | 否 | 是否水平镜像 |
+| `vert_mirror` | boolean | 全部 | 否 | 是否垂直镜像 |
+| `no_video` | boolean | 全部 | 否 | 是否明确声明该场景无视频 |
+| `aspect_ratio` | number 或 string | 全部 | 否 | 正数比例，或 `宽:高` 字符串；字符串中的宽、高为 1–9999 |
+| `object_fit` | string | 全部 | 否 | `stream`、`call` 支持 `fill`、`contain`、`cover`；`voip` 支持 `fill`、`contain` |
+| `screen_width` | integer | `voip` | 否 | 设备显示区域像素宽度，范围 1–16384 |
+| `screen_height` | integer | `voip` | 否 | 设备显示区域像素高度，范围 1–16384 |
+| `video_res_mode` | string | `voip` | 否 | 下行视频尺寸模式：`auto`、`fit_screen` 或 `fill_screen` |
+| `calling_timeout_sec` | integer | `voip` | 否 | 呼叫超时秒数，范围 1–300 |
 
-编码列表按设备首选顺序排列，空数组表示明确不支持；省略字段表示未上报。编码也接受逗号、斜杠、分号、竖线或空白分隔的字符串。设备只应声明自身实际支持的能力，接口允许的编码不代表每种业务都支持该编码。
+音频编码支持 `alaw`、`g711a`、`pcm`、`opus`、`amr`、`amr_nb`、`amr_wb`、`aac`；视频编码支持 `h264`、`h265`、`mjpeg`、`none`。`stream`、`call` 的编码字段也接受以逗号、斜杠、分号、竖线或空白分隔的字符串，服务端按分隔符转换为能力列表；`voip` 的编码字段只接受单个字符串。
+
+空数组表示明确不支持，省略字段表示未上报。设备只应声明自身实际支持的能力，接口允许的编码不代表每种业务都支持该编码。
 
 每次请求**完整替换携带场景的能力快照**，未携带的场景保留。`{"profiles":{"call":{}}}` 清除设备通话场景的已报字段。不要把同一场景拆成多次字段增量上报；同场景请求须串行，重试复用原快照。重复请求幂等，最后提交的快照生效，不同场景并发上报不会相互覆盖。
 
 **响应**：成功为 HTTP 200，`{"code":200,"msg":"ok"}`。参数错误为 HTTP 400 + `40000`；设备不存在或已解绑为 HTTP 410 + `6006`；存储失败为 HTTP 500 + `50000`。已解绑设备不能写入，设备能力不包含用户信息，重绑后仍可展示并由设备重新上报覆盖。
 
-用户设备列表返回 `profiles`。尚未通过此接口上报 `voip` 场景的旧设备，沿用现有 VoIP profile；一旦显式上报该场景，以此接口的快照为准。微信 VoIP 业务仍须按原流程调用 `/v1/voip/device/profile` 完成业务注册。
+用户设备列表、微信 VoIP 呼入和设备呼出均读取这里保存的 `profiles.voip`。设备应在上线后、接受微信来电前完成上报。
 
 **顶层请求字段**
 
@@ -885,7 +914,7 @@ Authorization: Bearer <user_jwt>
 
 **调用方**：Web、小程序。
 
-响应设备条目的 `profiles` 按业务场景提供明确上报的媒体字段。包含可选的 `stream`、`call`、`voip` 对象，由 device-server 的媒体能力上报接口提供；旧设备的 `voip` 可沿用原 VoIP profile；没有场景键时表示该场景能力未上报，不能从其他场景补值。对象仅含已上报的上下行媒体格式、音频采样率/声道数及视频显示字段，不含设备凭证。原有顶层媒体字段保持兼容；设备信息页面使用场景对象区分缺失、`false` 与 `0`。
+响应设备条目的 `profiles` 按业务场景提供明确上报的媒体字段。包含可选的 `stream`、`call`、`voip` 对象，由 device-server 的设备能力上报接口提供。没有场景键时表示该场景能力未上报，不能从其他场景补值。媒体字段只出现在 `profiles` 中。
 
 
 获取当前用户已绑定设备列表（含在线状态）。
@@ -908,18 +937,6 @@ Authorization: Bearer <user_jwt>
       "mac": "AA:BB:CC:DD:EE:FF",
       "bind_time": "2026-06-18T12:00:00",
       "online": true,
-      "up_video_mt": "h264",
-      "down_video_mt": "mjpeg",
-      "down_audio_mt": "amr",
-      "audio_rate": 8000,
-      "camera_rotation": 90,
-      "aspect_ratio": 1.7777777778,
-      "hor_mirror": true,
-      "vert_mirror": false,
-      "object_fit": "contain",
-      "has_camera": true,
-      "has_screen": true,
-      "voip_room_type": "video",
       "profiles": {
         "stream": {
           "up_audio_mt": [
@@ -939,7 +956,10 @@ Authorization: Bearer <user_jwt>
           "aspect_ratio": 1.7777777778,
           "hor_mirror": true,
           "vert_mirror": false,
-          "object_fit": "contain"
+          "object_fit": "contain",
+          "has_camera": true,
+          "has_screen": true,
+          "voip_room_type": "video"
         }
       }
     }
@@ -947,26 +967,16 @@ Authorization: Bearer <user_jwt>
 }
 ```
 
-| 字段 | 说明 |
-|------|------|
-| device_id | 设备 ID |
-| device_name | 用户设置的设备名称；新绑定默认空字符串，VoIP 授权前应先设置 |
-| status | `1`=已绑定 |
-| mac | 设备 MAC 地址 |
-| bind_time | 绑定时间，格式 `YYYY-MM-DDTHH:MM:SS` |
-| online | 设备是否在线 |
-| up_video_mt | 设备上行视频编码（设备→小程序） |
-| down_video_mt | 设备下行视频编码（小程序→设备） |
-| down_audio_mt | 设备下行音频编码（小程序→设备） |
-| audio_rate | 音频采样率，`8000` 或 `16000` |
-| camera_rotation | 设备视频在微信通话 UI 中的顺时针旋转角度：`0`、`90`、`180` 或 `270` |
-| aspect_ratio | 设备视频宽高比，例如 `1.7777777778`（即 `16/9`） |
-| hor_mirror | 是否水平镜像设备视频 |
-| vert_mirror | 是否垂直镜像设备视频 |
-| object_fit | 设备视频缩放方式：`fill` 或 `contain`；未上报时由微信插件使用默认值 |
-| has_camera | 是否具备摄像头能力 |
-| has_screen | 是否具备带屏能力 |
-| voip_room_type | 呼叫房间类型，`voice` 或 `video` |
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `data` | array | 当前用户的设备列表；没有设备时为空数组 |
+| `data[].device_id` | string | 设备 ID |
+| `data[].device_name` | string | 用户设置的设备名称；新绑定默认空字符串，VoIP 授权前应先设置 |
+| `data[].status` | integer | 固定为 `1`，表示已绑定 |
+| `data[].mac` | string | 设备 MAC 地址 |
+| `data[].bind_time` | string 或 null | 绑定时间，格式 `YYYY-MM-DDTHH:MM:SS`；无记录时为 `null` |
+| `data[].online` | boolean | 设备当前是否在线 |
+| `data[].profiles` | object | 按 `stream`、`call`、`voip` 场景组织的设备能力；未上报时为空对象 |
 
 **错误码**
 
@@ -982,9 +992,12 @@ Authorization: Bearer <user_jwt>
 | `data[].profiles` | object | 按场景返回设备能力快照 |
 | `data[].profiles.stream` | object | 可选，实时查看能力 |
 | `data[].profiles.call` | object | 可选，设备通话能力 |
-| `data[].profiles.voip` | object | 可选，微信 VoIP 能力，支持旧 profile 回退 |
+| `data[].profiles.voip` | object | 可选，微信 VoIP 工作配置 |
+| `data[].profiles.voip.has_camera` | boolean | 服务端根据 `no_video` 和 `up_video_mt` 派生，表示设备能否向小程序发送视频 |
+| `data[].profiles.voip.has_screen` | boolean | 服务端根据 `no_video` 和 `down_video_mt` 派生，表示设备能否接收小程序视频 |
+| `data[].profiles.voip.voip_room_type` | string | 服务端派生；有任一方向视频能力时为 `video`，否则为 `voice` |
 
-由 `/v1/device/profile` 上报的场景，其完整字段、类型与枚举见 [`POST /v1/device/profile`](#post-v1deviceprofile)。旧 VoIP 回退快照保留原始 JSON 值，还可能包含 `video_mt`（string，旧设备上下行统一视频编码）；该兼容字段不能用于 `/v1/device/profile` 上报。`bind_time` 在没有绑定时间时可为 `null`；镜像、旋转、宽高比和缩放方式未上报时可能省略。
+由 `/v1/device/profile` 上报的场景，其完整字段、类型与枚举见 [`POST /v1/device/profile`](#post-v1deviceprofile)。`has_camera`、`has_screen` 和 `voip_room_type` 仅在 `profiles.voip` 中由服务端补充，设备不能上报。`bind_time` 在没有绑定时间时可为 `null`；镜像、旋转、宽高比和缩放方式未上报时可能省略。
 
 **请求参数**：无。
 
@@ -1403,7 +1416,7 @@ Authorization: Bearer <user_jwt>
 |---|---|---|---|---|
 | [验证微信回调地址](#get-v1voipnotificationwx_app_id) | 微信服务器 | GET | `/v1/voip/notification/:wx_app_id` | 必需：微信签名 |
 | [接收微信呼叫通知](#post-v1voipnotificationwx_app_id) | 微信服务器 | POST | `/v1/voip/notification/:wx_app_id` | 必需：微信签名；AES 模式另验消息签名 |
-| [上报微信 VoIP 配置](#post-v1voipdeviceprofile) | 设备 | POST | `/v1/voip/device/profile` | 必需：正式设备 JWT（mqtt_token） |
+| [上报微信 VoIP 配置（已弃用）](#post-v1voipdeviceprofile) | 旧版设备 | POST | `/v1/voip/device/profile` | 必需：正式设备 JWT（mqtt_token） |
 | [查询设备的微信联系人](#get-v1voipdevicecontacts) | 设备 | GET | `/v1/voip/device/contacts` | 必需：正式设备 JWT（mqtt_token） |
 | [查询微信联系人（兼容字段）](#get-v1voipdevicecallers) | 设备 | GET | `/v1/voip/device/callers` | 必需：正式设备 JWT（mqtt_token） |
 | [设备发起微信呼叫](#post-v1voipdevicecall) | 设备 | POST | `/v1/voip/device/call` | 必需：正式设备 JWT（mqtt_token） |
@@ -1576,124 +1589,56 @@ Authorization: Bearer <user_jwt>
 
 <a id="post-v1voipdeviceprofile"></a>
 
-### 上报微信 VoIP 配置
+### 上报微信 VoIP 配置（已弃用）
 
 **接口**：`POST /v1/voip/device/profile`
 
-**调用方**：设备。
+**调用方**：旧版设备。
 
-上报设备媒体能力（设备上线时调用，**必须在接受来电前调用**）。
+该路径仅用于兼容旧版设备。新设备统一调用
+[`POST /v1/device/profile`](#post-v1deviceprofile)，并把下列字段放入
+`profiles.voip`。兼容接口收到请求后也写入统一的 `device_profile.profile.voip`，
+不会继续写入旧表。
 
-**鉴权**: ✅ `Authorization: Bearer <mqtt_token>`（JWT 需含 `device_id` claim）
+**鉴权**：`Authorization: Bearer <mqtt_token>`，JWT 必须包含 `device_id`。
 
-**请求头**
-
-| 字段 | 必填 | 说明 |
-|------|:--:|------|
-| Authorization | ✅ | `Bearer <mqtt_token>` |
-| Content-Type | ✅ | `application/json` |
-
-**请求体**
+**请求体**：JSON 对象，最大 512 字节。
 
 | 字段 | 类型 | 必填 | 说明 |
-|------|------|:--:|------|
-| screen_width | int | | 设备自身屏幕宽度，与视频素材分辨率无关（`no_video=true` 时传 1） |
-| screen_height | int | | 设备自身屏幕高度，与视频素材分辨率无关（`no_video=true` 时传 1） |
-| camera_rotation | int | | 设备视频在微信通话 UI 中的顺时针旋转角度：`0`、`90`、`180`、`270`；小程序默认 `0` |
-| aspect_ratio | number | | 设备视频宽高比，必须大于 `0`，例如 `1.7777777778`（`16/9`）；小程序默认 `4/3` |
-| hor_mirror | bool | | 是否水平镜像设备视频；小程序默认 `false` |
-| vert_mirror | bool | | 是否垂直镜像设备视频；小程序默认 `false` |
-| object_fit | string | | 设备视频缩放方式：`fill` 或 `contain`；小程序默认 `fill` |
-| audio_rate | int | ✅ | 采样率：`8000` 或 `16000` |
-| audio_channels | int | ✅ | 声道数：`1` 或 `2` |
-| video_mt | string | | 兼容旧设备的上下行统一视频编码：`h264`、`mjpeg`、`none`；新设备使用方向字段 |
-| up_video_mt | string | | 上行视频编码（设备→小程序）：`h264`、`h265`、`mjpeg`、`none` |
-| down_video_mt | string | | 下行视频编码（小程序→设备）：`h264`、`mjpeg`、`none`（不支持 h265） |
-| video_res_mode | string | | 微信下行视频分辨率适配：`auto`、`fit_screen`、`fill_screen`；省略等同 `auto` |
-| down_audio_mt | string | | 下行音频编码（小程序→设备）：`alaw`、`amr`、`opus`，默认 `alaw` |
-| no_video | bool | | 是否无视频能力 |
-| calling_timeout_sec | int | | 呼叫超时秒数 |
+|---|---|:---:|---|
+| `screen_width` | integer | 否 | 设备显示区域宽度 |
+| `screen_height` | integer | 否 | 设备显示区域高度 |
+| `camera_rotation` | integer | 否 | 顺时针旋转角度：`0`、`90`、`180`、`270` |
+| `aspect_ratio` | number | 否 | 视频宽高比，必须大于 0 |
+| `hor_mirror` | boolean | 否 | 是否水平镜像 |
+| `vert_mirror` | boolean | 否 | 是否垂直镜像 |
+| `object_fit` | string | 否 | `fill` 或 `contain` |
+| `audio_rate` | integer | 否 | 8000、16000、24000、32000、44100 或 48000 |
+| `audio_channels` | integer | 否 | 1 或 2 |
+| `video_mt` | string | 否 | 旧版统一视频编码；缺少方向字段时同时转换为 `up_video_mt` 和 `down_video_mt` |
+| `up_video_mt` | string | 否 | 设备发给小程序的视频编码 |
+| `down_video_mt` | string | 否 | 设备接收小程序视频的编码 |
+| `down_audio_mt` | string | 否 | 设备接收小程序音频的编码 |
+| `video_res_mode` | string | 否 | `auto`、`fit_screen` 或 `fill_screen` |
+| `no_video` | boolean | 否 | 是否为纯语音设备 |
+| `calling_timeout_sec` | integer | 否 | 呼叫超时秒数，范围 1–300 |
 
-**上报规则**
+兼容接口保留旧请求中的扩展媒体字段。`device_id`、微信 Session、Room、Token、AppID、
+ModelID 和 Payload 等会话身份字段不会写入；它们始终由服务端按当前呼叫生成。方向字段
+与 `video_mt` 同时存在时，方向字段优先。用户设备列表只返回统一接口定义的公开字段，
+不会把旧扩展字段透传给 Web 或小程序。
 
-| 参数类别 | 开发者需要遵守的规则 |
-|----------|----------------------|
-| 请求格式 | 请求体必须是 JSON 对象，最大 **512 字节** |
-| 上报时机 | 设备上线后、接听来电前完成上报；媒体能力或屏幕参数变化后重新上报 |
-| TiRTC profile 参数 | 使用 TiRTC Server API 中的同名顶层字段；字段名、类型和组合由开发者保证 |
-| 视频编码兼容 | 旧设备可继续使用 `video_mt`；同时上报方向字段时，以 `up_video_mt`、`down_video_mt` 为准，不向 TiRTC 发送 `video_mt` |
-| 视频 UI 参数 | `camera_rotation`、`aspect_ratio`、`hor_mirror`、`vert_mirror`、`object_fit` 仅用于小程序通话页面，不作为 TiRTC 会话参数 |
-| 会话身份参数 | 不要上报 `wx_session_key`、`wx_room_id`、`wx_session_token`、`wx_app_id`、`device_id`、`wx_payload`、`wx_model_id`；这些值按本次呼叫确定，profile 中的同名字段无效 |
-
-`video_res_mode` 只影响小程序发送给设备的下行视频，不负责旋转画面：
-
-| 取值 | 下行画面处理 | 使用要求 |
-|------|-------------|----------|
-| `auto` | 保持微信下行画面的原始尺寸，不缩放、不裁剪 | 无；省略字段时使用此模式 |
-| `fit_screen` | 按比例缩小到屏幕范围内，不放大、不裁剪；输出宽高向下取偶数 | `down_video_mt=mjpeg`，并上报有效的屏幕宽高 |
-| `fill_screen` | 按比例缩放并居中裁剪到屏幕尺寸，允许放大 | `down_video_mt=mjpeg`，并上报有效且为偶数的屏幕宽高 |
-
-配置不符合要求时，VoIP 呼叫可能失败。完整约束见
-[TiRTC Server API](https://docs.tange.ai/products/wxvoip/api-reference/server-api.html)。
-
-五个视频 UI 字段均可省略。`callerUI` / `listenerUI` 的对应关系见
-[小程序 VoIP 页面参数](weixin-mini-program/README.md#5-callerui-和-listenerui)。
-
-本接口没有上行音频字段；设备以 `TiRtcSendAudioStream` 实际发送的帧格式为准。
-
-**视频设备示例**（MJPEG 下行完整适配到 640 × 480 屏幕）
-
-```json
-{
-  "screen_width": 640,
-  "screen_height": 480,
-  "camera_rotation": 90,
-  "aspect_ratio": 1.7777777778,
-  "hor_mirror": true,
-  "vert_mirror": false,
-  "object_fit": "contain",
-  "audio_rate": 8000,
-  "audio_channels": 1,
-  "up_video_mt": "h264",
-  "down_video_mt": "mjpeg",
-  "video_res_mode": "fit_screen",
-  "down_audio_mt": "amr",
-  "no_video": false,
-  "calling_timeout_sec": 30
-}
-```
-
-**纯语音设备示例**
-
-```json
-{
-  "screen_width": 1,
-  "screen_height": 1,
-  "audio_rate": 8000,
-  "audio_channels": 1,
-  "up_video_mt": "none",
-  "down_video_mt": "none",
-  "down_audio_mt": "alaw",
-  "no_video": true,
-  "calling_timeout_sec": 30
-}
-```
-
-**成功响应** — HTTP 200
-
-```json
-{ "code": 0, "msg": "ok" }
-```
+**成功响应**：HTTP 200，`{ "code": 0, "msg": "ok" }`。响应包含
+`Deprecation: true` 和 `Link: </v1/device/profile>; rel="successor-version"` Header。
 
 **错误码**
 
 | code | HTTP | 含义 |
-|------|------|------|
-| 401 | 401 | JWT 鉴权失败 |
-| 40000 | 200 | JSON 解析失败、请求体不是 JSON 对象、超过 512 字节，或视频 UI 字段类型/取值不合法 |
-| 50000 | 200 | 数据库保存失败 |
-
-**校验范围**：此接口检查 JSON 对象、512 字节上限和五个视频 UI 字段。`audio_rate`、`audio_channels` 等媒体参数是接入时需要提供的会话配置，不在此接口逐项校验；保存成功不能证明后续 TiRTC 呼叫一定能建立。
+|---|---|---|
+| 401 | 401 | 设备 JWT 缺失、无效或过期 |
+| 40000 | 200 | JSON 格式、512 字节上限，或视频 UI 字段类型、取值不合法 |
+| 6006 | 200 | 设备已解绑 |
+| 50000 | 200 | 保存失败 |
 
 ---
 

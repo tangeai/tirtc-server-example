@@ -25,7 +25,7 @@ import (
 	devhandler "thing-connect/device-server/handler"
 	"thing-connect/internal/apiresp"
 	"thing-connect/internal/config"
-	"thing-connect/internal/service"
+	"thing-connect/internal/deviceprofile"
 	mysqlstore "thing-connect/internal/store/mysql"
 	mysqlmigrate "thing-connect/internal/store/mysql/migrate"
 	"thing-connect/internal/testenv"
@@ -64,7 +64,7 @@ func newSuite(t *testing.T) *suite {
 	devR := gin.New()
 	devS := &devhandler.Server{DB: sqlDB, RDB: rdb, JWTSecret: cfg.JWTSecret}
 	devS.Register(devR)
-	devhandler.RegisterDeviceProfile(devR, service.NewDeviceMediaService(mysqlstore.NewDeviceMediaStore(sqlDB)), cfg.JWTSecret)
+	devhandler.RegisterDeviceProfile(devR, deviceprofile.NewService(mysqlstore.NewDeviceProfileStore(sqlDB)), cfg.JWTSecret)
 
 	// user-server (no MQTT for unit tests)
 	usrR := gin.New()

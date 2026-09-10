@@ -453,16 +453,10 @@ int voip_configure_profile(const char *up_audio, const char *down_audio,
     return 0;
 }
 
-int voip_report_profile(const char *voip_server, const char *mqtt_token,
-                        cJSON **auth_list_out) {
-    /* POST /v1/voip/device/profile */
-    char url[512];
-    snprintf(url, sizeof(url), "%s/v1/voip/device/profile", voip_server);
-
+int voip_profile_json(char *profile, size_t capacity) {
+    if (!profile || capacity == 0) return -1;
     const AudioFormat *down = s_voip_down_audio_format;
     if (!down) down = audio_format_find("alaw_8khz");
-    const AudioFormat *up = s_voip_up_audio_format;
-    if (!up) up = audio_format_find("alaw_8khz");
     const VideoFormat *up_video = s_voip_up_video_format;
     if (!up_video) up_video = video_format_find("h264");
     const VideoFormat *down_video = s_voip_down_video_format;
@@ -514,8 +508,7 @@ int voip_report_profile(const char *voip_server, const char *mqtt_token,
         screen_width = 1;
         screen_height = 1;
     }
-    char profile[512];
-    snprintf(profile, sizeof(profile),
+    int written = snprintf(profile, capacity,
              "{\"screen_width\":%d,\"screen_height\":%d,"
              "\"camera_rotation\":%d,\"aspect_ratio\":%.10g,"
              "%s"
@@ -534,20 +527,17 @@ int voip_report_profile(const char *voip_server, const char *mqtt_token,
              s_voip_has_video ? down_video->codec : "none",
              down->codec, video_res_mode,
              s_voip_has_video ? "false" : "true");
+    if (written < 0 || (size_t)written >= capacity) { profile[0] = '\0'; return -1; }
+    return 0;
+}
 
+int voip_refresh_contacts(const char *voip_server, const char *mqtt_token,
+                        cJSON **auth_list_out) {
+    /* Compatibility name: the unified profile is already reported by main;
+     * this function refreshes only the authorized WeChat contacts. */
+    char url[512];
     char body_buf[4096];
     long http_code = 0;
-    if (_http_post_auth(url, mqtt_token, profile, body_buf, sizeof(body_buf), &http_code) == 0) {
-        cJSON *r = cJSON_Parse(body_buf);
-        cJSON *code = r ? cJSON_GetObjectItem(r, "code") : NULL;
-        int cv = (code && cJSON_IsNumber(code)) ? code->valueint : -1;
-        LOG_D("POST %s -> HTTP %ld code=%d", url, http_code, cv);
-        if (http_code == 200 && cv == 0)
-            LOG_I("VoIP profile 上报成功: up_audio=%s video=%s",
-                  up->name, s_voip_has_video ? up_video->name : "关闭");
-        else LOG_W("VoIP profile 上报失败 (code=%d)", cv);
-        cJSON_Delete(r);
-    }
 
     /* GET /v1/voip/device/contacts */
     snprintf(url, sizeof(url), "%s/v1/voip/device/contacts", voip_server);
@@ -1790,7 +1780,7 @@ static void *voip_refresh_callers_worker(void *opaque) {
         pthread_mutex_unlock(&vs->lock);
 
         cJSON *new_auth_list = NULL;
-        if (voip_report_profile(vs->voip_server, vs->mqtt_token,
+        if (voip_refresh_contacts(vs->voip_server, vs->mqtt_token,
                                 &new_auth_list) == 0) {
             voip_set_auth_list(vs, new_auth_list);
         } else {

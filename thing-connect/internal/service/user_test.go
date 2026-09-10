@@ -519,47 +519,6 @@ func TestUserService_Quota(t *testing.T) {
 	}
 }
 
-func TestUserService_DeviceList_NormalizesNoVideoCapabilities(t *testing.T) {
-	profiles := []string{
-		`{"up_video_mt":" NoNe ","down_video_mt":"NONE","audio_rate":8000}`,
-		`{"up_video_mt":"h264","down_video_mt":"mjpeg","no_video":true,"audio_rate":16000}`,
-		`{"video_mt":"none","audio_rate":8000}`,
-	}
-	rows := make([]model.UserDeviceRow, 0, len(profiles))
-	for i := range profiles {
-		profile := profiles[i]
-		rows = append(rows, model.UserDeviceRow{
-			DeviceID:    "voice-device",
-			DeviceName:  "书房学习机",
-			Status:      1,
-			VoipProfile: &profile,
-		})
-	}
-	svc := newSvc(&fakeUserStore{deviceRows: rows}, newFakeCache(), false)
-
-	devices, err := svc.DeviceList(context.Background(), 1, nil)
-	if err != nil {
-		t.Fatalf("DeviceList returned error: %v", err)
-	}
-	if len(devices) != len(profiles) {
-		t.Fatalf("want %d devices, got %d", len(profiles), len(devices))
-	}
-	for i, device := range devices {
-		if device.DeviceName != "书房学习机" {
-			t.Errorf("device %d: device_name=%q", i, device.DeviceName)
-		}
-		if device.UpVideoMT != "" || device.DownVideoMT != "" {
-			t.Errorf("device %d: want empty video formats, got up=%q down=%q", i, device.UpVideoMT, device.DownVideoMT)
-		}
-		if device.HasCamera || device.HasScreen {
-			t.Errorf("device %d: want no video capabilities, got camera=%v screen=%v", i, device.HasCamera, device.HasScreen)
-		}
-		if device.VoipRoomType != "voice" {
-			t.Errorf("device %d: want voice room, got %q", i, device.VoipRoomType)
-		}
-	}
-}
-
 func TestUserService_UpdateDeviceName(t *testing.T) {
 	svc := newSvc(&fakeUserStore{updateName: true}, newFakeCache(), false)
 	if err := svc.UpdateDeviceName(context.Background(), 7, "dev-1", "书房学习机"); err != nil {
@@ -569,35 +528,6 @@ func TestUserService_UpdateDeviceName(t *testing.T) {
 	svc = newSvc(&fakeUserStore{updateName: false}, newFakeCache(), false)
 	if err := svc.UpdateDeviceName(context.Background(), 7, "foreign", "名称"); !errors.Is(err, ErrDeviceNotFound) {
 		t.Fatalf("UpdateDeviceName not-owned error=%v, want ErrDeviceNotFound", err)
-	}
-}
-
-func TestParseVoipProfile_PreservesVideoCapabilities(t *testing.T) {
-	profile := `{"up_video_mt":" h264 ","down_video_mt":"mjpeg","camera_rotation":270,` +
-		`"aspect_ratio":1.7777777778,"hor_mirror":true,"vert_mirror":false,"object_fit":"contain"}`
-	media := parseVoipProfile(&profile)
-	if media.UpVideoMT != "h264" || media.DownVideoMT != "mjpeg" {
-		t.Fatalf("want h264/mjpeg, got %q/%q", media.UpVideoMT, media.DownVideoMT)
-	}
-	if media.CameraRotation == nil || *media.CameraRotation != 270 {
-		t.Fatalf("want camera rotation 270, got %#v", media.CameraRotation)
-	}
-	if media.AspectRatio == nil || *media.AspectRatio != 1.7777777778 ||
-		media.HorMirror == nil || !*media.HorMirror ||
-		media.VertMirror == nil || *media.VertMirror ||
-		media.ObjectFit == nil || *media.ObjectFit != "contain" {
-		t.Fatalf("unexpected video UI fields: %+v", media)
-	}
-	if got := voipRoomType(media.UpVideoMT, media.DownVideoMT); got != "video" {
-		t.Fatalf("want video room, got %q", got)
-	}
-}
-
-func TestParseVoipProfile_InvalidVideoUIFieldsAreOmitted(t *testing.T) {
-	profile := `{"up_video_mt":"h264","camera_rotation":45,"aspect_ratio":0,"object_fit":"cover"}`
-	media := parseVoipProfile(&profile)
-	if media.CameraRotation != nil || media.AspectRatio != nil || media.ObjectFit != nil {
-		t.Fatalf("invalid video UI fields were preserved: %+v", media)
 	}
 }
 
@@ -622,21 +552,18 @@ func (f *fakeCacheStore) GetReportFingerprint(_ context.Context, _ string) (stri
 }
 func (f *fakeCacheStore) DelReportFingerprint(_ context.Context, _ string) error { return nil }
 
-func TestDeviceMediaProfilesPreserveReportedValuesWithoutCrossSceneFallback(t *testing.T) {
-	raw := `{"down_audio_mt":"opus,amr","audio_rate":16000,"hor_mirror":false,"camera_rotation":0,"openid":"private","secret":"private"}`
-	profiles := deviceMediaProfiles(&raw)
-	if len(profiles) != 1 || string(profiles["voip"]["down_audio_mt"]) != `"opus,amr"` || string(profiles["voip"]["hor_mirror"]) != "false" || string(profiles["voip"]["camera_rotation"]) != "0" {
-		t.Fatalf("reported fields=%v", profiles)
+func TestUserServiceDeviceListNestsVoIPProfile(t *testing.T) {
+	profile := `{"voip":{"up_video_mt":"h264","down_video_mt":"mjpeg","down_audio_mt":"amr","audio_rate":8000,"no_video":false}}`
+	svc := newSvc(&fakeUserStore{deviceRows: []model.UserDeviceRow{{
+		DeviceID: "device-1", DeviceName: "书房设备", Status: 1, Profiles: &profile,
+	}}}, newFakeCache(), false)
+	devices, err := svc.DeviceList(context.Background(), 1, nil)
+	if err != nil || len(devices) != 1 {
+		t.Fatalf("DeviceList: devices=%v err=%v", devices, err)
 	}
-	for _, key := range []string{"openid", "secret", "up_audio_mt"} {
-		if _, ok := profiles["voip"][key]; ok {
-			t.Fatalf("unreported/private field %s exposed", key)
-		}
-	}
-	if _, ok := profiles["stream"]; ok {
-		t.Fatal("VoIP leaked into stream")
-	}
-	if len(deviceMediaProfiles(nil)) != 0 {
-		t.Fatal("missing profile synthesized")
+	voip := devices[0].Profiles["voip"]
+	if string(voip["up_video_mt"]) != `"h264"` || string(voip["has_camera"]) != "true" ||
+		string(voip["has_screen"]) != "true" || string(voip["voip_room_type"]) != `"video"` {
+		t.Fatalf("voip profile=%v", voip)
 	}
 }

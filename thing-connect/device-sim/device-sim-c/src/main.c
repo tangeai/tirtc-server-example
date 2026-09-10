@@ -1124,18 +1124,19 @@ int device_reference_run(int argc, char *argv[]) {
     call_set_runtime_callbacks_ex(rt.call, _begin_call, _finish_call, &rt);
     call_set_runtime_action_callback(rt.call, _run_call_action);
 
-    char media_profile[1024];
-    if (device_media_profile_json(media_profile, sizeof(media_profile),
+    char media_profile[1536];
+    char voip_profile[512];
+    if (voip_profile_json(voip_profile, sizeof(voip_profile)) != 0 ||
+        device_media_profile_json(media_profile, sizeof(media_profile),
                                   up_audio_spec->name, down_audio_spec->name,
                                   up_video_spec->name, down_video_spec->name,
-                                  video_path[0] != '\0') != 0 ||
+                                  video_path[0] != '\0', voip_profile) != 0 ||
         report_device_media(svc.device_server, mqtt_token, media_profile) != 0)
         LOG_W("设备媒体能力未同步，请检查 device-server，恢复后重新启动模拟器上报");
 
-    /* Profile is registered before the idle stream, so incoming WeChat calls
-     * can find this device even while it is serving H5 live video. */
+    /* Refresh contacts after the unified profile has been registered. */
     cJSON *initial_callers = NULL;
-    if (voip_report_profile(svc.voip_server, mqtt_token, &initial_callers) == 0)
+    if (voip_refresh_contacts(svc.voip_server, mqtt_token, &initial_callers) == 0)
         voip_set_auth_list(rt.voip, initial_callers);
     if (session_coordinator_start_stream(&rt.coordinator) != 0) {
         room_shutdown(rt.room);

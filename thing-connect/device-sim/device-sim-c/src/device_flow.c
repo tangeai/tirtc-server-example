@@ -1019,13 +1019,13 @@ int connect_mqtt_blocking(const char *host, int port,
 int device_media_profile_json(char *out, size_t capacity,
                               const char *up_audio, const char *down_audio,
                               const char *up_video, const char *down_video,
-                              int has_video) {
+                              int has_video, const char *voip_profile) {
     const AudioFormat *up = audio_format_find(up_audio);
     const AudioFormat *down = audio_format_find(down_audio);
     const VideoFormat *up_v = video_format_find(up_video);
     const VideoFormat *down_v = video_format_find(down_video);
     if (!out || capacity == 0 || !up || !down ||
-        (has_video && (!up_v || !down_v))) return -1;
+        (has_video && (!up_v || !down_v)) || !voip_profile) return -1;
     /* Only constant codec names from the format registry enter the JSON. */
     int n = snprintf(out, capacity,
         "{\"profiles\":{"
@@ -1034,11 +1034,12 @@ int device_media_profile_json(char *out, size_t capacity,
         "\"audio_rate\":8000,\"audio_channels\":1},"
         "\"call\":{\"up_audio_mt\":[\"%s\"],\"up_video_mt\":%s%s%s,"
         "\"down_audio_mt\":[\"%s\"],\"down_video_mt\":%s%s%s,"
-        "\"audio_rate\":%d,\"audio_channels\":1,\"no_video\":%s}}}",
+        "\"audio_rate\":%d,\"audio_channels\":1,\"no_video\":%s},"
+        "\"voip\":%s}}",
         up->codec, has_video ? "[\"" : "[", has_video ? up_v->codec : "", has_video ? "\"]" : "]",
         up->codec, has_video ? "[\"" : "[", has_video ? up_v->codec : "", has_video ? "\"]" : "]",
         down->codec, has_video ? "[\"" : "[", has_video ? down_v->codec : "", has_video ? "\"]" : "]",
-        down->sample_rate, has_video ? "false" : "true");
+        down->sample_rate, has_video ? "false" : "true", voip_profile);
     if (n < 0 || (size_t)n >= capacity) { out[0] = '\0'; return -1; }
     return 0;
 }

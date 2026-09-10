@@ -3,6 +3,7 @@ package migrate
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -35,6 +36,7 @@ func TestEmbeddedMigrationFilesAreNonEmpty(t *testing.T) {
 		"migrations/core/001_voip.sql", "migrations/core/001_ai.sql",
 		"migrations/core/001_call.sql", "migrations/core/001_zzz_schema_comments.sql",
 		"migrations/core/002_device_capabilities.sql",
+		"migrations/core/003_unify_device_profile.sql",
 		"migrations/admin/001_schema.sql", "migrations/admin/001_installation_state.sql",
 		"migrations/admin/001_schema_comments.sql",
 	}
@@ -47,9 +49,25 @@ func TestEmbeddedMigrationFilesAreNonEmpty(t *testing.T) {
 }
 
 func TestCurrentMigrationCatalogVersions(t *testing.T) {
-	want := map[string]int{"core": 2, "admin": 1}
+	want := map[string]int{"core": 3, "admin": 1}
 	if got := CurrentMigrationVersions(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("versions=%v want=%v", got, want)
+	}
+}
+
+func TestBootstrapSchemaRecordsEveryCurrentMigrationVersion(t *testing.T) {
+	contents, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "scripts", "schema.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema := string(contents)
+	for component, maximum := range CurrentMigrationVersions() {
+		for version := 1; version <= maximum; version++ {
+			entry := fmt.Sprintf("('%s', %d)", component, version)
+			if !strings.Contains(schema, entry) {
+				t.Errorf("scripts/schema.sql does not record migration %s", entry)
+			}
+		}
 	}
 }
 
@@ -332,7 +350,7 @@ func TestEmbeddedMigrationsAndBootstrapSchemaHaveSameObjects(t *testing.T) {
 	}
 	patterns := []*regexp.Regexp{
 		regexp.MustCompile(`CREATE TABLE IF NOT EXISTS [a-z_]+`),
-		regexp.MustCompile(`(?:UNIQUE KEY|KEY|INDEX) [A-Za-z0-9_]+`),
+		regexp.MustCompile(`(?m)^[ \t]*(?:UNIQUE KEY|KEY|INDEX) [A-Za-z0-9_]+`),
 	}
 	embeddedShape, err := CurrentSchemaShape()
 	if err != nil {
@@ -374,6 +392,7 @@ func TestEmbeddedMigrationsAndBootstrapSchemaHaveSameObjects(t *testing.T) {
 func matchSet(pattern *regexp.Regexp, value string) map[string]bool {
 	result := map[string]bool{}
 	for _, match := range pattern.FindAllString(value, -1) {
+		match = strings.TrimSpace(match)
 		if strings.HasPrefix(match, "INDEX ") {
 			match = "KEY " + strings.TrimPrefix(match, "INDEX ")
 		}

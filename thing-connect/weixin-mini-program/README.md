@@ -60,7 +60,7 @@
 | 微信小程序 | 用户身份、设备管理、微信授权、VoIP 发起/接收和通话页配置 |
 | `user-server` | 账号、JWT、设备绑定和设备列表 |
 | `voip-server` | 微信登录关系、授权关系、微信回调和取消通知 |
-| 设备 | MQTT 在线、上报 VoIP profile、接听/外呼、音视频采集和播放、AI 对讲 |
+| 设备 | MQTT 在线、上报设备能力、接听/外呼、音视频采集和播放、AI 对讲 |
 | 微信 `wmpf-voip` 插件 | 创建微信 VoIP 房间并展示通话页面 |
 | TiRTC | 设备侧实时音视频连接和传输 |
 
@@ -81,7 +81,7 @@
 4. 小程序后台已配置 request 合法域名，并将 H5 的 HTTPS 域名配置为 web-view 业务域名。
 5. 设备已按[设备上线](../device-integration.md)完成绑定并保持正式 MQTT 在线。
 6. 设备已调用
-   [`POST /v1/voip/device/profile`](../api-reference.md#post-v1voipdeviceprofile)
+   [`POST /v1/device/profile`](../api-reference.md#post-v1deviceprofile)
    上报实际媒体能力。
 
 服务端部署和微信回调配置见[部署与运维](../deployment.md)。
@@ -306,7 +306,7 @@ fragment 传入，页面启动时立即清除，只保存在页面内存，不�
 
 1. 设备属于当前登录用户。
 2. 设备保持正式 MQTT 在线。
-3. 设备已上报 `/v1/voip/device/profile`。
+3. 设备已上报 `/v1/device/profile`。
 4. 小程序完成 `wechat-mini-login`。
 5. 当前微信用户已通过
    [`wx.requestDeviceVoIP`](https://developers.weixin.qq.com/miniprogram/dev/framework/device/voip/auth.html)
@@ -591,7 +591,7 @@ node --test thing-connect/weixin-mini-program/tests/*.test.js
 - **微信显示已授权但服务端没有联系人**：检查 `report-auth` 是否成功，以及
   `wechat-mini-login` 是否刚刚刷新。
 - **小程序呼叫后设备没收到 `call_incoming`**：确认设备正式 MQTT 在线并已上报
-  `/v1/voip/device/profile`。
+  `/v1/device/profile`。
 - **设备呼小程序没有弹出来电页**：检查设备联系人 OpenID、微信 AppID、ModelID 和设备
   外呼接口结果；HTTP 成功后仍要继续检查 MQTT/微信后续链路。
 - **`contain` 看起来和 `fill` 一样**：查看日志中两端 `aspectRatio` 是否使用手机

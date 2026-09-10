@@ -44,7 +44,7 @@ func TestVoIPAppDevicesFiltersAndPaginates(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = db.Exec(`DELETE FROM voip_device_profile WHERE device_id IN (?,?)`, activeDeviceID, invalidDeviceID)
+		_, _ = db.Exec(`DELETE FROM device_profile WHERE device_id IN (?,?)`, activeDeviceID, invalidDeviceID)
 		_, _ = db.Exec(`DELETE FROM voip_device_auth WHERE wx_app_id=?`, appID)
 		_, _ = db.Exec(`DELETE FROM device_bind WHERE device_id IN (?,?)`, activeDeviceID, invalidDeviceID)
 		_, _ = db.Exec(`DELETE FROM users WHERE id=?`, userID)
@@ -59,7 +59,7 @@ func TestVoIPAppDevicesFiltersAndPaginates(t *testing.T) {
 	if _, err := db.Exec(`INSERT INTO voip_device_auth (device_id,wx_open_id,wx_app_id,wx_model_id,authorized_device_name,auth_status,invalid_reason) VALUES (?,?,?,?,?,'invalid','auth_revoked')`, invalidDeviceID, invalidOpenID, appID, "model-invalid", "失效设备"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`INSERT INTO voip_device_profile (device_id,profile) VALUES (?,?)`, activeDeviceID, `{}`); err != nil {
+	if _, err := db.Exec(`INSERT INTO device_profile (device_id,profile) VALUES (?,?)`, activeDeviceID, `{"voip":{}}`); err != nil {
 		t.Fatal(err)
 	}
 

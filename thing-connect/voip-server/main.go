@@ -16,10 +16,12 @@ import (
 	"thing-connect/internal/cache"
 	"thing-connect/internal/config"
 	"thing-connect/internal/db"
+	"thing-connect/internal/deviceprofile"
 	"thing-connect/internal/dynamicconfig"
 	"thing-connect/internal/logging"
 	"thing-connect/internal/mqttc"
 	"thing-connect/internal/servicestatus"
+	mysqlstore "thing-connect/internal/store/mysql"
 	mysqlmigrate "thing-connect/internal/store/mysql/migrate"
 	"thing-connect/internal/userauth"
 	"thing-connect/voip-server/handler"
@@ -74,7 +76,7 @@ func main() {
 	probes := map[string]servicestatus.DependencyProbe{"database": servicestatus.SQLProbe(sqlDB), "redis": servicestatus.RedisProbe(rdb), "mqtt": broker.Ping}
 	servicestatus.RegisterHealth(r, probes)
 
-	voipHTTP := handler.NewServer(cfg, sqlDB, rdb, broker)
+	voipHTTP := handler.NewServer(cfg, sqlDB, rdb, broker, deviceprofile.NewService(mysqlstore.NewDeviceProfileStore(sqlDB)))
 	voipHTTP.Register(r)
 	dynamicClient, dynamicRefs, err := voipDynamicConfig(dynamicClient, cfg.Tirtc, voipHTTP)
 	if err != nil {

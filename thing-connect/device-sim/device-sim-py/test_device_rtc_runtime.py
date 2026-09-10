@@ -100,7 +100,7 @@ class DeviceRtcRuntimeTests(unittest.TestCase):
         ai_module = _module_mock()
         call_module = _module_mock()
         sdk_runtime = _FakeSdkRuntime()
-        voip_module.report_profile.return_value = [{"wx_open_id": "openid-1"}]
+        voip_module.refresh_contacts.return_value = [{"wx_open_id": "openid-1"}]
 
         runtime = DeviceRtcRuntime(
             RuntimeConfig(
@@ -123,7 +123,7 @@ class DeviceRtcRuntimeTests(unittest.TestCase):
 
         runtime.start()
 
-        voip_module.report_profile.assert_called_once_with(
+        voip_module.refresh_contacts.assert_called_once_with(
             "https://voip.example.com", "mqtt-token"
         )
         runtime.voip.replace_callers.assert_called_once_with([{"wx_open_id": "openid-1"}])
@@ -140,7 +140,7 @@ class DeviceRtcRuntimeTests(unittest.TestCase):
         ai_module = _module_mock()
         call_module = _module_mock()
         sdk_runtime = _FakeSdkRuntime()
-        voip_module.report_profile.side_effect = RuntimeError(
+        voip_module.refresh_contacts.side_effect = RuntimeError(
             "profile unavailable")
         runtime = DeviceRtcRuntime(
             RuntimeConfig(
@@ -173,7 +173,7 @@ class DeviceRtcRuntimeTests(unittest.TestCase):
         ai_module = _module_mock()
         call_module = _module_mock()
         sdk_runtime = _FakeSdkRuntime()
-        voip_module.report_profile.return_value = []
+        voip_module.refresh_contacts.return_value = []
         runtime = DeviceRtcRuntime(
             RuntimeConfig(
                 device_id="dev-1",
@@ -206,7 +206,7 @@ class DeviceRtcRuntimeTests(unittest.TestCase):
         ai_module = _module_mock()
         call_module = _module_mock()
         sdk_runtime = _FakeSdkRuntime()
-        voip_module.report_profile.return_value = []
+        voip_module.refresh_contacts.return_value = []
 
         with tempfile.TemporaryDirectory() as root:
             audio_path = os.path.join(root, "audio.g711a")
@@ -282,7 +282,7 @@ class DeviceRtcRuntimeTests(unittest.TestCase):
 
             try:
                 with mock.patch.object(
-                    rtc_voip, "report_profile", return_value=[]
+                    rtc_voip, "refresh_contacts", return_value=[]
                 ):
                     runtime = DeviceRtcRuntime(
                         config,

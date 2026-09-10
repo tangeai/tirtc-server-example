@@ -419,7 +419,7 @@ func pushJoinToDevice(c *gin.Context, appCfg WxAppCfg, tirtcCfg TirtcServerCfg, 
 
 	profileJSON, err := profiler.GetDeviceProfile(ctx, deviceID)
 	if err != nil || profileJSON == "" {
-		return fmt.Errorf("device %s has no media profile — call POST /v1/voip/device/profile first", deviceID)
+		return fmt.Errorf("device %s has no media profile — call POST /v1/device/profile first", deviceID)
 	}
 
 	voipReq := tirtcapi.TokenWxvoipRequest{

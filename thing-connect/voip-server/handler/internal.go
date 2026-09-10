@@ -46,7 +46,7 @@ func (s *Server) postInternalUnbind(c *gin.Context) {
 		return
 	}
 	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM voip_device_profile WHERE device_id=?`,
+		`UPDATE device_profile SET profile=JSON_REMOVE(profile,'$.voip') WHERE device_id=?`,
 		body.DeviceID); err != nil {
 		apiresp.Fail(c, apiresp.ErrInternal, err.Error())
 		return

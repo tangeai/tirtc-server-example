@@ -1112,33 +1112,39 @@ static void submit_voip_profile(void)
     atomic_store_explicit(&s_voip_profile_pending, true, memory_order_release);
 
     cJSON *root = cJSON_CreateObject();
+    cJSON *profiles = root == NULL
+                          ? NULL
+                          : cJSON_AddObjectToObject(root, "profiles");
+    cJSON *voip = profiles == NULL
+                      ? NULL
+                      : cJSON_AddObjectToObject(profiles, "voip");
     const bool no_video = true;
     const int screen_width = 1;
     const int screen_height = 1;
     const char *up_video_mt = "";
     const char *down_video_mt = "";
-    bool ok = root != NULL &&
-              cJSON_AddNumberToObject(root, "screen_width", screen_width) &&
-              cJSON_AddNumberToObject(root, "screen_height", screen_height) &&
-              cJSON_AddNumberToObject(root, "camera_rotation",
+    bool ok = root != NULL && profiles != NULL && voip != NULL &&
+              cJSON_AddNumberToObject(voip, "screen_width", screen_width) &&
+              cJSON_AddNumberToObject(voip, "screen_height", screen_height) &&
+              cJSON_AddNumberToObject(voip, "camera_rotation",
                                      media->video.camera_rotation) &&
-              cJSON_AddNumberToObject(root, "aspect_ratio",
+              cJSON_AddNumberToObject(voip, "aspect_ratio",
                                      media->video.aspect_ratio) &&
               (media->video.object_fit[0] == '\0' ||
-               cJSON_AddStringToObject(root, "object_fit",
+               cJSON_AddStringToObject(voip, "object_fit",
                                       media->video.object_fit)) &&
-              cJSON_AddBoolToObject(root, "hor_mirror",
+              cJSON_AddBoolToObject(voip, "hor_mirror",
                                    media->video.hor_mirror) &&
-              cJSON_AddBoolToObject(root, "vert_mirror",
+              cJSON_AddBoolToObject(voip, "vert_mirror",
                                    media->video.vert_mirror) &&
-              cJSON_AddNumberToObject(root, "audio_rate", media->audio.sample_rate_hz) &&
-              cJSON_AddNumberToObject(root, "audio_channels", media->audio.channels) &&
-              cJSON_AddStringToObject(root, "up_video_mt", up_video_mt) &&
-              cJSON_AddStringToObject(root, "down_video_mt", down_video_mt) &&
-              cJSON_AddStringToObject(root, "down_audio_mt",
+              cJSON_AddNumberToObject(voip, "audio_rate", media->audio.sample_rate_hz) &&
+              cJSON_AddNumberToObject(voip, "audio_channels", media->audio.channels) &&
+              cJSON_AddStringToObject(voip, "up_video_mt", "none") &&
+              cJSON_AddStringToObject(voip, "down_video_mt", "none") &&
+              cJSON_AddStringToObject(voip, "down_audio_mt",
                                      platform_audio_codec(media->audio.codec)) &&
-              cJSON_AddBoolToObject(root, "no_video", no_video) &&
-              cJSON_AddNumberToObject(root, "calling_timeout_sec", 30);
+              cJSON_AddBoolToObject(voip, "no_video", no_video) &&
+              cJSON_AddNumberToObject(voip, "calling_timeout_sec", 30);
     char *body = ok ? cJSON_PrintUnformatted(root) : NULL;
     cJSON_Delete(root);
     if (body == NULL) {
@@ -1160,8 +1166,8 @@ static void submit_voip_profile(void)
              up_video_mt[0] == '\0' ? "none" : up_video_mt,
              down_video_mt[0] == '\0' ? "none" : down_video_mt,
              no_video ? "yes" : "no");
-    esp_err_t err = platform_client_request(PLATFORM_SERVICE_VOIP,
-                                            "/v1/voip/device/profile",
+    esp_err_t err = platform_client_request(PLATFORM_SERVICE_DEVICE,
+                                            "/v1/device/profile",
                                             body,
                                             voip_profile_response,
                                             NULL);

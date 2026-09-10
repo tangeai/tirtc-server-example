@@ -487,33 +487,37 @@ if (g_ai_conn && !g_ai_started && now_ms() - g_ai_connect_at >= 300) {
 
 微信小程序和设备通过 VoIP 进行双向音视频对讲，设备使用 [`TiRtcWhipConnect`](https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcwhipconnect) 建立连接。接入顺序如下：
 
-1. 调用 [`POST /v1/voip/device/profile`](api-reference.md#post-v1voipdeviceprofile)（`Bearer <mqtt_token>`）上报媒体能力。没有 profile 时，来电无法下发：
+1. 调用 [`POST /v1/device/profile`](api-reference.md#post-v1deviceprofile)（`Bearer <mqtt_token>`）上报媒体能力。没有 profile 时，来电无法下发：
 
    ```http
-   POST /v1/voip/device/profile
+   POST /v1/device/profile
    Authorization: Bearer <mqtt_token>
    Content-Type: application/json
 
    {
-     "screen_width": 640,        // 设备自身屏幕宽度（px）；no_video=true 时传 1
-     "screen_height": 480,       // 设备自身屏幕高度（px）；no_video=true 时传 1
-     "camera_rotation": 0,       // 微信通话 UI 顺时针旋转：0 / 90 / 180 / 270
-     "aspect_ratio": 1.3333333333, // 视频宽高比，例如 4/3
-     "object_fit": "contain",    // 可选：fill / contain；省略时使用微信默认值
-     "hor_mirror": false,        // 水平镜像
-     "vert_mirror": false,       // 垂直镜像
-     "audio_rate": 8000,         // 音频采样率：8000 / 16000
-     "audio_channels": 1,        // 声道数：1 / 2
-     "up_video_mt": "h264",      // 上行视频编码（设备→小程序）：h264 / h265 / mjpeg / none
-     "down_video_mt": "mjpeg",  // 下行视频编码（小程序→设备）：h264 / mjpeg / none（不支持 h265）
-     "video_res_mode": "fit_screen", // 微信下行视频等比缩小到设备屏幕范围
-     "down_audio_mt": "amr",     // 下行音频编码（小程序→设备）：alaw / amr / opus，默认 alaw
-     "no_video": false,          // 无视频能力置 true，此时 up/down_video_mt 可留空
-     "calling_timeout_sec": 30   // 呼叫超时秒数
+     "profiles": {
+       "voip": {
+         "screen_width": 640,
+         "screen_height": 480,
+         "camera_rotation": 0,
+         "aspect_ratio": 1.3333333333,
+         "object_fit": "contain",
+         "hor_mirror": false,
+         "vert_mirror": false,
+         "audio_rate": 8000,
+         "audio_channels": 1,
+         "up_video_mt": "h264",
+         "down_video_mt": "mjpeg",
+         "video_res_mode": "fit_screen",
+         "down_audio_mt": "amr",
+         "no_video": false,
+         "calling_timeout_sec": 30
+       }
+     }
    }
    ```
 
-   > `fit_screen` 和 `fill_screen` 仅适用于 `down_video_mt=mjpeg`，并要求有效的屏幕宽高。上行音频编码由 `TiRtcSendAudioStream` 实际发送的帧格式决定，不在 profile 中上报。完整字段与取值见 [api-reference.md](api-reference.md#post-v1voipdeviceprofile)。
+   > `fit_screen` 和 `fill_screen` 仅适用于 `down_video_mt=mjpeg`，并要求有效的屏幕宽高。上行音频编码由 `TiRtcSendAudioStream` 实际发送的帧格式决定，不在 profile 中上报。完整字段与取值见 [api-reference.md](api-reference.md#post-v1deviceprofile)。
 
 2. 监听 MQTT `device/sn_{device_id}/cmd`，从 `call_incoming` 的 payload 中读取 `peer_id` 和 `token`；在 `device/sn_{device_id}/notify` 接收 `call_cancel` 和 `callers_update`。
 3. 设备主动呼叫小程序时，调用 [`POST /v1/voip/device/call`](api-reference.md#post-v1voipdevicecall)。微信回调后，设备仍按第 2 步接收 `call_incoming`。
@@ -534,7 +538,7 @@ void on_voip_connected(int err, tirtc_conn_t hconn, void *user) {
 
 验收时需要确认两个方向：小程序呼叫设备能够接通并正常传输双向音视频；设备主动呼叫时，小程序能够收到来电提醒。
 
-参考代码在 [tirtc_voip.c](device-sim/device-sim-c/src/tirtc_voip.c)。其中，`voip_report_profile()`、`voip_accept_pending()`、`voip_reject_pending()` 和 `voip_dial_authorized()` 分别处理能力上报、接听、拒接和外呼。
+参考代码在 [tirtc_voip.c](device-sim/device-sim-c/src/tirtc_voip.c)。其中，`voip_refresh_contacts()`、`voip_accept_pending()`、`voip_reject_pending()` 和 `voip_dial_authorized()` 分别处理联系人刷新、接听、拒接和外呼。
 
 设备侧完整流程见 [device-voip.md](device-voip.md#小程序呼设备)，小程序侧见[微信小程序开发](#微信小程序开发)。
 

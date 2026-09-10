@@ -441,4 +441,5 @@ CREATE TABLE IF NOT EXISTS device_profile (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='设备上报的媒体能力';
 
 INSERT IGNORE INTO schema_migrations (component, version) VALUES
-    ('core', 2);
+    ('core', 2),
+    ('core', 3);

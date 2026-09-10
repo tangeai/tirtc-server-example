@@ -17,6 +17,7 @@ import (
 	"thing-connect/internal/cache"
 	"thing-connect/internal/config"
 	"thing-connect/internal/db"
+	"thing-connect/internal/deviceprofile"
 	"thing-connect/internal/logging"
 	"thing-connect/internal/service"
 	"thing-connect/internal/servicestatus"
@@ -106,7 +107,7 @@ func main() {
 	probes := map[string]servicestatus.DependencyProbe{"database": servicestatus.SQLProbe(sqlDB), "redis": servicestatus.RedisProbe(rdb)}
 	servicestatus.RegisterHealth(r, probes)
 	devhandler.NewServer(devSvc).Register(r)
-	devhandler.RegisterDeviceProfile(r, service.NewDeviceMediaService(mysqlstore.NewDeviceMediaStore(sqlDB)), cfg.JWTSecret)
+	devhandler.RegisterDeviceProfile(r, deviceprofile.NewService(mysqlstore.NewDeviceProfileStore(sqlDB)), cfg.JWTSecret)
 	statusCtx, statusCancel := context.WithCancel(context.Background())
 	reporter, err := servicestatus.NewReporter(rdb, "device-server", probes, dynamicClient.Revisions)
 	if err != nil {

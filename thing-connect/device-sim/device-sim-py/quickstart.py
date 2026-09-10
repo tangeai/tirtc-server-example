@@ -58,9 +58,9 @@ try:
     rtc_voip.start_service(DEVICE_ID)
 
     # 步骤 3：上报 VoIP profile，拉取授权用户列表
-    #   POST /v1/voip/device/profile   Authorization: Bearer {mqtt_token}
+    #   POST /v1/device/profile   Authorization: Bearer {mqtt_token}，profiles 包含 voip 场景
     #   GET  /v1/voip/device/contacts  Authorization: Bearer {mqtt_token}
-    auth_list = rtc_voip.report_profile(VOIP_SERVER, mqtt_token)
+    auth_list = rtc_voip.refresh_contacts(VOIP_SERVER, mqtt_token)
 
     # 步骤 4：建立 MQTT 长连接，监听来电（阻塞直到 Ctrl+C）
     #   ClientID = sn_{device_id}，Username = device_id，Password = mqtt_token

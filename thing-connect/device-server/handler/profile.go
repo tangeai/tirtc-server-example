@@ -12,14 +12,14 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"thing-connect/internal/apiresp"
-	"thing-connect/internal/service"
+	"thing-connect/internal/deviceprofile"
 )
 
-type MediaReporter interface {
+type ProfileReporter interface {
 	Report(context.Context, string, map[string]json.RawMessage) error
 }
 
-func RegisterDeviceProfile(r *gin.Engine, reporter MediaReporter, secret string) {
+func RegisterDeviceProfile(r *gin.Engine, reporter ProfileReporter, secret string) {
 	r.POST("/v1/device/profile", func(c *gin.Context) {
 		auth := c.GetHeader("Authorization")
 		if !strings.HasPrefix(auth, "Bearer ") {
@@ -59,8 +59,12 @@ func RegisterDeviceProfile(r *gin.Engine, reporter MediaReporter, secret string)
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 		defer cancel()
 		if err = reporter.Report(ctx, deviceID, req.Profiles); err != nil {
-			if errors.Is(err, service.ErrInvalidMediaProfile) {
+			if errors.Is(err, deviceprofile.ErrInvalid) {
 				apiresp.BadParam(c, err.Error())
+				return
+			}
+			if errors.Is(err, deviceprofile.ErrUnbound) {
+				apiresp.Fail(c, http.StatusGone, apiresp.CodeDevReset, "设备已解绑，请重新绑定")
 				return
 			}
 			apiresp.FromError(c, err)

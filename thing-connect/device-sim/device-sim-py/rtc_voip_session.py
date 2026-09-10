@@ -432,7 +432,7 @@ class VoipCallState:
         def refresh():
             try:
                 _log("收到授权更新通知，后台重新拉取授权列表…")
-                new_list = rtc_voip.report_profile(
+                new_list = rtc_voip.refresh_contacts(
                     self._voip_server,
                     self._mqtt_token,
                     contacts_error_none=True,
@@ -657,7 +657,7 @@ class VoipCallState:
                    "Content-Type": "application/json"}
         outgoing_generation = None
         try:
-            updated_callers = rtc_voip.report_profile(
+            updated_callers = rtc_voip.refresh_contacts(
                 self._voip_server, self._mqtt_token, with_video=(call_type == "video"))
             with self._lock:
                 self._auth_list[:] = updated_callers

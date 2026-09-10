@@ -111,6 +111,11 @@ Wi-Fi 连通后，如果 NVS 中没有设备凭证，设备会自动：
 4. 将下发的 `device_id/device_key` 写入 NVS，随后启动正式 MQTT 和 TiRTC。
 
 后续启动会直接读取 NVS，不再要求输入验证码。收到 `unbind` 或登录返回设备已解绑时，会重新进入绑定流程。
+设备取得正式 MQTT token 后，会向 device-server 调用
+[`POST /v1/device/profile`](../../api-reference.md#post-v1deviceprofile)，在 `profiles.voip`
+中上报纯音频工作配置。Web 与微信小程序通过用户设备列表读取这份配置；联系人查询仍由
+`GET /v1/voip/device/contacts` 单独完成。
+
 `tirtc-set` 仅作为预烧凭证和底层联调入口，不是正常用户配置步骤；密钥不会打印到日志：
 
 ```text

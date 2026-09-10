@@ -109,19 +109,7 @@ class RtcVoipTests(unittest.TestCase):
         self._bind_runtime.stop()
         rtc_voip._stream_stop.set()
 
-    def test_report_profile_includes_camera_rotation(self):
-        profile_response = mock.Mock(
-            status_code=200,
-            headers={"Content-Type": "application/json"},
-            text="",
-        )
-        profile_response.json.return_value = {"code": 0}
-        callers_response = mock.Mock(
-            status_code=200,
-            headers={"Content-Type": "application/json"},
-            text="",
-        )
-        callers_response.json.return_value = {"code": 0, "data": {"contacts": []}}
+    def test_build_profile_includes_camera_rotation(self):
         rtc_voip._video_file_path = "video.h264"
 
         with mock.patch.dict(os.environ, {
@@ -134,15 +122,9 @@ class RtcVoipTests(unittest.TestCase):
             "VOIP_OBJECT_FIT": "contain",
             "VOIP_VIDEO_RES_MODE": "fit_screen",
         }), \
-                mock.patch.object(rtc_voip, "_down_video_format", "mjpeg"), \
-                mock.patch.object(
-                    rtc_voip.http_trace,
-                    "request",
-                    side_effect=[profile_response, callers_response],
-                ) as request:
-            rtc_voip.report_profile("https://voip.example", "token", with_video=True)
+                mock.patch.object(rtc_voip, "_down_video_format", "mjpeg"):
+            profile = rtc_voip.build_profile(with_video=True)
 
-        profile = request.call_args_list[0].kwargs["json"]
         self.assertEqual(profile["camera_rotation"], 270)
         self.assertEqual(profile["screen_width"], 1024)
         self.assertEqual(profile["screen_height"], 600)
@@ -152,10 +134,6 @@ class RtcVoipTests(unittest.TestCase):
         self.assertEqual(profile["object_fit"], "contain")
         self.assertEqual(profile["down_video_mt"], "mjpeg")
         self.assertEqual(profile["video_res_mode"], "fit_screen")
-        self.assertEqual(
-            request.call_args_list[1].args[1],
-            "https://voip.example/v1/voip/device/contacts",
-        )
 
     def test_start_session_waits_for_0x2000_before_starting_audio_and_video_threads(self):
         with tempfile.TemporaryDirectory() as root:

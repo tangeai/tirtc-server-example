@@ -63,12 +63,11 @@ typedef struct {
 void set_mqtt_ca_cert(const char *path);
 void set_mqtt_insecure(int insecure);
 
-/* Builds stream/call capability snapshots from the configured media formats.
- * VoIP continues to use its own business profile endpoint. Returns 0 or -1. */
+/* Builds stream, call, and VoIP capability snapshots. Returns 0 or -1. */
 int device_media_profile_json(char *out, size_t capacity,
                               const char *up_audio, const char *down_audio,
                               const char *up_video, const char *down_video,
-                              int has_video);
+                              int has_video, const char *voip_profile);
 /* Startup/control thread only: three attempts with bounded backoff, never
  * call from MQTT/SDK callbacks. Does not retain pointers or spawn a thread. */
 int report_device_media(const char *server, const char *mqtt_token,

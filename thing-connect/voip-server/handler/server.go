@@ -12,6 +12,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"thing-connect/internal/config"
+	"thing-connect/internal/deviceprofile"
 )
 
 type MQTTPublisher interface {
@@ -23,11 +24,12 @@ type mqttOnlineChecker interface {
 }
 
 type Server struct {
-	mu     sync.RWMutex
-	cfg    *config.Config
-	db     *sqlx.DB
-	rdb    *redis.Client
-	broker MQTTPublisher
+	mu       sync.RWMutex
+	cfg      *config.Config
+	db       *sqlx.DB
+	rdb      *redis.Client
+	broker   MQTTPublisher
+	profiles *deviceprofile.Service
 }
 
 func (s *Server) Config() *config.Config {
@@ -38,8 +40,8 @@ func (s *Server) Config() *config.Config {
 }
 func (s *Server) UpdateConfig(cfg *config.Config) { s.mu.Lock(); s.cfg = cfg; s.mu.Unlock() }
 
-func NewServer(cfg *config.Config, db *sqlx.DB, rdb *redis.Client, broker MQTTPublisher) *Server {
-	return &Server{cfg: cfg, db: db, rdb: rdb, broker: broker}
+func NewServer(cfg *config.Config, db *sqlx.DB, rdb *redis.Client, broker MQTTPublisher, profiles *deviceprofile.Service) *Server {
+	return &Server{cfg: cfg, db: db, rdb: rdb, broker: broker, profiles: profiles}
 }
 
 // IsDeviceOnline allows the WeChat callback path to reject a call before

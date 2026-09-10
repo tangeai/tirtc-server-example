@@ -134,18 +134,19 @@ Page({
   },
 
   _decorateDevice(device, previous = {}) {
-    const upVideoMT = normalizeVideoCodec(device.up_video_mt)
-    const downVideoMT = normalizeVideoCodec(device.down_video_mt)
-    const downAudioMT = normalizeMediaCodec(device.down_audio_mt)
-    const audioRate = Number(device.audio_rate) || 0
-    const cameraRotation = normalizeCameraRotation(device.camera_rotation)
-    const aspectRatio = normalizeAspectRatio(device.aspect_ratio)
-    const horMirror = normalizeBoolean(device.hor_mirror)
-    const vertMirror = normalizeBoolean(device.vert_mirror)
-    const objectFit = normalizeObjectFit(device.object_fit)
-    const hasCamera = !!upVideoMT
-    const hasScreen = !!downVideoMT
-    const voipRoomType = (hasCamera || hasScreen) ? 'video' : 'voice'
+    const voip = (device.profiles && device.profiles.voip) || {}
+    const upVideoMT = normalizeVideoCodec(voip.up_video_mt)
+    const downVideoMT = normalizeVideoCodec(voip.down_video_mt)
+    const downAudioMT = normalizeMediaCodec(voip.down_audio_mt)
+    const audioRate = Number(voip.audio_rate) || 0
+    const cameraRotation = normalizeCameraRotation(voip.camera_rotation)
+    const aspectRatio = normalizeAspectRatio(voip.aspect_ratio)
+    const horMirror = normalizeBoolean(voip.hor_mirror)
+    const vertMirror = normalizeBoolean(voip.vert_mirror)
+    const objectFit = normalizeObjectFit(voip.object_fit)
+    const hasCamera = voip.has_camera === true || !!upVideoMT
+    const hasScreen = voip.has_screen === true || !!downVideoMT
+    const voipRoomType = voip.voip_room_type === 'video' || hasCamera || hasScreen ? 'video' : 'voice'
     return {
       ...device,
       voipAuthed: previous.voipAuthed || false,

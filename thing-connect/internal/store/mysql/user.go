@@ -66,9 +66,8 @@ func (s *userStore) GetDeviceList(ctx context.Context, userID int64) ([]model.Us
 		       1 AS status,
 		       db.mac,
 		       DATE_FORMAT(db.bind_time,'%Y-%m-%dT%T') AS bind_time,
-		       vdp.profile AS voip_profile, dmp.profile AS profiles
+		       dmp.profile AS profiles
 		FROM device_bind db
-		LEFT JOIN voip_device_profile vdp ON vdp.device_id = db.device_id
 		LEFT JOIN device_profile dmp ON dmp.device_id = db.device_id
 		WHERE db.user_id=?
 		ORDER BY db.bind_time DESC`, userID)

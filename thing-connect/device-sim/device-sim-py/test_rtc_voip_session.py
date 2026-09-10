@@ -46,7 +46,7 @@ class VoipCallStateTests(unittest.TestCase):
 
             state.do_call(target, "video")
 
-            rtc_voip.report_profile.assert_not_called()
+            rtc_voip.refresh_contacts.assert_not_called()
             request.assert_not_called()
 
     def test_failed_accept_restores_local_pending_call(self):
@@ -149,7 +149,7 @@ class VoipCallStateTests(unittest.TestCase):
         cached = [{"wx_open_id": "openid-1", "remark": "缓存备注"}]
         with mock.patch("rtc_voip_session.rtc_voip") as rtc_voip:
             rtc_voip._LOG_LEVEL = 40
-            rtc_voip.report_profile.return_value = None
+            rtc_voip.refresh_contacts.return_value = None
             state = VoipCallState(
                 "https://voip.example.com",
                 "dev-1",
@@ -163,7 +163,7 @@ class VoipCallStateTests(unittest.TestCase):
             state.on_callers_update()
 
             self.assertEqual(state.list_callers(), cached)
-            rtc_voip.report_profile.assert_called_once_with(
+            rtc_voip.refresh_contacts.assert_called_once_with(
                 "https://voip.example.com",
                 "mqtt-token",
                 contacts_error_none=True,
@@ -403,7 +403,7 @@ class VoipCallStateTests(unittest.TestCase):
                 mock.patch("rtc_voip_session.http_trace.request") as request:
             rtc_voip._LOG_LEVEL = 40
             rtc_voip.is_active.return_value = False
-            rtc_voip.report_profile.return_value = []
+            rtc_voip.refresh_contacts.return_value = []
             state = VoipCallState(
                 "https://voip.example.com",
                 "dev-1",
@@ -444,7 +444,7 @@ class VoipCallStateTests(unittest.TestCase):
                 ):
             rtc_voip._LOG_LEVEL = 40
             rtc_voip.is_active.return_value = False
-            rtc_voip.report_profile.return_value = [refreshed]
+            rtc_voip.refresh_contacts.return_value = [refreshed]
             state = VoipCallState(
                 "https://voip.example.com",
                 "dev-1",
@@ -497,7 +497,7 @@ class VoipCallStateTests(unittest.TestCase):
                     mock.patch("rtc_voip_session.http_trace.request") as request:
                 rtc_voip._LOG_LEVEL = 40
                 rtc_voip.is_active.return_value = False
-                rtc_voip.report_profile.return_value = [target]
+                rtc_voip.refresh_contacts.return_value = [target]
                 response = mock.Mock(
                     status_code=http_status,
                     headers={"Content-Type": "application/json"},
@@ -542,7 +542,7 @@ class VoipCallStateTests(unittest.TestCase):
         with mock.patch("rtc_voip_session.rtc_voip") as rtc_voip:
             rtc_voip._LOG_LEVEL = 40
             rtc_voip.is_active.return_value = False
-            rtc_voip.report_profile.return_value = [target]
+            rtc_voip.refresh_contacts.return_value = [target]
             state = VoipCallState(
                 "https://voip.example.com",
                 "dev-1",

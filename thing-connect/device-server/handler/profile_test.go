@@ -11,20 +11,19 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
-	"thing-connect/internal/service"
+	"thing-connect/internal/deviceprofile"
 )
 
-type mediaReporterStub struct {
+type profileReporterStub struct {
 	id  string
 	err error
 }
 
-func (s *mediaReporterStub) Report(_ context.Context, id string, _ map[string]json.RawMessage) error {
+func (s *profileReporterStub) Report(_ context.Context, id string, _ map[string]json.RawMessage) error {
 	s.id = id
 	return s.err
 }
 func TestMediaProfileHTTPIdentityAndErrors(t *testing.T) {
-	service.RegisterErrors()
 	sign := func(claims jwt.MapClaims) string {
 		token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte("media-test-secret"))
 		if err != nil {
@@ -48,13 +47,13 @@ func TestMediaProfileHTTPIdentityAndErrors(t *testing.T) {
 		{"spoof identity", device, `{"device_id":"device-b","profiles":{"stream":{}}}`, nil, 400, 40000, false},
 		{"trailing body", device, `{} {}`, nil, 400, 40000, false},
 		{"oversized", device, strings.Repeat(" ", 17000) + `{}`, nil, 400, 40000, false},
-		{"validation", device, `{}`, service.ErrInvalidMediaProfile, 400, 40000, true},
-		{"unbound", device, `{}`, service.ErrDeviceReset, 410, 6006, true},
+		{"validation", device, `{}`, deviceprofile.ErrInvalid, 400, 40000, true},
+		{"unbound", device, `{}`, deviceprofile.ErrUnbound, 410, 6006, true},
 		{"storage failure", device, `{}`, errors.New("mysql private password secret"), 500, 50000, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			reporter := &mediaReporterStub{err: tt.failure}
+			reporter := &profileReporterStub{err: tt.failure}
 			r := gin.New()
 			RegisterDeviceProfile(r, reporter, "media-test-secret")
 			req := httptest.NewRequest("POST", "/v1/device/profile", strings.NewReader(tt.body))

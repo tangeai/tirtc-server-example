@@ -10,7 +10,7 @@ from __future__ import annotations
   stop_session()
   is_active() -> bool
   get_state() -> str   # "IDLE" | "CONNECTING" | "IN_CALL"
-  report_profile(voip_server, mqtt_token) -> list
+  refresh_contacts(voip_server, mqtt_token) -> list
   reject_session(wx_app_id, wx_model_id, wx_session_token, wx_room_id, wx_payload, hangup_reason)
 """
 
@@ -1065,16 +1065,10 @@ def reject_session(
         cb_holder.clear()
 
 
-def report_profile(voip_server: str, mqtt_token: str,
-                   with_video: bool | None = None,
-                   contacts_error_none: bool = False) -> list | None:
-    """上报设备 VoIP profile，拉取并返回授权用户列表。
-
-    POST /v1/voip/device/profile   Authorization: Bearer {mqtt_token}
-    GET  /v1/voip/device/contacts  Authorization: Bearer {mqtt_token}
-    """
-    headers = {"Authorization": f"Bearer {mqtt_token}",
-               "Content-Type": "application/json"}
+def build_profile(with_video: bool | None = None, *, up_video_format: str | None = None,
+                  down_video_format: str | None = None,
+                  down_audio_format: str | None = None) -> dict:
+    """生成 /v1/device/profile 中的 voip 场景快照。"""
     try:
         camera_rotation = int(os.getenv("VOIP_CAMERA_ROTATION", "0"))
     except ValueError:
@@ -1091,19 +1085,14 @@ def report_profile(voip_server: str, mqtt_token: str,
         aspect_ratio = 4 / 3
 
     def env_dimension(name: str, default: int) -> int:
-        raw_value = os.getenv(name, str(default))
         try:
-            value = int(raw_value)
+            value = int(os.getenv(name, str(default)))
         except ValueError:
-            _warn(f"{name} 必须是正整数，已回退为 {default}")
-            return default
+            value = default
         if value <= 0:
             _warn(f"{name} 必须是正整数，已回退为 {default}")
             return default
         return value
-
-    screen_width = env_dimension("VOIP_SCREEN_WIDTH", 1280)
-    screen_height = env_dimension("VOIP_SCREEN_HEIGHT", 720)
 
     def env_bool(name: str) -> bool:
         value = os.getenv(name, "false").strip().lower()
@@ -1113,64 +1102,44 @@ def report_profile(voip_server: str, mqtt_token: str,
             _warn(f"{name} 必须是 true/false，已回退为 false")
         return False
 
-    hor_mirror = env_bool("VOIP_HOR_MIRROR")
-    vert_mirror = env_bool("VOIP_VERT_MIRROR")
-    object_fit = os.getenv("VOIP_OBJECT_FIT", "").strip().lower()
-    if object_fit not in ("", "fill", "contain"):
-        _warn("VOIP_OBJECT_FIT 仅支持 fill/contain，已回退为微信默认值")
-        object_fit = ""
-    video_res_mode = os.getenv("VOIP_VIDEO_RES_MODE", "auto").strip().lower()
-    if video_res_mode not in ("auto", "fit_screen", "fill_screen"):
+    selected_has_video = has_video() if with_video is None else bool(with_video)
+    selected_up_video = up_video_format or _up_video_format
+    selected_down_video = down_video_format or _down_video_format
+    selected_down_audio = down_audio_format or _down_audio_format
+    profile = {
+        "screen_width": env_dimension("VOIP_SCREEN_WIDTH", 1280) if selected_has_video else 1,
+        "screen_height": env_dimension("VOIP_SCREEN_HEIGHT", 720) if selected_has_video else 1,
+        "camera_rotation": camera_rotation,
+        "aspect_ratio": aspect_ratio,
+        "hor_mirror": env_bool("VOIP_HOR_MIRROR"),
+        "vert_mirror": env_bool("VOIP_VERT_MIRROR"),
+        "audio_rate": AUDIO_FORMATS[selected_down_audio].sample_rate,
+        "audio_channels": 1,
+        "up_video_mt": VIDEO_FORMATS[selected_up_video].codec if selected_has_video else "none",
+        "down_video_mt": VIDEO_FORMATS[selected_down_video].codec if selected_has_video else "none",
+        "down_audio_mt": AUDIO_FORMATS[selected_down_audio].codec,
+        "video_res_mode": os.getenv("VOIP_VIDEO_RES_MODE", "auto").strip().lower(),
+        "no_video": not selected_has_video,
+        "calling_timeout_sec": 30,
+    }
+    if profile["video_res_mode"] not in ("auto", "fit_screen", "fill_screen"):
         _warn("VOIP_VIDEO_RES_MODE 仅支持 auto/fit_screen/fill_screen，已回退为 auto")
-        video_res_mode = "auto"
-    selected_has_video = has_video() if with_video is None else (with_video and bool(_video_file_path))
-    if selected_has_video:
-        profile = {
-            "screen_width": screen_width, "screen_height": screen_height,
-            "camera_rotation": camera_rotation,
-            "aspect_ratio": aspect_ratio,
-            "hor_mirror": hor_mirror,
-            "vert_mirror": vert_mirror,
-            "audio_rate": AUDIO_FORMATS[_down_audio_format].sample_rate,
-            "audio_channels": 1,
-            "up_video_mt": VIDEO_FORMATS[_up_video_format].codec,
-            "down_video_mt": VIDEO_FORMATS[_down_video_format].codec,
-            "down_audio_mt": AUDIO_FORMATS[_down_audio_format].codec,
-            "video_res_mode": video_res_mode,
-            "no_video": False,
-            "calling_timeout_sec": 30,
-        }
-    else:
-        profile = {
-            "screen_width": 1, "screen_height": 1,
-            "camera_rotation": camera_rotation,
-            "aspect_ratio": aspect_ratio,
-            "hor_mirror": hor_mirror,
-            "vert_mirror": vert_mirror,
-            "audio_rate": AUDIO_FORMATS[_down_audio_format].sample_rate,
-            "audio_channels": 1,
-            "up_video_mt": "none", "down_video_mt": "none",
-            "down_audio_mt": AUDIO_FORMATS[_down_audio_format].codec,
-            "video_res_mode": video_res_mode,
-            "no_video": True,
-            "calling_timeout_sec": 30,
-        }
-    if object_fit:
+        profile["video_res_mode"] = "auto"
+    object_fit = os.getenv("VOIP_OBJECT_FIT", "").strip().lower()
+    if object_fit in ("fill", "contain"):
         profile["object_fit"] = object_fit
-    try:
-        r = http_trace.request("POST", f"{voip_server}/v1/voip/device/profile",
-                               json=profile, headers=headers, timeout=10)
-        resp = r.json() if r.headers.get("Content-Type", "").startswith("application/json") else {}
-        if r.status_code == 200 and resp.get("code", -1) == 0:
-            mode = (f"视频（{VIDEO_FORMATS[_up_video_format].name} + {_up_audio_format}）"
-                    if selected_has_video else f"纯音频（{_up_audio_format}）")
-            _info(f"上报 VoIP {mode} profile 成功")
-        else:
-            message = resp.get("msg") or "<响应体已省略>"
-            _warn(f"上报 voip profile 失败（code={resp.get('code', r.status_code)}）: {message}")
-    except requests.RequestException as e:
-        _warn(f"上报 voip profile 异常: {e}")
+    elif object_fit:
+        _warn("VOIP_OBJECT_FIT 仅支持 fill/contain，已回退为微信默认值")
+    return profile
 
+
+def refresh_contacts(voip_server: str, mqtt_token: str,
+                   with_video: bool | None = None,
+                   contacts_error_none: bool = False) -> list | None:
+    """兼容函数：Profile 已统一上报，此处只刷新微信 VoIP 联系人。"""
+    del with_video
+    headers = {"Authorization": f"Bearer {mqtt_token}",
+               "Content-Type": "application/json"}
     try:
         r = http_trace.request("GET", f"{voip_server}/v1/voip/device/contacts",
                                headers=headers, timeout=10)
@@ -1179,9 +1148,8 @@ def report_profile(voip_server: str, mqtt_token: str,
             auth_list = resp.get("data", {}).get("contacts", [])
             _info(f"授权用户列表（共 {len(auth_list)} 条）")
             return auth_list
-        else:
-            message = resp.get("msg") or "<响应体已省略>"
-            _warn(f"拉取授权列表失败（code={resp.get('code', r.status_code)}）: {message}")
+        message = resp.get("msg") or "<响应体已省略>"
+        _warn(f"拉取授权列表失败（code={resp.get('code', r.status_code)}）: {message}")
     except requests.RequestException as e:
         _warn(f"拉取授权列表异常: {e}")
     return None if contacts_error_none else []

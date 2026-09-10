@@ -26,7 +26,7 @@
 设备侧按以下四步接入微信 VoIP：
 
 1. 按 [device-integration.md](device-integration.md) 上线，拿到 `mqtt_token`
-2. 启动后调用 [`POST /v1/voip/device/profile`](api-reference.md#post-v1voipdeviceprofile)
+2. 启动后调用 [`POST /v1/device/profile`](api-reference.md#post-v1deviceprofile)
 3. 监听 MQTT `device/sn_{device_id}/cmd` 和 `device/sn_{device_id}/notify`
 4. 收到 `call_incoming` 后，用 payload 中的 `peer_id + token` 调
    <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcwhipconnect" target="_blank" rel="noopener">`TiRtcWhipConnect(peer_id, token, callback, NULL)`</a>
@@ -55,12 +55,12 @@ VoIP 场景下，设备作为 WHIP 客户端，通过
 
 设备上线完成后，应尽快调用：
 
-- [`POST /v1/voip/device/profile`](api-reference.md#post-v1voipdeviceprofile)
+- [`POST /v1/device/profile`](api-reference.md#post-v1deviceprofile)
 
 这是接收 VoIP 来电的前提；未上报 profile 的设备无法收到 `call_incoming`。
 
 字段、枚举值和错误码见
-[profile 接口说明](api-reference.md#post-v1voipdeviceprofile)。
+[profile 接口说明](api-reference.md#post-v1deviceprofile)。
 
 至少应上报：
 
@@ -79,28 +79,32 @@ VoIP 场景下，设备作为 WHIP 客户端，通过
 **HTTP 请求：**
 
 ```http
-POST /v1/voip/device/profile
+POST /v1/device/profile
 Authorization: Bearer <mqtt_token>
 Content-Type: application/json
 ```
 
 ```json
 {
-  "screen_width": 640,
-  "screen_height": 480,
-  "camera_rotation": 0,
-  "aspect_ratio": 1.3333333333,
-  "hor_mirror": false,
-  "vert_mirror": false,
-  "object_fit": "contain",
-  "audio_rate": 8000,
-  "audio_channels": 1,
-  "up_video_mt": "h264",
-  "down_video_mt": "mjpeg",
-  "video_res_mode": "fit_screen",
-  "down_audio_mt": "alaw",
-  "no_video": false,
-  "calling_timeout_sec": 30
+  "profiles": {
+    "voip": {
+      "screen_width": 640,
+      "screen_height": 480,
+      "camera_rotation": 0,
+      "aspect_ratio": 1.3333333333,
+      "hor_mirror": false,
+      "vert_mirror": false,
+      "object_fit": "contain",
+      "audio_rate": 8000,
+      "audio_channels": 1,
+      "up_video_mt": "h264",
+      "down_video_mt": "mjpeg",
+      "video_res_mode": "fit_screen",
+      "down_audio_mt": "alaw",
+      "no_video": false,
+      "calling_timeout_sec": 30
+    }
+  }
 }
 ```
 
@@ -184,7 +188,7 @@ VoIP 相关下行消息有三类：
 1. 用户已在小程序里登录，拿到 `user_jwt`
 2. 当前设备已经绑定到这个登录用户
 3. 小程序已配置 `wmpf-voip` 插件
-4. 设备已完成 [`POST /v1/voip/device/profile`](api-reference.md#post-v1voipdeviceprofile)，否则微信回调到服务端后无法下发 `call_incoming`
+4. 设备已完成 [`POST /v1/device/profile`](api-reference.md#post-v1deviceprofile)，否则微信回调到服务端后无法下发 `call_incoming`
 
 ### 2. 小程序初始化
 
@@ -431,7 +435,7 @@ if (voip_service_register() != 0 ||
 
 /* 启动时上报一次 profile；callers_update 到达后刷新联系人缓存。 */
 cJSON *callers = NULL;
-if (voip_report_profile(voip_server, mqtt_token, &callers) != 0) {
+if (voip_refresh_contacts(voip_server, mqtt_token, &callers) != 0) {
     tirtc_runtime_stop();
     voip_destroy(voip);
     return -1;
@@ -479,7 +483,7 @@ voip_destroy(voip);
 | `voip_configure_down_audio_format(format)` | 设备下行播放格式；示例 `alaw_8khz` 表示 G.711 A-law 8 kHz | [`tirtc_voip.h`](device-sim/device-sim-c/src/tirtc_voip.h#L32) |
 | `tirtc_runtime_start(device_id, device_key, client_id, endpoint)` | 设备 ID、设备密钥、全局唯一且稳定的 client ID、服务发现返回的 TiRTC endpoint | [`tirtc_runtime.h`](device-sim/device-sim-c/src/tirtc_runtime.h#L30) |
 | `voip_service_register()` | 将 VoIP 模块注册到 TiRTC runtime；必须在启动 runtime 前完成 | [`tirtc_voip.h`](device-sim/device-sim-c/src/tirtc_voip.h#L50) |
-| `voip_report_profile(voip_server, mqtt_token, &callers)` | 上报媒体能力，并通过输出参数返回授权联系人 JSON；所有权随后交给 `VoipState` | [`tirtc_voip.h`](device-sim/device-sim-c/src/tirtc_voip.h#L56) |
+| `voip_refresh_contacts(voip_server, mqtt_token, &callers)` | 刷新授权联系人，并通过输出参数返回联系人 JSON；所有权随后交给 `VoipState` | [`tirtc_voip.h`](device-sim/device-sim-c/src/tirtc_voip.h#L56) |
 | `voip_set_auth_list(voip, callers)` | 把资料接口返回的联系人 JSON 交给 VoIP 状态；函数接管该对象的所有权 | [`tirtc_voip.h`](device-sim/device-sim-c/src/tirtc_voip.h#L22) |
 | `voip_service_start/stop(voip)` | 启动或停止 VoIP 后台服务；销毁状态前必须先停止 | [`tirtc_voip.h`](device-sim/device-sim-c/src/tirtc_voip.h#L51) |
 | `tirtc_runtime_activate/deactivate(service, generation)` | 激活指定业务并取得代次；结束时必须用同一业务和代次释放 | [`tirtc_runtime.h`](device-sim/device-sim-c/src/tirtc_runtime.h#L35) |
@@ -851,7 +855,7 @@ payload:
 
 | 接口 | 请求方 | 用途 | 成功返回 |
 |------|--------|------|---------|
-| [`POST /v1/voip/device/profile`](api-reference.md#post-v1voipdeviceprofile) | 设备 | 上报媒体能力 | `{code:0,data:null}` |
+| [`POST /v1/device/profile`](api-reference.md#post-v1deviceprofile) | 设备 | 上报设备能力 | `{code:200,msg:"ok"}` |
 | [`GET /v1/voip/device/contacts`](api-reference.md#get-v1voipdevicecontacts) | 设备 | 拉取小程序联系人 | `{code:0,data:{contacts:[...]}}` |
 | [`POST /v1/voip/device/call`](api-reference.md#post-v1voipdevicecall) | 设备 | 主动呼叫小程序 | `{code:0,data:{call_id}}` |
 
@@ -877,7 +881,7 @@ payload:
 
 | 现象 | 检查项 |
 |------|--------|
-| 微信上已经呼出，设备没有收到 `call_incoming` | 确认设备已正式 MQTT 在线，并已调用 [`POST /v1/voip/device/profile`](api-reference.md#post-v1voipdeviceprofile) |
+| 微信上已经呼出，设备没有收到 `call_incoming` | 确认设备已正式 MQTT 在线，并已调用 [`POST /v1/device/profile`](api-reference.md#post-v1deviceprofile) |
 | `TiRtcWhipConnect` 返回 0，但没有通话 | 返回 0 只表示请求已提交；检查连接回调及其 `error` 参数 |
 | 设备收到来电，但无法拒接 | 确认拒接请求中的 `wx_*` 字段来自本次 `call_incoming` payload |
 | 收到 `callers_update` 后列表没有变化 | 确认设备重新调用了 [`GET /v1/voip/device/contacts`](api-reference.md#get-v1voipdevicecontacts) |

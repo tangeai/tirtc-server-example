@@ -39,13 +39,14 @@ typedef struct {
 static void test_device_media_profile(void) {
     char body[1024];
     assert(device_media_profile_json(body, sizeof(body), "pcm_s16le_16khz",
-                                     "opus_16khz", "h265", "mjpeg", 1) == 0);
+                                     "opus_16khz", "h265", "mjpeg", 1,
+                                     "{\"no_video\":false}") == 0);
     cJSON *root = cJSON_Parse(body);
     assert(root);
     cJSON *profiles = cJSON_GetObjectItem(root, "profiles");
     cJSON *stream = cJSON_GetObjectItem(profiles, "stream");
     cJSON *call = cJSON_GetObjectItem(profiles, "call");
-    assert(!cJSON_GetObjectItem(profiles, "voip"));
+    assert(cJSON_IsObject(cJSON_GetObjectItem(profiles, "voip")));
     assert(strcmp(cJSON_GetStringValue(cJSON_GetArrayItem(
         cJSON_GetObjectItem(stream, "down_audio_mt"), 0)), "alaw") == 0);
     assert(strcmp(cJSON_GetStringValue(cJSON_GetArrayItem(
@@ -56,7 +57,8 @@ static void test_device_media_profile(void) {
     assert(!cJSON_GetObjectItem(stream, "camera_rotation"));
     cJSON_Delete(root);
     assert(device_media_profile_json(body, sizeof(body), "alaw_8khz",
-                                     "alaw_8khz", "h264", "h264", 0) == 0);
+                                     "alaw_8khz", "h264", "h264", 0,
+                                     "{\"no_video\":true}") == 0);
     root = cJSON_Parse(body);
     call = cJSON_GetObjectItem(cJSON_GetObjectItem(root, "profiles"), "call");
     assert(cJSON_GetArraySize(cJSON_GetObjectItem(call, "up_video_mt")) == 0);
@@ -64,10 +66,10 @@ static void test_device_media_profile(void) {
     assert(cJSON_IsTrue(cJSON_GetObjectItem(call, "no_video")));
     cJSON_Delete(root);
     assert(device_media_profile_json(body, 8, "alaw_8khz",
-                                     "alaw_8khz", "h264", "h264", 1) == -1);
+                                     "alaw_8khz", "h264", "h264", 1, "{}") == -1);
     assert(body[0] == '\0');
     assert(device_media_profile_json(body, sizeof(body), "invalid",
-                                     "alaw_8khz", "h264", "h264", 1) == -1);
+                                     "alaw_8khz", "h264", "h264", 1, "{}") == -1);
 }
 
 static void test_hmac_sha256_b64(void) {

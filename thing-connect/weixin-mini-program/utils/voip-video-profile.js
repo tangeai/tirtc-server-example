@@ -84,13 +84,14 @@ function updateDeviceVideoProfileCache(devices) {
   ;(Array.isArray(devices) ? devices : []).forEach((device) => {
     const deviceID = String((device && device.device_id) || '').trim()
     if (!deviceID) return
+    const voip = (device.profiles && device.profiles.voip) || {}
     profiles[deviceID] = {
       device_id: deviceID,
-      camera_rotation: normalizeCameraRotation(device.camera_rotation),
-      aspect_ratio: normalizeAspectRatio(device.aspect_ratio),
-      hor_mirror: normalizeBoolean(device.hor_mirror),
-      vert_mirror: normalizeBoolean(device.vert_mirror),
-      object_fit: normalizeObjectFit(device.object_fit),
+      camera_rotation: normalizeCameraRotation(voip.camera_rotation),
+      aspect_ratio: normalizeAspectRatio(voip.aspect_ratio),
+      hor_mirror: normalizeBoolean(voip.hor_mirror),
+      vert_mirror: normalizeBoolean(voip.vert_mirror),
+      object_fit: normalizeObjectFit(voip.object_fit),
     }
   })
   try {

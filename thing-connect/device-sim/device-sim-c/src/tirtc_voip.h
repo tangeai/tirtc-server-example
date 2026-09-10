@@ -53,7 +53,8 @@ void voip_service_stop(VoipState *vs);
 
 /* ── VoIP operations ───────────────────────────────────────────────────── */
 
-int  voip_report_profile(const char *voip_server, const char *mqtt_token,
+int  voip_profile_json(char *out, size_t capacity);
+int  voip_refresh_contacts(const char *voip_server, const char *mqtt_token,
                          cJSON **auth_list_out);
 int  voip_start_session(VoipState *vs, const char *peer_id, const char *token,
                         const char *audio_file);

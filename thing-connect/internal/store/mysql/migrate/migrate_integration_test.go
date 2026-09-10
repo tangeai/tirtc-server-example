@@ -70,7 +70,7 @@ func TestMigrateNewTables(t *testing.T) {
 	if err := sqlDB.Get(&count, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='admin_users'`); err != nil || count == 0 {
 		t.Errorf("admin_users table missing: n=%d err=%v", count, err)
 	}
-	if err := sqlDB.Get(&count, `SELECT COUNT(*) FROM schema_migrations WHERE component IN ('core','admin')`); err != nil || count != 3 {
+	if err := sqlDB.Get(&count, `SELECT COUNT(*) FROM schema_migrations WHERE component IN ('core','admin')`); err != nil || count != 4 {
 		t.Errorf("schema_migrations entries: n=%d err=%v", count, err)
 	}
 	if err := sqlDB.Get(&count, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='call_requests'`); err != nil || count != 0 {
