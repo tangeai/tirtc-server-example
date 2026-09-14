@@ -15,7 +15,9 @@
 
 #include <assert.h>
 #include <limits.h>
+#include <math.h>
 #include <signal.h>
+#include <stdlib.h>
 
 #include <curl/curl.h>
 #include <mosquitto.h>
@@ -1016,27 +1018,121 @@ int connect_mqtt_blocking(const char *host, int port,
 }
 
 
+/* Parse an optional boolean profile value; empty returns 0. */
+static int presentation_bool(const char *name, const char *value, int *out) {
+    if (!value || value[0] == '\0') return 0;
+    if (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
+        strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0) {
+        *out = 1;
+        return 1;
+    }
+    if (strcmp(value, "0") == 0 || strcasecmp(value, "false") == 0 ||
+        strcasecmp(value, "no") == 0 || strcasecmp(value, "off") == 0) {
+        *out = 0;
+        return 1;
+    }
+    LOG_W("%s 必须是 true/false，已忽略", name);
+    return 0;
+}
+
+/* Whether an aspect ratio uses the width:height (1-9999) form. */
+static int aspect_wh_valid(const char *s) {
+    if (!s) return 0;
+    const char *colon = strchr(s, ':');
+    if (!colon || colon == s || colon[1] == '\0' || strchr(colon + 1, ':'))
+        return 0;
+    size_t width_len = (size_t)(colon - s);
+    size_t height_len = strlen(colon + 1);
+    if (width_len > 4 || height_len > 4 || s[0] == '0' || colon[1] == '0')
+        return 0;
+    for (const char *p = s; p < colon; ++p)
+        if (*p < '0' || *p > '9') return 0;
+    for (const char *p = colon + 1; *p; ++p)
+        if (*p < '0' || *p > '9') return 0;
+    return 1;
+}
+
+/* 按 STREAM_* 环境变量生成实时查看画布呈现字段；片段以逗号开头，
+ * 供 stream 场景 JSON 直接拼接，未设置任何字段时为空串。 */
+static int stream_presentation_json(char *out, size_t capacity,
+                                    const StreamPresentation *presentation) {
+    if (!out || capacity == 0) return -1;
+    out[0] = '\0';
+    size_t pos = 0;
+    if (!presentation) return 0;
+    const char *aspect = presentation->aspect_ratio;
+    if (aspect && aspect[0] != '\0') {
+        char *end = NULL;
+        double parsed = strtod(aspect, &end);
+        if (end != aspect && *end == '\0' && isfinite(parsed) && parsed > 0) {
+            pos += (size_t)snprintf(out + pos, capacity - pos,
+                                    ",\"aspect_ratio\":%.10g", parsed);
+        } else if (aspect_wh_valid(aspect)) {
+            pos += (size_t)snprintf(out + pos, capacity - pos,
+                                    ",\"aspect_ratio\":\"%s\"", aspect);
+        } else {
+            LOG_W("STREAM_ASPECT_RATIO 仅支持正数或 宽:高，已忽略");
+        }
+    }
+    const char *object_fit = presentation->object_fit;
+    if (object_fit && object_fit[0] != '\0') {
+        if (strcmp(object_fit, "fill") == 0 || strcmp(object_fit, "contain") == 0 ||
+            strcmp(object_fit, "cover") == 0) {
+            pos += (size_t)snprintf(out + pos, capacity - pos,
+                                    ",\"object_fit\":\"%s\"", object_fit);
+        } else {
+            LOG_W("STREAM_OBJECT_FIT 仅支持 fill/contain/cover，已忽略");
+        }
+    }
+    const char *rotation_env = presentation->camera_rotation;
+    if (rotation_env && rotation_env[0] != '\0') {
+        char *end = NULL;
+        long parsed = strtol(rotation_env, &end, 10);
+        if (end != rotation_env && *end == '\0' &&
+            (parsed == 0 || parsed == 90 || parsed == 180 || parsed == 270)) {
+            pos += (size_t)snprintf(out + pos, capacity - pos,
+                                    ",\"camera_rotation\":%ld", parsed);
+        } else {
+            LOG_W("STREAM_CAMERA_ROTATION 仅支持 0/90/180/270，已忽略");
+        }
+    }
+    int mirror = 0;
+    if (presentation_bool("STREAM_HOR_MIRROR", presentation->hor_mirror, &mirror))
+        pos += (size_t)snprintf(out + pos, capacity - pos,
+                                ",\"hor_mirror\":%s", mirror ? "true" : "false");
+    if (presentation_bool("STREAM_VERT_MIRROR", presentation->vert_mirror, &mirror))
+        pos += (size_t)snprintf(out + pos, capacity - pos,
+                                ",\"vert_mirror\":%s", mirror ? "true" : "false");
+    if (pos >= capacity) { out[0] = '\0'; return -1; }
+    return 0;
+}
+
 int device_media_profile_json(char *out, size_t capacity,
                               const char *up_audio, const char *down_audio,
                               const char *up_video, const char *down_video,
-                              int has_video, const char *voip_profile) {
+                              int has_video, const char *voip_profile,
+                              const StreamPresentation *presentation) {
     const AudioFormat *up = audio_format_find(up_audio);
     const AudioFormat *down = audio_format_find(down_audio);
     const VideoFormat *up_v = video_format_find(up_video);
     const VideoFormat *down_v = video_format_find(down_video);
     if (!out || capacity == 0 || !up || !down ||
         (has_video && (!up_v || !down_v)) || !voip_profile) return -1;
+    /* STREAM_* 画布呈现字段（可选）；片段以逗号开头，未设置时为空串。 */
+    char stream_pres[256];
+    if (stream_presentation_json(stream_pres, sizeof(stream_pres), presentation) != 0) return -1;
     /* Only constant codec names from the format registry enter the JSON. */
     int n = snprintf(out, capacity,
         "{\"profiles\":{"
         "\"stream\":{\"up_audio_mt\":[\"%s\"],\"up_video_mt\":%s%s%s,"
         "\"down_audio_mt\":[\"alaw\"],\"down_video_mt\":[],"
-        "\"audio_rate\":8000,\"audio_channels\":1},"
+        "\"audio_rate\":8000,\"audio_channels\":1%s},"
         "\"call\":{\"up_audio_mt\":[\"%s\"],\"up_video_mt\":%s%s%s,"
         "\"down_audio_mt\":[\"%s\"],\"down_video_mt\":%s%s%s,"
         "\"audio_rate\":%d,\"audio_channels\":1,\"no_video\":%s},"
         "\"voip\":%s}}",
         up->codec, has_video ? "[\"" : "[", has_video ? up_v->codec : "", has_video ? "\"]" : "]",
+        stream_pres,
         up->codec, has_video ? "[\"" : "[", has_video ? up_v->codec : "", has_video ? "\"]" : "]",
         down->codec, has_video ? "[\"" : "[", has_video ? down_v->codec : "", has_video ? "\"]" : "]",
         down->sample_rate, has_video ? "false" : "true", voip_profile);

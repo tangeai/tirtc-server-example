@@ -1303,7 +1303,22 @@ Authorization: Bearer <user_jwt>
     "token": "v1.eyJ...",
     "app_id": "2818153",
     "endpoint": "https://api-tirtc.tange365.com",
-    "in_call": false
+    "in_call": false,
+    "profiles": {
+      "stream": {
+        "up_audio_mt": ["alaw"],
+        "up_video_mt": ["h264"],
+        "down_audio_mt": ["alaw"],
+        "down_video_mt": [],
+        "audio_rate": 8000,
+        "audio_channels": 1,
+        "aspect_ratio": "4:3",
+        "object_fit": "contain",
+        "camera_rotation": 90,
+        "hor_mirror": true,
+        "vert_mirror": false
+      }
+    }
   }
 }
 ```
@@ -1314,6 +1329,7 @@ Authorization: Bearer <user_jwt>
 | app_id | TiRTC App ID |
 | endpoint | TiRTC API 地址 |
 | in_call | 设备当前是否在对讲中（`true` 时仍正常签发 token，由 H5 自行决定是否提示用户） |
+| profiles | 设备能力快照，与 `GET /v1/user/device/list` 的 `profiles` 同构；设备未上报时省略该字段。H5 用 `profiles.stream` 自适应画布 |
 
 **错误码**
 
@@ -1332,6 +1348,7 @@ Authorization: Bearer <user_jwt>
 | `data.app_id` | string | TiRTC 应用 ID |
 | `data.endpoint` | string | TiRTC 服务入口 |
 | `data.in_call` | boolean | 设备是否正在一对一通话；不阻止本次发放凭证 |
+| `data.profiles` | object | 可选。按 `stream`、`call`、`voip` 场景组织的设备能力，投影规则与设备列表一致（无效字段被丢弃）；设备未上报或读取失败时省略该字段。H5 实时查看读取 `profiles.stream`。场景内字段类型与枚举见 [`POST /v1/device/profile`](#post-v1deviceprofile) |
 
 ---
 

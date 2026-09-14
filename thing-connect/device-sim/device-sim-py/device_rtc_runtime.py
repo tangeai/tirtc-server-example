@@ -5,6 +5,10 @@
 """
 
 from dataclasses import dataclass
+import logging
+import math
+import os
+import re
 import threading
 
 from camera_video_source import describe_video_source
@@ -20,6 +24,8 @@ from tirtc_runtime import (
     ServiceKind,
     process_tirtc_runtime,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -42,6 +48,51 @@ class RuntimeConfig:
     hardware_audio: bool = False
     log_level: str = "debug"
     device_server: str = ""
+
+
+def _stream_presentation_env() -> dict:
+    """按 STREAM_* 环境变量生成实时查看画布呈现字段；未设置或非法时省略。"""
+    fields: dict = {}
+    aspect = os.getenv("STREAM_ASPECT_RATIO", "").strip()
+    if aspect:
+        try:
+            value = float(aspect)
+            if math.isfinite(value) and value > 0:
+                fields["aspect_ratio"] = value
+            else:
+                _LOGGER.warning("STREAM_ASPECT_RATIO 必须大于 0，已忽略")
+        except ValueError:
+            if re.fullmatch(r"[1-9][0-9]{0,3}:[1-9][0-9]{0,3}", aspect):
+                fields["aspect_ratio"] = aspect
+            else:
+                _LOGGER.warning("STREAM_ASPECT_RATIO 仅支持正数或 宽:高，已忽略")
+    object_fit = os.getenv("STREAM_OBJECT_FIT", "").strip().lower()
+    if object_fit:
+        if object_fit in ("fill", "contain", "cover"):
+            fields["object_fit"] = object_fit
+        else:
+            _LOGGER.warning("STREAM_OBJECT_FIT 仅支持 fill/contain/cover，已忽略")
+    rotation_env = os.getenv("STREAM_CAMERA_ROTATION", "").strip()
+    if rotation_env:
+        try:
+            rotation = int(rotation_env)
+        except ValueError:
+            rotation = -1
+        if rotation in (0, 90, 180, 270):
+            fields["camera_rotation"] = rotation
+        else:
+            _LOGGER.warning("STREAM_CAMERA_ROTATION 仅支持 0/90/180/270，已忽略")
+    for name, key in (("STREAM_HOR_MIRROR", "hor_mirror"),
+                      ("STREAM_VERT_MIRROR", "vert_mirror")):
+        value = os.getenv(name, "").strip().lower()
+        if value:
+            if value in ("1", "true", "yes", "on"):
+                fields[key] = True
+            elif value in ("0", "false", "no", "off"):
+                fields[key] = False
+            else:
+                _LOGGER.warning("%s 必须是 true/false，已忽略", name)
+    return fields
 
 
 class DeviceRtcRuntime:
@@ -363,12 +414,14 @@ class DeviceRtcRuntime:
         c = self.config
         up, down = AUDIO_FORMATS[c.up_audio_format], AUDIO_FORMATS[c.down_audio_format]
         video = [VIDEO_FORMATS[c.up_video_format].codec] if c.up_video_file else []
+        stream = {
+            "up_audio_mt": [up.codec], "up_video_mt": video,
+            "down_audio_mt": ["alaw"], "down_video_mt": [],
+            "audio_rate": 8000, "audio_channels": 1,
+        }
+        stream.update(_stream_presentation_env())
         profiles = {
-            "stream": {
-                "up_audio_mt": [up.codec], "up_video_mt": video,
-                "down_audio_mt": ["alaw"], "down_video_mt": [],
-                "audio_rate": 8000, "audio_channels": 1,
-            },
+            "stream": stream,
             "call": {
                 "up_audio_mt": [up.codec], "up_video_mt": list(video),
                 "down_audio_mt": [down.codec],

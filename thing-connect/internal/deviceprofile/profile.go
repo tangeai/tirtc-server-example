@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"regexp"
 	"strings"
@@ -65,6 +66,29 @@ func (s *Service) VoIP(ctx context.Context, deviceID string) (json.RawMessage, e
 		return nil, err
 	}
 	return Scene(snapshot.Profile, "voip"), nil
+}
+
+// PublicSnapshot returns the validated public capability projection for a
+// device. An absent profile is represented by an empty map.
+func (s *Service) PublicSnapshot(ctx context.Context, deviceID string) (map[string]map[string]json.RawMessage, error) {
+	snapshot, err := s.store.Get(ctx, deviceID)
+	if err != nil || snapshot == nil || len(snapshot.Profile) == 0 {
+		return nil, err
+	}
+	raw := string(snapshot.Profile)
+	return Public(&raw), nil
+}
+
+// OptionalPublicSnapshot returns public profile metadata when available.
+// Profile enrichment must not block use cases whose primary operation does
+// not depend on presentation metadata.
+func (s *Service) OptionalPublicSnapshot(ctx context.Context, deviceID string) map[string]map[string]json.RawMessage {
+	profiles, err := s.PublicSnapshot(ctx, deviceID)
+	if err != nil {
+		slog.WarnContext(ctx, "device profile unavailable", "device_id", deviceID)
+		return nil
+	}
+	return profiles
 }
 
 var aspectRatioPattern = regexp.MustCompile(`^[1-9][0-9]{0,3}:[1-9][0-9]{0,3}$`)

@@ -21,6 +21,7 @@ import (
 	cleanupoutbox "thing-connect/internal/cleanup"
 	"thing-connect/internal/config"
 	"thing-connect/internal/db"
+	"thing-connect/internal/deviceprofile"
 	"thing-connect/internal/dynamicconfig"
 	"thing-connect/internal/logging"
 	mailerpkg "thing-connect/internal/mailer"
@@ -89,6 +90,7 @@ func main() {
 	userSvc.SetPasswordResetEmailQueue(passwordResetMailQueue)
 
 	bindSvc := service.NewBindService(bindStore, cacheStore, broker, svcCfg)
+	profileSvc := deviceprofile.NewService(mysqlstore.NewDeviceProfileStore(sqlDB))
 	dynamicClient, dynamicRefs, err := userDynamicConfig(dynamicClient, cfg.Tirtc, userSvc, bindSvc)
 	if err != nil {
 		log.Fatalf("dynamic config: %v", err)
@@ -166,7 +168,7 @@ func main() {
 	}
 	go reporter.Run(outboxCtx)
 
-	usrhandler.NewServer(userSvc, bindSvc, broker, sqlDB, rdb, cfg.JWTSecret, cfg.Call.ServerURL, cfg.Internal.Key, roleStore, cleanup).Register(r)
+	usrhandler.NewServer(userSvc, bindSvc, profileSvc, broker, sqlDB, rdb, cfg.JWTSecret, cfg.Call.ServerURL, cfg.Internal.Key, roleStore, cleanup).Register(r)
 
 	addr := fmt.Sprintf(":%d", cfg.Server.HTTPPort)
 	srv := &http.Server{

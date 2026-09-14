@@ -37,6 +37,16 @@ typedef struct {
     char temp_client_id[64];
 } ReportResult;
 
+/* Optional H5 stream presentation values supplied by the composition root.
+ * Strings are validated while the public device profile is serialized. */
+typedef struct {
+    const char *aspect_ratio;
+    const char *object_fit;
+    const char *camera_rotation;
+    const char *hor_mirror;
+    const char *vert_mirror;
+} StreamPresentation;
+
 /* ── MQTT message handler (implemented by voip / ai / stream modules) ──── */
 
 typedef struct {
@@ -67,7 +77,8 @@ void set_mqtt_insecure(int insecure);
 int device_media_profile_json(char *out, size_t capacity,
                               const char *up_audio, const char *down_audio,
                               const char *up_video, const char *down_video,
-                              int has_video, const char *voip_profile);
+                              int has_video, const char *voip_profile,
+                              const StreamPresentation *presentation);
 /* Startup/control thread only: three attempts with bounded backoff, never
  * call from MQTT/SDK callbacks. Does not retain pointers or spawn a thread. */
 int report_device_media(const char *server, const char *mqtt_token,

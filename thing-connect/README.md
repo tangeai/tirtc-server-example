@@ -587,7 +587,7 @@ void on_call_connected(int err, tirtc_conn_t hconn, void *user) {
 
 ### H5 开发
 
-H5 页面由 user-server 提供静态文件。用户登录并获取 RTC token 后，通过 Web SDK 直连设备。完整页面见 [player.html](user-server/static/player.html)。
+H5 页面由 user-server 提供静态文件。用户登录并获取 RTC token 后，通过 Web SDK 直连设备。完整页面见 [player.html](user-server/static/player.html)。画布根据 rtc-token 响应中的 `profiles.stream`（宽高比、缩放方式、旋转、镜像）自适应；设备未上报时保持 16:9 + contain。
 SDK 类、方法和参数以 [TiRTC Web API 参考](https://docs.tange.ai/products/tirtc/api-reference/web.html)
 为准。
 

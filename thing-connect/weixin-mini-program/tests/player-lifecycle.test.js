@@ -19,10 +19,11 @@ function player(options = {}) {
   const calls = { connects: 0, attaches: 0, disconnects: 0, talks: 0, stops: 0, logins: 0 }
   const connectionReady = options.connectionReady || Promise.resolve()
   const talkReady = options.talkReady || Promise.resolve()
+  const style = () => ({ setProperty(name, value) { this[name] = value } })
   const document = {
     hidden: false,
     getElementById(id) {
-      if (!elements.has(id)) elements.set(id, { style: {}, classList: { add() {}, remove() {}, toggle() {} } })
+      if (!elements.has(id)) elements.set(id, { style: style(), classList: { add() {}, remove() {}, toggle() {} } })
       return elements.get(id)
     },
     addEventListener: (name, fn) => { listeners[name] = fn },
@@ -99,4 +100,44 @@ test('连接失败提供可重试状态，不遗留连接', async () => {
   assert.equal(p.calls.logins, 1)
   assert.equal(p.elements.get('player-retry').hidden, false)
   assert.equal(p.calls.connects, 0)
+})
+
+test('设备未上报呈现属性时使用默认画面配置', async () => {
+  const p = player()
+  await tick()
+  const boxStyle = p.elements.get('canvas-box').style
+  const canvasStyle = p.elements.get('canvas').style
+  assert.equal(Number(boxStyle['--video-ratio']), 16 / 9)
+  assert.equal(canvasStyle.objectFit, 'contain')
+  assert.equal(canvasStyle.width, '100%')
+  assert.equal(canvasStyle.height, '100%')
+  assert.equal(canvasStyle.transform, 'translate(-50%, -50%)')
+})
+
+test('设备上报的窄幅比例不会被改写', async () => {
+  const p = player({ fetchResult: Promise.resolve({ json: async () => ({
+    code: 200,
+    data: { token: 'rtc', app_id: 'one', profiles: { stream: { aspect_ratio: '1:10' } } },
+  }) }) })
+  await tick()
+  assert.equal(p.elements.get('canvas-box').style['--video-ratio'], '0.1')
+  assert.equal(p.elements.get('canvas').style.width, '100%')
+  assert.equal(p.elements.get('canvas').style.height, '100%')
+})
+
+test('旋转九十度时交换画布尺寸并保持上报比例', async () => {
+  const p = player({ fetchResult: Promise.resolve({ json: async () => ({
+    code: 200,
+    data: { token: 'rtc', app_id: 'one', profiles: { stream: {
+      aspect_ratio: '4:3', camera_rotation: 90, object_fit: 'cover', hor_mirror: true,
+    } } },
+  }) }) })
+  await tick()
+  const boxStyle = p.elements.get('canvas-box').style
+  const canvasStyle = p.elements.get('canvas').style
+  assert.equal(Number(boxStyle['--video-ratio']), 0.75)
+  assert.equal(Number.parseFloat(canvasStyle.width), 100 / 0.75)
+  assert.equal(Number.parseFloat(canvasStyle.height), 75)
+  assert.equal(canvasStyle.objectFit, 'cover')
+  assert.equal(canvasStyle.transform, 'translate(-50%, -50%) rotate(90deg) scaleX(-1)')
 })

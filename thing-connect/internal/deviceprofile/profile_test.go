@@ -45,6 +45,22 @@ func TestValidateSceneSpecificFields(t *testing.T) {
 	}
 }
 
+func TestValidateAspectRatioForms(t *testing.T) {
+	for _, raw := range []json.RawMessage{
+		json.RawMessage(`{"aspect_ratio":"4:3"}`),
+		json.RawMessage(`{"aspect_ratio":1.3333}`),
+	} {
+		if err := Validate(map[string]json.RawMessage{"stream": raw}); err != nil {
+			t.Fatalf("valid aspect ratio %s rejected: %v", raw, err)
+		}
+	}
+	if err := Validate(map[string]json.RawMessage{
+		"stream": json.RawMessage(`{"aspect_ratio":"1.3333"}`),
+	}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("quoted numeric aspect ratio accepted: %v", err)
+	}
+}
+
 func TestServiceUsesOneStoreBoundary(t *testing.T) {
 	store := &storeStub{bound: true}
 	service := NewService(store)

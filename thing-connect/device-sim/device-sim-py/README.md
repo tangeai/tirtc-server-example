@@ -294,6 +294,11 @@ python3 device_sim_main.py --device-id DEV000001 --device-key your-key \
 | `VOIP_OBJECT_FIT`（环境变量） | 空 | 微信 VoIP 设备视频缩放方式：`fill/contain`；为空时不上传，使用微信默认值 |
 | `VOIP_HOR_MIRROR`（环境变量） | `false` | 是否水平镜像微信 VoIP 视频 |
 | `VOIP_VERT_MIRROR`（环境变量） | `false` | 是否垂直镜像微信 VoIP 视频 |
+| `STREAM_ASPECT_RATIO`（环境变量） | 空 | 实时查看画布宽高比：正数或 `宽:高`（宽高 1–9999）；为空时不上传，H5 使用 16:9 |
+| `STREAM_OBJECT_FIT`（环境变量） | 空 | 实时查看画布缩放方式：`fill/contain/cover`；为空时不上传，H5 使用 contain |
+| `STREAM_CAMERA_ROTATION`（环境变量） | 空 | 实时查看画面顺时针旋转角度，仅支持 `0/90/180/270`；为空时不上传 |
+| `STREAM_HOR_MIRROR`（环境变量） | 空 | 实时查看画面是否水平镜像：`true/false`；为空时不上传 |
+| `STREAM_VERT_MIRROR`（环境变量） | 空 | 实时查看画面是否垂直镜像：`true/false`；为空时不上传 |
 | `--down-media-dir` | `device-sim-py/received` | 各媒体模式通用的下行音视频保存目录 |
 | `--log-level` | `debug` | `debug` / `info` / `warn` / `error` |
 

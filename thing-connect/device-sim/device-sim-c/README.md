@@ -174,6 +174,8 @@ Linux ARM、MIPS 或其他架构必须使用与 CPU、ABI 和 libc 匹配的 TiR
 
 微信 VoIP 显示和分辨率参数通过 `VOIP_SCREEN_WIDTH`、`VOIP_SCREEN_HEIGHT`、`VOIP_VIDEO_RES_MODE`、`VOIP_CAMERA_ROTATION`、`VOIP_DOWN_VIDEO_ROTATION`、`VOIP_ASPECT_RATIO`、`VOIP_OBJECT_FIT`、`VOIP_HOR_MIRROR` 和 `VOIP_VERT_MIRROR` 环境变量配置；其含义见 [微信 VoIP 设备接入](../../device-voip.md#设备侧前提)。`VOIP_DOWN_VIDEO_ROTATION` 默认为 `0`，此时不上传；`1` 输出正向画面，`2` 保留旋转画面。
 
+实时查看（H5）画布呈现字段通过 `STREAM_ASPECT_RATIO`（正数或 `宽:高`，宽高 1–9999）、`STREAM_OBJECT_FIT`（`fill/contain/cover`）、`STREAM_CAMERA_ROTATION`（`0/90/180/270`）、`STREAM_HOR_MIRROR` 和 `STREAM_VERT_MIRROR`（`true/false`）环境变量配置；均未设置时不上传，H5 使用 16:9 + contain 默认值。含义见 [H5 实时查看与按住说话](../../device-h5-live.md)。
+
 使用 MJPEG 下行并将画面完整缩小到设备屏幕范围：
 
 ```bash

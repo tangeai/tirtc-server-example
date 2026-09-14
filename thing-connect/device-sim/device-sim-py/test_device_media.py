@@ -1,13 +1,18 @@
+import os
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import requests
 import device_flow
-from device_rtc_runtime import DeviceRtcRuntime
+from device_rtc_runtime import DeviceRtcRuntime, _stream_presentation_env
 
 
 class DeviceMediaTests(unittest.TestCase):
+    @patch.dict(os.environ, {
+        "STREAM_ASPECT_RATIO": "", "STREAM_OBJECT_FIT": "",
+        "STREAM_CAMERA_ROTATION": "", "STREAM_HOR_MIRROR": "", "STREAM_VERT_MIRROR": "",
+    })
     def test_scene_profiles_follow_config_not_voip_defaults(self):
         runtime = object.__new__(DeviceRtcRuntime)
         runtime.config = SimpleNamespace(
@@ -26,6 +31,31 @@ class DeviceMediaTests(unittest.TestCase):
         self.assertEqual(profiles["call"]["down_video_mt"], [])
         self.assertTrue(profiles["call"]["no_video"])
         self.assertTrue(profiles["voip"]["no_video"])
+
+    @patch.dict(os.environ, {
+        "STREAM_ASPECT_RATIO": "4:3", "STREAM_OBJECT_FIT": "cover",
+        "STREAM_CAMERA_ROTATION": "90",
+        "STREAM_HOR_MIRROR": "true", "STREAM_VERT_MIRROR": "false",
+    })
+    def test_stream_presentation_env_fields(self):
+        fields = _stream_presentation_env()
+        self.assertEqual(fields["aspect_ratio"], "4:3")
+        self.assertEqual(fields["object_fit"], "cover")
+        self.assertEqual(fields["camera_rotation"], 90)
+        self.assertTrue(fields["hor_mirror"])
+        self.assertFalse(fields["vert_mirror"])
+
+    @patch.dict(os.environ, {
+        "STREAM_ASPECT_RATIO": "1.7777777778", "STREAM_OBJECT_FIT": "",
+        "STREAM_CAMERA_ROTATION": "45", "STREAM_HOR_MIRROR": "", "STREAM_VERT_MIRROR": "maybe",
+    })
+    def test_stream_presentation_env_invalid_values_are_dropped(self):
+        fields = _stream_presentation_env()
+        self.assertEqual(fields["aspect_ratio"], 1.7777777778)
+        self.assertNotIn("object_fit", fields)
+        self.assertNotIn("camera_rotation", fields)
+        self.assertNotIn("hor_mirror", fields)
+        self.assertNotIn("vert_mirror", fields)
 
     @patch("device_flow.time.sleep")
     @patch("device_flow.http_trace.request")

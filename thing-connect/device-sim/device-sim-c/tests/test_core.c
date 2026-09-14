@@ -41,7 +41,7 @@ static void test_device_media_profile(void) {
     char body[1024];
     assert(device_media_profile_json(body, sizeof(body), "pcm_s16le_16khz",
                                      "opus_16khz", "h265", "mjpeg", 1,
-                                     "{\"no_video\":false}") == 0);
+                                     "{\"no_video\":false}", NULL) == 0);
     cJSON *root = cJSON_Parse(body);
     assert(root);
     cJSON *profiles = cJSON_GetObjectItem(root, "profiles");
@@ -59,7 +59,7 @@ static void test_device_media_profile(void) {
     cJSON_Delete(root);
     assert(device_media_profile_json(body, sizeof(body), "alaw_8khz",
                                      "alaw_8khz", "h264", "h264", 0,
-                                     "{\"no_video\":true}") == 0);
+                                     "{\"no_video\":true}", NULL) == 0);
     root = cJSON_Parse(body);
     call = cJSON_GetObjectItem(cJSON_GetObjectItem(root, "profiles"), "call");
     assert(cJSON_GetArraySize(cJSON_GetObjectItem(call, "up_video_mt")) == 0);
@@ -67,10 +67,39 @@ static void test_device_media_profile(void) {
     assert(cJSON_IsTrue(cJSON_GetObjectItem(call, "no_video")));
     cJSON_Delete(root);
     assert(device_media_profile_json(body, 8, "alaw_8khz",
-                                     "alaw_8khz", "h264", "h264", 1, "{}") == -1);
+                                     "alaw_8khz", "h264", "h264", 1, "{}", NULL) == -1);
     assert(body[0] == '\0');
     assert(device_media_profile_json(body, sizeof(body), "invalid",
-                                     "alaw_8khz", "h264", "h264", 1, "{}") == -1);
+                                     "alaw_8khz", "h264", "h264", 1, "{}", NULL) == -1);
+
+    StreamPresentation presentation = {
+        .aspect_ratio = "4:3", .object_fit = "contain",
+        .camera_rotation = "90", .hor_mirror = "true",
+        .vert_mirror = "false",
+    };
+    assert(device_media_profile_json(body, sizeof(body), "pcm_s16le_16khz",
+                                     "opus_16khz", "h265", "mjpeg", 1,
+                                     "{\"no_video\":false}", &presentation) == 0);
+    root = cJSON_Parse(body);
+    assert(root);
+    stream = cJSON_GetObjectItem(cJSON_GetObjectItem(root, "profiles"), "stream");
+    assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(stream, "aspect_ratio")), "4:3") == 0);
+    assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(stream, "object_fit")), "contain") == 0);
+    assert(cJSON_GetNumberValue(cJSON_GetObjectItem(stream, "camera_rotation")) == 90);
+    assert(cJSON_IsTrue(cJSON_GetObjectItem(stream, "hor_mirror")));
+    assert(cJSON_IsFalse(cJSON_GetObjectItem(stream, "vert_mirror")));
+    cJSON_Delete(root);
+
+    presentation.aspect_ratio = "+4:3";
+    presentation.camera_rotation = "90junk";
+    assert(device_media_profile_json(body, sizeof(body), "pcm_s16le_16khz",
+                                     "opus_16khz", "h265", "mjpeg", 1,
+                                     "{\"no_video\":false}", &presentation) == 0);
+    root = cJSON_Parse(body);
+    stream = cJSON_GetObjectItem(cJSON_GetObjectItem(root, "profiles"), "stream");
+    assert(!cJSON_GetObjectItem(stream, "aspect_ratio"));
+    assert(!cJSON_GetObjectItem(stream, "camera_rotation"));
+    cJSON_Delete(root);
 
     assert(unsetenv("VOIP_DOWN_VIDEO_ROTATION") == 0);
     assert(voip_profile_json(body, sizeof(body)) == 0);

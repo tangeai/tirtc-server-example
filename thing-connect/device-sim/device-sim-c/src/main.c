@@ -1126,11 +1126,19 @@ int device_reference_run(int argc, char *argv[]) {
 
     char media_profile[1536];
     char voip_profile[512];
+    StreamPresentation stream_presentation = {
+        .aspect_ratio = getenv("STREAM_ASPECT_RATIO"),
+        .object_fit = getenv("STREAM_OBJECT_FIT"),
+        .camera_rotation = getenv("STREAM_CAMERA_ROTATION"),
+        .hor_mirror = getenv("STREAM_HOR_MIRROR"),
+        .vert_mirror = getenv("STREAM_VERT_MIRROR"),
+    };
     if (voip_profile_json(voip_profile, sizeof(voip_profile)) != 0 ||
         device_media_profile_json(media_profile, sizeof(media_profile),
                                   up_audio_spec->name, down_audio_spec->name,
                                   up_video_spec->name, down_video_spec->name,
-                                  video_path[0] != '\0', voip_profile) != 0 ||
+                                  video_path[0] != '\0', voip_profile,
+                                  &stream_presentation) != 0 ||
         report_device_media(svc.device_server, mqtt_token, media_profile) != 0)
         LOG_W("设备媒体能力未同步，请检查 device-server，恢复后重新启动模拟器上报");
 

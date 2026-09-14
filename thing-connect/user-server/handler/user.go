@@ -12,6 +12,7 @@ import (
 
 	"thing-connect/internal/apiresp"
 	"thing-connect/internal/captcha"
+	"thing-connect/internal/deviceprofile"
 	"thing-connect/internal/mqttc"
 	"thing-connect/internal/service"
 	"thing-connect/internal/store"
@@ -41,6 +42,10 @@ type Server struct {
 	mqtt      *mqttc.Broker
 	jwtSecret string
 
+	// profileSvc serves the public device capability snapshot used to enrich
+	// the rtc-token response. Nil disables the optional enrichment.
+	profileSvc *deviceprofile.Service
+
 	callServerURL string // call-server base URL for internal/unbind
 	internalKey   string // X-Internal-Key header value
 
@@ -59,10 +64,11 @@ type Server struct {
 	passwordResetMailQueueCancel context.CancelFunc
 }
 
-func NewServer(userSvc *service.UserService, bindSvc *service.BindService, mqtt *mqttc.Broker, db *sqlx.DB, redisClient *redis.Client, jwtSecret, callServerURL, internalKey string, roleStore store.RoleBindingStore, cleanup *UnbindCleanup) *Server {
+func NewServer(userSvc *service.UserService, bindSvc *service.BindService, profileSvc *deviceprofile.Service, mqtt *mqttc.Broker, db *sqlx.DB, redisClient *redis.Client, jwtSecret, callServerURL, internalKey string, roleStore store.RoleBindingStore, cleanup *UnbindCleanup) *Server {
 	return &Server{
 		userSvc: userSvc, bindSvc: bindSvc, mqtt: mqtt, jwtSecret: jwtSecret,
-		callServerURL: callServerURL, internalKey: internalKey, RoleStore: roleStore, UnbindCleanup: cleanup, DB: db, RDB: redisClient,
+		profileSvc: profileSvc, callServerURL: callServerURL, internalKey: internalKey,
+		RoleStore: roleStore, UnbindCleanup: cleanup, DB: db, RDB: redisClient,
 	}
 }
 

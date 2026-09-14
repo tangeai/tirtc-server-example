@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"sync"
 
 	"thing-connect/internal/apiresp"
@@ -68,10 +69,24 @@ func (s *Server) getRtcToken(c *gin.Context) {
 		return
 	}
 
-	apiresp.OK(c, gin.H{
+	var profiles map[string]map[string]json.RawMessage
+	if s.profileSvc != nil {
+		profiles = s.profileSvc.OptionalPublicSnapshot(c.Request.Context(), deviceID)
+	}
+	apiresp.OK(c, buildRtcTokenData(token, appID, endpoint, inCall, profiles))
+}
+
+// buildRtcTokenData assembles the rtc-token response payload. profiles is
+// omitted (never null) when nil.
+func buildRtcTokenData(token, appID, endpoint string, inCall bool, profiles map[string]map[string]json.RawMessage) gin.H {
+	data := gin.H{
 		"token":    token,
 		"app_id":   appID,
 		"endpoint": endpoint,
 		"in_call":  inCall,
-	})
+	}
+	if profiles != nil {
+		data["profiles"] = profiles
+	}
+	return data
 }

@@ -71,6 +71,8 @@ H5 实时预览链路**不做运行时能力协商**。设备接入该页面时�
 - 一个连接内不得无协商切换编码。要更换 profile，先结束当前连接并让设备端和 H5 配置使用同一合同
 - H5 talkback 的默认采样率在前端代码中固定为 `8000`；切换到 `16000` 时，需要同时确认设备解码链路和浏览器端配置
 
+编码与封装保持固定契约；自适应只发生在**画布呈现**层。H5 从 rtc-token 响应的 `profiles.stream` 读取画面比例（`aspect_ratio`，正数或 `宽:高`）、缩放方式（`object_fit`，fill/contain/cover）、旋转（`camera_rotation`，0/90/180/270，90/270 时画布宽高比取倒数）和镜像（`hor_mirror`/`vert_mirror`），调整 canvas 的盒子比例与 CSS transform。设备未上报时回退为 16:9 + contain + 无变换；这些字段不会改变编码流，也不参与协商。
+
 ---
 
 ## 链路概览
@@ -85,7 +87,7 @@ sequenceDiagram
     DEV->>DEV: 等待 on_conn_accepted
 
     H5->>US: GET /v1/user/device/rtc-token?device_id=...
-    US-->>H5: token + app_id + endpoint + in_call
+    US-->>H5: token + app_id + endpoint + in_call（+ profiles 可选）
     H5->>DEV: TiRTC connect(device_id, token)
 
     DEV-->>H5: stream 10 音频 + stream 11 视频
@@ -96,6 +98,8 @@ sequenceDiagram
 
 - 校验这台设备是否属于当前登录用户
 - 用该设备的 `device_key` 构造 TiRTC connect token
+
+响应还会 best-effort 携带设备上线时上报的能力快照 `profiles`（与设备列表同构）。它在同一次响应中下发，H5 不单独拉取；设备未上报或读取失败时省略该字段，不影响 H5 建连。
 
 它返回的 `in_call` 只是给 H5 做提示用。即使设备正在设备间通话，接口仍然会签发 token，是否允许用户继续预览由前端自己决定。
 
@@ -128,7 +132,22 @@ Authorization: Bearer <user_jwt>
     "token": "v1.eyJ...",
     "app_id": "2818153",
     "endpoint": "https://api-tirtc.tange365.com",
-    "in_call": false
+    "in_call": false,
+    "profiles": {
+      "stream": {
+        "up_audio_mt": ["alaw"],
+        "up_video_mt": ["h264"],
+        "down_audio_mt": ["alaw"],
+        "down_video_mt": [],
+        "audio_rate": 8000,
+        "audio_channels": 1,
+        "aspect_ratio": "4:3",
+        "object_fit": "contain",
+        "camera_rotation": 90,
+        "hor_mirror": true,
+        "vert_mirror": false
+      }
+    }
   }
 }
 ```
@@ -139,6 +158,7 @@ Authorization: Bearer <user_jwt>
 | `app_id` | TiRTC App ID |
 | `endpoint` | TiRTC API 地址 |
 | `in_call` | 设备当前是否在通话中，仅用于前端提示 |
+| `profiles` | 可选。设备能力快照（同设备列表 `profiles`），H5 读取 `profiles.stream` 调整画布；设备未上报或读取失败时省略 |
 
 设备侧只需要了解三点：
 
@@ -187,6 +207,7 @@ H5 先调用：
 - `app_id` 用于初始化 Web SDK
 - `endpoint` 是 TiRTC 服务地址
 - `in_call` 只是提示字段，不是服务端拒绝条件
+- `profiles`（可选）携带设备能力快照，`profiles.stream` 驱动画布呈现：`aspect_ratio`（正数或 `宽:高`）、`object_fit`（fill/contain/cover）、`camera_rotation`（0/90/180/270，90/270 时画布宽高比取倒数）、`hor_mirror`/`vert_mirror`（CSS transform）；缺失时保持 16:9 + contain + 无变换
 
 ### 3. 初始化 Web SDK 并建立连接
 
