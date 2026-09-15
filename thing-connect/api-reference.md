@@ -44,11 +44,20 @@ Admin 接口见 [Admin API](admin/admin-server/API.md)。标记为内部服务�
 
 设备启动时通过该接口获取各业务服务和 TiRTC 的入口地址，无需鉴权。自托管环境需要在 user-server 中启用 `discovery.enabled`，并配置设备可访问的公网地址。
 
-向 `fetch_services()` 传入入口根地址后，Linux C 参考实现会请求根地址下的 `/services`。演示环境入口为 `http://ep-open.tangeopen.com/services`。
+向 `fetch_services()` 传入入口根地址后，Linux C 参考实现会请求根地址下的 `/services`。演示环境按接入协议提供两个入口：
+
+| 接入方式 | 服务发现入口 |
+|---|---|
+| HTTP | `http://ep-open.tangeopen.com/services` |
+| HTTPS | `https://ep-open.tangeopen.com/services` |
+
+HTTPS 接入使用 HTTPS 入口，返回 HTTPS 业务服务地址和 MQTT TLS 地址。客户端应直接使用返回的完整地址，包括协议和端口，不要自行替换协议。
 
 **成功响应示例**（HTTP 200）
 
-以下为演示环境的响应示例，实际接入时以接口返回为准。
+以下分别展示演示环境两个入口的响应，实际接入时以接口返回为准。
+
+**HTTP 入口响应**
 
 ```jsonc
 {
@@ -59,6 +68,20 @@ Admin 接口见 [Admin API](admin/admin-server/API.md)。标记为内部服务�
   "call-srv": "http://srv-open.tangeopen.com", // call-server 根地址
   "mqtt-srv": "mqtt://mqtt-open.tangeopen.com:8884", // MQTT 地址，格式 mqtt://host:port 或 mqtts://host:port
   "tirtc-srv": "http://ep-tirtc.tange365.com" // TiRTC SDK 服务入口；用于 TIRTC_OPT_SERVICE_ENDPOINT
+}
+```
+
+**HTTPS 入口响应**
+
+```jsonc
+{
+  "device-srv": "https://srv-open.tangeopen.com", // device-server 根地址
+  "user-srv": "https://srv-open.tangeopen.com", // user-server 根地址，供支持用户端入口发现的客户端使用
+  "voip-srv": "https://srv-open.tangeopen.com", // voip-server 根地址
+  "ai-srv": "https://srv-open.tangeopen.com", // ai-server 根地址
+  "call-srv": "https://srv-open.tangeopen.com", // call-server 根地址
+  "mqtt-srv": "mqtts://mqtt-open.tangeopen.com:8883", // MQTT 地址，格式 mqtt://host:port 或 mqtts://host:port
+  "tirtc-srv": "https://ep-tirtc.tange365.com" // TiRTC SDK 服务入口；用于 TIRTC_OPT_SERVICE_ENDPOINT
 }
 ```
 
