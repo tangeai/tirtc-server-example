@@ -48,15 +48,17 @@ Admin 接口见 [Admin API](admin/admin-server/API.md)。标记为内部服务�
 
 **成功响应示例**（HTTP 200）
 
+以下为演示环境的响应示例，实际接入时以接口返回为准。
+
 ```jsonc
 {
-  "device-srv": "https://xiaotai.chat", // device-server 根地址
-  "user-srv": "https://xiaotai.chat", // user-server 根地址，供支持用户端入口发现的客户端使用
-  "voip-srv": "https://xiaotai.chat", // voip-server 根地址
-  "ai-srv": "https://xiaotai.chat", // ai-server 根地址
-  "call-srv": "https://xiaotai.chat", // call-server 根地址
-  "mqtt-srv": "mqtts://mqtt-open.tangeopen.com:8883", // MQTT 地址，格式 mqtt://host:port 或 mqtts://host:port
-  "tirtc-srv": "<实际配置的TiRTC服务入口>" // TiRTC SDK 服务入口；用于 TIRTC_OPT_SERVICE_ENDPOINT
+  "device-srv": "http://srv-open.tangeopen.com", // device-server 根地址
+  "user-srv": "http://srv-open.tangeopen.com", // user-server 根地址，供支持用户端入口发现的客户端使用
+  "voip-srv": "http://srv-open.tangeopen.com", // voip-server 根地址
+  "ai-srv": "http://srv-open.tangeopen.com", // ai-server 根地址
+  "call-srv": "http://srv-open.tangeopen.com", // call-server 根地址
+  "mqtt-srv": "mqtt://mqtt-open.tangeopen.com:8884", // MQTT 地址，格式 mqtt://host:port 或 mqtts://host:port
+  "tirtc-srv": "http://ep-tirtc.tange365.com" // TiRTC SDK 服务入口；用于 TIRTC_OPT_SERVICE_ENDPOINT
 }
 ```
 
