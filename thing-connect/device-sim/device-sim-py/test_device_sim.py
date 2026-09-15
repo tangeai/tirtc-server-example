@@ -139,7 +139,7 @@ class DeviceSimulatorTests(unittest.TestCase):
         with redirect_stdout(output):
             device_sim_main._print_bind_guide()
 
-        self.assertIn("https://demo-open.tange-ai.com", output.getvalue())
+        self.assertIn("https://xiaotai.chat", output.getvalue())
         self.assertNotIn("srv-open.tangeopen.com", output.getvalue())
 
     def test_bind_guide_uses_discovered_local_user_server(self):
@@ -147,7 +147,7 @@ class DeviceSimulatorTests(unittest.TestCase):
         with redirect_stdout(output):
             device_sim_main._print_bind_guide("http://dev-demo-open.tangeai.cn:8080")
         self.assertIn("http://dev-demo-open.tangeai.cn:8080", output.getvalue())
-        self.assertNotIn("https://demo-open.tange-ai.com", output.getvalue())
+        self.assertNotIn("https://xiaotai.chat", output.getvalue())
 
     def test_temp_mqtt_rejection_does_not_claim_token_expiration(self):
         client = mock.Mock()

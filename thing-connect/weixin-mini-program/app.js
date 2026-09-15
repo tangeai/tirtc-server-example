@@ -195,8 +195,8 @@ App({
 
   globalData: {
     // 替换为实际部署地址
-    userServerBaseUrl: 'https://demo-open.tange-ai.com',
-    voipServerBaseUrl: 'https://demo-open.tange-ai.com',
+    userServerBaseUrl: 'https://xiaotai.chat',
+    voipServerBaseUrl: 'https://xiaotai.chat',
     // 替换为微信 IoT 平台分配的 ModelID
     modelId: 'HRHY_vJ9mHI2KQhd6yvj9Q',
     wxAppId: 'wx27d4b2d7eb37eb58',

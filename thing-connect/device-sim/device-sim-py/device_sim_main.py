@@ -21,7 +21,7 @@ import threading
 
 DEFAULT_SDK_VERSION = "2.3.0"
 DEFAULT_AUDIO_FILENAME = "audio.g711a"
-EXPERIENCE_PLATFORM_URL = "https://demo-open.tange-ai.com"
+EXPERIENCE_PLATFORM_URL = "https://xiaotai.chat"
 MIN_PYTHON_VERSION = (3, 10)
 MAX_PYTHON_VERSION = (3, 14)
 COMMAND_THREAD_JOIN_TIMEOUT_SEC = 5.0

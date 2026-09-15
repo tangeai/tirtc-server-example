@@ -40,7 +40,7 @@
 #include "session_coordinator.h"
 
 #define DEFAULT_AUDIO_PATH "../assets/audio.g711a"
-#define EXPERIENCE_PLATFORM_URL "https://demo-open.tange-ai.com"
+#define EXPERIENCE_PLATFORM_URL "https://xiaotai.chat"
 
 /* ── Signal handler ──────────────────────────────────────────────────────── */
 

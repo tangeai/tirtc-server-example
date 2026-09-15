@@ -38,7 +38,7 @@
 #define PLATFORM_DEFAULT_HTTP_TIMEOUT_MS 15000U
 #define PLATFORM_DEFAULT_DISCOVERY "http://ep-open.tangeopen.com/services"
 #define PLATFORM_DEFAULT_PROVISION_TIMEOUT_SECONDS 190U
-#define EXPERIENCE_PLATFORM_URL "https://demo-open.tange-ai.com"
+#define EXPERIENCE_PLATFORM_URL "https://xiaotai.chat"
 #define PROVISION_DONE_BIT BIT0
 #define PROVISION_ERROR_BIT BIT1
 

@@ -57,7 +57,7 @@ python device_sim_main.py --mac AA:BB:CC:DD:EE:FF
 
 ### 步骤 3：注册或登录官方 H5 平台
 
-浏览器打开 <a href="https://demo-open.tange-ai.com/" target="_blank" rel="noopener">https://demo-open.tange-ai.com/</a>，用邮箱注册账号并登录。
+浏览器打开 <a href="https://xiaotai.chat/" target="_blank" rel="noopener">https://xiaotai.chat/</a>，用邮箱注册账号并登录。
 
 ### 步骤 4：绑定模拟器设备
 

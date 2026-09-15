@@ -46,7 +46,21 @@ Admin 接口见 [Admin API](admin/admin-server/API.md)。标记为内部服务�
 
 向 `fetch_services()` 传入入口根地址后，Linux C 参考实现会请求根地址下的 `/services`。演示环境入口为 `http://ep-open.tangeopen.com/services`。
 
-**成功响应** — HTTP 200，JSON 对象：
+**成功响应示例**（HTTP 200）
+
+```jsonc
+{
+  "device-srv": "https://xiaotai.chat", // device-server 根地址
+  "user-srv": "https://xiaotai.chat", // user-server 根地址，供支持用户端入口发现的客户端使用
+  "voip-srv": "https://xiaotai.chat", // voip-server 根地址
+  "ai-srv": "https://xiaotai.chat", // ai-server 根地址
+  "call-srv": "https://xiaotai.chat", // call-server 根地址
+  "mqtt-srv": "mqtts://mqtt-open.tangeopen.com:8883", // MQTT 地址，格式 mqtt://host:port 或 mqtts://host:port
+  "tirtc-srv": "<实际配置的TiRTC服务入口>" // TiRTC SDK 服务入口；用于 TIRTC_OPT_SERVICE_ENDPOINT
+}
+```
+
+**成功响应**（HTTP 200），JSON 对象：
 
 | 字段 | 必填 | 说明 |
 |------|:--:|------|
@@ -79,6 +93,15 @@ Admin 接口见 [Admin API](admin/admin-server/API.md)。标记为内部服务�
 `room_code` 是多人对讲的六位房间号，不是 `room_id`。客户端应保存服务端返回的完整 `room_id`，按业务流程选择接口，不自行生成、截取或替换前缀。微信 VoIP 的 `wx_room_id` 属于微信呼叫流程，也不能与这两类 ID 混用。
 
 ## 约定
+
+### 示例阅读说明
+
+请求与响应示例使用 `jsonc` 展示完整字段，并用 `//` 注释说明含义。实际 HTTP 正文使用标准 JSON，发送前须移除注释；`Content-Type` 仍为 `application/json`。
+
+- 字段表说明类型、必填性、范围和返回条件；示例值不代表默认值。可选字段按实际需要传入，只读字段只出现在响应中。
+- 示例展开嵌套对象和数组元素的字段；数组仅列出代表性元素。`metadata`、`public_config`、`user_params` 等动态键值对象按提供方或业务配置取值，不存在固定的全部键列表。
+- 有条件返回的字段在示例中展示其存在时的形态，实际响应仍可能省略；空对象、空数组、`null` 与字段省略按各接口说明区分。
+- 凭证、密钥和上游生成的连接地址使用 `<说明>` 占位值，调用时使用实际返回值。不同服务类型和兼容请求形态分别展示，不将互斥配置混在同一个请求中。
 
 ### 响应格式
 
@@ -171,19 +194,19 @@ voip-server、ai-server 和 call-server 使用相同的 `jwt_secret` 验证。�
 
 上报设备 MAC，获取 6 位验证码和临时 MQTT 连接凭证。
 
-**鉴权**: 无（可选 HMAC 签名）
+**鉴权**： 无（可选 HMAC 签名）
 
 **请求头**
 
 | 字段 | 必填 | 说明 |
 |------|:--:|------|
 | Content-Type | ✅ | `application/json` |
-| X-Device-Id | 情况1 | 设备 ID |
-| X-Timestamp | 情况1 | Unix 秒级时间戳，与服务器偏差 ≤300s |
-| X-Nonce | 情况1 | 随机串，建议使用 16 位十六进制；300 秒内不可重复，服务端不限定为 16 位 |
-| X-Signature | 情况1 | `Base64(HMAC-SHA256(device_key, device_id + timestamp + nonce))` |
+| X-Device-Id | 签名上报时必填 | 设备 ID |
+| X-Timestamp | 签名上报时必填 | Unix 秒级时间戳，与服务器偏差 ≤300s |
+| X-Nonce | 签名上报时必填 | 随机串，建议使用 16 位十六进制；300 秒内不可重复，服务端不限定为 16 位 |
+| X-Signature | 签名上报时必填 | `Base64(HMAC-SHA256(device_key, device_id + timestamp + nonce))` |
 
-> 四个签名 Header **要么全不带，要么全带**。部分带 = 签名失败（6008）。
+> 签名上报必须带齐四个签名请求头，否则返回 `6008`。未签名上报不带这四个请求头。
 
 **请求体**
 
@@ -193,27 +216,37 @@ voip-server、ai-server 和 call-server 使用相同的 `jwt_secret` 验证。�
 
 **请求示例**
 
-```json
-{ "mac": "AA:BB:CC:DD:EE:FF" }
+```jsonc
+{
+  "mac": "AA:BB:CC:DD:EE:FF" // 必填，设备 MAC 地址，建议使用 AA:BB:CC:DD:EE:FF 格式；不能为空
+}
 ```
+
+**旧客户端兼容字段**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `device_id` | string | 未签名请求不得传非空值，否则返回 `6014`；签名请求以 `X-Device-Id` 为准，忽略此字段 |
+| `chip_uid` | string | 接受但不使用，新接入省略 |
+| `device_rand` | string | 接受但不使用，新接入省略 |
 
 **两种请求形态**
 
 | 情况 | Header 签名 | 处理方式 |
 |------|:--:|---------|
-| 1 — 签名信任 | ✅ 四个全带且验签通过 | 跳 L1/L2/L4，校验 device_id↔MAC 一致性，返回验证码 |
-| 2 — 裸设备 | ❌ | 走完整四层限频，返回验证码 |
+| 签名上报 | ✅ 四个全带且验签通过 | 跳过 L1、L2、L4 限制，校验设备 ID 与 MAC 是否一致，返回验证码 |
+| 未签名上报 | ❌ | 执行完整的四层限频检查，返回验证码 |
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok",
-  "data": {
-    "code": "386236",
-    "temp_token": "eyJhbGciOiJIUzI1NiIs...",
-    "temp_client_id": "tmp_a1b2c3d4"
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "code": "386236", // 六位绑定验证码字符串，与顶层业务码 code 区分
+    "temp_token": "<实际返回的 temp_token>", // 临时设备 JWT，供本次绑定的 MQTT 和 TTS 使用
+    "temp_client_id": "tmp_a1b2c3d4" // 临时 MQTT ClientID / Username
   }
 }
 ```
@@ -232,6 +265,7 @@ voip-server、ai-server 和 call-server 使用相同的 `jwt_secret` 验证。�
 | 6008 | 401 | 签名不完整、签名失败、时间戳偏差过大、Nonce 重放；时间戳格式或偏差错误会在 `msg` 中给出具体原因 |
 | 6010 | 400 | mac 为空 |
 | 6013 | 403 | 签名上报中的 MAC 与该 device_id 已记录的 MAC 不一致 |
+| 6014 | 400 | 未签名上报的请求体包含非空 device_id |
 | 40901 | 409 | 该 MAC 已有未消费验证码且本次未命中幂等重放（详见下方「重复上报同一 MAC 的行为」），附 `Retry-After` 头 |
 | 429 | 429 | L2 单 IP 新 MAC 过多 / L3 同 MAC 请求超限 / L4 全局待处理码超限，附 `Retry-After` 头 |
 | 50000 | 500 | 服务器内部错误（Redis/DB/系统异常） |
@@ -272,7 +306,7 @@ voip-server、ai-server 和 call-server 使用相同的 `jwt_secret` 验证。�
 
 把 `/v1/device/report` 返回的 6 位设备验证码合成为 8kHz、单声道、16-bit little-endian PCM。该接口只接受与验证码同一次 Report 返回的 `temp_token`，不能使用正式 `mqtt_token` 或其他设备的临时 token。
 
-**鉴权**: ✅ `Authorization: Bearer <temp_token>`
+**鉴权**： ✅ `Authorization: Bearer <temp_token>`
 
 **查询参数**: `code` 为同一次 Report 返回的 6 位验证码；`fmt=wav` 时返回带 44 字节 RIFF/WAV 头的 `audio/wav`，不传时返回 `audio/pcm;rate=8000;channels=1;format=s16le`。
 
@@ -311,7 +345,7 @@ Authorization: Bearer <temp_token>
 
 已持有 device_id + device_key 的设备，用 HMAC 签名换取正式 MQTT 连接 token。
 
-**鉴权**: 无（HMAC 签名）
+**鉴权**： 无（HMAC 签名）
 
 **请求头**
 
@@ -325,14 +359,14 @@ Authorization: Bearer <temp_token>
 
 **无请求体**
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok",
-  "data": {
-    "mqtt_token": "eyJhbGciOiJIUzI1NiIs..."
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "mqtt_token": "<实际返回的 mqtt_token>" // 正式设备 JWT，用于 MQTT Password 和设备 HTTP Bearer
   }
 }
 ```
@@ -352,24 +386,49 @@ Authorization: Bearer <temp_token>
 **签名示例 (C — mbedTLS)**
 
 ```c
-#include <mbedtls/md.h>
+#include <stddef.h>
+#include <stdio.h>
+#include <string.h>
 #include <mbedtls/base64.h>
+#include <mbedtls/md.h>
 
+/* 成功返回 0；参数、缓冲区或加密操作失败返回 -1。
+ * 调用方须提供秒级 timestamp 和每次请求不同的 nonce。
+ * sig_out 至少 45 字节：32 字节 SHA-256 摘要编码为 44 字符，再加结束符。 */
 int device_sign(const char *device_id, const char *device_key,
                 const char *timestamp, const char *nonce,
                 char *sig_out, size_t sig_size)
 {
+    if (device_id == NULL || device_key == NULL || timestamp == NULL ||
+        nonce == NULL || sig_out == NULL || sig_size < 45 ||
+        device_id[0] == '\0' || device_key[0] == '\0' ||
+        timestamp[0] == '\0' || nonce[0] == '\0') {
+        return -1;
+    }
+    sig_out[0] = '\0';
+
+    /* 签名原文不含分隔符；检查截断，不能对不完整原文计算签名。 */
     char raw[256];
     int raw_len = snprintf(raw, sizeof(raw), "%s%s%s", device_id, timestamp, nonce);
-    unsigned char hmac[32];
-    if (raw_len < 0 || (size_t)raw_len >= sizeof(raw)) return -1;
-    if (mbedtls_md_hmac(mbedtls_md_info_from_type(MBEDTLS_MD_SHA256),
-                    (const unsigned char *)device_key, strlen(device_key),
-                    (const unsigned char *)raw, (size_t)raw_len, hmac) != 0) return -1;
-    size_t olen;
-    if (mbedtls_base64_encode((unsigned char *)sig_out, sig_size, &olen, hmac, 32) != 0) return -1;
-    if (olen >= sig_size) return -1;
-    sig_out[olen] = '\0';
+    if (raw_len < 0 || (size_t)raw_len >= sizeof(raw)) {
+        return -1;
+    }
+    const mbedtls_md_info_t *md = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+    unsigned char digest[32];
+    if (md == NULL || mbedtls_md_hmac(md,
+            (const unsigned char *)device_key, strlen(device_key),
+            (const unsigned char *)raw, (size_t)raw_len, digest) != 0) {
+        return -1;
+    }
+
+    /* 编码的是二进制 HMAC 摘要，不是摘要的十六进制文本。 */
+    size_t written = 0;
+    if (mbedtls_base64_encode((unsigned char *)sig_out, sig_size,
+                             &written, digest, sizeof(digest)) != 0 ||
+        written >= sig_size) {
+        return -1;
+    }
+    sig_out[written] = '\0';
     return 0;
 }
 ```
@@ -394,47 +453,54 @@ int device_sign(const char *device_id, const char *device_key,
 
 **鉴权**：正式设备 `mqtt_token`。设备身份仅取自 JWT，不接受请求体中的 `device_id`；用户 token、临时 token、缺少过期时间或已过期的 token 返回 HTTP 401 + `code=401`。
 
-```json
+```jsonc
 {
-  "profiles": {
-    "stream": {
-      "up_audio_mt": ["alaw"],
-      "up_video_mt": ["h264"],
-      "down_audio_mt": ["alaw"],
-      "down_video_mt": [],
-      "audio_rate": 8000,
-      "audio_channels": 1
+  "profiles": { // 按场景保存的设备媒体能力
+    "stream": { // 实时查看场景；仅声明本机实际支持的能力
+      "up_audio_mt": ["alaw"], // 可选，设备发送音频的编码列表，按首选顺序排列
+      "up_video_mt": ["h264"], // 可选，设备发送视频的编码；stream/call 为数组，voip 为单个字符串
+      "down_audio_mt": ["alaw"], // 可选，设备接收音频的编码；stream/call 为数组，voip 为单个字符串
+      "down_video_mt": ["h264"], // 可选，设备接收视频的编码；stream/call 为数组，voip 为单个字符串
+      "audio_rate": 8000, // 可选，音频采样率，单位 Hz
+      "audio_channels": 1, // 可选，声道数：1 或 2
+      "camera_rotation": 0, // 可选，画面顺时针旋转角度：0、90、180、270
+      "hor_mirror": false, // 可选，是否水平镜像
+      "vert_mirror": false, // 可选，是否垂直镜像
+      "no_video": false, // 可选，是否明确声明无视频
+      "aspect_ratio": "4:3", // 可选，画面宽高比；统一接口支持正数或宽:高字符串
+      "object_fit": "contain" // 可选，画面缩放方式；voip 为 fill/contain，其他场景另支持 cover
     },
-    "call": {
-      "up_audio_mt": ["alaw"],
-      "up_video_mt": ["h264"],
-      "down_audio_mt": ["opus", "amr"],
-      "down_video_mt": ["h264", "mjpeg"],
-      "audio_rate": 16000,
-      "audio_channels": 1,
-      "camera_rotation": 0,
-      "hor_mirror": false,
-      "vert_mirror": false,
-      "aspect_ratio": "4:3",
-      "object_fit": "contain"
+    "call": { // 设备通话场景；仅声明本机实际支持的能力
+      "up_audio_mt": ["alaw"], // 可选，设备发送音频的编码列表，按首选顺序排列
+      "up_video_mt": ["h264"], // 可选，设备发送视频的编码；stream/call 为数组，voip 为单个字符串
+      "down_audio_mt": ["opus", "amr"], // 可选，设备接收音频的编码；stream/call 为数组，voip 为单个字符串
+      "down_video_mt": ["h264", "mjpeg"], // 可选，设备接收视频的编码；stream/call 为数组，voip 为单个字符串
+      "audio_rate": 16000, // 可选，音频采样率，单位 Hz
+      "audio_channels": 1, // 可选，声道数：1 或 2
+      "camera_rotation": 0, // 可选，画面顺时针旋转角度：0、90、180、270
+      "hor_mirror": false, // 可选，是否水平镜像
+      "vert_mirror": false, // 可选，是否垂直镜像
+      "no_video": false, // 可选，是否明确声明无视频
+      "aspect_ratio": "4:3", // 可选，画面宽高比；统一接口支持正数或宽:高字符串
+      "object_fit": "contain" // 可选，画面缩放方式；voip 为 fill/contain，其他场景另支持 cover
     },
-    "voip": {
-      "screen_width": 640,
-      "screen_height": 480,
-      "up_video_mt": "h264",
-      "down_video_mt": "mjpeg",
-      "down_audio_mt": "amr",
-      "audio_rate": 8000,
-      "audio_channels": 1,
-      "camera_rotation": 90,
-      "down_video_rotation": 1,
-      "aspect_ratio": 1.7777777778,
-      "hor_mirror": true,
-      "vert_mirror": false,
-      "object_fit": "contain",
-      "video_res_mode": "fit_screen",
-      "calling_timeout_sec": 30,
-      "no_video": false
+    "voip": { // 微信 VoIP 场景；仅声明本机实际支持的能力
+      "screen_width": 640, // 可选，设备显示区域宽度，单位像素
+      "screen_height": 480, // 可选，设备显示区域高度，单位像素
+      "up_video_mt": "h264", // 可选，设备发送视频的编码；stream/call 为数组，voip 为单个字符串
+      "down_video_mt": "mjpeg", // 可选，设备接收视频的编码；stream/call 为数组，voip 为单个字符串
+      "down_audio_mt": "amr", // 可选，设备接收音频的编码；stream/call 为数组，voip 为单个字符串
+      "audio_rate": 8000, // 可选，音频采样率，单位 Hz
+      "audio_channels": 1, // 可选，声道数：1 或 2
+      "camera_rotation": 90, // 可选，画面顺时针旋转角度：0、90、180、270
+      "down_video_rotation": 1, // 可选，微信下行编码方向：0 默认、1 正向、2 保留旋转
+      "aspect_ratio": 1.7777777778, // 可选，画面宽高比；统一接口支持正数或宽:高字符串
+      "hor_mirror": true, // 可选，是否水平镜像
+      "vert_mirror": false, // 可选，是否垂直镜像
+      "object_fit": "contain", // 可选，画面缩放方式；voip 为 fill/contain，其他场景另支持 cover
+      "video_res_mode": "fit_screen", // 可选，下行视频尺寸模式：auto/fit_screen/fill_screen
+      "calling_timeout_sec": 30, // 可选，呼叫超时，1–300 秒
+      "no_video": false // 可选，是否明确声明无视频
     }
   }
 }
@@ -529,23 +595,24 @@ int device_sign(const char *device_id, const char *device_key,
 
 获取当前人机验证 Provider 及其可公开的控件配置，用于初始化客户端控件。
 
-**鉴权**: 无
+**鉴权**： 无
 
 **无请求参数**
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok",
-  "data": {
-    "provider": "yidun",
-    "enabled": true,
-    "public_config": {
-      "captcha_id": "xxx"
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "provider": "yidun", // 当前人机验证提供方标识
+    "enabled": true, // 是否启用人机验证
+    "public_config": { // 提供方的公开控件参数，无密钥
+      "captcha_id": "<实际返回的 captcha_id>", // 配置验证码控件 ID 时返回
+      "mini_program_captcha_id": "<按实际配置返回的小程序控件ID>" // 可选，单独配置的小程序控件 ID
     },
-    "captcha_id": "xxx"
+    "captcha_id": "<实际返回的 captcha_id>" // 兼容旧客户端的控件 ID；未配置时为空
   }
 }
 ```
@@ -574,7 +641,7 @@ int device_sign(const char *device_id, const char *device_key,
 
 发送邮箱验证码（注册前调用）。
 
-**鉴权**: 无
+**鉴权**： 无
 
 **请求头**
 
@@ -595,16 +662,36 @@ int device_sign(const char *device_id, const char *device_key,
 
 **请求示例**
 
-```json
-{ "email": "user@example.com" }
+```jsonc
+{
+  "email": "user@example.com", // 必填，接收验证码的邮箱地址
+  "captcha": { // 可选，通用人机验证载荷，启用 Provider 时由客户端控件返回
+    "provider": "yidun", // 人机验证提供方标识
+    "token": "<客户端验证控件返回的票据>", // 验证控件返回的一次性票据
+    "metadata": { // 提供方要求的附加参数，值为字符串
+      "captcha_id": "<公开配置返回的控件ID>" // 易盾校验使用的控件 ID，取自公开配置；其他提供方按实际要求填写
+    }
+  }
+}
 ```
 
-**成功响应** — HTTP 200
+**易盾兼容请求示例**（供旧客户端使用；新接入使用上面的 `captcha` 对象）：
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok"
+  "email": "user@example.com", // 必填，接收验证码的邮箱地址
+  "captcha_id": "<易盾控件ID>", // 易盾兼容字段，控件 ID
+  "validate": "<易盾验证票据>", // 易盾兼容字段，控件返回的验证票据
+  "user": "example-user" // 易盾兼容字段，用户标识
+}
+```
+
+**成功响应**（HTTP 200）
+
+```jsonc
+{
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok" // 结果说明，业务判断使用 code
 }
 ```
 
@@ -629,7 +716,7 @@ int device_sign(const char *device_id, const char *device_key,
 
 注册新用户。
 
-**鉴权**: 无
+**鉴权**： 无
 
 **请求头**
 
@@ -647,23 +734,23 @@ int device_sign(const char *device_id, const char *device_key,
 
 **请求示例**
 
-```json
+```jsonc
 {
-  "email": "user@example.com",
-  "password": "mypassword",
-  "code": "386236"
+  "email": "user@example.com", // 必填，邮箱地址
+  "password": "ExamplePassword123!", // 必填，密码，最少 6 位
+  "code": "386236" // 必填，注册邮箱收到的六位验证码
 }
 ```
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok",
-  "data": {
-    "token": "eyJhbGciOi...",
-    "user_id": 1
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "token": "<实际返回的 token>", // 用户 JWT，供后续 Bearer 鉴权使用
+    "user_id": 1 // 注册账号的数字 ID
   }
 }
 ```
@@ -698,7 +785,7 @@ int device_sign(const char *device_id, const char *device_key,
 
 用户登录。
 
-**鉴权**: 无
+**鉴权**： 无
 
 **请求头**
 
@@ -717,22 +804,41 @@ int device_sign(const char *device_id, const char *device_key,
 
 **请求示例**
 
-```json
+```jsonc
 {
-  "email": "user@example.com",
-  "password": "mypassword"
+  "email": "user@example.com", // 必填，邮箱地址
+  "password": "ExamplePassword123!", // 必填，密码
+  "captcha": { // 可选，通用人机验证载荷，字段含义同发送验证码接口
+    "provider": "yidun", // 人机验证提供方标识
+    "token": "<客户端验证控件返回的票据>", // 验证控件返回的一次性票据
+    "metadata": { // 提供方要求的附加参数，值为字符串
+      "captcha_id": "<公开配置返回的控件ID>" // 易盾校验使用的控件 ID，取自公开配置；其他提供方按实际要求填写
+    }
+  }
 }
 ```
 
-**成功响应** — HTTP 200
+**易盾兼容请求示例**（供旧客户端使用；新接入使用上面的 `captcha` 对象）：
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok",
-  "data": {
-    "token": "eyJhbGciOi...",
-    "user_id": 1
+  "email": "user@example.com", // 必填，邮箱地址
+  "password": "ExamplePassword123!", // 必填，密码
+  "captcha_id": "<易盾控件ID>", // 易盾兼容字段，控件 ID
+  "validate": "<易盾验证票据>", // 易盾兼容字段，控件返回的验证票据
+  "user": "example-user" // 易盾兼容字段，用户标识
+}
+```
+
+**成功响应**（HTTP 200）
+
+```jsonc
+{
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "token": "<实际返回的 token>", // 用户 JWT，过期时间取自 exp
+    "user_id": 1 // 当前账号的数字 ID
   }
 }
 ```
@@ -777,7 +883,7 @@ int device_sign(const char *device_id, const char *device_key,
 
 成功响应表示请求已受理；验证码邮件由后台异步投递，可能有短暂延迟。未收到邮件时可稍后重新发起请求。
 
-**鉴权**: 无
+**鉴权**： 无
 
 **请求头**
 
@@ -793,12 +899,38 @@ int device_sign(const char *device_id, const char *device_key,
 | captcha | object | | 通用人机验证载荷，字段含义同发送验证码接口 |
 | captcha_id / validate / user | string | | 易盾兼容字段；新接入请使用 `captcha` |
 
-**成功响应** — HTTP 200
+**请求示例**
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok"
+  "email": "user@example.com", // 必填，注册邮箱地址
+  "captcha": { // 可选，通用人机验证载荷，字段含义同发送验证码接口
+    "provider": "yidun", // 人机验证提供方标识
+    "token": "<客户端验证控件返回的票据>", // 验证控件返回的一次性票据
+    "metadata": { // 提供方要求的附加参数，值为字符串
+      "captcha_id": "<公开配置返回的控件ID>" // 易盾校验使用的控件 ID，取自公开配置；其他提供方按实际要求填写
+    }
+  }
+}
+```
+
+**易盾兼容请求示例**（供旧客户端使用；新接入使用上面的 `captcha` 对象）：
+
+```jsonc
+{
+  "email": "user@example.com", // 必填，注册邮箱地址
+  "captcha_id": "<易盾控件ID>", // 易盾兼容字段，控件 ID
+  "validate": "<易盾验证票据>", // 易盾兼容字段，控件返回的验证票据
+  "user": "example-user" // 易盾兼容字段，用户标识
+}
+```
+
+**成功响应**（HTTP 200）
+
+```jsonc
+{
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok" // 结果说明，业务判断使用 code
 }
 ```
 
@@ -823,7 +955,7 @@ int device_sign(const char *device_id, const char *device_key,
 
 使用找回密码验证码设置新密码。验证码仅可使用一次，且不能用于注册。
 
-**鉴权**: 无
+**鉴权**： 无
 
 **请求头**
 
@@ -839,12 +971,22 @@ int device_sign(const char *device_id, const char *device_key,
 | password | string | ✅ | 新密码，最少 6 位 |
 | code | string | ✅ | 找回密码邮件中的 6 位验证码 |
 
-**成功响应** — HTTP 200
+**请求示例**
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok"
+  "email": "user@example.com", // 必填，注册邮箱地址
+  "password": "NewExamplePassword123!", // 必填，新密码，最少 6 位
+  "code": "386236" // 必填，找回密码邮件中的六位验证码
+}
+```
+
+**成功响应**（HTTP 200）
+
+```jsonc
+{
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok" // 结果说明，业务判断使用 code
 }
 ```
 
@@ -879,18 +1021,18 @@ Authorization: Bearer <user_jwt>
 
 查询当前用户剩余设备配额。
 
-**鉴权**: ✅
+**鉴权**： ✅
 
 **无请求体**
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok",
-  "data": {
-    "quota": 8
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "quota": 8 // 当前用户剩余可绑定设备数
   }
 }
 ```
@@ -925,48 +1067,73 @@ Authorization: Bearer <user_jwt>
 
 获取当前用户已绑定设备列表（含在线状态）。
 
-**鉴权**: ✅
+**鉴权**： ✅
 
 **无请求体**
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok",
-  "data": [
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": [ // 业务数据
     {
-      "device_id": "TIRZ00000001",
-      "device_name": "客厅学习机",
-      "status": 1,
-      "mac": "AA:BB:CC:DD:EE:FF",
-      "bind_time": "2026-06-18T12:00:00",
-      "online": true,
-      "profiles": {
-        "stream": {
-          "up_audio_mt": [
-            "alaw"
-          ],
-          "up_video_mt": [
-            "h264"
-          ],
-          "audio_rate": 8000
+      "device_id": "TIRZ00000001", // 设备 ID
+      "device_name": "客厅学习机", // 用户设置的设备名称；新绑定默认空字符串，VoIP 授权前应先设置
+      "status": 1, // 固定为 1，表示已绑定
+      "mac": "AA:BB:CC:DD:EE:FF", // 设备 MAC 地址
+      "bind_time": "2026-06-18T12:00:00", // 绑定时间，格式 YYYY-MM-DDTHH:MM:SS；无记录时为 null
+      "online": true, // 设备当前是否在线
+      "profiles": { // 按场景保存的设备媒体能力
+        "stream": { // 实时查看场景；仅声明本机实际支持的能力
+          "up_audio_mt": ["alaw"], // 设备发送音频的编码列表，按首选顺序排列
+          "up_video_mt": ["h264"], // 设备发送视频的编码；stream/call 为数组，voip 为单个字符串
+          "down_audio_mt": ["alaw"], // 设备接收音频的编码；stream/call 为数组，voip 为单个字符串
+          "down_video_mt": ["h264"], // 设备接收视频的编码；stream/call 为数组，voip 为单个字符串
+          "audio_rate": 8000, // 音频采样率，单位 Hz
+          "audio_channels": 1, // 声道数：1 或 2
+          "camera_rotation": 0, // 画面顺时针旋转角度：0、90、180、270
+          "hor_mirror": false, // 是否水平镜像
+          "vert_mirror": false, // 是否垂直镜像
+          "no_video": false, // 是否明确声明无视频
+          "aspect_ratio": "4:3", // 画面宽高比；统一接口支持正数或宽:高字符串
+          "object_fit": "contain" // 画面缩放方式；voip 为 fill/contain，其他场景另支持 cover
         },
-        "voip": {
-          "up_video_mt": "h264",
-          "down_video_mt": "mjpeg",
-          "down_audio_mt": "amr",
-          "audio_rate": 8000,
-          "camera_rotation": 90,
-          "down_video_rotation": 1,
-          "aspect_ratio": 1.7777777778,
-          "hor_mirror": true,
-          "vert_mirror": false,
-          "object_fit": "contain",
-          "has_camera": true,
-          "has_screen": true,
-          "voip_room_type": "video"
+        "call": { // 设备通话场景；仅声明本机实际支持的能力
+          "up_audio_mt": ["alaw"], // 设备发送音频的编码列表，按首选顺序排列
+          "up_video_mt": ["h264"], // 设备发送视频的编码；stream/call 为数组，voip 为单个字符串
+          "down_audio_mt": ["opus", "amr"], // 设备接收音频的编码；stream/call 为数组，voip 为单个字符串
+          "down_video_mt": ["h264", "mjpeg"], // 设备接收视频的编码；stream/call 为数组，voip 为单个字符串
+          "audio_rate": 16000, // 音频采样率，单位 Hz
+          "audio_channels": 1, // 声道数：1 或 2
+          "camera_rotation": 0, // 画面顺时针旋转角度：0、90、180、270
+          "hor_mirror": false, // 是否水平镜像
+          "vert_mirror": false, // 是否垂直镜像
+          "no_video": false, // 是否明确声明无视频
+          "aspect_ratio": "4:3", // 画面宽高比；统一接口支持正数或宽:高字符串
+          "object_fit": "contain" // 画面缩放方式；voip 为 fill/contain，其他场景另支持 cover
+        },
+        "voip": { // 微信 VoIP 场景；仅声明本机实际支持的能力
+          "screen_width": 640, // 设备显示区域宽度，单位像素
+          "screen_height": 480, // 设备显示区域高度，单位像素
+          "up_video_mt": "h264", // 设备发送视频的编码；stream/call 为数组，voip 为单个字符串
+          "down_video_mt": "mjpeg", // 设备接收视频的编码；stream/call 为数组，voip 为单个字符串
+          "down_audio_mt": "amr", // 设备接收音频的编码；stream/call 为数组，voip 为单个字符串
+          "audio_rate": 8000, // 音频采样率，单位 Hz
+          "audio_channels": 1, // 声道数：1 或 2
+          "camera_rotation": 90, // 画面顺时针旋转角度：0、90、180、270
+          "down_video_rotation": 1, // 微信下行编码方向：0 默认、1 正向、2 保留旋转
+          "aspect_ratio": 1.7777777778, // 画面宽高比；统一接口支持正数或宽:高字符串
+          "hor_mirror": true, // 是否水平镜像
+          "vert_mirror": false, // 是否垂直镜像
+          "object_fit": "contain", // 画面缩放方式；voip 为 fill/contain，其他场景另支持 cover
+          "video_res_mode": "fit_screen", // 下行视频尺寸模式：auto/fit_screen/fill_screen
+          "calling_timeout_sec": 30, // 呼叫超时，1–300 秒
+          "no_video": false, // 是否明确声明无视频
+          "has_camera": true, // 只读，服务端派生的设备上行视频能力
+          "has_screen": true, // 只读，服务端派生的设备下行视频能力
+          "voip_room_type": "video" // 只读，有任一方向视频能力为 video，否则为 voice
         }
       }
     }
@@ -1023,23 +1190,26 @@ Authorization: Bearer <user_jwt>
 `wmpfVoip.callDevice.deviceName`；最多 13 个 Unicode 字符。修改接口只保存当前名称，
 不会修改微信已保存的授权名称。
 
-**鉴权**: ✅
+**鉴权**： ✅
 
 **请求体**
 
-```json
-{ "device_id": "TIRZ00000001", "device_name": "客厅学习机" }
+```jsonc
+{
+  "device_id": "TIRZ00000001", // 设备 ID
+  "device_name": "客厅学习机" // 用户设置的设备名称，最多 13 个字符
+}
 ```
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok",
-  "data": {
-    "device_id": "TIRZ00000001",
-    "device_name": "客厅学习机"
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "device_id": "TIRZ00000001", // 修改的设备 ID
+    "device_name": "客厅学习机" // 保存后的设备名称
   }
 }
 ```
@@ -1075,7 +1245,7 @@ Authorization: Bearer <user_jwt>
 
 验证码绑定设备（用户输入设备 TTS 播报的 6 位码）。
 
-**鉴权**: ✅
+**鉴权**： ✅
 
 **请求头**
 
@@ -1092,19 +1262,21 @@ Authorization: Bearer <user_jwt>
 
 **请求示例**
 
-```json
-{ "code": "386236" }
+```jsonc
+{
+  "code": "386236" // 必填，设备本次上报的六位绑定验证码
+}
 ```
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok",
-  "data": {
-    "device_id": "TIRZ00000001",
-    "msg": "bind success"
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "device_id": "TIRZ00000001", // 绑定成功的设备 ID
+    "msg": "bind success" // 绑定结果说明，固定 bind success
   }
 }
 ```
@@ -1147,7 +1319,7 @@ Authorization: Bearer <user_jwt>
 
 按 device_id 直接绑定（无需验证码，device_id 须已存在于 `device_pool`）。
 
-**鉴权**: ✅
+**鉴权**： ✅
 
 **请求头**
 
@@ -1163,21 +1335,26 @@ Authorization: Bearer <user_jwt>
 | device_id | string | ✅ | 设备 ID（须在 device_pool 中） |
 | mac | string | 否 | 设备 MAC。带上才启用 MAC 一致性校验（`6013`）与同账号同 MAC 查重（`6015`）；省略则沿用该 device_id 已存指纹。公开绑定 UI 通常只提交 device_id |
 
+旧客户端还可传 `chip_uid`（string，芯片标识）和 `device_rand`（string，设备随机标识），随设备指纹保存。MAC 是设备一致性校验依据，新接入无需提供这两个兼容字段。
+
 **请求示例**
 
-```json
-{ "device_id": "TIRZ00000001" }
+```jsonc
+{
+  "device_id": "TIRZ00000001", // 必填，设备 ID（须在 device_pool 中）
+  "mac": "AA:BB:CC:DD:EE:FF" // 可选，设备 MAC；用于一致性校验和同账号查重，省略时沿用已存 MAC
+}
 ```
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok",
-  "data": {
-    "device_id": "TIRZ00000001",
-    "msg": "bind success"
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "device_id": "TIRZ00000001", // 绑定成功的设备 ID
+    "msg": "bind success" // 绑定结果说明，固定 bind success
   }
 }
 ```
@@ -1216,10 +1393,9 @@ Authorization: Bearer <user_jwt>
 
 **调用方**：Web、小程序。
 
-解绑设备并释放配额。若设备在线，推送 `unbind` 通知并踢除 MQTT 连接。解绑同时清空
-`device_name`，并删除该设备的 VoIP 授权和 profile，避免下一个绑定用户继承上一用户的名称。
+解绑设备并释放配额，服务端尝试发送 `unbind` 通知并踢除 MQTT 连接。成功响应表示绑定关系已解除；设备名称、VoIP 授权和 profile、AI 角色绑定及通话关系由后台清理，响应时这些清理任务可能尚未完成。
 
-**鉴权**: ✅
+**鉴权**： ✅
 
 **请求头**
 
@@ -1236,18 +1412,20 @@ Authorization: Bearer <user_jwt>
 
 **请求示例**
 
-```json
-{ "device_id": "TIRZ00000001" }
+```jsonc
+{
+  "device_id": "TIRZ00000001" // 必填，要解绑的设备 ID
+}
 ```
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok",
-  "data": {
-    "msg": "reset success"
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "msg": "reset success" // 解绑结果说明，固定 reset success
   }
 }
 ```
@@ -1279,7 +1457,7 @@ Authorization: Bearer <user_jwt>
 
 获取 TiRTC token（H5 直连 TiRTC 用）。
 
-**鉴权**: ✅
+**鉴权**： ✅
 
 **请求头**
 
@@ -1293,30 +1471,66 @@ Authorization: Bearer <user_jwt>
 |------|:--:|------|
 | device_id | ✅ | 设备 ID |
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok",
-  "data": {
-    "token": "v1.eyJ...",
-    "app_id": "2818153",
-    "endpoint": "https://api-tirtc.tange365.com",
-    "in_call": false,
-    "profiles": {
-      "stream": {
-        "up_audio_mt": ["alaw"],
-        "up_video_mt": ["h264"],
-        "down_audio_mt": ["alaw"],
-        "down_video_mt": [],
-        "audio_rate": 8000,
-        "audio_channels": 1,
-        "aspect_ratio": "4:3",
-        "object_fit": "contain",
-        "camera_rotation": 90,
-        "hor_mirror": true,
-        "vert_mirror": false
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "token": "<实际返回的 token>", // 连接设备所需的 TiRTC 凭证
+    "app_id": "2818153", // TiRTC 应用 ID
+    "endpoint": "https://api-tirtc.tange365.com", // TiRTC 服务入口
+    "in_call": false, // 设备是否正在一对一通话；不阻止本次发放凭证
+    "profiles": { // 按场景保存的设备媒体能力
+      "stream": { // 实时查看场景；仅声明本机实际支持的能力
+        "up_audio_mt": ["alaw"], // 设备发送音频的编码列表，按首选顺序排列
+        "up_video_mt": ["h264"], // 设备发送视频的编码；stream/call 为数组，voip 为单个字符串
+        "down_audio_mt": ["alaw"], // 设备接收音频的编码；stream/call 为数组，voip 为单个字符串
+        "down_video_mt": ["h264"], // 设备接收视频的编码；stream/call 为数组，voip 为单个字符串
+        "audio_rate": 8000, // 音频采样率，单位 Hz
+        "audio_channels": 1, // 声道数：1 或 2
+        "camera_rotation": 0, // 画面顺时针旋转角度：0、90、180、270
+        "hor_mirror": false, // 是否水平镜像
+        "vert_mirror": false, // 是否垂直镜像
+        "no_video": false, // 是否明确声明无视频
+        "aspect_ratio": "4:3", // 画面宽高比；统一接口支持正数或宽:高字符串
+        "object_fit": "contain" // 画面缩放方式；voip 为 fill/contain，其他场景另支持 cover
+      },
+      "call": { // 设备通话场景；仅声明本机实际支持的能力
+        "up_audio_mt": ["alaw"], // 设备发送音频的编码列表，按首选顺序排列
+        "up_video_mt": ["h264"], // 设备发送视频的编码；stream/call 为数组，voip 为单个字符串
+        "down_audio_mt": ["opus", "amr"], // 设备接收音频的编码；stream/call 为数组，voip 为单个字符串
+        "down_video_mt": ["h264", "mjpeg"], // 设备接收视频的编码；stream/call 为数组，voip 为单个字符串
+        "audio_rate": 16000, // 音频采样率，单位 Hz
+        "audio_channels": 1, // 声道数：1 或 2
+        "camera_rotation": 0, // 画面顺时针旋转角度：0、90、180、270
+        "hor_mirror": false, // 是否水平镜像
+        "vert_mirror": false, // 是否垂直镜像
+        "no_video": false, // 是否明确声明无视频
+        "aspect_ratio": "4:3", // 画面宽高比；统一接口支持正数或宽:高字符串
+        "object_fit": "contain" // 画面缩放方式；voip 为 fill/contain，其他场景另支持 cover
+      },
+      "voip": { // 微信 VoIP 场景；仅声明本机实际支持的能力
+        "screen_width": 640, // 设备显示区域宽度，单位像素
+        "screen_height": 480, // 设备显示区域高度，单位像素
+        "up_video_mt": "h264", // 设备发送视频的编码；stream/call 为数组，voip 为单个字符串
+        "down_video_mt": "mjpeg", // 设备接收视频的编码；stream/call 为数组，voip 为单个字符串
+        "down_audio_mt": "amr", // 设备接收音频的编码；stream/call 为数组，voip 为单个字符串
+        "audio_rate": 8000, // 音频采样率，单位 Hz
+        "audio_channels": 1, // 声道数：1 或 2
+        "camera_rotation": 90, // 画面顺时针旋转角度：0、90、180、270
+        "down_video_rotation": 1, // 微信下行编码方向：0 默认、1 正向、2 保留旋转
+        "aspect_ratio": 1.7777777778, // 画面宽高比；统一接口支持正数或宽:高字符串
+        "hor_mirror": true, // 是否水平镜像
+        "vert_mirror": false, // 是否垂直镜像
+        "object_fit": "contain", // 画面缩放方式；voip 为 fill/contain，其他场景另支持 cover
+        "video_res_mode": "fit_screen", // 下行视频尺寸模式：auto/fit_screen/fill_screen
+        "calling_timeout_sec": 30, // 呼叫超时，1–300 秒
+        "no_video": false, // 是否明确声明无视频
+        "has_camera": true, // 只读，服务端派生的设备上行视频能力
+        "has_screen": true, // 只读，服务端派生的设备下行视频能力
+        "voip_room_type": "video" // 只读，有任一方向视频能力为 video，否则为 voice
       }
     }
   }
@@ -1366,34 +1580,35 @@ Authorization: Bearer <user_jwt>
 
 **请求参数**：无。
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok",
-  "data": {
-    "boards": [
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "boards": [ // 已上架开发板，最多 100 条；无已上架条目时为空数组
       {
-        "id": "6c349438-7fd4-44f1-a363-d728d62ae057",
-        "vendor": "示例厂商",
-        "name": "音视频开发板",
-        "model": "BOARD-S3-01",
-        "chip": "ESP32-S3",
-        "summary": "适合体验实时音视频、微信 VoIP、设备互呼和多人对讲。",
-        "capabilities": ["实时音视频", "微信 VoIP", "多人对讲"],
-        "adaptation_status": "ready",
-        "image_url": "https://cdn.example.com/boards/board-s3-01.webp",
-        "purchase_url": "https://shop.example.com/board-s3-01",
-        "repository_url": "https://github.com/example/board-s3-01",
-        "firmware_url": "https://downloads.example.com/board-s3-01.bin",
-        "flashing_guide_url": "https://docs.example.com/board-s3-01",
-        "effect_video_url": "https://video.example.com/board-s3-01",
-        "detail_slug": "board-s3-01",
-        "sort_order": 10,
-        "publish_status": "published",
-        "created_at": "2026-09-10T10:00:00+08:00",
-        "updated_at": "2026-09-10T10:00:00+08:00"
+        "id": "6c349438-7fd4-44f1-a363-d728d62ae057", // 开发板条目的稳定标识
+        "vendor": "示例厂商", // 厂商名称
+        "name": "音视频开发板", // 页面展示名称
+        "model": "BOARD-S3-01", // 完整型号，目录内唯一
+        "chip": "ESP32-S3", // 芯片或平台名称
+        "summary": "适合体验实时音视频、微信 VoIP、设备互呼和多人对讲。", // 简介，最多 160 个字符
+        "capabilities": ["实时音视频", "微信 VoIP", "多人对讲"], // 能力标签，最多 10 项
+        "adaptation_status": "ready", // 适配状态：ready、adapting 或 planned
+        "image_url": "https://cdn.example.com/boards/board-s3-01.webp", // HTTPS 产品图片地址，或后台上传生成的 /v1/board-images/<name> 站内地址
+        "purchase_url": "https://shop.example.com/board-s3-01", // HTTPS 购买地址；未配置时不返回
+        "repository_url": "https://github.com/example/board-s3-01", // HTTPS 源码仓库地址；未配置时不返回
+        "firmware_url": "https://downloads.example.com/board-s3-01.bin", // HTTPS 固件下载地址；未配置时不返回
+        "flashing_guide_url": "https://docs.example.com/board-s3-01", // HTTPS 烧录指南地址；未配置时不返回
+        "effect_video_url": "https://video.example.com/board-s3-01", // HTTPS 效果视频地址；未配置时不返回
+        "detail_slug": "board-s3-01", // 详情地址标识，用于 /boards#<detail_slug> 和详情接口
+        "sort_order": 10, // 展示顺序，数值越小越靠前
+        "publish_status": "published", // 返回条目固定为 published
+        "created_at": "2026-09-10T10:00:00+08:00", // 后台创建时间，ISO 8601；未记录时不返回
+        "updated_at": "2026-09-10T10:00:00+08:00", // 后台最后修改时间，ISO 8601；未记录时不返回
+        "published_at": "2026-09-10T10:00:00+08:00" // 最近上架时间，ISO 8601
       }
     ]
   }
@@ -1448,26 +1663,33 @@ Authorization: Bearer <user_jwt>
 |---|---|:---:|---|
 | `slug` | string | 是 | 开发板的 `detail_slug`，由小写字母、数字和连字符组成 |
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok",
-  "data": {
-    "id": "6c349438-7fd4-44f1-a363-d728d62ae057",
-    "vendor": "示例厂商",
-    "name": "音视频开发板",
-    "model": "BOARD-S3-01",
-    "chip": "ESP32-S3",
-    "summary": "适合体验实时音视频、微信 VoIP、设备互呼和多人对讲。",
-    "capabilities": ["实时音视频", "微信 VoIP", "多人对讲"],
-    "adaptation_status": "ready",
-    "image_url": "https://cdn.example.com/boards/board-s3-01.webp",
-    "firmware_url": "https://downloads.example.com/board-s3-01.bin",
-    "detail_slug": "board-s3-01",
-    "sort_order": 10,
-    "publish_status": "published"
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "id": "6c349438-7fd4-44f1-a363-d728d62ae057", // 开发板条目的稳定标识
+    "vendor": "示例厂商", // 厂商名称
+    "name": "音视频开发板", // 页面展示名称
+    "model": "BOARD-S3-01", // 完整型号，目录内唯一
+    "chip": "ESP32-S3", // 芯片或平台名称
+    "summary": "适合体验实时音视频、微信 VoIP、设备互呼和多人对讲。", // 简介，最多 160 个字符
+    "capabilities": ["实时音视频", "微信 VoIP", "多人对讲"], // 能力标签，最多 10 项
+    "adaptation_status": "ready", // 适配状态：ready、adapting 或 planned
+    "image_url": "https://cdn.example.com/boards/board-s3-01.webp", // HTTPS 产品图片地址，或后台上传生成的 /v1/board-images/<name> 站内地址
+    "purchase_url": "https://shop.example.com/board-s3-01", // HTTPS 购买地址；未配置时不返回
+    "repository_url": "https://github.com/example/board-s3-01", // HTTPS 源码仓库地址；未配置时不返回
+    "firmware_url": "https://downloads.example.com/board-s3-01.bin", // HTTPS 固件下载地址；未配置时不返回
+    "flashing_guide_url": "https://docs.example.com/board-s3-01", // HTTPS 烧录指南地址；未配置时不返回
+    "effect_video_url": "https://video.example.com/board-s3-01", // HTTPS 效果视频地址；未配置时不返回
+    "detail_slug": "board-s3-01", // 详情地址标识，用于 /boards#<detail_slug> 和详情接口
+    "sort_order": 10, // 展示顺序，数值越小越靠前
+    "publish_status": "published", // 返回条目固定为 published
+    "created_at": "2026-09-10T10:00:00+08:00", // 后台创建时间，ISO 8601；未记录时不返回
+    "updated_at": "2026-09-10T10:00:00+08:00", // 后台最后修改时间，ISO 8601；未记录时不返回
+    "published_at": "2026-09-10T10:00:00+08:00" // 最近上架时间，ISO 8601
   }
 }
 ```
@@ -1500,7 +1722,7 @@ Authorization: Bearer <user_jwt>
 |---|---|:---:|---|
 | `name` | string | 是 | 64 位小写十六进制内容摘要及扩展名；扩展名为 `jpg`、`png` 或 `webp` |
 
-**成功响应** — HTTP 200，响应体为对应图片二进制，`Content-Type` 与图片格式一致。图片地址由内容生成且不可变，响应使用 `Cache-Control: public, max-age=31536000, immutable`。
+**成功响应**（HTTP 200），响应体为对应图片二进制，`Content-Type` 与图片格式一致。图片地址由内容生成且不可变，响应使用 `Cache-Control: public, max-age=31536000, immutable`。
 
 图片不存在或名称格式无效时返回 HTTP 404，无 JSON 响应体。
 
@@ -1516,19 +1738,19 @@ Authorization: Bearer <user_jwt>
 
 公开读取用户 Web 的顶部导航，无需鉴权。成功为 HTTP 200：
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok",
-  "data": {
-    "links": [
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "links": [ // 已启用链接，最多 3 项，无配置为 []
       {
-        "name": "接入文档",
-        "url": "https://docs.example.com",
-        "enabled": true
+        "name": "接入文档", // 链接显示名称
+        "url": "https://docs.example.com", // 跳转地址
+        "enabled": true // 返回项均为 true
       }
     ],
-    "revision": 1
+    "revision": 1 // 配置版本；0 表示本地回退配置
   }
 }
 ```
@@ -1557,8 +1779,15 @@ Authorization: Bearer <user_jwt>
 
 使用用户 JWT 查询当前账号，不接受用户 ID 参数。成功为 HTTP 200：
 
-```json
-{"code":200,"msg":"ok","data":{"user_id":1,"email":"user@example.com"}}
+```jsonc
+{
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "user_id": 1, // 当前账号 ID
+    "email": "user@example.com" // 当前账号邮箱
+  }
+}
 ```
 
 响应禁止缓存，不返回密码或令牌。鉴权失败返回 HTTP 401 + `401`，内部错误为 HTTP 500 + `50000`。Web 遇到受保护接口的鉴权失败时清除失效令牌，进入登录页并提示重新登录。
@@ -1620,9 +1849,9 @@ Authorization: Bearer <user_jwt>
 
 微信服务器 URL 验证回调。
 
-**鉴权**: 微信签名校验
+**鉴权**： 微信签名校验
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
 返回 `echostr` 参数值（纯文本）。
 
@@ -1655,19 +1884,22 @@ Authorization: Bearer <user_jwt>
 
 微信服务器事件推送。处理 `iot_voip_notify` 事件。
 
-**鉴权**: 微信签名校验 + AES 解密（若 `encrypt_type=aes`）
+**鉴权**： 微信签名校验 + AES 解密（若 `encrypt_type=aes`）
 
-**流程**:
+**流程**：
 
 1. 校验签名
 2. AES 解密（若加密）
 3. 若 `action=join_voip_room`：调 TiRTC Token 服务获取 peer_id + token
 4. 通过 MQTT 向设备推送 `call_incoming`
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
-{ "errcode": 0, "errmsg": "ok" }
+```jsonc
+{
+  "errcode": 0, // 微信回调结果码，0 为成功
+  "errmsg": "ok" // 微信回调结果说明
+}
 ```
 
 **错误码**
@@ -1678,32 +1910,32 @@ Authorization: Bearer <user_jwt>
 | 2 | 意外的微信消息类型（非 `iot_voip_notify`） |
 | 3 | `wx_app_id` 对应的微信 App 未配置 |
 | 4 | 意外的 action（非 `join_voip_room`） |
-| 5 | 签名校验失败 |
-| 9 | 请求体无效（空或解析/AES 解密失败） |
+| 5 | 查询参数 signature 校验失败 |
+| 9 | 请求体为空、解析失败、AES 消息签名 msg_signature 无效或解密失败 |
 | 10 | 向设备推送 `call_incoming` 失败，或同一房间 10 分钟内重复回调仍在处理中 |
 
 > **去重 / 重试**：以 `voip:notify:{wx_app_id}:{room_id}` 为键做 10 分钟去重。微信重试时，若上一笔仍在处理中 → `errcode 10`；若已完成 → `errcode 0`（幂等返回成功，不再建立第二次 TiRTC 会话、不再向设备推第二次 `call_incoming`）。
 
 **推送设备消息格式** (topic: `device/sn_{id}/cmd`):
 
-```json
+```jsonc
 {
-  "type": "call_incoming",
-  "channel": "wx",
-  "payload": {
-    "peer_id": "whips://wxvoip?x_wx_room_id=...",
-    "token": "v1.eyJ...",
-    "wx_app_id": "wxXXX",
-    "wx_model_id": "HRHY_xxx",
-    "wx_room_id": "wxf...",
-    "wx_user_openid": "o4DLd5...",
-    "wx_user_remark": "客厅联系人",
-    "wx_server_token": "...",
-    "wx_session_key": "...",
-    "wx_call_id": "...",
-    "wx_from": "...",
-    "wx_room_type": "video",
-    "wx_payload": "eyJpZCI6Ii4uLiJ9"
+  "type": "call_incoming", // 消息类型，固定 call_incoming
+  "channel": "wx", // 通道，固定 wx
+  "payload": { // 通知业务数据，字段含义如下
+    "peer_id": "<实际返回的 peer_id>", // TiRTC WHIP 连接 URL
+    "token": "<实际返回的 token>", // TiRTC JWT token
+    "wx_app_id": "<实际返回的 wx_app_id>", // 微信 AppID
+    "wx_model_id": "<实际返回的 wx_model_id>", // VoIP 硬件型号 ID
+    "wx_room_id": "<实际返回的 wx_room_id>", // 微信 VoIP 房间 ID
+    "wx_user_openid": "<实际返回的 wx_user_openid>", // 主叫用户 openid
+    "wx_user_remark": "客厅联系人", // 当前设备联系人列表中该微信身份的统一备注名，未设置时为空
+    "wx_server_token": "<实际返回的 wx_server_token>", // 微信服务端 token（设备接听时回传）
+    "wx_session_key": "<实际返回的 wx_session_key>", // 微信会话密钥
+    "wx_call_id": "<实际返回的 wx_call_id>", // Payload.id（Payload 可解析时携带）；服务端自动生成 Payload 时等于 /voip/device/call 返回的 call_id
+    "wx_from": "<实际返回的 wx_from>", // 主叫标识（Payload 可解析时携带）
+    "wx_room_type": "video", // 房间类型 voice/video（Payload 可解析时携带）
+    "wx_payload": "eyJpZCI6Ii4uLiJ9" // 微信原始 Payload 字符串（通常是 Base64 文本），始终携带；服务端不改写该值
   }
 }
 ```
@@ -1762,6 +1994,36 @@ Authorization: Bearer <user_jwt>
 | `ModelId` | string | 设备型号 ID |
 | `Payload` | string | 微信原始附加信息，通常为 Base64 JSON；解析后的 id/from/to/room_type 均为字符串，分别表示呼叫 ID、来源、目标 OpenID 和房间类型 |
 
+**明文通知正文示例**
+
+以下字段由微信产生；占位凭证不能用于建立呼叫。`Payload` 示例为 Base64 编码的 JSON，包含 `id`（呼叫 ID）、`from`（主叫标识）、`to`（目标 OpenID）、`room_type`（voice/video）。
+
+```xml
+<xml>
+  <ToUserName>example_receiver</ToUserName> <!-- 接收方账号 -->
+  <FromUserName>example_openid</FromUserName> <!-- 发送方账号 -->
+  <CreateTime>1720000000</CreateTime> <!-- 事件创建时间，Unix 秒 -->
+  <MsgType>event</MsgType> <!-- 固定为 event -->
+  <Event>iot_voip_notify</Event> <!-- 固定的微信 VoIP 事件名 -->
+  <Action>join_voip_room</Action> <!-- 加入微信 VoIP 房间 -->
+  <Sn>TIRZ00000001</Sn> <!-- 目标设备 ID -->
+  <RoomId>example_wx_room</RoomId> <!-- 本次微信房间 ID -->
+  <SessionKey>WECHAT_SESSION_KEY</SessionKey> <!-- 微信会话密钥，占位值 -->
+  <ServerToken>WECHAT_SERVER_TOKEN</ServerToken> <!-- 微信服务端凭证，占位值 -->
+  <ModelId>HRHY_example</ModelId> <!-- 微信设备型号 ID -->
+  <Payload>eyJpZCI6ImNhbGxfZXhhbXBsZV8wMDEiLCJmcm9tIjoiZXhhbXBsZV9vcGVuaWQiLCJ0byI6ImV4YW1wbGVfb3BlbmlkIiwicm9vbV90eXBlIjoidmlkZW8ifQ==</Payload> <!-- 微信原始透传信息，服务端不改写 -->
+</xml>
+```
+
+**AES 模式外层正文示例**（与明文正文二选一；查询参数同时携带 `encrypt_type=aes` 和 `msg_signature`）：
+
+```xml
+<xml>
+  <ToUserName>example_receiver</ToUserName> <!-- 接收方账号 -->
+  <Encrypt>WECHAT_ENCRYPTED_MESSAGE</Encrypt> <!-- 微信生成的加密消息，占位值 -->
+</xml>
+```
+
 这些字段由微信生成，设备和 H5 不直接构造此回调。返回 `errcode` 为 integer，`errmsg` 为 string；含义见本接口错误表。
 
 ---
@@ -1776,12 +2038,11 @@ Authorization: Bearer <user_jwt>
 
 该路径仅用于兼容旧版设备。新设备统一调用
 [`POST /v1/device/profile`](#post-v1deviceprofile)，并把下列字段放入
-`profiles.voip`。兼容接口收到请求后也写入统一的 `device_profile.profile.voip`，
-不会继续写入旧表。
+`profiles.voip`。两条路径使用同一份 VoIP 配置。
 
 **鉴权**：`Authorization: Bearer <mqtt_token>`，JWT 必须包含 `device_id`。
 
-**请求体**：JSON 对象，最大 512 字节。
+**请求体**：JSON 对象，最大 512 字节。示例展示全部已定义字段；实际请求仅携带需要的可选项，移除注释后使用紧凑 JSON，并检查正文大小。
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|:---:|---|
@@ -1808,7 +2069,40 @@ ModelID 和 Payload 等会话身份字段不会写入；它们始终由服务端
 与 `video_mt` 同时存在时，方向字段优先。用户设备列表只返回统一接口定义的公开字段，
 不会把旧扩展字段透传给 Web 或小程序。
 
-**成功响应**：HTTP 200，`{ "code": 0, "msg": "ok" }`。响应包含
+**请求示例**
+
+```jsonc
+{
+  "screen_width": 640, // 可选，设备显示区域宽度
+  "screen_height": 480, // 可选，设备显示区域高度
+  "up_video_mt": "h264", // 可选，设备发给小程序的视频编码
+  "down_video_mt": "mjpeg", // 可选，设备接收小程序视频的编码
+  "down_audio_mt": "amr", // 可选，设备接收小程序音频的编码
+  "audio_rate": 8000, // 可选，8000、16000、24000、32000、44100 或 48000
+  "audio_channels": 1, // 可选，1 或 2
+  "camera_rotation": 90, // 可选，顺时针旋转角度：0、90、180、270
+  "down_video_rotation": 1, // 可选，微信下行视频编码方向：0 使用默认行为，1 输出正向画面，2 保留旋转画面；默认 0，可省略
+  "aspect_ratio": 1.7777777778, // 可选，视频宽高比，必须大于 0
+  "hor_mirror": true, // 可选，是否水平镜像
+  "vert_mirror": false, // 可选，是否垂直镜像
+  "object_fit": "contain", // 可选，fill 或 contain
+  "video_res_mode": "fit_screen", // 可选，auto、fit_screen 或 fill_screen
+  "calling_timeout_sec": 30, // 可选，呼叫超时秒数，范围 1–300
+  "no_video": false, // 可选，是否为纯语音设备
+  "video_mt": "h264" // 可选，旧版统一视频编码；缺少方向字段时同时转换为 up_video_mt 和 down_video_mt
+}
+```
+
+**成功响应**：HTTP 200，
+
+```jsonc
+{
+  "code": 0, // 业务码：本接口成功为 0
+  "msg": "ok" // 结果说明，业务判断使用 code
+}
+```
+
+响应包含
 `Deprecation: true` 和 `Link: </v1/device/profile>; rel="successor-version"` Header。
 
 **错误码**
@@ -1835,22 +2129,22 @@ ModelID 和 Payload 等会话身份字段不会写入；它们始终由服务端
 不包含设备联系人；查询完整联系人列表使用 call-server 的
 `GET /v1/call/device/contacts`。
 
-**鉴权**: ✅ `Authorization: Bearer <mqtt_token>`（JWT 需含 `device_id` claim）
+**鉴权**： ✅ `Authorization: Bearer <mqtt_token>`（JWT 需含 `device_id` claim）
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
+```jsonc
 {
-  "code": 0,
-  "msg": "ok",
-  "data": {
-    "contacts": [
+  "code": 0, // 业务码：本接口成功为 0
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "contacts": [ // 当前设备的有效 VoIP 联系人，按授权创建时间倒序排列；没有联系人时为 []
       {
-        "wx_open_id": "o4DLd5...",
-        "wx_app_id": "wxXXX",
-        "wx_model_id": "HRHY_xxx",
-        "remark": "小雨",
-        "created_at": "2026-06-18T12:00:00Z"
+        "wx_open_id": "<实际返回的 wx_open_id>", // 微信用户 OpenID；发起外呼时作为 wx_user_openid
+        "wx_app_id": "<实际返回的 wx_app_id>", // 授权所属的微信小程序 AppID
+        "wx_model_id": "<实际返回的 wx_model_id>", // 授权对应的微信设备型号 ID；发起外呼时服务端从授权记录读取
+        "remark": "小雨", // 当前 wx_open_id + wx_app_id 的统一联系人名称；未设置时为空字符串
+        "created_at": "2026-06-18T12:00:00Z" // 该设备授权记录的创建时间，RFC 3339 格式
       }
     ]
   }
@@ -1893,6 +2187,26 @@ ModelID 和 Payload 等会话身份字段不会写入；它们始终由服务端
 
 **请求参数**：无。
 
+**成功响应示例**（HTTP 200）
+
+```jsonc
+{
+  "code": 0, // 业务码：本接口成功为 0
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "list": [ // 联系人列表，无联系人时为 []
+      {
+        "wx_open_id": "example_openid", // 微信用户 OpenID
+        "wx_app_id": "example_appid", // 微信小程序 AppID
+        "wx_model_id": "example_model", // 授权设备型号 ID
+        "remark": "小雨", // 联系人名称，未设置时为空
+        "created_at": "2026-06-18T12:00:00Z" // 授权记录创建时间
+      }
+    ]
+  }
+}
+```
+
 **成功响应**：HTTP 200，`code=0`、`msg=ok`。
 
 | 返回字段 | 类型 | 说明 |
@@ -1918,7 +2232,7 @@ ModelID 和 Payload 等会话身份字段不会写入；它们始终由服务端
 
 设备主动呼叫用户。
 
-**鉴权**: ✅ `Authorization: Bearer <mqtt_token>`（JWT 需含 `device_id` claim）
+**鉴权**： ✅ `Authorization: Bearer <mqtt_token>`（JWT 需含 `device_id` claim）
 
 **请求头**
 
@@ -1975,18 +2289,31 @@ ModelID 和 Payload 等会话身份字段不会写入；它们始终由服务端
 
 **请求示例**
 
-```json
+```jsonc
 {
-  "device_id": "TIRZ00000001",
-  "wx_user_openid": "o4DLd5...",
-  "wx_room_type": "video"
+  "device_id": "TIRZ00000001", // 必填，主叫设备 ID
+  "wx_user_openid": "<联系人列表中的wx_open_id>", // 必填，被叫用户 openid
+  "wx_room_type": "video", // 必填，voice 或 video
+  "wx_app_id": "<联系人列表中的wx_app_id>", // 可选，微信 AppID，不传则用默认；必须与有效授权记录一致
+  "wx_version_type": 0, // 可选，版本类型：0=正式版、1=开发版、2=体验版
+  "wx_listener_name": "小雨", // 可选，被叫方展示名称
+  "wx_query": "source=device", // 可选，自定义查询参数
+  "wx_caller_camera_status": 0, // 可选，主叫摄像头状态：0=开启、1=关闭
+  "wx_listener_camera_status": 0, // 可选，被叫摄像头状态：0=开启、1=关闭
+  "payload": "{\"id\":\"call_example_001\",\"from\":\"TIRZ00000001\",\"to\":\"example_openid\",\"room_type\":\"video\"}" // 可选，自定义 payload
 }
 ```
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
-{ "code": 0, "msg": "ok", "data": { "call_id": "8d4bc1f..." } }
+```jsonc
+{
+  "code": 0, // 业务码：本接口成功为 0
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "call_id": "<实际返回的 call_id>" // 本次微信 VoIP 呼叫的关联 ID
+  }
+}
 ```
 
 **错误码**
@@ -1994,7 +2321,7 @@ ModelID 和 Payload 等会话身份字段不会写入；它们始终由服务端
 | code | HTTP | 含义 |
 |------|------|------|
 | 401 | 401 | JWT 缺失、无效、过期或缺少 `device_id` claim |
-| 40000 | 200 | JSON 解析失败、必填字段缺失或 wx_room_type 非法 |
+| 40000 | 200 | JSON 解析失败、必填字段缺失、wx_room_type 非法或 device_id 与 JWT 不一致 |
 | 40205 | 200 | 微信 VoIP 授权不存在或已失效 |
 | 40900 | 200 | 同一设备或联系人短时间内重复发起 |
 | 50001 | 200 | 微信 App 未配置 |
@@ -2024,7 +2351,7 @@ ModelID 和 Payload 等会话身份字段不会写入；它们始终由服务端
 
 微信 code 换 openid。
 
-**鉴权**: ✅ `Authorization: Bearer <user_jwt>`（JWT 需含 `user_id` claim）
+**鉴权**： ✅ `Authorization: Bearer <user_jwt>`（JWT 需含 `user_id` claim）
 
 成功后服务端会将当前用户、`wx_app_id` 与返回的 `wx_user_openid` 关联 24 小时，
 供后续 `contact-remark` / `auth-list` / `report-auth` / `delete-auth` 校验；小程序在查询或上报授权前
@@ -2046,17 +2373,23 @@ ModelID 和 Payload 等会话身份字段不会写入；它们始终由服务端
 
 **请求示例**
 
-```json
+```jsonc
 {
-  "code": "0b1a2b3c4d5e6f7g8h9i0j",
-  "wx_app_id": "wxXXX"
+  "code": "<wx.login刚返回的code>", // 必填，wx.login 刚返回的临时代码
+  "wx_app_id": "<实际小程序AppID>" // 可选，微信 AppID，不传则用默认
 }
 ```
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
-{ "code": 0, "msg": "ok", "data": { "wx_user_openid": "o4DLd5..." } }
+```jsonc
+{
+  "code": 0, // 业务码：本接口成功为 0
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "wx_user_openid": "<实际返回的 wx_user_openid>" // 当前用户在所指定小程序中的 OpenID
+  }
+}
 ```
 
 **错误码**
@@ -2089,7 +2422,7 @@ H5 查询指定设备的小程序 VoIP 联系人。此接口与设备接口分�
 `voip_device_auth` 中的联系人；查询完整联系人列表使用 call-server 的
 `GET /v1/call/user/contacts?device_id=...`。
 
-**鉴权**: ✅ `Authorization: Bearer <user_jwt>`（JWT 需含 `user_id` claim）
+**鉴权**： ✅ `Authorization: Bearer <user_jwt>`（JWT 需含 `user_id` claim）
 
 **查询参数**
 
@@ -2097,20 +2430,20 @@ H5 查询指定设备的小程序 VoIP 联系人。此接口与设备接口分�
 |------|:--:|------|
 | device_id | ✅ | 当前用户名下的设备 ID |
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
+```jsonc
 {
-  "code": 0,
-  "msg": "ok",
-  "data": {
-    "contacts": [
+  "code": 0, // 业务码：本接口成功为 0
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "contacts": [ // 指定设备的有效 VoIP 联系人，按授权创建时间倒序排列；没有联系人时为 []
       {
-        "wx_open_id": "o4DLd5...",
-        "wx_app_id": "wxXXX",
-        "wx_model_id": "HRHY_xxx",
-        "remark": "小雨",
-        "created_at": "2026-06-18T12:00:00Z"
+        "wx_open_id": "<实际返回的 wx_open_id>", // 微信用户 OpenID
+        "wx_app_id": "<实际返回的 wx_app_id>", // 授权所属的微信小程序 AppID
+        "wx_model_id": "<实际返回的 wx_model_id>", // 授权对应的微信设备型号 ID
+        "remark": "小雨", // 当前 wx_open_id + wx_app_id 的统一联系人名称；未设置时为空字符串
+        "created_at": "2026-06-18T12:00:00Z" // 该设备授权记录的创建时间，RFC 3339 格式
       }
     ]
   }
@@ -2151,7 +2484,7 @@ H5 查询指定设备的小程序 VoIP 联系人。此接口与设备接口分�
 查询当前微信用户在当前账号名下设备上的 VoIP 授权记录。只读取统一联系人名称时使用
 `GET /v1/voip/user/contact-remark`。
 
-**鉴权**: ✅ `Authorization: Bearer <user_jwt>`（JWT 需含 `user_id` claim）
+**鉴权**： ✅ `Authorization: Bearer <user_jwt>`（JWT 需含 `user_id` claim）
 
 **查询参数**
 
@@ -2166,19 +2499,19 @@ H5 查询指定设备的小程序 VoIP 联系人。此接口与设备接口分�
 - 授权记录属于指定小程序 AppID
 - `auth_status=active`
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
+```jsonc
 {
-  "code": 0,
-  "msg": "ok",
-  "data": {
-    "list": [
+  "code": 0, // 业务码：本接口成功为 0
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "list": [ // 当前微信身份在当前账号名下设备上的有效授权记录；没有授权时为 []
       {
-        "device_id": "TIRZ00000001",
-        "remark": "小雨",
-        "authorized_device_name": "客厅学习机",
-        "auth_status": "active"
+        "device_id": "TIRZ00000001", // 已授权的设备 ID
+        "remark": "小雨", // 当前 wx_open_id + wx_app_id 的统一联系人名称；未设置时为空字符串
+        "authorized_device_name": "客厅学习机", // 创建该微信授权时使用的设备名称；不是设备当前绑定名称
+        "auth_status": "active" // 授权状态；本接口只返回有效记录，因此固定为 active
       }
     ]
   }
@@ -2214,7 +2547,7 @@ H5 查询指定设备的小程序 VoIP 联系人。此接口与设备接口分�
 查询当前小程序 OpenID 的统一联系人名称。小程序应先调用 `wechat-mini-login`；服务端
 据此确定 OpenID，客户端不传 `wx_open_id`。
 
-**鉴权**: ✅ `Authorization: Bearer <user_jwt>`
+**鉴权**： ✅ `Authorization: Bearer <user_jwt>`
 
 **查询参数**
 
@@ -2224,13 +2557,13 @@ H5 查询指定设备的小程序 VoIP 联系人。此接口与设备接口分�
 
 **成功响应**
 
-```json
+```jsonc
 {
-  "code": 0,
-  "msg": "ok",
-  "data": {
-    "wx_open_id": "o4DLd5...",
-    "remark": "小雨"
+  "code": 0, // 业务码：本接口成功为 0
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "wx_open_id": "<实际返回的 wx_open_id>", // 当前微信登录状态对应的 OpenID
+    "remark": "小雨" // 该小程序内统一联系人名称，未设置时为空
   }
 }
 ```
@@ -2269,7 +2602,7 @@ H5 查询指定设备的小程序 VoIP 联系人。此接口与设备接口分�
 `wx_open_id + wx_app_id` 的全部设备授权记录；它不是设备名称。设备端、H5 和小程序
 均可修改，最后一次成功写入生效，并向所有受影响设备推送 `callers_update`。
 
-**鉴权**: ✅ `Authorization: Bearer <user_jwt>`
+**鉴权**： ✅ `Authorization: Bearer <user_jwt>`
 
 **请求体**
 
@@ -2278,11 +2611,23 @@ H5 查询指定设备的小程序 VoIP 联系人。此接口与设备接口分�
 | wx_app_id | string | | 微信 AppID，不传则使用默认 AppID |
 | remark | string | ✅ | 联系人名称，去除首尾空格后 1–64 个 Unicode 字符 |
 
-```json
-{ "wx_app_id": "wxXXX", "remark": "小雨" }
+```jsonc
+{
+  "wx_app_id": "<实际小程序AppID>", // 可选，微信 AppID，不传则使用默认 AppID
+  "remark": "小雨" // 必填，联系人名称，去除首尾空格后 1–64 个 Unicode 字符
+}
 ```
 
-**成功响应**: `{ "code": 0, "msg": "ok" }`；响应不包含 `data` 字段。
+**成功响应**:
+
+```jsonc
+{
+  "code": 0, // 业务码：本接口成功为 0
+  "msg": "ok" // 结果说明，业务判断使用 code
+}
+```
+
+响应不包含 `data` 字段。
 
 **错误码**
 
@@ -2305,7 +2650,7 @@ H5 查询指定设备的小程序 VoIP 联系人。此接口与设备接口分�
 
 上报 VoIP 授权（用户在小程序完成 `wx.requestDeviceVoIP` 后调用）。成功后推送 `callers_update` 通知到设备。
 
-**鉴权**: ✅ `Authorization: Bearer <user_jwt>`（JWT 需含 `user_id` claim）
+**鉴权**： ✅ `Authorization: Bearer <user_jwt>`（JWT 需含 `user_id` claim）
 
 目标设备必须属于当前用户，且 `wx_open_id` 必须与同一用户最近一次
 `wechat-mini-login` 的结果一致。
@@ -2336,20 +2681,25 @@ H5 查询指定设备的小程序 VoIP 联系人。此接口与设备接口分�
 
 **请求示例**
 
-```json
+```jsonc
 {
-  "device_id": "TIRZ00000001",
-  "wx_open_id": "o4DLd5...",
-  "remark": "小雨",
-  "device_name": "客厅学习机",
-  "authorization_created": true
+  "device_id": "TIRZ00000001", // 必填，设备 ID
+  "wx_open_id": "<wechat-mini-login返回的OpenID>", // 必填，微信用户 openid
+  "wx_app_id": "<实际小程序AppID>", // 可选，微信 AppID，不传则用默认
+  "remark": "小雨", // 可选，当前 OpenID 的统一联系人名称，去除首尾空格后最多 64 个字符；非空值会同步到该 OpenID 的所有设备；未传或空值沿用已保存名称；不是设备名称
+  "device_name": "客厅学习机", // authorization_created=true 时提供，本次微信授权使用的设备名称，最多 13 个 Unicode 字符；必须与当前绑定名称一致
+  "authorization_created": true, // 可选，本次是否新建了微信授权；新授权为 true，微信已授权或状态恢复上报为 false
+  "wx_model_id": "HRHY_example" // 可选，型号 ID，不传则用 App 配置的默认 model_id
 }
 ```
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
-{ "code": 0, "msg": "ok" }
+```jsonc
+{
+  "code": 0, // 业务码：本接口成功为 0
+  "msg": "ok" // 结果说明，业务判断使用 code
+}
 ```
 
 成功响应不包含 `data` 字段。
@@ -2377,7 +2727,7 @@ H5 查询指定设备的小程序 VoIP 联系人。此接口与设备接口分�
 删除授权。实际删除到授权记录时推送 `callers_update` 通知到设备；重复删除保持幂等，
 不会重复推送。
 
-**鉴权**: ✅ `Authorization: Bearer <user_jwt>`（JWT 需含 `user_id` claim）
+**鉴权**： ✅ `Authorization: Bearer <user_jwt>`（JWT 需含 `user_id` claim）
 
 目标设备必须属于当前用户，且 `wx_open_id` 必须与同一用户最近一次
 `wechat-mini-login` 的结果一致。
@@ -2399,17 +2749,21 @@ H5 查询指定设备的小程序 VoIP 联系人。此接口与设备接口分�
 
 **请求示例**
 
-```json
+```jsonc
 {
-  "device_id": "TIRZ00000001",
-  "wx_open_id": "o4DLd5..."
+  "device_id": "TIRZ00000001", // 必填，设备 ID
+  "wx_open_id": "<wechat-mini-login返回的OpenID>", // 必填，微信用户 openid
+  "wx_app_id": "<实际小程序AppID>" // 可选，微信 AppID，不传则用默认
 }
 ```
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
-{ "code": 0, "msg": "ok" }
+```jsonc
+{
+  "code": 0, // 业务码：本接口成功为 0
+  "msg": "ok" // 结果说明，业务判断使用 code
+}
 ```
 
 成功响应不包含 `data` 字段。
@@ -2437,7 +2791,7 @@ H5 查询指定设备的小程序 VoIP 联系人。此接口与设备接口分�
 获取 SN ticket。`device_id` 必须属于当前用户。响应中的 `device_name` 为设备绑定名称；
 未设置名称时返回 `device_id`。
 
-**鉴权**: ✅ `Authorization: Bearer <user_jwt>`（JWT 需含 `user_id` claim）
+**鉴权**： ✅ `Authorization: Bearer <user_jwt>`（JWT 需含 `user_id` claim）
 
 **请求头**
 
@@ -2455,21 +2809,22 @@ H5 查询指定设备的小程序 VoIP 联系人。此接口与设备接口分�
 
 **请求示例**
 
-```json
+```jsonc
 {
-  "device_id": "TIRZ00000001"
+  "device_id": "TIRZ00000001", // 必填，设备 ID
+  "wx_app_id": "<实际小程序AppID>" // 可选，微信 AppID，不传则用默认
 }
 ```
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
+```jsonc
 {
-  "code": 0,
-  "msg": "ok",
-  "data": {
-    "sn_ticket": "xxx",
-    "device_name": "客厅学习机"
+  "code": 0, // 业务码：本接口成功为 0
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "sn_ticket": "<实际返回的 sn_ticket>", // 用于小程序设备 VoIP 授权的票据
+    "device_name": "客厅学习机" // 当前设备名称，用于微信授权展示
   }
 }
 ```
@@ -2508,7 +2863,7 @@ H5 查询指定设备的小程序 VoIP 联系人。此接口与设备接口分�
 
 取消呼叫（小程序挂断后调用）。推送 `call_cancel` 通知到设备。`device_id` 必须属于当前用户。
 
-**鉴权**: ✅ `Authorization: Bearer <user_jwt>`（JWT 需含 `user_id` claim）
+**鉴权**： ✅ `Authorization: Bearer <user_jwt>`（JWT 需含 `user_id` claim）
 
 **请求头**
 
@@ -2526,17 +2881,20 @@ H5 查询指定设备的小程序 VoIP 联系人。此接口与设备接口分�
 
 **请求示例**
 
-```json
+```jsonc
 {
-  "device_id": "TIRZ00000001",
-  "wx_room_id": "wxf..."
+  "device_id": "TIRZ00000001", // 必填，设备 ID
+  "wx_room_id": "<本次微信通话的房间ID>" // 可选，微信房间 ID
 }
 ```
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
-{ "code": 0, "msg": "ok" }
+```jsonc
+{
+  "code": 0, // 业务码：本接口成功为 0
+  "msg": "ok" // 结果说明，业务判断使用 code
+}
 ```
 
 **错误码**
@@ -2563,9 +2921,26 @@ H5 查询指定设备的小程序 VoIP 联系人。此接口与设备接口分�
 
 **鉴权**：`X-Internal-Key` 请求头，值需匹配服务端配置的内部调用密钥。
 
-**请求体**：`{ "device_id": "TIRZ00000001" }`
+**请求体**：
 
-**成功响应**：`{ "code": 0, "msg": "ok" }`
+```jsonc
+{
+  "device_id": "TIRZ00000001" // 必填，需要清理业务关联的设备 ID
+}
+```
+
+
+
+**成功响应**：
+
+```jsonc
+{
+  "code": 0, // 业务码：本接口成功为 0
+  "msg": "ok" // 结果说明，业务判断使用 code
+}
+```
+
+
 
 | code | HTTP | 含义 |
 |------|------|------|
@@ -2654,16 +3029,16 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **无请求体 / 查询参数**
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok",
-  "data": {
-    "peer_id": "whips://ai?x_role_id=fin63bby1og0&...",
-    "token": "v1.eyJ...",
-    "role_id": "fin63bby1og0"
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "peer_id": "<实际返回的 peer_id>", // AI 会话 TiRTC 连接目标
+    "token": "<实际返回的 token>", // AI 会话连接凭证
+    "role_id": "fin63bby1og0" // 实际使用的 AI 角色 ID
   }
 }
 ```
@@ -2674,7 +3049,7 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 | token | TiRTC JWT token，用于建立 WHIP 连接 |
 | role_id | 当前使用的角色 ID（优先设备绑定角色，否则 default_role_id） |
 
-> 已配置数据库时，ai-server 查询 `ai_device_role` 表获取设备绑定的角色；未绑定则使用 `default_role_id`。未配置数据库时所有设备使用 `default_role_id`。
+> 角色优先使用[设置设备角色](#put-v1aidevicedevice_idrole)保存的绑定。没有绑定、绑定读取失败或未配置数据库时，使用 `default_role_id`。批量角色接口管理的云端绑定不参与这里的角色选择。同一设备、同一角色的成功凭证缓存 60 秒。
 
 **错误码**
 
@@ -2695,7 +3070,9 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 ### AI 角色管理
 
-> 以下接口需要配置 `tirtc_aichat` 段。代理探鸽云 `/ai/aigcrtc/roles` CRUD，本地维护 `ai_user_role` 索引和 `ai_device_role` 绑定。所有接口需鉴权。
+以下接口需要配置 `tirtc_aichat`，并使用用户 JWT 鉴权。角色由探鸽云保存，本站记录角色归属和供设备获取 AI 凭证时使用的角色绑定。
+
+应用 MCP 工具、设备插件和知识库列表包含用户自己的资源及配置的默认资源。默认资源可读取；更新或删除资源要求当前用户拥有该资源。
 
 #### AI 资源字段
 
@@ -2749,6 +3126,44 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 | `config.workspace_id` | string | `qwen-agent` 的可选工作空间 ID |
 
 角色请求会按上述结构转发；空字符串和空数组字段通常不转发。若携带 `agent_config` 却省略 `ali_rag`，该字段仍会以 `null` 转发；仅修改其他行为配置时，应同时带上需要保留的知识库绑定。
+
+**服务配置的互斥形态**
+
+角色示例展开 `custom-compose` 的完整字段。使用其他服务时，将整个 `service_config` 替换为以下对应结构；请求和响应使用相同结构，可选字段的实际返回取决于云端配置。
+
+`coze`：
+
+```jsonc
+{
+  "service_config": { // 可选，模型与语音服务配置；不同 type 的 config 结构不同
+    "name": "Coze 服务", // 可选，服务配置名称
+    "type": "coze", // 服务类型：custom-compose、coze 或 qwen-agent
+    "config": { // 所选服务类型的配置
+      "app_id": "<Coze应用ID>", // 所选 Coze/Qwen 服务的应用 ID
+      "bot_id": "<Coze Bot ID>", // Coze Bot ID
+      "private_key": "<Coze私钥>", // Coze 私钥，敏感字段；示例仅为占位值
+      "public_key_id": "<Coze公钥ID>", // Coze 公钥 ID
+      "workflow_id": "<Coze工作流ID>" // 可选，Coze 工作流 ID
+    }
+  }
+}
+```
+
+`qwen-agent`：
+
+```jsonc
+{
+  "service_config": { // 可选，模型与语音服务配置；不同 type 的 config 结构不同
+    "name": "Qwen Agent 服务", // 可选，服务配置名称
+    "type": "qwen-agent", // 服务类型：custom-compose、coze 或 qwen-agent
+    "config": { // 所选服务类型的配置
+      "app_id": "<Qwen应用ID>", // 所选 Coze/Qwen 服务的应用 ID
+      "api_key": "<Qwen API密钥>", // 可选，Qwen 应用 API 密钥，敏感字段
+      "workspace_id": "<Qwen工作空间ID>" // 可选，Qwen 工作空间 ID
+    }
+  }
+}
+```
 
 **角色返回对象**
 
@@ -2829,20 +3244,57 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **鉴权**：`Authorization: Bearer <user_jwt>`（用户 JWT）
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok",
-  "data": {
-    "items": [
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "items": [ // 结果列表；元素示例完整展示对象字段
       {
-        "id": "finxxxxxxxx",
-        "name": "我的助手"
+        "id": "finxxxxxxxx", // 只读，角色 ID
+        "name": "我的助手", // 名称
+        "avatar": "https://cdn.example.com/assistant.png", // 可选，角色头像地址
+        "app_id": "2818153", // 只读，云端应用 ID
+        "user_id": "cloud_user_example", // 只读，云端用户 ID，与本站数字用户 ID 区分
+        "parent_role_id": "fin_parent_example", // 可选，继承的父角色 ID
+        "agent_config": { // 可选，角色行为配置
+          "prompt": "你是一个智能助手，请用简体中文回答。", // 可选，角色提示词
+          "welcome_text": "你好！有什么可以帮你？", // 可选，开场白
+          "ali_rag": { // 知识库绑定；null 表示未绑定
+            "index_id": "idx_001" // 知识库索引 ID
+          },
+          "ali_memory": { // 可选，记忆配置
+            "enable": true // 记忆开关
+          },
+          "mcp_tools": ["app_tool_001"], // 可选，绑定的 MCP 工具 ID 列表
+          "device_plugins": ["plg_001"] // 可选，绑定的设备插件 ID 列表
+        },
+        "service_config": { // 可选，模型与语音服务配置；不同 type 的 config 结构不同
+          "name": "中文语音服务", // 可选，服务配置名称
+          "type": "custom-compose", // 服务类型：custom-compose、coze 或 qwen-agent
+          "config": { // 所选服务类型的配置
+            "tts": { // 可选，custom-compose 的语音合成组件
+              "provider": "<TTS提供方标识>", // TTS 提供方标识，以实际服务为准
+              "provider_params": { // TTS 参数，取值范围由提供方定义
+                "voice": "<音色列表返回的ID>", // 音色列表返回的 ID
+                "volume": 50, // 音量，范围由提供方定义
+                "rate": 1.0, // 语速，范围由提供方定义
+                "pitch": 1.0, // 音调，范围由提供方定义
+                "language_hints": ["zh-CN"] // 语言提示列表
+              }
+            }
+          }
+        },
+        "user_params": { // 可选，自定义参数对象，值可为任意 JSON 类型
+          "locale": "zh-CN" // 自定义参数示例键，非固定协议字段
+        },
+        "created_at": "2026-09-01T10:00:00Z", // 只读，创建时间，保留云端返回格式
+        "updated_at": "2026-09-01T10:00:00Z" // 只读，更新时间，保留云端返回格式
       }
     ],
-    "total": 3
+    "total": 1 // 结果数量，计数规则见本接口字段表
   }
 }
 ```
@@ -2863,20 +3315,52 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **鉴权**：`Authorization: Bearer <user_jwt>`（用户 JWT）
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok",
-  "data": {
-    "id": "fin63bby1og0",
-    "name": "默认助手",
-    "agent_config": {
-      "prompt": "你是一个智能助手",
-      "welcome_text": "你好！",
-      "ali_rag": null
-    }
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "id": "fin63bby1og0", // 只读，角色 ID
+    "name": "默认助手", // 名称
+    "avatar": "https://cdn.example.com/assistant.png", // 可选，角色头像地址
+    "app_id": "2818153", // 只读，云端应用 ID
+    "user_id": "cloud_user_example", // 只读，云端用户 ID，与本站数字用户 ID 区分
+    "parent_role_id": "fin_parent_example", // 可选，继承的父角色 ID
+    "agent_config": { // 可选，角色行为配置
+      "prompt": "你是一个智能助手，请用简体中文回答。", // 可选，角色提示词
+      "welcome_text": "你好！有什么可以帮你？", // 可选，开场白
+      "ali_rag": { // 知识库绑定；null 表示未绑定
+        "index_id": "idx_001" // 知识库索引 ID
+      },
+      "ali_memory": { // 可选，记忆配置
+        "enable": true // 记忆开关
+      },
+      "mcp_tools": ["app_tool_001"], // 可选，绑定的 MCP 工具 ID 列表
+      "device_plugins": ["plg_001"] // 可选，绑定的设备插件 ID 列表
+    },
+    "service_config": { // 可选，模型与语音服务配置；不同 type 的 config 结构不同
+      "name": "中文语音服务", // 可选，服务配置名称
+      "type": "custom-compose", // 服务类型：custom-compose、coze 或 qwen-agent
+      "config": { // 所选服务类型的配置
+        "tts": { // 可选，custom-compose 的语音合成组件
+          "provider": "<TTS提供方标识>", // TTS 提供方标识，以实际服务为准
+          "provider_params": { // TTS 参数，取值范围由提供方定义
+            "voice": "<音色列表返回的ID>", // 音色列表返回的 ID
+            "volume": 50, // 音量，范围由提供方定义
+            "rate": 1.0, // 语速，范围由提供方定义
+            "pitch": 1.0, // 音调，范围由提供方定义
+            "language_hints": ["zh-CN"] // 语言提示列表
+          }
+        }
+      }
+    },
+    "user_params": { // 可选，自定义参数对象，值可为任意 JSON 类型
+      "locale": "zh-CN" // 自定义参数示例键，非固定协议字段
+    },
+    "created_at": "2026-09-01T10:00:00Z", // 只读，创建时间，保留云端返回格式
+    "updated_at": "2026-09-01T10:00:00Z" // 只读，更新时间，保留云端返回格式
   }
 }
 ```
@@ -2921,27 +3405,91 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **请求示例**
 
-```json
+```jsonc
 {
-  "name": "我的助手",
-  "agent_config": { "prompt": "你是一个智能助手", "welcome_text": "你好！" }
+  "name": "我的助手", // 必填，角色名称
+  "avatar": "https://cdn.example.com/assistant.png", // 可选，角色头像地址
+  "parent_role_id": "fin_parent_example", // 可选，继承的父角色 ID
+  "agent_config": { // 可选，角色配置（prompt、welcome_text 等）
+    "prompt": "你是一个智能助手，请用简体中文回答。", // 可选，角色提示词
+    "welcome_text": "你好！有什么可以帮你？", // 可选，开场白
+    "ali_rag": { // 可选，知识库绑定；null 表示清除
+      "index_id": "idx_001" // 知识库索引 ID
+    },
+    "ali_memory": { // 可选，记忆配置
+      "enable": true // 记忆开关
+    },
+    "mcp_tools": ["app_tool_001"], // 可选，绑定的 MCP 工具 ID 列表
+    "device_plugins": ["plg_001"] // 可选，绑定的设备插件 ID 列表
+  },
+  "service_config": { // 可选，模型与语音服务配置；不同 type 的 config 结构不同
+    "name": "中文语音服务", // 可选，服务配置名称
+    "type": "custom-compose", // 服务类型：custom-compose、coze 或 qwen-agent
+    "config": { // 所选服务类型的配置
+      "tts": { // 可选，custom-compose 的语音合成组件
+        "provider": "<TTS提供方标识>", // TTS 提供方标识，以实际服务为准
+        "provider_params": { // TTS 参数，取值范围由提供方定义
+          "voice": "<音色列表返回的ID>", // 音色列表返回的 ID
+          "volume": 50, // 音量，范围由提供方定义
+          "rate": 1.0, // 语速，范围由提供方定义
+          "pitch": 1.0, // 音调，范围由提供方定义
+          "language_hints": ["zh-CN"] // 语言提示列表
+        }
+      }
+    }
+  },
+  "user_params": { // 可选，自定义参数对象，值可为任意 JSON 类型
+    "locale": "zh-CN" // 自定义参数示例键，非固定协议字段
+  }
 }
 ```
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok",
-  "data": {
-    "id": "finxxxxxxxx",
-    "name": "我的助手",
-    "agent_config": {
-      "prompt": "你是一个智能助手",
-      "welcome_text": "你好！",
-      "ali_rag": null
-    }
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "id": "finxxxxxxxx", // 只读，角色 ID
+    "name": "我的助手", // 角色名称
+    "avatar": "https://cdn.example.com/assistant.png", // 可选，角色头像地址
+    "app_id": "2818153", // 只读，云端应用 ID
+    "user_id": "cloud_user_example", // 只读，云端用户 ID，与本站数字用户 ID 区分
+    "parent_role_id": "fin_parent_example", // 可选，继承的父角色 ID
+    "agent_config": { // 角色配置（prompt、welcome_text 等）
+      "prompt": "你是一个智能助手，请用简体中文回答。", // 可选，角色提示词
+      "welcome_text": "你好！有什么可以帮你？", // 可选，开场白
+      "ali_rag": { // 知识库绑定；null 表示未绑定
+        "index_id": "idx_001" // 知识库索引 ID
+      },
+      "ali_memory": { // 可选，记忆配置
+        "enable": true // 记忆开关
+      },
+      "mcp_tools": ["app_tool_001"], // 可选，绑定的 MCP 工具 ID 列表
+      "device_plugins": ["plg_001"] // 可选，绑定的设备插件 ID 列表
+    },
+    "service_config": { // 可选，模型与语音服务配置；不同 type 的 config 结构不同
+      "name": "中文语音服务", // 可选，服务配置名称
+      "type": "custom-compose", // 服务类型：custom-compose、coze 或 qwen-agent
+      "config": { // 所选服务类型的配置
+        "tts": { // 可选，custom-compose 的语音合成组件
+          "provider": "<TTS提供方标识>", // TTS 提供方标识，以实际服务为准
+          "provider_params": { // TTS 参数，取值范围由提供方定义
+            "voice": "<音色列表返回的ID>", // 音色列表返回的 ID
+            "volume": 50, // 音量，范围由提供方定义
+            "rate": 1.0, // 语速，范围由提供方定义
+            "pitch": 1.0, // 音调，范围由提供方定义
+            "language_hints": ["zh-CN"] // 语言提示列表
+          }
+        }
+      }
+    },
+    "user_params": { // 可选，自定义参数对象，值可为任意 JSON 类型
+      "locale": "zh-CN" // 自定义参数示例键，非固定协议字段
+    },
+    "created_at": "2026-09-01T10:00:00Z", // 只读，创建时间，保留云端返回格式
+    "updated_at": "2026-09-01T10:00:00Z" // 只读，更新时间，保留云端返回格式
   }
 }
 ```
@@ -2966,6 +3514,56 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 |---|---|---|---|
 | `id` | string | 是 | 路径参数，当前用户可访问的角色 ID |
 
+**成功响应示例**（HTTP 200）
+
+```jsonc
+{
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "id": "finxxxxxxxx", // 只读，角色 ID
+    "name": "我的助手", // 名称
+    "avatar": "https://cdn.example.com/assistant.png", // 可选，角色头像地址
+    "app_id": "2818153", // 只读，云端应用 ID
+    "user_id": "cloud_user_example", // 只读，云端用户 ID，与本站数字用户 ID 区分
+    "parent_role_id": "fin_parent_example", // 可选，继承的父角色 ID
+    "agent_config": { // 可选，角色行为配置
+      "prompt": "你是一个智能助手，请用简体中文回答。", // 可选，角色提示词
+      "welcome_text": "你好！有什么可以帮你？", // 可选，开场白
+      "ali_rag": { // 知识库绑定；null 表示未绑定
+        "index_id": "idx_001" // 知识库索引 ID
+      },
+      "ali_memory": { // 可选，记忆配置
+        "enable": true // 记忆开关
+      },
+      "mcp_tools": ["app_tool_001"], // 可选，绑定的 MCP 工具 ID 列表
+      "device_plugins": ["plg_001"] // 可选，绑定的设备插件 ID 列表
+    },
+    "service_config": { // 可选，模型与语音服务配置；不同 type 的 config 结构不同
+      "name": "中文语音服务", // 可选，服务配置名称
+      "type": "custom-compose", // 服务类型：custom-compose、coze 或 qwen-agent
+      "config": { // 所选服务类型的配置
+        "tts": { // 可选，custom-compose 的语音合成组件
+          "provider": "<TTS提供方标识>", // TTS 提供方标识，以实际服务为准
+          "provider_params": { // TTS 参数，取值范围由提供方定义
+            "voice": "<音色列表返回的ID>", // 音色列表返回的 ID
+            "volume": 50, // 音量，范围由提供方定义
+            "rate": 1.0, // 语速，范围由提供方定义
+            "pitch": 1.0, // 音调，范围由提供方定义
+            "language_hints": ["zh-CN"] // 语言提示列表
+          }
+        }
+      }
+    },
+    "user_params": { // 可选，自定义参数对象，值可为任意 JSON 类型
+      "locale": "zh-CN" // 自定义参数示例键，非固定协议字段
+    },
+    "created_at": "2026-09-01T10:00:00Z", // 只读，创建时间，保留云端返回格式
+    "updated_at": "2026-09-01T10:00:00Z" // 只读，更新时间，保留云端返回格式
+  }
+}
+```
+
 **返回字段**：`data` 为角色返回对象，完整字段及嵌套配置见 [AI 资源字段](#ai-资源字段)。
 
 **空结果**：本地所有权校验通过后，若云端角色已不存在并返回空数据，本接口仍为 HTTP 200 + `code=200`，`data=null`。这与默认角色接口的 HTTP 404 不同。
@@ -2988,7 +3586,98 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `id` | string | 是 | 路径参数，当前用户可访问的角色 ID |
+| `id` | string | 是 | 路径参数，当前用户创建的角色 ID |
+
+**请求示例**
+
+```jsonc
+{
+  "name": "我的助手 v2", // 可选，角色名称
+  "avatar": "https://cdn.example.com/assistant.png", // 可选，角色头像地址
+  "parent_role_id": "fin_parent_example", // 可选，继承的父角色 ID
+  "agent_config": { // 可选，角色行为配置
+    "prompt": "你是一个智能助手，请用简体中文回答。", // 可选，角色提示词
+    "welcome_text": "你好！有什么可以帮你？", // 可选，开场白
+    "ali_rag": { // 可选，知识库绑定；null 表示清除
+      "index_id": "idx_001" // 知识库索引 ID
+    },
+    "ali_memory": { // 可选，记忆配置
+      "enable": true // 记忆开关
+    },
+    "mcp_tools": ["app_tool_001"], // 可选，绑定的 MCP 工具 ID 列表
+    "device_plugins": ["plg_001"] // 可选，绑定的设备插件 ID 列表
+  },
+  "service_config": { // 可选，模型与语音服务配置；不同 type 的 config 结构不同
+    "name": "中文语音服务", // 可选，服务配置名称
+    "type": "custom-compose", // 服务类型：custom-compose、coze 或 qwen-agent
+    "config": { // 所选服务类型的配置
+      "tts": { // 可选，custom-compose 的语音合成组件
+        "provider": "<TTS提供方标识>", // TTS 提供方标识，以实际服务为准
+        "provider_params": { // TTS 参数，取值范围由提供方定义
+          "voice": "<音色列表返回的ID>", // 音色列表返回的 ID
+          "volume": 50, // 音量，范围由提供方定义
+          "rate": 1.0, // 语速，范围由提供方定义
+          "pitch": 1.0, // 音调，范围由提供方定义
+          "language_hints": ["zh-CN"] // 语言提示列表
+        }
+      }
+    }
+  },
+  "user_params": { // 可选，自定义参数对象，值可为任意 JSON 类型
+    "locale": "zh-CN" // 自定义参数示例键，非固定协议字段
+  }
+}
+```
+
+**成功响应示例**（HTTP 200）
+
+```jsonc
+{
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "id": "finxxxxxxxx", // 只读，角色 ID
+    "name": "我的助手 v2", // 名称
+    "avatar": "https://cdn.example.com/assistant.png", // 可选，角色头像地址
+    "app_id": "2818153", // 只读，云端应用 ID
+    "user_id": "cloud_user_example", // 只读，云端用户 ID，与本站数字用户 ID 区分
+    "parent_role_id": "fin_parent_example", // 可选，继承的父角色 ID
+    "agent_config": { // 可选，角色行为配置
+      "prompt": "你是一个智能助手，请用简体中文回答。", // 可选，角色提示词
+      "welcome_text": "你好！有什么可以帮你？", // 可选，开场白
+      "ali_rag": { // 知识库绑定；null 表示未绑定
+        "index_id": "idx_001" // 知识库索引 ID
+      },
+      "ali_memory": { // 可选，记忆配置
+        "enable": true // 记忆开关
+      },
+      "mcp_tools": ["app_tool_001"], // 可选，绑定的 MCP 工具 ID 列表
+      "device_plugins": ["plg_001"] // 可选，绑定的设备插件 ID 列表
+    },
+    "service_config": { // 可选，模型与语音服务配置；不同 type 的 config 结构不同
+      "name": "中文语音服务", // 可选，服务配置名称
+      "type": "custom-compose", // 服务类型：custom-compose、coze 或 qwen-agent
+      "config": { // 所选服务类型的配置
+        "tts": { // 可选，custom-compose 的语音合成组件
+          "provider": "<TTS提供方标识>", // TTS 提供方标识，以实际服务为准
+          "provider_params": { // TTS 参数，取值范围由提供方定义
+            "voice": "<音色列表返回的ID>", // 音色列表返回的 ID
+            "volume": 50, // 音量，范围由提供方定义
+            "rate": 1.0, // 语速，范围由提供方定义
+            "pitch": 1.0, // 音调，范围由提供方定义
+            "language_hints": ["zh-CN"] // 语言提示列表
+          }
+        }
+      }
+    },
+    "user_params": { // 可选，自定义参数对象，值可为任意 JSON 类型
+      "locale": "zh-CN" // 自定义参数示例键，非固定协议字段
+    },
+    "created_at": "2026-09-01T10:00:00Z", // 只读，创建时间，保留云端返回格式
+    "updated_at": "2026-09-01T10:00:00Z" // 只读，更新时间，保留云端返回格式
+  }
+}
+```
 
 **返回字段**：`data` 为角色返回对象，完整字段及嵌套配置见 [AI 资源字段](#ai-资源字段)。
 
@@ -3010,11 +3699,20 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `id` | string | 是 | 路径参数，当前用户可访问的角色 ID |
+| `id` | string | 是 | 路径参数，当前用户创建的角色 ID |
 
 **请求体**：无。
 
-**成功响应**：HTTP 200，`{"code":200,"msg":"ok"}`，无 `data` 字段。
+**成功响应**：HTTP 200，
+
+```jsonc
+{
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok" // 结果说明，业务判断使用 code
+}
+```
+
+无 `data` 字段。
 
 #### 角色 CRUD 通用错误码
 
@@ -3040,15 +3738,15 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **鉴权**：`Authorization: Bearer <user_jwt>`（用户 JWT）
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok",
-  "data": {
-    "default_role_id": "fin63bby1og0",
-    "role_id": "finxxxxxxxx"
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "default_role_id": "fin63bby1og0", // 全局默认角色 ID
+    "role_id": "finxxxxxxxx" // 设备显式绑定的角色 ID，未设置时为空并使用默认角色
   }
 }
 ```
@@ -3095,16 +3793,18 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **请求示例**
 
-```json
-{ "role_id": "finxxxxxxxx" }
+```jsonc
+{
+  "role_id": "<本账号创建的角色ID>" // 必填，当前用户创建的角色 ID
+}
 ```
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok"
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok" // 结果说明，业务判断使用 code
 }
 ```
 
@@ -3126,12 +3826,12 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **鉴权**：`Authorization: Bearer <user_jwt>`（用户 JWT）
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok"
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok" // 结果说明，业务判断使用 code
 }
 ```
 
@@ -3156,7 +3856,7 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 #### 设备角色批量操作（V2 代理）
 
-> 以下接口代理至探鸽云 `/v2/ai/device-roles` 进行批量设备-角色绑定管理。所有接口需鉴权。
+这些接口通过探鸽云 `/v2/ai/device-roles` 管理云端绑定，需要用户 JWT。批量操作与单设备角色接口管理的绑定独立，不会同步修改 `/v1/ai/token` 使用的设备角色。要切换设备获取 AI 凭证时使用的角色，请调用[设置设备角色](#put-v1aidevicedevice_idrole)。
 
 <a id="post-v1aidevice-roles"></a>
 
@@ -3179,19 +3879,19 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **请求示例**
 
-```json
+```jsonc
 {
-  "device_ids": ["TIRZ00000001", "TIRZ00000002"],
-  "role_id": "finxxxxxxxx"
+  "device_ids": ["TIRZ00000001", "TIRZ00000002"], // 必填，设备 ID 列表
+  "role_id": "<本账号创建的角色ID>" // 必填，角色 ID
 }
 ```
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok"
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok" // 结果说明，业务判断使用 code
 }
 ```
 
@@ -3215,23 +3915,25 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **请求示例**
 
-```json
-{ "device_ids": ["TIRZ00000001", "TIRZ00000002"] }
+```jsonc
+{
+  "device_ids": ["TIRZ00000001", "TIRZ00000002"] // 必填，设备 ID 列表
+}
 ```
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok",
-  "data": {
-    "items": [
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "items": [ // 设备与角色绑定记录
       {
-        "device_id": "TIRZ00000001",
-        "role_id": "finxxxxxxxx",
-        "created_at": 1720000000,
-        "updated_at": 1720000000
+        "device_id": "TIRZ00000001", // 设备 ID
+        "role_id": "finxxxxxxxx", // 绑定的角色 ID
+        "created_at": 1720000000, // 云端返回的创建时间戳
+        "updated_at": 1720000000 // 云端返回的更新时间戳
       }
     ]
   }
@@ -3268,12 +3970,21 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 | `role_id` | string | 否 | 角色 ID；省略时按设备删除绑定 |
 
 
-**成功响应** — HTTP 200
+**请求示例**
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok"
+  "device_ids": ["TIRZ00000001", "TIRZ00000002"], // 必填，设备 ID 列表，设备须属于当前用户
+  "role_id": "finxxxxxxxx" // 可选，角色 ID；省略时按设备删除绑定
+}
+```
+
+**成功响应**（HTTP 200）
+
+```jsonc
+{
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok" // 结果说明，业务判断使用 code
 }
 ```
 
@@ -3309,23 +4020,21 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 |------|:--:|------|
 | language | | 语言过滤（如 `zh-CN`），空则返回全部 |
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok",
-  "data": {
-    "items": [
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "items": [ // 音色列表
       {
-        "id": "voice_001",
-        "name": "小云",
-        "languages": [
-          "zh-CN"
-        ],
-        "model": "cosyvoice",
-        "scene": "default",
-        "sample_url": "https://..."
+        "id": "voice_001", // 音色 ID
+        "name": "小云", // 音色名称
+        "languages": ["zh-CN"], // 可选，支持的语言
+        "model": "cosyvoice", // 可选，语音模型
+        "scene": "default", // 可选，适用场景
+        "sample_url": "<实际返回的 sample_url>" // 可选，试听音频地址
       }
     ]
   }
@@ -3362,18 +4071,18 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **鉴权**：`Authorization: Bearer <user_jwt>`（用户 JWT）
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok",
-  "data": {
-    "items": [
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "items": [ // 全局 MCP 工具列表
       {
-        "id": "tool_001",
-        "name": "web_search",
-        "description": "搜索互联网"
+        "id": "tool_001", // 只读，MCP 工具 ID
+        "name": "web_search", // 工具名称
+        "description": "搜索互联网" // 可选，工具描述
       }
     ]
   }
@@ -3405,16 +4114,16 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **鉴权**：`Authorization: Bearer <user_jwt>`（用户 JWT）
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok",
-  "data": {
-    "id": "tool_001",
-    "name": "web_search",
-    "description": "搜索互联网"
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "id": "tool_001", // 只读，MCP 工具 ID
+    "name": "web_search", // 工具名称
+    "description": "搜索互联网" // 可选，工具描述
   }
 }
 ```
@@ -3452,17 +4161,17 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **鉴权**：`Authorization: Bearer <user_jwt>`（用户 JWT）
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok",
-  "data": {
-    "items": [
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "items": [ // 当前用户资源与配置的默认资源引用
       {
-        "id": "app_tool_001",
-        "name": "my_tool"
+        "id": "app_tool_001", // 只读，MCP 工具 ID
+        "name": "my_tool" // 资源名称
       }
     ]
   }
@@ -3505,34 +4214,44 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **请求示例**
 
-```json
+```jsonc
 {
-  "config": {
-    "name": "my_tool",
-    "url": "https://mcp.example.com/sse",
-    "description": "自定义工具",
-    "type": "sse"
+  "config": { // 必填，工具配置
+    "enable": true, // 可选，工具运行时开关，与外层 enabled 区分
+    "name": "my_tool", // 工具名称
+    "url": "https://mcp.example.com/sse", // MCP 服务地址
+    "description": "自定义工具", // 可选，工具说明
+    "type": "sse", // 可选，传输协议：sse 或 streamableHttp
+    "authentication": { // 可选，MCP 服务认证配置
+      "type": "BearerToken", // 认证类型，目前为 BearerToken
+      "bearer_token": "<MCP服务认证凭证>" // MCP 认证凭证，敏感字段；示例仅为占位值
+    }
   },
-  "enabled": true
+  "enabled": true // 可选，是否启用；省略时由上游决定
 }
 ```
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok",
-  "data": {
-    "id": "app_tool_001",
-    "app_id": "2818153",
-    "enabled": true,
-    "config": {
-      "name": "my_tool",
-      "url": "https://mcp.example.com/sse",
-      "description": "自定义工具",
-      "type": "sse"
-    }
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "id": "app_tool_001", // 只读，MCP 工具 ID
+    "app_id": "2818153", // 只读，云端应用 ID
+    "config": { // 工具配置
+      "enable": true, // 可选，工具运行时开关，与外层 enabled 区分
+      "name": "my_tool", // 工具名称
+      "url": "https://mcp.example.com/sse", // MCP 服务地址
+      "description": "自定义工具", // 可选，工具说明
+      "type": "sse", // 可选，传输协议：sse 或 streamableHttp
+      "authentication": { // 可选，MCP 服务认证配置
+        "type": "BearerToken", // 认证类型，目前为 BearerToken
+        "bearer_token": "<MCP服务认证凭证>" // MCP 认证凭证，敏感字段；示例仅为占位值
+      }
+    },
+    "enabled": true // 是否启用；省略时由上游决定
   }
 }
 ```
@@ -3557,6 +4276,31 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 |---|---|---|---|
 | `id` | string | 是 | 路径参数，当前用户可访问的工具 ID |
 
+**成功响应示例**（HTTP 200）
+
+```jsonc
+{
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "id": "app_tool_001", // 只读，MCP 工具 ID
+    "app_id": "2818153", // 只读，云端应用 ID
+    "config": { // 工具配置对象
+      "enable": true, // 可选，工具运行时开关，与外层 enabled 区分
+      "name": "my_tool", // 工具名称
+      "url": "https://mcp.example.com/sse", // MCP 服务地址
+      "description": "自定义工具", // 可选，工具说明
+      "type": "sse", // 可选，传输协议：sse 或 streamableHttp
+      "authentication": { // 可选，MCP 服务认证配置
+        "type": "BearerToken", // 认证类型，目前为 BearerToken
+        "bearer_token": "<MCP服务认证凭证>" // MCP 认证凭证，敏感字段；示例仅为占位值
+      }
+    },
+    "enabled": true // 是否启用
+  }
+}
+```
+
 **返回字段**：`data` 为应用级 MCP 工具对象，完整字段及嵌套配置见 [AI 资源字段](#ai-资源字段)。
 
 <a id="put-v1aimcpapp-toolsid"></a>
@@ -3571,23 +4315,48 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **鉴权**：`Authorization: Bearer <user_jwt>`（用户 JWT）
 
-**请求体**: `config` 和 `enabled` 均可选，传什么更新什么。
+**请求体**：`config` 和 `enabled` 均可选。只切换启用状态时传 `enabled`，支持显式传 `false`。修改 `config` 时应提供要保留的完整配置，不要假定云端会保留省略的嵌套字段。
 
-**成功响应** — HTTP 200
+**请求示例**
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok",
-  "data": {
-    "id": "app_tool_001",
-    "enabled": false,
-    "config": {
-      "name": "my_tool",
-      "url": "https://mcp.example.com/sse",
-      "description": "自定义工具",
-      "type": "sse"
+  "config": { // 工具配置对象
+    "enable": true, // 可选，工具运行时开关，与外层 enabled 区分
+    "name": "my_tool", // 工具名称
+    "url": "https://mcp.example.com/sse", // MCP 服务地址
+    "description": "自定义工具", // 可选，工具说明
+    "type": "sse", // 可选，传输协议：sse 或 streamableHttp
+    "authentication": { // 可选，MCP 服务认证配置
+      "type": "BearerToken", // 认证类型，目前为 BearerToken
+      "bearer_token": "<MCP服务认证凭证>" // MCP 认证凭证，敏感字段；示例仅为占位值
     }
+  },
+  "enabled": false // 是否启用
+}
+```
+
+**成功响应**（HTTP 200）
+
+```jsonc
+{
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "id": "app_tool_001", // 只读，MCP 工具 ID
+    "app_id": "2818153", // 只读，云端应用 ID
+    "config": { // 工具配置对象
+      "enable": true, // 可选，工具运行时开关，与外层 enabled 区分
+      "name": "my_tool", // 工具名称
+      "url": "https://mcp.example.com/sse", // MCP 服务地址
+      "description": "自定义工具", // 可选，工具说明
+      "type": "sse", // 可选，传输协议：sse 或 streamableHttp
+      "authentication": { // 可选，MCP 服务认证配置
+        "type": "BearerToken", // 认证类型，目前为 BearerToken
+        "bearer_token": "<MCP服务认证凭证>" // MCP 认证凭证，敏感字段；示例仅为占位值
+      }
+    },
+    "enabled": false // 是否启用
   }
 }
 ```
@@ -3596,7 +4365,7 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `id` | string | 是 | 路径参数，当前用户可访问的工具 ID |
+| `id` | string | 是 | 路径参数，当前用户创建的工具 ID |
 
 **返回字段**：`data` 为应用级 MCP 工具对象，完整字段及嵌套配置见 [AI 资源字段](#ai-资源字段)。
 
@@ -3628,11 +4397,20 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `id` | string | 是 | 路径参数，当前用户可访问的工具 ID |
+| `id` | string | 是 | 路径参数，当前用户创建的工具 ID |
 
 **请求体**：无。
 
-**成功响应**：HTTP 200，`{"code":200,"msg":"ok"}`，无 `data` 字段。
+**成功响应**：HTTP 200，
+
+```jsonc
+{
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok" // 结果说明，业务判断使用 code
+}
+```
+
+无 `data` 字段。
 
 ---
 
@@ -3653,17 +4431,17 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **鉴权**：`Authorization: Bearer <user_jwt>`（用户 JWT）
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok",
-  "data": {
-    "items": [
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "items": [ // 当前用户资源与配置的默认资源引用
       {
-        "id": "plg_001",
-        "name": "开灯"
+        "id": "plg_001", // 只读，设备插件 ID
+        "name": "开灯" // 资源名称
       }
     ]
   }
@@ -3704,25 +4482,68 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **请求示例**
 
-```json
+```jsonc
 {
-  "name": "开灯",
-  "action": "turn_on",
-  "description": "打开设备灯"
+  "name": "开灯", // 必填，插件名称
+  "action": "turn_on", // 必填，设备端指令标识，仅允许 [a-zA-Z0-9_]，长度 1-64
+  "description": "打开设备灯", // 可选，描述
+  "input_params": [ // 可选，输入参数定义，各子字段见下方注释
+    {
+      "name": "mode", // 可选，输入参数名称
+      "type": "string", // 参数类型：string/integer/boolean/array/object
+      "description": "开灯模式", // 可选，输入参数含义
+      "required": false, // 是否必填，未传时为 false
+      "enum": ["normal", "night"], // 可选，允许值列表
+      "default_value": "normal" // 可选，默认值的字符串表示
+    }
+  ],
+  "return_params": [ // 可选，返回值定义，格式同 input_params
+    {
+      "name": "result", // 可选，返回参数名称
+      "type": "string", // 参数类型：string/integer/boolean/array/object
+      "description": "执行结果", // 可选，返回参数含义
+      "required": true, // 是否必填，未传时为 false
+      "enum": ["ok", "failed"], // 可选，允许值列表
+      "default_value": "ok" // 可选，默认值的字符串表示
+    }
+  ]
 }
 ```
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok",
-  "data": {
-    "id": "plg_001",
-    "name": "开灯",
-    "action": "turn_on",
-    "description": "打开设备灯"
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "id": "plg_001", // 只读，设备插件 ID
+    "app_id": "2818153", // 只读，云端应用 ID
+    "name": "开灯", // 插件名称
+    "action": "turn_on", // 设备端指令标识，仅允许 [a-zA-Z0-9_]，长度 1-64
+    "description": "打开设备灯", // 描述
+    "input_params": [ // 输入参数定义，各子字段见下方注释
+      {
+        "name": "mode", // 可选，输入参数名称
+        "type": "string", // 参数类型：string/integer/boolean/array/object
+        "description": "开灯模式", // 可选，输入参数含义
+        "required": false, // 是否必填，未传时为 false
+        "enum": ["normal", "night"], // 可选，允许值列表
+        "default_value": "normal" // 可选，默认值的字符串表示
+      }
+    ],
+    "return_params": [ // 返回值定义，格式同 input_params
+      {
+        "name": "result", // 可选，返回参数名称
+        "type": "string", // 参数类型：string/integer/boolean/array/object
+        "description": "执行结果", // 可选，返回参数含义
+        "required": true, // 是否必填，未传时为 false
+        "enum": ["ok", "failed"], // 可选，允许值列表
+        "default_value": "ok" // 可选，默认值的字符串表示
+      }
+    ],
+    "created_at": "2026-09-01T10:00:00Z", // 只读，创建时间，保留云端返回格式
+    "updated_at": "2026-09-01T10:00:00Z" // 只读，更新时间，保留云端返回格式
   }
 }
 ```
@@ -3747,6 +4568,44 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 |---|---|---|---|
 | `id` | string | 是 | 路径参数，当前用户可访问的插件 ID |
 
+**成功响应示例**（HTTP 200）
+
+```jsonc
+{
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "id": "plg_001", // 只读，设备插件 ID
+    "app_id": "2818153", // 只读，云端应用 ID
+    "name": "开灯", // 名称
+    "action": "turn_on", // 设备指令标识，须与设备实现一致
+    "description": "打开设备灯", // 说明文本
+    "input_params": [ // 可选，设备指令的输入参数定义
+      {
+        "name": "mode", // 可选，输入参数名称
+        "type": "string", // 参数类型：string/integer/boolean/array/object
+        "description": "开灯模式", // 可选，输入参数含义
+        "required": false, // 是否必填，未传时为 false
+        "enum": ["normal", "night"], // 可选，允许值列表
+        "default_value": "normal" // 可选，默认值的字符串表示
+      }
+    ],
+    "return_params": [ // 可选，设备指令的返回参数定义
+      {
+        "name": "result", // 可选，返回参数名称
+        "type": "string", // 参数类型：string/integer/boolean/array/object
+        "description": "执行结果", // 可选，返回参数含义
+        "required": true, // 是否必填，未传时为 false
+        "enum": ["ok", "failed"], // 可选，允许值列表
+        "default_value": "ok" // 可选，默认值的字符串表示
+      }
+    ],
+    "created_at": "2026-09-01T10:00:00Z", // 只读，创建时间，保留云端返回格式
+    "updated_at": "2026-09-01T10:00:00Z" // 只读，更新时间，保留云端返回格式
+  }
+}
+```
+
 **返回字段**：`data` 为设备插件对象，完整字段及嵌套配置见 [AI 资源字段](#ai-资源字段)。
 
 <a id="put-v1aipluginsid"></a>
@@ -3767,7 +4626,75 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `id` | string | 是 | 路径参数，当前用户可访问的插件 ID |
+| `id` | string | 是 | 路径参数，当前用户创建的插件 ID |
+
+**请求示例**
+
+```jsonc
+{
+  "name": "开灯", // 名称
+  "action": "turn_on", // 设备指令标识，须与设备实现一致
+  "description": "打开设备灯", // 说明文本
+  "input_params": [ // 可选，设备指令的输入参数定义
+    {
+      "name": "mode", // 可选，输入参数名称
+      "type": "string", // 参数类型：string/integer/boolean/array/object
+      "description": "开灯模式", // 可选，输入参数含义
+      "required": false, // 是否必填，未传时为 false
+      "enum": ["normal", "night"], // 可选，允许值列表
+      "default_value": "normal" // 可选，默认值的字符串表示
+    }
+  ],
+  "return_params": [ // 可选，设备指令的返回参数定义
+    {
+      "name": "result", // 可选，返回参数名称
+      "type": "string", // 参数类型：string/integer/boolean/array/object
+      "description": "执行结果", // 可选，返回参数含义
+      "required": true, // 是否必填，未传时为 false
+      "enum": ["ok", "failed"], // 可选，允许值列表
+      "default_value": "ok" // 可选，默认值的字符串表示
+    }
+  ]
+}
+```
+
+**成功响应示例**（HTTP 200）
+
+```jsonc
+{
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "id": "plg_001", // 只读，设备插件 ID
+    "app_id": "2818153", // 只读，云端应用 ID
+    "name": "开灯", // 名称
+    "action": "turn_on", // 设备指令标识，须与设备实现一致
+    "description": "打开设备灯", // 说明文本
+    "input_params": [ // 可选，设备指令的输入参数定义
+      {
+        "name": "mode", // 可选，输入参数名称
+        "type": "string", // 参数类型：string/integer/boolean/array/object
+        "description": "开灯模式", // 可选，输入参数含义
+        "required": false, // 是否必填，未传时为 false
+        "enum": ["normal", "night"], // 可选，允许值列表
+        "default_value": "normal" // 可选，默认值的字符串表示
+      }
+    ],
+    "return_params": [ // 可选，设备指令的返回参数定义
+      {
+        "name": "result", // 可选，返回参数名称
+        "type": "string", // 参数类型：string/integer/boolean/array/object
+        "description": "执行结果", // 可选，返回参数含义
+        "required": true, // 是否必填，未传时为 false
+        "enum": ["ok", "failed"], // 可选，允许值列表
+        "default_value": "ok" // 可选，默认值的字符串表示
+      }
+    ],
+    "created_at": "2026-09-01T10:00:00Z", // 只读，创建时间，保留云端返回格式
+    "updated_at": "2026-09-01T10:00:00Z" // 只读，更新时间，保留云端返回格式
+  }
+}
+```
 
 **返回字段**：`data` 为设备插件对象，完整字段及嵌套配置见 [AI 资源字段](#ai-资源字段)。
 
@@ -3799,11 +4726,20 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `id` | string | 是 | 路径参数，当前用户可访问的插件 ID |
+| `id` | string | 是 | 路径参数，当前用户创建的插件 ID |
 
 **请求体**：无。
 
-**成功响应**：HTTP 200，`{"code":200,"msg":"ok"}`，无 `data` 字段。
+**成功响应**：HTTP 200，
+
+```jsonc
+{
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok" // 结果说明，业务判断使用 code
+}
+```
+
+无 `data` 字段。
 
 ---
 
@@ -3823,20 +4759,20 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **鉴权**：`Authorization: Bearer <user_jwt>`（用户 JWT）
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok",
-  "data": {
-    "items": [
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "items": [ // 当前用户资源与配置的默认资源引用
       {
-        "id": "idx_001",
-        "name": "产品手册"
+        "id": "idx_001", // 只读，知识库索引引用 ID
+        "name": "产品手册" // 资源名称
       }
     ],
-    "total": 1
+    "total": 1 // 返回的 items 数量
   }
 }
 ```
@@ -3877,24 +4813,24 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **请求示例**
 
-```json
+```jsonc
 {
-  "name": "产品手册",
-  "description": "产品知识库"
+  "name": "产品手册", // 必填，索引名称
+  "description": "产品知识库" // 必填，索引描述
 }
 ```
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok",
-  "data": {
-    "index_id": "idx_001",
-    "name": "产品手册",
-    "description": "产品知识库",
-    "document_ids": []
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "index_id": "idx_001", // 知识库索引 ID
+    "name": "产品手册", // 索引名称
+    "description": "产品知识库", // 索引描述
+    "document_ids": [] // 关联的文档 ID 列表，不是上传文件 ID
   }
 }
 ```
@@ -3916,6 +4852,21 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `id` | string | 是 | 路径参数，当前用户可访问的知识库索引 ID |
+
+**成功响应示例**（HTTP 200）
+
+```jsonc
+{
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "index_id": "idx_001", // 知识库索引 ID
+    "name": "产品手册", // 名称
+    "description": "产品知识库", // 说明文本
+    "document_ids": ["doc_001"] // 关联的文档 ID 列表，不是上传文件 ID
+  }
+}
+```
 
 **返回字段**：`data` 为知识库索引返回对象，完整字段及嵌套配置见 [AI 资源字段](#ai-资源字段)。
 
@@ -3941,15 +4892,34 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **请求示例**
 
-```json
-{ "name": "产品手册 v2", "document_ids": ["doc_001", "doc_003"] }
+```jsonc
+{
+  "name": "产品手册 v2", // 可选，索引名称
+  "description": "产品知识库", // 可选，索引描述
+  "document_ids": ["doc_001", "doc_003"] // 可选，关联文档 ID 列表
+}
 ```
 
 **路径参数**
 
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `id` | string | 是 | 路径参数，当前用户可访问的知识库索引 ID |
+| `id` | string | 是 | 路径参数，当前用户创建的知识库索引 ID |
+
+**成功响应示例**（HTTP 200）
+
+```jsonc
+{
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "index_id": "idx_001", // 知识库索引 ID
+    "name": "产品手册 v2", // 索引名称
+    "description": "产品知识库", // 索引描述
+    "document_ids": ["doc_001", "doc_003"] // 关联文档 ID 列表
+  }
+}
+```
 
 **返回字段**：`data` 为知识库索引返回对象，完整字段及嵌套配置见 [AI 资源字段](#ai-资源字段)。
 
@@ -3969,11 +4939,20 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `id` | string | 是 | 路径参数，当前用户可访问的知识库索引 ID |
+| `id` | string | 是 | 路径参数，当前用户创建的知识库索引 ID |
 
 **请求体**：无。
 
-**成功响应**：HTTP 200，`{"code":200,"msg":"ok"}`，无 `data` 字段。
+**成功响应**：HTTP 200，
+
+```jsonc
+{
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok" // 结果说明，业务判断使用 code
+}
+```
+
+无 `data` 字段。
 
 <a id="get-v1aiknowledgeindexesiddocumentspage1page_size20"></a>
 
@@ -3996,23 +4975,23 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 | page | | 1 | 页码；非正整数按默认值处理 |
 | page_size | | 20 | 每页条数，范围 1–100；非法值按默认值处理 |
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok",
-  "data": {
-    "items": [
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "items": [ // 本页文档列表
       {
-        "document_id": "doc_001",
-        "name": "快速入门.pdf",
-        "status": "ready",
-        "size": 102400,
-        "modified_at": 1720000000
+        "document_id": "doc_001", // 文档 ID
+        "name": "快速入门.pdf", // 文档名称
+        "status": "ready", // 可选，云端文档处理状态；服务端不固定枚举
+        "size": 102400, // 可选，文档大小，单位字节
+        "modified_at": 1720000000 // 可选，云端最后修改时间戳
       }
     ],
-    "total": 2
+    "total": 2 // 上游返回的文档总数
   }
 }
 ```
@@ -4050,21 +5029,21 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **鉴权**：`Authorization: Bearer <user_jwt>`（用户 JWT）
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok",
-  "data": {
-    "items": [
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "items": [ // 当前用户拥有的文件
       {
-        "file_id": "file_001",
-        "file_name": "manual.pdf",
-        "file_type": "pdf",
-        "status": "done",
-        "size_in_bytes": 204800,
-        "create_time": "2026-01-01T00:00:00Z"
+        "file_id": "file_001", // 文件 ID
+        "file_name": "manual.pdf", // 文件名称
+        "file_type": "pdf", // 可选，文件类型
+        "status": "done", // 可选，云端处理状态；服务端不固定枚举
+        "size_in_bytes": 204800, // 可选，文件大小，单位字节
+        "create_time": "2026-01-01T00:00:00Z" // 可选，云端创建时间
       }
     ]
   }
@@ -4106,19 +5085,28 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **请求示例**
 
+`AI_SERVER` 为 ai-server 根地址，`USER_JWT` 为用户登录返回的 token，`manual.pdf` 为本地文件。`curl -F` 自动设置 multipart boundary。
+
 ```bash
+# file 是必填文件字段；不手工设置 Content-Type。
 curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
   -H "Authorization: Bearer $USER_JWT" \
   -F "file=@manual.pdf"
 ```
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
-{ "code": 200, "msg": "ok", "data": { "file_id": "file_001" } }
+```jsonc
+{
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "file_id": "file_001" // 上传后的文件 ID
+  }
+}
 ```
 
-**错误码**: `40000`（缺少 file 或读取失败）、`401`（鉴权失败）、`50200`（上游 AI 服务不可用）、`50000`（上传响应缺少文件 ID 或本地所有权记录失败）
+**错误码**： `40000`（缺少 file 或读取失败）、`401`（鉴权失败）、`50200`（上游 AI 服务不可用）、`50000`（上传响应缺少文件 ID 或本地所有权记录失败）
 
 **返回字段说明**
 
@@ -4159,7 +5147,16 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 
 **请求体**：无。
 
-**成功响应**：HTTP 200，`{"code":200,"msg":"ok"}`，无 `data` 字段。
+**成功响应**：HTTP 200，
+
+```jsonc
+{
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok" // 结果说明，业务判断使用 code
+}
+```
+
+无 `data` 字段。
 
 ---
 
@@ -4175,9 +5172,26 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 
 **鉴权**：`X-Internal-Key` 请求头，值需匹配服务端配置的内部调用密钥。
 
-**请求体**：`{ "device_id": "TIRZ00000001" }`
+**请求体**：
 
-**成功响应**：`{ "code": 200, "msg": "ok" }`
+```jsonc
+{
+  "device_id": "TIRZ00000001" // 必填，需要清理业务关联的设备 ID
+}
+```
+
+
+
+**成功响应**：
+
+```jsonc
+{
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok" // 结果说明，业务判断使用 code
+}
+```
+
+
 
 | code | HTTP | 含义 |
 |------|------|------|
@@ -4243,7 +5257,7 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 
 发起呼叫（一对多）。
 
-**鉴权**: ✅ `Authorization: Bearer <mqtt_token>`（设备 JWT，含 `device_id` claim）
+**鉴权**： ✅ `Authorization: Bearer <mqtt_token>`（设备 JWT，含 `device_id` claim）
 
 **请求体**
 
@@ -4254,21 +5268,28 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 
 **请求示例**
 
-```json
+```jsonc
 {
-  "targets": ["TIRZ00000002", "TIRZ00000003"],
-  "call_type": "video"
+  "targets": ["TIRZ00000002", "TIRZ00000003"], // 必填，被叫设备 ID 数组
+  "call_type": "video" // 必填，audio 或 video
 }
 ```
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
-{ "code": 200, "msg": "ok", "data": {
-  "room_id": "d_roomid_c5b745c0bf61494e84a8432b199a693e",
-  "online":  {"TIRZ00000002": true, "TIRZ00000003": false},
-  "offline": ["TIRZ00000003"]
-}}
+```jsonc
+{
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "room_id": "d_roomid_c5b745c0bf61494e84a8432b199a693e", // 房间 ID，格式 d_roomid_ + 32 位十六进制（UUID v4 去横线）
+    "online": { // 目标设备在线状态映射，true=在线、false=离线
+      "TIRZ00000002": true, // 映射键为被叫设备 ID，值表示是否在线
+      "TIRZ00000003": false // 映射键为被叫设备 ID，值表示是否在线
+    },
+    "offline": ["TIRZ00000003"] // string[] / null；建房时离线的设备 ID 列表，直接计入 rejected_by；所有被叫在线时为 null
+  }
+}
 ```
 
 | 字段 | 说明 |
@@ -4302,7 +5323,7 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 
 接听来电（`purpose=call`）。该操作会执行 SETNX/DEL 并发送 MQTT 通知，因此使用 POST。
 
-**鉴权**: ✅ `Authorization: Bearer <mqtt_token>`（设备 JWT）
+**鉴权**： ✅ `Authorization: Bearer <mqtt_token>`（设备 JWT）
 
 **请求体**
 
@@ -4314,18 +5335,25 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 
 **请求示例**
 
-```json
+```jsonc
 {
-  "device_id": "TIRZ00000001",
-  "room_id": "d_roomid_c5b745c0bf61494e84a8432b199a693e",
-  "purpose": "call"
+  "device_id": "TIRZ00000001", // 必填，主叫设备 ID（从 call_incoming 中获取）
+  "room_id": "d_roomid_c5b745c0bf61494e84a8432b199a693e", // 必填，房间 ID（从 call_incoming 中获取）
+  "purpose": "call" // 必填，必须是 "call"（call-server 不实现 live_preview）
 }
 ```
 
-**成功响应** — HTTP 200
+**成功响应**（HTTP 200）
 
-```json
-{ "code": 200, "msg": "ok", "data": { "token": "v1.eyJ...", "device_id": "TIRZ00000001" } }
+```jsonc
+{
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "token": "<实际返回的 token>", // 被叫连接主叫所需的 TiRTC token
+    "device_id": "TIRZ00000001" // 主叫设备 ID
+  }
+}
 ```
 
 **错误码**
@@ -4359,13 +5387,31 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 
 拒接来电。
 
-**鉴权**: ✅ 设备 JWT，且必须是该房间的 target 之一
+**鉴权**： ✅ 设备 JWT，且必须是该房间的 target 之一
 
-**请求体**: `{ "room_id": "xxx", "reason": "busy" }`（`reason` 建议值 `busy` | `decline`，默认 `decline`；服务端不校验，原样透传给对端）
+**请求体**：
 
-**成功响应**: `{ "code": 200, "msg": "ok" }`
+```jsonc
+{
+  "room_id": "d_roomid_c5b745c0bf61494e84a8432b199a693e", // 必填，要拒绝的一对一通话房间 ID
+  "reason": "busy" // 可选，拒绝原因，默认 decline；传入值转发给主叫
+}
+```
 
-**错误码**: `401`（JWT 鉴权失败，HTTP 401）、`40000`（缺 room_id）、`40300`（不是该房间 target，HTTP 200）、`40400`（房间不存在）
+（`reason` 建议值 `busy` | `decline`，默认 `decline`；服务端不校验，原样透传给对端）
+
+**成功响应**:
+
+```jsonc
+{
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok" // 结果说明，业务判断使用 code
+}
+```
+
+
+
+**错误码**： `401`（JWT 鉴权失败，HTTP 401）、`40000`（缺 room_id）、`40300`（不是该房间 target，HTTP 200）、`40400`（房间不存在）
 
 > 所有 target（含离线预拒接的）都拒接后，房间解散，主叫收到 `room_cancel{reason:"all_rejected"}`。
 
@@ -4386,13 +5432,31 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 
 **调用方**：设备。
 
-挂断，释放房间。**鉴权**: ✅ 设备 JWT，且必须是 caller 或 answered_by。
+挂断，释放房间。**鉴权**： ✅ 设备 JWT，且必须是 caller 或 answered_by。
 
-**请求体**: `{ "room_id": "xxx", "reason": "hangup" }`（`reason` 建议值 `hangup` | `p2p_error`，默认 `hangup`；服务端不校验，原样透传给对端）
+**请求体**：
 
-**成功响应**: `{ "code": 200, "msg": "ok" }`
+```jsonc
+{
+  "room_id": "d_roomid_c5b745c0bf61494e84a8432b199a693e", // 必填，已接通的一对一通话房间 ID
+  "reason": "hangup" // 可选，默认 hangup；可传 p2p_error 等原因，原样转发
+}
+```
 
-**错误码**: `401`（JWT 鉴权失败，HTTP 401）、`40000`、`40300`（不是 caller/answered_by，HTTP 200）、`40400`
+（`reason` 建议值 `hangup` | `p2p_error`，默认 `hangup`；服务端不校验，原样透传给对端）
+
+**成功响应**:
+
+```jsonc
+{
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok" // 结果说明，业务判断使用 code
+}
+```
+
+
+
+**错误码**： `401`（JWT 鉴权失败，HTTP 401）、`40000`、`40300`（不是 caller/answered_by，HTTP 200）、`40400`
 
 **请求体字段**
 
@@ -4411,13 +5475,30 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 
 **调用方**：设备。
 
-主叫取消呼叫（仅 caller 可调用）。**鉴权**: ✅ 设备 JWT。
+主叫取消呼叫（仅 caller 可调用）。**鉴权**： ✅ 设备 JWT。
 
-**请求体**: `{ "room_id": "xxx" }`
+**请求体**：
 
-**成功响应**: `{ "code": 200, "msg": "ok" }`
+```jsonc
+{
+  "room_id": "d_roomid_c5b745c0bf61494e84a8432b199a693e" // 必填，主叫要取消的房间 ID
+}
+```
 
-**错误码**: `401`（JWT 鉴权失败，HTTP 401）、`40000`、`40300`（非 caller，HTTP 200）、`40400`
+
+
+**成功响应**:
+
+```jsonc
+{
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok" // 结果说明，业务判断使用 code
+}
+```
+
+
+
+**错误码**： `401`（JWT 鉴权失败，HTTP 401）、`40000`、`40300`（非 caller，HTTP 200）、`40400`
 
 **请求体字段**
 
@@ -4437,18 +5518,22 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 
 查询当前设备的一对一通话房间，用于进程重启后恢复状态。多人对讲的房间关系使用 [`GET /v1/call/group/device/assignment`](#get-v1callroomdeviceassignment) 查询。
 
-**鉴权**: ✅ 设备 JWT
+**鉴权**： ✅ 设备 JWT
 
 **成功响应** — 不在一对一通话房间时省略 `data`；这不表示设备未加入多人对讲房间
 
-```json
-{ "code": 200, "msg": "ok", "data": {
-  "room_id": "d_roomid_c5b745c0bf61494e84a8432b199a693e",
-  "status": "answered",
-  "caller": "TIRZ00000001",
-  "call_type": "video",
-  "role": "callee"
-}}
+```jsonc
+{
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "room_id": "d_roomid_c5b745c0bf61494e84a8432b199a693e", // 一对一通话房间 ID，格式 d_roomid_ + 32 位十六进制；不能用于多人对讲接口
+    "status": "answered", // active=呼叫中（未接听）、answered=已接听
+    "caller": "TIRZ00000001", // 主叫设备 ID
+    "call_type": "video", // audio 或 video
+    "role": "callee" // 当前设备在该房间中的角色：caller 或 callee
+  }
+}
 ```
 
 | 字段 | 说明 |
@@ -4473,32 +5558,32 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 
 设备侧联系人列表，同时返回**设备联系人**（`call_contact` 表）和 **VoIP 联系人**（`voip_device_auth` 表，微信小程序授权用户）。用 `type` 字段区分。
 
-**鉴权**: ✅ 设备 JWT。
+**鉴权**： ✅ 设备 JWT。
 
 **成功响应**
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok",
-  "data": {
-    "contacts": [
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "contacts": [ // 联系人对象数组；没有联系人时为 []
       {
-        "device_id": "TIRZ00000002",
-        "type": "device",
-        "remark": "门铃",
-        "source": "manual",
-        "online": true
+        "device_id": "TIRZ00000002", // device 联系人为对方设备 ID；voip 联系人为 wx_open_id（无独立设备身份）
+        "type": "device", // 联系人类型：device（设备联系人）或 voip（微信授权联系人）；设备必须按此字段选择呼叫接口
+        "remark": "门铃", // device 为本设备对该联系人的备注；voip 为当前 wx_open_id + wx_app_id 的统一联系人名称；未设置时为空字符串
+        "source": "manual", // 联系人来源：manual（跨账号申请）、auto（同账号自动关联）或 voip（小程序授权）
+        "online": true // 对方设备当前是否在线
       },
       {
-        "id": 3,
-        "device_id": "o4DLd5...",
-        "type": "voip",
-        "source": "voip",
-        "remark": "妈妈",
-        "wx_open_id": "o4DLd5...",
-        "wx_app_id": "wxXXX",
-        "wx_model_id": "HRHY_xxx"
+        "id": 3, // voip_device_auth 表主键；PUT /v1/call/device/contacts/remark 不使用它，而是使用 peer_id
+        "device_id": "<实际返回的 device_id>", // device 联系人为对方设备 ID；voip 联系人为 wx_open_id（无独立设备身份）
+        "type": "voip", // 联系人类型：device（设备联系人）或 voip（微信授权联系人）；设备必须按此字段选择呼叫接口
+        "source": "voip", // 联系人来源：manual（跨账号申请）、auto（同账号自动关联）或 voip（小程序授权）
+        "remark": "妈妈", // device 为本设备对该联系人的备注；voip 为当前 wx_open_id + wx_app_id 的统一联系人名称；未设置时为空字符串
+        "wx_open_id": "<实际返回的 wx_open_id>", // 微信用户 OpenID；与该项的 device_id 相同
+        "wx_app_id": "<实际返回的 wx_app_id>", // 授权所属的微信小程序 AppID
+        "wx_model_id": "<实际返回的 wx_model_id>" // 授权对应的微信设备型号 ID；发起 VoIP 外呼时由 voip-server 从授权记录读取
       }
     ]
   }
@@ -4539,14 +5624,24 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 
 查询当前设备可以审批的联系人申请。只返回当前设备是非发起方的 pending 请求。
 
-**鉴权**: ✅ 设备 JWT
+**鉴权**： ✅ 设备 JWT
 
 **成功响应**:
 
-```json
-{ "code": 200, "msg": "ok", "data": { "pending": [
-  { "type": "device", "peer_device_id": "TIRZ00000001", "created_at": "2026-07-22T14:00:00+08:00" }
-]}}
+```jsonc
+{
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "pending": [ // 当前设备可审批的联系人申请；没有待审批申请时为 []
+      {
+        "type": "device", // 联系人类型；申请流程只适用于设备联系人，因此固定为 device
+        "peer_device_id": "TIRZ00000001", // 发起申请的对方设备 ID；审批时作为 peer_device_id
+        "created_at": "2026-07-22T14:00:00+08:00" // 申请创建时间，RFC 3339 格式
+      }
+    ]
+  }
+}
 ```
 
 | 字段 | 类型 | 说明 |
@@ -4580,11 +5675,30 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 
 发起跨账号联系人申请。同账号设备会直接自动接受，不走 pending 流程。该接口只适用于设备联系人；VoIP 联系人没有申请流程。
 
-**鉴权**: ✅ 设备 JWT
+**鉴权**： ✅ 设备 JWT
 
-**请求体**: `{ "target_device_id": "TIRZ00000002" }`
+**请求体**：
 
-**成功响应**: `{ "code": 200, "msg": "ok", "data": {"status": "pending", "source": "manual"} }`。
+```jsonc
+{
+  "target_device_id": "TIRZ00000002" // 必填，对端设备 ID，不可为本机
+}
+```
+
+
+
+**成功响应**:
+
+```jsonc
+{
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "status": "pending", // 跨账号申请为 pending；同账号设备直接建立联系人时为 accepted
+    "source": "manual" // 跨账号申请为 manual；同账号自动联系人为 auto
+  }
+}
+```
 
 | 字段 | 说明 |
 |------|------|
@@ -4593,21 +5707,21 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 
 成功后向目标设备的 `device/sn_{target_device_id}/notify` 推送：
 
-```json
+```jsonc
 {
-  "type": "callers_update",
-  "channel": "device",
-  "payload": {
-    "action": "request",
-    "contact_type": "device",
-    "peer_id": "TIRZ00000001"
+  "type": "callers_update", // 固定为 callers_update，通知设备刷新联系人
+  "channel": "device", // 固定为 device，设备联系人通知通道
+  "payload": { // 通知业务数据，字段含义如下
+    "action": "request", // 联系人变更动作，本例 request 表示收到申请
+    "contact_type": "device", // 联系人类型：device 或 voip；申请流程固定为 device
+    "peer_id": "TIRZ00000001" // 申请发起方设备 ID
   }
 }
 ```
 
 目标设备收到后应提示联系人申请，并重新拉取联系人和 pending 列表。
 
-**错误码**: `40000`（缺参数/呼叫自己）、`40400`（target 不存在）、`40206`（已是联系人）、`40207`（已有待处理申请）、`40209`（超过 `max_contacts_per_device`）
+**错误码**： `40000`（缺参数/呼叫自己）、`40400`（target 不存在）、`40206`（已是联系人）、`40207`（已有待处理申请）、`40209`（超过 `max_contacts_per_device`）
 
 **请求体字段**
 
@@ -4627,15 +5741,35 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 
 审批联系人申请（仅接收方可调用）。
 
-**鉴权**: ✅ 设备 JWT
+**鉴权**： ✅ 设备 JWT
 
-**请求体**: `{ "peer_device_id": "xxx", "action": "accept" }`（`action`: `accept` | `reject`）
+**请求体**：
 
-**成功响应**: `{ "code": 200, "msg": "ok", "data": {"status": "accepted"} }`。
+```jsonc
+{
+  "peer_device_id": "TIRZ00000001", // 必填，申请方设备 ID
+  "action": "accept" // 必填，accept 同意或 reject 拒绝
+}
+```
+
+（`action`: `accept` | `reject`）
+
+**成功响应**:
+
+```jsonc
+{
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "status": "accepted" // 状态，枚举与含义见本接口字段表
+  }
+}
+```
+
 `data.status` 为审批后的状态：`accepted` 或 `rejected`。成功后向申请发起设备推送
 `callers_update`。
 
-**错误码**: `40000`、`40205`（申请不存在或非法响应）、`40209`（申请方或接收方联系人数量已达上限）
+**错误码**： `40000`、`40205`（申请不存在或非法响应）、`40209`（申请方或接收方联系人数量已达上限）
 
 **请求体字段**
 
@@ -4658,7 +5792,7 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 当 `peer_id` 是 VoIP 联系人的 `wx_open_id` 时，修改的是该 OpenID 的统一联系人名称，
 同一小程序下所有已授权设备都会更新，并收到 `callers_update`；不是修改设备名称。
 
-**鉴权**: ✅ 设备 JWT
+**鉴权**： ✅ 设备 JWT
 
 **请求体**
 
@@ -4669,13 +5803,25 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 
 **请求示例**
 
-```json
-{ "peer_id": "TIRZ00000002", "remark": "门铃" }
+```jsonc
+{
+  "peer_id": "TIRZ00000002", // 必填，设备联系人传对方 device_id；VoIP 联系人传 wx_open_id
+  "remark": "门铃" // 可选，备注内容，空字符串清空备注，最多 64 个 Unicode 字符
+}
 ```
 
-**成功响应**: `{ "code": 200, "msg": "ok" }`；响应不包含 `data` 字段。
+**成功响应**:
 
-**错误码**: `40000`（缺 peer_id 或 remark 超过 64 个字符）、`40205`（peer_id 既不是已接受的设备联系人，也不是本设备的 VoIP 授权用户）
+```jsonc
+{
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok" // 结果说明，业务判断使用 code
+}
+```
+
+响应不包含 `data` 字段。
+
+**错误码**： `40000`（缺 peer_id 或 remark 超过 64 个字符）、`40205`（peer_id 既不是已接受的设备联系人，也不是本设备的 VoIP 授权用户）
 
 ---
 
@@ -4689,7 +5835,7 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 
 删除已接受的跨账号手动联系人（`source:"manual"`，软删除为 status=3，**双向生效**：自己和对方都失去该联系人），成功后向对端推送 `channel:"device"` 的 `callers_update`，对端应重新拉取联系人。同账号 `source:"auto"` 联系人属于账号内设备拓扑，不允许删除；VoIP 联系人的移除走小程序取消授权，不在此接口。
 
-**鉴权**: ✅ 设备 JWT
+**鉴权**： ✅ 设备 JWT
 
 **查询参数**
 
@@ -4703,9 +5849,18 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 ```
 
-**成功响应**: `{ "code": 200, "msg": "ok" }`；响应不包含 `data` 字段。
+**成功响应**:
 
-**错误码**: `40000`（缺 peer_id）、`40205`（联系人不存在、不是 accepted 状态或已删除）、`40211`（同账号 auto 联系人受保护，不允许删除）
+```jsonc
+{
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok" // 结果说明，业务判断使用 code
+}
+```
+
+响应不包含 `data` 字段。
+
+**错误码**： `40000`（缺 peer_id）、`40205`（联系人不存在、不是 accepted 状态或已删除）、`40211`（同账号 auto 联系人受保护，不允许删除）
 
 **查询参数明细**
 
@@ -4754,29 +5909,29 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 
 **成功响应**：
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok",
-  "data": {
-    "contacts": [
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "contacts": [ // 指定设备的联系人对象数组；没有联系人时为 []
       {
-        "id": 12,
-        "device_id": "TIRZ00000002",
-        "type": "device",
-        "remark": "门铃",
-        "source": "manual",
-        "online": true
+        "id": 12, // 对应数据表的数字主键：device 来自 call_contact，voip 来自 voip_device_auth
+        "device_id": "TIRZ00000002", // device 联系人为对方设备 ID；voip 联系人为 wx_open_id
+        "type": "device", // device 或 voip
+        "remark": "门铃", // device 为指定设备对该联系人的备注；voip 为当前 wx_open_id + wx_app_id 的统一联系人名称
+        "source": "manual", // manual、auto 或 voip
+        "online": true // 对方设备当前是否在线
       },
       {
-        "id": 3,
-        "device_id": "o4DLd5...",
-        "type": "voip",
-        "source": "voip",
-        "remark": "妈妈",
-        "wx_open_id": "o4DLd5...",
-        "wx_app_id": "wxXXX",
-        "wx_model_id": "HRHY_xxx"
+        "id": 3, // 对应数据表的数字主键：device 来自 call_contact，voip 来自 voip_device_auth
+        "device_id": "<实际返回的 device_id>", // device 联系人为对方设备 ID；voip 联系人为 wx_open_id
+        "type": "voip", // device 或 voip
+        "source": "voip", // manual、auto 或 voip
+        "remark": "妈妈", // device 为指定设备对该联系人的备注；voip 为当前 wx_open_id + wx_app_id 的统一联系人名称
+        "wx_open_id": "<实际返回的 wx_open_id>", // 微信用户 OpenID；与该项的 device_id 相同
+        "wx_app_id": "<实际返回的 wx_app_id>", // 授权所属的微信小程序 AppID
+        "wx_model_id": "<实际返回的 wx_model_id>" // 授权对应的微信设备型号 ID
       }
     ]
   }
@@ -4810,11 +5965,22 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 
 **成功响应**：
 
-```json
-{ "code": 200, "msg": "ok", "data": { "pending": [
-  {"id": 12, "type": "device", "initiator_device": "TIRZ00000001",
-   "target_device": "TIRZ00000002", "created_at": "2026-07-22T14:00:00+08:00"}
-]}}
+```jsonc
+{
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "pending": [ // 当前用户可审批的申请；没有待审批申请时为 []
+      {
+        "id": 12, // call_contact 表主键；审批时作为 POST /v1/call/user/contacts/respond 的 id
+        "type": "device", // 联系人类型；申请流程只适用于设备联系人，因此固定为 device
+        "initiator_device": "TIRZ00000001", // 发起申请的设备 ID
+        "target_device": "TIRZ00000002", // 当前用户负责审批的接收设备 ID
+        "created_at": "2026-07-22T14:00:00+08:00" // 申请创建时间，RFC 3339 格式
+      }
+    ]
+  }
+}
 ```
 
 | 字段 | 类型 | 说明 |
@@ -4845,6 +6011,28 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 | `device_id` | string | 是 | 本账号的发起设备 ID |
 | `target_device_id` | string | 是 | 对端设备 ID，不可与本方相同 |
 
+**请求示例**
+
+```jsonc
+{
+  "device_id": "TIRZ00000001", // 必填，本账号的发起设备 ID
+  "target_device_id": "TIRZ00000002" // 必填，对端设备 ID，不可与本方相同
+}
+```
+
+**成功响应示例**（HTTP 200）
+
+```jsonc
+{
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "status": "pending", // 状态，枚举与含义见本接口字段表
+    "source": "manual" // 联系人来源：manual 跨账号申请，auto 同账号自动关联
+  }
+}
+```
+
 **成功响应**：HTTP 200，`code=200`、`msg=ok`。`data.status`（string）为 pending 或 accepted；`data.source`（string）为 manual 或 auto。同账号设备直接 accepted/auto。
 
 **错误码**：JWT 失败为 HTTP 401 + `401`；业务错误为 HTTP 200。`40000` 参数错误、`40300` 无权操作、`40400` 联系人或设备不存在、`50000` 内部错误。已存在联系人或申请分别返回 `40206`、`40207`，数量达到上限返回 `40209`。
@@ -4868,9 +6056,30 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 | `id` | integer | 是 | 待审批联系人记录 ID |
 | `action` | string | 是 | accept 或 reject |
 
+**请求示例**
+
+```jsonc
+{
+  "id": 12, // 必填，待审批联系人记录 ID
+  "action": "accept" // 必填，accept 或 reject
+}
+```
+
+**成功响应示例**（HTTP 200）
+
+```jsonc
+{
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "status": "accepted" // 状态，枚举与含义见本接口字段表
+  }
+}
+```
+
 **成功响应**：HTTP 200，`code=200`、`msg=ok`。`data.status`（string）为 accepted 或 rejected。只能由申请接收方所属账号审批。
 
-**错误码**：JWT 失败为 HTTP 401 + `401`；业务错误为 HTTP 200。`40000` 参数错误、`40300` 无权操作、`40205` 联系人不存在、`50000` 内部错误。
+**错误码**：JWT 失败为 HTTP 401 + `401`；业务错误为 HTTP 200。`40000` 参数错误、`40300` 无权操作、`40205` 申请不存在或非法响应、`40209` 申请方或接收方联系人数量已达上限、`50000` 内部错误。
 
 ---
 
@@ -4892,9 +6101,28 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 | `peer_id` | string | 是 | 对端设备 ID 或微信 OpenID |
 | `remark` | string | 否 | 最多 64 个 Unicode 字符；空字符串清除备注 |
 
+**请求示例**
+
+```jsonc
+{
+  "device_id": "TIRZ00000001", // 必填，本账号的设备 ID
+  "peer_id": "TIRZ00000002", // 必填，对端设备 ID 或微信 OpenID
+  "remark": "门铃" // 可选，最多 64 个 Unicode 字符；空字符串清除备注
+}
+```
+
+**成功响应示例**（HTTP 200）
+
+```jsonc
+{
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok" // 结果说明，业务判断使用 code
+}
+```
+
 **成功响应**：HTTP 200，`code=200`、`msg=ok`。无 `data` 字段。VoIP 名称同步到同一小程序下的授权设备。
 
-**错误码**：JWT 失败为 HTTP 401 + `401`；业务错误为 HTTP 200。`40000` 参数错误、`40300` 无权操作、`40205` 联系人不存在、`50000` 内部错误。
+**错误码**：JWT 失败为 HTTP 401 + `401`；业务错误为 HTTP 200。`40000` 参数错误、`40300` 无权操作、`40205` 申请不存在或非法响应、`40209` 申请方或接收方联系人数量已达上限、`50000` 内部错误。
 
 ---
 
@@ -4916,9 +6144,18 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 
 **请求体**：无。
 
+**成功响应示例**（HTTP 200）
+
+```jsonc
+{
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok" // 结果说明，业务判断使用 code
+}
+```
+
 **成功响应**：HTTP 200，`code=200`、`msg=ok`。无 `data` 字段。auto 联系人不能删除，VoIP 联系人通过取消授权移除。
 
-**错误码**：JWT 失败为 HTTP 401 + `401`；业务错误为 HTTP 200。`40000` 参数错误、`40300` 无权操作、`40205` 联系人不存在、`50000` 内部错误。受保护联系人返回 `40211`。
+**错误码**：JWT 失败为 HTTP 401 + `401`；业务错误为 HTTP 200。`40000` 参数错误、`40300` 无权操作、`40205` 申请不存在或非法响应、`40209` 申请方或接收方联系人数量已达上限、`50000` 内部错误。受保护联系人返回 `40211`。
 
 ---
 
@@ -4942,13 +6179,30 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 
 服务间调用：设备解绑时永久删除所有涉及该设备的 `call_contact` 记录（包括待审批、已拒绝和已软删除记录），释放房间，并向原有未删除联系人的对端发送 `callers_update`。
 
-**鉴权**: `X-Internal-Key` 请求头，值需匹配配置 `internal.key`
+**鉴权**： `X-Internal-Key` 请求头，值需匹配配置 `internal.key`
 
-**请求体**: `{ "device_id": "TIRZ00000001" }`
+**请求体**：
 
-**成功响应**: `{ "code": 200, "msg": "ok" }`
+```jsonc
+{
+  "device_id": "TIRZ00000001" // 必填，需要清理业务关联的设备 ID
+}
+```
 
-**错误码**: `40301`（key 不匹配或未配置）、`40000`（缺 device_id）；错误仍使用 HTTP 200。
+
+
+**成功响应**:
+
+```jsonc
+{
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok" // 结果说明，业务判断使用 code
+}
+```
+
+
+
+**错误码**： `40301`（key 不匹配或未配置）、`40000`（缺 device_id）；错误仍使用 HTTP 200。
 
 **请求体字段**
 
@@ -5019,7 +6273,7 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 
 **请求体**：无。
 
-**成功响应**：HTTP 200，`code=200`、`msg=ok`，`data` 的全部字段见[房间关系返回字段](#房间关系返回字段)。变更接口成功表示关系已保存，设备连接结果需再次查询。
+**成功响应**：HTTP 200，`code=200`、`msg=ok`，`data` 的全部字段见[房间关系返回字段](#房间关系返回字段)。
 
 **失败响应**：见[多人对讲错误处理](#多人对讲错误处理)，客户端按数值 `code` 判断。
 
@@ -5049,6 +6303,14 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 
 设备已有房间关系时返回 `40923`，须先退出当前房间。
 
+**请求示例**
+
+```jsonc
+{
+  "password": "1234" // 可选，空字符串或省略表示无密码；设置时为四位 ASCII 数字
+}
+```
+
 **成功响应**：HTTP 200，`code=200`、`msg=ok`，`data` 的全部字段见[房间关系返回字段](#房间关系返回字段)。变更接口成功表示关系已保存，设备连接结果需再次查询。
 
 **失败响应**：见[多人对讲错误处理](#多人对讲错误处理)，客户端按数值 `code` 判断。
@@ -5077,6 +6339,15 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 | `password` | string | 有密码时 | 四位数字密码，无密码房间可省略 |
 
 重复加入当前房间直接返回已有关系；设备已在其他房间时返回 `40923`，须先退出当前房间。
+
+**请求示例**
+
+```jsonc
+{
+  "room_code": "001234", // 必填，六位 ASCII 数字房间号，保留前导零
+  "password": "1234" // 有密码时时提供，四位数字密码，无密码房间可省略
+}
+```
 
 **成功响应**：HTTP 200，`code=200`、`msg=ok`，`data` 的全部字段见[房间关系返回字段](#房间关系返回字段)。变更接口成功表示关系已保存，设备连接结果需再次查询。
 
@@ -5108,6 +6379,15 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 发送 `{}` 表示退出当前房间；携带校验字段可避免误退出已切换的房间。
 
 设备当前没有房间关系时直接返回成功，关系版本保持不变。
+
+**请求示例**
+
+```jsonc
+{
+  "room_id": "group_room_78c2cdf66ee1283cb84fcb15444fdf68", // 可选，原始房间 ID；省略或空字符串时不校验
+  "assignment_version": 3 // 可选，当前关系版本；省略或 0 时不校验，非零须与当前版本一致
+}
+```
 
 **成功响应**：HTTP 200，`code=200`、`msg=ok`，`data` 的全部字段见[房间关系返回字段](#房间关系返回字段)。变更接口成功表示关系已保存，设备连接结果需再次查询。
 
@@ -5142,7 +6422,7 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 
 **请求体**：无。
 
-**成功响应**：HTTP 200，`code=200`、`msg=ok`，`data` 的全部字段见[房间关系返回字段](#房间关系返回字段)。变更接口成功表示关系已保存，设备连接结果需再次查询。
+**成功响应**：HTTP 200，`code=200`、`msg=ok`，`data` 的全部字段见[房间关系返回字段](#房间关系返回字段)。
 
 **失败响应**：见[多人对讲错误处理](#多人对讲错误处理)，客户端按数值 `code` 判断。
 
@@ -5168,6 +6448,14 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 
 设备已有房间关系时返回 `40923`，须先退出当前房间。
 
+**请求示例**
+
+```jsonc
+{
+  "password": "1234" // 可选，空字符串或省略表示无密码；设置时为四位 ASCII 数字
+}
+```
+
 **成功响应**：HTTP 200，`code=200`、`msg=ok`，`data` 的全部字段见[房间关系返回字段](#房间关系返回字段)。变更接口成功表示关系已保存，设备连接结果需再次查询。
 
 **失败响应**：见[多人对讲错误处理](#多人对讲错误处理)，客户端按数值 `code` 判断。
@@ -5192,6 +6480,15 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 | `password` | string | 有密码时 | 四位数字密码，无密码房间可省略 |
 
 重复加入当前房间直接返回已有关系；设备已在其他房间时返回 `40923`，须先退出当前房间。
+
+**请求示例**
+
+```jsonc
+{
+  "room_code": "001234", // 必填，六位 ASCII 数字房间号，保留前导零
+  "password": "1234" // 有密码时时提供，四位数字密码，无密码房间可省略
+}
+```
 
 **成功响应**：HTTP 200，`code=200`、`msg=ok`，`data` 的全部字段见[房间关系返回字段](#房间关系返回字段)。变更接口成功表示关系已保存，设备连接结果需再次查询。
 
@@ -5220,6 +6517,15 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 
 设备当前没有房间关系时直接返回成功，关系版本保持不变。
 
+**请求示例**
+
+```jsonc
+{
+  "room_id": "group_room_78c2cdf66ee1283cb84fcb15444fdf68", // 可选，原始房间 ID；省略或空字符串时不校验
+  "assignment_version": 3 // 可选，当前关系版本；省略或 0 时不校验，非零须与当前版本一致
+}
+```
+
 **成功响应**：HTTP 200，`code=200`、`msg=ok`，`data` 的全部字段见[房间关系返回字段](#房间关系返回字段)。变更接口成功表示关系已保存，设备连接结果需再次查询。
 
 **失败响应**：见[多人对讲错误处理](#多人对讲错误处理)，客户端按数值 `code` 判断。
@@ -5243,6 +6549,32 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 | `room_id` | string | 原始业务房间 ID，长度 1–64 字节 |
 | `assignment_version` | integer | 当前关系版本，大于 0 |
 | `session_id` | string | 设备生成的会话 ID，长度 8–64 字节；每次重建连接使用新 ID |
+
+**请求示例**
+
+```jsonc
+{
+  "room_id": "group_room_78c2cdf66ee1283cb84fcb15444fdf68", // 原始业务房间 ID，长度 1–64 字节
+  "assignment_version": 3, // 当前关系版本，大于 0
+  "session_id": "<本次新生成的会话ID>" // 必填，本次新生成的会话 ID；保存并供 presence 复用
+}
+```
+
+**成功响应示例**（HTTP 200）
+
+```jsonc
+{
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "peer_id": "<TiRTC返回的完整连接目标>", // TiRTC 连接目标
+    "token": "<本设备的TiRTC连接凭证>", // 连接凭证，只供当前设备使用
+    "heartbeat_seconds": 15, // 状态上报间隔，单位秒
+    "lease_seconds": 45, // 连接租约时长，单位秒
+    "expires_at": 1900000000 // 上游提供时返回的凭证到期时间
+  }
+}
+```
 
 **成功响应**：HTTP 200，`code=200`、`msg=ok`，`data` 为以下对象。
 
@@ -5279,7 +6611,26 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 | `session_id` | string | 设备生成的会话 ID，长度 8–64 字节；每次重建连接使用新 ID |
 | `state` | string | connecting、joined、suspended、left 或 connect_failed |
 
-**成功响应**：HTTP 200，`{"code":200,"msg":"ok","data":null}`。
+**请求示例**
+
+```jsonc
+{
+  "room_id": "group_room_78c2cdf66ee1283cb84fcb15444fdf68", // 多人对讲房间 ID，后续连接和上报时原样传递；不是六位 room_code 或一对一通话 ID
+  "assignment_version": 3, // 房间关系版本，连接和上报时携带查询到的版本
+  "session_id": "<领取凭证时使用的会话ID>", // 必填，当前 connect-token 使用的同一 session_id
+  "state": "joined" // 必填，connecting/joined/suspended/left/connect_failed；加入成功后才报 joined
+}
+```
+
+**成功响应**：HTTP 200，
+
+```jsonc
+{
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": null // 此接口成功时固定为 null
+}
+```
 
 按凭证返回的 `heartbeat_seconds` 周期上报。`joined` 确认加入并续租；`connecting` 报告连接中状态但不延长租约；`suspended`、`left`、`connect_failed` 释放当前连接。上报 `left` 不删除房间关系，持久退出须调用 `leave`。
 
@@ -5289,20 +6640,20 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 
 查询和变更成功返回 HTTP 200：
 
-```json
+```jsonc
 {
-  "code": 200,
-  "msg": "ok",
-  "data": {
-    "device_id": "device-1",
-    "room_id": "group_room_78c2cdf66ee1283cb84fcb15444fdf68",
-    "room_code": "001234",
-    "desired_state": "joined",
-    "assignment_version": 3,
-    "state": "assigned",
-    "password_set": true,
-    "online_count": 0,
-    "online": false
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "device_id": "device-1", // 当前设备 ID
+    "room_id": "group_room_78c2cdf66ee1283cb84fcb15444fdf68", // 多人对讲房间 ID，后续连接和上报时原样传递；不是六位 room_code 或一对一通话 ID
+    "room_code": "001234", // 六位数字房间号，按字符串处理并保留前导零
+    "desired_state": "joined", // 设备应保持的房间关系
+    "assignment_version": 3, // 房间关系版本，连接和上报时携带查询到的版本
+    "state": "assigned", // 设备在房间中的执行状态
+    "password_set": true, // 房间是否设置密码，不返回密码本身
+    "online_count": 0, // 房间中租约有效且已报告加入成功的设备数
+    "online": false // 当前设备是否在线，不等同于已加入房间
   }
 }
 ```
@@ -5391,7 +6742,7 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 | 6011 | 403 | MAC 不符，疑似克隆 |
 | 6012 | 503 | 设备池已耗尽 |
 | 6013 | 403 | 签名 Report、Token 或绑定请求中的 MAC 与 device_id 已记录的 MAC 不一致 |
-| 6014 | 400 | Body 带了未声明的 device_id |
+| 6014 | 400 | 未签名 Report 请求体包含非空 device_id |
 | 6015 | 409 | 同 MAC 已绑定至本账号其它设备 |
 
 ### voip-server
@@ -5440,6 +6791,6 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 | 2 | 意外的信令消息 |
 | 3 | wx_app_id 未配置 |
 | 4 | 意外的 action |
-| 5 | 签名校验失败 |
+| 5 | 查询参数 signature 校验失败 |
 | 9 | 请求体无效 |
 | 10 | TiRTC/MQTT 处理失败，或同一房间的上一笔回调仍在处理中 |
