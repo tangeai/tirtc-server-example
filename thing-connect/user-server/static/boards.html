@@ -6,16 +6,16 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="查看探鸽 · 小钛支持的开发板、固件、源码仓库和烧录指南。">
   <title>开发板 — 探鸽 · 小钛</title>
-  <link rel="stylesheet" href="/static/css/boards.css?v=2">
+  <link rel="stylesheet" href="/static/css/boards.css?v=4">
   <link rel="stylesheet" href="/static/css/brand.css?v=2">
-  <link rel="stylesheet" href="/static/css/site-header.css?v=1">
+  <link rel="stylesheet" href="/static/css/site-header.css?v=2">
 </head>
 <body>
   <header class="site-header">
     <nav class="nav shell" aria-label="主导航">
       <a class="brand" href="/" aria-label="探鸽 · 小钛首页"><i class="brand-mark" aria-hidden="true"></i><span>探鸽 · 小钛</span></a>
-      <div class="nav-links" id="nav-links"><a href="/#routes">快速入门</a><a href="/#demo">功能示例</a><a class="active" href="/boards">开发板</a><a href="https://community.tange-ai.com" target="_blank" rel="noreferrer">开放社区</a><a class="mobile-only" href="https://github.com/tangeai/tirtc-server-example" target="_blank" rel="noreferrer">GitHub</a><a class="mobile-only" data-auth-guest href="/login">登录</a><a class="mobile-only" data-auth-guest href="/register">免费注册</a><a class="mobile-only" data-auth-user href="/devices" hidden>进入控制台</a></div>
-      <div class="nav-actions"><a class="nav-github" href="https://github.com/tangeai/tirtc-server-example" target="_blank" rel="noreferrer"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .7a11.5 11.5 0 0 0-3.64 22.4c.58.1.79-.25.79-.56v-2.23c-3.22.7-3.9-1.37-3.9-1.37-.53-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.7.08-.7 1.17.08 1.78 1.2 1.78 1.2 1.03 1.77 2.7 1.26 3.36.97.1-.75.4-1.26.73-1.55-2.57-.29-5.27-1.28-5.27-5.69 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.16 1.18A10.9 10.9 0 0 1 12 6.12c.98 0 1.95.13 2.87.39 2.2-1.49 3.16-1.18 3.16-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.42-2.71 5.39-5.29 5.68.42.36.79 1.07.79 2.16v3.22c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .7Z"/></svg>GitHub</a><a class="nav-login" data-auth-guest href="/login">登录</a><a class="console-link" data-auth-guest href="/register">免费注册</a><a class="console-link" data-auth-user href="/devices" hidden>进入控制台</a></div>
+      <div class="nav-links" id="nav-links"><a href="/#routes">快速入门</a><a href="/#demo">功能演示</a><a class="active" href="/boards">开发板</a><a href="https://community.tange-ai.com" target="_blank" rel="noreferrer">开放社区</a><a class="mobile-only" href="https://github.com/tangeai/xiaotai-esp32" target="_blank" rel="noreferrer">GitHub</a><a class="mobile-only" data-auth-guest href="/login">登录</a><a class="mobile-only" data-auth-guest href="/register">免费注册</a><a class="mobile-only" data-auth-user href="/devices" hidden>进入控制台</a></div>
+      <div class="nav-actions"><a class="nav-github" href="https://github.com/tangeai/xiaotai-esp32" target="_blank" rel="noreferrer"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .7a11.5 11.5 0 0 0-3.64 22.4c.58.1.79-.25.79-.56v-2.23c-3.22.7-3.9-1.37-3.9-1.37-.53-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.7.08-.7 1.17.08 1.78 1.2 1.78 1.2 1.03 1.77 2.7 1.26 3.36.97.1-.75.4-1.26.73-1.55-2.57-.29-5.27-1.28-5.27-5.69 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.16 1.18A10.9 10.9 0 0 1 12 6.12c.98 0 1.95.13 2.87.39 2.2-1.49 3.16-1.18 3.16-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.42-2.71 5.39-5.29 5.68.42.36.79 1.07.79 2.16v3.22c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .7Z"/></svg>GitHub</a><a class="nav-login" data-auth-guest href="/login">登录</a><a class="console-link" data-auth-guest href="/register">免费注册</a><a class="console-link" data-auth-user href="/devices" hidden>进入控制台</a></div>
       <button class="menu-button" type="button" aria-label="打开导航" aria-controls="nav-links" aria-expanded="false"><span></span><span></span></button>
     </nav>
   </header>

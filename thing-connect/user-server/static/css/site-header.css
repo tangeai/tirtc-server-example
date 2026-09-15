@@ -1,4 +1,11 @@
+html {
+  scrollbar-gutter: stable;
+}
+
 .site-header {
+  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  -webkit-font-smoothing: antialiased;
   position: sticky;
   top: 0;
   z-index: 20;
@@ -8,6 +15,8 @@
 }
 
 .site-header .nav {
+  width: min(calc(100% - 48px), 1120px);
+  margin: 0 auto;
   min-height: 72px;
   height: auto;
   display: flex;
@@ -74,6 +83,7 @@
 
 .site-header .nav-login {
   padding: 10px 9px;
+  font-weight: 650;
 }
 
 .site-header .console-link {
@@ -95,10 +105,18 @@
 .site-header .menu-button {
   width: 42px;
   height: 42px;
+  padding: 0;
+  font: inherit;
   border: 1px solid #dce6e8;
   border-radius: 10px;
   background: #fff;
   cursor: pointer;
+}
+
+@media (max-width: 620px) {
+  .site-header .nav {
+    width: calc(100% - 32px);
+  }
 }
 
 .site-header .menu-button span {
