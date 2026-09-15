@@ -398,7 +398,7 @@ def main():
 
     svc = fetch_services(base_url=args.endpoint)
     _server         = svc["device_server"]
-    _homepage_url   = svc.get("user_server") or EXPERIENCE_PLATFORM_URL
+    _homepage_url   = EXPERIENCE_PLATFORM_URL
     _broker_host    = svc["mqtt_host"]
     _broker_port    = svc["mqtt_port"]
     _broker_tls     = svc["mqtt_tls"]

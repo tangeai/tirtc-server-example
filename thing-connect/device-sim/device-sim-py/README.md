@@ -65,7 +65,7 @@ python3 -m venv .venv
 
 ### 3. 首次绑定
 
-首次启动不需要填写 `device_id` 或 `device_key`。终端会显示六位验证码和注册/登录地址。该地址优先使用服务发现中的 `user-srv`，未提供时使用体验平台：
+首次启动不需要填写 `device_id` 或 `device_key`。终端会显示六位验证码和主站注册/登录地址 `https://xiaotai.chat`：
 
 1. 打开 [TiRTC 体验平台](https://xiaotai.chat) 并登录。
 2. 输入六位验证码绑定模拟设备。

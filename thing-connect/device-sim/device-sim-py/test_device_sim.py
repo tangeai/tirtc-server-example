@@ -142,7 +142,7 @@ class DeviceSimulatorTests(unittest.TestCase):
         self.assertIn("https://xiaotai.chat", output.getvalue())
         self.assertNotIn("srv-open.tangeopen.com", output.getvalue())
 
-    def test_bind_guide_uses_discovered_local_user_server(self):
+    def test_bind_guide_accepts_explicit_homepage(self):
         output = io.StringIO()
         with redirect_stdout(output):
             device_sim_main._print_bind_guide("http://dev-demo-open.tangeai.cn:8080")
