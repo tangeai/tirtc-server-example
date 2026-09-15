@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="zh-CN" data-page="home">
 <head>
+  <link rel="icon" href="/static/favicon.ico?v=1" type="image/x-icon">
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="探鸽 · 小钛支持多款开发板烧录体验，提供实时音视频、AI 对话与多人对讲。设备端、服务端、Web 和微信小程序开源，可直接体验、复用或自行部署。">
@@ -35,6 +36,7 @@
 
     html {
       scroll-behavior: smooth;
+      scroll-padding-top: 73px;
     }
 
     body {
@@ -768,7 +770,7 @@
       margin-bottom: 30px;
     }
 
-    .video-step-heading h3 {
+    .video-step-heading h2 {
       margin-bottom: 8px;
       font-size: 25px;
       letter-spacing: -0.03em;
@@ -957,9 +959,34 @@
       transform: translateY(0);
     }
 
+    .demo {
+      padding: 40px 0;
+    }
+
+    .demo .video-step {
+      margin-top: 0;
+    }
+
+    @media (min-width: 981px) and (min-height: 700px) {
+      html {
+        scroll-snap-type: y proximity;
+      }
+
+      .hero,
+      .routes,
+      .demo {
+        min-height: calc(100svh - 73px);
+        display: flex;
+        align-items: center;
+        padding-block: 48px;
+        scroll-snap-align: start;
+      }
+    }
+
     @media (prefers-reduced-motion: reduce) {
       html {
         scroll-behavior: auto;
+        scroll-snap-type: none;
       }
 
       *,
@@ -1151,7 +1178,7 @@
         border-radius: 17px;
       }
 
-      .video-step-heading h3 {
+      .video-step-heading h2 {
         font-size: 21px;
       }
 
@@ -1224,12 +1251,12 @@
       <div class="hero-grid shell">
         <div class="reveal">
           <div class="eyebrow"><span class="eyebrow-dot"></span>设备音视频 · 从开发板到应用整套开源</div>
-          <h1>开箱即用实时音视频<br><em>整套开源，快速落地</em></h1>
+          <h1>让设备连上音视频<br><em>也能和 AI 对话</em></h1>
           <ul class="hero-features" aria-label="核心功能">
             <li>实时音视频</li><li>微信 VoIP 呼叫</li><li>设备互呼</li><li>多人对讲</li><li>AI 对话</li>
           </ul>
           <p class="hero-copy">
-            下载固件并烧录到硬件后，联网绑定即可快速体验实时音视频对讲与远程查看；服务端、Web、小程序与硬件均开源，支持复用与按需二次开发。
+            烧录固件、联网绑定，即可体验远程查看与语音对讲。设备端、服务端、Web 和微信小程序开源，可自行部署，按需开发。
           </p>
           <div class="hero-actions">
             <a class="button button-primary" href="#routes">选择体验方式 <span class="arrow">→</span></a>
@@ -1324,9 +1351,9 @@
     <section class="routes" id="routes">
       <div class="shell">
         <div class="section-heading routes-heading reveal">
-          <div class="section-kicker">选择适合你的开始方式</div>
-          <h2>开发板直接体验，应用按需部署</h2>
-          <p>从开发板开始，烧录固件即可体验。也可用电脑模拟，或下载整套源码自行部署。</p>
+          <div class="section-kicker">快速入门</div>
+          <h2>选一种方式，开始体验</h2>
+          <p>用开发板体验完整流程，用电脑模拟设备，或部署自己的平台。</p>
         </div>
 
         <article class="setup-step setup-step--primary reveal">
@@ -1361,11 +1388,16 @@
           </article>
         </div>
 
-        <div class="video-step" id="demo">
+      </div>
+    </section>
+
+    <section class="demo" id="demo" aria-labelledby="demo-title">
+      <div class="shell">
+        <div class="video-step">
           <div class="video-step-heading reveal">
             <div>
-              <h3>核心功能演示</h3>
-              <p>通过视频，了解设备连接后的实际体验。</p>
+              <h2 id="demo-title">看看设备能做什么</h2>
+              <p>两段视频，了解远程查看、AI 对讲与设备呼叫。</p>
             </div>
           </div>
 
