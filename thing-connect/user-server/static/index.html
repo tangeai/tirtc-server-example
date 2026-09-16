@@ -937,12 +937,54 @@
 
     .footer-links {
       display: flex;
+      flex-wrap: wrap;
       align-items: center;
       gap: 24px;
     }
 
-    .footer-links a:hover {
+    .site-footer a:hover {
       color: var(--ink);
+      text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+
+    .footer-contact {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 28px;
+      padding-top: 32px;
+      padding-bottom: 32px;
+      border-bottom: 1px solid var(--soft-line);
+    }
+
+    .footer-contact h2 {
+      margin-bottom: 10px;
+      font-size: 16px;
+    }
+
+    .footer-contact a {
+      color: var(--accent);
+      font-size: 16px;
+    }
+
+    .footer-miniprogram {
+      width: 300px;
+      max-width: 100%;
+      margin: 0;
+    }
+
+    .footer-miniprogram img {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
+    .footer-legal {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 20px;
     }
 
     .reveal {
@@ -1429,12 +1471,24 @@
   </main>
 
   <footer class="site-footer">
+    <div class="footer-contact shell">
+      <div>
+        <h2>商务合作与技术咨询</h2>
+        <a href="mailto:developer@tange.ai">developer@tange.ai</a>
+      </div>
+      <figure class="footer-miniprogram">
+        <img src="/static/images/wx-xiaotai.png?v=2" width="869" height="320" alt="微信扫码或搜一搜「探鸽小钛」小程序" loading="lazy">
+      </figure>
+    </div>
     <div class="footer-inner shell">
-      <span>© <span id="year"></span> 探鸽 · 小钛</span>
+      <div class="footer-legal">
+        <span>© <span id="year"></span> 探鸽 · 小钛</span>
+        <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">粤ICP备19005025号-19</a>
+      </div>
       <div class="footer-links">
-        <a href="https://github.com/tangeai/tirtc-server-example" target="_blank" rel="noreferrer">GitHub</a>
+        <a href="https://tange.ai" target="_blank" rel="noopener noreferrer">探鸽智能</a>
+        <a href="https://docs.tange.ai/products/tirtc/" target="_blank" rel="noopener noreferrer">TiRTC SDK 文档</a>
         <a href="https://community.tange-ai.com" target="_blank" rel="noreferrer">开放社区</a>
-        <a href="/login">登录控制台</a>
       </div>
     </div>
   </footer>
