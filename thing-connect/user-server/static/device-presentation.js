@@ -65,6 +65,14 @@
       ["上行视频", video("up_video_mt")],
       ["下行音频（首选顺序）", codecList(p.down_audio_mt)],
       ["下行视频（首选顺序）", video("down_video_mt")],
+      ...(scene === "stream"
+        ? [
+            ["上行音频 Stream ID", display("up_audio_streamid")],
+            ["上行视频 Stream ID", display("up_video_streamid")],
+            ["下行音频 Stream ID", display("down_audio_streamid")],
+            ["下行视频 Stream ID", display("down_video_streamid")],
+          ]
+        : []),
       ["音频采样率", display("audio_rate", (v) => `${v} Hz`)],
       ["音频声道数", display("audio_channels")],
       ["摄像头旋转", display("camera_rotation", (v) => `${v}°（顺时针）`)],
