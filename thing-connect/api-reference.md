@@ -482,6 +482,10 @@ int device_sign(const char *device_id, const char *device_key,
 {
   "profiles": { // 按场景保存的设备媒体能力
     "stream": { // 实时查看场景；仅声明本机实际支持的能力
+      "up_audio_streamid": 10, // 可选，设备发送音频的流 ID
+      "up_video_streamid": 11, // 可选，设备发送视频的流 ID
+      "down_audio_streamid": 14, // 可选，设备接收对讲音频的流 ID
+      "down_video_streamid": 15, // 可选，设备接收对讲视频的流 ID
       "up_audio_mt": ["alaw"], // 可选，设备发送音频的编码列表，按首选顺序排列
       "up_video_mt": ["h264"], // 可选，设备发送视频的编码；stream/call 为数组，voip 为单个字符串
       "down_audio_mt": ["alaw"], // 可选，设备接收音频的编码；stream/call 为数组，voip 为单个字符串
@@ -542,6 +546,10 @@ int device_sign(const char *device_id, const char *device_key,
 | `down_video_mt` | string[] | `stream`、`call` | 否 | 设备接收视频的编码，最多 8 项，按首选顺序排列 |
 | `up_video_mt` | string | `voip` | 否 | 设备发送给微信小程序的视频编码 |
 | `down_video_mt` | string | `voip` | 否 | 设备接收微信小程序视频的编码 |
+| `up_audio_streamid` | integer | `stream` | 否 | 设备发送音频的流 ID，0–15；`stream` 默认 10 |
+| `up_video_streamid` | integer | `stream` | 否 | 设备发送视频的流 ID，0–15；`stream` 默认 11 |
+| `down_audio_streamid` | integer | `stream` | 否 | 设备接收音频的流 ID，0–15；`stream` 默认 14 |
+| `down_video_streamid` | integer | `stream` | 否 | 设备接收视频的流 ID，0–15；`stream` 默认 15 |
 | `audio_rate` | integer | 全部 | 否 | 音频采样率：8000、16000、24000、32000、44100 或 48000 Hz |
 | `audio_channels` | integer | 全部 | 否 | 音频声道数：1 或 2 |
 | `camera_rotation` | integer | 全部 | 否 | 画面顺时针旋转角度：0、90、180 或 270 |
@@ -575,7 +583,9 @@ int device_sign(const char *device_id, const char *device_key,
 | `profiles.call` | object | 三选一或多选 | 设备通话能力快照 |
 | `profiles.voip` | object | 三选一或多选 | 微信 VoIP 能力快照 |
 
-场景中 `up_*` 表示设备发送能力，`down_*` 表示设备接收能力。`audio_rate`、`audio_channels`、`camera_rotation`、`down_video_rotation` 为整数；`hor_mirror`、`vert_mirror`、`no_video` 为布尔值。除 `down_video_rotation` 缺省时按 `0` 处理外，其他字段均无隐式补全值。
+场景中 `up_*` 表示设备发送能力，`down_*` 表示设备接收能力。`audio_rate`、`audio_channels`、`camera_rotation`、`down_video_rotation` 为整数；`hor_mirror`、`vert_mirror`、`no_video` 为布尔值。`down_video_rotation` 缺省时按 `0` 处理。服务端只返回设备实际已报的 streamid，不补齐缺省字段；显式 `0` 保留。字段或整个场景缺失时，由客户端逐字段使用默认值：`stream` 上行音频/视频为 `10/11`、下行音频/视频为 `14/15`。四个 streamid 字段仅适用于 `stream` 场景。其他字段无隐式补全值。
+
+设备在建立实时查看连接前通过 `profiles.stream` 上报 streamid，并使实际发送、接收、订阅及关键帧处理使用相同值。同一连接的音频与视频不能共用流 ID。客户端订阅 `up_*_streamid`，向设备发送时使用 `down_*_streamid`；值为 `0` 时不能当成缺省。Web 实时查看读取 `profiles.stream` 的上行音视频和下行音频 ID；当前页面不发送视频。上报不会改写设备固件的媒体参数，也不会切换现有连接；修改后应重新建立连接。
 
 ---
 

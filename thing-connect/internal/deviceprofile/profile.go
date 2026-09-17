@@ -119,6 +119,9 @@ func validField(scene, key string, raw json.RawMessage) bool {
 		return false
 	}
 	switch key {
+	case "up_video_streamid", "up_audio_streamid", "down_video_streamid", "down_audio_streamid":
+		var n int
+		return scene == "stream" && json.Unmarshal(raw, &n) == nil && n >= 0 && n <= 15
 	case "up_audio_mt", "down_audio_mt", "up_video_mt", "down_video_mt":
 		if scene == "voip" && key == "up_audio_mt" {
 			return false

@@ -19,6 +19,15 @@ class DeviceMediaTests(unittest.TestCase):
             up_audio_format="pcm_s16le_16khz", down_audio_format="opus_16khz",
             up_video_file="camera.h265", up_video_format="h265", down_video_format="mjpeg")
         profiles = runtime.profiles()
+        for scene, expected in {
+            "stream": (10, 11, 14, 15),
+        }.items():
+            self.assertEqual(tuple(profiles[scene][key] for key in (
+                "up_audio_streamid", "up_video_streamid",
+                "down_audio_streamid", "down_video_streamid")), expected)
+        self.assertNotIn("ai", profiles)
+        self.assertNotIn("up_audio_streamid", profiles["voip"])
+        self.assertNotIn("up_video_streamid", profiles["voip"])
         self.assertEqual(profiles["voip"]["up_video_mt"], "h265")
         self.assertEqual(profiles["voip"]["down_video_mt"], "mjpeg")
         self.assertEqual(profiles["stream"]["down_audio_mt"], ["alaw"])

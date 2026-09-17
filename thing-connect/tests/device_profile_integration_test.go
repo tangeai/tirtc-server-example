@@ -53,9 +53,10 @@ func TestDeviceProfileReportToUserDeviceList(t *testing.T) {
 		return rows
 	}
 	snapshot := map[string]any{"profiles": map[string]any{
-		"stream": map[string]any{"up_audio_mt": []string{"pcm"}, "up_video_mt": []string{}, "camera_rotation": 0, "hor_mirror": false},
-		"call":   map[string]any{"down_audio_mt": []string{"opus", "amr"}, "audio_rate": 16000},
-		"voip":   map[string]any{"down_audio_mt": "amr", "up_video_mt": "none", "down_video_mt": "none", "audio_rate": 8000, "audio_channels": 1, "camera_rotation": 90, "no_video": true},
+		"stream": map[string]any{"up_audio_mt": []string{"pcm"}, "up_video_mt": []string{}, "camera_rotation": 0, "hor_mirror": false,
+			"up_audio_streamid": 0, "up_video_streamid": 2, "down_audio_streamid": 3, "down_video_streamid": 15},
+		"call": map[string]any{"down_audio_mt": []string{"opus", "amr"}, "audio_rate": 16000},
+		"voip": map[string]any{"down_audio_mt": "amr", "up_video_mt": "none", "down_video_mt": "none", "audio_rate": 8000, "audio_channels": 1, "camera_rotation": 90, "no_video": true},
 	}}
 	for i := 0; i < 2; i++ {
 		r := post(snapshot)
@@ -68,6 +69,11 @@ func TestDeviceProfileReportToUserDeviceList(t *testing.T) {
 		t.Fatalf("owner devices=%+v", rows)
 	}
 	profiles := rows[0].Profiles
+	for key, want := range map[string]string{"up_audio_streamid": "0", "up_video_streamid": "2", "down_audio_streamid": "3", "down_video_streamid": "15"} {
+		if got := string(profiles["stream"][key]); got != want {
+			t.Fatalf("%s=%s, want %s", key, got, want)
+		}
+	}
 	if string(profiles["stream"]["hor_mirror"]) != "false" || string(profiles["stream"]["camera_rotation"]) != "0" {
 		t.Fatal("explicit values lost", profiles)
 	}

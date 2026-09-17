@@ -411,10 +411,14 @@ class DeviceRtcRuntime:
     def profiles(self) -> dict:
         """按实际配置生成实时流、设备互呼和微信 VoIP 场景。"""
         from media_formats import AUDIO_FORMATS, VIDEO_FORMATS
+        from tirtc_sdk import AUDIO_STREAM_ID, VIDEO_STREAM_ID
+        from rtc_stream import TALKBACK_STREAM_ID
         c = self.config
         up, down = AUDIO_FORMATS[c.up_audio_format], AUDIO_FORMATS[c.down_audio_format]
         video = [VIDEO_FORMATS[c.up_video_format].codec] if c.up_video_file else []
         stream = {
+            "up_audio_streamid": AUDIO_STREAM_ID, "up_video_streamid": VIDEO_STREAM_ID,
+            "down_audio_streamid": TALKBACK_STREAM_ID, "down_video_streamid": 15,
             "up_audio_mt": [up.codec], "up_video_mt": video,
             "down_audio_mt": ["alaw"], "down_video_mt": [],
             "audio_rate": 8000, "audio_channels": 1,

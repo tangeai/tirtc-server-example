@@ -123,8 +123,10 @@ if (!jwtToken) window.MiniProgramPage.requireLogin();
 const params   = new URLSearchParams(location.search);
 const deviceID = params.get('device_id') || '';
 
-const STREAM_AUDIO     = 10;
-const STREAM_VIDEO     = 11;
+function streamId(profile, key, fallback) {
+  const value = profile?.[key];
+  return Number.isInteger(value) && value >= 0 && value <= 15 ? value : fallback;
+}
 
 // ── Page title ────────────────────────────────────────────────────────────
 const titleText = deviceID ? `${deviceID} 实时查看` : '实时查看';
@@ -245,6 +247,9 @@ async function start() {
     const { rtcToken, appId, streamProfile } = await fetchRtcToken();
     if (attempt !== generation) return;
     applyVideoPresentation(streamProfile);
+    const upAudioStreamId = streamId(streamProfile, 'up_audio_streamid', 10);
+    const upVideoStreamId = streamId(streamProfile, 'up_video_streamid', 11);
+    const downAudioStreamId = streamId(streamProfile, 'down_audio_streamid', 14);
 
     TiRtc.initialize(TiRtcInitOptions({ appId:appId }));
 
@@ -253,9 +258,9 @@ async function start() {
     if (attempt !== generation) return;
 
     connection  = new TiRtcConn();
-    audioOutput = TiRtcAudioOutput({ connection, streamId: STREAM_AUDIO });
-    videoOutput = TiRtcVideoOutput({ connection, streamId: STREAM_VIDEO });
-    audioInput  = new TiRtcAudioInput({ connection, streamId: 14 });
+    audioOutput = TiRtcAudioOutput({ connection, streamId: upAudioStreamId });
+    videoOutput = TiRtcVideoOutput({ connection, streamId: upVideoStreamId });
+    audioInput  = new TiRtcAudioInput({ connection, streamId: downAudioStreamId });
     audioInput.setOptions({ sampleRate: 8000 });
 
     await connection.connect({ deviceId: deviceID, token: rtcToken });
@@ -264,8 +269,8 @@ async function start() {
     setStatus(true);
     videoOutput.attach();
     if (!muted) audioOutput.attach();
-    connection.subscribeVideo({ streamId: STREAM_VIDEO });
-    connection.subscribeAudio({ streamId: STREAM_AUDIO });
+    connection.subscribeVideo({ streamId: upVideoStreamId });
+    connection.subscribeAudio({ streamId: upAudioStreamId });
     updateMuteUI();
     $('player-message').textContent = '已连接 · 点击声音按钮开启或关闭声音';
 

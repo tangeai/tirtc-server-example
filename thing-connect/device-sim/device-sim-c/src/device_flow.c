@@ -1124,13 +1124,15 @@ int device_media_profile_json(char *out, size_t capacity,
     /* Only constant codec names from the format registry enter the JSON. */
     int n = snprintf(out, capacity,
         "{\"profiles\":{"
-        "\"stream\":{\"up_audio_mt\":[\"%s\"],\"up_video_mt\":%s%s%s,"
+        "\"stream\":{\"up_audio_streamid\":%d,\"up_video_streamid\":%d,"
+        "\"down_audio_streamid\":14,\"down_video_streamid\":15,\"up_audio_mt\":[\"%s\"],\"up_video_mt\":%s%s%s,"
         "\"down_audio_mt\":[\"alaw\"],\"down_video_mt\":[],"
         "\"audio_rate\":8000,\"audio_channels\":1%s},"
         "\"call\":{\"up_audio_mt\":[\"%s\"],\"up_video_mt\":%s%s%s,"
         "\"down_audio_mt\":[\"%s\"],\"down_video_mt\":%s%s%s,"
         "\"audio_rate\":%d,\"audio_channels\":1,\"no_video\":%s},"
         "\"voip\":%s}}",
+        STREAM_ID_AUDIO, STREAM_ID_VIDEO,
         up->codec, has_video ? "[\"" : "[", has_video ? up_v->codec : "", has_video ? "\"]" : "]",
         stream_pres,
         up->codec, has_video ? "[\"" : "[", has_video ? up_v->codec : "", has_video ? "\"]" : "]",

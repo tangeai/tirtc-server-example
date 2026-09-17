@@ -4,8 +4,38 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 )
+
+func TestStreamIDsValidationAndProjection(t *testing.T) {
+	keys := []string{"up_video_streamid", "up_audio_streamid", "down_video_streamid", "down_audio_streamid"}
+	for _, scene := range []string{"stream"} {
+		for _, key := range keys {
+			for _, value := range []string{"0", "15", "-1", "16", "1.5", `"10"`, "null", "true", "[]", "{}"} {
+				t.Run(scene+"/"+key+"/"+value, func(t *testing.T) {
+					raw := json.RawMessage(fmt.Sprintf(`{"%s":%s}`, key, value))
+					store := &storeStub{bound: true}
+					err := NewService(store).Report(context.Background(), "device-1", map[string]json.RawMessage{scene: raw})
+					if value != "0" && value != "15" {
+						if !errors.Is(err, ErrInvalid) || store.written != nil {
+							t.Fatalf("invalid report persisted: err=%v written=%s", err, store.written)
+						}
+						return
+					}
+					if err != nil {
+						t.Fatal(err)
+					}
+					encoded, _ := json.Marshal(store.written)
+					profile := string(encoded)
+					if got := string(Public(&profile)[scene][key]); got != value {
+						t.Fatalf("stream ID lost: got %s, want %s", got, value)
+					}
+				})
+			}
+		}
+	}
+}
 
 type storeStub struct {
 	bound   bool
@@ -121,5 +151,37 @@ func TestVoIPReadsOnlyVoIPScene(t *testing.T) {
 	raw, err := NewService(store).VoIP(context.Background(), "device-1")
 	if err != nil || string(raw) != `{"down_audio_mt":"amr"}` {
 		t.Fatalf("raw=%s err=%v", raw, err)
+	}
+}
+
+func TestPublicDoesNotInventStreamIDs(t *testing.T) {
+	for _, profile := range []string{`{"stream":{}}`, `{"stream":{"up_audio_mt":["alaw"]}}`} {
+		stream := Public(&profile)["stream"]
+		for _, key := range []string{"up_audio_streamid", "up_video_streamid", "down_audio_streamid", "down_video_streamid"} {
+			if _, exists := stream[key]; exists {
+				t.Fatalf("unreported %s added", key)
+			}
+		}
+	}
+}
+
+func TestAIProfileRemainsUnsupported(t *testing.T) {
+	if err := Validate(map[string]json.RawMessage{"ai": json.RawMessage(`{"up_audio_streamid":1}`)}); !errors.Is(err, ErrInvalid) {
+		t.Fatal("AI profile accepted")
+	}
+}
+
+func TestOtherScenesStreamIDContractUnchanged(t *testing.T) {
+	for _, scene := range []string{"call", "voip"} {
+		for _, key := range []string{"up_audio_streamid", "up_video_streamid", "down_audio_streamid", "down_video_streamid"} {
+			raw := json.RawMessage(fmt.Sprintf(`{"%s":0}`, key))
+			if err := Validate(map[string]json.RawMessage{scene: raw}); !errors.Is(err, ErrInvalid) {
+				t.Fatalf("%s accepted %s", scene, key)
+			}
+			profile := fmt.Sprintf(`{"%s":%s}`, scene, raw)
+			if _, ok := Public(&profile)[scene][key]; ok {
+				t.Fatalf("%s exposes %s", scene, key)
+			}
+		}
 	}
 }

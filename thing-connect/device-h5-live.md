@@ -30,13 +30,15 @@ H5 实时查看只需要设备完成两件事：
 1. 按 [device-integration.md](device-integration.md) 完成设备上线，拿到 `device_id`、`device_key`、`mqtt_token`
 2. 使用 `device_id + device_key` 启动 TiRTC 常驻监听，等待 H5 连接后持续发送实时媒体
 
-H5 页面使用以下 stream：
+H5 页面默认使用以下 stream（下文表格和设备示例均按默认值演示）：
 
 | 方向 | stream_id | 说明 |
 |------|-----------|------|
 | 设备 → H5 音频 | `10` | H5 订阅设备实时音频 |
 | 设备 → H5 视频 | `11` | H5 订阅设备实时视频 |
 | H5 → 设备 talkback | `14` | H5 “按住说话”上行音频 |
+
+设备可通过 `POST /v1/device/profile` 的 `profiles.stream` 上报 `up_audio_streamid`、`up_video_streamid`、`down_audio_streamid`、`down_video_streamid`，默认分别为 `10`、`11`、`14`、`15`，范围 `0–15`。方向以设备为准；H5 从 rtc-token 响应读取前三者用于订阅和音频发送。当前 H5 不发送视频，下行视频 ID 供其他支持视频发送的客户端使用。设备实际收发和订阅回调必须与上报值一致，修改后重新建立连接。
 
 H5 talkback 约定：
 
@@ -71,7 +73,7 @@ H5 实时预览链路**不做运行时能力协商**。设备接入该页面时�
 - 一个连接内不得无协商切换编码。要更换 profile，先结束当前连接并让设备端和 H5 配置使用同一合同
 - H5 talkback 的默认采样率在前端代码中固定为 `8000`；切换到 `16000` 时，需要同时确认设备解码链路和浏览器端配置
 
-编码与封装保持固定契约；自适应只发生在**画布呈现**层。H5 从 rtc-token 响应的 `profiles.stream` 读取画面比例（`aspect_ratio`，正数或 `宽:高`）、缩放方式（`object_fit`，fill/contain/cover）、旋转（`camera_rotation`，0/90/180/270，90/270 时画布宽高比取倒数）和镜像（`hor_mirror`/`vert_mirror`），调整 canvas 的盒子比例与 CSS transform。设备未上报时回退为 16:9 + contain + 无变换；这些字段不会改变编码流，也不参与协商。
+编码与封装保持固定契约；streamid 按设备声明选择，画面自适应发生在**画布呈现**层。H5 从 rtc-token 响应的 `profiles.stream` 读取画面比例（`aspect_ratio`，正数或 `宽:高`）、缩放方式（`object_fit`，fill/contain/cover）、旋转（`camera_rotation`，0/90/180/270，90/270 时画布宽高比取倒数）和镜像（`hor_mirror`/`vert_mirror`），调整 canvas 的盒子比例与 CSS transform。设备未上报时回退为 16:9 + contain + 无变换；这些字段不会改变编码流，也不参与协商。
 
 ---
 
@@ -225,26 +227,29 @@ H5 先调用：
 7. 调 `connection.connect({ deviceId, token })`
 8. 连接成功后 `attach()` 音频/视频输出，并订阅 `stream 10/11`
 
-对应的参考代码形态如下：
+以下示例使用已验证的 profile 字段，省略时保留默认值：
 
 ```js
-const { rtcToken, appId } = await fetchRtcToken(); // 本项目接口返回的短期 token 和应用 ID
+const { rtcToken, appId, streamProfile } = await fetchRtcToken(); // 本项目接口返回的短期 token 和应用 ID
 
 TiRtc.initialize(TiRtcInitOptions({ appId }));
 await TiRtc.videoOutputReady();
 
+const upAudio = streamProfile?.up_audio_streamid ?? 10;
+const upVideo = streamProfile?.up_video_streamid ?? 11;
+const downAudio = streamProfile?.down_audio_streamid ?? 14;
 const connection  = new TiRtcConn();
-const audioOutput = TiRtcAudioOutput({ connection, streamId: 10 }); // 设备音频下行
-const videoOutput = TiRtcVideoOutput({ connection, streamId: 11 }); // 设备视频下行
-const audioInput  = new TiRtcAudioInput({ connection, streamId: 14 }); // 浏览器对讲上行
+const audioOutput = TiRtcAudioOutput({ connection, streamId: upAudio }); // 设备音频下行
+const videoOutput = TiRtcVideoOutput({ connection, streamId: upVideo }); // 设备视频下行
+const audioInput  = new TiRtcAudioInput({ connection, streamId: downAudio }); // 浏览器对讲上行
 
 audioInput.setOptions({ sampleRate: 8000 });
 
 await connection.connect({ deviceId, token: rtcToken });
 videoOutput.attach();
 audioOutput.attach();
-connection.subscribeVideo({ streamId: 11 });
-connection.subscribeAudio({ streamId: 10 });
+connection.subscribeVideo({ streamId: upVideo });
+connection.subscribeAudio({ streamId: upAudio });
 ```
 
 ### 4. 关闭页面时释放资源
@@ -264,7 +269,7 @@ H5 页面离开时，至少应做：
 
 ## TiRTC 连接与媒体流
 
-H5 实时预览没有 MQTT 请求/通知，设备侧面对的是 **TiRTC 连接** 和固定的音视频 stream 约定。
+H5 实时预览没有 MQTT 请求/通知，设备侧面对的是 **TiRTC 连接** 和设备声明的音视频 stream 约定。
 
 ### H5 -> 设备：TiRTC connect
 

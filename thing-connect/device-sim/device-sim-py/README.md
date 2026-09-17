@@ -1014,7 +1014,7 @@ WHIP 连接成功后需等 ~300ms KCP 握手再发 `start_session`。
 
 ## 设备媒体能力上报
 
-统一模拟器取得正式 MQTT token 后，向 device-server 调用 [`POST /v1/device/profile`](../../api-reference.md#post-v1deviceprofile)，一次上报实时查看、设备通话和微信 VoIP 三个场景。Web 与微信小程序都从对应场景读取能力；未上报的字段不会从其他场景补值。
+统一模拟器取得正式 MQTT token 后，向 device-server 调用 [`POST /v1/device/profile`](../../api-reference.md#post-v1deviceprofile)，一次上报实时查看、设备通话和微信 VoIP 三个场景。Web 与微信小程序都从对应场景读取能力；未上报的字段不会从其他场景补值。 `stream` 上报上行音频/视频 `10/11` 和下行音频/视频 `14/15`。未实现的视频能力不因声明 streamid 而启用。
 
 上报在启动控制线程执行，单次请求最多 10 秒。网络或服务端暂时失败时按 1 秒、2 秒退避，最多尝试三次；鉴权、解绑和参数错误不重试。上报失败时，模拟器会提示检查 device-server，修复后重新启动即可再次上报。
 

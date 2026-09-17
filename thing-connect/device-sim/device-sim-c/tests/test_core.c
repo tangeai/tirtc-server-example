@@ -47,6 +47,10 @@ static void test_device_media_profile(void) {
     cJSON *profiles = cJSON_GetObjectItem(root, "profiles");
     cJSON *stream = cJSON_GetObjectItem(profiles, "stream");
     cJSON *call = cJSON_GetObjectItem(profiles, "call");
+    assert(cJSON_GetNumberValue(cJSON_GetObjectItem(stream, "up_audio_streamid")) == STREAM_ID_AUDIO);
+    assert(cJSON_GetNumberValue(cJSON_GetObjectItem(stream, "up_video_streamid")) == STREAM_ID_VIDEO);
+    assert(cJSON_GetNumberValue(cJSON_GetObjectItem(stream, "down_audio_streamid")) == 14);
+    assert(cJSON_GetNumberValue(cJSON_GetObjectItem(stream, "down_video_streamid")) == 15);
     assert(cJSON_IsObject(cJSON_GetObjectItem(profiles, "voip")));
     assert(strcmp(cJSON_GetStringValue(cJSON_GetArrayItem(
         cJSON_GetObjectItem(stream, "down_audio_mt"), 0)), "alaw") == 0);
