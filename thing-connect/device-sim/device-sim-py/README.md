@@ -161,7 +161,7 @@ python device_sim_main.py --device-id DEV000001 --device-key your-key --with-cam
 `requirements-audio.txt` 和 `requirements-camera.txt` 均包含基础 `requirements.txt`。
 只使用一种 PC 硬件时，安装对应的依赖文件即可；同时使用摄像头和麦克风时，两份都要安装。
 
-Windows 也可使用文件模式；只有显式传入 `--with-mic` 时，VoIP、AI 或设备间通话才使用 PC 麦克风和扬声器。此模式线上上下行必须同时使用 `alaw_8khz` 或同时使用 `alaw_16khz`（G.711 A-law、单声道）；PCM/AMR/Opus 只能去掉 `--with-mic` 后使用预编码文件测试。
+Windows 也可使用文件模式；只有显式传入 `--with-mic` 时，Web 对讲下行、VoIP、AI 或设备间通话才使用 PC 扬声器，后三种通话同时使用 PC 麦克风。此模式线上上下行必须同时使用 `alaw_8khz` 或同时使用 `alaw_16khz`（G.711 A-law、单声道）；PCM/AMR/Opus 只能去掉 `--with-mic` 后使用预编码文件测试。
 
 使用 `--with-mic` 时，启动时选择 Windows 默认输入和输出设备，并打印麦克风、扬声器的编号、名称与音频接口。USB 麦克风可作为默认输入设备，也可按编号指定：
 
@@ -399,6 +399,9 @@ python3 device_sim_main.py --device-id DEV000001 --device-key your-key \
   --up-video-format h264
 ```
 
+Windows 需要让 Web 对讲声音从电脑扬声器播放时，在命令末尾增加
+`--with-mic --up-audio-format alaw_8khz --down-audio-format alaw_8khz`。
+
 操作步骤：
 
 1. 保持设备模拟器运行。
@@ -412,6 +415,7 @@ python3 device_sim_main.py --device-id DEV000001 --device-key your-key \
 - 发送繁忙或关键帧恢复导致视频前进到下一个 IDR 时，音频文件同步到相同媒体位置，音画内容保持对应。
 - 设备端持续输出实时流相关日志。
 - 如果 H5 只看图不听音，也不影响设备侧持续发音视频。
+- 使用 `--with-mic` 时，H5 按住说话的声音从设备电脑扬声器播放，同时仍保存接收录音。
 
 ### 2. 验证纯音频 VoIP 呼叫
 

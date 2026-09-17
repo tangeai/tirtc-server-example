@@ -9,9 +9,11 @@ from __future__ import annotations
   is_active() -> bool
   get_state() -> str   # "IDLE" | "IN_CALL"
 
-对讲功能（H5 按住说话 → stream 14 → 设备端接收并保存文件）：
-  configure_talkback(enabled=True, recv_dir="./received", device_id="xxx")
-  在 start_service() 之前调用，on_audio 回调中检查 stream_id==14 时写入 received_audio.raw。
+对讲功能（H5 按住说话 → stream 14 → 设备端接收）：
+  configure_talkback(enabled=True, recv_dir="./received", device_id="xxx",
+                     playback=True)
+  在 start_service() 之前调用；音频保存到 received_audio.raw，playback=True
+  时同时解码并送入 Windows 扬声器。
 """
 
 import ctypes
@@ -34,6 +36,8 @@ from tirtc_sdk import (
     TIRTC_OPT_SERVICE_ENDPOINT, TIRTC_OPT_MAX_SEND_BUFFER,
     TIRTC_OPT_DEVICE_SECRET_KEY,
     AUDIO_STREAM_ID, VIDEO_STREAM_ID,
+    TIRTC_AUDIO_ALAW, TIRTC_AUDIO_PCM,
+    TIRTC_AUDIOSAMPLE_16K16B1C,
     TIRTC_FRAME_FLAG_KEY_FRAME,
     CONN_FATAL_ERRORS,
     TIRTC_E_BUSY, TIRTC_E_INVALID_HANDLE, TIRTC_E_CONN_CLOSED,
@@ -60,6 +64,7 @@ _callback_guard = SdkCallbackGuard()
 from audio_recorder import AudioRecorder
 _talkback_recorder: AudioRecorder | None = None
 _talkback_work: CallbackWorkQueue | None = None
+_talkback_speaker = None
 
 _LOG_LEVEL = 10  # debug=10 info=20 warn=30 error=40
 
@@ -68,15 +73,34 @@ def set_log_level(level: str) -> None:
     _LOG_LEVEL = {"debug": 10, "info": 20, "warn": 30, "error": 40}.get(level.lower(), 10)
 
 
-def configure_talkback(enabled: bool = False, recv_dir: str = "", device_id: str = "") -> None:
-    """启用/禁用 H5 对讲录音。在 start() 之前调用。"""
-    global _talkback_recorder
+def configure_talkback(enabled: bool = False, recv_dir: str = "",
+                       device_id: str = "", playback: bool = False) -> None:
+    """配置 H5 对讲录音及可选扬声器播放。在 start_service() 前调用。"""
+    global _talkback_recorder, _talkback_speaker
+    _close_talkback_playback()
     if enabled:
         _talkback_recorder = AudioRecorder(
             recv_dir, device_id, "received_audio.raw", _info, _warn)
         _info(f"对讲录音已启用: stream={TALKBACK_STREAM_ID} dir={recv_dir} device={device_id}")
     else:
         _talkback_recorder = None
+    if playback:
+        try:
+            from audio_device import SpeakerPlayback, select_speaker
+            speaker_device = select_speaker()
+            _talkback_speaker = SpeakerPlayback(speaker_device)
+            _info(f"Web 对讲扬声器播放已启用: device={speaker_device}")
+        except Exception as exc:
+            _talkback_speaker = None
+            _warn(f"Web 对讲扬声器不可用，将仅保存录音: {exc}")
+
+
+def _close_talkback_playback() -> None:
+    global _talkback_speaker
+    if _talkback_speaker is None:
+        return
+    _talkback_speaker.close()
+    _talkback_speaker = None
 
 
 def _open_talkback_file() -> None:
@@ -246,6 +270,7 @@ def start_service(
 def stop_service() -> None:
     global _service_active, _active_conn, _active_thread, _talkback_work
     if not _service_active:
+        _close_talkback_playback()
         return
     _service_active = False
     with _state_lock:
@@ -264,6 +289,7 @@ def stop_service() -> None:
     _close_talkback_file()
     if _talkback_work is not None:
         _talkback_work.stop()
+    _close_talkback_playback()
     if _active_thread_local is not None and _active_thread_local.is_alive():
         join_worker_before_uninit(
             _active_thread_local, _warn, "实时音视频推流", timeout=3.0)
@@ -395,10 +421,22 @@ def _stream_worker(hconn_val: int, source: MediaSource) -> None:
 def _process_talkback_item(item) -> None:
     frame, buf = item
     recorder = _talkback_recorder
-    if recorder is None or not recorder.is_open:
-        return
-    recorder.write_frame(frame, buf)
-    if recorder.frame_count == 1:
+    if recorder is not None and recorder.is_open:
+        recorder.write_frame(frame, buf)
+    speaker = _talkback_speaker
+    if speaker is not None:
+        if frame.media == TIRTC_AUDIO_ALAW:
+            from alaw import alaw_decode
+            pcm = alaw_decode(buf)
+        elif frame.media == TIRTC_AUDIO_PCM:
+            pcm = buf
+        else:
+            pcm = None
+        if pcm is not None:
+            sample_rate = (16000 if frame.flags == TIRTC_AUDIOSAMPLE_16K16B1C
+                           else 8000)
+            speaker.play(pcm, source_rate=sample_rate)
+    if recorder is not None and recorder.frame_count == 1:
         _info(
             f"H5 对讲音频流检测到: stream={frame.stream_id} "
             f"media={frame.media} {frame.length}bytes/帧"

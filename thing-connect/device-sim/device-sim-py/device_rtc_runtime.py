@@ -288,7 +288,8 @@ class DeviceRtcRuntime:
             SessionKind.STREAM, ServiceKind.STREAM)
         try:
             self.stream.configure_talkback(
-                True, c.down_media_dir, c.device_id)
+                True, c.down_media_dir, c.device_id,
+                playback=c.hardware_audio)
             self.stream.start_service(
                 lambda: FileMediaSource(
                     c.up_video_file, c.up_audio_file,

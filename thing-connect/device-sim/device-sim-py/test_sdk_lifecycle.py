@@ -191,6 +191,39 @@ class SdkLifecycleTests(unittest.TestCase):
         self.assertTrue(rtc_stream._force_key_frame.is_set())
         rtc_stream._force_key_frame.clear()
 
+    def test_stream_talkback_decodes_alaw_for_speaker(self):
+        old_recorder = rtc_stream._talkback_recorder
+        old_speaker = rtc_stream._talkback_speaker
+        speaker = mock.Mock()
+        frame = rtc_stream.TIRTCFRAMEINFO()
+        frame.stream_id = rtc_stream.TALKBACK_STREAM_ID
+        frame.media = rtc_stream.TIRTC_AUDIO_ALAW
+        frame.flags = rtc_stream.TIRTC_AUDIOSAMPLE_16K16B1C
+        payload = b"\xd5\x55"
+        rtc_stream._talkback_recorder = None
+        rtc_stream._talkback_speaker = speaker
+        try:
+            rtc_stream._process_talkback_item((frame, payload))
+        finally:
+            rtc_stream._talkback_recorder = old_recorder
+            rtc_stream._talkback_speaker = old_speaker
+
+        from alaw import alaw_decode
+        speaker.play.assert_called_once_with(
+            alaw_decode(payload), source_rate=16000)
+
+    def test_stream_talkback_playback_closes_speaker(self):
+        old_speaker = rtc_stream._talkback_speaker
+        speaker = mock.Mock()
+        rtc_stream._talkback_speaker = speaker
+        try:
+            rtc_stream._close_talkback_playback()
+            self.assertIsNone(rtc_stream._talkback_speaker)
+        finally:
+            rtc_stream._talkback_speaker = old_speaker
+
+        speaker.close.assert_called_once_with()
+
     def test_stream_replacement_releases_old_source_before_opening_new_one(self):
         old_active = rtc_stream._service_active
         old_conn = rtc_stream._active_conn
