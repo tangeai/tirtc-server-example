@@ -148,6 +148,17 @@ class TiRtcRuntime:
                 sdk.TiRtcLogSetCallback(self._sdk_log_callback)
                 sdk.TiRtcLogSetLevel(8)
 
+            max_connections = ctypes.c_int(
+                sdk.TIRTC_REFERENCE_MAX_CONNECTIONS)
+            self._check(
+                "TiRtcSetOption(MAX_CONNECTIONS)",
+                sdk.TiRtcSetOption(
+                    sdk.TIRTC_OPT_MAX_CONNECTIONS,
+                    ctypes.byref(max_connections),
+                    ctypes.sizeof(max_connections),
+                ),
+            )
+
             if endpoint:
                 endpoint_bytes = endpoint.encode()
                 self._check(

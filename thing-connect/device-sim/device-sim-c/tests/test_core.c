@@ -16,6 +16,7 @@
 #include "linux_device_adapter.h"
 #include "media_format.h"
 #include "media_subscription_policy.h"
+#include "stream_connection_set.h"
 #include "sdk_callback_guard.h"
 #include "session_arbiter.h"
 #include "session_coordinator.h"
@@ -471,19 +472,76 @@ static void test_media_subscription_policy(void) {
     MediaSubscriptionPolicy policy = {0};
 
     media_subscription_policy_prepare(&policy, 0);
+    assert(!media_subscription_policy_audio_enabled(&policy));
     assert(!media_subscription_policy_video_enabled(&policy));
     assert(!media_subscription_policy_subscribe_video(&policy));
+    assert(media_subscription_policy_subscribe_audio(&policy));
+    assert(media_subscription_policy_audio_enabled(&policy));
+    media_subscription_policy_unsubscribe_audio(&policy);
+    assert(!media_subscription_policy_audio_enabled(&policy));
 
     media_subscription_policy_prepare(&policy, 1);
-    assert(media_subscription_policy_video_enabled(&policy));
-    media_subscription_policy_unsubscribe_video(&policy);
+    assert(!media_subscription_policy_audio_enabled(&policy));
     assert(!media_subscription_policy_video_enabled(&policy));
+    assert(media_subscription_policy_subscribe_audio(&policy));
     assert(media_subscription_policy_subscribe_video(&policy));
+    assert(media_subscription_policy_audio_enabled(&policy));
     assert(media_subscription_policy_video_enabled(&policy));
+    media_subscription_policy_unsubscribe_audio(&policy);
+    media_subscription_policy_unsubscribe_video(&policy);
+    assert(!media_subscription_policy_audio_enabled(&policy));
+    assert(!media_subscription_policy_video_enabled(&policy));
 
     media_subscription_policy_reset(&policy);
+    assert(!media_subscription_policy_audio_enabled(&policy));
     assert(!media_subscription_policy_video_enabled(&policy));
+    assert(!media_subscription_policy_subscribe_audio(&policy));
     assert(!media_subscription_policy_subscribe_video(&policy));
+}
+
+static void test_stream_connection_set_isolates_multiple_viewers(void) {
+    StreamConnectionSet set;
+    tirtc_conn_t first = (tirtc_conn_t)(uintptr_t)0x101;
+    tirtc_conn_t second = (tirtc_conn_t)(uintptr_t)0x202;
+    tirtc_conn_t handles[STREAM_MAX_CONNECTIONS];
+    stream_connection_set_init(&set, 1);
+
+    assert(stream_connection_add_pending(&set, first));
+    assert(stream_connection_add_pending(&set, second));
+    assert(stream_connection_subscribe_audio(&set, first));
+    assert(stream_connection_subscribe_video(&set, second));
+    assert(stream_connection_activate(&set, first));
+    assert(stream_connection_activate(&set, second));
+    assert(stream_connection_active_count(&set) == 2);
+
+    assert(stream_connection_snapshot_audio(
+               &set, handles, STREAM_MAX_CONNECTIONS) == 1);
+    assert(handles[0] == first);
+    assert(stream_connection_snapshot_video(
+               &set, handles, STREAM_MAX_CONNECTIONS) == 1);
+    assert(handles[0] == second);
+
+    stream_connection_set_down_audio(&set, first, 1);
+    stream_connection_set_down_audio(&set, second, 0);
+    assert(stream_connection_accepts_down_audio(&set, first));
+    assert(!stream_connection_accepts_down_audio(&set, second));
+
+    stream_connection_unsubscribe_audio(&set, first);
+    assert(stream_connection_snapshot_audio(
+               &set, handles, STREAM_MAX_CONNECTIONS) == 0);
+    assert(stream_connection_snapshot_video(
+               &set, handles, STREAM_MAX_CONNECTIONS) == 1);
+
+    assert(stream_connection_remove(&set, first));
+    assert(stream_connection_active_count(&set) == 1);
+    assert(stream_connection_is_active(&set, second));
+
+    for (uintptr_t value = 0x300;
+        value < 0x300 + STREAM_MAX_CONNECTIONS - 1; ++value)
+        assert(stream_connection_add_pending(
+            &set, (tirtc_conn_t)(uintptr_t)value));
+    assert(!stream_connection_add_pending(
+        &set, (tirtc_conn_t)(uintptr_t)0x999));
 }
 
 static void test_service_discovery_parser(void) {
@@ -1334,7 +1392,7 @@ static void test_process_runtime_single_sdk_lifecycle(void) {
 
     TirtcRuntimeTestSdkStats stats = {0};
     tirtc_runtime_test_sdk_get_stats(&stats);
-    assert(stats.set_option_calls == 4);
+    assert(stats.set_option_calls == 5);
     assert(stats.init_calls == 1);
     assert(stats.start_calls == 1);
     assert(stats.stop_calls == 0);
@@ -1575,6 +1633,7 @@ int main(void) {
     test_audio_recorder_files();
     test_ai_start_session_json_declares_codecs();
     test_media_subscription_policy();
+    test_stream_connection_set_isolates_multiple_viewers();
     test_service_discovery_parser();
     test_fixed_audio_and_mjpeg();
     test_invalid_amr();

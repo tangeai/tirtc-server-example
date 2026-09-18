@@ -75,6 +75,11 @@ _callback_guard = SdkCallbackGuard()
 _state_lock    = threading.Lock()
 _session_state = "IDLE"          # IDLE | CONNECTING | IN_CALL | DISCONNECTING
 _active_hconn: "int | None" = None
+_pending_hconn: "int | None" = None
+_local_audio_subscribed = False
+_local_video_subscribed = False
+_pending_send_audio_subscribed = False
+_pending_send_video_subscribed = False
 _connect_cb_ref: "ConnectCB | None" = None  # 防止 GC
 _connect_cb_refs: "list[ConnectCB]" = []    # runtime 退出前保活超时重试的回调
 
@@ -171,12 +176,20 @@ def set_session_end_callback(callback) -> None:
 # ── 内部辅助 ──────────────────────────────────────────────────────────────────
 
 def _handle_disconnect(hconn_val: int):
-    global _session_state, _active_hconn
+    global _session_state, _active_hconn, _pending_hconn
+    global _local_audio_subscribed, _local_video_subscribed
+    global _pending_send_audio_subscribed, _pending_send_video_subscribed
     with _state_lock:
         if _active_hconn != hconn_val:
+            if _pending_hconn == hconn_val:
+                _pending_hconn = None
+                _pending_send_audio_subscribed = False
+                _pending_send_video_subscribed = False
             return
         _session_state = "DISCONNECTING"
         _active_hconn  = None
+        _local_audio_subscribed = False
+        _local_video_subscribed = False
     _media.stop()
     _media.set_hconn(None)
     clear_call_type()
@@ -221,41 +234,63 @@ def _is_audio_call() -> bool:
         return _session_call_type == "audio"
 
 
-def _apply_video_downlink_policy(hconn_val: int) -> None:
-    if not _is_audio_call():
-        return
-    rc = sdk.TiRtcUnsubscribeVideo(
-        ctypes.c_void_p(hconn_val), sdk.VIDEO_STREAM_ID)
-    if rc >= 0:
-        _info(
-            f"纯音频设备通话已退订下行视频 "
-            f"stream={sdk.VIDEO_STREAM_ID}"
-        )
-    else:
-        _warn(
-            f"退订下行视频失败 stream={sdk.VIDEO_STREAM_ID} "
-            f"rc={rc} ({sdk.TiRtcGetErrorStr(rc).decode()})"
-        )
+def _subscribe_peer_media(hconn_val: int) -> bool:
+    global _local_audio_subscribed, _local_video_subscribed
+    hconn = ctypes.c_void_p(hconn_val)
+    video_call = not _is_audio_call()
+    audio_rc = sdk.TiRtcSubscribeAudio(hconn, sdk.AUDIO_STREAM_ID)
+    video_rc = (
+        sdk.TiRtcSubscribeVideo(hconn, sdk.VIDEO_STREAM_ID)
+        if video_call else 0
+    )
+    if audio_rc < 0 or video_rc < 0:
+        if audio_rc >= 0:
+            sdk.TiRtcUnsubscribeAudio(hconn, sdk.AUDIO_STREAM_ID)
+        if video_call and video_rc >= 0:
+            sdk.TiRtcUnsubscribeVideo(hconn, sdk.VIDEO_STREAM_ID)
+        return False
+    with _state_lock:
+        current = _active_hconn == hconn_val
+        if current:
+            _local_audio_subscribed = True
+            _local_video_subscribed = video_call
+    if not current:
+        sdk.TiRtcUnsubscribeAudio(hconn, sdk.AUDIO_STREAM_ID)
+        if video_call:
+            sdk.TiRtcUnsubscribeVideo(hconn, sdk.VIDEO_STREAM_ID)
+    return current
 
 
 def _accept_inbound_connection_after_callback(hconn_val: int) -> None:
-    global _session_state, _active_hconn
+    global _session_state, _active_hconn, _pending_hconn
+    global _local_audio_subscribed, _local_video_subscribed
+    global _pending_send_audio_subscribed, _pending_send_video_subscribed
     with _state_lock:
-        if not _service_active:
+        if not _service_active or _pending_hconn != hconn_val:
             accept = False
         else:
             accept = True
             _session_state = "CONNECTING"
             _active_hconn = hconn_val
+            _local_audio_subscribed = False
+            _local_video_subscribed = False
+            pending_audio = _pending_send_audio_subscribed
+            pending_video = _pending_send_video_subscribed
+            _pending_hconn = None
+            _pending_send_audio_subscribed = False
+            _pending_send_video_subscribed = False
     if not accept:
         sdk.TiRtcDisconnect(ctypes.c_void_p(hconn_val))
         return
     _media.set_hconn(hconn_val)
+    if pending_audio:
+        _media.subscribe_audio(sdk.AUDIO_STREAM_ID)
+    if pending_video:
+        _media.subscribe_video(sdk.VIDEO_STREAM_ID)
     _info(
         f"收到入站 P2P 连接 hconn={hconn_val:#x}"
         "（等待 0x2000 接通确认）"
     )
-    _apply_video_downlink_policy(hconn_val)
 
 
 def _complete_inbound_connection_after_callback(
@@ -271,6 +306,10 @@ def _complete_inbound_connection_after_callback(
         if active:
             _session_state = "IN_CALL"
     if not active:
+        return
+    if not _subscribe_peer_media(hconn_val):
+        _warn("订阅对端设备通话媒体失败")
+        _schedule_disconnect_after_callback(hconn_val)
         return
     _media.start()
     if _on_p2p_connected_cb:
@@ -302,11 +341,29 @@ def _process_command_after_callback(hconn_val: int, raw: bytes) -> None:
 def _build_callbacks() -> TIRTCCALLBACKS:
     def on_conn_accepted(hconn):
         hval = ctypes.cast(hconn, ctypes.c_void_p).value
-        _callback_guard.defer(
-            _accept_inbound_connection_after_callback,
-            hval,
-            name="call-accept",
-        )
+        global _pending_hconn
+        global _pending_send_audio_subscribed, _pending_send_video_subscribed
+        with _state_lock:
+            accept = _service_active
+            if accept:
+                _pending_hconn = hval
+                _pending_send_audio_subscribed = False
+                _pending_send_video_subscribed = False
+        try:
+            queued = accept and _callback_guard.defer(
+                _accept_inbound_connection_after_callback,
+                hval,
+                name="call-accept",
+            )
+        except RuntimeError:
+            queued = False
+        if not queued:
+            with _state_lock:
+                if _pending_hconn == hval:
+                    _pending_hconn = None
+                    _pending_send_audio_subscribed = False
+                    _pending_send_video_subscribed = False
+            _disconnect_stale_handle_after_callback(hval)
 
     def on_conn_error(hconn, error):
         hval = ctypes.cast(hconn, ctypes.c_void_p).value
@@ -329,6 +386,15 @@ def _build_callbacks() -> TIRTCCALLBACKS:
             return
         try:
             fi = ctypes.cast(pFi, ctypes.POINTER(TIRTCFRAMEINFO)).contents
+            hval = ctypes.cast(hconn, ctypes.c_void_p).value
+            with _state_lock:
+                accepted = (
+                    _active_hconn == hval
+                    and _local_audio_subscribed
+                    and fi.stream_id == sdk.AUDIO_STREAM_ID
+                )
+            if not accepted:
+                return
             buf = ctypes.string_at(data, fi.length)
             _media.on_audio_frame(fi, buf)
         except Exception:
@@ -339,6 +405,15 @@ def _build_callbacks() -> TIRTCCALLBACKS:
             return
         try:
             fi = ctypes.cast(pFi, ctypes.POINTER(TIRTCFRAMEINFO)).contents
+            hval = ctypes.cast(hconn, ctypes.c_void_p).value
+            with _state_lock:
+                accepted = (
+                    _active_hconn == hval
+                    and _local_video_subscribed
+                    and fi.stream_id == sdk.VIDEO_STREAM_ID
+                )
+            if not accepted:
+                return
             buf = ctypes.string_at(data, fi.length)
             _media.on_video_frame(buf)
         except Exception:
@@ -365,10 +440,18 @@ def _build_callbacks() -> TIRTCCALLBACKS:
             _media.request_video_key_frame(stream_id)
 
     def on_subscribe_video(hconn, stream_id):
+        global _pending_send_video_subscribed
         hval = ctypes.cast(hconn, ctypes.c_void_p).value
         with _state_lock:
             active = _active_hconn == hval
-        accepted = active and _media.subscribe_video(stream_id)
+            pending = _pending_hconn == hval
+            pending_capable = _session_call_type == "video"
+            if pending and pending_capable and stream_id == sdk.VIDEO_STREAM_ID:
+                _pending_send_video_subscribed = True
+        accepted = (
+            _media.subscribe_video(stream_id) if active
+            else pending and pending_capable and stream_id == sdk.VIDEO_STREAM_ID
+        )
         _info(
             f"设备通话视频订阅 stream={stream_id} "
             f"{'已接受' if accepted else '已拒绝'}"
@@ -376,14 +459,38 @@ def _build_callbacks() -> TIRTCCALLBACKS:
         return 0 if accepted else -1
 
     def on_unsubscribe_video(hconn, stream_id):
+        global _pending_send_video_subscribed
         hval = ctypes.cast(hconn, ctypes.c_void_p).value
         with _state_lock:
             active = _active_hconn == hval
+            if _pending_hconn == hval and stream_id == sdk.VIDEO_STREAM_ID:
+                _pending_send_video_subscribed = False
         if active and _media.unsubscribe_video(stream_id):
             _info(f"对端已退订设备通话视频 stream={stream_id}；音频继续发送")
 
-    def on_subscribe_audio(hconn, stream_id): return 0
-    def on_unsubscribe_audio(hconn, stream_id): pass
+    def on_subscribe_audio(hconn, stream_id):
+        global _pending_send_audio_subscribed
+        hval = ctypes.cast(hconn, ctypes.c_void_p).value
+        with _state_lock:
+            active = _active_hconn == hval
+            pending = _pending_hconn == hval
+            if pending and stream_id == sdk.AUDIO_STREAM_ID:
+                _pending_send_audio_subscribed = True
+        accepted = (
+            _media.subscribe_audio(stream_id) if active
+            else pending and stream_id == sdk.AUDIO_STREAM_ID
+        )
+        return 0 if accepted else -1
+
+    def on_unsubscribe_audio(hconn, stream_id):
+        global _pending_send_audio_subscribed
+        hval = ctypes.cast(hconn, ctypes.c_void_p).value
+        with _state_lock:
+            active = _active_hconn == hval
+            if _pending_hconn == hval and stream_id == sdk.AUDIO_STREAM_ID:
+                _pending_send_audio_subscribed = False
+        if active:
+            _media.unsubscribe_audio(stream_id)
 
     cbs = TIRTCCALLBACKS()
     cbs.on_conn_accepted     = OnConnAcceptCB(_callback_guard.wrap(on_conn_accepted))
@@ -416,6 +523,7 @@ def connect_to(remote_device_id: str, token: str, room_id: str,
                call_type: "str | None" = None) -> None:
     """被叫侧：重试连接主叫，全部失败后触发 _on_connect_failed_cb。"""
     global _session_state, _active_hconn, _connect_cb_ref
+    global _local_audio_subscribed, _local_video_subscribed
 
     if call_type is not None:
         set_call_type(call_type)
@@ -511,8 +619,14 @@ def connect_to(remote_device_id: str, token: str, room_id: str,
         with _state_lock:
             _session_state = "IN_CALL"
             _active_hconn  = hconn_val
+            _local_audio_subscribed = False
+            _local_video_subscribed = False
         _media.set_hconn(hconn_val)
-        _apply_video_downlink_policy(hconn_val)
+        if not _subscribe_peer_media(hconn_val):
+            _err("订阅对端设备通话媒体失败")
+            _handle_disconnect(hconn_val)
+            sdk.TiRtcDisconnect(hconn)
+            return
         _info(f"P2P 连接成功 hconn={hconn_val:#x}，发送 0x2000 room_id={room_id}")
         body = json.dumps({"room_id": room_id}).encode()
         sdk.TiRtcSendCommand(hconn, 0x2000, body, len(body))
@@ -538,11 +652,14 @@ def connect_to(remote_device_id: str, token: str, room_id: str,
 
 
 def hangup() -> None:
-    global _session_state, _active_hconn
+    global _session_state, _active_hconn, _pending_hconn
+    global _local_audio_subscribed, _local_video_subscribed
+    global _pending_send_audio_subscribed, _pending_send_video_subscribed
 
     with _state_lock:
         state     = _session_state
         hconn_val = _active_hconn
+        pending_hconn_val = _pending_hconn
         if state == "DISCONNECTING":
             _log("hangup: 正在断开，等待 SDK 回调完成")
             return
@@ -550,8 +667,13 @@ def hangup() -> None:
             # 本地主动停止取得清理权，让同步到达的 on_disconnected 失效。
             _session_state = "DISCONNECTING"
             _active_hconn = None
+            _local_audio_subscribed = False
+            _local_video_subscribed = False
+        _pending_hconn = None
+        _pending_send_audio_subscribed = False
+        _pending_send_video_subscribed = False
 
-    if state == "IDLE":
+    if state == "IDLE" and pending_hconn_val is None:
         clear_call_type()
         _log("hangup: 已是 IDLE，忽略")
         return
@@ -562,6 +684,8 @@ def hangup() -> None:
 
     if hconn_val is not None:
         sdk.TiRtcDisconnect(ctypes.c_void_p(hconn_val))
+    if pending_hconn_val is not None and pending_hconn_val != hconn_val:
+        sdk.TiRtcDisconnect(ctypes.c_void_p(pending_hconn_val))
 
     with _state_lock:
         if _session_state == "DISCONNECTING":

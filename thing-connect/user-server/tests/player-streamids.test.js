@@ -36,6 +36,8 @@ async function connectWithProfile(profile) {
       disconnect() {}
       subscribeAudio({ streamId }) { calls.subscribeAudio = streamId; }
       subscribeVideo({ streamId }) { calls.subscribeVideo = streamId; }
+      unsubscribeAudio({ streamId }) { calls.unsubscribeAudio = streamId; }
+      unsubscribeVideo({ streamId }) { calls.unsubscribeVideo = streamId; }
     },
     TiRtcAudioOutput({ streamId }) { calls.audioOutput = streamId; return output(); },
     TiRtcVideoOutput({ streamId }) { calls.videoOutput = streamId; return output(); },

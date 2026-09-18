@@ -7,7 +7,8 @@ void media_subscription_policy_prepare(MediaSubscriptionPolicy *policy,
     if (!policy) return;
     policy->initialized = 1;
     policy->video_capable = video_capable ? 1 : 0;
-    policy->video_enabled = policy->video_capable;
+    policy->audio_enabled = 0;
+    policy->video_enabled = 0;
 }
 
 void media_subscription_policy_reset(MediaSubscriptionPolicy *policy) {
@@ -20,6 +21,21 @@ int media_subscription_policy_subscribe_video(MediaSubscriptionPolicy *policy) {
         return 0;
     policy->video_enabled = 1;
     return 1;
+}
+
+int media_subscription_policy_subscribe_audio(MediaSubscriptionPolicy *policy) {
+    if (!policy || !policy->initialized) return 0;
+    policy->audio_enabled = 1;
+    return 1;
+}
+
+void media_subscription_policy_unsubscribe_audio(MediaSubscriptionPolicy *policy) {
+    if (policy) policy->audio_enabled = 0;
+}
+
+int media_subscription_policy_audio_enabled(
+    const MediaSubscriptionPolicy *policy) {
+    return policy && policy->initialized && policy->audio_enabled;
 }
 
 void media_subscription_policy_unsubscribe_video(MediaSubscriptionPolicy *policy) {

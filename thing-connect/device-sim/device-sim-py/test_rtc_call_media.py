@@ -37,6 +37,7 @@ _STATE_FIELDS = {
     "receive_work": "_receive_work",
     "echo_gate": "_echo_gate",
     "session_video_capable": "_session_video_capable",
+    "audio_enabled": "_audio_enabled",
     "video_enabled": "_video_enabled",
     "video_generation": "_video_generation",
 }
@@ -148,18 +149,40 @@ class RtcCallMediaTests(unittest.TestCase):
         rtc_call_media._send_video_path = "video.h264"
 
         rtc_call_media.prepare_session(False)
+        self.assertEqual(
+            rtc_call_media._subscription_state()[:3],
+            (False, False, False),
+        )
+        self.assertTrue(
+            rtc_call_media.subscribe_audio(rtc_call_media.AUDIO_STREAM_ID))
         self.assertFalse(
             rtc_call_media.subscribe_video(rtc_call_media.VIDEO_STREAM_ID))
         self.assertEqual(
-            rtc_call_media._video_state()[:2], (False, False))
+            rtc_call_media._subscription_state()[:3],
+            (True, False, False),
+        )
 
         rtc_call_media.prepare_session(True)
         self.assertEqual(
-            rtc_call_media._video_state()[:2], (True, True))
+            rtc_call_media._subscription_state()[:3],
+            (False, True, False),
+        )
+        self.assertTrue(
+            rtc_call_media.subscribe_audio(rtc_call_media.AUDIO_STREAM_ID))
+        self.assertTrue(
+            rtc_call_media.subscribe_video(rtc_call_media.VIDEO_STREAM_ID))
+        self.assertEqual(
+            rtc_call_media._subscription_state()[:3],
+            (True, True, True),
+        )
+        self.assertTrue(
+            rtc_call_media.unsubscribe_audio(rtc_call_media.AUDIO_STREAM_ID))
         self.assertTrue(
             rtc_call_media.unsubscribe_video(rtc_call_media.VIDEO_STREAM_ID))
         self.assertEqual(
-            rtc_call_media._video_state()[:2], (True, False))
+            rtc_call_media._subscription_state()[:3],
+            (False, True, False),
+        )
         self.assertFalse(
             rtc_call_media.request_video_key_frame(
                 rtc_call_media.VIDEO_STREAM_ID))
@@ -280,6 +303,9 @@ class RtcCallMediaTests(unittest.TestCase):
                 worker = rtc_call_media._stream_thread
                 try:
                     self.assertIsNotNone(worker)
+                    self.assertFalse(sent.wait(timeout=0.05))
+                    self.assertTrue(rtc_call_media.subscribe_audio(
+                        rtc_call_media.AUDIO_STREAM_ID))
                     self.assertTrue(sent.wait(timeout=1.0))
                 finally:
                     rtc_call_media.stop()

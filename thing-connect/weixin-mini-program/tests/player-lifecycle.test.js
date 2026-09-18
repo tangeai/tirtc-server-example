@@ -16,7 +16,11 @@ function player(options = {}) {
   const script = html.match(/<script type="module">([\s\S]*?)<\/script>/)[1].replace(/^import .*;$/m, '')
   const elements = new Map()
   const listeners = {}
-  const calls = { connects: 0, attaches: 0, disconnects: 0, talks: 0, stops: 0, logins: 0 }
+  const calls = {
+    connects: 0, attaches: 0, disconnects: 0, talks: 0, stops: 0,
+    logins: 0, subscribeAudio: [], subscribeVideo: [],
+    unsubscribeAudio: [], unsubscribeVideo: [],
+  }
   const connectionReady = options.connectionReady || Promise.resolve()
   const talkReady = options.talkReady || Promise.resolve()
   const style = () => ({ setProperty(name, value) { this[name] = value } })
@@ -43,8 +47,10 @@ function player(options = {}) {
   class Connection {
     connect() { calls.connects++; return connectionReady }
     disconnect() { calls.disconnects++ }
-    subscribeVideo() {}
-    subscribeAudio() {}
+    subscribeVideo({ streamId }) { calls.subscribeVideo.push(streamId) }
+    subscribeAudio({ streamId }) { calls.subscribeAudio.push(streamId) }
+    unsubscribeVideo({ streamId }) { calls.unsubscribeVideo.push(streamId) }
+    unsubscribeAudio({ streamId }) { calls.unsubscribeAudio.push(streamId) }
   }
   const context = {
     window, document, URLSearchParams, AbortController,
@@ -92,6 +98,22 @@ test('麦克风权限迟到返回时，已松开的按键不能继续上行音�
   await tick()
   assert.equal(p.calls.talks, 0)
   assert.ok(p.calls.stops > 0)
+})
+
+test('静音取消音频订阅，恢复声音重新订阅，离开页面取消剩余订阅', async () => {
+  const p = player()
+  await tick()
+  assert.deepEqual(p.calls.subscribeAudio, [10])
+  assert.deepEqual(p.calls.subscribeVideo, [11])
+
+  p.window.toggleMute()
+  assert.deepEqual(p.calls.unsubscribeAudio, [10])
+  p.window.toggleMute()
+  assert.deepEqual(p.calls.subscribeAudio, [10, 10])
+
+  p.listeners.pagehide()
+  assert.deepEqual(p.calls.unsubscribeAudio, [10, 10])
+  assert.deepEqual(p.calls.unsubscribeVideo, [11])
 })
 
 test('连接失败提供可重试状态，不遗留连接', async () => {

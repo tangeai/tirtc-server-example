@@ -223,6 +223,9 @@ let generation      = 0;
 let connected       = false;
 let startTimeout    = null;
 let requestController = null;
+let subscribedAudioStreamId = null;
+let subscribedVideoStreamId = null;
+let configuredAudioStreamId = null;
 
 function showFailure(message) {
   $('player-message').textContent = message;
@@ -250,6 +253,7 @@ async function start() {
     const upAudioStreamId = streamId(streamProfile, 'up_audio_streamid', 10);
     const upVideoStreamId = streamId(streamProfile, 'up_video_streamid', 11);
     const downAudioStreamId = streamId(streamProfile, 'down_audio_streamid', 14);
+    configuredAudioStreamId = upAudioStreamId;
 
     TiRtc.initialize(TiRtcInitOptions({ appId:appId }));
 
@@ -269,8 +273,12 @@ async function start() {
     setStatus(true);
     videoOutput.attach();
     if (!muted) audioOutput.attach();
+    subscribedVideoStreamId = upVideoStreamId;
     connection.subscribeVideo({ streamId: upVideoStreamId });
-    connection.subscribeAudio({ streamId: upAudioStreamId });
+    if (!muted) {
+      subscribedAudioStreamId = upAudioStreamId;
+      connection.subscribeAudio({ streamId: upAudioStreamId });
+    }
     updateMuteUI();
     $('player-message').textContent = '已连接 · 点击声音按钮开启或关闭声音';
 
@@ -296,7 +304,19 @@ function updateMuteUI() {
 // ── Mute ─────────────────────────────────────────────────────────────────
 window.toggleMute = function() {
   muted = !muted;
-  if (audioOutput) muted ? audioOutput.detach() : audioOutput.attach();
+  if (audioOutput && connection && connected) {
+    if (muted) {
+      if (subscribedAudioStreamId !== null) {
+        connection.unsubscribeAudio({ streamId: subscribedAudioStreamId });
+        subscribedAudioStreamId = null;
+      }
+      audioOutput.detach();
+    } else {
+      audioOutput.attach();
+      subscribedAudioStreamId = configuredAudioStreamId;
+      connection.subscribeAudio({ streamId: configuredAudioStreamId });
+    }
+  }
   updateMuteUI();
 };
 
@@ -340,14 +360,23 @@ function cleanup() {
   if (requestController) requestController.abort();
   requestController = null;
   window.stopTalk();
-  if (connection)  connection.disconnect();
+  if (connection && subscribedVideoStreamId !== null) {
+    connection.unsubscribeVideo({ streamId: subscribedVideoStreamId });
+  }
+  if (connection && subscribedAudioStreamId !== null) {
+    connection.unsubscribeAudio({ streamId: subscribedAudioStreamId });
+  }
+  subscribedVideoStreamId = null;
+  subscribedAudioStreamId = null;
   if (audioOutput) audioOutput.detach();
   if (videoOutput) videoOutput.detach();
   if (audioInput) {
     audioInput.stop();
     void audioInput.detach().catch(() => {});
   }
+  if (connection) connection.disconnect();
   connection = audioOutput = videoOutput = audioInput = null;
+  configuredAudioStreamId = null;
 }
 
 $('player-retry').onclick = start;

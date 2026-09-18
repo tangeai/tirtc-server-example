@@ -33,12 +33,14 @@ VoIP 和 AI 使用 <a href="https://docs.tange.ai/products/tirtc/api-reference/c
 4. 被叫收到 MQTT `call_incoming(channel=device)` 后决定接/拒
 5. 被叫接听时调 [`POST /v1/call/device/info`](api-reference.md#post-v1calldeviceinfo)
 6. 被叫用返回 token 调 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcconnect" target="_blank" rel="noopener">`TiRtcConnect(caller_id, token)`</a>
-7. 建连成功后，被叫发 `0x2000` 表示接通
+7. 建连成功后，被叫订阅对端 stream 10 音频；视频通话还订阅 stream 11 视频
+8. 被叫发 `0x2000` 表示接通；主叫收到 `0x2000` 后也订阅对端对应 stream
+9. 双方仅在收到对端订阅回调后发送对应媒体，并只接收本端已成功订阅的媒体
 
 联调时检查以下结果：
 
-- **设备侧（被叫）**：<a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcconnect" target="_blank" rel="noopener">`TiRtcConnect`</a> 回调 `error == 0`、`0x2000` 接通确认发送无错。
-- **对端（主叫）**：收到被叫的 `0x2000` 接通确认后，双方 `on_audio` / `on_video` 才开始收发媒体（`on_conn_accepted` 只是 P2P 建连，媒体要等 `0x2000`）。
+- **设备侧（被叫）**：<a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcconnect" target="_blank" rel="noopener">`TiRtcConnect`</a> 回调 `error == 0`，本端订阅成功，`0x2000` 接通确认发送无错。
+- **对端（主叫）**：收到被叫的 `0x2000` 接通确认后先订阅对端媒体；双方发送由对端订阅回调授权，`on_audio` / `on_video` 只接受当前连接中本端已订阅的 stream。
 
 ---
 
@@ -111,8 +113,10 @@ sequenceDiagram
     CALLEE->>CALL: POST /v1/call/device/info
     CALL-->>CALLEE: token
     CALLEE->>CALLER: TiRtcConnect(caller_id, token)
+    CALLEE->>CALLER: subscribe audio 10 / video 11
     CALLEE->>CALLER: TiRtcSendCommand(0x2000, {"room_id":"..."})
-    CALLER->>CALLEE: 双向音视频收发
+    CALLER->>CALLEE: subscribe audio 10 / video 11
+    CALLER->>CALLEE: 按订阅状态双向音视频收发
 ```
 
 图中涉及的 TiRTC SDK 接口：<a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcconnect" target="_blank" rel="noopener">`TiRtcConnect`</a>、<a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsendcommand" target="_blank" rel="noopener">`TiRtcSendCommand`</a>。
@@ -250,6 +254,7 @@ sequenceDiagram
     CALLEE->>CALL: POST /v1/call/device/info
     CALL-->>CALLEE: token
     CALLEE->>CALLER: TiRtcConnect(caller_id, token)
+    CALLEE->>CALLER: subscribe audio 10 / video 11
     CALLEE->>CALLER: TiRtcSendCommand(0x2000, {"room_id":"..."})
 ```
 
@@ -357,11 +362,13 @@ Content-Type: application/json
 
 - <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcconnect" target="_blank" rel="noopener">`TiRtcConnect(caller_id, token, ...)`</a>
 
-连接成功后，再发：
+连接成功后，先调用 `TiRtcSubscribeAudio(hconn, 10)`；视频通话再调用 `TiRtcSubscribeVideo(hconn, 11)`。只有订阅全部成功且连接仍属于当前会话，才能记录本端接收权限并发送：
 
 - <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsendcommand" target="_blank" rel="noopener">`TiRtcSendCommand(0x2000, {"room_id":"..."})`</a>
 
-`0x2000` 是接通确认。没有这一步，对端虽然可能已经建立底层连接，但业务上仍不知道你已真正接听。
+`0x2000` 是接通确认。没有这一步，对端虽然可能已经建立底层连接，但业务上仍不知道你已真正接听。主叫收到 `0x2000` 后执行相同订阅步骤，再启动媒体任务。
+
+stream 10/11 的接收与发送权限相互独立：本端 `TiRtcSubscribeAudio/Video` 成功只允许本端接收；对端触发的 `on_subscribe_audio/video` 才允许本端发送对应媒体。取消订阅、断开连接或会话代次变化时立即撤销相应权限。
 
 ### 3. 拒接
 
@@ -443,7 +450,8 @@ void on_mqtt_device_call(const cJSON *payload) {
 
 /* 被叫用户选择接听：
    内部 POST /v1/call/device/info -> TiRtcConnect(caller_id, token)
-   -> 成功后 TiRtcSendCommand(0x2000, {"room_id":...}) -> 启动媒体任务。 */
+   -> 成功后订阅对端媒体 -> TiRtcSendCommand(0x2000, {"room_id":...})
+   -> 启动媒体任务；收到对端订阅回调后才发送对应媒体。 */
 if (call_session_do_accept(call) != 0) {
     /* 接听失败；call_session 内部恢复 pending/idle，并可提示重试。 */
 }
@@ -469,7 +477,7 @@ call_destroy(call);
 | 方法 | 内部调用/作用 | 允许调用的状态 |
 |---|---|---|
 | call_session_do_call | [`POST /v1/call/request`](api-reference.md#post-v1callrequest)，记录 room_id，启动振铃超时 | IDLE |
-| call_session_do_accept | [`POST /v1/call/device/info`](api-reference.md#post-v1calldeviceinfo)，随后调用 TiRtcConnect，成功后发 0x2000 | PENDING |
+| call_session_do_accept | [`POST /v1/call/device/info`](api-reference.md#post-v1calldeviceinfo)，随后调用 TiRtcConnect，成功订阅对端媒体后发 0x2000 | PENDING |
 | call_session_do_reject | [`POST /v1/call/reject`](api-reference.md#post-v1callreject) | PENDING |
 | call_session_do_cancel | [`POST /v1/call/cancel`](api-reference.md#post-v1callcancel) | OUTGOING |
 | call_session_do_hangup | [`POST /v1/call/hangup`](api-reference.md#post-v1callhangup)，并通过 call_hangup 停止媒体、TiRtcDisconnect 通知对端 | IN_CALL |
@@ -625,7 +633,7 @@ Authorization: Bearer <mqtt_token>
 - [`POST /v1/call/request`](api-reference.md#post-v1callrequest) 返回 `40205`：至少一个 target 不是已接受联系人
 - 被叫收到了 `call_incoming` 但 [`device/info`](api-reference.md#post-v1calldeviceinfo) 返回 `40400`：房间已取消或超时
 - [`device/info`](api-reference.md#post-v1calldeviceinfo) 返回 `40210`：房间已被别人抢接
-- 被叫接听后主叫没反应：确认被叫在 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcconnect" target="_blank" rel="noopener">`TiRtcConnect`</a> 成功后发送了 `0x2000`
+- 被叫接听后主叫没反应：确认被叫在 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcconnect" target="_blank" rel="noopener">`TiRtcConnect`</a> 成功后订阅了 stream 10（视频通话还包括 11）并发送 `0x2000`；双方还需确认收到对端订阅回调后才发送，以及接收回调只放行本端已订阅的当前连接
 - 旧通话被新来电顶掉：服务端默认允许新来电切换房间；若不想切换，应主动调用 [`/v1/call/reject`](api-reference.md#post-v1callreject)
 - 进程崩溃重启后状态乱：启动时调用 [`GET /v1/call/room`](api-reference.md#get-v1callroom) 做房间恢复
 

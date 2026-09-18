@@ -15,6 +15,7 @@
 #include "file_media_source.h"
 #include "media_rx_log.h"
 #include "sdk_callback_guard.h"
+#include "stream_connection_set.h"
 #include "tirtc_runtime.h"
 #include "tirtc/tiRTC.h"
 
@@ -22,13 +23,13 @@ extern volatile sig_atomic_t g_stop;
 
 static int s_service_active;
 
-static tirtc_conn_t s_active_conn;
 static pthread_mutex_t s_conn_mtx = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t s_handoff_mtx = PTHREAD_MUTEX_INITIALIZER;
 static pthread_t s_push_thread;
 static int s_push_thread_created;
 static int s_push_running;
 static int s_force_key;
+static StreamConnectionSet s_connections;
 
 static DeviceMediaSource s_media;
 static const AudioFormat *s_audio_format;
@@ -69,21 +70,21 @@ static int _take_force_key(void) {
     return force_key;
 }
 
-static void _accept_connection(void *opaque) {
-    tirtc_conn_t hconn = (tirtc_conn_t)opaque;
-    pthread_mutex_lock(&s_handoff_mtx);
-    if (!s_service_active) {
-        TiRtcDisconnect(hconn);
-        pthread_mutex_unlock(&s_handoff_mtx);
-        return;
-    }
-
+static int _ensure_push_thread(void) {
+    pthread_t finished_thread;
+    int join_finished = 0;
     pthread_mutex_lock(&s_conn_mtx);
-    tirtc_conn_t old_conn = s_active_conn;
-    s_active_conn = NULL;
+    if (s_push_running) {
+        pthread_mutex_unlock(&s_conn_mtx);
+        return 1;
+    }
+    if (s_push_thread_created) {
+        finished_thread = s_push_thread;
+        s_push_thread_created = 0;
+        join_finished = 1;
+    }
     pthread_mutex_unlock(&s_conn_mtx);
-    if (old_conn) TiRtcDisconnect(old_conn);
-    _stop_push_thread();
+    if (join_finished) pthread_join(finished_thread, NULL);
 
     DeviceMediaSourceConfig media_config = {
         .audio_locator = s_audio_path,
@@ -95,41 +96,108 @@ static void _accept_connection(void *opaque) {
     };
     if (device_media_source_open(&s_media, &media_config) != 0) {
         LOG_E("无法打开实时流上行媒体源");
+        return 0;
+    }
+
+    pthread_mutex_lock(&s_conn_mtx);
+    if (!s_service_active) {
+        pthread_mutex_unlock(&s_conn_mtx);
+        device_media_source_close(&s_media);
+        return 0;
+    }
+    s_push_running = 1;
+    s_force_key = 1;
+    if (pthread_create(&s_push_thread, NULL, _push_thread, NULL) != 0) {
+        s_push_running = 0;
+        pthread_mutex_unlock(&s_conn_mtx);
+        device_media_source_close(&s_media);
+        LOG_E("无法启动实时流媒体线程");
+        return 0;
+    }
+    s_push_thread_created = 1;
+    pthread_mutex_unlock(&s_conn_mtx);
+    return 1;
+}
+
+static void _accept_connection(void *opaque) {
+    tirtc_conn_t hconn = (tirtc_conn_t)opaque;
+    pthread_mutex_lock(&s_handoff_mtx);
+    pthread_mutex_lock(&s_conn_mtx);
+    int announced = s_service_active &&
+                    stream_connection_is_pending(&s_connections, hconn);
+    pthread_mutex_unlock(&s_conn_mtx);
+    if (!announced) {
+        TiRtcDisconnect(hconn);
+        pthread_mutex_unlock(&s_handoff_mtx);
+        return;
+    }
+
+    if (!_ensure_push_thread()) {
+        pthread_mutex_lock(&s_conn_mtx);
+        (void)stream_connection_remove(&s_connections, hconn);
+        pthread_mutex_unlock(&s_conn_mtx);
         TiRtcDisconnect(hconn);
         pthread_mutex_unlock(&s_handoff_mtx);
         return;
     }
 
     pthread_mutex_lock(&s_conn_mtx);
-    if (!s_service_active || s_active_conn) {
+    if (!s_service_active ||
+        !stream_connection_activate(&s_connections, hconn)) {
         pthread_mutex_unlock(&s_conn_mtx);
-        device_media_source_close(&s_media);
         TiRtcDisconnect(hconn);
         pthread_mutex_unlock(&s_handoff_mtx);
         return;
     }
-    s_active_conn = hconn;
-    s_push_running = 1;
-    s_force_key = 1;
     media_rx_log_reset(&s_rx_log);
-    if (pthread_create(&s_push_thread, NULL, _push_thread, NULL) == 0) {
-        s_push_thread_created = 1;
-        LOG_I("客户端已连接，上行媒体线程已启动");
-    } else {
-        s_push_running = 0;
-        s_active_conn = NULL;
-        device_media_source_close(&s_media);
-        LOG_E("无法创建实时推流线程");
-        TiRtcDisconnect(hconn);
-    }
     pthread_mutex_unlock(&s_conn_mtx);
+
+    int audio_rc = TiRtcSubscribeAudio(hconn, STREAM_ID_DOWN_AUDIO);
+    int video_rc = TiRtcSubscribeVideo(hconn, STREAM_ID_DOWN_VIDEO);
+
+    pthread_mutex_lock(&s_conn_mtx);
+    int current = s_service_active &&
+                  stream_connection_is_active(&s_connections, hconn);
+    if (current) {
+        stream_connection_set_down_audio(&s_connections, hconn, audio_rc >= 0);
+        stream_connection_set_down_video(&s_connections, hconn, video_rc >= 0);
+    }
+    size_t active_count = stream_connection_active_count(&s_connections);
+    pthread_mutex_unlock(&s_conn_mtx);
+    if (!current) {
+        if (audio_rc >= 0)
+            (void)TiRtcUnsubscribeAudio(hconn, STREAM_ID_DOWN_AUDIO);
+        if (video_rc >= 0)
+            (void)TiRtcUnsubscribeVideo(hconn, STREAM_ID_DOWN_VIDEO);
+        LOG_E("实时流连接在订阅下行媒体时失效 audio_rc=%d video_rc=%d",
+              audio_rc, video_rc);
+        TiRtcDisconnect(hconn);
+    } else {
+        LOG_I("客户端已连接（%zu/%d），下行订阅 audio=%s video=%s；上行媒体等待该端订阅",
+              active_count, STREAM_MAX_CONNECTIONS,
+              audio_rc >= 0 ? "成功" : "失败",
+              video_rc >= 0 ? "成功" : "失败");
+    }
     pthread_mutex_unlock(&s_handoff_mtx);
 }
 
 static void _on_conn_accepted(tirtc_conn_t hconn) {
     sdk_callback_enter(&s_callback_guard);
-    if (sdk_defer_action(&s_callback_guard, _accept_connection, hconn) != 0) {
-        LOG_E("无法延后处理客户端连接");
+    pthread_mutex_lock(&s_conn_mtx);
+    int duplicate = stream_connection_is_pending(&s_connections, hconn) ||
+                    stream_connection_is_active(&s_connections, hconn);
+    int added = s_service_active && !duplicate &&
+                stream_connection_add_pending(&s_connections, hconn);
+    pthread_mutex_unlock(&s_conn_mtx);
+    if (duplicate) {
+        LOG_D("忽略重复的客户端连接回调 hconn=%p", (void *)hconn);
+    } else if (!added ||
+               sdk_defer_action(
+                   &s_callback_guard, _accept_connection, hconn) != 0) {
+        LOG_E("无法接收或延后处理客户端连接");
+        pthread_mutex_lock(&s_conn_mtx);
+        if (added) (void)stream_connection_remove(&s_connections, hconn);
+        pthread_mutex_unlock(&s_conn_mtx);
         sdk_defer_disconnect(&s_callback_guard, hconn);
     }
     sdk_callback_leave(&s_callback_guard);
@@ -139,10 +207,7 @@ static void _on_conn_error(tirtc_conn_t hconn, int error) {
     sdk_callback_enter(&s_callback_guard);
     LOG_E("on_conn_error: %s", TiRtcGetErrorStr(error));
     pthread_mutex_lock(&s_conn_mtx);
-    if (s_active_conn == hconn) {
-        s_active_conn = NULL;
-        s_push_running = 0;
-    }
+    (void)stream_connection_remove(&s_connections, hconn);
     pthread_mutex_unlock(&s_conn_mtx);
     if (sdk_defer_disconnect(&s_callback_guard, hconn) != 0)
         LOG_E("无法延后断开错误连接");
@@ -153,22 +218,24 @@ static void _on_disconnected(tirtc_conn_t hconn) {
     sdk_callback_enter(&s_callback_guard);
     LOG_D("客户端断开");
     pthread_mutex_lock(&s_conn_mtx);
-    if (s_active_conn == hconn) {
-        s_active_conn = NULL;
-        s_push_running = 0;
-    }
+    (void)stream_connection_remove(&s_connections, hconn);
     pthread_mutex_unlock(&s_conn_mtx);
     sdk_callback_leave(&s_callback_guard);
 }
 
 static void _on_audio(tirtc_conn_t hconn, const TIRTCFRAMEINFO *frame, void *data) {
     sdk_callback_enter(&s_callback_guard);
-    (void)hconn;
-    (void)device_media_sink_submit(
-        DEVICE_BUSINESS_STREAM, 0, frame->stream_id, frame->media,
-        frame->flags, frame->ts, data, frame->length);
+    pthread_mutex_lock(&s_conn_mtx);
+    int accepted = frame && data &&
+                   stream_connection_accepts_down_audio(&s_connections, hconn) &&
+                   frame->stream_id == STREAM_ID_DOWN_AUDIO;
+    pthread_mutex_unlock(&s_conn_mtx);
+    if (accepted)
+        (void)device_media_sink_submit(
+            DEVICE_BUSINESS_STREAM, 0, frame->stream_id, frame->media,
+            frame->flags, frame->ts, data, frame->length);
     MediaRxNotice notice;
-    if (media_rx_log_note_audio(&s_rx_log, "实时流", frame, &notice))
+    if (accepted && media_rx_log_note_audio(&s_rx_log, "实时流", frame, &notice))
         (void)sdk_defer_copy_action(
             &s_callback_guard, media_rx_log_emit, NULL,
             &notice, sizeof(notice));
@@ -177,12 +244,17 @@ static void _on_audio(tirtc_conn_t hconn, const TIRTCFRAMEINFO *frame, void *dat
 
 static void _on_video(tirtc_conn_t hconn, const TIRTCFRAMEINFO *frame, void *data) {
     sdk_callback_enter(&s_callback_guard);
-    (void)hconn;
-    (void)device_media_sink_submit(
-        DEVICE_BUSINESS_STREAM, 1, frame->stream_id, frame->media,
-        frame->flags, frame->ts, data, frame->length);
+    pthread_mutex_lock(&s_conn_mtx);
+    int accepted = frame && data &&
+                   stream_connection_accepts_down_video(&s_connections, hconn) &&
+                   frame->stream_id == STREAM_ID_DOWN_VIDEO;
+    pthread_mutex_unlock(&s_conn_mtx);
+    if (accepted)
+        (void)device_media_sink_submit(
+            DEVICE_BUSINESS_STREAM, 1, frame->stream_id, frame->media,
+            frame->flags, frame->ts, data, frame->length);
     MediaRxNotice notice;
-    if (media_rx_log_note_video(&s_rx_log, "实时流", frame, &notice))
+    if (accepted && media_rx_log_note_video(&s_rx_log, "实时流", frame, &notice))
         (void)sdk_defer_copy_action(
             &s_callback_guard, media_rx_log_emit, NULL,
             &notice, sizeof(notice));
@@ -209,79 +281,111 @@ static void _on_command(tirtc_conn_t hconn, uint32_t cmd, const void *data,
 
 static void _on_request_key_frame(tirtc_conn_t hconn, uint8_t stream_id) {
     sdk_callback_enter(&s_callback_guard);
-    (void)hconn;
     LOG_D("请求关键帧 stream_id=%u", stream_id);
-    if (stream_id == STREAM_ID_VIDEO) {
-        pthread_mutex_lock(&s_conn_mtx);
+    pthread_mutex_lock(&s_conn_mtx);
+    if (stream_id == STREAM_ID_VIDEO &&
+        stream_connection_is_active(&s_connections, hconn))
         s_force_key = 1;
-        pthread_mutex_unlock(&s_conn_mtx);
-    }
+    pthread_mutex_unlock(&s_conn_mtx);
     sdk_callback_leave(&s_callback_guard);
 }
 
 static int _on_sub_video(tirtc_conn_t hconn, uint8_t stream_id) {
     sdk_callback_enter(&s_callback_guard);
-    (void)hconn;
     LOG_D("订阅视频 stream_id=%u", stream_id);
-    if (stream_id == STREAM_ID_VIDEO) {
+    pthread_mutex_lock(&s_conn_mtx);
+    int accepted = stream_id == STREAM_ID_VIDEO &&
+                   stream_connection_subscribe_video(&s_connections, hconn);
+    if (accepted) {
         /* H5 subscribes after connect completes and may have missed the IDR
          * sent when the connection was accepted. */
-        pthread_mutex_lock(&s_conn_mtx);
         s_force_key = 1;
-        pthread_mutex_unlock(&s_conn_mtx);
     }
+    pthread_mutex_unlock(&s_conn_mtx);
     sdk_callback_leave(&s_callback_guard);
-    return 0;
+    return accepted ? 0 : -1;
 }
 
 static int _on_sub_audio(tirtc_conn_t hconn, uint8_t stream_id) {
     sdk_callback_enter(&s_callback_guard);
-    (void)hconn;
     LOG_D("订阅音频 stream_id=%u", stream_id);
+    pthread_mutex_lock(&s_conn_mtx);
+    int accepted = stream_id == STREAM_ID_AUDIO &&
+                   stream_connection_subscribe_audio(&s_connections, hconn);
+    pthread_mutex_unlock(&s_conn_mtx);
     sdk_callback_leave(&s_callback_guard);
-    return 0;
+    return accepted ? 0 : -1;
 }
 
-static void _on_unsubscribe(tirtc_conn_t hconn, uint8_t stream_id) {
+static void _on_unsubscribe_video(tirtc_conn_t hconn, uint8_t stream_id) {
     sdk_callback_enter(&s_callback_guard);
-    (void)hconn;
-    (void)stream_id;
+    pthread_mutex_lock(&s_conn_mtx);
+    if (stream_id == STREAM_ID_VIDEO)
+        stream_connection_unsubscribe_video(&s_connections, hconn);
+    pthread_mutex_unlock(&s_conn_mtx);
+    sdk_callback_leave(&s_callback_guard);
+}
+
+static void _on_unsubscribe_audio(tirtc_conn_t hconn, uint8_t stream_id) {
+    sdk_callback_enter(&s_callback_guard);
+    pthread_mutex_lock(&s_conn_mtx);
+    if (stream_id == STREAM_ID_AUDIO)
+        stream_connection_unsubscribe_audio(&s_connections, hconn);
+    pthread_mutex_unlock(&s_conn_mtx);
     sdk_callback_leave(&s_callback_guard);
 }
 
 static void *_push_thread(void *arg) {
     (void)arg;
-    pthread_mutex_lock(&s_conn_mtx);
-    tirtc_conn_t hconn = s_active_conn;
-    pthread_mutex_unlock(&s_conn_mtx);
-    if (!hconn) return NULL;
-
     int has_video = device_media_source_has_video(&s_media);
     double audio_pts_ms = 0.0;
     double video_pts_ms = 0.0;
     int64_t wall_start_ms = now_ms();
-    int consecutive_failures = 0;
+    int audio_was_enabled = 0;
+    int video_was_enabled = 0;
 
     while (_push_should_run() && !g_stop) {
-        if (consecutive_failures >= 3) {
-            LOG_E("连续 3 次发送失败，断开连接");
-            TiRtcDisconnect(hconn);
-            break;
+        tirtc_conn_t audio_targets[STREAM_MAX_CONNECTIONS];
+        tirtc_conn_t video_targets[STREAM_MAX_CONNECTIONS];
+        pthread_mutex_lock(&s_conn_mtx);
+        size_t audio_count = stream_connection_snapshot_audio(
+            &s_connections, audio_targets, STREAM_MAX_CONNECTIONS);
+        size_t video_count = has_video ? stream_connection_snapshot_video(
+            &s_connections, video_targets, STREAM_MAX_CONNECTIONS) : 0;
+        pthread_mutex_unlock(&s_conn_mtx);
+        int audio_enabled = audio_count > 0;
+        int video_enabled = video_count > 0;
+        if (!audio_enabled && !video_enabled) {
+            sleep_ms(10);
+            continue;
         }
-        double target_pts = has_video && video_pts_ms < audio_pts_ms
-                                ? video_pts_ms : audio_pts_ms;
-        int64_t wait_ms = (int64_t)target_pts - (now_ms() - wall_start_ms);
+        int64_t elapsed = now_ms() - wall_start_ms;
+        if (audio_enabled && !audio_was_enabled && audio_pts_ms < elapsed)
+            audio_pts_ms = (double)elapsed;
+        if (video_enabled && !video_was_enabled && video_pts_ms < elapsed) {
+            video_pts_ms = (double)elapsed;
+            pthread_mutex_lock(&s_conn_mtx);
+            s_force_key = 1;
+            pthread_mutex_unlock(&s_conn_mtx);
+        }
+        audio_was_enabled = audio_enabled;
+        video_was_enabled = video_enabled;
+        double target_pts = audio_enabled && video_enabled
+                                ? (video_pts_ms < audio_pts_ms
+                                       ? video_pts_ms : audio_pts_ms)
+                                : (audio_enabled ? audio_pts_ms : video_pts_ms);
+        int64_t wait_ms = (int64_t)target_pts - elapsed;
         if (wait_ms > 2) {
             sleep_ms((int)(wait_ms > 50 ? 50 : wait_ms));
             continue;
         }
 
-        int send_audio = !has_video || audio_pts_ms <= video_pts_ms;
+        int send_audio = audio_enabled &&
+                         (!video_enabled || audio_pts_ms <= video_pts_ms);
         TIRTCFRAMEINFO frame;
         memset(&frame, 0, sizeof(frame));
-        int rc;
+        DeviceMediaPacket packet;
         if (send_audio) {
-            DeviceMediaPacket packet;
             if (device_media_source_next_audio(&s_media, &packet) <= 0)
                 break;
             frame.stream_id = STREAM_ID_AUDIO;
@@ -289,10 +393,8 @@ static void *_push_thread(void *arg) {
             frame.flags = s_audio_format->flags;
             frame.ts = (uint32_t)audio_pts_ms;
             frame.length = (uint32_t)packet.length;
-            rc = TiRtcSendAudioStream(hconn, &frame, packet.data);
             audio_pts_ms += packet.duration_ms;
         } else {
-            DeviceMediaPacket packet;
             if (device_media_source_next_video(
                     &s_media, _take_force_key(), &packet) <= 0)
                 break;
@@ -301,31 +403,56 @@ static void *_push_thread(void *arg) {
             frame.flags = packet.key_frame ? TIRTC_FRAME_FLAG_KEY_FRAME : 0;
             frame.ts = (uint32_t)video_pts_ms;
             frame.length = (uint32_t)packet.length;
-            rc = TiRtcSendVideoStream(hconn, &frame, packet.data);
             video_pts_ms += 1000.0 / VIDEO_FPS;
         }
 
-        if (rc >= 0) {
-            consecutive_failures = 0;
-        } else if (rc == TIRTC_E_CONN_TIMEOUTCLOSE ||
-                   rc == TIRTC_E_CONN_REMOTECLOSE ||
-                   rc == TIRTC_E_CONN_OTHER_ERROR) {
-            LOG_D("连接已关闭，退出推流");
-            break;
-        } else if (rc == TIRTC_E_INVALID_HANDLE) {
-            sleep_ms(5);
-        } else {
-            if (!send_audio && rc == TIRTC_E_BUSY) {
+        tirtc_conn_t *targets = send_audio ? audio_targets : video_targets;
+        size_t target_count = send_audio ? audio_count : video_count;
+        for (size_t i = 0; i < target_count; ++i) {
+            tirtc_conn_t hconn = targets[i];
+            int rc = send_audio
+                         ? TiRtcSendAudioStream(hconn, &frame, packet.data)
+                         : TiRtcSendVideoStream(hconn, &frame, packet.data);
+            int disconnect = 0;
+            if (rc >= 0) {
                 pthread_mutex_lock(&s_conn_mtx);
-                s_force_key = 1;
+                (void)stream_connection_note_send_result(
+                    &s_connections, hconn, 1);
                 pthread_mutex_unlock(&s_conn_mtx);
+                continue;
             }
-            LOG_E("发送%s失败 rc=%d: %s", send_audio ? "音频" : "视频",
-                  rc, TiRtcGetErrorStr(rc));
-            consecutive_failures++;
+            if (rc == TIRTC_E_CONN_TIMEOUTCLOSE ||
+                rc == TIRTC_E_CONN_REMOTECLOSE ||
+                rc == TIRTC_E_CONN_OTHER_ERROR) {
+                disconnect = 1;
+            } else if (rc == TIRTC_E_BUSY) {
+                if (!send_audio) {
+                    pthread_mutex_lock(&s_conn_mtx);
+                    s_force_key = 1;
+                    pthread_mutex_unlock(&s_conn_mtx);
+                }
+            } else if (rc != TIRTC_E_INVALID_HANDLE) {
+                pthread_mutex_lock(&s_conn_mtx);
+                unsigned int failures = stream_connection_note_send_result(
+                    &s_connections, hconn, 0);
+                pthread_mutex_unlock(&s_conn_mtx);
+                LOG_E("发送%s失败 rc=%d: %s", send_audio ? "音频" : "视频",
+                      rc, TiRtcGetErrorStr(rc));
+                disconnect = failures >= 3;
+            }
+            if (disconnect) {
+                LOG_W("单个实时流连接发送失败，断开该连接");
+                pthread_mutex_lock(&s_conn_mtx);
+                (void)stream_connection_remove(&s_connections, hconn);
+                pthread_mutex_unlock(&s_conn_mtx);
+                TiRtcDisconnect(hconn);
+            }
         }
     }
     device_media_source_close(&s_media);
+    pthread_mutex_lock(&s_conn_mtx);
+    s_push_running = 0;
+    pthread_mutex_unlock(&s_conn_mtx);
     LOG_I("推流线程退出");
     return NULL;
 }
@@ -342,9 +469,9 @@ int stream_service_register(void) {
     callbacks.on_command = _on_command;
     callbacks.on_request_key_frame = _on_request_key_frame;
     callbacks.on_subscribe_video = _on_sub_video;
-    callbacks.on_unsubscribe_video = _on_unsubscribe;
+    callbacks.on_unsubscribe_video = _on_unsubscribe_video;
     callbacks.on_subscribe_audio = _on_sub_audio;
-    callbacks.on_unsubscribe_audio = _on_unsubscribe;
+    callbacks.on_unsubscribe_audio = _on_unsubscribe_audio;
     return tirtc_runtime_register_service(
         TIRTC_SERVICE_STREAM, &callbacks, &s_callback_guard);
 }
@@ -360,22 +487,30 @@ int stream_service_start(const char *video_path, const char *audio_path,
     }
     STR_COPY(s_video_path, video_path ? video_path : "");
     STR_COPY(s_audio_path, audio_path ? audio_path : "");
+    pthread_mutex_lock(&s_conn_mtx);
+    stream_connection_set_init(&s_connections, s_video_path[0] != '\0');
     s_service_active = 1;
+    pthread_mutex_unlock(&s_conn_mtx);
     LOG_I("实时流业务已就绪（上行 audio=%s video=%s；下行提交 media sink）",
           s_audio_format->name, s_video_path[0] ? s_video_format->name : "关闭");
     return 0;
 }
 
 void stream_service_stop(void) {
-    if (!s_service_active) return;
-    s_service_active = 0;
-    _stop_push_thread();
-
     pthread_mutex_lock(&s_conn_mtx);
-    tirtc_conn_t hconn = s_active_conn;
-    s_active_conn = NULL;
+    if (!s_service_active) {
+        pthread_mutex_unlock(&s_conn_mtx);
+        return;
+    }
+    s_service_active = 0;
+    tirtc_conn_t handles[STREAM_MAX_CONNECTIONS];
+    size_t count = stream_connection_snapshot_all(
+        &s_connections, handles, STREAM_MAX_CONNECTIONS);
+    stream_connection_set_init(&s_connections, s_video_path[0] != '\0');
     pthread_mutex_unlock(&s_conn_mtx);
-    if (hconn) TiRtcDisconnect(hconn);
+
+    _stop_push_thread();
+    for (size_t i = 0; i < count; ++i) TiRtcDisconnect(handles[i]);
 
     sdk_callback_wait_all(&s_callback_guard);
     LOG_I("实时流业务已停止");

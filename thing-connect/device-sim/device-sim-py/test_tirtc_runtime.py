@@ -159,8 +159,18 @@ class TiRtcRuntimeTests(unittest.TestCase):
                 tirtc_runtime.sdk.TIRTC_EVENT_SYS_STOPPED, None, 0)
             return 0
 
+        configured_options = {}
+
+        def set_option(option, data, length):
+            if option == tirtc_runtime.sdk.TIRTC_OPT_MAX_CONNECTIONS:
+                self.assertEqual(length, ctypes.sizeof(ctypes.c_int))
+                configured_options[option] = ctypes.cast(
+                    data, ctypes.POINTER(ctypes.c_int)).contents.value
+            return 0
+
         with mock.patch.object(
-                tirtc_runtime.sdk, "TiRtcSetOption", return_value=0), \
+                tirtc_runtime.sdk, "TiRtcSetOption",
+                side_effect=set_option), \
                 mock.patch.object(
                     tirtc_runtime.sdk, "TiRtcInit", return_value=0) as init, \
                 mock.patch.object(
@@ -187,6 +197,10 @@ class TiRtcRuntimeTests(unittest.TestCase):
             runtime.stop()
 
         init.assert_called_once_with()
+        self.assertEqual(
+            tirtc_runtime.sdk.TIRTC_REFERENCE_MAX_CONNECTIONS,
+            configured_options[tirtc_runtime.sdk.TIRTC_OPT_MAX_CONNECTIONS],
+        )
         start.assert_called_once()
         stop.assert_called_once_with()
         uninit.assert_called_once_with()

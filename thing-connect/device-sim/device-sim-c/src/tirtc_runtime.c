@@ -9,6 +9,7 @@
 #include "common.h"
 #include "device_adapter.h"
 #include "sdk_callback_guard.h"
+#include "tirtc_limits.h"
 
 extern volatile sig_atomic_t g_stop;
 
@@ -554,6 +555,18 @@ int tirtc_runtime_start(const char *device_id, const char *secret_key,
     if (g_log_level <= LOG_DEBUG) {
         TiRtcLogSetCallback(_sdk_log_cb);
         TiRtcLogSetLevel(8);
+    }
+
+    int max_connections = TIRTC_REFERENCE_MAX_CONNECTIONS;
+    rc = TiRtcSetOption(TIRTC_OPT_MAX_CONNECTIONS, &max_connections,
+                        sizeof(max_connections));
+    if (rc != 0) {
+        LOG_E("设置 TiRTC 最大连接数失败 rc=%d (%s)",
+              rc, TiRtcGetErrorStr(rc));
+        device_recovery_report(DEVICE_RECOVERY_TIRTC, rc,
+                               "TiRTC 最大连接数配置失败");
+        tirtc_runtime_stop();
+        return -1;
     }
 
     if (endpoint && endpoint[0]) {

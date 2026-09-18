@@ -79,8 +79,10 @@ TIRTC_EVENT_SYS_STOPPED      = 1
 
 TIRTC_OPT_SERVICE_ENDPOINT   = 1
 TIRTC_OPT_DEVICE_SECRET_KEY  = 2
+TIRTC_OPT_MAX_CONNECTIONS    = 3
 TIRTC_OPT_CLIENT_ID          = 11
 TIRTC_OPT_MAX_SEND_BUFFER    = 8
+TIRTC_REFERENCE_MAX_CONNECTIONS = 4
 
 TIRTC_E_BUSY                 = -40006
 TIRTC_E_INVALID_HANDLE       = -40002
@@ -211,6 +213,10 @@ TiRtcSendCommand     = _bind("TiRtcSendCommand",   ctypes.c_int,
 TiRtcSubscribeVideo  = _bind("TiRtcSubscribeVideo", ctypes.c_int,
                                ctypes.c_void_p, ctypes.c_uint8)
 TiRtcUnsubscribeVideo = _bind("TiRtcUnsubscribeVideo", ctypes.c_int,
+                                ctypes.c_void_p, ctypes.c_uint8)
+TiRtcSubscribeAudio  = _bind("TiRtcSubscribeAudio", ctypes.c_int,
+                              ctypes.c_void_p, ctypes.c_uint8)
+TiRtcUnsubscribeAudio = _bind("TiRtcUnsubscribeAudio", ctypes.c_int,
                                 ctypes.c_void_p, ctypes.c_uint8)
 if HAS_CLIENT_ID_OPT:
     LogCB = ctypes.CFUNCTYPE(None, ctypes.c_char_p, ctypes.c_uint32)

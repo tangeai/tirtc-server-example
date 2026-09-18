@@ -147,13 +147,13 @@ class SdkLifecycleTests(unittest.TestCase):
 
     def test_stream_service_stop_waits_for_callback_return(self):
         old_active = rtc_stream._service_active
-        old_conn = rtc_stream._active_conn
+        old_connections = rtc_stream._connections.copy()
         old_thread = rtc_stream._active_thread
         release, callback_thread = self._start_blocked_callback(
             rtc_stream._callback_guard
         )
         rtc_stream._service_active = True
-        rtc_stream._active_conn = None
+        rtc_stream._connections.clear()
         rtc_stream._active_thread = None
         try:
             with mock.patch.object(rtc_stream, "_close_talkback_file"), \
@@ -173,7 +173,8 @@ class SdkLifecycleTests(unittest.TestCase):
                 stop_thread.join(timeout=1.0)
         finally:
             rtc_stream._service_active = old_active
-            rtc_stream._active_conn = old_conn
+            rtc_stream._connections.clear()
+            rtc_stream._connections.update(old_connections)
             rtc_stream._active_thread = old_thread
 
         self.assertFalse(stop_thread.is_alive())
@@ -183,13 +184,122 @@ class SdkLifecycleTests(unittest.TestCase):
     def test_stream_video_subscription_requests_key_frame(self):
         rtc_stream._force_key_frame.clear()
         callbacks = rtc_stream.runtime_callbacks()
+        old_connections = rtc_stream._connections.copy()
+        try:
+            rtc_stream._connections.clear()
+            rtc_stream._connections[0x101] = rtc_stream._StreamConnection(
+                pending=False)
+            result = callbacks.on_subscribe_video(
+                ctypes.c_void_p(0x101), rtc_stream.VIDEO_STREAM_ID)
 
-        result = callbacks.on_subscribe_video(
-            ctypes.c_void_p(0x101), rtc_stream.VIDEO_STREAM_ID)
+            self.assertEqual(result, 0)
+            self.assertTrue(
+                rtc_stream._connections[0x101].send_video_subscribed)
+            self.assertTrue(rtc_stream._force_key_frame.is_set())
+        finally:
+            rtc_stream._connections.clear()
+            rtc_stream._connections.update(old_connections)
+            rtc_stream._force_key_frame.clear()
 
-        self.assertEqual(result, 0)
-        self.assertTrue(rtc_stream._force_key_frame.is_set())
-        rtc_stream._force_key_frame.clear()
+    def test_stream_accepts_subscriptions_before_deferred_activation(self):
+        callbacks = rtc_stream.runtime_callbacks()
+        old_active = rtc_stream._service_active
+        old_connections = rtc_stream._connections.copy()
+        rtc_stream._service_active = True
+        rtc_stream._connections.clear()
+        try:
+            with mock.patch.object(
+                    rtc_stream._callback_guard, "defer", return_value=True):
+                callbacks.on_conn_accepted(ctypes.c_void_p(0x202))
+            self.assertTrue(rtc_stream._connections[0x202].pending)
+            self.assertEqual(
+                callbacks.on_subscribe_audio(0x202, rtc_stream.AUDIO_STREAM_ID),
+                0,
+            )
+            self.assertEqual(
+                callbacks.on_subscribe_video(0x202, rtc_stream.VIDEO_STREAM_ID),
+                0,
+            )
+            self.assertTrue(
+                rtc_stream._connections[0x202].send_audio_subscribed)
+            self.assertTrue(
+                rtc_stream._connections[0x202].send_video_subscribed)
+        finally:
+            rtc_stream._service_active = old_active
+            rtc_stream._connections.clear()
+            rtc_stream._connections.update(old_connections)
+
+    def test_stream_connection_subscribes_talkback_before_starting_media(self):
+        old_active = rtc_stream._service_active
+        old_connections = rtc_stream._connections.copy()
+        old_thread = rtc_stream._active_thread
+        old_factory = rtc_stream._media_factory
+        source = mock.Mock()
+        thread = mock.Mock()
+        rtc_stream._service_active = True
+        rtc_stream._connections.clear()
+        rtc_stream._connections[0x202] = rtc_stream._StreamConnection()
+        rtc_stream._active_thread = None
+        rtc_stream._media_factory = lambda: source
+        try:
+            with mock.patch.object(
+                    rtc_stream.sdk, "TiRtcSubscribeAudio",
+                    create=True, return_value=0) as subscribe, \
+                    mock.patch.object(
+                        rtc_stream.sdk, "TiRtcSubscribeVideo",
+                        return_value=0), \
+                    mock.patch.object(rtc_stream, "_open_talkback_file"), \
+                    mock.patch.object(
+                        rtc_stream.threading, "Thread", return_value=thread):
+                rtc_stream._activate_connection_after_callback(0x202)
+            subscribe.assert_called_once()
+            self.assertEqual(
+                subscribe.call_args.args[1], rtc_stream.TALKBACK_STREAM_ID)
+            self.assertTrue(
+                rtc_stream._connections[0x202].talkback_subscribed)
+            thread.start.assert_called_once_with()
+        finally:
+            rtc_stream._service_active = old_active
+            rtc_stream._connections.clear()
+            rtc_stream._connections.update(old_connections)
+            rtc_stream._active_thread = old_thread
+            rtc_stream._media_factory = old_factory
+
+    def test_stream_video_downlink_subscription_failure_does_not_drop_view(self):
+        old_active = rtc_stream._service_active
+        old_connections = rtc_stream._connections.copy()
+        old_thread = rtc_stream._active_thread
+        old_factory = rtc_stream._media_factory
+        source = mock.Mock()
+        thread = mock.Mock()
+        rtc_stream._service_active = True
+        rtc_stream._connections.clear()
+        rtc_stream._connections[0x303] = rtc_stream._StreamConnection()
+        rtc_stream._active_thread = None
+        rtc_stream._media_factory = lambda: source
+        try:
+            with mock.patch.object(
+                    rtc_stream.sdk, "TiRtcSubscribeAudio", return_value=0), \
+                    mock.patch.object(
+                        rtc_stream.sdk, "TiRtcSubscribeVideo", return_value=-1), \
+                    mock.patch.object(rtc_stream, "_open_talkback_file"), \
+                    mock.patch.object(
+                        rtc_stream.threading, "Thread", return_value=thread), \
+                    mock.patch.object(
+                        rtc_stream.sdk, "TiRtcDisconnect") as disconnect:
+                rtc_stream._activate_connection_after_callback(0x303)
+            self.assertTrue(
+                rtc_stream._connections[0x303].talkback_subscribed)
+            self.assertFalse(
+                rtc_stream._connections[0x303].talkback_video_subscribed)
+            thread.start.assert_called_once_with()
+            disconnect.assert_not_called()
+        finally:
+            rtc_stream._service_active = old_active
+            rtc_stream._connections.clear()
+            rtc_stream._connections.update(old_connections)
+            rtc_stream._active_thread = old_thread
+            rtc_stream._media_factory = old_factory
 
     def test_stream_talkback_decodes_alaw_for_speaker(self):
         old_recorder = rtc_stream._talkback_recorder
@@ -212,6 +322,35 @@ class SdkLifecycleTests(unittest.TestCase):
         speaker.play.assert_called_once_with(
             alaw_decode(payload), source_rate=16000)
 
+    def test_stream_receive_requires_matching_local_subscription(self):
+        callbacks = rtc_stream.runtime_callbacks()
+        old_connections = rtc_stream._connections.copy()
+        old_work = rtc_stream._talkback_work
+        work = mock.Mock()
+        frame = rtc_stream.TIRTCFRAMEINFO()
+        frame.stream_id = rtc_stream.TALKBACK_STREAM_ID
+        frame.length = 1
+        payload = (ctypes.c_uint8 * 1)(1)
+        rtc_stream._connections.clear()
+        rtc_stream._connections[0x101] = rtc_stream._StreamConnection(
+            pending=False)
+        rtc_stream._connections[0x202] = rtc_stream._StreamConnection()
+        rtc_stream._talkback_work = work
+        try:
+            callbacks.on_audio(0x101, ctypes.byref(frame), payload)
+            work.submit.assert_not_called()
+
+            rtc_stream._connections[0x101].talkback_subscribed = True
+            callbacks.on_audio(0x101, ctypes.byref(frame), payload)
+            work.submit.assert_called_once()
+
+            callbacks.on_audio(0x202, ctypes.byref(frame), payload)
+            self.assertEqual(work.submit.call_count, 1)
+        finally:
+            rtc_stream._connections.clear()
+            rtc_stream._connections.update(old_connections)
+            rtc_stream._talkback_work = old_work
+
     def test_stream_talkback_playback_closes_speaker(self):
         old_speaker = rtc_stream._talkback_speaker
         speaker = mock.Mock()
@@ -224,55 +363,150 @@ class SdkLifecycleTests(unittest.TestCase):
 
         speaker.close.assert_called_once_with()
 
-    def test_stream_replacement_releases_old_source_before_opening_new_one(self):
+    def test_stream_second_viewer_reuses_source_and_keeps_first_connection(self):
         old_active = rtc_stream._service_active
-        old_conn = rtc_stream._active_conn
+        old_connections = rtc_stream._connections.copy()
         old_thread = rtc_stream._active_thread
         old_factory = rtc_stream._media_factory
-        old_stop_requested = rtc_stream._stop_event.is_set()
-        events = []
-
-        class OldStreamThread:
-            @staticmethod
-            def join(timeout=None):
-                events.append("old source released")
-
-            @staticmethod
-            def is_alive():
-                return False
-
-        new_source = mock.Mock()
-
-        def open_new_source():
-            events.append("new source opened")
-            return new_source
-
+        existing_thread = mock.Mock()
+        media_factory = mock.Mock()
         rtc_stream._service_active = True
-        rtc_stream._active_conn = 0x101
-        rtc_stream._active_thread = OldStreamThread()
-        rtc_stream._media_factory = open_new_source
-        new_thread = mock.Mock()
+        rtc_stream._connections.clear()
+        rtc_stream._connections[0x101] = rtc_stream._StreamConnection(
+            pending=False, send_video_subscribed=True)
+        rtc_stream._connections[0x202] = rtc_stream._StreamConnection()
+        rtc_stream._active_thread = existing_thread
+        rtc_stream._media_factory = media_factory
         try:
             with mock.patch.object(
                     rtc_stream.sdk, "TiRtcDisconnect", return_value=0), \
-                    mock.patch.object(rtc_stream, "_close_talkback_file"), \
-                    mock.patch.object(rtc_stream, "_open_talkback_file"), \
                     mock.patch.object(
-                        rtc_stream.threading, "Thread", return_value=new_thread):
+                        rtc_stream.sdk, "TiRtcSubscribeAudio",
+                        return_value=0), \
+                    mock.patch.object(
+                        rtc_stream.sdk, "TiRtcSubscribeVideo",
+                        return_value=0), \
+                    mock.patch.object(rtc_stream, "_open_talkback_file"):
                 rtc_stream._activate_connection_after_callback(0x202)
+            self.assertIn(0x101, rtc_stream._connections)
+            self.assertIn(0x202, rtc_stream._connections)
+            self.assertFalse(rtc_stream._connections[0x202].pending)
+            self.assertTrue(
+                rtc_stream._connections[0x101].send_video_subscribed)
         finally:
+            rtc_stream._service_active = old_active
+            rtc_stream._connections.clear()
+            rtc_stream._connections.update(old_connections)
+            rtc_stream._active_thread = old_thread
+            rtc_stream._media_factory = old_factory
+
+        media_factory.assert_not_called()
+
+    def test_stream_viewers_keep_independent_subscriptions_and_disconnects(self):
+        callbacks = rtc_stream.runtime_callbacks()
+        old_connections = rtc_stream._connections.copy()
+        rtc_stream._connections.clear()
+        rtc_stream._connections[0x101] = rtc_stream._StreamConnection(
+            pending=False)
+        rtc_stream._connections[0x202] = rtc_stream._StreamConnection(
+            pending=False)
+        try:
+            self.assertEqual(
+                callbacks.on_subscribe_video(0x101, rtc_stream.VIDEO_STREAM_ID),
+                0,
+            )
+            self.assertTrue(
+                rtc_stream._connections[0x101].send_video_subscribed)
+            self.assertFalse(
+                rtc_stream._connections[0x202].send_video_subscribed)
+
+            callbacks.on_disconnected(0x101)
+            self.assertNotIn(0x101, rtc_stream._connections)
+            self.assertIn(0x202, rtc_stream._connections)
+        finally:
+            rtc_stream._connections.clear()
+            rtc_stream._connections.update(old_connections)
+
+    def test_stream_worker_fans_one_frame_out_to_all_subscribed_viewers(self):
+        old_connections = rtc_stream._connections.copy()
+        old_stop_requested = rtc_stream._stop_event.is_set()
+        source = mock.Mock()
+        source.has_video.return_value = False
+        source.next_audio_packet.return_value = (b"\xd5", 40)
+        source.get_audio_format.return_value = mock.Mock(media=1, flags=0)
+        rtc_stream._connections.clear()
+        rtc_stream._connections[0x101] = rtc_stream._StreamConnection(
+            pending=False, send_audio_subscribed=True)
+        rtc_stream._connections[0x202] = rtc_stream._StreamConnection(
+            pending=False, send_audio_subscribed=True)
+        rtc_stream._stop_event.clear()
+
+        def sent(_hconn, _frame, _data):
+            if send.call_count == 2:
+                rtc_stream._stop_event.set()
+            return 0
+
+        try:
+            with mock.patch.object(
+                    rtc_stream.sdk, "TiRtcSendAudioStream",
+                    side_effect=sent) as send:
+                rtc_stream._stream_worker(source)
+            self.assertEqual(2, send.call_count)
+            self.assertEqual(
+                {0x101, 0x202},
+                {call.args[0].value for call in send.call_args_list},
+            )
+            source.next_audio_packet.assert_called_once_with()
+        finally:
+            rtc_stream._connections.clear()
+            rtc_stream._connections.update(old_connections)
             if old_stop_requested:
                 rtc_stream._stop_event.set()
             else:
                 rtc_stream._stop_event.clear()
-            rtc_stream._service_active = old_active
-            rtc_stream._active_conn = old_conn
-            rtc_stream._active_thread = old_thread
-            rtc_stream._media_factory = old_factory
 
-        self.assertEqual(
-            ["old source released", "new source opened"], events)
-        new_thread.start.assert_called_once_with()
+    def test_stream_rejects_viewer_above_bounded_capacity(self):
+        callbacks = rtc_stream.runtime_callbacks()
+        old_active = rtc_stream._service_active
+        old_connections = rtc_stream._connections.copy()
+        rtc_stream._service_active = True
+        rtc_stream._connections.clear()
+        for index in range(rtc_stream.MAX_STREAM_CONNECTIONS):
+            rtc_stream._connections[0x100 + index] = (
+                rtc_stream._StreamConnection(pending=False)
+            )
+        try:
+            with mock.patch.object(
+                    rtc_stream._callback_guard, "defer", return_value=True
+            ) as defer:
+                callbacks.on_conn_accepted(0x999)
+            self.assertNotIn(0x999, rtc_stream._connections)
+            defer.assert_called_once()
+        finally:
+            rtc_stream._service_active = old_active
+            rtc_stream._connections.clear()
+            rtc_stream._connections.update(old_connections)
+
+    def test_stream_duplicate_accept_keeps_existing_viewer(self):
+        callbacks = rtc_stream.runtime_callbacks()
+        old_active = rtc_stream._service_active
+        old_connections = rtc_stream._connections.copy()
+        existing = rtc_stream._StreamConnection(
+            pending=False, send_video_subscribed=True)
+        rtc_stream._service_active = True
+        rtc_stream._connections.clear()
+        rtc_stream._connections[0x101] = existing
+        try:
+            with mock.patch.object(
+                    rtc_stream._callback_guard, "defer") as defer:
+                callbacks.on_conn_accepted(0x101)
+            defer.assert_not_called()
+            self.assertIs(existing, rtc_stream._connections[0x101])
+            self.assertTrue(existing.send_video_subscribed)
+        finally:
+            rtc_stream._service_active = old_active
+            rtc_stream._connections.clear()
+            rtc_stream._connections.update(old_connections)
 
     def test_device_call_service_stop_waits_for_callback_return(self):
         old_active = rtc_call._service_active

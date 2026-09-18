@@ -35,6 +35,7 @@ extern volatile sig_atomic_t g_stop;
 static int              s_service_active;
 
 static tirtc_conn_t     s_active_conn   = NULL;
+static tirtc_conn_t     s_pending_conn  = NULL;
 static pthread_mutex_t  s_conn_mtx      = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t  s_call_control_mtx = PTHREAD_MUTEX_INITIALIZER;
 static SessionState     s_session_state = SESS_IDLE;
@@ -47,6 +48,10 @@ static pthread_t        s_media_thread;
 static int              s_media_thread_created;
 static int              s_media_start_pending;
 static int              s_force_key;
+static int              s_receive_audio_subscribed;
+static int              s_receive_video_subscribed;
+static int              s_pending_send_audio_subscribed;
+static int              s_pending_send_video_subscribed;
 static MediaSubscriptionPolicy s_media_policy;
 static char             s_pending_connected_room[128];
 static char             s_send_audio_path[512];
@@ -83,7 +88,7 @@ static void _start_media_stream(void);
 static void _stop_media_stream(void);
 static void _prepare_media_policy(void);
 static int _is_audio_call(void);
-static void _apply_video_downlink_policy(tirtc_conn_t hconn);
+static int _subscribe_peer_media(tirtc_conn_t hconn);
 
 /* ── Process-runtime callbacks ───────────────────────────────────────────── */
 
@@ -111,6 +116,12 @@ static void _finish_call_transport(tirtc_conn_t hconn) {
         s_active_conn = NULL;
         s_session_state = SESS_DISCONNECTING;
         s_media_start_pending = 0;
+        s_receive_audio_subscribed = 0;
+        s_receive_video_subscribed = 0;
+    } else if (s_pending_conn == hconn) {
+        s_pending_conn = NULL;
+        s_pending_send_audio_subscribed = 0;
+        s_pending_send_video_subscribed = 0;
     }
     pthread_mutex_unlock(&s_conn_mtx);
     if (!matched) return;
@@ -139,6 +150,13 @@ static void _deferred_accept_call(void *opaque) {
     tirtc_conn_t hconn = (tirtc_conn_t)opaque;
     pthread_mutex_lock(&s_call_control_mtx);
     pthread_mutex_lock(&s_conn_mtx);
+    int announced = s_service_active && s_pending_conn == hconn;
+    if (!announced) {
+        pthread_mutex_unlock(&s_conn_mtx);
+        TiRtcDisconnect(hconn);
+        pthread_mutex_unlock(&s_call_control_mtx);
+        return;
+    }
     tirtc_conn_t old = s_active_conn;
     if (old) s_active_conn = NULL;
     pthread_mutex_unlock(&s_conn_mtx);
@@ -150,6 +168,15 @@ static void _deferred_accept_call(void *opaque) {
     if (s_service_active) {
         s_active_conn = hconn;
         s_session_state = SESS_CONNECTING;
+        s_receive_audio_subscribed = 0;
+        s_receive_video_subscribed = 0;
+        if (s_pending_send_audio_subscribed)
+            (void)media_subscription_policy_subscribe_audio(&s_media_policy);
+        if (s_pending_send_video_subscribed)
+            (void)media_subscription_policy_subscribe_video(&s_media_policy);
+        s_pending_conn = NULL;
+        s_pending_send_audio_subscribed = 0;
+        s_pending_send_video_subscribed = 0;
         media_rx_log_reset(&s_rx_log);
     }
     pthread_mutex_unlock(&s_conn_mtx);
@@ -160,7 +187,6 @@ static void _deferred_accept_call(void *opaque) {
     }
     LOG_I("收到入站 P2P 连接 hconn=%p（等待 0x2000 接通确认）",
           (void *)hconn);
-    _apply_video_downlink_policy(hconn);
     pthread_mutex_unlock(&s_call_control_mtx);
 }
 
@@ -180,6 +206,13 @@ static void _deferred_start_call_media(void *opaque) {
         pthread_mutex_unlock(&s_call_control_mtx);
         return;
     }
+    if (_subscribe_peer_media(hconn) != 0) {
+        LOG_E("设备通话订阅对端媒体失败，断开连接");
+        _finish_call_transport(hconn);
+        TiRtcDisconnect(hconn);
+        pthread_mutex_unlock(&s_call_control_mtx);
+        return;
+    }
     _start_media_stream();
     if (s_on_p2p_connected)
         s_on_p2p_connected(room_id, s_p2p_connected_user);
@@ -188,9 +221,27 @@ static void _deferred_start_call_media(void *opaque) {
 
 static void _call_on_conn_accepted(tirtc_conn_t hconn) {
     sdk_callback_enter(&s_call_callback_guard);
-    if (sdk_defer_action(&s_call_callback_guard, _deferred_accept_call,
-                         hconn) != 0)
+    pthread_mutex_lock(&s_conn_mtx);
+    int accept = s_service_active;
+    if (accept) {
+        s_pending_conn = hconn;
+        s_pending_send_audio_subscribed = 0;
+        s_pending_send_video_subscribed = 0;
+    }
+    pthread_mutex_unlock(&s_conn_mtx);
+    if (!accept ||
+        sdk_defer_action(&s_call_callback_guard, _deferred_accept_call,
+                         hconn) != 0) {
         LOG_E("无法延后处理入站 P2P 连接");
+        pthread_mutex_lock(&s_conn_mtx);
+        if (s_pending_conn == hconn) {
+            s_pending_conn = NULL;
+            s_pending_send_audio_subscribed = 0;
+            s_pending_send_video_subscribed = 0;
+        }
+        pthread_mutex_unlock(&s_conn_mtx);
+        (void)sdk_defer_disconnect(&s_call_callback_guard, hconn);
+    }
     sdk_callback_leave(&s_call_callback_guard);
 }
 
@@ -215,7 +266,9 @@ static void _call_on_disconnected(tirtc_conn_t hconn) {
 static void _call_on_audio(tirtc_conn_t hconn, const TIRTCFRAMEINFO *pFi, void *data) {
     sdk_callback_enter(&s_call_callback_guard);
     pthread_mutex_lock(&s_conn_mtx);
-    int matched = s_active_conn == hconn;
+    int matched = pFi && data && s_active_conn == hconn &&
+                  s_receive_audio_subscribed &&
+                  pFi->stream_id == STREAM_ID_AUDIO;
     pthread_mutex_unlock(&s_conn_mtx);
     if (matched)
         (void)device_media_sink_submit(
@@ -233,7 +286,9 @@ static void _call_on_audio(tirtc_conn_t hconn, const TIRTCFRAMEINFO *pFi, void *
 static void _call_on_video(tirtc_conn_t hconn, const TIRTCFRAMEINFO *pFi, void *data) {
     sdk_callback_enter(&s_call_callback_guard);
     pthread_mutex_lock(&s_conn_mtx);
-    int matched = s_active_conn == hconn;
+    int matched = pFi && data && s_active_conn == hconn &&
+                  s_receive_video_subscribed &&
+                  pFi->stream_id == STREAM_ID_VIDEO;
     pthread_mutex_unlock(&s_conn_mtx);
     if (matched)
         (void)device_media_sink_submit(
@@ -322,10 +377,14 @@ static void _call_on_request_key_frame(tirtc_conn_t hconn, uint8_t stream_id) {
 static int _call_on_subscribe_video(tirtc_conn_t hconn, uint8_t stream_id) {
     sdk_callback_enter(&s_call_callback_guard);
     pthread_mutex_lock(&s_conn_mtx);
-    int accepted =
-        s_active_conn == hconn &&
-        stream_id == STREAM_ID_VIDEO &&
-        media_subscription_policy_subscribe_video(&s_media_policy);
+    int accepted = 0;
+    if (stream_id == STREAM_ID_VIDEO && s_active_conn == hconn)
+        accepted = media_subscription_policy_subscribe_video(&s_media_policy);
+    else if (stream_id == STREAM_ID_VIDEO && s_pending_conn == hconn &&
+             s_media_policy.initialized && s_media_policy.video_capable) {
+        s_pending_send_video_subscribed = 1;
+        accepted = 1;
+    }
     if (accepted) s_force_key = 1;
     pthread_mutex_unlock(&s_conn_mtx);
     LOG_I("设备通话视频订阅 stream=%u %s",
@@ -340,6 +399,8 @@ static void _call_on_unsubscribe_video(tirtc_conn_t hconn, uint8_t stream_id) {
     int matched = s_active_conn == hconn && stream_id == STREAM_ID_VIDEO;
     if (matched)
         media_subscription_policy_unsubscribe_video(&s_media_policy);
+    else if (s_pending_conn == hconn && stream_id == STREAM_ID_VIDEO)
+        s_pending_send_video_subscribed = 0;
     pthread_mutex_unlock(&s_conn_mtx);
     if (matched)
         LOG_I("对端已退订设备通话视频 stream=%u；音频继续发送", stream_id);
@@ -348,14 +409,28 @@ static void _call_on_unsubscribe_video(tirtc_conn_t hconn, uint8_t stream_id) {
 
 static int _call_on_subscribe_audio(tirtc_conn_t hconn, uint8_t stream_id) {
     sdk_callback_enter(&s_call_callback_guard);
-    (void)hconn; (void)stream_id;
+    pthread_mutex_lock(&s_conn_mtx);
+    int accepted = 0;
+    if (stream_id == STREAM_ID_AUDIO && s_active_conn == hconn)
+        accepted = media_subscription_policy_subscribe_audio(&s_media_policy);
+    else if (stream_id == STREAM_ID_AUDIO && s_pending_conn == hconn &&
+             s_media_policy.initialized) {
+        s_pending_send_audio_subscribed = 1;
+        accepted = 1;
+    }
+    pthread_mutex_unlock(&s_conn_mtx);
     sdk_callback_leave(&s_call_callback_guard);
-    return 0;
+    return accepted ? 0 : -1;
 }
 
 static void _call_on_unsubscribe_audio(tirtc_conn_t hconn, uint8_t stream_id) {
     sdk_callback_enter(&s_call_callback_guard);
-    (void)hconn; (void)stream_id;
+    pthread_mutex_lock(&s_conn_mtx);
+    if (s_active_conn == hconn && stream_id == STREAM_ID_AUDIO)
+        media_subscription_policy_unsubscribe_audio(&s_media_policy);
+    else if (s_pending_conn == hconn && stream_id == STREAM_ID_AUDIO)
+        s_pending_send_audio_subscribed = 0;
+    pthread_mutex_unlock(&s_conn_mtx);
     sdk_callback_leave(&s_call_callback_guard);
 }
 
@@ -415,15 +490,34 @@ static void _prepare_media_policy(void) {
     pthread_mutex_unlock(&s_conn_mtx);
 }
 
-static void _apply_video_downlink_policy(tirtc_conn_t hconn) {
-    if (!hconn || !_is_audio_call()) return;
-    int rc = TiRtcUnsubscribeVideo(hconn, STREAM_ID_VIDEO);
-    if (rc >= 0)
-        LOG_I("纯音频设备通话已退订下行视频 stream=%u",
-              STREAM_ID_VIDEO);
-    else
-        LOG_W("退订下行视频失败 stream=%u rc=%d (%s)",
-              STREAM_ID_VIDEO, rc, TiRtcGetErrorStr(rc));
+static int _subscribe_peer_media(tirtc_conn_t hconn) {
+    if (!hconn) return -1;
+    int video_call = !_is_audio_call();
+    int audio_rc = TiRtcSubscribeAudio(hconn, STREAM_ID_AUDIO);
+    int video_rc = video_call
+                       ? TiRtcSubscribeVideo(hconn, STREAM_ID_VIDEO)
+                       : 0;
+    if (audio_rc < 0 || video_rc < 0) {
+        if (audio_rc >= 0)
+            (void)TiRtcUnsubscribeAudio(hconn, STREAM_ID_AUDIO);
+        if (video_rc >= 0 && video_call)
+            (void)TiRtcUnsubscribeVideo(hconn, STREAM_ID_VIDEO);
+        return -1;
+    }
+    pthread_mutex_lock(&s_conn_mtx);
+    int current = s_active_conn == hconn;
+    if (current) {
+        s_receive_audio_subscribed = 1;
+        s_receive_video_subscribed = video_call;
+    }
+    pthread_mutex_unlock(&s_conn_mtx);
+    if (!current) {
+        (void)TiRtcUnsubscribeAudio(hconn, STREAM_ID_AUDIO);
+        if (video_call)
+            (void)TiRtcUnsubscribeVideo(hconn, STREAM_ID_VIDEO);
+        return -1;
+    }
+    return 0;
 }
 
 static void _start_media_stream(void) {
@@ -502,25 +596,37 @@ static void *_media_worker(void *arg) {
     int64_t wall_start_ms = now_ms();
     int     consec_fail   = 0;
     int has_video = device_media_source_has_video(&s_media_src);
+    int audio_was_enabled = 0;
     int video_was_enabled = 0;
 
     while (!g_stop) {
         pthread_mutex_lock(&s_conn_mtx);
         int running = s_media_running;
         tirtc_conn_t conn = s_active_conn;
+        int audio_enabled =
+            media_subscription_policy_audio_enabled(&s_media_policy);
         int video_enabled =
             has_video &&
             media_subscription_policy_video_enabled(&s_media_policy);
         pthread_mutex_unlock(&s_conn_mtx);
         if (!running || !conn) break;
+        if (!audio_enabled && !video_enabled) {
+            sleep_ms(10);
+            continue;
+        }
+        int64_t elapsed = now_ms() - wall_start_ms;
+        if (audio_enabled && !audio_was_enabled && audio_pts_ms < elapsed)
+            audio_pts_ms = (double)elapsed;
         if (video_enabled && !video_was_enabled) {
-            video_pts_ms = audio_pts_ms;
+            if (video_pts_ms < elapsed) video_pts_ms = (double)elapsed;
             first_video = 1;
         }
+        audio_was_enabled = audio_enabled;
         video_was_enabled = video_enabled;
-        double target_pts = video_enabled && video_pts_ms < audio_pts_ms
-                                ? video_pts_ms : audio_pts_ms;
-        int64_t elapsed    = now_ms() - wall_start_ms;
+        double target_pts = audio_enabled && video_enabled
+                                ? (video_pts_ms < audio_pts_ms
+                                       ? video_pts_ms : audio_pts_ms)
+                                : (audio_enabled ? audio_pts_ms : video_pts_ms);
         int64_t wait_ms    = (int64_t)target_pts - elapsed;
         if (wait_ms > 2) {
             sleep_ms((int)(wait_ms > 50 ? 50 : wait_ms));
@@ -528,7 +634,8 @@ static void *_media_worker(void *arg) {
         }
 
         int rc;
-        int send_audio = !video_enabled || audio_pts_ms <= video_pts_ms;
+        int send_audio = audio_enabled &&
+                         (!video_enabled || audio_pts_ms <= video_pts_ms);
         if (send_audio) {
             DeviceMediaPacket packet;
             if (device_media_source_next_audio(&s_media_src, &packet) <= 0)
@@ -713,11 +820,18 @@ int call_connect_to(const char *remote_device_id, const char *token,
         pthread_mutex_lock(&s_conn_mtx);
         s_active_conn = hconn;
         s_session_state = SESS_IN_CALL;
+        s_receive_audio_subscribed = 0;
+        s_receive_video_subscribed = 0;
         media_rx_log_reset(&s_rx_log);
         pthread_mutex_unlock(&s_conn_mtx);
 
         LOG_I("P2P 连接成功 hconn=%p，发送 0x2000 room_id=%s", (void*)hconn, room_id);
-        _apply_video_downlink_policy(hconn);
+        if (_subscribe_peer_media(hconn) != 0) {
+            LOG_E("订阅对端设备通话媒体失败");
+            _finish_call_transport(hconn);
+            TiRtcDisconnect(hconn);
+            return -1;
+        }
 
         /* Build 0x2000 payload */
         cJSON *cmd_root = cJSON_CreateObject();
@@ -771,9 +885,15 @@ void call_hangup(void) {
 
     pthread_mutex_lock(&s_conn_mtx);
     tirtc_conn_t conn = s_active_conn;
+    tirtc_conn_t pending = s_pending_conn;
     s_active_conn = NULL;
+    s_pending_conn = NULL;
     s_session_state = conn ? SESS_DISCONNECTING : SESS_IDLE;
     s_media_start_pending = 0;
+    s_receive_audio_subscribed = 0;
+    s_receive_video_subscribed = 0;
+    s_pending_send_audio_subscribed = 0;
+    s_pending_send_video_subscribed = 0;
     s_expected_room_id[0] = '\0';
     pthread_mutex_unlock(&s_conn_mtx);
     pthread_mutex_lock(&s_connect_mtx);
@@ -784,6 +904,7 @@ void call_hangup(void) {
     if (conn) {
         TiRtcDisconnect(conn);
     }
+    if (pending && pending != conn) TiRtcDisconnect(pending);
     pthread_mutex_lock(&s_conn_mtx);
     s_session_state = SESS_IDLE;
     pthread_mutex_unlock(&s_conn_mtx);

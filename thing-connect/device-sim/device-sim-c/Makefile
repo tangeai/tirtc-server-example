@@ -146,7 +146,7 @@ TEST_SRCS := tests/test_core.c $(SRCDIR)/common.c $(SRCDIR)/audio_recorder.c \
 	$(SRCDIR)/device_adapter.c $(SRCDIR)/linux_device_adapter.c \
 	$(SRCDIR)/media_format.c \
 	$(SRCDIR)/file_media_source.c $(SRCDIR)/sdk_callback_guard.c \
-	$(SRCDIR)/media_subscription_policy.c \
+	$(SRCDIR)/media_subscription_policy.c $(SRCDIR)/stream_connection_set.c \
 	$(SRCDIR)/session_coordinator.c $(SRCDIR)/session_arbiter.c \
 	$(SRCDIR)/device_flow.c $(SRCDIR)/http_tls.c $(SRCDIR)/media_rx_log.c \
 	$(SRCDIR)/tirtc_runtime.c $(SRCDIR)/tirtc_ai.c \

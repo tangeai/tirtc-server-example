@@ -115,6 +115,7 @@ _hconn: "ctypes.c_void_p | None" = None
 # subscribe/unsubscribe 回调只在 capability 范围内动态启停视频。
 _video_state_lock = threading.Lock()
 _session_video_capable = False
+_audio_enabled = False
 _video_enabled = False
 _video_generation = 0
 
@@ -150,20 +151,42 @@ def configure(device_id: str, send_audio: str, send_video: str, recv_dir: str,
 
 def prepare_session(with_video: bool) -> None:
     """Prepare media policy before P2P connection establishment."""
-    global _session_video_capable, _video_enabled, _video_generation
+    global _session_video_capable, _audio_enabled
+    global _video_enabled, _video_generation
     capable = bool(with_video and _send_video_path)
     with _video_state_lock:
         _session_video_capable = capable
-        _video_enabled = capable
+        _audio_enabled = False
+        _video_enabled = False
         _video_generation += 1
 
 
 def reset_session() -> None:
-    global _session_video_capable, _video_enabled, _video_generation
+    global _session_video_capable, _audio_enabled
+    global _video_enabled, _video_generation
     with _video_state_lock:
         _session_video_capable = False
+        _audio_enabled = False
         _video_enabled = False
         _video_generation += 1
+
+
+def subscribe_audio(stream_id: int) -> bool:
+    global _audio_enabled
+    with _video_state_lock:
+        if stream_id != AUDIO_STREAM_ID:
+            return False
+        _audio_enabled = True
+        return True
+
+
+def unsubscribe_audio(stream_id: int) -> bool:
+    global _audio_enabled
+    with _video_state_lock:
+        if stream_id != AUDIO_STREAM_ID:
+            return False
+        _audio_enabled = False
+        return True
 
 
 def subscribe_video(stream_id: int) -> bool:
@@ -205,6 +228,16 @@ def request_video_key_frame(stream_id: int) -> bool:
 def _video_state() -> tuple[bool, bool, int]:
     with _video_state_lock:
         return (
+            _session_video_capable,
+            _video_enabled,
+            _video_generation,
+        )
+
+
+def _subscription_state() -> tuple[bool, bool, bool, int]:
+    with _video_state_lock:
+        return (
+            _audio_enabled,
             _session_video_capable,
             _video_enabled,
             _video_generation,
@@ -542,6 +575,10 @@ def _mic_worker(fmt_cfg) -> None:
         frames = actual_rate * AUDIO_PKT_MS // 1000
         with mic:
             while not _stream_stop.is_set():
+                audio_enabled, _, _, _ = _subscription_state()
+                if not audio_enabled:
+                    time.sleep(0.01)
+                    continue
                 try:
                     pkt_data, overflowed = mic.read(frames)
                 except _sd.PortAudioError:
@@ -707,7 +744,9 @@ def _media_worker(hconn_val: int) -> None:
     video_pts_ms  = 0.0 if has_video else float("inf")
     first_video   = True
     wall_start_ms = _now_ms()
-    seen_video_generation = -1
+    seen_generation = -1
+    audio_was_enabled = False
+    video_was_enabled = False
 
     def _send_audio_pkt() -> bool:
         nonlocal audio_pts_ms
@@ -758,24 +797,33 @@ def _media_worker(hconn_val: int) -> None:
 
     try:
         while not _stream_stop.is_set():
-            _, video_enabled, video_generation = _video_state()
+            audio_enabled, _, video_enabled, generation = _subscription_state()
             video_enabled = bool(has_video and video_enabled)
-            if video_enabled and video_generation != seen_video_generation:
-                video_pts_ms = float(audio_pts_ms)
+            if not audio_enabled and not video_enabled:
+                time.sleep(0.01)
+                continue
+            elapsed = _now_ms() - wall_start_ms
+            if audio_enabled and not audio_was_enabled:
+                audio_pts_ms = max(audio_pts_ms, elapsed)
+            if video_enabled and (
+                    not video_was_enabled or generation != seen_generation):
+                video_pts_ms = max(video_pts_ms, float(elapsed))
                 first_video = True
-                seen_video_generation = video_generation
+            audio_was_enabled = audio_enabled
+            video_was_enabled = video_enabled
+            seen_generation = generation
             target_pts = (
-                audio_pts_ms
-                if not video_enabled
-                else min(audio_pts_ms, video_pts_ms)
+                min(audio_pts_ms, video_pts_ms)
+                if audio_enabled and video_enabled
+                else audio_pts_ms if audio_enabled else video_pts_ms
             )
-            elapsed    = _now_ms() - wall_start_ms
             wait_ms    = target_pts - elapsed
             if wait_ms > 2:
                 time.sleep(wait_ms / 1000.0)
                 continue
 
-            if not video_enabled or audio_pts_ms <= video_pts_ms:
+            if audio_enabled and (
+                    not video_enabled or audio_pts_ms <= video_pts_ms):
                 if not _send_audio_pkt():
                     break
             else:

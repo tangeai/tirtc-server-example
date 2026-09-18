@@ -28,7 +28,7 @@
 H5 实时查看只需要设备完成两件事：
 
 1. 按 [device-integration.md](device-integration.md) 完成设备上线，拿到 `device_id`、`device_key`、`mqtt_token`
-2. 使用 `device_id + device_key` 启动 TiRTC 常驻监听，等待 H5 连接后持续发送实时媒体
+2. 使用 `device_id + device_key` 启动 TiRTC 常驻监听，等待 H5 连接和订阅后发送对应实时媒体
 
 H5 页面默认使用以下 stream（下文表格和设备示例均按默认值演示）：
 
@@ -37,6 +37,7 @@ H5 页面默认使用以下 stream（下文表格和设备示例均按默认值�
 | 设备 → H5 音频 | `10` | H5 订阅设备实时音频 |
 | 设备 → H5 视频 | `11` | H5 订阅设备实时视频 |
 | H5 → 设备 talkback | `14` | H5 “按住说话”上行音频 |
+| H5/App → 设备视频 | `15` | 支持视频上行的客户端发送视频；当前 H5 不发送 |
 
 设备可通过 `POST /v1/device/profile` 的 `profiles.stream` 上报 `up_audio_streamid`、`up_video_streamid`、`down_audio_streamid`、`down_video_streamid`，默认分别为 `10`、`11`、`14`、`15`，范围 `0–15`。方向以设备为准；H5 从 rtc-token 响应读取前三者用于订阅和音频发送。当前 H5 不发送视频，下行视频 ID 供其他支持视频发送的客户端使用。设备实际收发和订阅回调必须与上报值一致，修改后重新建立连接。
 
@@ -50,7 +51,7 @@ H5 自己会调用 [`GET /v1/user/device/rtc-token?device_id=...`](api-reference
 
 联调时检查以下结果：
 
-- **设备侧**：H5 连入后推流线程持续运行；按住说话时 `on_audio` 收到 stream 14 的 G.711 A-law（`alaw`）。
+- **设备侧**：每个 H5/App 使用独立 TiRTC 连接；连接建立后设备分别订阅该连接的 stream 14/15，某一路订阅失败不影响其他媒体和实时查看。只有该连接订阅 stream 10/11 后，设备才向该连接发送对应音频/视频。按住说话时，设备仅在本端对该连接的 stream 14 订阅有效时接收 G.711 A-law（`alaw`）。
 - **对端（H5）**：页面 video/audio 元素有画面和声音，浏览器控制台无 stream 10/11 的 subscribe 错误。
 
 ---
@@ -92,8 +93,10 @@ sequenceDiagram
     US-->>H5: token + app_id + endpoint + in_call（+ profiles 可选）
     H5->>DEV: TiRTC connect(device_id, token)
 
-    DEV-->>H5: stream 10 音频 + stream 11 视频
-    H5->>DEV: stream 14 talkback 音频（按住说话）
+    DEV->>H5: subscribe stream 14/15
+    H5->>DEV: subscribe stream 10/11
+    DEV-->>H5: 已订阅的 stream 10 音频 / stream 11 视频
+    H5->>DEV: 已订阅的 stream 14 talkback 音频（按住说话）
 ```
 
 [`GET /v1/user/device/rtc-token`](api-reference.md#get-v1userdevicertc-token) 的职责只有两件：
@@ -282,33 +285,38 @@ H5 拿到 `token` 后执行：
 connection.connect({ deviceId, token })
 ```
 
-设备侧不需要解析 token；`on_conn_accepted` 只需投递“实时预览连接已建立”事件，
-由设备控制任务在回调返回后保存句柄并启动媒体。
+设备侧不需要解析 token；`on_conn_accepted` 只需投递“实时预览连接已建立”事件。
+设备在连接回调内将每个连接登记到有界连接集合，使紧随建连到达的订阅不会被误判为旧连接；控制任务在回调返回后分别为该连接订阅下行 stream 14/15。发送任务可以启动，但在收到某个连接对应的订阅回调前不得向该连接发送 stream 10/11。
+
+Web、App 等多个客户端可以同时连接同一设备。设备只采集和编码一份媒体，每帧向所有已订阅对应 stream 的连接分别发送；任一连接取消订阅或断开，只清理该连接，不影响其他观看端。Linux C 和 Python 参考模拟器最多同时保留 4 个实时查看连接，超过容量的连接会被拒绝。
 
 ### 设备 -> H5：实时媒体流
 
 | 方向 | stream_id | 类型 | 设备动作 |
 |------|-----------|------|---------|
-| 设备 -> H5 | `10` | 音频 | 持续调用 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsendaudiostream" target="_blank" rel="noopener">`TiRtcSendAudioStream`</a> |
-| 设备 -> H5 | `11` | 视频 | 持续调用 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsendvideostream" target="_blank" rel="noopener">`TiRtcSendVideoStream`</a> |
+| 设备 -> H5 | `10` | 音频 | 收到有效 `on_subscribe_audio` 后调用 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsendaudiostream" target="_blank" rel="noopener">`TiRtcSendAudioStream`</a> |
+| 设备 -> H5 | `11` | 视频 | 收到有效 `on_subscribe_video` 后调用 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsendvideostream" target="_blank" rel="noopener">`TiRtcSendVideoStream`</a> |
 
 **设备侧发送开始条件：**
 
 1. <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcstart" target="_blank" rel="noopener">`TiRtcStart(...)`</a> 已成功
 2. 收到 `on_conn_accepted` 并成功投递应用事件
 3. 控制任务在回调栈外启动推流线程
+4. 对应 stream 收到 `on_subscribe_audio` 或 `on_subscribe_video`；音频和视频权限独立生效
 
 **设备侧发送结束条件：**
 
 1. H5 主动断开
 2. 设备调用 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcdisconnect" target="_blank" rel="noopener">`TiRtcDisconnect`</a>
 3. 设备切换到 VoIP / AI / 设备呼设备前台会话
+4. 对端对相应 stream 取消订阅；只停止该媒体类型
 
 ### H5 -> 设备：talkback 音频
 
 | 方向 | stream_id | 类型 | 设备动作 |
 |------|-----------|------|---------|
-| H5 -> 设备 | `14` | 麦克风音频（`alaw`，`8000/16000Hz`） | 在 `on_audio` 中识别并播放/处理 |
+| H5 -> 设备 | `14` | 麦克风音频（`alaw`，`8000/16000Hz`） | `TiRtcSubscribeAudio` 成功后，在 `on_audio` 中校验连接、订阅状态和 stream 再播放/处理 |
+| App -> 设备 | `15` | 视频（客户端支持时） | `TiRtcSubscribeVideo` 成功后，在 `on_video` 中校验连接、订阅状态和 stream 再处理 |
 
 这一路不是 MQTT 消息，不需要 ACK，也没有单独的 HTTP 回调。
 
@@ -329,7 +337,8 @@ connection.connect({ deviceId, token })
 3. <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsetoption" target="_blank" rel="noopener">`TiRtcSetOption(TIRTC_OPT_DEVICE_SECRET_KEY, device_key, ...)`</a>
 4. <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcstart" target="_blank" rel="noopener">`TiRtcStart(device_id, &callbacks)`</a>
 5. 等待 `on_conn_accepted`
-6. 在连接建立后启动实时音频/视频发送线程
+6. 在每个连接建立后分别订阅该连接的下行 stream 14/15；首个连接启动共享实时音频/视频发送线程
+7. 收到对端对 stream 10/11 的订阅回调后，分别开始发送对应媒体
 
 > 顺序不可调换。先调用 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsetoption" target="_blank" rel="noopener">`TiRtcSetOption(TIRTC_OPT_DEVICE_SECRET_KEY, ...)`</a>，再调用 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcstart" target="_blank" rel="noopener">`TiRtcStart`</a>。
 >
@@ -348,13 +357,12 @@ Linux C 参考实现见：
 - 音频：`stream_id = 10`
 - 视频：`stream_id = 11`
 
-设备在 `on_conn_accepted` 中投递连接事件，由控制任务在回调返回后启动推流线程，循环调用：
+设备在 `on_conn_accepted` 中投递连接事件，由控制任务在回调返回后为该连接订阅下行 stream 14/15；首个连接启动共享推流线程。线程读取一份媒体，并且只对已经发出对应订阅回调的连接调用：
 
 - <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsendaudiostream" target="_blank" rel="noopener">`TiRtcSendAudioStream`</a>
 - <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcsendvideostream" target="_blank" rel="noopener">`TiRtcSendVideoStream`</a>
 
-H5 在 `connect()` 完成后才挂载并订阅输出，设备在连接接入时发送的首个 IDR
-可能已经错过。因此设备除了处理 `on_request_key_frame`，还应在视频订阅回调中请求新关键帧；
+设备不得在 H5 订阅视频前读取或发送视频。收到视频订阅回调时应请求新关键帧；
 `TiRtcSendVideoStream` 返回 `TIRTC_E_BUSY` 后也应尽快补关键帧，避免持续丢弃非关键帧。
 
 预编码文件源不能在当前位置即时编码 IDR，只能前进到下一个关键帧。发生这种跳转时，
@@ -378,8 +386,9 @@ H5 播放页支持“按住说话”，可以把浏览器音频发送给设备�
 
 设备侧需要做两件事：
 
-1. 在音频回调 `on_audio` 中按“H5 来源连接 + 音频 stream”处理 talkback 数据
-2. 把这一路音频交给本地播放或业务处理
+1. 每个连接建立后调用 `TiRtcSubscribeAudio(hconn, 14)`；仅在调用成功且该连接仍有效时记录本端订阅状态
+2. 在音频回调 `on_audio` 中同时校验“H5 来源连接 + 本端订阅状态 + 音频 stream”
+3. 把这一路音频交给本地播放或业务处理
 
 前端使用以下约定：
 
@@ -412,8 +421,12 @@ Linux C 参考实现的 `tirtc_stream.c::_on_audio()` 会校验当前连接，�
 #define STREAM_AUDIO     10
 #define STREAM_VIDEO     11
 #define STREAM_TALKBACK  14
+#define STREAM_DOWN_VIDEO 15
 
 static tirtc_conn_t s_h5_conn;
+static int s_send_audio_subscribed;
+static int s_send_video_subscribed;
+static int s_talkback_subscribed;
 
 static void on_event(int event, const void *data, int len) {
     (void)data; (void)len;
@@ -431,8 +444,8 @@ static void on_disconnected(tirtc_conn_t hconn) {
 }
 
 static void on_audio(tirtc_conn_t hconn, const TIRTCFRAMEINFO *fi, void *data) {
-    (void)hconn;
-    if (fi->stream_id == STREAM_TALKBACK &&
+    if (hconn == s_h5_conn && s_talkback_subscribed &&
+        fi->stream_id == STREAM_TALKBACK &&
         fi->media == TIRTC_AUDIO_ALAW &&
         (fi->flags == TIRTC_AUDIOSAMPLE_8K16B1C ||
          fi->flags == TIRTC_AUDIOSAMPLE_16K16B1C)) {
@@ -453,10 +466,14 @@ static void on_frame_ignore(tirtc_conn_t h, const TIRTCFRAMEINFO *f, void *d)
 { (void)h; (void)f; (void)d; }
 static void on_command_ignore(tirtc_conn_t h, uint32_t c, const void *d, uint32_t n)
 { (void)h; (void)c; (void)d; (void)n; }
-static void on_unsubscribe_ignore(tirtc_conn_t h, uint8_t stream)
-{ (void)h; (void)stream; }
-static int on_subscribe_accept(tirtc_conn_t h, uint8_t stream)
-{ (void)h; (void)stream; return 0; }
+static void on_unsubscribe_audio(tirtc_conn_t h, uint8_t stream)
+{ if (h == s_h5_conn && stream == STREAM_AUDIO) s_send_audio_subscribed = 0; }
+static void on_unsubscribe_video(tirtc_conn_t h, uint8_t stream)
+{ if (h == s_h5_conn && stream == STREAM_VIDEO) s_send_video_subscribed = 0; }
+static int on_subscribe_audio(tirtc_conn_t h, uint8_t stream)
+{ if (h != s_h5_conn || stream != STREAM_AUDIO) return -1; s_send_audio_subscribed = 1; return 0; }
+static int on_subscribe_video(tirtc_conn_t h, uint8_t stream)
+{ if (h != s_h5_conn || stream != STREAM_VIDEO) return -1; s_send_video_subscribed = 1; encoder_request_idr(); return 0; }
 
 /* 进程启动时调用一次；H5 会话切换不能再次调用此函数。 */
 int process_rtc_start(const char *device_id, const char *device_key,
@@ -473,10 +490,10 @@ int process_rtc_start(const char *device_id, const char *device_key,
     cbs.on_message = on_frame_ignore;
     cbs.on_command = on_command_ignore;
     cbs.on_request_key_frame = on_request_key_frame;
-    cbs.on_subscribe_video = on_subscribe_accept;
-    cbs.on_unsubscribe_video = on_unsubscribe_ignore;
-    cbs.on_subscribe_audio = on_subscribe_accept;
-    cbs.on_unsubscribe_audio = on_unsubscribe_ignore;
+    cbs.on_subscribe_video = on_subscribe_video;
+    cbs.on_unsubscribe_video = on_unsubscribe_video;
+    cbs.on_subscribe_audio = on_subscribe_audio;
+    cbs.on_unsubscribe_audio = on_unsubscribe_audio;
 
     int rc = TiRtcSetOption(TIRTC_OPT_MAX_SEND_BUFFER,
                             &max_send_buffer, sizeof(max_send_buffer));
@@ -502,7 +519,8 @@ int h5_send_audio(const uint8_t *alaw, uint32_t len, uint32_t pts_ms) {
     fi.flags = TIRTC_AUDIOSAMPLE_8K16B1C;
     fi.ts = pts_ms;
     fi.length = len;
-    return s_h5_conn ? TiRtcSendAudioStream(s_h5_conn, &fi, (void *)alaw) : TIRTC_E_INVALID_HANDLE;
+    return s_h5_conn && s_send_audio_subscribed
+        ? TiRtcSendAudioStream(s_h5_conn, &fi, (void *)alaw) : TIRTC_E_INVALID_HANDLE;
 }
 
 int h5_send_h264(const uint8_t *annexb_au, uint32_t len, uint32_t pts_ms, int is_idr) {
@@ -512,9 +530,12 @@ int h5_send_h264(const uint8_t *annexb_au, uint32_t len, uint32_t pts_ms, int is
     fi.flags = is_idr ? TIRTC_FRAME_FLAG_KEY_FRAME : 0;
     fi.ts = pts_ms;
     fi.length = len;
-    return s_h5_conn ? TiRtcSendVideoStream(s_h5_conn, &fi, (void *)annexb_au) : TIRTC_E_INVALID_HANDLE;
+    return s_h5_conn && s_send_video_subscribed
+        ? TiRtcSendVideoStream(s_h5_conn, &fi, (void *)annexb_au) : TIRTC_E_INVALID_HANDLE;
 }
 ```
+
+控制任务处理连接事件时还需要先保存 `s_h5_conn`，再调用 `TiRtcSubscribeAudio(s_h5_conn, 14)` 和 `TiRtcSubscribeVideo(s_h5_conn, 15)`；只有成功的调用才能置对应本端订阅状态。示例中的共享状态在产品代码中需要由锁或单线程控制任务保护。
 
 上例的 `process_rtc_start()` 属于进程级 runtime，只能在进程启动时调用一次。同时支持多个业务时，传给 `TiRtcStart` 的必须是按“连接归属 + 会话代次”分发的统一回调表，不能让每个业务各自启动 SDK。
 
@@ -564,11 +585,11 @@ H5 实时查看采用设备常驻监听、H5 主动连入的方式。它和 VoIP
 
 ## 问题排查
 
-- H5 能登录但看不到画面：先确认设备已经 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcstart" target="_blank" rel="noopener">`TiRtcStart`</a> 成功，并且 `on_conn_accepted` 后确实开始发 `stream 10/11`
+- H5 能登录但看不到画面：先确认设备已经 <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcstart" target="_blank" rel="noopener">`TiRtcStart`</a> 成功，并确认设备收到 stream 11 的视频订阅回调后才开始发送
 - H5 连接成功但首帧慢：确认视频订阅回调会请求新关键帧，并检查 `TIRTC_E_BUSY` 后是否补发关键帧；不能只依赖连接接入时发送的首个 IDR
 - 文件媒体恢复后音画错位：确认跳到下一个视频 IDR 时，音频文件读取位置也跳到相同媒体时间，音视频输出时间戳仍保持单调递增
 - H5 有画面没声音：确认设备上行音频确实走 `stream 10`，H5 已订阅音频
-- 按住说话设备没收到：确认设备 `on_audio` 回调里处理了来自 H5 连接的 `stream_id == 14` 音频帧，并按 `alaw`、`8000/16000Hz` 解码
+- 按住说话设备没收到：确认设备对 stream 14 的 `TiRtcSubscribeAudio` 已成功，且 `on_audio` 同时校验当前 H5 连接、本端订阅状态和 `stream_id == 14`，再按 `alaw`、`8000/16000Hz` 解码
 - `rtc-token` 返回 `40300`：说明这台设备不属于当前 H5 登录用户
 - H5 提示 `in_call=true`：是状态提示，不是服务端拒绝；是否允许继续预览要看前端和设备自己的策略
 

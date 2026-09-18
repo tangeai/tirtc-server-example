@@ -4,18 +4,23 @@
 typedef struct {
     int initialized;
     int video_capable;
+    int audio_enabled;
     int video_enabled;
 } MediaSubscriptionPolicy;
 
 /*
- * Prepare one call session. Video starts enabled only when the negotiated call
- * type and the configured media source both support it.
+ * Prepare one call session. Audio and video both start disabled and are enabled
+ * independently only by the peer's subscription callbacks.
  */
 void media_subscription_policy_prepare(MediaSubscriptionPolicy *policy,
                                        int video_capable);
 void media_subscription_policy_reset(MediaSubscriptionPolicy *policy);
 
-/* Return non-zero when a peer video subscription can be accepted. */
+/* Outbound media remains disabled until the peer subscribes to each stream. */
+int media_subscription_policy_subscribe_audio(MediaSubscriptionPolicy *policy);
+void media_subscription_policy_unsubscribe_audio(MediaSubscriptionPolicy *policy);
+int media_subscription_policy_audio_enabled(
+    const MediaSubscriptionPolicy *policy);
 int media_subscription_policy_subscribe_video(MediaSubscriptionPolicy *policy);
 void media_subscription_policy_unsubscribe_video(MediaSubscriptionPolicy *policy);
 int media_subscription_policy_video_enabled(

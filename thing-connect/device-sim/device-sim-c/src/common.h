@@ -154,6 +154,8 @@ static inline const char *sess_state_str(SessionState s) {
 
 #define STREAM_ID_AUDIO      10
 #define STREAM_ID_VIDEO      11
+#define STREAM_ID_DOWN_AUDIO 14
+#define STREAM_ID_DOWN_VIDEO 15
 #define STREAM_ID_AI          1
 
 #define VIDEO_FPS            15.0

@@ -22,6 +22,7 @@ import sys
 import threading
 import time
 
+from dataclasses import dataclass
 from typing import Callable
 from callback_work_queue import CallbackWorkQueue
 from media_source import MediaSource, VIDEO_FRAME_MS
@@ -45,11 +46,24 @@ from tirtc_sdk import (
 
 # H5 对讲 stream_id（与 Web SDK TiRtcAudioInput streamId 一致）
 TALKBACK_STREAM_ID = 14
+TALKBACK_VIDEO_STREAM_ID = 15
+MAX_STREAM_CONNECTIONS = sdk.TIRTC_REFERENCE_MAX_CONNECTIONS
+
+
+@dataclass
+class _StreamConnection:
+    pending: bool = True
+    send_audio_subscribed: bool = False
+    send_video_subscribed: bool = False
+    talkback_subscribed: bool = False
+    talkback_video_subscribed: bool = False
+    consecutive_send_failures: int = 0
 
 # ── 模块状态 ──────────────────────────────────────────────────────────────────
 _state_lock   = threading.Lock()
+_activation_lock = threading.Lock()
 _stop_event   = threading.Event()
-_active_conn  = None           # tirtc_conn_t (ctypes c_void_p value)
+_connections: dict[int, _StreamConnection] = {}
 _active_thread: threading.Thread | None = None
 _force_key_frame = threading.Event()
 _force_key_lock = threading.Lock()
@@ -157,7 +171,6 @@ def _schedule_disconnect_after_callback(hconn_val: int) -> None:
     def disconnect():
         if not _service_active:
             return
-        _close_talkback_file()
         rc = sdk.TiRtcDisconnect(ctypes.c_void_p(hconn_val))
         if rc != 0:
             _sdk_err("TiRtcDisconnect", rc)
@@ -167,72 +180,87 @@ def _schedule_disconnect_after_callback(hconn_val: int) -> None:
 
 
 def _activate_connection_after_callback(hconn_val: int) -> None:
-    """Replace the active stream connection outside the SDK callback stack."""
-    global _active_conn, _active_thread
-
-    if not _service_active or _media_factory is None:
-        sdk.TiRtcDisconnect(ctypes.c_void_p(hconn_val))
-        return
-    media_factory = _media_factory
-
-    with _state_lock:
-        if not _service_active:
-            old_conn = None
-            old_thread = None
-            install = False
-            disconnect_new = True
-        elif _active_conn == hconn_val:
-            old_conn = None
-            old_thread = None
-            install = False
-            disconnect_new = False
-        else:
-            old_conn, _active_conn = _active_conn, None
-            old_thread, _active_thread = _active_thread, None
-            _stop_event.set()
-            install = True
-            disconnect_new = False
-
-    if not install:
-        if disconnect_new:
+    """Activate one bounded viewer without replacing existing viewers."""
+    global _active_thread
+    with _activation_lock:
+        with _state_lock:
+            connection = _connections.get(hconn_val)
+            valid = (_service_active and _media_factory is not None and
+                     connection is not None and connection.pending)
+            need_worker = _active_thread is None
+        if not valid:
             sdk.TiRtcDisconnect(ctypes.c_void_p(hconn_val))
-        return
-    if old_conn is not None:
-        sdk.TiRtcDisconnect(ctypes.c_void_p(old_conn))
-    join_worker_before_uninit(old_thread, _warn, "旧实时流")
-    _close_talkback_file()
+            return
 
-    try:
-        # The previous worker closes its media source in finally.  Open the
-        # replacement afterwards so exclusive Windows cameras are reusable.
-        source = media_factory()
-    except BaseException as exc:
-        _err(f"创建媒体源失败 hconn={hconn_val:#x}: {exc}")
-        sdk.TiRtcDisconnect(ctypes.c_void_p(hconn_val))
-        return
+        source = None
+        if need_worker:
+            try:
+                source = _media_factory()
+            except BaseException as exc:
+                _err(f"创建媒体源失败 hconn={hconn_val:#x}: {exc}")
+                with _state_lock:
+                    _connections.pop(hconn_val, None)
+                sdk.TiRtcDisconnect(ctypes.c_void_p(hconn_val))
+                return
 
-    with _state_lock:
-        if not _service_active:
-            install = False
-        else:
-            _stop_event.clear()
-            _active_conn = hconn_val
-            thread = threading.Thread(
-                target=_stream_worker,
-                args=(hconn_val, source),
-                daemon=True,
-                name="tirtc-stream",
-            )
-            _active_thread = thread
-            install = True
-    if not install:
-        source.close()
-        sdk.TiRtcDisconnect(ctypes.c_void_p(hconn_val))
-        return
+        with _state_lock:
+            connection = _connections.get(hconn_val)
+            if not _service_active or connection is None or not connection.pending:
+                current = False
+            else:
+                connection.pending = False
+                current = True
+                if need_worker:
+                    _stop_event.clear()
+                    thread = threading.Thread(
+                        target=_stream_worker,
+                        args=(source,),
+                        daemon=True,
+                        name="tirtc-stream",
+                    )
+                    # Start while holding the state lock so stop_service cannot
+                    # observe an unstarted Thread object.
+                    thread.start()
+                    _active_thread = thread
+        if not current:
+            if source is not None:
+                source.close()
+            sdk.TiRtcDisconnect(ctypes.c_void_p(hconn_val))
+            return
 
-    _open_talkback_file()
-    thread.start()
-    _info(f"实时流连接已建立 hconn={hconn_val:#x}")
+        hconn = ctypes.c_void_p(hconn_val)
+        audio_rc = sdk.TiRtcSubscribeAudio(hconn, TALKBACK_STREAM_ID)
+        video_rc = sdk.TiRtcSubscribeVideo(hconn, TALKBACK_VIDEO_STREAM_ID)
+        audio_subscribed = audio_rc >= 0
+        video_subscribed = video_rc >= 0
+        with _state_lock:
+            connection = _connections.get(hconn_val)
+            current = (_service_active and connection is not None and
+                       not connection.pending)
+            already_receiving_audio = any(
+                item.talkback_subscribed
+                for key, item in _connections.items() if key != hconn_val)
+            if current:
+                connection.talkback_subscribed = audio_subscribed
+                connection.talkback_video_subscribed = video_subscribed
+            active_count = sum(not item.pending for item in _connections.values())
+        if not current:
+            if audio_subscribed:
+                sdk.TiRtcUnsubscribeAudio(hconn, TALKBACK_STREAM_ID)
+            if video_subscribed:
+                sdk.TiRtcUnsubscribeVideo(hconn, TALKBACK_VIDEO_STREAM_ID)
+            sdk.TiRtcDisconnect(hconn)
+            return
+        if audio_subscribed and not already_receiving_audio:
+            _open_talkback_file()
+        if not audio_subscribed:
+            _warn(f"订阅客户端对讲音频失败 rc={audio_rc}")
+        if not video_subscribed:
+            _warn(f"订阅客户端下行视频失败 rc={video_rc}")
+        _info(
+            f"实时流连接已建立 hconn={hconn_val:#x} "
+            f"viewers={active_count}/{MAX_STREAM_CONNECTIONS}"
+        )
 
 
 def runtime_callbacks() -> TIRTCCALLBACKS:
@@ -268,19 +296,21 @@ def start_service(
 
 
 def stop_service() -> None:
-    global _service_active, _active_conn, _active_thread, _talkback_work
-    if not _service_active:
-        _close_talkback_playback()
-        return
-    _service_active = False
-    with _state_lock:
-        _stop_event.set()
-        active_conn_local, _active_conn = _active_conn, None
-        _active_thread_local = _active_thread
-        _active_thread = None
+    global _service_active, _active_thread, _talkback_work
+    with _activation_lock:
+        if not _service_active:
+            _close_talkback_playback()
+            return
+        _service_active = False
+        with _state_lock:
+            _stop_event.set()
+            connections = tuple(_connections)
+            _connections.clear()
+            _active_thread_local = _active_thread
+            _active_thread = None
 
-    if active_conn_local is not None:
-        sdk.TiRtcDisconnect(ctypes.c_void_p(active_conn_local))
+    for hconn_val in connections:
+        sdk.TiRtcDisconnect(ctypes.c_void_p(hconn_val))
 
     if _active_thread_local is not None:
         _active_thread_local.join(timeout=8.0)
@@ -302,7 +332,9 @@ def is_active() -> bool:
 
 def get_state() -> str:
     with _state_lock:
-        return "IN_CALL" if _active_conn is not None else "IDLE"
+        return "IN_CALL" if any(
+            not connection.pending for connection in _connections.values()
+        ) else "IDLE"
 
 
 # ── 推流线程 ──────────────────────────────────────────────────────────────────
@@ -311,19 +343,54 @@ def _now_ms() -> int:
 
 
 
-def _stream_worker(hconn_val: int, source: MediaSource) -> None:
-    hconn = ctypes.c_void_p(hconn_val)
-    _log(f"推流线程启动 hconn={hconn_val:#x}")
+def _stream_worker(source: MediaSource) -> None:
+    global _active_thread
+    _log("共享推流线程启动")
 
     has_video = source.has_video()
     audio_pts_ms  = 0
     video_pts_ms  = 0.0 if has_video else float("inf")
     first_video   = True
     wall_start_ms = _now_ms()
-    consec_fail   = 0
+    audio_was_enabled = False
+    video_was_enabled = False
 
-    def _send_audio() -> bool:
-        nonlocal audio_pts_ms, consec_fail
+    def _send_to_targets(targets, fi, buf, is_video: bool) -> None:
+        for hconn_val in targets:
+            hconn = ctypes.c_void_p(hconn_val)
+            rc = (sdk.TiRtcSendVideoStream(hconn, ctypes.byref(fi), buf)
+                  if is_video else
+                  sdk.TiRtcSendAudioStream(hconn, ctypes.byref(fi), buf))
+            disconnect = rc in CONN_FATAL_ERRORS
+            with _state_lock:
+                connection = _connections.get(hconn_val)
+                if connection is None or connection.pending:
+                    continue
+                if rc >= 0:
+                    connection.consecutive_send_failures = 0
+                elif rc not in (
+                        TIRTC_E_BUSY, TIRTC_E_INVALID_HANDLE,
+                        TIRTC_E_CONN_CLOSED) and not disconnect:
+                    connection.consecutive_send_failures += 1
+                    disconnect = connection.consecutive_send_failures >= 3
+            if rc == TIRTC_E_BUSY and is_video:
+                _request_key_frame()
+            elif rc < 0 and rc not in (
+                    TIRTC_E_BUSY, TIRTC_E_INVALID_HANDLE,
+                    TIRTC_E_CONN_CLOSED) and not disconnect:
+                _err(
+                    f"Send{'Video' if is_video else 'Audio'}Stream "
+                    f"hconn={hconn_val:#x} rc={rc}: "
+                    f"{sdk.TiRtcGetErrorStr(rc).decode()}"
+                )
+            if disconnect:
+                _warn(f"单个实时流连接发送失败，断开 hconn={hconn_val:#x}")
+                with _state_lock:
+                    _connections.pop(hconn_val, None)
+                sdk.TiRtcDisconnect(hconn)
+
+    def _send_audio(targets) -> bool:
+        nonlocal audio_pts_ms
         packet = source.next_audio_packet()
         if packet is None:
             return False
@@ -339,21 +406,12 @@ def _stream_worker(hconn_val: int, source: MediaSource) -> None:
         fi.length    = len(pkt)
 
         buf = (ctypes.c_uint8 * len(pkt)).from_buffer_copy(pkt)
-        rc = sdk.TiRtcSendAudioStream(hconn, ctypes.byref(fi), buf)
-        if rc in CONN_FATAL_ERRORS:
-            return False
-        elif rc < 0 and rc not in (TIRTC_E_BUSY, TIRTC_E_INVALID_HANDLE, TIRTC_E_CONN_CLOSED):
-            _err(f"SendAudioStream rc={rc}: {sdk.TiRtcGetErrorStr(rc).decode()}")
-            consec_fail += 1
-        elif rc < 0 and rc == TIRTC_E_INVALID_HANDLE:
-            time.sleep(0.005)
-        elif rc >= 0:
-            consec_fail = max(0, consec_fail - 1)
+        _send_to_targets(targets, fi, buf, False)
         audio_pts_ms += duration_ms
         return True
 
-    def _send_video() -> bool:
-        nonlocal video_pts_ms, first_video, consec_fail
+    def _send_video(targets) -> bool:
+        nonlocal video_pts_ms, first_video
         key_requested = _take_key_frame_request()
         force_key = first_video or key_requested
 
@@ -373,49 +431,61 @@ def _stream_worker(hconn_val: int, source: MediaSource) -> None:
         fi.length    = len(frame_data)
 
         buf = (ctypes.c_uint8 * len(frame_data)).from_buffer_copy(frame_data)
-        rc = sdk.TiRtcSendVideoStream(hconn, ctypes.byref(fi), buf)
-        if rc in CONN_FATAL_ERRORS:
-            return False
-        elif rc == TIRTC_E_BUSY:
-            # The SDK drops non-key frames after a full send buffer until an
-            # IDR arrives.  Request recovery immediately instead of waiting
-            # for the file's next natural GOP boundary.
-            _request_key_frame()
-        elif rc < 0 and rc not in (TIRTC_E_BUSY, TIRTC_E_INVALID_HANDLE, TIRTC_E_CONN_CLOSED):
-            _err(f"SendVideoStream rc={rc}: {sdk.TiRtcGetErrorStr(rc).decode()}")
-            consec_fail += 1
-        elif rc < 0 and rc == TIRTC_E_INVALID_HANDLE:
-            time.sleep(0.005)
-        elif rc >= 0:
-            first_video = False
-            consec_fail = max(0, consec_fail - 1)
+        _send_to_targets(targets, fi, buf, True)
+        first_video = False
         video_pts_ms += VIDEO_FRAME_MS
         return True
 
     try:
         while not _stop_event.is_set():
-            if consec_fail >= 3:
-                _err("连续 3 次发送失败，断开连接")
-                sdk.TiRtcDisconnect(hconn)
-                break
-
-            # 纯音频模式只按音频时钟推进；有视频时按最早的音视频 pts 推进。
-            target_pts = audio_pts_ms if not has_video else min(audio_pts_ms, video_pts_ms)
-            elapsed    = _now_ms() - wall_start_ms
+            with _state_lock:
+                audio_targets = tuple(
+                    hconn_val for hconn_val, connection in _connections.items()
+                    if not connection.pending and
+                    connection.send_audio_subscribed
+                )
+                video_targets = tuple(
+                    hconn_val for hconn_val, connection in _connections.items()
+                    if not connection.pending and has_video and
+                    connection.send_video_subscribed
+                )
+            audio_enabled = bool(audio_targets)
+            video_enabled = bool(video_targets)
+            if not audio_enabled and not video_enabled:
+                time.sleep(0.01)
+                continue
+            elapsed = _now_ms() - wall_start_ms
+            if audio_enabled and not audio_was_enabled:
+                audio_pts_ms = max(audio_pts_ms, elapsed)
+            if video_enabled and not video_was_enabled:
+                video_pts_ms = max(video_pts_ms, float(elapsed))
+                first_video = True
+                _request_key_frame()
+            audio_was_enabled = audio_enabled
+            video_was_enabled = video_enabled
+            target_pts = (
+                min(audio_pts_ms, video_pts_ms)
+                if audio_enabled and video_enabled
+                else audio_pts_ms if audio_enabled else video_pts_ms
+            )
             wait_ms    = target_pts - elapsed
             if wait_ms > 2:
                 time.sleep(wait_ms / 1000.0)
                 continue
 
-            if not has_video or audio_pts_ms <= video_pts_ms:
-                if not _send_audio():
+            if audio_enabled and (
+                    not video_enabled or audio_pts_ms <= video_pts_ms):
+                if not _send_audio(audio_targets):
                     break
             else:
-                if not _send_video():
+                if not _send_video(video_targets):
                     break
     finally:
         source.close()
-        _log(f"推流线程退出 hconn={hconn_val:#x}")
+        with _state_lock:
+            if _active_thread is threading.current_thread():
+                _active_thread = None
+        _log("共享推流线程退出")
 
 
 def _process_talkback_item(item) -> None:
@@ -449,43 +519,62 @@ def _build_callbacks() -> TIRTCCALLBACKS:
     def on_conn_accepted(hconn):
         _log(f"on_conn_accepted: 连接已接受 hconn={ctypes.cast(hconn, ctypes.c_void_p).value:#x}")
         hconn_val = ctypes.cast(hconn, ctypes.c_void_p).value
-        _callback_guard.defer(
-            _activate_connection_after_callback,
-            hconn_val,
-            name="stream-accept",
-        )
+        with _state_lock:
+            duplicate = hconn_val in _connections
+            added = (_service_active and not duplicate and
+                     len(_connections) < MAX_STREAM_CONNECTIONS)
+            if added:
+                _connections[hconn_val] = _StreamConnection()
+        if duplicate:
+            _log(f"忽略重复连接回调 hconn={hconn_val:#x}")
+            return
+        try:
+            queued = added and _callback_guard.defer(
+                _activate_connection_after_callback,
+                hconn_val,
+                name="stream-accept",
+            )
+        except RuntimeError:
+            queued = False
+        if not queued:
+            with _state_lock:
+                connection = _connections.get(hconn_val)
+                if added and connection is not None and connection.pending:
+                    _connections.pop(hconn_val, None)
+            _schedule_disconnect_after_callback(hconn_val)
 
 
     def on_conn_error(hconn, error):
         _log(f"on_conn_error: 连接错误 hconn={ctypes.cast(hconn, ctypes.c_void_p).value:#x} error={error}")
-        global _active_conn
         hconn_val = ctypes.cast(hconn, ctypes.c_void_p).value
         _err(f"连接错误 hconn={hconn_val:#x}: {sdk.TiRtcGetErrorStr(error).decode()}")
         with _state_lock:
-            if _active_conn == hconn_val:
-                _active_conn = None
+            _connections.pop(hconn_val, None)
         _schedule_disconnect_after_callback(hconn_val)
 
     def on_disconnected(hconn):
         _log(f"on_disconnected: 连接已断开 hconn={ctypes.cast(hconn, ctypes.c_void_p).value:#x}")
-        global _active_conn
         hconn_val = ctypes.cast(hconn, ctypes.c_void_p).value
         with _state_lock:
-            if _active_conn == hconn_val:
-                _active_conn = None
-        _callback_guard.defer(
-            _close_talkback_file,
-            name="stream-talkback-close",
-        )
+            _connections.pop(hconn_val, None)
 
     def on_audio(hconn, pFi, data):
-        if not data or _talkback_recorder is None or not _talkback_recorder.is_open:
+        if not data:
             return
         try:
             fi = ctypes.cast(pFi, ctypes.POINTER(TIRTCFRAMEINFO)).contents
         except Exception:
             return
-        if fi.stream_id != TALKBACK_STREAM_ID:
+        hconn_val = ctypes.cast(hconn, ctypes.c_void_p).value
+        with _state_lock:
+            connection = _connections.get(hconn_val)
+            accepted = (
+                connection is not None
+                and not connection.pending
+                and connection.talkback_subscribed
+                and fi.stream_id == TALKBACK_STREAM_ID
+            )
+        if not accepted:
             return
         buf = ctypes.string_at(data, fi.length)
         frame = TIRTCFRAMEINFO()
@@ -499,7 +588,26 @@ def _build_callbacks() -> TIRTCCALLBACKS:
             _talkback_work.submit((frame, buf))
 
     def on_video(hconn, pFi, data):
-        pass
+        if not data:
+            return
+        try:
+            fi = ctypes.cast(pFi, ctypes.POINTER(TIRTCFRAMEINFO)).contents
+        except Exception:
+            return
+        hconn_val = ctypes.cast(hconn, ctypes.c_void_p).value
+        with _state_lock:
+            connection = _connections.get(hconn_val)
+            accepted = (
+                connection is not None
+                and not connection.pending
+                and connection.talkback_video_subscribed
+                and fi.stream_id == TALKBACK_VIDEO_STREAM_ID
+            )
+        if accepted:
+            _log(
+                "收到已订阅的客户端视频帧 "
+                f"stream={fi.stream_id} length={fi.length}"
+            )
 
     def on_message(hconn, pFi, data):
         pass
@@ -509,26 +617,52 @@ def _build_callbacks() -> TIRTCCALLBACKS:
 
     def on_request_key_frame(hconn, stream_id):
         _log(f"on_request_key_frame: 收到关键帧请求 hconn={ctypes.cast(hconn, ctypes.c_void_p).value:#x} stream_id={stream_id}")
-        if stream_id == VIDEO_STREAM_ID:
+        hconn_val = ctypes.cast(hconn, ctypes.c_void_p).value
+        with _state_lock:
+            connection = _connections.get(hconn_val)
+            accepted = connection is not None and not connection.pending
+        if accepted and stream_id == VIDEO_STREAM_ID:
             _request_key_frame()
 
     def on_subscribe_video(hconn, stream_id):
         _log(f"on_subscribe_video: 视频订阅 hconn={ctypes.cast(hconn, ctypes.c_void_p).value:#x} stream_id={stream_id}")
-        if stream_id == VIDEO_STREAM_ID:
+        hconn_val = ctypes.cast(hconn, ctypes.c_void_p).value
+        with _state_lock:
+            connection = _connections.get(hconn_val)
+            accepted = stream_id == VIDEO_STREAM_ID and connection is not None
+            if accepted:
+                connection.send_video_subscribed = True
+        if accepted:
             # H5 attaches/subscribes only after connect() resolves, so the
             # IDR sent at connection acceptance may already be gone.
             _request_key_frame()
-        return 0
+        return 0 if accepted else -1
 
     def on_unsubscribe_video(hconn, stream_id):
         _log(f"on_unsubscribe_video: 视频取消订阅 hconn={ctypes.cast(hconn, ctypes.c_void_p).value:#x} stream_id={stream_id}")
+        hconn_val = ctypes.cast(hconn, ctypes.c_void_p).value
+        with _state_lock:
+            connection = _connections.get(hconn_val)
+            if connection is not None and stream_id == VIDEO_STREAM_ID:
+                connection.send_video_subscribed = False
 
     def on_subscribe_audio(hconn, stream_id):
         _log(f"on_subscribe_audio: 音频订阅 hconn={ctypes.cast(hconn, ctypes.c_void_p).value:#x} stream_id={stream_id}")
-        return 0
+        hconn_val = ctypes.cast(hconn, ctypes.c_void_p).value
+        with _state_lock:
+            connection = _connections.get(hconn_val)
+            accepted = stream_id == AUDIO_STREAM_ID and connection is not None
+            if accepted:
+                connection.send_audio_subscribed = True
+        return 0 if accepted else -1
 
     def on_unsubscribe_audio(hconn, stream_id):
         _log(f"on_unsubscribe_audio: 音频取消订阅 hconn={ctypes.cast(hconn, ctypes.c_void_p).value:#x} stream_id={stream_id}")
+        hconn_val = ctypes.cast(hconn, ctypes.c_void_p).value
+        with _state_lock:
+            connection = _connections.get(hconn_val)
+            if connection is not None and stream_id == AUDIO_STREAM_ID:
+                connection.send_audio_subscribed = False
 
     cbs = TIRTCCALLBACKS()
     cbs.on_conn_accepted     = OnConnAcceptCB(_callback_guard.wrap(on_conn_accepted))
