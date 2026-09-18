@@ -22,6 +22,7 @@ typedef struct {
     MediaSubscriptionPolicy send_policy;
     int down_audio_subscribed;
     int down_video_subscribed;
+    int video_waiting_for_key_frame;
     unsigned int consecutive_send_failures;
 } StreamConnection;
 
@@ -48,6 +49,15 @@ void stream_connection_unsubscribe_audio(StreamConnectionSet *set,
                                          tirtc_conn_t handle);
 void stream_connection_unsubscribe_video(StreamConnectionSet *set,
                                          tirtc_conn_t handle);
+int stream_connection_mark_video_recovery(StreamConnectionSet *set,
+                                          tirtc_conn_t handle);
+int stream_connection_audio_frame_allowed(const StreamConnectionSet *set,
+                                          tirtc_conn_t handle);
+int stream_connection_video_frame_allowed(const StreamConnectionSet *set,
+                                          tirtc_conn_t handle,
+                                          int key_frame);
+void stream_connection_complete_video_recovery(StreamConnectionSet *set,
+                                               tirtc_conn_t handle);
 void stream_connection_set_down_audio(StreamConnectionSet *set,
                                       tirtc_conn_t handle, int subscribed);
 void stream_connection_set_down_video(StreamConnectionSet *set,
@@ -56,6 +66,10 @@ int stream_connection_accepts_down_audio(const StreamConnectionSet *set,
                                          tirtc_conn_t handle);
 int stream_connection_accepts_down_video(const StreamConnectionSet *set,
                                          tirtc_conn_t handle);
+int stream_connection_has_down_media(const StreamConnectionSet *set);
+int stream_connection_has_send_media(const StreamConnectionSet *set);
+size_t stream_connection_video_subscriber_count(
+    const StreamConnectionSet *set);
 
 size_t stream_connection_snapshot_audio(const StreamConnectionSet *set,
                                         tirtc_conn_t *handles, size_t capacity);

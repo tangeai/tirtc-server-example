@@ -91,8 +91,11 @@ int stream_connection_subscribe_audio(StreamConnectionSet *set,
 int stream_connection_subscribe_video(StreamConnectionSet *set,
                                       tirtc_conn_t handle) {
     StreamConnection *client = _find(set, handle);
-    return client && media_subscription_policy_subscribe_video(
-                         &client->send_policy);
+    if (!client || !media_subscription_policy_subscribe_video(
+                       &client->send_policy))
+        return 0;
+    client->video_waiting_for_key_frame = 1;
+    return 1;
 }
 
 void stream_connection_unsubscribe_audio(StreamConnectionSet *set,
@@ -104,7 +107,44 @@ void stream_connection_unsubscribe_audio(StreamConnectionSet *set,
 void stream_connection_unsubscribe_video(StreamConnectionSet *set,
                                          tirtc_conn_t handle) {
     StreamConnection *client = _find(set, handle);
-    if (client) media_subscription_policy_unsubscribe_video(&client->send_policy);
+    if (client) {
+        media_subscription_policy_unsubscribe_video(&client->send_policy);
+        client->video_waiting_for_key_frame = 0;
+    }
+}
+
+int stream_connection_mark_video_recovery(StreamConnectionSet *set,
+                                          tirtc_conn_t handle) {
+    StreamConnection *client = _find(set, handle);
+    if (!client || client->state != STREAM_CONNECTION_ACTIVE ||
+        !media_subscription_policy_video_enabled(&client->send_policy))
+        return 0;
+    int newly_waiting = !client->video_waiting_for_key_frame;
+    client->video_waiting_for_key_frame = 1;
+    return newly_waiting;
+}
+
+int stream_connection_audio_frame_allowed(const StreamConnectionSet *set,
+                                          tirtc_conn_t handle) {
+    const StreamConnection *client = _find_const(set, handle);
+    return client && client->state == STREAM_CONNECTION_ACTIVE &&
+           media_subscription_policy_audio_enabled(&client->send_policy);
+}
+
+int stream_connection_video_frame_allowed(const StreamConnectionSet *set,
+                                          tirtc_conn_t handle,
+                                          int key_frame) {
+    const StreamConnection *client = _find_const(set, handle);
+    return client && client->state == STREAM_CONNECTION_ACTIVE &&
+           media_subscription_policy_video_enabled(&client->send_policy) &&
+           (!client->video_waiting_for_key_frame || key_frame);
+}
+
+void stream_connection_complete_video_recovery(StreamConnectionSet *set,
+                                               tirtc_conn_t handle) {
+    StreamConnection *client = _find(set, handle);
+    if (client && client->state == STREAM_CONNECTION_ACTIVE)
+        client->video_waiting_for_key_frame = 0;
 }
 
 void stream_connection_set_down_audio(StreamConnectionSet *set,
@@ -133,6 +173,42 @@ int stream_connection_accepts_down_video(const StreamConnectionSet *set,
     const StreamConnection *client = _find_const(set, handle);
     return client && client->state == STREAM_CONNECTION_ACTIVE &&
            client->down_video_subscribed;
+}
+
+int stream_connection_has_down_media(const StreamConnectionSet *set) {
+    if (!set) return 0;
+    for (size_t i = 0; i < STREAM_MAX_CONNECTIONS; ++i) {
+        const StreamConnection *client = &set->clients[i];
+        if (client->state == STREAM_CONNECTION_ACTIVE &&
+            (client->down_audio_subscribed || client->down_video_subscribed))
+            return 1;
+    }
+    return 0;
+}
+
+int stream_connection_has_send_media(const StreamConnectionSet *set) {
+    if (!set) return 0;
+    for (size_t i = 0; i < STREAM_MAX_CONNECTIONS; ++i) {
+        const StreamConnection *client = &set->clients[i];
+        if (client->state != STREAM_CONNECTION_FREE &&
+            (media_subscription_policy_audio_enabled(&client->send_policy) ||
+             media_subscription_policy_video_enabled(&client->send_policy)))
+            return 1;
+    }
+    return 0;
+}
+
+size_t stream_connection_video_subscriber_count(
+    const StreamConnectionSet *set) {
+    size_t count = 0;
+    if (!set) return 0;
+    for (size_t i = 0; i < STREAM_MAX_CONNECTIONS; ++i) {
+        const StreamConnection *client = &set->clients[i];
+        if (client->state == STREAM_CONNECTION_ACTIVE &&
+            media_subscription_policy_video_enabled(&client->send_policy))
+            count++;
+    }
+    return count;
 }
 
 static size_t _snapshot(const StreamConnectionSet *set, tirtc_conn_t *handles,

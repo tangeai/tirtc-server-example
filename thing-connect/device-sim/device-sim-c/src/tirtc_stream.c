@@ -16,6 +16,7 @@
 #include "media_rx_log.h"
 #include "sdk_callback_guard.h"
 #include "stream_connection_set.h"
+#include "stream_media_timeline.h"
 #include "tirtc_runtime.h"
 #include "tirtc/tiRTC.h"
 
@@ -40,6 +41,23 @@ static MediaRxLog s_rx_log = MEDIA_RX_LOG_INITIALIZER;
 static SdkCallbackGuard s_callback_guard = SDK_CALLBACK_GUARD_INITIALIZER;
 
 static void *_push_thread(void *arg);
+
+static void _flush_downlink_if_unused(void *opaque) {
+    (void)opaque;
+    pthread_mutex_lock(&s_conn_mtx);
+    int in_use = stream_connection_has_down_media(&s_connections);
+    pthread_mutex_unlock(&s_conn_mtx);
+    if (!in_use)
+        device_media_sink_flush(
+            DEVICE_BUSINESS_STREAM,
+            device_adapter_session_generation(DEVICE_BUSINESS_STREAM));
+}
+
+static void _schedule_downlink_flush_if_unused(void) {
+    if (sdk_defer_action(
+            &s_callback_guard, _flush_downlink_if_unused, NULL) != 0)
+        LOG_W("无法延后清理实时流下行媒体");
+}
 
 static void _stop_push_thread(void) {
     pthread_t thread;
@@ -209,6 +227,7 @@ static void _on_conn_error(tirtc_conn_t hconn, int error) {
     pthread_mutex_lock(&s_conn_mtx);
     (void)stream_connection_remove(&s_connections, hconn);
     pthread_mutex_unlock(&s_conn_mtx);
+    _schedule_downlink_flush_if_unused();
     if (sdk_defer_disconnect(&s_callback_guard, hconn) != 0)
         LOG_E("无法延后断开错误连接");
     sdk_callback_leave(&s_callback_guard);
@@ -220,6 +239,7 @@ static void _on_disconnected(tirtc_conn_t hconn) {
     pthread_mutex_lock(&s_conn_mtx);
     (void)stream_connection_remove(&s_connections, hconn);
     pthread_mutex_unlock(&s_conn_mtx);
+    _schedule_downlink_flush_if_unused();
     sdk_callback_leave(&s_callback_guard);
 }
 
@@ -284,8 +304,11 @@ static void _on_request_key_frame(tirtc_conn_t hconn, uint8_t stream_id) {
     LOG_D("请求关键帧 stream_id=%u", stream_id);
     pthread_mutex_lock(&s_conn_mtx);
     if (stream_id == STREAM_ID_VIDEO &&
-        stream_connection_is_active(&s_connections, hconn))
-        s_force_key = 1;
+        stream_connection_is_active(&s_connections, hconn)) {
+        (void)stream_connection_mark_video_recovery(&s_connections, hconn);
+        if (stream_connection_video_subscriber_count(&s_connections) == 1)
+            s_force_key = 1;
+    }
     pthread_mutex_unlock(&s_conn_mtx);
     sdk_callback_leave(&s_callback_guard);
 }
@@ -294,9 +317,10 @@ static int _on_sub_video(tirtc_conn_t hconn, uint8_t stream_id) {
     sdk_callback_enter(&s_callback_guard);
     LOG_D("订阅视频 stream_id=%u", stream_id);
     pthread_mutex_lock(&s_conn_mtx);
+    int media_was_active = stream_connection_has_send_media(&s_connections);
     int accepted = stream_id == STREAM_ID_VIDEO &&
                    stream_connection_subscribe_video(&s_connections, hconn);
-    if (accepted) {
+    if (accepted && !media_was_active) {
         /* H5 subscribes after connect completes and may have missed the IDR
          * sent when the connection was accepted. */
         s_force_key = 1;
@@ -338,11 +362,9 @@ static void _on_unsubscribe_audio(tirtc_conn_t hconn, uint8_t stream_id) {
 static void *_push_thread(void *arg) {
     (void)arg;
     int has_video = device_media_source_has_video(&s_media);
-    double audio_pts_ms = 0.0;
-    double video_pts_ms = 0.0;
+    StreamMediaTimeline timeline;
+    stream_media_timeline_init(&timeline);
     int64_t wall_start_ms = now_ms();
-    int audio_was_enabled = 0;
-    int video_was_enabled = 0;
 
     while (_push_should_run() && !g_stop) {
         tirtc_conn_t audio_targets[STREAM_MAX_CONNECTIONS];
@@ -355,33 +377,31 @@ static void *_push_thread(void *arg) {
         pthread_mutex_unlock(&s_conn_mtx);
         int audio_enabled = audio_count > 0;
         int video_enabled = video_count > 0;
-        if (!audio_enabled && !video_enabled) {
+        int64_t elapsed = now_ms() - wall_start_ms;
+        int audio_started = 0;
+        int video_started = 0;
+        int media_active = stream_media_timeline_observe(
+            &timeline, has_video, audio_enabled, video_enabled, elapsed,
+            &audio_started, &video_started);
+        (void)audio_started;
+        if (!media_active) {
             sleep_ms(10);
             continue;
         }
-        int64_t elapsed = now_ms() - wall_start_ms;
-        if (audio_enabled && !audio_was_enabled && audio_pts_ms < elapsed)
-            audio_pts_ms = (double)elapsed;
-        if (video_enabled && !video_was_enabled && video_pts_ms < elapsed) {
-            video_pts_ms = (double)elapsed;
+        if (video_started) {
             pthread_mutex_lock(&s_conn_mtx);
             s_force_key = 1;
             pthread_mutex_unlock(&s_conn_mtx);
         }
-        audio_was_enabled = audio_enabled;
-        video_was_enabled = video_enabled;
-        double target_pts = audio_enabled && video_enabled
-                                ? (video_pts_ms < audio_pts_ms
-                                       ? video_pts_ms : audio_pts_ms)
-                                : (audio_enabled ? audio_pts_ms : video_pts_ms);
+        double target_pts = stream_media_timeline_target(&timeline, has_video);
         int64_t wait_ms = (int64_t)target_pts - elapsed;
         if (wait_ms > 2) {
             sleep_ms((int)(wait_ms > 50 ? 50 : wait_ms));
             continue;
         }
 
-        int send_audio = audio_enabled &&
-                         (!video_enabled || audio_pts_ms <= video_pts_ms);
+        int send_audio = stream_media_timeline_next_is_audio(
+            &timeline, has_video);
         TIRTCFRAMEINFO frame;
         memset(&frame, 0, sizeof(frame));
         DeviceMediaPacket packet;
@@ -391,9 +411,10 @@ static void *_push_thread(void *arg) {
             frame.stream_id = STREAM_ID_AUDIO;
             frame.media = s_audio_format->media;
             frame.flags = s_audio_format->flags;
-            frame.ts = (uint32_t)audio_pts_ms;
+            frame.ts = (uint32_t)timeline.audio_pts_ms;
             frame.length = (uint32_t)packet.length;
-            audio_pts_ms += packet.duration_ms;
+            stream_media_timeline_advance_audio(
+                &timeline, packet.duration_ms);
         } else {
             if (device_media_source_next_video(
                     &s_media, _take_force_key(), &packet) <= 0)
@@ -401,15 +422,24 @@ static void *_push_thread(void *arg) {
             frame.stream_id = STREAM_ID_VIDEO;
             frame.media = s_video_format->media;
             frame.flags = packet.key_frame ? TIRTC_FRAME_FLAG_KEY_FRAME : 0;
-            frame.ts = (uint32_t)video_pts_ms;
+            frame.ts = (uint32_t)timeline.video_pts_ms;
             frame.length = (uint32_t)packet.length;
-            video_pts_ms += 1000.0 / VIDEO_FPS;
+            stream_media_timeline_advance_video(
+                &timeline, 1000.0 / VIDEO_FPS);
         }
 
         tirtc_conn_t *targets = send_audio ? audio_targets : video_targets;
         size_t target_count = send_audio ? audio_count : video_count;
         for (size_t i = 0; i < target_count; ++i) {
             tirtc_conn_t hconn = targets[i];
+            pthread_mutex_lock(&s_conn_mtx);
+            int allowed = send_audio
+                              ? stream_connection_audio_frame_allowed(
+                                    &s_connections, hconn)
+                              : stream_connection_video_frame_allowed(
+                                    &s_connections, hconn, packet.key_frame);
+            pthread_mutex_unlock(&s_conn_mtx);
+            if (!allowed) continue;
             int rc = send_audio
                          ? TiRtcSendAudioStream(hconn, &frame, packet.data)
                          : TiRtcSendVideoStream(hconn, &frame, packet.data);
@@ -418,6 +448,9 @@ static void *_push_thread(void *arg) {
                 pthread_mutex_lock(&s_conn_mtx);
                 (void)stream_connection_note_send_result(
                     &s_connections, hconn, 1);
+                if (!send_audio && packet.key_frame)
+                    stream_connection_complete_video_recovery(
+                        &s_connections, hconn);
                 pthread_mutex_unlock(&s_conn_mtx);
                 continue;
             }
@@ -428,7 +461,11 @@ static void *_push_thread(void *arg) {
             } else if (rc == TIRTC_E_BUSY) {
                 if (!send_audio) {
                     pthread_mutex_lock(&s_conn_mtx);
-                    s_force_key = 1;
+                    if (stream_connection_mark_video_recovery(
+                            &s_connections, hconn) &&
+                        stream_connection_video_subscriber_count(
+                            &s_connections) == 1)
+                        s_force_key = 1;
                     pthread_mutex_unlock(&s_conn_mtx);
                 }
             } else if (rc != TIRTC_E_INVALID_HANDLE) {
@@ -445,6 +482,7 @@ static void *_push_thread(void *arg) {
                 pthread_mutex_lock(&s_conn_mtx);
                 (void)stream_connection_remove(&s_connections, hconn);
                 pthread_mutex_unlock(&s_conn_mtx);
+                _schedule_downlink_flush_if_unused();
                 TiRtcDisconnect(hconn);
             }
         }

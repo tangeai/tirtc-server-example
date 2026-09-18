@@ -56,6 +56,18 @@ class MicCaptureTests(unittest.TestCase):
         self.assertTrue(streams[0].closed)
 
 
+class SpeakerPlaybackTests(unittest.TestCase):
+    def test_flush_drops_audio_queued_by_disconnected_viewer(self):
+        speaker = audio_device.SpeakerPlayback.__new__(
+            audio_device.SpeakerPlayback)
+        speaker._queue = audio_device.queue.Queue()
+        speaker._queue.put_nowait((b"old audio", 8000))
+
+        speaker.flush()
+
+        self.assertTrue(speaker._queue.empty())
+
+
 class MicResamplingContinuityTests(unittest.TestCase):
     def test_usb_48k_stream_preserves_samples_across_reads(self):
         import numpy as np

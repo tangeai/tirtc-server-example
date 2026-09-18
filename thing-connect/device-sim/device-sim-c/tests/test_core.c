@@ -17,6 +17,7 @@
 #include "media_format.h"
 #include "media_subscription_policy.h"
 #include "stream_connection_set.h"
+#include "stream_media_timeline.h"
 #include "sdk_callback_guard.h"
 #include "session_arbiter.h"
 #include "session_coordinator.h"
@@ -517,16 +518,34 @@ static void test_stream_connection_set_isolates_multiple_viewers(void) {
     assert(stream_connection_snapshot_audio(
                &set, handles, STREAM_MAX_CONNECTIONS) == 1);
     assert(handles[0] == first);
+    assert(stream_connection_audio_frame_allowed(&set, first));
     assert(stream_connection_snapshot_video(
                &set, handles, STREAM_MAX_CONNECTIONS) == 1);
     assert(handles[0] == second);
+    assert(stream_connection_has_send_media(&set));
+    assert(stream_connection_video_subscriber_count(&set) == 1);
+
+    assert(stream_connection_video_frame_allowed(&set, second, 0) == 0);
+    assert(stream_connection_video_frame_allowed(&set, second, 1) == 1);
+    stream_connection_complete_video_recovery(&set, second);
+    assert(stream_connection_video_frame_allowed(&set, second, 0) == 1);
+    assert(stream_connection_mark_video_recovery(&set, second) == 1);
+    assert(stream_connection_mark_video_recovery(&set, second) == 0);
+    assert(stream_connection_video_frame_allowed(&set, second, 0) == 0);
+
+    assert(stream_connection_subscribe_video(&set, first));
+    assert(stream_connection_video_subscriber_count(&set) == 2);
+    stream_connection_unsubscribe_video(&set, first);
+    assert(stream_connection_video_subscriber_count(&set) == 1);
 
     stream_connection_set_down_audio(&set, first, 1);
     stream_connection_set_down_audio(&set, second, 0);
     assert(stream_connection_accepts_down_audio(&set, first));
     assert(!stream_connection_accepts_down_audio(&set, second));
+    assert(stream_connection_has_down_media(&set));
 
     stream_connection_unsubscribe_audio(&set, first);
+    assert(!stream_connection_audio_frame_allowed(&set, first));
     assert(stream_connection_snapshot_audio(
                &set, handles, STREAM_MAX_CONNECTIONS) == 0);
     assert(stream_connection_snapshot_video(
@@ -535,6 +554,7 @@ static void test_stream_connection_set_isolates_multiple_viewers(void) {
     assert(stream_connection_remove(&set, first));
     assert(stream_connection_active_count(&set) == 1);
     assert(stream_connection_is_active(&set, second));
+    assert(!stream_connection_has_down_media(&set));
 
     for (uintptr_t value = 0x300;
         value < 0x300 + STREAM_MAX_CONNECTIONS - 1; ++value)
@@ -542,6 +562,65 @@ static void test_stream_connection_set_isolates_multiple_viewers(void) {
             &set, (tirtc_conn_t)(uintptr_t)value));
     assert(!stream_connection_add_pending(
         &set, (tirtc_conn_t)(uintptr_t)0x999));
+}
+
+static void test_stream_media_timeline_realigns_after_idle(void) {
+    StreamMediaTimeline timeline;
+    int audio_started = 0;
+    int video_started = 0;
+    stream_media_timeline_init(&timeline);
+
+    assert(stream_media_timeline_observe(
+        &timeline, 1, 0, 1, 0, &audio_started, &video_started));
+    assert(audio_started);
+    assert(video_started);
+    stream_media_timeline_advance_video(&timeline, 1000.0 / 15.0);
+
+    assert(!stream_media_timeline_observe(
+        &timeline, 1, 0, 0, 300000, &audio_started, &video_started));
+    assert(stream_media_timeline_observe(
+        &timeline, 1, 0, 1, 300000, &audio_started, &video_started));
+    assert(audio_started);
+    assert(video_started);
+    assert(timeline.audio_pts_ms >= 300000.0);
+    assert(timeline.video_pts_ms >= 300000.0);
+
+    stream_media_timeline_init(&timeline);
+    assert(stream_media_timeline_observe(
+        &timeline, 0, 1, 0, 0, &audio_started, &video_started));
+    assert(audio_started);
+    stream_media_timeline_advance_audio(&timeline, 40.0);
+    assert(!stream_media_timeline_observe(
+        &timeline, 0, 0, 0, 300000, &audio_started, &video_started));
+    assert(stream_media_timeline_observe(
+        &timeline, 0, 1, 0, 300000, &audio_started, &video_started));
+    assert(audio_started);
+    assert(timeline.audio_pts_ms >= 300000.0);
+}
+
+static void test_stream_media_timeline_clocks_both_tracks(void) {
+    StreamMediaTimeline timeline;
+    int audio_started = 0;
+    int video_started = 0;
+    stream_media_timeline_init(&timeline);
+
+    /* H5 subscribes video before audio.  Both file readers must still advance
+     * on the shared clock so late audio starts near current video content. */
+    assert(stream_media_timeline_observe(
+        &timeline, 1, 0, 1, 0, &audio_started, &video_started));
+    assert(audio_started && video_started);
+    int video_frames = 0;
+    while (video_frames < 5) {
+        if (stream_media_timeline_next_is_audio(&timeline, 1))
+            stream_media_timeline_advance_audio(&timeline, 40.0);
+        else {
+            stream_media_timeline_advance_video(&timeline, 1000.0 / 15.0);
+            video_frames++;
+        }
+    }
+    double skew = timeline.audio_pts_ms - timeline.video_pts_ms;
+    if (skew < 0.0) skew = -skew;
+    assert(skew <= 1000.0 / 15.0);
 }
 
 static void test_service_discovery_parser(void) {
@@ -1634,6 +1713,8 @@ int main(void) {
     test_ai_start_session_json_declares_codecs();
     test_media_subscription_policy();
     test_stream_connection_set_isolates_multiple_viewers();
+    test_stream_media_timeline_realigns_after_idle();
+    test_stream_media_timeline_clocks_both_tracks();
     test_service_discovery_parser();
     test_fixed_audio_and_mjpeg();
     test_invalid_amr();

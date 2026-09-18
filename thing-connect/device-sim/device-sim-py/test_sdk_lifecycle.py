@@ -196,6 +196,23 @@ class SdkLifecycleTests(unittest.TestCase):
             self.assertTrue(
                 rtc_stream._connections[0x101].send_video_subscribed)
             self.assertTrue(rtc_stream._force_key_frame.is_set())
+
+            rtc_stream._force_key_frame.clear()
+            rtc_stream._connections[0x202] = rtc_stream._StreamConnection(
+                pending=False)
+            result = callbacks.on_subscribe_video(
+                ctypes.c_void_p(0x202), rtc_stream.VIDEO_STREAM_ID)
+            self.assertEqual(result, 0)
+            self.assertFalse(
+                rtc_stream._force_key_frame.is_set(),
+                "第二个观看端不能跳转所有观看端共用的媒体源",
+            )
+            callbacks.on_request_key_frame(
+                ctypes.c_void_p(0x202), rtc_stream.VIDEO_STREAM_ID)
+            self.assertFalse(
+                rtc_stream._force_key_frame.is_set(),
+                "多端时单端关键帧请求不能跳转共享媒体源",
+            )
         finally:
             rtc_stream._connections.clear()
             rtc_stream._connections.update(old_connections)
@@ -458,6 +475,343 @@ class SdkLifecycleTests(unittest.TestCase):
             )
             source.next_audio_packet.assert_called_once_with()
         finally:
+            rtc_stream._connections.clear()
+            rtc_stream._connections.update(old_connections)
+            if old_stop_requested:
+                rtc_stream._stop_event.set()
+            else:
+                rtc_stream._stop_event.clear()
+
+    def test_stream_worker_realigns_after_all_viewers_stop_and_resume(self):
+        old_connections = rtc_stream._connections.copy()
+        old_stop_requested = rtc_stream._stop_event.is_set()
+        source = mock.Mock()
+        source.has_video.return_value = True
+        source.next_audio_packet.return_value = (b"audio", 40)
+        source.get_audio_format.return_value = mock.Mock(media=1, flags=0)
+        source.next_video.return_value = (b"frame", False)
+        source.get_video_format.return_value = mock.Mock(media=1)
+        now_ms = 0
+        phase = "initial"
+        sends_after_resume = 0
+
+        rtc_stream._connections.clear()
+        rtc_stream._connections[0x101] = rtc_stream._StreamConnection(
+            pending=False, send_video_subscribed=True)
+        rtc_stream._stop_event.clear()
+
+        def current_time():
+            return now_ms
+
+        def sleep(_seconds):
+            nonlocal now_ms, phase
+            if phase == "initial":
+                rtc_stream._connections[0x101].send_video_subscribed = False
+                now_ms = 300_000
+                phase = "idle"
+            elif phase == "idle":
+                rtc_stream._connections[0x101].send_video_subscribed = True
+                phase = "resumed"
+            else:
+                rtc_stream._stop_event.set()
+
+        def send_video(_hconn, _frame, _data):
+            nonlocal sends_after_resume
+            if phase == "resumed":
+                sends_after_resume += 1
+                if sends_after_resume >= 2:
+                    rtc_stream._stop_event.set()
+            return 0
+
+        try:
+            with mock.patch.object(
+                    rtc_stream, "_now_ms", side_effect=current_time), \
+                    mock.patch.object(
+                        rtc_stream.time, "sleep", side_effect=sleep), \
+                    mock.patch.object(
+                        rtc_stream.sdk, "TiRtcSendVideoStream",
+                        side_effect=send_video):
+                rtc_stream._stream_worker(source)
+            self.assertEqual(
+                sends_after_resume,
+                1,
+                "恢复订阅后必须先恢复实时节奏，不能补发空闲期帧",
+            )
+        finally:
+            rtc_stream._connections.clear()
+            rtc_stream._connections.update(old_connections)
+            if old_stop_requested:
+                rtc_stream._stop_event.set()
+            else:
+                rtc_stream._stop_event.clear()
+
+    def test_stream_worker_keeps_media_content_aligned_when_audio_subscribes_late(self):
+        old_connections = rtc_stream._connections.copy()
+        old_stop_requested = rtc_stream._stop_event.is_set()
+        old_key_requested = rtc_stream._force_key_frame.is_set()
+        source = mock.Mock()
+        source.has_video.return_value = True
+        source.get_audio_format.return_value = mock.Mock(media=1, flags=0)
+        source.get_video_format.return_value = mock.Mock(media=1)
+        audio_index = 0
+        video_index = 0
+        last_video_sent = -1
+        first_audio_sent = None
+        now_ms = 0.0
+
+        rtc_stream._connections.clear()
+        rtc_stream._connections[0x101] = rtc_stream._StreamConnection(
+            pending=False, send_video_subscribed=True)
+        rtc_stream._stop_event.clear()
+        rtc_stream._force_key_frame.clear()
+
+        def next_audio_packet():
+            nonlocal audio_index
+            payload = bytes([audio_index])
+            audio_index += 1
+            return payload, 40.0
+
+        def next_video(force_key=False):
+            nonlocal video_index
+            payload = bytes([video_index])
+            is_key = video_index == 0 or (force_key and video_index == 0)
+            video_index += 1
+            return payload, is_key
+
+        def current_time():
+            return int(now_ms)
+
+        def sleep(seconds):
+            nonlocal now_ms
+            now_ms += seconds * 1000.0
+
+        def send_video(_hconn, _frame, data):
+            nonlocal last_video_sent
+            last_video_sent = bytes(data)[0]
+            if last_video_sent == 4:
+                with rtc_stream._state_lock:
+                    rtc_stream._connections[0x101].send_audio_subscribed = True
+            return 0
+
+        def send_audio(_hconn, _frame, data):
+            nonlocal first_audio_sent
+            first_audio_sent = bytes(data)[0]
+            rtc_stream._stop_event.set()
+            return 0
+
+        source.next_audio_packet.side_effect = next_audio_packet
+        source.next_video.side_effect = next_video
+        try:
+            with mock.patch.object(
+                    rtc_stream, "_now_ms", side_effect=current_time), \
+                    mock.patch.object(
+                        rtc_stream.time, "sleep", side_effect=sleep), \
+                    mock.patch.object(
+                        rtc_stream.sdk, "TiRtcSendVideoStream",
+                        side_effect=send_video), \
+                    mock.patch.object(
+                        rtc_stream.sdk, "TiRtcSendAudioStream",
+                        side_effect=send_audio):
+                rtc_stream._stream_worker(source)
+
+            self.assertIsNotNone(first_audio_sent)
+            audio_content_ms = first_audio_sent * 40.0
+            video_content_ms = last_video_sent * rtc_stream.VIDEO_FRAME_MS
+            self.assertLessEqual(
+                abs(audio_content_ms - video_content_ms),
+                rtc_stream.VIDEO_FRAME_MS,
+                "晚订阅音频必须从当前视频内容附近开始，不能从旧位置播放",
+            )
+        finally:
+            rtc_stream._connections.clear()
+            rtc_stream._connections.update(old_connections)
+            if old_stop_requested:
+                rtc_stream._stop_event.set()
+            else:
+                rtc_stream._stop_event.clear()
+            if old_key_requested:
+                rtc_stream._force_key_frame.set()
+            else:
+                rtc_stream._force_key_frame.clear()
+
+    def test_stream_busy_viewer_waits_for_keyframe_without_seek_loop(self):
+        old_connections = rtc_stream._connections.copy()
+        old_stop_requested = rtc_stream._stop_event.is_set()
+        old_key_requested = rtc_stream._force_key_frame.is_set()
+        source = mock.Mock()
+        source.has_video.return_value = True
+        source.next_audio_packet.return_value = (b"audio", 40)
+        source.get_audio_format.return_value = mock.Mock(media=1, flags=0)
+        source.get_video_format.return_value = mock.Mock(media=1)
+        force_key_values = []
+        now_ms = -100
+
+        rtc_stream._connections.clear()
+        rtc_stream._connections[0x101] = rtc_stream._StreamConnection(
+            pending=False,
+            send_video_subscribed=True,
+            video_waiting_for_key_frame=True,
+        )
+        rtc_stream._stop_event.clear()
+        rtc_stream._force_key_frame.clear()
+
+        def current_time():
+            nonlocal now_ms
+            now_ms += 100
+            return now_ms
+
+        def next_video(force_key=False):
+            force_key_values.append(force_key)
+            if len(force_key_values) == 2:
+                rtc_stream._stop_event.set()
+            return b"frame", force_key
+
+        source.next_video.side_effect = next_video
+        try:
+            with mock.patch.object(
+                    rtc_stream, "_now_ms", side_effect=current_time), \
+                    mock.patch.object(
+                        rtc_stream.sdk, "TiRtcSendVideoStream",
+                        return_value=rtc_stream.TIRTC_E_BUSY):
+                rtc_stream._stream_worker(source)
+            self.assertEqual(force_key_values, [True, False])
+        finally:
+            rtc_stream._connections.clear()
+            rtc_stream._connections.update(old_connections)
+            if old_stop_requested:
+                rtc_stream._stop_event.set()
+            else:
+                rtc_stream._stop_event.clear()
+            if old_key_requested:
+                rtc_stream._force_key_frame.set()
+            else:
+                rtc_stream._force_key_frame.clear()
+
+    def test_stream_abnormal_disconnect_flushes_last_talkback_playback(self):
+        callbacks = rtc_stream.runtime_callbacks()
+        old_connections = rtc_stream._connections.copy()
+        old_speaker = rtc_stream._talkback_speaker
+        rtc_stream._connections.clear()
+        rtc_stream._connections[0x101] = rtc_stream._StreamConnection(
+            pending=False, talkback_subscribed=True)
+        speaker = mock.Mock()
+        rtc_stream._talkback_speaker = speaker
+
+        def run_deferred(callback, *args, **_kwargs):
+            callback(*args)
+            return True
+
+        try:
+            with mock.patch.object(
+                    rtc_stream._callback_guard, "defer",
+                    side_effect=run_deferred):
+                callbacks.on_disconnected(0x101)
+            speaker.flush.assert_called_once_with()
+        finally:
+            rtc_stream._talkback_speaker = old_speaker
+            rtc_stream._connections.clear()
+            rtc_stream._connections.update(old_connections)
+
+    def test_stream_disconnect_keeps_talkback_for_surviving_viewer(self):
+        callbacks = rtc_stream.runtime_callbacks()
+        old_connections = rtc_stream._connections.copy()
+        old_speaker = rtc_stream._talkback_speaker
+        rtc_stream._connections.clear()
+        rtc_stream._connections[0x101] = rtc_stream._StreamConnection(
+            pending=False, talkback_subscribed=True)
+        rtc_stream._connections[0x202] = rtc_stream._StreamConnection(
+            pending=False, talkback_subscribed=True)
+        speaker = mock.Mock()
+        rtc_stream._talkback_speaker = speaker
+
+        def run_deferred(callback, *args, **_kwargs):
+            callback(*args)
+            return True
+
+        try:
+            with mock.patch.object(
+                    rtc_stream._callback_guard, "defer",
+                    side_effect=run_deferred):
+                callbacks.on_disconnected(0x101)
+            speaker.flush.assert_not_called()
+            self.assertIn(0x202, rtc_stream._connections)
+        finally:
+            rtc_stream._talkback_speaker = old_speaker
+            rtc_stream._connections.clear()
+            rtc_stream._connections.update(old_connections)
+
+    def test_stream_worker_does_not_send_to_viewer_removed_after_snapshot(self):
+        old_connections = rtc_stream._connections.copy()
+        old_stop_requested = rtc_stream._stop_event.is_set()
+        source = mock.Mock()
+        source.has_video.return_value = False
+        source.get_audio_format.return_value = mock.Mock(media=1, flags=0)
+        rtc_stream._connections.clear()
+        rtc_stream._connections[0x101] = rtc_stream._StreamConnection(
+            pending=False, send_audio_subscribed=True)
+        rtc_stream._stop_event.clear()
+
+        def next_audio_packet():
+            with rtc_stream._state_lock:
+                rtc_stream._connections.pop(0x101, None)
+            rtc_stream._stop_event.set()
+            return b"audio", 40
+
+        source.next_audio_packet.side_effect = next_audio_packet
+        try:
+            with mock.patch.object(
+                    rtc_stream.sdk, "TiRtcSendAudioStream") as send_audio:
+                rtc_stream._stream_worker(source)
+            send_audio.assert_not_called()
+        finally:
+            rtc_stream._connections.clear()
+            rtc_stream._connections.update(old_connections)
+            if old_stop_requested:
+                rtc_stream._stop_event.set()
+            else:
+                rtc_stream._stop_event.clear()
+
+    def test_stream_fatal_send_flushes_last_talkback_playback(self):
+        old_connections = rtc_stream._connections.copy()
+        old_stop_requested = rtc_stream._stop_event.is_set()
+        old_speaker = rtc_stream._talkback_speaker
+        source = mock.Mock()
+        source.has_video.return_value = False
+        source.get_audio_format.return_value = mock.Mock(media=1, flags=0)
+        source.next_audio_packet.return_value = (b"audio", 40)
+        rtc_stream._connections.clear()
+        rtc_stream._connections[0x101] = rtc_stream._StreamConnection(
+            pending=False,
+            send_audio_subscribed=True,
+            talkback_subscribed=True,
+        )
+        rtc_stream._stop_event.clear()
+        speaker = mock.Mock()
+        rtc_stream._talkback_speaker = speaker
+
+        def run_deferred(callback, *args, **_kwargs):
+            callback(*args)
+            return True
+
+        def disconnect(_hconn):
+            rtc_stream._stop_event.set()
+            return 0
+
+        try:
+            with mock.patch.object(
+                    rtc_stream.sdk, "TiRtcSendAudioStream",
+                    return_value=next(iter(rtc_stream.CONN_FATAL_ERRORS))), \
+                    mock.patch.object(
+                        rtc_stream.sdk, "TiRtcDisconnect",
+                        side_effect=disconnect), \
+                    mock.patch.object(
+                        rtc_stream._callback_guard, "defer",
+                        side_effect=run_deferred):
+                rtc_stream._stream_worker(source)
+            speaker.flush.assert_called_once_with()
+            self.assertNotIn(0x101, rtc_stream._connections)
+        finally:
+            rtc_stream._talkback_speaker = old_speaker
             rtc_stream._connections.clear()
             rtc_stream._connections.update(old_connections)
             if old_stop_requested:

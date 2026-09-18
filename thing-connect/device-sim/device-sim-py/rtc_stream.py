@@ -57,6 +57,7 @@ class _StreamConnection:
     send_video_subscribed: bool = False
     talkback_subscribed: bool = False
     talkback_video_subscribed: bool = False
+    video_waiting_for_key_frame: bool = False
     consecutive_send_failures: int = 0
 
 # ── 模块状态 ──────────────────────────────────────────────────────────────────
@@ -118,7 +119,7 @@ def _close_talkback_playback() -> None:
 
 
 def _open_talkback_file() -> None:
-    if _talkback_recorder is None:
+    if _talkback_recorder is None or _talkback_recorder.is_open:
         return
     path = _talkback_recorder.open()
     _info(f"对讲录音文件已创建: {path}")
@@ -131,6 +132,32 @@ def _close_talkback_file() -> None:
         return
     _talkback_recorder.close()
     _info(f"对讲录音已保存，共 {_talkback_recorder.frame_count} 帧")
+
+
+def _flush_talkback_playback_if_unused() -> None:
+    """Drop stale playback only when no viewer can still send talkback."""
+    with _state_lock:
+        in_use = any(
+            not connection.pending and connection.talkback_subscribed
+            for connection in _connections.values()
+        )
+        if in_use:
+            return
+        speaker = _talkback_speaker
+        if speaker is not None:
+            flush = getattr(speaker, "flush", None)
+            if callable(flush):
+                flush()
+
+
+def _schedule_flush_talkback_if_unused() -> None:
+    try:
+        _callback_guard.defer(
+            _flush_talkback_playback_if_unused,
+            name="stream-talkback-idle",
+        )
+    except RuntimeError:
+        pass
 
 import datetime as _dt
 
@@ -241,6 +268,11 @@ def _activate_connection_after_callback(hconn_val: int) -> None:
                 item.talkback_subscribed
                 for key, item in _connections.items() if key != hconn_val)
             if current:
+                if audio_subscribed and not already_receiving_audio:
+                    speaker = _talkback_speaker
+                    flush = getattr(speaker, "flush", None)
+                    if callable(flush):
+                        flush()
                 connection.talkback_subscribed = audio_subscribed
                 connection.talkback_video_subscribed = video_subscribed
             active_count = sum(not item.pending for item in _connections.values())
@@ -355,8 +387,26 @@ def _stream_worker(source: MediaSource) -> None:
     audio_was_enabled = False
     video_was_enabled = False
 
-    def _send_to_targets(targets, fi, buf, is_video: bool) -> None:
+    def _send_to_targets(targets, fi, buf, is_video: bool,
+                         is_key_frame: bool = False) -> None:
         for hconn_val in targets:
+            with _state_lock:
+                connection = _connections.get(hconn_val)
+                unavailable = connection is None or connection.pending
+                if is_video:
+                    unavailable = (
+                        unavailable or
+                        not connection.send_video_subscribed or
+                        (connection.video_waiting_for_key_frame and
+                         not is_key_frame)
+                    )
+                else:
+                    unavailable = (
+                        unavailable or
+                        not connection.send_audio_subscribed
+                    )
+            if unavailable:
+                continue
             hconn = ctypes.c_void_p(hconn_val)
             rc = (sdk.TiRtcSendVideoStream(hconn, ctypes.byref(fi), buf)
                   if is_video else
@@ -368,13 +418,28 @@ def _stream_worker(source: MediaSource) -> None:
                     continue
                 if rc >= 0:
                     connection.consecutive_send_failures = 0
+                    if is_video and is_key_frame:
+                        connection.video_waiting_for_key_frame = False
                 elif rc not in (
                         TIRTC_E_BUSY, TIRTC_E_INVALID_HANDLE,
                         TIRTC_E_CONN_CLOSED) and not disconnect:
                     connection.consecutive_send_failures += 1
                     disconnect = connection.consecutive_send_failures >= 3
             if rc == TIRTC_E_BUSY and is_video:
-                _request_key_frame()
+                with _state_lock:
+                    connection = _connections.get(hconn_val)
+                    newly_waiting = (
+                        connection is not None and
+                        not connection.video_waiting_for_key_frame
+                    )
+                    if connection is not None:
+                        connection.video_waiting_for_key_frame = True
+                    video_subscribers = sum(
+                        not item.pending and item.send_video_subscribed
+                        for item in _connections.values()
+                    )
+                if newly_waiting and video_subscribers == 1:
+                    _request_key_frame()
             elif rc < 0 and rc not in (
                     TIRTC_E_BUSY, TIRTC_E_INVALID_HANDLE,
                     TIRTC_E_CONN_CLOSED) and not disconnect:
@@ -387,6 +452,7 @@ def _stream_worker(source: MediaSource) -> None:
                 _warn(f"单个实时流连接发送失败，断开 hconn={hconn_val:#x}")
                 with _state_lock:
                     _connections.pop(hconn_val, None)
+                _schedule_flush_talkback_if_unused()
                 sdk.TiRtcDisconnect(hconn)
 
     def _send_audio(targets) -> bool:
@@ -431,7 +497,7 @@ def _stream_worker(source: MediaSource) -> None:
         fi.length    = len(frame_data)
 
         buf = (ctypes.c_uint8 * len(frame_data)).from_buffer_copy(frame_data)
-        _send_to_targets(targets, fi, buf, True)
+        _send_to_targets(targets, fi, buf, True, is_key)
         first_video = False
         video_pts_ms += VIDEO_FRAME_MS
         return True
@@ -451,30 +517,40 @@ def _stream_worker(source: MediaSource) -> None:
                 )
             audio_enabled = bool(audio_targets)
             video_enabled = bool(video_targets)
-            if not audio_enabled and not video_enabled:
+            media_active = audio_enabled or video_enabled
+            if not media_active:
+                # Preserve transition detection across a zero-subscriber gap.
+                # Otherwise a later viewer inherits stale PTS and the worker
+                # tries to catch up the whole idle interval at full speed.
+                audio_was_enabled = False
+                video_was_enabled = False
                 time.sleep(0.01)
                 continue
+            # Keep both source read positions on one media clock while either
+            # track is being viewed.  H5 commonly subscribes video first and
+            # audio later; pausing the unrequested reader would make its
+            # content start behind the already-playing track even if PTS match.
+            audio_clock_enabled = True
+            video_clock_enabled = has_video
             elapsed = _now_ms() - wall_start_ms
-            if audio_enabled and not audio_was_enabled:
+            if audio_clock_enabled and not audio_was_enabled:
                 audio_pts_ms = max(audio_pts_ms, elapsed)
-            if video_enabled and not video_was_enabled:
+            if video_clock_enabled and not video_was_enabled:
                 video_pts_ms = max(video_pts_ms, float(elapsed))
                 first_video = True
                 _request_key_frame()
-            audio_was_enabled = audio_enabled
-            video_was_enabled = video_enabled
+            audio_was_enabled = audio_clock_enabled
+            video_was_enabled = video_clock_enabled
             target_pts = (
                 min(audio_pts_ms, video_pts_ms)
-                if audio_enabled and video_enabled
-                else audio_pts_ms if audio_enabled else video_pts_ms
+                if video_clock_enabled else audio_pts_ms
             )
             wait_ms    = target_pts - elapsed
             if wait_ms > 2:
                 time.sleep(wait_ms / 1000.0)
                 continue
 
-            if audio_enabled and (
-                    not video_enabled or audio_pts_ms <= video_pts_ms):
+            if not video_clock_enabled or audio_pts_ms <= video_pts_ms:
                 if not _send_audio(audio_targets):
                     break
             else:
@@ -550,6 +626,7 @@ def _build_callbacks() -> TIRTCCALLBACKS:
         _err(f"连接错误 hconn={hconn_val:#x}: {sdk.TiRtcGetErrorStr(error).decode()}")
         with _state_lock:
             _connections.pop(hconn_val, None)
+        _schedule_flush_talkback_if_unused()
         _schedule_disconnect_after_callback(hconn_val)
 
     def on_disconnected(hconn):
@@ -557,6 +634,7 @@ def _build_callbacks() -> TIRTCCALLBACKS:
         hconn_val = ctypes.cast(hconn, ctypes.c_void_p).value
         with _state_lock:
             _connections.pop(hconn_val, None)
+        _schedule_flush_talkback_if_unused()
 
     def on_audio(hconn, pFi, data):
         if not data:
@@ -621,7 +699,14 @@ def _build_callbacks() -> TIRTCCALLBACKS:
         with _state_lock:
             connection = _connections.get(hconn_val)
             accepted = connection is not None and not connection.pending
-        if accepted and stream_id == VIDEO_STREAM_ID:
+            if accepted and stream_id == VIDEO_STREAM_ID:
+                connection.video_waiting_for_key_frame = True
+            video_subscribers = sum(
+                not item.pending and item.send_video_subscribed
+                for item in _connections.values()
+            )
+        if (accepted and stream_id == VIDEO_STREAM_ID and
+                video_subscribers == 1):
             _request_key_frame()
 
     def on_subscribe_video(hconn, stream_id):
@@ -630,9 +715,14 @@ def _build_callbacks() -> TIRTCCALLBACKS:
         with _state_lock:
             connection = _connections.get(hconn_val)
             accepted = stream_id == VIDEO_STREAM_ID and connection is not None
+            media_was_active = any(
+                item.send_audio_subscribed or item.send_video_subscribed
+                for item in _connections.values()
+            )
             if accepted:
                 connection.send_video_subscribed = True
-        if accepted:
+                connection.video_waiting_for_key_frame = True
+        if accepted and not media_was_active:
             # H5 attaches/subscribes only after connect() resolves, so the
             # IDR sent at connection acceptance may already be gone.
             _request_key_frame()

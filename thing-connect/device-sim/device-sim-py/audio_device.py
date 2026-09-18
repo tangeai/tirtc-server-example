@@ -522,6 +522,14 @@ class SpeakerPlayback:
             except queue.Full:
                 pass
 
+    def flush(self):
+        """Drop queued audio after the last remote talkback sender leaves."""
+        while True:
+            try:
+                self._queue.get_nowait()
+            except queue.Empty:
+                break
+
     def close(self):
         self._stop_event.set()
         try:
