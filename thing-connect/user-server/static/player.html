@@ -123,9 +123,23 @@ if (!jwtToken) window.MiniProgramPage.requireLogin();
 const params   = new URLSearchParams(location.search);
 const deviceID = params.get('device_id') || '';
 
+const LEGACY_STREAM_IDS = Object.freeze({
+  upAudio: 10,
+  upVideo: 11,
+  downAudio: 14,
+});
+
 function streamId(profile, key, fallback) {
   const value = profile?.[key];
   return Number.isInteger(value) && value >= 0 && value <= 15 ? value : fallback;
+}
+
+function resolveStreamIds(profile) {
+  return {
+    upAudio: streamId(profile, 'up_audio_streamid', LEGACY_STREAM_IDS.upAudio),
+    upVideo: streamId(profile, 'up_video_streamid', LEGACY_STREAM_IDS.upVideo),
+    downAudio: streamId(profile, 'down_audio_streamid', LEGACY_STREAM_IDS.downAudio),
+  };
 }
 
 // ── Page title ────────────────────────────────────────────────────────────
@@ -159,7 +173,7 @@ async function fetchRtcToken() {
     rtcToken: d.data.token,
     appId: d.data.app_id,
     endpoint: d.data.endpoint,
-    streamProfile: d.data.profiles ? d.data.profiles.stream : null,
+    streamProfile: d.data.profiles?.stream ?? null,
   };
 }
 
@@ -250,9 +264,11 @@ async function start() {
     const { rtcToken, appId, streamProfile } = await fetchRtcToken();
     if (attempt !== generation) return;
     applyVideoPresentation(streamProfile);
-    const upAudioStreamId = streamId(streamProfile, 'up_audio_streamid', 10);
-    const upVideoStreamId = streamId(streamProfile, 'up_video_streamid', 11);
-    const downAudioStreamId = streamId(streamProfile, 'down_audio_streamid', 14);
+    const {
+      upAudio: upAudioStreamId,
+      upVideo: upVideoStreamId,
+      downAudio: downAudioStreamId,
+    } = resolveStreamIds(streamProfile);
     configuredAudioStreamId = upAudioStreamId;
 
     TiRtc.initialize(TiRtcInitOptions({ appId:appId }));

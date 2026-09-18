@@ -8,7 +8,7 @@ const html = fs.readFileSync(path.join(__dirname, '../static/player.html'), 'utf
 const script = html.match(/<script type="module">([\s\S]*?)<\/script>/)[1]
   .replace(/^import .*;$/m, '');
 
-async function connectWithProfile(profile) {
+async function connectWithProfiles(profiles) {
   const calls = {};
   const elements = new Map();
   const output = () => ({ attach() {}, detach() {} });
@@ -27,7 +27,7 @@ async function connectWithProfile(profile) {
     URLSearchParams, AbortController,
     setTimeout() { return 1; }, clearTimeout() {},
     fetch: async () => ({ json: async () => ({ code: 200, data: {
-      token: 'rtc-token', app_id: 'app', profiles: profile && { stream: profile },
+      token: 'rtc-token', app_id: 'app', ...(profiles === undefined ? {} : { profiles }),
     } }) }),
     TiRtc: { initialize() {}, async videoOutputReady() {} },
     TiRtcInitOptions: options => options,
@@ -53,6 +53,10 @@ async function connectWithProfile(profile) {
   return calls;
 }
 
+function connectWithProfile(profile) {
+  return connectWithProfiles(profile === undefined ? undefined : { stream: profile });
+}
+
 test('player subscribes to device streams and sends to its downlink, preserving zero', async () => {
   assert.deepEqual(await connectWithProfile({
     up_audio_streamid: 0, up_video_streamid: 7,
@@ -61,10 +65,17 @@ test('player subscribes to device streams and sends to its downlink, preserving 
 });
 
 test('old devices and invalid stream IDs retain existing player defaults', async () => {
-  for (const profile of [undefined, {}, {
-    up_audio_streamid: '0', up_video_streamid: 16, down_audio_streamid: -1,
-  }]) {
-    assert.deepEqual(await connectWithProfile(profile), {
+  const legacyResponses = [
+    undefined,
+    {},
+    { stream: null },
+    { stream: { aspect_ratio: '4:3' } },
+    { stream: {
+      up_audio_streamid: '0', up_video_streamid: 16, down_audio_streamid: -1,
+    } },
+  ];
+  for (const profiles of legacyResponses) {
+    assert.deepEqual(await connectWithProfiles(profiles), {
       audioOutput: 10, videoOutput: 11, audioInput: 14, subscribeAudio: 10, subscribeVideo: 11,
     });
   }
