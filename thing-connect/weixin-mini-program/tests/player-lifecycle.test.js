@@ -74,18 +74,34 @@ test('离开页面后迟到的 token 响应不能重新建立媒体连接', asyn
   assert.equal(p.calls.connects, 0)
 })
 
-test('连接中的页面隐藏会释放会话，迟到连接成功不恢复播放', async () => {
+test('连接中的页面隐藏不会释放会话，连接完成后继续播放', async () => {
   const ready = deferred()
   const p = player({ connectionReady: ready.promise })
   await tick()
   assert.equal(p.calls.connects, 1)
   p.document.hidden = true
-  p.listeners.visibilitychange()
+  if (p.listeners.visibilitychange) p.listeners.visibilitychange()
   ready.resolve()
   await tick()
-  assert.equal(p.calls.disconnects, 1)
-  assert.equal(p.calls.attaches, 0)
-  assert.match(p.elements.get('player-message').textContent, /暂停/)
+  assert.equal(p.calls.disconnects, 0)
+  assert.equal(p.calls.attaches, 1)
+  assert.deepEqual(p.calls.subscribeVideo, [11])
+})
+
+test('页面隐藏只停止对讲，不退订或断开实时查看', async () => {
+  const p = player()
+  await tick()
+  p.window.startTalk()
+  await tick()
+  assert.equal(p.calls.talks, 1)
+
+  p.document.hidden = true
+  p.listeners.visibilitychange()
+
+  assert.ok(p.calls.stops > 0)
+  assert.equal(p.calls.disconnects, 0)
+  assert.deepEqual(p.calls.unsubscribeAudio, [])
+  assert.deepEqual(p.calls.unsubscribeVideo, [])
 })
 
 test('麦克风权限迟到返回时，已松开的按键不能继续上行音频', async () => {

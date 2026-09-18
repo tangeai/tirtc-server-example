@@ -365,7 +365,10 @@ window.stopTalk = function(e) {
   $('talk-btn').classList.remove('active');
   $('talk-dot').style.background = 'rgba(255,255,255,0.3)';
   $('talk-label').textContent = '按住说话';
-  if (audioInput) audioInput.stop();
+  if (audioInput) {
+    const stopped = audioInput.stop();
+    if (stopped && typeof stopped.catch === 'function') void stopped.catch(() => {});
+  }
 };
 
 function cleanup() {
@@ -387,7 +390,6 @@ function cleanup() {
   if (audioOutput) audioOutput.detach();
   if (videoOutput) videoOutput.detach();
   if (audioInput) {
-    audioInput.stop();
     void audioInput.detach().catch(() => {});
   }
   if (connection) connection.disconnect();
@@ -399,10 +401,7 @@ $('player-retry').onclick = start;
 window.addEventListener('pagehide', cleanup);
 window.addEventListener('beforeunload', cleanup);
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) {
-    cleanup();
-    showFailure('播放已暂停，点击重新连接继续查看');
-  }
+  if (document.hidden) window.stopTalk();
 });
 
 if (deviceID) start();
