@@ -100,14 +100,18 @@ test('麦克风权限迟到返回时，已松开的按键不能继续上行音�
   assert.ok(p.calls.stops > 0)
 })
 
-test('静音取消音频订阅，恢复声音重新订阅，离开页面取消剩余订阅', async () => {
+test('默认静音，用户点击后才挂载并订阅音频', async () => {
   const p = player()
   await tick()
-  assert.deepEqual(p.calls.subscribeAudio, [10])
+  assert.deepEqual(p.calls.subscribeAudio, [])
   assert.deepEqual(p.calls.subscribeVideo, [11])
 
   p.window.toggleMute()
+  assert.deepEqual(p.calls.subscribeAudio, [10])
+
+  p.window.toggleMute()
   assert.deepEqual(p.calls.unsubscribeAudio, [10])
+
   p.window.toggleMute()
   assert.deepEqual(p.calls.subscribeAudio, [10, 10])
 

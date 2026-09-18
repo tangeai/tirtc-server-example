@@ -50,6 +50,7 @@ async function connectWithProfiles(profiles) {
   };
   vm.runInNewContext(script, context);
   await new Promise(resolve => setImmediate(resolve));
+  context.window.toggleMute();
   return calls;
 }
 
