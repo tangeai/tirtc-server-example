@@ -19,7 +19,7 @@ PRODUCT_ADAPTER_OBJ ?=
 # The repository keeps SDK releases under <platform>/<version>.  Allow the
 # target platform/version to be selected for native or cross compilation.
 SDK_PLATFORM ?= linux-x86_64
-SDK_VERSION  ?= 2.3.0
+SDK_VERSION  ?= 2.5.0
 SDK_DIR      ?= ../sdk/$(SDK_PLATFORM)/$(SDK_VERSION)
 SDK_INC := -I$(SDK_DIR)/include
 SDK_LIB := -L$(SDK_DIR)/lib -lTiRTC

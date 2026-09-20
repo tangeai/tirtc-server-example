@@ -136,12 +136,14 @@ static const char *_test_sdk_version(void) {
     return "test-sdk";
 }
 
+#if TIRTC_VERSION_MAJOR == 2 && TIRTC_VERSION_MINOR < 5
 static void _test_sdk_log_config(int output_to_console, const char *path,
                                  uint32_t size) {
     (void)output_to_console;
     (void)path;
     (void)size;
 }
+#endif
 
 static void _test_sdk_log_level(int level) {
     (void)level;
@@ -158,7 +160,9 @@ static void _test_sdk_log_callback(TIRTCLOGCALLBACK callback) {
 #define TiRtcUninit         _test_sdk_uninit
 #define TiRtcGetErrorStr    _test_sdk_error_string
 #define TiRtcGetVersion     _test_sdk_version
+#if TIRTC_VERSION_MAJOR == 2 && TIRTC_VERSION_MINOR < 5
 #define TiRtcLogConfig      _test_sdk_log_config
+#endif
 #define TiRtcLogSetLevel    _test_sdk_log_level
 #define TiRtcLogSetCallback _test_sdk_log_callback
 #endif
@@ -455,8 +459,7 @@ static void _build_sdk_callbacks(void) {
     callbacks->on_unsubscribe_video = _on_unsubscribe_video;
     callbacks->on_subscribe_audio = _on_subscribe_audio;
     callbacks->on_unsubscribe_audio = _on_unsubscribe_audio;
-    /* File-backed media has no live encoder to retune. TiRTC 2.3.0 requires
-     * this appended callback field to be present, but permits a NULL value. */
+    /* File-backed media has no live encoder to retune. */
     callbacks->on_update_bitrate = NULL;
 }
 
@@ -550,7 +553,9 @@ int tirtc_runtime_start(const char *device_id, const char *secret_key,
     s_runtime.initialized = 1;
     pthread_mutex_unlock(&s_runtime.lock);
 
+#if TIRTC_VERSION_MAJOR == 2 && TIRTC_VERSION_MINOR < 5
     TiRtcLogConfig(0, NULL, 0);
+#endif
     TiRtcLogSetLevel(3);
     if (g_log_level <= LOG_DEBUG) {
         TiRtcLogSetCallback(_sdk_log_cb);

@@ -4,7 +4,7 @@
 
 ## 定位与边界
 
-这个目录只面向 Linux C，不包含真实硬件驱动，也不是适用于所有芯片和操作系统的通用固件。其他芯片或操作系统目录中的代码属于独立移植工程，不是本 Linux C 参考实现的一部分；ESP32-S3 是对该参考架构的独立移植，不能与这里的 Linux 实现混编或混写文档。
+这个目录只面向 Linux C，不包含真实硬件驱动，也不是适用于所有芯片和操作系统的通用固件。其他芯片或操作系统需要独立移植，不能将这里的 Linux 实现直接混编到目标工程。
 
 该实现包含以下能力：
 
@@ -255,7 +255,7 @@ received/<device_id>/ai_<timestamp>.wav   # 仅 alaw/PCM
 
 ## TiRTC SDK 核心 API
 
-SDK API 定义和媒体帧字段以目标平台 SDK 的 [`tiRTC.h`](../sdk/linux-x86_64/2.3.0/include/tirtc/tiRTC.h) 为准。本实现的关键约束是：
+SDK API 定义和媒体帧字段以目标平台 SDK 的 [`tiRTC.h`](../sdk/linux-x86_64/2.5.0/include/tirtc/tiRTC.h) 为准。本实现的关键约束是：
 
 1. `tirtc_runtime` 是 SDK 生命周期和 `TIRTCCALLBACKS` 的唯一所有者。
 2. 仅 `TIRTC_OPT_MAX_SEND_BUFFER` 在 `TiRtcInit` 前设置；初始化成功后设置设备密钥、Client ID 和其他普通选项，再调用一次 `TiRtcStart(device_id, &callbacks)`。

@@ -141,7 +141,7 @@ class TiRtcRuntime:
             with self._lock:
                 self._initialized = True
 
-            sdk.TiRtcLogConfig(0, None, 0)
+            sdk.disable_file_logging()
             sdk.TiRtcLogSetLevel(3)
             if self._log_level <= 10:
                 self._sdk_log_callback = sdk.LogCB(self._on_sdk_log)

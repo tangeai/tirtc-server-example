@@ -4,7 +4,7 @@ ThingConnect 提供设备接入示例，覆盖 **H5 实时预览与对讲、AI �
 
 第一次使用时，建议先按[项目快速体验](../README.md)跑通设备上线、绑定和 H5 出图，再根据产品需要接入其他对讲能力。下面给出最短接入路径和 TiRTC SDK 调用骨架；完整字段、错误码和排查方法可从各节进入对应专题文档查看。
 
-设备端使用 **TiRTC C SDK**（[SDK 头文件](device-sim/sdk/linux-x86_64/2.3.0/include/tirtc/tiRTC.h)），H5 使用 [TiRTC Web SDK](device-h5-live.md#h5-端接入)，微信小程序使用[微信 IoT VoIP](weixin-mini-program/README.md#微信-voip-开发)。设备协议顺序和会话控制可参考 [Linux C 参考实现](device-sim/device-sim-c/README.md)。
+设备端使用 **TiRTC C SDK**（[SDK 头文件](device-sim/sdk/linux-x86_64/2.5.0/include/tirtc/tiRTC.h)），H5 使用 [TiRTC Web SDK](device-h5-live.md#h5-端接入)，微信小程序使用[微信 IoT VoIP](weixin-mini-program/README.md#微信-voip-开发)。设备协议顺序和会话控制可参考 [Linux C 参考实现](device-sim/device-sim-c/README.md)。
 
 接入真实产品时，还需要完成[十项二次开发 TODO](device-porting.md#二次开发-todo)，不能只替换几个系统库。
 
@@ -721,7 +721,7 @@ HTTP 接口的请求和返回字段、成功码、业务错误码及微信回调
 thing-connect/
 ├── device-sim/device-sim-c/  # Linux C 参考实现（文件媒体，不接硬件）
 ├── device-sim/device-sim-py/  # Python 设备模拟器（首次体验用）
-├── device-sim/sdk/<platform>/2.3.0/include/tirtc/tiRTC.h  # TiRTC C SDK 权威头文件
+├── device-sim/sdk/linux-x86_64/2.5.0/include/tirtc/tiRTC.h  # TiRTC C SDK 权威头文件
 ├── device-server/            # 设备身份与 MQTT token
 ├── user-server/              # 用户、绑定、H5 静态页面与 RTC token
 ├── voip-server/              # 微信 IoT VoIP

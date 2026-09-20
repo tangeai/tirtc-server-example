@@ -69,6 +69,25 @@ html {
   gap: 10px;
 }
 
+.site-header .site-language-switch {
+  flex: none;
+  padding: 8px 10px;
+  border: 1px solid #dce6e8;
+  border-radius: 8px;
+  color: #505b61;
+  background: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.site-header .site-language-switch:hover,
+.site-header .site-language-switch:focus-visible {
+  color: #087d89;
+  border-color: #087d89;
+}
+
 .site-header .nav-github {
   display: inline-flex;
   align-items: center;
@@ -135,6 +154,10 @@ html {
 
   .site-header .menu-button {
     display: block;
+    margin-left: 0;
+  }
+
+  .site-header .site-language-switch {
     margin-left: auto;
   }
 

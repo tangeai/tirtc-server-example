@@ -1,6 +1,7 @@
 (() => {
   const fallbackImage = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 220"><rect width="320" height="220" rx="20" fill="#e5f5f6"/><rect x="76" y="40" width="168" height="140" rx="14" fill="#2b929c"/><rect x="102" y="66" width="116" height="72" rx="6" fill="#142329"/><text x="160" y="112" text-anchor="middle" fill="#78d2dc" font-size="24" font-family="Arial">BOARD</text></svg>')}`;
-  const statusNames = { ready: '已适配', adapting: '适配中', planned: '计划中' };
+  const i18n = window.SiteI18n;
+  const statusNames = { ready: 'boards.ready', adapting: 'boards.adapting', planned: 'boards.planned' };
   const statusClass = { ready: 'ready', adapting: 'doing', planned: 'planned' };
   const featured = document.querySelector('#featured-list');
   const list = document.querySelector('#board-list');
@@ -18,14 +19,14 @@
   const image = (board) => {
     const element = document.createElement('img');
     element.src = board.image_url || fallbackImage;
-    element.alt = `${board.name} 产品图`;
+    element.alt = i18n.t('boards.productImage', { name: board.name });
     element.loading = 'lazy';
     element.addEventListener('error', () => { element.src = fallbackImage; }, { once: true });
     return element;
   };
-  const status = (board) => text('span', `status ${statusClass[board.adaptation_status] || 'planned'}`, statusNames[board.adaptation_status] || '计划中');
+  const status = (board) => text('span', `status ${statusClass[board.adaptation_status] || 'planned'}`, i18n.t(statusNames[board.adaptation_status] || 'boards.planned'));
   const detailButton = (board) => {
-    const button = text('button', 'detail', '详情 →');
+    const button = text('button', 'detail', i18n.t('boards.details'));
     button.type = 'button';
     button.addEventListener('click', () => openDetail(board));
     return button;
@@ -65,7 +66,7 @@
   function openDetail(board) {
     const detailImage = document.querySelector('#detail-image');
     detailImage.src = board.image_url || fallbackImage;
-    detailImage.alt = `${board.name} 产品图`;
+    detailImage.alt = i18n.t('boards.productImage', { name: board.name });
     detailImage.onerror = () => { detailImage.src = fallbackImage; };
     document.querySelector('#detail-vendor').textContent = board.vendor;
     document.querySelector('#detail-name').textContent = board.name;
@@ -85,7 +86,7 @@
   }
   function render(data) {
     boards = data.boards || [];
-    document.querySelector('#board-count').textContent = `${boards.length} 款`;
+    document.querySelector('#board-count').textContent = i18n.t('boards.count', { count: boards.length });
     document.querySelector('#empty').hidden = boards.length !== 0;
     featured.replaceChildren(...boards.slice(0, 20).map(featuredCard));
     const more = boards.slice(20);
@@ -114,15 +115,23 @@
   menuButton.addEventListener('click', () => {
     const open = nav.classList.toggle('menu-open');
     menuButton.setAttribute('aria-expanded', String(open));
-    menuButton.setAttribute('aria-label', open ? '关闭导航' : '打开导航');
+    menuButton.setAttribute('aria-label', i18n.t(open ? 'site.menuClose' : 'site.menuOpen'));
   });
   document.querySelectorAll('.nav-links a').forEach((link) => link.addEventListener('click', () => {
     nav.classList.remove('menu-open');
     menuButton.setAttribute('aria-expanded', 'false');
-    menuButton.setAttribute('aria-label', '打开导航');
+    menuButton.setAttribute('aria-label', i18n.t('site.menuOpen'));
   }));
   const loggedIn = Boolean(localStorage.getItem('token'));
   document.querySelectorAll('[data-auth-guest]').forEach((item) => { item.hidden = loggedIn; });
   document.querySelectorAll('[data-auth-user]').forEach((item) => { item.hidden = !loggedIn; });
+  i18n.onChange(() => {
+    menuButton.setAttribute('aria-label', i18n.t(nav.classList.contains('menu-open') ? 'site.menuClose' : 'site.menuOpen'));
+    document.querySelector('#board-count').textContent = i18n.t('boards.count', { count: boards.length });
+    featured.replaceChildren(...boards.slice(0, 20).map(featuredCard));
+    list.replaceChildren(...boards.slice(20).map(boardRow));
+    const detailName = document.querySelector('#detail-name').textContent;
+    if (detailName) document.querySelector('#detail-image').alt = i18n.t('boards.productImage', { name: detailName });
+  });
   load();
 })();

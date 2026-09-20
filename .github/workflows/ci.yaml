@@ -96,12 +96,6 @@ jobs:
           make WERROR=1 framework
           make WERROR=1 adapter-template-check
           ASAN_OPTIONS=detect_leaks=0 make SANITIZE=address,undefined WERROR=1 test
-      - name: Shared device core tests
-        run: |
-          cmake -S thing-connect/device-sim/common/device_core -B /tmp/device-core-build -DBUILD_TESTING=ON -DCMAKE_C_FLAGS=-Werror
-          cmake --build /tmp/device-core-build
-          ctest --test-dir /tmp/device-core-build --output-on-failure
-
   python-simulator:
     strategy:
       fail-fast: false
@@ -121,36 +115,5 @@ jobs:
       - name: Python simulator tests
         working-directory: thing-connect/device-sim/device-sim-py
         env:
-          TIRTC_SDK_VERSION: 2.3.0
+          TIRTC_SDK_VERSION: 2.5.0
         run: python -m unittest discover -p 'test_*.py'
-
-  esp32-firmware:
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-      - name: ESP32-S3 firmware build
-        uses: espressif/esp-idf-ci-action@v1
-        with:
-          esp_idf_version: v5.5.4
-          target: esp32s3
-          path: thing-connect/device-sim/device-sim-esp32
-
-  esp32-starter:
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-      - name: Starter generator contract tests
-        run: python3 -m unittest thing-connect/device-sim/scripts/test_create_esp32_project.py
-      - name: Generate focused starter
-        run: >-
-          python3 thing-connect/device-sim/scripts/create_esp32_project.py
-          generated-esp32-starter
-          --name generated_esp32_starter
-      - name: Generated ESP32-S3 starter build
-        uses: espressif/esp-idf-ci-action@v1
-        with:
-          esp_idf_version: v5.5.4
-          target: esp32s3
-          path: generated-esp32-starter

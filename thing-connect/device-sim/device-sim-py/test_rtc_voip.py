@@ -8,7 +8,7 @@ import time
 import unittest
 from unittest import mock
 
-os.environ.setdefault("TIRTC_SDK_VERSION", "2.3.0")
+os.environ.setdefault("TIRTC_SDK_VERSION", "2.5.0")
 
 import rtc_voip
 

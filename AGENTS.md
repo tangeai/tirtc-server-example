@@ -21,7 +21,7 @@ Go 服务向以下目标依赖方向收敛：
 - SQL、事务、锁和 MySQL 错误转换属于 `internal/store/mysql` adapter。现有 `internal/store` 可承载真正跨域的稳定契约；新的服务私有 port interface 与消费它的业务模块共置，避免形成全局 store 上帝接口。
 - 数据类型优先由所属业务模块拥有；`internal/model` 只保留确实跨模块共享且语义一致的模型。Admin 领域逻辑留在 `internal/admin`，Admin HTTP 层通过其业务模块 interface 和权限检查访问。
 - 业务服务之间不导入彼此的可执行目录，也不直接改写其他服务拥有的数据；通过已有内部 HTTP、MQTT 或持久化 outbox 协作。Admin Server 的管理职责按其权限模型处理。
-- H5、Admin Web、微信小程序、Python/C/ESP32 设备示例都是服务端协议的消费者。服务端契约变化必须搜索并同步检查所有消费者。
+- H5、Admin Web、微信小程序及 Python/Linux C 设备示例都是服务端协议的消费者。服务端契约变化必须搜索并同步检查所有消费者。
 - 设备示例用于展示协议和接入流程，不等于量产实现。修改 Linux C 产品适配层时保留 `DeviceAdapterV1` seam；平台、SDK ABI、资源和会话生命周期不得泄漏到业务协议模块。
 
 ### 渐进收敛标准
@@ -36,7 +36,7 @@ Go 服务向以下目标依赖方向收敛：
 - 配置、动态配置、服务发现、部署或数据库：阅读 `thing-connect/deployment.md`、`thing-connect/admin/admin-server/README.md`、相关 `config.yaml.example`、`thing-connect/internal/config`、`thing-connect/internal/db/migrate.go`、`thing-connect/internal/admin/config_registry.go` 和 `thing-connect/scripts/schema.sql`。
 - 设备上线、MQTT 或 TiRTC 信令：阅读相应 `thing-connect/device-*.md`；涉及业务互斥、资源抢占、迟到回调或会话代次时，阅读 `thing-connect/device-session-model.md` 和 `thing-connect/device-session-arbiter.md`。
 - Admin 产品行为、RBAC 或运维任务：阅读 `thing-connect/admin/admin-server/README.md`、`thing-connect/admin/admin-server/API.md` 和 `thing-connect/internal/admin` 中相邻测试。
-- Python、Linux C 或 ESP32：先读 `thing-connect/device-sim/` 下对应示例目录的 `README.md`。SDK 头文件是 SDK 接口事实源，服务端文档与集成测试是业务协议事实源。
+- Python 或 Linux C：先读 `thing-connect/device-sim/` 下对应示例目录的 `README.md`。SDK 头文件是 SDK 接口事实源，服务端文档与集成测试是业务协议事实源。
 - 构建、依赖或检查命令：以 `.github/workflows/ci.yaml`、`thing-connect/.golangci.yml`、各 `package.json`、`thing-connect/build.sh` 和 `thing-connect/device-sim/device-sim-c/Makefile` 为准。
 
 ## 项目契约与稳定性

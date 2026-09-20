@@ -344,7 +344,7 @@ class TerminalController:
                 char = msvcrt.getwch()
                 if char in ("\r", "\n"):
                     print()
-                    return "".join(chars)
+                    return "".join(chars) + "\n"
                 if char == "\003":
                     stop_event.set()
                     return None

@@ -4,8 +4,8 @@
   <link rel="icon" href="/static/favicon.ico?v=1" type="image/x-icon">
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="探鸽小钛硬件实时音视频开源方案，支持微信 VoIP 呼叫、设备对讲、多人对讲、AI 聊天与 AI 识别。烧录固件联网即可体验音视频能力，设备端、服务端、小程序、Web、APP 全端开源，电脑模拟器免硬件先行验证。">
-  <title>硬件实时音视频｜微信 VoIP 呼叫、设备对讲全端开源方案 | 探鸽小钛</title>
+  <meta name="description" content="探鸽小钛硬件实时音视频开源方案，支持微信 VoIP 呼叫、设备对讲、多人对讲、AI 聊天与 AI 识别。烧录固件联网即可体验音视频能力，设备端、服务端、小程序、Web、APP 全端开源，电脑模拟器免硬件先行验证。" data-i18n-content="home.description">
+  <title data-i18n="home.title">硬件实时音视频｜微信 VoIP 呼叫、设备对讲全端开源方案 | 探鸽小钛</title>
   <script>document.documentElement.classList.add("js");</script>
   <style>
     :root {
@@ -1216,25 +1216,25 @@
     }
   </style>
   <link rel="stylesheet" href="/static/css/brand.css?v=2">
-  <link rel="stylesheet" href="/static/css/site-header.css?v=2">
+  <link rel="stylesheet" href="/static/css/site-header.css?v=3">
 </head>
 <body>
   <header class="site-header">
-    <nav class="nav shell" aria-label="主导航">
-      <a class="brand" href="#top" aria-label="探鸽 · 小钛首页">
+    <nav class="nav shell" aria-label="主导航" data-i18n-aria-label="site.mainNav">
+      <a class="brand" href="#top" aria-label="探鸽 · 小钛首页" data-i18n-aria-label="site.homeLabel">
         <span class="brand-mark" aria-hidden="true"></span>
-        <span>探鸽 · 小钛</span>
+        <span data-i18n="site.brand">探鸽 · 小钛</span>
       </a>
 
       <div class="nav-links" id="nav-links">
-        <a href="#routes">快速入门</a>
-        <a href="#demo">功能演示</a>
-        <a href="/boards">开发板</a>
-        <a href="https://community.tange-ai.com" target="_blank" rel="noreferrer">开放社区</a>
+        <a href="#routes" data-i18n="site.quickStart">快速入门</a>
+        <a href="#demo" data-i18n="site.demos">功能演示</a>
+        <a href="/boards" data-i18n="site.boards">开发板</a>
+        <a href="https://community.tange-ai.com" target="_blank" rel="noreferrer" data-i18n="site.community">开放社区</a>
         <a class="mobile-only" href="https://github.com/tangeai/xiaotai-esp32" target="_blank" rel="noreferrer">GitHub</a>
-        <a class="mobile-only" data-auth-guest href="/login">登录</a>
-        <a class="mobile-only" data-auth-guest href="/register">免费注册</a>
-        <a class="mobile-only" data-auth-user href="/devices" hidden>进入控制台</a>
+        <a class="mobile-only" data-auth-guest href="/login" data-i18n="site.login">登录</a>
+        <a class="mobile-only" data-auth-guest href="/register" data-i18n="site.register">免费注册</a>
+        <a class="mobile-only" data-auth-user href="/devices" hidden data-i18n="site.console">进入控制台</a>
       </div>
 
       <div class="nav-actions">
@@ -1244,12 +1244,13 @@
           </svg>
           GitHub
         </a>
-        <a class="nav-login" data-auth-guest href="/login">登录</a>
-        <a class="console-link" data-auth-guest href="/register">免费注册</a>
-        <a class="console-link" data-auth-user href="/devices" hidden>进入控制台</a>
+        <a class="nav-login" data-auth-guest href="/login" data-i18n="site.login">登录</a>
+        <a class="console-link" data-auth-guest href="/register" data-i18n="site.register">免费注册</a>
+        <a class="console-link" data-auth-user href="/devices" hidden data-i18n="site.console">进入控制台</a>
       </div>
 
-      <button class="menu-button" type="button" aria-label="打开导航" aria-controls="nav-links" aria-expanded="false">
+      <button class="site-language-switch" type="button" data-site-language-toggle aria-label="Switch to English">English</button>
+      <button class="menu-button" type="button" aria-label="打开导航" data-i18n-aria-label="site.menuOpen" aria-controls="nav-links" aria-expanded="false">
         <span></span>
         <span></span>
       </button>
@@ -1260,36 +1261,36 @@
     <section class="hero">
       <div class="hero-grid shell">
         <div class="reveal">
-          <div class="eyebrow"><span class="eyebrow-dot"></span>设备音视频 · 从开发板到应用整套开源</div>
-          <h1>硬件实时音视频开发<br><em>整套开源，快速落地</em></h1>
-          <ul class="hero-features" aria-label="核心功能">
-            <li>实时音视频</li><li>微信 VoIP 呼叫</li><li>设备对讲</li><li>多人对讲</li><li>AI 聊天</li><li>AI 识别</li>
+          <div class="eyebrow"><span class="eyebrow-dot"></span><span data-i18n="home.eyebrow">设备音视频 · 从开发板到应用整套开源</span></div>
+          <h1><span data-i18n="home.heroTitle">硬件实时音视频开发</span><br><em data-i18n="home.heroEmphasis">整套开源，快速落地</em></h1>
+          <ul class="hero-features" aria-label="核心功能" data-i18n-aria-label="home.featuresLabel">
+            <li data-i18n="home.featureLive">实时音视频</li><li data-i18n="home.featureWeChat">微信 VoIP 呼叫</li><li data-i18n="home.featureIntercom">设备对讲</li><li data-i18n="home.featureGroup">多人对讲</li><li data-i18n="home.featureChat">AI 聊天</li><li data-i18n="home.featureRecognition">AI 识别</li>
           </ul>
-          <p class="hero-copy">
+          <p class="hero-copy" data-i18n="home.heroCopy">
             烧录固件、联网绑定后即可体验。支持微信 VoIP 呼叫、设备对讲、AI 聊天等。设备端 / 服务端 / 小程序 / Web/APP 全端开源，直接复用，加速产品落地。
           </p>
           <div class="hero-actions">
-            <a class="button button-primary" href="#routes">选择体验方式 <span class="arrow">→</span></a>
-            <a class="button button-secondary" href="https://github.com/tangeai/xiaotai-esp32" target="_blank" rel="noopener noreferrer">获取开源代码</a>
+            <a class="button button-primary" href="#routes"><span data-i18n="home.chooseRoute">选择体验方式</span> <span class="arrow">→</span></a>
+            <a class="button button-secondary" href="https://github.com/tangeai/xiaotai-esp32" target="_blank" rel="noopener noreferrer" data-i18n="home.getSource">获取开源代码</a>
           </div>
           <div class="hero-note">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
               <path d="M12 3 4 7v5c0 4.6 3.1 7.7 8 9 4.9-1.3 8-4.4 8-9V7l-8-4Z"/>
               <path d="m9 12 2 2 4-4"/>
             </svg>
-            多款开发板兼容，电脑模拟器无需硬件，先行验证功能
+            <span data-i18n="home.heroNote">多款开发板兼容，电脑模拟器无需硬件，先行验证功能</span>
           </div>
           <div class="hero-mirror">
-            <span>GitHub 下载速度较慢？</span>
-            <a href="https://gitee.com/tange-ai/xiaotai-esp32" target="_blank" rel="noreferrer">使用 Gitee 国内镜像</a>
-            <small>（同步略有延迟）</small>
+            <span data-i18n="home.githubSlow">GitHub 下载速度较慢？</span>
+            <a href="https://gitee.com/tange-ai/xiaotai-esp32" target="_blank" rel="noreferrer" data-i18n="home.gitee">使用 Gitee 国内镜像</a>
+            <small data-i18n="home.mirrorDelay">（同步略有延迟）</small>
           </div>
         </div>
 
-        <div class="terminal reveal" aria-label="模拟器运行效果">
+        <div class="terminal reveal" aria-label="模拟器运行效果" data-i18n-aria-label="home.terminalLabel">
           <div class="terminal-bar">
             <div class="terminal-dots"><i></i><i></i><i></i></div>
-            <div class="terminal-platforms" role="tablist" aria-label="选择运行环境">
+            <div class="terminal-platforms" role="tablist" aria-label="选择运行环境" data-i18n-aria-label="home.platformLabel">
               <button class="terminal-platform active" id="terminal-tab-windows" type="button" role="tab" aria-selected="true" aria-controls="terminal-panel-windows" data-terminal-platform="windows">Windows</button>
               <button class="terminal-platform" id="terminal-tab-ubuntu-python" type="button" role="tab" aria-selected="false" aria-controls="terminal-panel-ubuntu-python" data-terminal-platform="ubuntu-python" tabindex="-1">Ubuntu Python</button>
               <button class="terminal-platform" id="terminal-tab-ubuntu-c" type="button" role="tab" aria-selected="false" aria-controls="terminal-panel-ubuntu-c" data-terminal-platform="ubuntu-c" tabindex="-1">Ubuntu C</button>
@@ -1341,14 +1342,14 @@
               </div>
             </div>
             <div class="terminal-divider"></div>
-            <div class="terminal-line terminal-muted">命令运行成功后，打开体验平台：</div>
+            <div class="terminal-line terminal-muted" data-i18n="home.afterCommands">命令运行成功后，打开体验平台：</div>
             <div class="terminal-line">
               <a class="terminal-link" href="https://xiaotai.chat" target="_blank" rel="noreferrer">https://xiaotai.chat</a>
             </div>
             <div class="live-status">
               <div>
-                <strong>TiRTC 设备模拟器已连接</strong>
-                <small>可开始验证各项音视频功能</small>
+                <strong data-i18n="home.simulatorConnected">TiRTC 设备模拟器已连接</strong>
+                <small data-i18n="home.simulatorReady">可开始验证各项音视频功能</small>
               </div>
               <span class="live-badge"><i></i> ONLINE</span>
             </div>
@@ -1361,40 +1362,40 @@
     <section class="routes" id="routes">
       <div class="shell">
         <div class="section-heading routes-heading reveal">
-          <div class="section-kicker">选择适合你的开始方式</div>
-          <h2><span>开发板直接体验，</span><span>应用按需部署</span></h2>
-          <p>从开发板开始，烧录固件即可体验。也可用电脑模拟，或下载整套源码自行部署。</p>
+          <div class="section-kicker" data-i18n="home.routesKicker">选择适合你的开始方式</div>
+          <h2><span data-i18n="home.routesTitleFirst">开发板直接体验，</span><span data-i18n="home.routesTitleSecond">应用按需部署</span></h2>
+          <p data-i18n="home.routesIntro">从开发板开始，烧录固件即可体验。也可用电脑模拟，或下载整套源码自行部署。</p>
         </div>
 
         <article class="setup-step setup-step--primary reveal">
           <div class="setup-copy">
-            <span class="setup-badge">推荐体验</span>
-            <h3>烧录开发板，直接体验</h3>
-            <p>选择已适配的开发板，烧录对应固件。联网绑定后，即可通过 Web 或微信小程序体验。</p>
+            <span class="setup-badge" data-i18n="home.recommended">推荐体验</span>
+            <h3 data-i18n="home.boardRouteTitle">烧录开发板，直接体验</h3>
+            <p data-i18n="home.boardRouteCopy">选择已适配的开发板，烧录对应固件。联网绑定后，即可通过 Web 或微信小程序体验。</p>
           </div>
-          <a class="setup-link" href="/boards">查看开发板固件 <span aria-hidden="true">→</span></a>
+          <a class="setup-link" href="/boards"><span data-i18n="home.boardFirmware">查看开发板固件</span> <span aria-hidden="true">→</span></a>
         </article>
 
         <div class="setup-alternatives">
           <article class="setup-step reveal">
             <div class="setup-copy">
-              <h3>没有开发板？用电脑体验</h3>
-              <p>运行设备模拟器，体验设备上线、绑定与音视频功能，无需硬件。</p>
+              <h3 data-i18n="home.simRouteTitle">没有开发板？用电脑体验</h3>
+              <p data-i18n="home.simRouteCopy">运行设备模拟器，体验设备上线、绑定与音视频功能，无需硬件。</p>
             </div>
             <ul class="setup-requirements">
               <li>Windows / Ubuntu x86_64</li>
               <li>macOS Apple Silicon</li>
             </ul>
-            <a class="setup-link" href="https://github.com/tangeai/tirtc-server-example/blob/main/thing-connect/device-sim/device-sim-py/README.md" target="_blank" rel="noopener noreferrer">查看模拟器教程 <span aria-hidden="true">→</span></a>
+            <a class="setup-link" href="https://github.com/tangeai/tirtc-server-example/blob/main/thing-connect/device-sim/device-sim-py/README.md" target="_blank" rel="noopener noreferrer"><span data-i18n="home.simGuide">查看模拟器教程</span> <span aria-hidden="true">→</span></a>
           </article>
 
           <article class="setup-step reveal">
             <div class="setup-copy">
-              <h3>复用整套应用，自行部署</h3>
-              <p>下载源码，搭建自己的平台，按业务需要继续开发。</p>
+              <h3 data-i18n="home.deployTitle">复用整套应用，自行部署</h3>
+              <p data-i18n="home.deployCopy">下载源码，搭建自己的平台，按业务需要继续开发。</p>
             </div>
-            <ul class="setup-requirements"><li>服务端、Web 与微信小程序</li><li>设备端源码</li></ul>
-            <a class="setup-link" href="https://github.com/tangeai/tirtc-server-example/blob/main/thing-connect/deployment.md" target="_blank" rel="noopener noreferrer">查看部署指南 <span aria-hidden="true">→</span></a>
+            <ul class="setup-requirements"><li data-i18n="home.deployParts">服务端、Web 与微信小程序</li><li data-i18n="home.deviceSource">设备端源码</li></ul>
+            <a class="setup-link" href="https://github.com/tangeai/tirtc-server-example/blob/main/thing-connect/deployment.md" target="_blank" rel="noopener noreferrer"><span data-i18n="home.deployGuide">查看部署指南</span> <span aria-hidden="true">→</span></a>
           </article>
         </div>
 
@@ -1406,8 +1407,8 @@
         <div class="video-step">
           <div class="video-step-heading reveal">
             <div>
-              <h2 id="demo-title">核心功能演示</h2>
-              <p>通过视频，了解设备连接后的实际体验。</p>
+              <h2 id="demo-title" data-i18n="home.demoTitle">核心功能演示</h2>
+              <p data-i18n="home.demoIntro">通过视频，了解设备连接后的实际体验。</p>
             </div>
           </div>
 
@@ -1416,26 +1417,26 @@
               <div class="video-frame">
                 <video controls preload="metadata" poster="/static/images/video-live-view-poster.jpg">
                   <source src="/download/videos/simulator-live-view.mp4" type="video/mp4">
-                  当前浏览器不支持视频播放。
+                  <span data-i18n="home.videoUnsupported">当前浏览器不支持视频播放。</span>
                 </video>
-                <button class="video-play-button" type="button" aria-label="播放设备远程查看实时音视频演示"><span class="video-play-icon" aria-hidden="true"></span>播放演示</button>
-                <span class="video-label"><i></i> 远程实时查看</span>
+                <button class="video-play-button" type="button" aria-label="播放设备远程查看实时音视频演示" data-i18n-aria-label="home.videoLiveAria"><span class="video-play-icon" aria-hidden="true"></span><span data-i18n="home.playDemo">播放演示</span></button>
+                <span class="video-label"><i></i> <span data-i18n="home.liveLabel">远程实时查看</span></span>
               </div>
-              <h3>远程查看设备的实时音视频</h3>
-              <p>设备通过 TiRTC 推送音视频，可在 Web 体验平台（H5）中实时查看。</p>
+              <h3 data-i18n="home.liveTitle">远程查看设备的实时音视频</h3>
+              <p data-i18n="home.liveCopy">设备通过 TiRTC 推送音视频，可在 Web 体验平台（H5）中实时查看。</p>
             </article>
 
             <article class="video-card reveal">
               <div class="video-frame">
                 <video controls preload="metadata" poster="/static/images/video-ai-intercom-poster.jpg">
                   <source src="/download/videos/ai-call.mp4" type="video/mp4">
-                  当前浏览器不支持视频播放。
+                  <span data-i18n="home.videoUnsupported">当前浏览器不支持视频播放。</span>
                 </video>
-                <button class="video-play-button" type="button" aria-label="播放 AI 对讲、设备互呼和微信小程序呼叫演示"><span class="video-play-icon" aria-hidden="true"></span>播放演示</button>
-                <span class="video-label"><i></i> AI 对讲与设备呼叫</span>
+                <button class="video-play-button" type="button" aria-label="播放 AI 对讲、设备互呼和微信小程序呼叫演示" data-i18n-aria-label="home.videoAiAria"><span class="video-play-icon" aria-hidden="true"></span><span data-i18n="home.playDemo">播放演示</span></button>
+                <span class="video-label"><i></i> <span data-i18n="home.aiLabel">AI 对讲与设备呼叫</span></span>
               </div>
-              <h3>AI 对讲与设备呼叫</h3>
-              <p>支持 AI 语音对讲，可通过 AI 控制一台设备呼叫另一台设备，也可由设备呼叫微信小程序。</p>
+              <h3 data-i18n="home.aiTitle">AI 对讲与设备呼叫</h3>
+              <p data-i18n="home.aiCopy">支持 AI 语音对讲，可通过 AI 控制一台设备呼叫另一台设备，也可由设备呼叫微信小程序。</p>
             </article>
             <!--
             <article class="video-card reveal">
@@ -1473,26 +1474,27 @@
   <footer class="site-footer">
     <div class="footer-contact shell">
       <div>
-        <h2>商务合作与技术咨询</h2>
+        <h2 data-i18n="home.contact">商务合作与技术咨询</h2>
         <a href="mailto:developer@tange.ai">developer@tange.ai</a>
       </div>
       <figure class="footer-miniprogram">
-        <img src="/static/images/wx-xiaotai.png?v=2" width="869" height="320" alt="微信扫码或搜一搜「探鸽小钛」小程序" loading="lazy">
+        <img src="/static/images/wx-xiaotai.png?v=2" width="869" height="320" alt="微信扫码或搜一搜「探鸽小钛」小程序" data-i18n-alt="home.qrAlt" loading="lazy">
       </figure>
     </div>
     <div class="footer-inner shell">
       <div class="footer-legal">
-        <span>© <span id="year"></span> 探鸽 · 小钛</span>
+        <span>© <span id="year"></span> <span data-i18n="site.brand">探鸽 · 小钛</span></span>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">粤ICP备19005025号-19</a>
       </div>
       <div class="footer-links">
-        <a href="https://tange.ai" target="_blank" rel="noopener noreferrer">探鸽智能</a>
-        <a href="https://docs.tange.ai/products/tirtc/" target="_blank" rel="noopener noreferrer">TiRTC SDK 文档</a>
-        <a href="https://community.tange-ai.com" target="_blank" rel="noreferrer">开放社区</a>
+        <a href="https://tange.ai" target="_blank" rel="noopener noreferrer" data-i18n="home.company">探鸽智能</a>
+        <a href="https://docs.tange.ai/products/tirtc/" target="_blank" rel="noopener noreferrer" data-i18n="home.sdkDocs">TiRTC SDK 文档</a>
+        <a href="https://community.tange-ai.com" target="_blank" rel="noreferrer" data-i18n="site.community">开放社区</a>
       </div>
     </div>
   </footer>
 
+  <script src="/static/site-i18n.js?v=1"></script>
   <script>
     const nav = document.querySelector(".nav");
     const menuButton = document.querySelector(".menu-button");
@@ -1500,14 +1502,14 @@
     menuButton.addEventListener("click", () => {
       const isOpen = nav.classList.toggle("menu-open");
       menuButton.setAttribute("aria-expanded", String(isOpen));
-      menuButton.setAttribute("aria-label", isOpen ? "关闭导航" : "打开导航");
+      menuButton.setAttribute("aria-label", SiteI18n.t(isOpen ? "site.menuClose" : "site.menuOpen"));
     });
 
     document.querySelectorAll(".nav-links a").forEach((link) => {
       link.addEventListener("click", () => {
         nav.classList.remove("menu-open");
         menuButton.setAttribute("aria-expanded", "false");
-        menuButton.setAttribute("aria-label", "打开导航");
+        menuButton.setAttribute("aria-label", SiteI18n.t("site.menuOpen"));
       });
     });
 
@@ -1534,9 +1536,9 @@
     function resetCopyButton() {
       if (copyResetTimer) window.clearTimeout(copyResetTimer);
       copyResetTimer = null;
-      copyButtonLabel.textContent = "复制";
+      copyButtonLabel.textContent = SiteI18n.t("home.copy");
       copyButton.classList.remove("copied");
-      copyButton.setAttribute("aria-label", `复制 ${terminalPlatformNames[activeTerminalPlatform]} 运行命令`);
+      copyButton.setAttribute("aria-label", SiteI18n.t("home.copyCommand", { platform: terminalPlatformNames[activeTerminalPlatform] }));
     }
 
     function switchTerminalPlatform(platform) {
@@ -1592,9 +1594,9 @@
         document.execCommand("copy");
         textArea.remove();
       }
-      copyButtonLabel.textContent = "已复制";
+      copyButtonLabel.textContent = SiteI18n.t("home.copied");
       copyButton.classList.add("copied");
-      copyButton.setAttribute("aria-label", "运行命令已复制");
+      copyButton.setAttribute("aria-label", SiteI18n.t("home.commandCopied"));
       copyResetTimer = window.setTimeout(resetCopyButton, 1800);
     });
 
@@ -1630,6 +1632,11 @@
     });
 
     document.getElementById("year").textContent = new Date().getFullYear();
+    SiteI18n.onChange(() => {
+      menuButton.setAttribute("aria-label", SiteI18n.t(nav.classList.contains("menu-open") ? "site.menuClose" : "site.menuOpen"));
+      resetCopyButton();
+    });
+    resetCopyButton();
   </script>
 </body>
 </html>

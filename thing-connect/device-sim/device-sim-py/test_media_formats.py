@@ -3,7 +3,7 @@
 import os
 import unittest
 
-os.environ.setdefault("TIRTC_SDK_VERSION", "2.3.0")
+os.environ.setdefault("TIRTC_SDK_VERSION", "2.5.0")
 
 from media_formats import (
     AUDIO_FORMATS,

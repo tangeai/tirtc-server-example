@@ -46,17 +46,22 @@ def _handler(counts, *, accepts=False):
 
 
 class TiRtcRuntimeTests(unittest.TestCase):
-    def test_callbacks_match_tirtc_2_3_abi(self):
-        self.assertEqual(tirtc_runtime.sdk._SDK_VERSION, "2.3.0")
+    def test_callbacks_match_tirtc_2_5_abi(self):
+        self.assertEqual(tirtc_runtime.sdk._SDK_VERSION, "2.5.0")
         self.assertEqual(
             tirtc_runtime.sdk.TiRtcGetVersion(),
-            b"v2.3.0",
+            b"v2.5.0",
         )
-        self.assertEqual(TIRTCCALLBACKS._fields_[-1][0], "on_update_bitrate")
+        self.assertEqual(TIRTCCALLBACKS._fields_[-1][0], "on_sleep_wakeup_info")
         self.assertEqual(
             ctypes.sizeof(TIRTCCALLBACKS),
-            14 * ctypes.sizeof(ctypes.c_void_p),
+            15 * ctypes.sizeof(ctypes.c_void_p),
         )
+        self.assertFalse(TIRTCCALLBACKS().on_sleep_wakeup_info)
+
+    def test_removed_file_log_api_is_not_called(self):
+        self.assertIsNone(tirtc_runtime.sdk._legacy_log_config)
+        tirtc_runtime.sdk.disable_file_logging()
 
     def test_binding_keeps_sdk_version_compatibility_internal(self):
         with mock.patch.object(
@@ -182,7 +187,7 @@ class TiRtcRuntimeTests(unittest.TestCase):
                 mock.patch.object(
                     tirtc_runtime.sdk, "TiRtcUninit") as uninit, \
                 mock.patch.object(
-                    tirtc_runtime.sdk, "TiRtcLogConfig"), \
+                    tirtc_runtime.sdk, "disable_file_logging"), \
                 mock.patch.object(
                     tirtc_runtime.sdk, "TiRtcLogSetLevel"):
             runtime.set_log_level("error")
@@ -242,7 +247,7 @@ class TiRtcRuntimeTests(unittest.TestCase):
                 mock.patch.object(
                     tirtc_runtime.sdk, "TiRtcUninit") as uninit, \
                 mock.patch.object(
-                    tirtc_runtime.sdk, "TiRtcLogConfig"), \
+                    tirtc_runtime.sdk, "disable_file_logging"), \
                 mock.patch.object(
                     tirtc_runtime.sdk, "TiRtcLogSetLevel"):
             runtime.set_log_level("error")

@@ -91,7 +91,7 @@ C 参考实现提供版本化的 `DeviceAdapterV1`、Linux 默认适配、产品
 ```text
 thing-connect/device-sim/sdk/
 └── <target-platform>/
-    └── 2.3.0/
+    └── 2.5.0/
         ├── include/tirtc/
         └── lib/libTiRTC.so
 ```
@@ -106,7 +106,7 @@ make WERROR=1 \
   PKG_CONFIG=aarch64-linux-gnu-pkg-config \
   SYSROOT=/path/to/target-sysroot \
   SDK_PLATFORM=linux-aarch64 \
-  SDK_VERSION=2.3.0
+  SDK_VERSION=2.5.0
 ```
 
 只构建不含参考 `main` 的静态库：

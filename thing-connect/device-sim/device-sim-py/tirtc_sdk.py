@@ -14,11 +14,11 @@ import os
 import platform
 import sys
 
-DEFAULT_SDK_VERSION = "2.3.0"
+DEFAULT_SDK_VERSION = "2.5.0"
 
 # ── 加载动态库 ────────────────────────────────────────────────────────────
 # 目录布局: sdk/<platform>/<version>/{include,lib}/
-# 默认固定使用 2.3.0；也允许调用方通过 TIRTC_SDK_VERSION 显式覆盖。
+# 默认固定使用 2.5.0；也允许调用方通过 TIRTC_SDK_VERSION 显式覆盖。
 _DIR = os.path.dirname(os.path.abspath(__file__))
 # PyInstaller frozen: 库已解压到 sys._MEIPASS/<platform>/<version>/lib
 _SDK_ROOT = getattr(sys, "_MEIPASS", None) or os.path.join(_DIR, "..", "sdk")
@@ -45,6 +45,15 @@ if _MACHINE not in _EXPECTED_MACHINES[_PLATFORM]:
     )
 
 _SDK_VERSION = os.environ.get("TIRTC_SDK_VERSION", DEFAULT_SDK_VERSION).strip()
+
+
+def _ver_tuple(value):
+    try:
+        return tuple(int(part) for part in value.split("."))
+    except (AttributeError, ValueError):
+        return (0,)
+
+
 _LIB_DIR = os.path.join(_SDK_ROOT, _PLATFORM, _SDK_VERSION, "lib")
 _LIB_PATH = os.path.join(_LIB_DIR, _LIB_FILE)
 if not os.path.isfile(_LIB_PATH):
@@ -120,6 +129,7 @@ OnSubAudioCB    = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_uint8
 OnUnsubAudioCB  = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_uint8)
 OnUpdateBitrateCB = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_uint8,
                                     ctypes.c_uint32)
+OnSleepWakeupInfoCB = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
 ConnectCB       = ctypes.CFUNCTYPE(None, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p)
 ServiceReqCB    = ctypes.CFUNCTYPE(None, ctypes.c_char_p, ctypes.c_void_p)
 
@@ -140,6 +150,8 @@ class TIRTCCALLBACKS(ctypes.Structure):
         ("on_unsubscribe_audio", OnUnsubAudioCB),
         ("on_update_bitrate",    OnUpdateBitrateCB),
     ]
+    if _ver_tuple(_SDK_VERSION) >= (2, 5, 0):
+        _fields_.append(("on_sleep_wakeup_info", OnSleepWakeupInfoCB))
 
 # ── SDK 函数绑定 ──────────────────────────────────────────────────────────
 def _bind(name, restype, *argtypes):
@@ -157,13 +169,6 @@ TiRtcSetOption       = _bind("TiRtcSetOption",     ctypes.c_int,
 
 # Keep old SDK handling inside the binding layer.  Business modules and
 # current-facing documentation use the current API without version branches.
-def _ver_tuple(value):
-    try:
-        return tuple(int(part) for part in value.split("."))
-    except (AttributeError, ValueError):
-        return (0,)
-
-
 HAS_CLIENT_ID_OPT = _ver_tuple(_SDK_VERSION) >= (2, 2, 1)
 
 
@@ -183,8 +188,18 @@ def device_id_for_start(device_id, secret_key):
 TiRtcStart           = _bind("TiRtcStart",         ctypes.c_int,
                                ctypes.c_char_p, ctypes.POINTER(TIRTCCALLBACKS))
 TiRtcStop            = _bind("TiRtcStop",          ctypes.c_int)
-TiRtcLogConfig       = _bind("TiRtcLogConfig",     None,
-                               ctypes.c_int, ctypes.c_char_p, ctypes.c_uint32)
+_legacy_log_config = (
+    _bind("TiRtcLogConfig", None, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint32)
+    if _ver_tuple(_SDK_VERSION) < (2, 5, 0) else None
+)
+
+
+def disable_file_logging():
+    """Older SDKs expose file logging; 2.5.0 no longer provides this API."""
+    if _legacy_log_config is not None:
+        _legacy_log_config(0, None, 0)
+
+
 TiRtcLogSetLevel     = _bind("TiRtcLogSetLevel",   None, ctypes.c_int)
 TiRtcConnSetUserData = _bind("TiRtcConnSetUserData", ctypes.c_int,
                                ctypes.c_void_p, ctypes.c_void_p)

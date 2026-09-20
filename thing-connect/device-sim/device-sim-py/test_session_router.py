@@ -296,6 +296,29 @@ class TerminalControllerTests(unittest.TestCase):
 
         self.assertFalse(stop_event.is_set())
 
+    def test_windows_empty_enter_does_not_stop_command_input(self):
+        coordinator = mock.Mock(current=SessionKind.STREAM)
+        terminal = TerminalController(
+            coordinator, mock.Mock(), mock.Mock(), mock.Mock())
+        stop_event = threading.Event()
+        commands = mock.Mock()
+        console = mock.Mock()
+        console.kbhit.return_value = True
+        console.getwch.side_effect = list("\rhelp\rexit\r")
+        stdin = mock.Mock()
+        stdin.isatty.return_value = True
+
+        with mock.patch("session_router.os.name", "nt"):
+            with mock.patch.dict(sys.modules, {"msvcrt": console}):
+                with mock.patch.object(sys, "stdin", stdin):
+                    with redirect_stdout(io.StringIO()) as output:
+                        terminal._read_commands_until_stopped(
+                            stop_event, commands)
+
+        self.assertTrue(stop_event.is_set())
+        commands.put_nowait.assert_called_once_with("help")
+        self.assertNotIn("终端输入已结束", output.getvalue())
+
     def test_exit_only_signals_runtime_owner(self):
         coordinator = mock.Mock(current=SessionKind.STREAM)
         terminal = TerminalController(
