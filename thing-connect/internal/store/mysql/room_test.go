@@ -193,6 +193,48 @@ func TestIntercomDeviceMustLeaveBeforeChangingRooms(t *testing.T) {
 	}
 }
 
+func TestIntercomUnbindClearsInactiveAssignmentOwner(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	device := uniqueDevID()
+	if _, err := db.Exec("INSERT INTO device_bind(device_id,user_id) VALUES(?,2)", device); err != nil {
+		t.Fatal(err)
+	}
+	service, err := room.New(mysqlstore.NewRoomStore(db), roomTokenStub{}, roomSignalsStub{}, []byte(strings.Repeat("p", 32)), room.DefaultPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	assigned, err := service.Change(ctx, room.Operation{DeviceID: device, UserID: 2, Kind: "create"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.Change(ctx, room.Operation{DeviceID: device, UserID: 2, Kind: "leave", RoomID: assigned.RoomID, Version: assigned.Version}); err != nil {
+		t.Fatal(err)
+	}
+	// User-server has committed the unbind before its cleanup outbox calls
+	// call-server. The device may subsequently be bound by a different user.
+	if _, err = db.Exec("UPDATE device_bind SET user_id=0 WHERE device_id=?", device); err != nil {
+		t.Fatal(err)
+	}
+	if err = service.Unbind(ctx, device); err != nil {
+		t.Fatal(err)
+	}
+	var owner int64
+	if err = db.QueryRow("SELECT owner_user_id FROM call_assignments WHERE device_id=?", device).Scan(&owner); err != nil {
+		t.Fatal(err)
+	}
+	if owner != 0 {
+		t.Fatalf("inactive assignment owner=%d, want 0", owner)
+	}
+	if _, err = db.Exec("UPDATE device_bind SET user_id=24 WHERE device_id=?", device); err != nil {
+		t.Fatal(err)
+	}
+	current, err := service.Current(ctx, device, 24)
+	if err != nil || current.Desired != "left" {
+		t.Fatalf("new owner could not view inactive assignment: %+v %v", current, err)
+	}
+}
+
 func TestIntercomLeaveDuringTokenRequest(t *testing.T) {
 	db := openTestDB(t)
 	db.SetMaxOpenConns(12)

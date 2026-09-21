@@ -712,7 +712,18 @@ func (s *Service) Unbind(ctx context.Context, device string) error {
 		if err != nil {
 			return err
 		}
-		if a.Desired != "joined" || (owner != 0 && owner == a.Owner) {
+		// A left assignment has no current room relationship. Clear its historical
+		// owner after unbind so a later bind by another user can query an empty
+		// assignment. A delayed duplicate cleanup must not alter a same-user
+		// rebind; active assignments retain the ownership fence below.
+		if a.Desired != "joined" {
+			if a.Owner == 0 || (owner != 0 && owner == a.Owner) {
+				return nil
+			}
+			a.Owner = 0
+			return tx.SaveAssignment(a)
+		}
+		if owner != 0 && owner == a.Owner {
 			return nil
 		}
 		r, err := tx.Room(a.RoomID, false)

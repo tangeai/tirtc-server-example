@@ -473,4 +473,5 @@ CREATE TABLE IF NOT EXISTS board_resources (
 INSERT IGNORE INTO schema_migrations (component, version) VALUES
     ('core', 2),
     ('core', 3),
-    ('core', 4);
+    ('core', 4),
+    ('core', 5);
