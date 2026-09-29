@@ -73,7 +73,8 @@ typedef struct {
 void set_mqtt_ca_cert(const char *path);
 void set_mqtt_insecure(int insecure);
 
-/* Builds stream, call, and VoIP capability snapshots. Returns 0 or -1. */
+/* Builds simulator metadata plus stream, call, and VoIP capability snapshots.
+ * Returns 0 or -1. */
 int device_media_profile_json(char *out, size_t capacity,
                               const char *up_audio, const char *down_audio,
                               const char *up_video, const char *down_video,

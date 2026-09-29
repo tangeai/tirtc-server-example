@@ -28,6 +28,14 @@ func TestDeviceProfileReportsPersistAndIsolateScenes(t *testing.T) {
 	if err := report("stream", `{"camera_rotation":90,"hor_mirror":true}`); err != nil {
 		t.Fatal(err)
 	}
+	chipModel, boardModel, firmwareVersion := "芯片/任意值", "开发板 任意值", "版本 任意值"
+	if err := svc.ReportDevice(ctx, id, deviceprofile.ReportInput{
+		Profiles:        map[string]json.RawMessage{"stream": json.RawMessage(`{"camera_rotation":90,"hor_mirror":true}`)},
+		Hardware:        &deviceprofile.Hardware{ChipModel: &chipModel, BoardModel: &boardModel},
+		FirmwareVersion: &firmwareVersion,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	var created time.Time
 	if err = db.Get(&created, `SELECT created_at FROM device_profile WHERE device_id=?`, id); err != nil {
 		t.Fatal(err)
@@ -52,10 +60,13 @@ func TestDeviceProfileReportsPersistAndIsolateScenes(t *testing.T) {
 	if len(rows) != 1 || rows[0].Profiles == nil {
 		t.Fatalf("rows=%+v", rows)
 	}
-	var profiles map[string]map[string]json.RawMessage
-	if err = json.Unmarshal([]byte(*rows[0].Profiles), &profiles); err != nil {
-		t.Fatal(err)
+	metadata := deviceprofile.PublicMetadata(rows[0].Profiles)
+	if metadata.Hardware == nil || metadata.Hardware.ChipModel == nil || metadata.Hardware.BoardModel == nil ||
+		*metadata.Hardware.ChipModel != chipModel || *metadata.Hardware.BoardModel != boardModel ||
+		metadata.FirmwareVersion == nil || *metadata.FirmwareVersion != firmwareVersion {
+		t.Fatalf("metadata=%+v", metadata)
 	}
+	profiles := deviceprofile.Public(rows[0].Profiles)
 	if string(profiles["stream"]["camera_rotation"]) != "0" || string(profiles["stream"]["hor_mirror"]) != "false" {
 		t.Fatal(profiles)
 	}
@@ -65,6 +76,10 @@ func TestDeviceProfileReportsPersistAndIsolateScenes(t *testing.T) {
 		t.Fatal(formats)
 	}
 	if err = report("stream", `{}`); err != nil {
+		t.Fatal(err)
+	}
+	var changed time.Time
+	if err = db.Get(&changed, `SELECT updated_at FROM device_profile WHERE device_id=?`, id); err != nil {
 		t.Fatal(err)
 	}
 	if err = report("stream", `{}`); err != nil {
@@ -81,7 +96,10 @@ func TestDeviceProfileReportsPersistAndIsolateScenes(t *testing.T) {
 	if !audit.Created.Equal(created) || !audit.Updated.After(created) {
 		t.Fatalf("audit=%+v created=%v", audit, created)
 	}
-	_ = json.Unmarshal([]byte(audit.Profile), &profiles)
+	if !audit.Updated.Equal(changed) {
+		t.Fatalf("identical retry updated row: before=%v after=%v", changed, audit.Updated)
+	}
+	profiles = deviceprofile.Public(&audit.Profile)
 	if len(profiles["stream"]) != 0 || len(profiles["call"]) == 0 {
 		t.Fatal("scene replacement lost other scene", profiles)
 	}

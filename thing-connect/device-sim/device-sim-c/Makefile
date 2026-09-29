@@ -21,6 +21,8 @@ PRODUCT_ADAPTER_OBJ ?=
 SDK_PLATFORM ?= linux-x86_64
 SDK_VERSION  ?= 2.5.0
 SDK_DIR      ?= ../sdk/$(SDK_PLATFORM)/$(SDK_VERSION)
+SDK_ARCH     := $(patsubst linux-%,%,$(SDK_PLATFORM))
+DEVICE_SIM_VERSION ?= 1.0.0
 SDK_INC := -I$(SDK_DIR)/include
 SDK_LIB := -L$(SDK_DIR)/lib -lTiRTC
 
@@ -37,6 +39,9 @@ RPATH ?= $$ORIGIN/../sdk/$(SDK_PLATFORM)/$(SDK_VERSION)/lib
 CFLAGS  := -Wall -Wextra -std=gnu99 -g -O2 -pthread -D_GNU_SOURCE
 CFLAGS  += $(SDK_INC)
 CFLAGS  += $(CURL_CFLAGS) $(OPENSSL_CFLAGS) $(CJSON_CFLAGS) $(MOSQUITTO_CFLAGS)
+CFLAGS  += -DDEVICE_SIM_CHIP_MODEL=\"$(SDK_ARCH)\"
+CFLAGS  += -DDEVICE_SIM_BOARD_MODEL=\"thingconnect-device-sim-c\"
+CFLAGS  += -DDEVICE_SIM_FIRMWARE_VERSION=\"$(DEVICE_SIM_VERSION)\"
 ifneq ($(strip $(SYSROOT)),)
 CFLAGS  += --sysroot=$(SYSROOT)
 endif

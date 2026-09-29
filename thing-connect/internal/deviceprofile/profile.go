@@ -19,8 +19,28 @@ var (
 )
 
 type Store interface {
-	ReplaceScenes(context.Context, string, map[string]json.RawMessage) (bool, error)
+	Replace(context.Context, string, ReportInput) (bool, error)
 	Get(context.Context, string) (*Snapshot, error)
+}
+
+// Hardware identifies the chip and development board reported by a device.
+// Values are opaque and are not interpreted by the server.
+type Hardware struct {
+	ChipModel  *string `json:"chip_model,omitempty"`
+	BoardModel *string `json:"board_model,omitempty"`
+}
+
+// ReportInput is one device information snapshot. Profiles remain required;
+// optional metadata only replaces fields present in the request.
+type ReportInput struct {
+	Profiles        map[string]json.RawMessage `json:"profiles"`
+	Hardware        *Hardware                  `json:"hardware,omitempty"`
+	FirmwareVersion *string                    `json:"firmware_version,omitempty"`
+}
+
+type Metadata struct {
+	Hardware        *Hardware
+	FirmwareVersion *string
 }
 
 type Snapshot struct {
@@ -33,10 +53,14 @@ type Service struct{ store Store }
 func NewService(store Store) *Service { return &Service{store: store} }
 
 func (s *Service) Report(ctx context.Context, deviceID string, profiles map[string]json.RawMessage) error {
-	if err := Validate(profiles); err != nil {
+	return s.ReportDevice(ctx, deviceID, ReportInput{Profiles: profiles})
+}
+
+func (s *Service) ReportDevice(ctx context.Context, deviceID string, report ReportInput) error {
+	if err := Validate(report.Profiles); err != nil {
 		return err
 	}
-	return s.replace(ctx, deviceID, profiles)
+	return s.replace(ctx, deviceID, report)
 }
 
 // ReportLegacyVoIP stores a VoIP scene already normalized by the deprecated
@@ -46,13 +70,13 @@ func (s *Service) ReportLegacyVoIP(ctx context.Context, deviceID string, voip js
 	if json.Unmarshal(voip, &fields) != nil || fields == nil {
 		return ErrInvalid
 	}
-	return s.replace(ctx, deviceID, map[string]json.RawMessage{"voip": voip})
+	return s.replace(ctx, deviceID, ReportInput{Profiles: map[string]json.RawMessage{"voip": voip}})
 }
 
-func (s *Service) replace(ctx context.Context, deviceID string, profiles map[string]json.RawMessage) error {
-	bound, err := s.store.ReplaceScenes(ctx, deviceID, profiles)
+func (s *Service) replace(ctx context.Context, deviceID string, report ReportInput) error {
+	bound, err := s.store.Replace(ctx, deviceID, report)
 	if err != nil {
-		return fmt.Errorf("保存设备能力: %w", err)
+		return fmt.Errorf("保存设备信息: %w", err)
 	}
 	if !bound {
 		return ErrUnbound
@@ -240,6 +264,21 @@ func Public(profile *string) map[string]map[string]json.RawMessage {
 		voip["voip_room_type"] = encoded
 	}
 	return result
+}
+
+// PublicMetadata projects optional device-level metadata from a stored report.
+func PublicMetadata(profile *string) Metadata {
+	if profile == nil {
+		return Metadata{}
+	}
+	var stored struct {
+		Hardware        *Hardware `json:"hardware"`
+		FirmwareVersion *string   `json:"firmware_version"`
+	}
+	if json.Unmarshal([]byte(*profile), &stored) != nil {
+		return Metadata{}
+	}
+	return Metadata{Hardware: stored.Hardware, FirmwareVersion: stored.FirmwareVersion}
 }
 
 func publicLegacyVoIP(input map[string]json.RawMessage) map[string]json.RawMessage {

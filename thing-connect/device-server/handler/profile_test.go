@@ -15,12 +15,14 @@ import (
 )
 
 type profileReporterStub struct {
-	id  string
-	err error
+	id     string
+	report deviceprofile.ReportInput
+	err    error
 }
 
-func (s *profileReporterStub) Report(_ context.Context, id string, _ map[string]json.RawMessage) error {
+func (s *profileReporterStub) ReportDevice(_ context.Context, id string, report deviceprofile.ReportInput) error {
 	s.id = id
+	s.report = report
 	return s.err
 }
 func TestMediaProfileHTTPIdentityAndErrors(t *testing.T) {
@@ -39,6 +41,7 @@ func TestMediaProfileHTTPIdentityAndErrors(t *testing.T) {
 		called            bool
 	}{
 		{"valid", device, `{"profiles":{"stream":{}}}`, nil, 200, 200, true},
+		{"metadata", device, `{"hardware":{"chip_model":"任意芯片值","board_model":"任意开发板值"},"firmware_version":"任意版本值","profiles":{"stream":{}}}`, nil, 200, 200, true},
 		{"missing token", "", `{}`, nil, 401, 401, false},
 		{"user token", sign(jwt.MapClaims{"user_id": 1, "exp": time.Now().Add(time.Hour).Unix()}), `{}`, nil, 401, 401, false},
 		{"temporary token", sign(jwt.MapClaims{"device_id": "tmp_fake", "exp": time.Now().Add(time.Hour).Unix()}), `{}`, nil, 401, 401, false},
@@ -69,6 +72,12 @@ func TestMediaProfileHTTPIdentityAndErrors(t *testing.T) {
 			}
 			if tt.called && reporter.id != "device-a" {
 				t.Fatal("identity was not taken from JWT")
+			}
+			if tt.name == "metadata" && (reporter.report.Hardware == nil || reporter.report.Hardware.ChipModel == nil ||
+				reporter.report.Hardware.BoardModel == nil || *reporter.report.Hardware.ChipModel != "任意芯片值" ||
+				*reporter.report.Hardware.BoardModel != "任意开发板值" || reporter.report.FirmwareVersion == nil ||
+				*reporter.report.FirmwareVersion != "任意版本值") {
+				t.Fatalf("metadata not decoded: %+v", reporter.report)
 			}
 			if strings.Contains(w.Body.String(), "password") {
 				t.Fatal("internal error leaked")

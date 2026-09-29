@@ -1140,7 +1140,7 @@ int device_reference_run(int argc, char *argv[]) {
                                   video_path[0] != '\0', voip_profile,
                                   &stream_presentation) != 0 ||
         report_device_media(svc.device_server, mqtt_token, media_profile) != 0)
-        LOG_W("设备媒体能力未同步，请检查 device-server，恢复后重新启动模拟器上报");
+        LOG_W("设备信息与媒体能力未同步，请检查 device-server，恢复后重新启动模拟器上报");
 
     /* Refresh contacts after the unified profile has been registered. */
     cJSON *initial_callers = NULL;

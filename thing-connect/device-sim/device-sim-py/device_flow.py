@@ -553,25 +553,32 @@ def connect_mqtt_blocking(broker_host: str, broker_port: int,
     _ok("已断开 MQTT 连接")
 
 
-def report_profiles(server: str, mqtt_token: str, profiles: dict) -> bool:
+def report_profiles(server: str, mqtt_token: str, profiles: dict, *,
+                    hardware: dict | None = None,
+                    firmware_version: str | None = None) -> bool:
     """上报显式场景快照；启动线程最多尝试三次，永久错误不重试。"""
+    payload = {"profiles": profiles}
+    if hardware is not None:
+        payload["hardware"] = hardware
+    if firmware_version is not None:
+        payload["firmware_version"] = firmware_version
     for attempt in range(3):
         try:
             response = http_trace.request(
                 "POST", f"{server.rstrip('/')}/v1/device/profile",
                 headers={"Authorization": f"Bearer {mqtt_token}"},
-                json={"profiles": profiles}, timeout=10)
+                json=payload, timeout=10)
             data = response.json()
             code = data.get("code") if isinstance(data, dict) else None
             if response.status_code == 200 and code == 200:
-                _ok("设备媒体能力上报成功")
+                _ok("设备信息与媒体能力上报成功")
                 return True
             if response.status_code < 500 and response.status_code != 429:
-                _warn(f"媒体能力上报未接受（HTTP {response.status_code}，code={code}）")
+                _warn(f"设备信息上报未接受（HTTP {response.status_code}，code={code}）")
                 return False
         except (requests.RequestException, ValueError):
             pass
         if attempt < 2:
             time.sleep(2 ** attempt)
-    _warn("媒体能力上报失败；请检查 device-server，恢复后重新启动模拟器上报")
+    _warn("设备信息上报失败；请检查 device-server，恢复后重新启动模拟器上报")
     return False

@@ -480,6 +480,11 @@ int device_sign(const char *device_id, const char *device_key,
 
 ```jsonc
 {
+  "hardware": { // 可选，设备自报的硬件标识；字符串由设备定义，服务端不解释
+    "chip_model": "ESP32-S3", // 可选，芯片或 SoC 型号
+    "board_model": "ESP32-S3-KORVO-2" // 可选，开发板或硬件平台型号
+  },
+  "firmware_version": "1.4.2+20260929", // 可选，当前运行的固件版本
   "profiles": { // 按场景保存的设备媒体能力
     "stream": { // 实时查看场景；仅声明本机实际支持的能力
       "up_audio_streamid": 10, // 可选，设备发送音频的流 ID
@@ -535,7 +540,7 @@ int device_sign(const char *device_id, const char *device_key,
 }
 ```
 
-`profiles` 必须包含至少一个场景：`stream`（实时查看）、`call`（设备通话）、`voip`（微信 VoIP）。正文最大 16 KiB。每个场景的字段均可省略，未知字段和 `null` 被拒绝。
+`profiles` 必须包含至少一个场景：`stream`（实时查看）、`call`（设备通话）、`voip`（微信 VoIP）。正文最大 16 KiB。每个场景的字段均可省略，未知字段和 `null` 被拒绝。`hardware.chip_model`、`hardware.board_model` 和 `firmware_version` 都是可选字符串；服务端不判断其命名、版本格式或取值含义。
 
 | 字段 | 类型 | 适用场景 | 必填 | 说明 |
 |---|---|---|:---:|---|
@@ -568,7 +573,9 @@ int device_sign(const char *device_id, const char *device_key,
 
 空数组表示明确不支持，省略字段表示未上报。设备只应声明自身实际支持的能力，接口允许的编码不代表每种业务都支持该编码。
 
-每次请求**完整替换携带场景的能力快照**，未携带的场景保留。`{"profiles":{"call":{}}}` 清除设备通话场景的已报字段。不要把同一场景拆成多次字段增量上报；同场景请求须串行，重试复用原快照。重复请求幂等，最后提交的快照生效，不同场景并发上报不会相互覆盖。
+每次请求**完整替换携带场景的能力快照**，未携带的场景保留。`{"profiles":{"call":{}}}` 清除设备通话场景的已报字段。不要把同一场景拆成多次字段增量上报；同场景请求须串行，重试复用原快照。重复请求幂等；合并后的完整快照没有变化时，服务端不重复更新数据库。最后提交的不同快照生效，不同场景并发上报不会相互覆盖。
+
+设备级元数据按字段更新：未携带 `hardware` 或 `firmware_version` 时保留已存值；`hardware` 中只携带一个型号时，另一个型号同样保留。旧设备只上报 `profiles` 的请求保持原有行为。这些值来自设备自报，适合展示、诊断和统计，不能单独作为鉴权、可信硬件识别或 OTA 包兼容性判断依据。
 
 **响应**：成功为 HTTP 200，`{"code":200,"msg":"ok"}`。参数错误为 HTTP 400 + `40000`；设备不存在或已解绑为 HTTP 410 + `6006`；存储失败为 HTTP 500 + `50000`。已解绑设备不能写入，设备能力不包含用户信息，重绑后仍可展示并由设备重新上报覆盖。
 
@@ -578,6 +585,10 @@ int device_sign(const char *device_id, const char *device_key,
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
+| `hardware` | object | 否 | 设备自报的硬件标识；省略时保留已存值 |
+| `hardware.chip_model` | string | 否 | 芯片或 SoC 型号，任意字符串，服务端不解释 |
+| `hardware.board_model` | string | 否 | 开发板或硬件平台型号，任意字符串，服务端不解释 |
+| `firmware_version` | string | 否 | 当前固件版本，任意字符串，服务端不解释；省略时保留已存值 |
 | `profiles` | object | 是 | 场景快照集合，至少包含一个允许的场景 |
 | `profiles.stream` | object | 三选一或多选 | 实时查看能力快照 |
 | `profiles.call` | object | 三选一或多选 | 设备通话能力快照 |
@@ -1097,7 +1108,7 @@ Authorization: Bearer <user_jwt>
 
 **调用方**：Web、小程序。
 
-响应设备条目的 `profiles` 按业务场景提供明确上报的媒体字段。包含可选的 `stream`、`call`、`voip` 对象，由 device-server 的设备能力上报接口提供。没有场景键时表示该场景能力未上报，不能从其他场景补值。媒体字段只出现在 `profiles` 中。
+响应设备条目的 `hardware`、`firmware_version` 和 `profiles` 来自 device-server 的设备信息上报接口。`profiles` 按业务场景提供明确上报的媒体字段，包含可选的 `stream`、`call`、`voip` 对象。没有场景键时表示该场景能力未上报，不能从其他场景补值。媒体字段只出现在 `profiles` 中；设备未上报的硬件或固件字段省略。
 
 
 获取当前用户已绑定设备列表（含在线状态）。
@@ -1120,6 +1131,11 @@ Authorization: Bearer <user_jwt>
       "mac": "AA:BB:CC:DD:EE:FF", // 设备 MAC 地址
       "bind_time": "2026-06-18T12:00:00", // 绑定时间，格式 YYYY-MM-DDTHH:MM:SS；无记录时为 null
       "online": true, // 设备当前是否在线
+      "hardware": { // 可选，设备自报的硬件标识
+        "chip_model": "ESP32-S3", // 可选，芯片或 SoC 型号
+        "board_model": "ESP32-S3-KORVO-2" // 可选，开发板或硬件平台型号
+      },
+      "firmware_version": "1.4.2+20260929", // 可选，设备自报的固件版本
       "profiles": { // 按场景保存的设备媒体能力
         "stream": { // 实时查看场景；仅声明本机实际支持的能力
           "up_audio_mt": ["alaw"], // 设备发送音频的编码列表，按首选顺序排列
@@ -1185,6 +1201,10 @@ Authorization: Bearer <user_jwt>
 | `data[].mac` | string | 设备 MAC 地址 |
 | `data[].bind_time` | string 或 null | 绑定时间，格式 `YYYY-MM-DDTHH:MM:SS`；无记录时为 `null` |
 | `data[].online` | boolean | 设备当前是否在线 |
+| `data[].hardware` | object | 可选，设备自报的硬件标识；设备未上报时省略 |
+| `data[].hardware.chip_model` | string | 可选，芯片或 SoC 型号 |
+| `data[].hardware.board_model` | string | 可选，开发板或硬件平台型号 |
+| `data[].firmware_version` | string | 可选，设备自报的固件版本；设备未上报时省略 |
 | `data[].profiles` | object | 按 `stream`、`call`、`voip` 场景组织的设备能力；未上报时为空对象 |
 | `data[].profiles.voip.down_video_rotation` | integer | 微信下行视频编码方向；`0` 或省略表示使用默认行为，`1` 输出正向画面，`2` 保留旋转画面 |
 

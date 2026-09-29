@@ -43,8 +43,8 @@ type storeStub struct {
 	profile json.RawMessage
 }
 
-func (s *storeStub) ReplaceScenes(_ context.Context, _ string, scenes map[string]json.RawMessage) (bool, error) {
-	s.written = scenes
+func (s *storeStub) Replace(_ context.Context, _ string, report ReportInput) (bool, error) {
+	s.written = report.Profiles
 	return s.bound, nil
 }
 
@@ -117,6 +117,19 @@ func TestPublicAddsDerivedVoIPFieldsInsideScene(t *testing.T) {
 	}
 	if _, ok := public["stream"]["has_camera"]; ok {
 		t.Fatal("derived VoIP field leaked into stream")
+	}
+}
+
+func TestPublicMetadataPreservesOpaqueValues(t *testing.T) {
+	profile := `{"hardware":{"chip_model":"芯片 / 任意值","board_model":"开发板 任意值"},"firmware_version":"版本 任意值","stream":{}}`
+	metadata := PublicMetadata(&profile)
+	if metadata.Hardware == nil || metadata.Hardware.ChipModel == nil || metadata.Hardware.BoardModel == nil ||
+		*metadata.Hardware.ChipModel != "芯片 / 任意值" || *metadata.Hardware.BoardModel != "开发板 任意值" ||
+		metadata.FirmwareVersion == nil || *metadata.FirmwareVersion != "版本 任意值" {
+		t.Fatalf("metadata=%+v", metadata)
+	}
+	if len(Public(&profile)["stream"]) != 0 {
+		t.Fatal("metadata leaked into media profiles")
 	}
 }
 

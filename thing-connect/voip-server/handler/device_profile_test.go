@@ -18,8 +18,8 @@ type profileStoreStub struct {
 	scenes   map[string]json.RawMessage
 }
 
-func (s *profileStoreStub) ReplaceScenes(_ context.Context, deviceID string, scenes map[string]json.RawMessage) (bool, error) {
-	s.deviceID, s.scenes = deviceID, scenes
+func (s *profileStoreStub) Replace(_ context.Context, deviceID string, report deviceprofile.ReportInput) (bool, error) {
+	s.deviceID, s.scenes = deviceID, report.Profiles
 	return true, nil
 }
 

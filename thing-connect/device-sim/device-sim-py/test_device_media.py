@@ -5,7 +5,11 @@ from unittest.mock import Mock, patch
 
 import requests
 import device_flow
-from device_rtc_runtime import DeviceRtcRuntime, _stream_presentation_env
+from device_rtc_runtime import (
+    DeviceRtcRuntime,
+    _device_report_metadata,
+    _stream_presentation_env,
+)
 
 
 class DeviceMediaTests(unittest.TestCase):
@@ -72,13 +76,30 @@ class DeviceMediaTests(unittest.TestCase):
         request.side_effect = [requests.Timeout(), Mock(status_code=503),
                                Mock(status_code=200, json=lambda: {"code": 200, "msg": "anything"})]
         profile = {"stream": {"hor_mirror": False, "camera_rotation": 0}}
-        self.assertTrue(device_flow.report_profiles("https://device.example/", "test-token", profile))
+        hardware = {"chip_model": "x86_64", "board_model": "thingconnect-device-sim-py"}
+        firmware_version = "1.0.0"
+        self.assertTrue(device_flow.report_profiles(
+            "https://device.example/", "test-token", profile,
+            hardware=hardware, firmware_version=firmware_version))
         self.assertEqual(request.call_count, 3)
         self.assertEqual([c.args[0] for c in sleep.call_args_list], [1, 2])
         for call in request.call_args_list:
             self.assertEqual(call.args, ("POST", "https://device.example/v1/device/profile"))
-            self.assertEqual(call.kwargs["json"], {"profiles": profile})
+            self.assertEqual(call.kwargs["json"], {
+                "hardware": hardware,
+                "firmware_version": firmware_version,
+                "profiles": profile,
+            })
             self.assertEqual(call.kwargs["timeout"], 10)
+
+    def test_device_report_metadata_identifies_python_simulator(self):
+        metadata = _device_report_metadata()
+        self.assertTrue(metadata["hardware"]["chip_model"])
+        self.assertEqual(
+            metadata["hardware"]["board_model"],
+            "thingconnect-device-sim-py",
+        )
+        self.assertEqual(metadata["firmware_version"], "1.0.0")
 
     @patch("device_flow.time.sleep")
     @patch("device_flow.http_trace.request")

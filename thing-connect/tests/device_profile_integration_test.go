@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"thing-connect/internal/deviceprofile"
 )
 
 // Exercise both real HTTP servers and MySQL/Redis: device reports must become
@@ -38,8 +40,10 @@ func TestDeviceProfileReportToUserDeviceList(t *testing.T) {
 	otherToken := userJWT(t, cfg.JWTSecret, other)
 	post := func(body any) *apiResp { return doPost(t, s.devSrv.URL+"/v1/device/profile", deviceToken, body) }
 	type deviceInfo struct {
-		DeviceID string                                `json:"device_id"`
-		Profiles map[string]map[string]json.RawMessage `json:"profiles"`
+		DeviceID        string                                `json:"device_id"`
+		Hardware        *deviceprofile.Hardware               `json:"hardware"`
+		FirmwareVersion *string                               `json:"firmware_version"`
+		Profiles        map[string]map[string]json.RawMessage `json:"profiles"`
 	}
 	list := func(token string) []deviceInfo {
 		r := s.usrGET(t, "/v1/user/device/list", token)
@@ -52,12 +56,15 @@ func TestDeviceProfileReportToUserDeviceList(t *testing.T) {
 		}
 		return rows
 	}
-	snapshot := map[string]any{"profiles": map[string]any{
-		"stream": map[string]any{"up_audio_mt": []string{"pcm"}, "up_video_mt": []string{}, "camera_rotation": 0, "hor_mirror": false,
-			"up_audio_streamid": 0, "up_video_streamid": 2, "down_audio_streamid": 3, "down_video_streamid": 15},
-		"call": map[string]any{"down_audio_mt": []string{"opus", "amr"}, "audio_rate": 16000},
-		"voip": map[string]any{"down_audio_mt": "amr", "up_video_mt": "none", "down_video_mt": "none", "audio_rate": 8000, "audio_channels": 1, "camera_rotation": 90, "no_video": true},
-	}}
+	snapshot := map[string]any{
+		"hardware":         map[string]any{"chip_model": "任意芯片值", "board_model": "任意开发板值"},
+		"firmware_version": "任意版本值",
+		"profiles": map[string]any{
+			"stream": map[string]any{"up_audio_mt": []string{"pcm"}, "up_video_mt": []string{}, "camera_rotation": 0, "hor_mirror": false,
+				"up_audio_streamid": 0, "up_video_streamid": 2, "down_audio_streamid": 3, "down_video_streamid": 15},
+			"call": map[string]any{"down_audio_mt": []string{"opus", "amr"}, "audio_rate": 16000},
+			"voip": map[string]any{"down_audio_mt": "amr", "up_video_mt": "none", "down_video_mt": "none", "audio_rate": 8000, "audio_channels": 1, "camera_rotation": 90, "no_video": true},
+		}}
 	for i := 0; i < 2; i++ {
 		r := post(snapshot)
 		if r.HTTPStatus != 200 || r.Code != 200 {
@@ -69,6 +76,11 @@ func TestDeviceProfileReportToUserDeviceList(t *testing.T) {
 		t.Fatalf("owner devices=%+v", rows)
 	}
 	profiles := rows[0].Profiles
+	if rows[0].Hardware == nil || rows[0].Hardware.ChipModel == nil || rows[0].Hardware.BoardModel == nil ||
+		*rows[0].Hardware.ChipModel != "任意芯片值" || *rows[0].Hardware.BoardModel != "任意开发板值" ||
+		rows[0].FirmwareVersion == nil || *rows[0].FirmwareVersion != "任意版本值" {
+		t.Fatalf("metadata not projected: %+v", rows[0])
+	}
 	for key, want := range map[string]string{"up_audio_streamid": "0", "up_video_streamid": "2", "down_audio_streamid": "3", "down_video_streamid": "15"} {
 		if got := string(profiles["stream"][key]); got != want {
 			t.Fatalf("%s=%s, want %s", key, got, want)

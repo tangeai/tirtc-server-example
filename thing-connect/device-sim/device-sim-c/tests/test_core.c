@@ -46,6 +46,13 @@ static void test_device_media_profile(void) {
                                      "{\"no_video\":false}", NULL) == 0);
     cJSON *root = cJSON_Parse(body);
     assert(root);
+    cJSON *hardware = cJSON_GetObjectItem(root, "hardware");
+    assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(hardware, "chip_model")),
+                  DEVICE_SIM_CHIP_MODEL) == 0);
+    assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(hardware, "board_model")),
+                  DEVICE_SIM_BOARD_MODEL) == 0);
+    assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(root, "firmware_version")),
+                  DEVICE_SIM_FIRMWARE_VERSION) == 0);
     cJSON *profiles = cJSON_GetObjectItem(root, "profiles");
     cJSON *stream = cJSON_GetObjectItem(profiles, "stream");
     cJSON *call = cJSON_GetObjectItem(profiles, "call");

@@ -15,7 +15,7 @@ type profileStoreStub struct {
 	err  error
 }
 
-func (s *profileStoreStub) ReplaceScenes(context.Context, string, map[string]json.RawMessage) (bool, error) {
+func (s *profileStoreStub) Replace(context.Context, string, deviceprofile.ReportInput) (bool, error) {
 	return false, nil
 }
 

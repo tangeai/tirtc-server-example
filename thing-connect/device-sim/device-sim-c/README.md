@@ -342,9 +342,9 @@ ROOM 复用进程 TiRTC runtime，由会话仲裁器管理：AI、设备通话�
 产品通过 `DeviceAdapterV1` 的媒体源与播放 sink 处理 `DEVICE_BUSINESS_ROOM`，通过 `DEVICE_ACTION_ROOM_PTT_DOWN` / `DEVICE_ACTION_ROOM_PTT_UP` 接入本机按键。Linux 默认适配器从文件读取上行，下行不落盘；真实扬声器需要产品 sink。协议、房间容量和部署要求见 [设备多人对讲](../../device-room.md)。
 
 
-## 设备媒体能力上报
+## 设备信息与媒体能力上报
 
-统一模拟器取得正式 MQTT token 后，向 device-server 调用 [`POST /v1/device/profile`](../../api-reference.md#post-v1deviceprofile)，一次上报实时查看、设备通话和微信 VoIP 三个场景。Web 与微信小程序都从对应场景读取能力；未上报的字段不会从其他场景补值。 `stream` 上报上行音频/视频 `10/11` 和下行音频/视频 `14/15`。未实现的视频能力不因声明 streamid 而启用。
+统一模拟器取得正式 MQTT token 后，向 device-server 调用 [`POST /v1/device/profile`](../../api-reference.md#post-v1deviceprofile)，一次上报实时查看、设备通话和微信 VoIP 三个场景，同时上报模拟器身份。`hardware.chip_model` 使用 `SDK_PLATFORM` 的目标架构（默认 `x86_64`），`hardware.board_model` 为 `thingconnect-device-sim-c`，`firmware_version` 使用模拟器自身的 SemVer（当前为 `1.0.0`）。这些值明确表示 Linux C 模拟器，不代表真实产品开发板。Web 与微信小程序都从对应场景读取能力；未上报的字段不会从其他场景补值。 `stream` 上报上行音频/视频 `10/11` 和下行音频/视频 `14/15`。未实现的视频能力不因声明 streamid 而启用。
 
 上报在启动控制线程执行，单次请求最多 10 秒。网络或服务端暂时失败时按 1 秒、2 秒退避，最多尝试三次；鉴权、解绑和参数错误不重试。上报失败时，模拟器会提示检查 device-server，修复后重新启动即可再次上报。
 

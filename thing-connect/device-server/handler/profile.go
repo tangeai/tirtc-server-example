@@ -16,7 +16,7 @@ import (
 )
 
 type ProfileReporter interface {
-	Report(context.Context, string, map[string]json.RawMessage) error
+	ReportDevice(context.Context, string, deviceprofile.ReportInput) error
 }
 
 func RegisterDeviceProfile(r *gin.Engine, reporter ProfileReporter, secret string) {
@@ -41,9 +41,7 @@ func RegisterDeviceProfile(r *gin.Engine, reporter ProfileReporter, secret strin
 			apiresp.Unauthorized(c)
 			return
 		}
-		var req struct {
-			Profiles map[string]json.RawMessage `json:"profiles"`
-		}
+		var req deviceprofile.ReportInput
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 16*1024)
 		decoder := json.NewDecoder(c.Request.Body)
 		decoder.DisallowUnknownFields()
@@ -58,7 +56,7 @@ func RegisterDeviceProfile(r *gin.Engine, reporter ProfileReporter, secret strin
 		}
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 		defer cancel()
-		if err = reporter.Report(ctx, deviceID, req.Profiles); err != nil {
+		if err = reporter.ReportDevice(ctx, deviceID, req); err != nil {
 			if errors.Is(err, deviceprofile.ErrInvalid) {
 				apiresp.BadParam(c, err.Error())
 				return

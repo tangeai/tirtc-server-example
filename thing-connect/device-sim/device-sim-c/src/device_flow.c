@@ -32,6 +32,16 @@
 #include "http_tls.h"
 #include "media_format.h"
 
+#ifndef DEVICE_SIM_CHIP_MODEL
+#define DEVICE_SIM_CHIP_MODEL "unknown"
+#endif
+#ifndef DEVICE_SIM_BOARD_MODEL
+#define DEVICE_SIM_BOARD_MODEL "thingconnect-device-sim-c"
+#endif
+#ifndef DEVICE_SIM_FIRMWARE_VERSION
+#define DEVICE_SIM_FIRMWARE_VERSION "1.0.0"
+#endif
+
 /* ── Global stop flag (shared across modules, defined in main.c) ──── */
 extern volatile sig_atomic_t g_stop;
 
@@ -1123,7 +1133,8 @@ int device_media_profile_json(char *out, size_t capacity,
     if (stream_presentation_json(stream_pres, sizeof(stream_pres), presentation) != 0) return -1;
     /* Only constant codec names from the format registry enter the JSON. */
     int n = snprintf(out, capacity,
-        "{\"profiles\":{"
+        "{\"hardware\":{\"chip_model\":\"%s\",\"board_model\":\"%s\"},"
+        "\"firmware_version\":\"%s\",\"profiles\":{"
         "\"stream\":{\"up_audio_streamid\":%d,\"up_video_streamid\":%d,"
         "\"down_audio_streamid\":14,\"down_video_streamid\":15,\"up_audio_mt\":[\"%s\"],\"up_video_mt\":%s%s%s,"
         "\"down_audio_mt\":[\"alaw\"],\"down_video_mt\":[],"
@@ -1132,6 +1143,7 @@ int device_media_profile_json(char *out, size_t capacity,
         "\"down_audio_mt\":[\"%s\"],\"down_video_mt\":%s%s%s,"
         "\"audio_rate\":%d,\"audio_channels\":1,\"no_video\":%s},"
         "\"voip\":%s}}",
+        DEVICE_SIM_CHIP_MODEL, DEVICE_SIM_BOARD_MODEL, DEVICE_SIM_FIRMWARE_VERSION,
         STREAM_ID_AUDIO, STREAM_ID_VIDEO,
         up->codec, has_video ? "[\"" : "[", has_video ? up_v->codec : "", has_video ? "\"]" : "]",
         stream_pres,

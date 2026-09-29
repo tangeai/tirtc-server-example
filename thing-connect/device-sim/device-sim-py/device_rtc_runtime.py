@@ -8,6 +8,7 @@ from dataclasses import dataclass
 import logging
 import math
 import os
+import platform
 import re
 import threading
 
@@ -26,6 +27,7 @@ from tirtc_runtime import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+DEVICE_SIM_VERSION = "1.0.0"
 
 
 @dataclass(frozen=True)
@@ -48,6 +50,18 @@ class RuntimeConfig:
     hardware_audio: bool = False
     log_level: str = "debug"
     device_server: str = ""
+
+
+def _device_report_metadata() -> dict:
+    machine = platform.machine().strip().lower() or "unknown"
+    machine = {"amd64": "x86_64", "aarch64": "arm64"}.get(machine, machine)
+    return {
+        "hardware": {
+            "chip_model": machine,
+            "board_model": "thingconnect-device-sim-py",
+        },
+        "firmware_version": DEVICE_SIM_VERSION,
+    }
 
 
 def _stream_presentation_env() -> dict:
@@ -230,7 +244,14 @@ class DeviceRtcRuntime:
             )
             if c.device_server:
                 from device_flow import report_profiles
-                report_profiles(c.device_server, c.mqtt_token, self.profiles())
+                metadata = _device_report_metadata()
+                report_profiles(
+                    c.device_server,
+                    c.mqtt_token,
+                    self.profiles(),
+                    hardware=metadata["hardware"],
+                    firmware_version=metadata["firmware_version"],
+                )
             self._refresh_voip_contacts()
             self.coordinator.start_stream()
             self.room.start()

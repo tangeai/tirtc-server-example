@@ -434,7 +434,7 @@ CREATE TABLE IF NOT EXISTS call_outbox (
 
 CREATE TABLE IF NOT EXISTS device_profile (
     device_id VARCHAR(64) NOT NULL COMMENT '设备 ID',
-    profile JSON NOT NULL COMMENT '按 stream、call、voip 场景保存的设备媒体能力',
+    profile JSON NOT NULL COMMENT '设备级硬件、固件元数据及按 stream、call、voip 场景保存的媒体能力',
     created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '创建时间',
     updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6) COMMENT '更新时间',
     PRIMARY KEY (device_id)
@@ -474,4 +474,5 @@ INSERT IGNORE INTO schema_migrations (component, version) VALUES
     ('core', 2),
     ('core', 3),
     ('core', 4),
-    ('core', 5);
+    ('core', 5),
+    ('core', 6);

@@ -1017,9 +1017,9 @@ WHIP 连接成功后需等 ~300ms KCP 握手再发 `start_session`。
 加入后默认静音收听。`--with-mic` 模式使用本机麦克风、扬声器及现有 A-law 音频配置；文件模式只在 PTT 按下时发送上行文件，下行不保存录音。AI、设备通话和微信通话会暂停对讲，结束后自动同步并恢复期望房间。操作接口使用服务发现得到的 call-server 地址，设备重启和 MQTT 重连均会重新读取服务端关系。协议、容量和部署要求见 [设备多人对讲](../../device-room.md)。
 
 
-## 设备媒体能力上报
+## 设备信息与媒体能力上报
 
-统一模拟器取得正式 MQTT token 后，向 device-server 调用 [`POST /v1/device/profile`](../../api-reference.md#post-v1deviceprofile)，一次上报实时查看、设备通话和微信 VoIP 三个场景。Web 与微信小程序都从对应场景读取能力；未上报的字段不会从其他场景补值。 `stream` 上报上行音频/视频 `10/11` 和下行音频/视频 `14/15`。未实现的视频能力不因声明 streamid 而启用。
+统一模拟器取得正式 MQTT token 后，向 device-server 调用 [`POST /v1/device/profile`](../../api-reference.md#post-v1deviceprofile)，一次上报实时查看、设备通话和微信 VoIP 三个场景，同时上报模拟器身份。`hardware.chip_model` 使用 `platform.machine()` 返回的运行架构，`hardware.board_model` 为 `thingconnect-device-sim-py`，`firmware_version` 使用模拟器自身的 SemVer（当前为 `1.0.0`）。这些值明确表示 Python 模拟器，不代表真实产品开发板。Web 与微信小程序都从对应场景读取能力；未上报的字段不会从其他场景补值。 `stream` 上报上行音频/视频 `10/11` 和下行音频/视频 `14/15`。未实现的视频能力不因声明 streamid 而启用。
 
 上报在启动控制线程执行，单次请求最多 10 秒。网络或服务端暂时失败时按 1 秒、2 秒退避，最多尝试三次；鉴权、解绑和参数错误不重试。上报失败时，模拟器会提示检查 device-server，修复后重新启动即可再次上报。
 

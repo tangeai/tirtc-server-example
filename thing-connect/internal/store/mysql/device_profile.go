@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
-	"strings"
 
 	"github.com/jmoiron/sqlx"
 	"thing-connect/internal/deviceprofile"
@@ -17,7 +15,7 @@ type deviceProfileStore struct{ db *sqlx.DB }
 
 func NewDeviceProfileStore(db *sqlx.DB) deviceprofile.Store { return &deviceProfileStore{db: db} }
 
-func (s *deviceProfileStore) ReplaceScenes(ctx context.Context, deviceID string, profiles map[string]json.RawMessage) (bool, error) {
+func (s *deviceProfileStore) Replace(ctx context.Context, deviceID string, report deviceprofile.ReportInput) (bool, error) {
 	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return false, err
@@ -29,29 +27,59 @@ func (s *deviceProfileStore) ReplaceScenes(ctx context.Context, deviceID string,
 		return false, nil
 	}
 	if err != nil {
-		return false, fmt.Errorf("lock device media binding: %w", err)
+		return false, fmt.Errorf("lock device binding: %w", err)
 	}
-	raw, err := json.Marshal(profiles)
+	// The binding lock serializes reports and unbinding for one device. Merge the
+	// partial report with the stored document so omitted scenes and metadata are
+	// retained, then skip an identical snapshot to avoid redo/binlog churn.
+	stored := make(map[string]json.RawMessage)
+	var previous string
+	err = tx.GetContext(ctx, &previous, `SELECT profile FROM device_profile WHERE device_id=?`, deviceID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return false, fmt.Errorf("get device profile for update: %w", err)
+	}
+	if err == nil {
+		if unmarshalErr := json.Unmarshal([]byte(previous), &stored); unmarshalErr != nil {
+			return false, fmt.Errorf("decode device profile: %w", unmarshalErr)
+		}
+	}
+	previousCanonical, err := json.Marshal(stored)
 	if err != nil {
 		return false, err
 	}
-	// JSON_SET replaces complete scenes, unlike a recursive JSON merge. The bind
-	// lock serializes reports and unbinding without holding a remote operation.
-	keys := make([]string, 0, len(profiles))
-	for key := range profiles {
-		keys = append(keys, key)
+	for scene, raw := range report.Profiles {
+		stored[scene] = raw
 	}
-	sort.Strings(keys)
-	clauses := make([]string, 0, len(keys))
-	args := []any{deviceID, string(raw)}
-	for _, key := range keys {
-		clauses = append(clauses, "?, CAST(? AS JSON)")
-		args = append(args, "$."+key, string(profiles[key]))
+	if report.Hardware != nil && (report.Hardware.ChipModel != nil || report.Hardware.BoardModel != nil) {
+		hardware := make(map[string]json.RawMessage)
+		if current := stored["hardware"]; len(current) > 0 {
+			_ = json.Unmarshal(current, &hardware)
+		}
+		if report.Hardware.ChipModel != nil {
+			hardware["chip_model"], _ = json.Marshal(*report.Hardware.ChipModel)
+		}
+		if report.Hardware.BoardModel != nil {
+			hardware["board_model"], _ = json.Marshal(*report.Hardware.BoardModel)
+		}
+		stored["hardware"], _ = json.Marshal(hardware)
+	}
+	if report.FirmwareVersion != nil {
+		stored["firmware_version"], _ = json.Marshal(*report.FirmwareVersion)
+	}
+	raw, err := json.Marshal(stored)
+	if err != nil {
+		return false, err
+	}
+	if string(raw) == string(previousCanonical) {
+		if err = tx.Commit(); err != nil {
+			return false, err
+		}
+		return true, nil
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO device_profile(device_id,profile) VALUES(?,?)
- ON DUPLICATE KEY UPDATE profile=JSON_SET(profile,`+strings.Join(clauses, ",")+`)`, args...)
+ ON DUPLICATE KEY UPDATE profile=VALUES(profile)`, deviceID, string(raw))
 	if err != nil {
-		return false, fmt.Errorf("save device media: %w", err)
+		return false, fmt.Errorf("save device profile: %w", err)
 	}
 	if err = tx.Commit(); err != nil {
 		return false, err

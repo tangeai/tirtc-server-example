@@ -339,6 +339,6 @@ Report 成功后，设备从 HTTP 响应中取得 `temp_client_id`（格式为 `
 
 ## 上报设备媒体能力
 
-设备取得正式 `mqtt_token` 后，可调用 device-server 的 [`POST /v1/device/profile`](api-reference.md#post-v1deviceprofile)，按 `stream`、`call`、`voip` 场景提供当前媒体能力。固件或媒体配置变化时重新上报；设备信息页面按场景展示，缺失字段显示“未上报”。
+设备取得正式 `mqtt_token` 后，可调用 device-server 的 [`POST /v1/device/profile`](api-reference.md#post-v1deviceprofile)，按 `stream`、`call`、`voip` 场景提供当前媒体能力，并可在顶层携带 `hardware.chip_model`、`hardware.board_model` 和 `firmware_version`。这些硬件和固件值由设备定义，服务端原样保存，不判断格式或含义。固件或媒体配置变化时重新上报；设备信息页面按场景展示，缺失字段显示“未上报”。
 
-一次请求完整替换所携带场景的快照，未携带场景保留。所有字段都可省略，显式 `false`、`0` 和空编码列表与未上报有不同含义。设备应串行发送同场景快照，并对暂时失败进行有界退避；解绑、鉴权或参数错误应先恢复绑定或修正配置。详细字段、错误码和 VoIP 兼容规则见 API Reference。
+一次请求完整替换所携带场景的快照，未携带场景保留。设备级元数据只更新请求中实际携带的字段，旧设备只上报 `profiles` 时不会清除元数据；合并后的完整快照未变化时，服务端不重复更新数据库。场景内所有字段都可省略，显式 `false`、`0` 和空编码列表与未上报有不同含义。设备应只在上线、固件或媒体配置变化时上报，串行发送同场景快照，并对暂时失败进行有界退避；心跳和在线状态继续使用 MQTT。解绑、鉴权或参数错误应先恢复绑定或修正配置。详细字段、错误码和 VoIP 兼容规则见 API Reference。

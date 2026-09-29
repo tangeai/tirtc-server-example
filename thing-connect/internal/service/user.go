@@ -24,13 +24,15 @@ import (
 
 // DeviceInfo is the service-layer device list item (online status added by service).
 type DeviceInfo struct {
-	Profiles   map[string]map[string]json.RawMessage `json:"profiles"`
-	DeviceID   string                                `json:"device_id"`
-	DeviceName string                                `json:"device_name"`
-	Status     int8                                  `json:"status"`
-	MAC        string                                `json:"mac"`
-	BindTime   *string                               `json:"bind_time"`
-	Online     bool                                  `json:"online"`
+	Profiles        map[string]map[string]json.RawMessage `json:"profiles"`
+	Hardware        *deviceprofile.Hardware               `json:"hardware,omitempty"`
+	FirmwareVersion *string                               `json:"firmware_version,omitempty"`
+	DeviceID        string                                `json:"device_id"`
+	DeviceName      string                                `json:"device_name"`
+	Status          int8                                  `json:"status"`
+	MAC             string                                `json:"mac"`
+	BindTime        *string                               `json:"bind_time"`
+	Online          bool                                  `json:"online"`
 }
 
 // OnlineChecker allows service to check device online status without importing mqttc.
@@ -556,13 +558,16 @@ func (s *UserService) DeviceList(ctx context.Context, userID int64, checker Onli
 	}
 	result := make([]DeviceInfo, 0, len(rows))
 	for _, r := range rows {
+		metadata := deviceprofile.PublicMetadata(r.Profiles)
 		di := DeviceInfo{
-			Profiles:   deviceprofile.Public(r.Profiles),
-			DeviceID:   r.DeviceID,
-			DeviceName: r.DeviceName,
-			Status:     r.Status,
-			MAC:        r.MAC,
-			BindTime:   r.BindTime,
+			Profiles:        deviceprofile.Public(r.Profiles),
+			Hardware:        metadata.Hardware,
+			FirmwareVersion: metadata.FirmwareVersion,
+			DeviceID:        r.DeviceID,
+			DeviceName:      r.DeviceName,
+			Status:          r.Status,
+			MAC:             r.MAC,
+			BindTime:        r.BindTime,
 		}
 		if checker != nil {
 			if r.DeviceID != "" {

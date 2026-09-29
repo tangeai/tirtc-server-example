@@ -553,7 +553,7 @@ func (f *fakeCacheStore) GetReportFingerprint(_ context.Context, _ string) (stri
 func (f *fakeCacheStore) DelReportFingerprint(_ context.Context, _ string) error { return nil }
 
 func TestUserServiceDeviceListNestsVoIPProfile(t *testing.T) {
-	profile := `{"voip":{"up_video_mt":"h264","down_video_mt":"mjpeg","down_audio_mt":"amr","audio_rate":8000,"no_video":false}}`
+	profile := `{"hardware":{"chip_model":"任意芯片值","board_model":"任意开发板值"},"firmware_version":"任意版本值","voip":{"up_video_mt":"h264","down_video_mt":"mjpeg","down_audio_mt":"amr","audio_rate":8000,"no_video":false}}`
 	svc := newSvc(&fakeUserStore{deviceRows: []model.UserDeviceRow{{
 		DeviceID: "device-1", DeviceName: "书房设备", Status: 1, Profiles: &profile,
 	}}}, newFakeCache(), false)
@@ -565,5 +565,10 @@ func TestUserServiceDeviceListNestsVoIPProfile(t *testing.T) {
 	if string(voip["up_video_mt"]) != `"h264"` || string(voip["has_camera"]) != "true" ||
 		string(voip["has_screen"]) != "true" || string(voip["voip_room_type"]) != `"video"` {
 		t.Fatalf("voip profile=%v", voip)
+	}
+	if devices[0].Hardware == nil || devices[0].Hardware.ChipModel == nil || devices[0].Hardware.BoardModel == nil ||
+		*devices[0].Hardware.ChipModel != "任意芯片值" || *devices[0].Hardware.BoardModel != "任意开发板值" ||
+		devices[0].FirmwareVersion == nil || *devices[0].FirmwareVersion != "任意版本值" {
+		t.Fatalf("metadata=%+v", devices[0])
 	}
 }
