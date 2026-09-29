@@ -42,6 +42,11 @@ type ManagedDevice = {
   online: boolean;
   presence_known: boolean;
   last_seen_at?: string;
+  hardware?: {
+    chip_model?: string;
+    board_model?: string;
+  };
+  firmware_version?: string;
 };
 
 type BindLog = {
@@ -403,6 +408,21 @@ function UserDevicesPanel() {
                   children: formatTime(detail.device.last_seen_at),
                 },
                 { key: 'mac', label: 'MAC 地址', children: detail.device.mac || '—' },
+                {
+                  key: 'chip_model',
+                  label: '芯片型号',
+                  children: detail.device.hardware?.chip_model || '未上报',
+                },
+                {
+                  key: 'board_model',
+                  label: '开发板型号',
+                  children: detail.device.hardware?.board_model || '未上报',
+                },
+                {
+                  key: 'firmware_version',
+                  label: '固件版本',
+                  children: detail.device.firmware_version || '未上报',
+                },
                 {
                   key: 'owner',
                   label: '当前用户',

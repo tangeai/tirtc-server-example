@@ -16,6 +16,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"thing-connect/internal/apiresp"
+	"thing-connect/internal/deviceprofile"
 	"thing-connect/internal/logging"
 )
 
@@ -272,25 +273,36 @@ func (s *HTTPServer) sendPasswordResetEmail(c *gin.Context) {
 }
 
 type managedDevice struct {
-	ID            int64      `db:"id" json:"id"`
-	DeviceID      string     `db:"device_id" json:"device_id"`
-	MAC           string     `db:"mac" json:"mac"`
-	Assign        string     `db:"assign" json:"assign"`
-	DeviceName    string     `db:"device_name" json:"device_name"`
-	UserID        int64      `db:"user_id" json:"user_id"`
-	UserEmail     string     `db:"user_email" json:"user_email"`
-	LastUserID    int64      `db:"last_user_id" json:"last_user_id"`
-	ActiveTime    *time.Time `db:"active_time" json:"active_time,omitempty"`
-	BindTime      *time.Time `db:"bind_time" json:"bind_time,omitempty"`
-	UnbindTime    *time.Time `db:"unbind_time" json:"unbind_time,omitempty"`
-	CreatedAt     time.Time  `db:"created_at" json:"created_at"`
-	UpdatedAt     time.Time  `db:"updated_at" json:"updated_at"`
-	Online        bool       `db:"-" json:"online"`
-	PresenceKnown bool       `db:"-" json:"presence_known"`
-	LastSeenAt    *time.Time `db:"-" json:"last_seen_at,omitempty"`
+	ID              int64                   `db:"id" json:"id"`
+	DeviceID        string                  `db:"device_id" json:"device_id"`
+	MAC             string                  `db:"mac" json:"mac"`
+	Assign          string                  `db:"assign" json:"assign"`
+	DeviceName      string                  `db:"device_name" json:"device_name"`
+	UserID          int64                   `db:"user_id" json:"user_id"`
+	UserEmail       string                  `db:"user_email" json:"user_email"`
+	LastUserID      int64                   `db:"last_user_id" json:"last_user_id"`
+	ActiveTime      *time.Time              `db:"active_time" json:"active_time,omitempty"`
+	BindTime        *time.Time              `db:"bind_time" json:"bind_time,omitempty"`
+	UnbindTime      *time.Time              `db:"unbind_time" json:"unbind_time,omitempty"`
+	CreatedAt       time.Time               `db:"created_at" json:"created_at"`
+	UpdatedAt       time.Time               `db:"updated_at" json:"updated_at"`
+	Online          bool                    `db:"-" json:"online"`
+	PresenceKnown   bool                    `db:"-" json:"presence_known"`
+	LastSeenAt      *time.Time              `db:"-" json:"last_seen_at,omitempty"`
+	Profile         *string                 `db:"profile" json:"-"`
+	Hardware        *deviceprofile.Hardware `db:"-" json:"hardware,omitempty"`
+	FirmwareVersion *string                 `db:"-" json:"firmware_version,omitempty"`
 }
 
 const managedDeviceSelect = `SELECT d.id,d.device_id,d.mac,d.assign,d.device_name,d.user_id,COALESCE(u.email,'') user_email,d.last_user_id,d.active_time,d.bind_time,d.unbind_time,d.created_at,d.updated_at FROM device_bind d LEFT JOIN users u ON u.id=d.user_id`
+
+const managedDeviceDetailSelect = `SELECT d.id,d.device_id,d.mac,d.assign,d.device_name,d.user_id,COALESCE(u.email,'') user_email,d.last_user_id,d.active_time,d.bind_time,d.unbind_time,d.created_at,d.updated_at,p.profile FROM device_bind d LEFT JOIN users u ON u.id=d.user_id LEFT JOIN device_profile p ON p.device_id=d.device_id`
+
+func (d *managedDevice) projectProfileMetadata() {
+	metadata := deviceprofile.PublicMetadata(d.Profile)
+	d.Hardware = metadata.Hardware
+	d.FirmwareVersion = metadata.FirmwareVersion
+}
 
 func (s *HTTPServer) listDevices(c *gin.Context) {
 	page, size := pageParams(c)
@@ -399,7 +411,7 @@ func (s *HTTPServer) listDevicePool(c *gin.Context) {
 
 func (s *HTTPServer) getDevice(c *gin.Context) {
 	var device managedDevice
-	err := s.store.db.GetContext(c, &device, managedDeviceSelect+` WHERE d.device_id=?`, c.Param("device_id"))
+	err := s.store.db.GetContext(c, &device, managedDeviceDetailSelect+` WHERE d.device_id=?`, c.Param("device_id"))
 	if errors.Is(err, sql.ErrNoRows) {
 		c.JSON(http.StatusNotFound, apiresp.JSON{Code: 404, Msg: "设备不存在"})
 		return
@@ -408,6 +420,7 @@ func (s *HTTPServer) getDevice(c *gin.Context) {
 		apiresp.Internal(c, err.Error())
 		return
 	}
+	device.projectProfileMetadata()
 	devices := []managedDevice{device}
 	s.attachDevicePresence(c, devices)
 	device = devices[0]

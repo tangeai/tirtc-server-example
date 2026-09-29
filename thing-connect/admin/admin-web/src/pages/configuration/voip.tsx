@@ -408,6 +408,31 @@ export function VoIPPage() {
           <Descriptions
             bordered
             size="small"
+            column={3}
+            items={[
+              {
+                key: 'chip_model',
+                label: '芯片型号',
+                children: profile.hardware?.chip_model || '未上报',
+              },
+              {
+                key: 'board_model',
+                label: '开发板型号',
+                children: profile.hardware?.board_model || '未上报',
+              },
+              {
+                key: 'firmware_version',
+                label: '固件版本',
+                children: profile.firmware_version || '未上报',
+              },
+            ]}
+          />
+        )}
+        <Typography.Title level={5}>VoIP 媒体属性</Typography.Title>
+        {profile && (
+          <Descriptions
+            bordered
+            size="small"
             column={2}
             items={profileFields.map((key) => ({
               key,
@@ -424,7 +449,7 @@ export function VoIPPage() {
             }))}
           />
         )}
-        <Typography.Title level={5}>原始上报数据（供开发排查）</Typography.Title>
+        <Typography.Title level={5}>原始 VoIP 属性（供开发排查）</Typography.Title>
         <pre className="profile-json">{profile ? prettyJSON(profile.attributes) : ''}</pre>
       </Drawer>
     </>

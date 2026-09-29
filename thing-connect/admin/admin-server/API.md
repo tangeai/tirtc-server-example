@@ -122,6 +122,8 @@ MFA 验证请求：
 
 `online` 依据 Redis 中 150 秒有效期的 MQTT 在线记录判定；设备心跳或 Broker 连接事件会刷新记录。`presence_known=false` 表示 Admin Server 当时无法读取 Redis，不能按离线处理。兼容升级前值时设备仍可显示在线，但 `last_seen_at` 可能为空；设备产生下一次心跳后会写入最近观测时间。
 
+`GET /devices/:device_id` 还会在设备已经上报时返回可选的 `hardware.chip_model`、`hardware.board_model` 和 `firmware_version`。未上报这些字段的旧设备不返回对应字段。
+
 用户和设备列表的排序规则如下：
 
 | 接口 | 默认排序 | 可选排序 |
@@ -142,6 +144,8 @@ MFA 验证请求：
 - `profile_reported=true|false`：按设备是否上报 VoIP 属性筛选。
 
 列表默认按授权记录 ID 倒序排列。筛选条件同时作用于 `items` 和 `total`，Admin Web 使用 `page_size=20` 分页查询，不会一次加载全部授权记录。
+
+`GET /voip/devices/:device_id/profile` 保留原有 `profile` 和 `attributes` VoIP 属性，并在设备已经上报时增加可选的 `hardware` 与 `firmware_version`。
 
 登录日志和操作日志保留稳定的英文动作码用于筛选与二次开发。`GET /login-logs` 的每条记录包含登录时提交的 `email`；`GET /audit-logs` 的每条记录包含 `admin_user_id` 和当前可查询到的 `email`，账号不存在或已离线清理时 `email` 为空。
 

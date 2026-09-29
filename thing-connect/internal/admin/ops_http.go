@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"thing-connect/internal/apiresp"
+	"thing-connect/internal/deviceprofile"
 )
 
 type dictType struct {
@@ -496,7 +497,7 @@ func (s *HTTPServer) voipDeviceProfile(c *gin.Context) {
 		Profile   string    `db:"profile" json:"profile"`
 		UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
 	}
-	err := s.store.db.GetContext(c, &row, `SELECT device_id,JSON_EXTRACT(profile,'$.voip') profile,updated_at
+	err := s.store.db.GetContext(c, &row, `SELECT device_id,profile,updated_at
 		FROM device_profile WHERE device_id=? AND JSON_CONTAINS_PATH(profile,'one','$.voip')`, c.Param("device_id"))
 	if errors.Is(err, sql.ErrNoRows) {
 		c.JSON(http.StatusNotFound, apiresp.JSON{Code: 404, Msg: "设备未上报 VoIP 属性"})
@@ -506,11 +507,29 @@ func (s *HTTPServer) voipDeviceProfile(c *gin.Context) {
 		apiresp.Internal(c, err.Error())
 		return
 	}
+	apiresp.OK(c, adminDeviceProfileData(row.DeviceID, row.Profile, row.UpdatedAt))
+}
+
+func adminDeviceProfileData(deviceID, storedProfile string, updatedAt time.Time) gin.H {
+	voip := deviceprofile.Scene(json.RawMessage(storedProfile), "voip")
 	var attributes any
-	if json.Unmarshal([]byte(row.Profile), &attributes) != nil {
-		attributes = row.Profile
+	if json.Unmarshal(voip, &attributes) != nil {
+		attributes = string(voip)
 	}
-	apiresp.OK(c, gin.H{"device_id": row.DeviceID, "profile": row.Profile, "attributes": attributes, "updated_at": row.UpdatedAt})
+	data := gin.H{
+		"device_id":  deviceID,
+		"profile":    string(voip),
+		"attributes": attributes,
+		"updated_at": updatedAt,
+	}
+	metadata := deviceprofile.PublicMetadata(&storedProfile)
+	if metadata.Hardware != nil {
+		data["hardware"] = metadata.Hardware
+	}
+	if metadata.FirmwareVersion != nil {
+		data["firmware_version"] = *metadata.FirmwareVersion
+	}
+	return data
 }
 
 func validExtra(raw json.RawMessage) bool {

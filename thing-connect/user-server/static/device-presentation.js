@@ -103,7 +103,18 @@
       ],
     ];
   }
-  const value = { states, roomSummary, roleSummary, mediaRows };
+  function deviceRows(device) {
+    return [
+      ["设备名称", device?.device_name || "未命名设备"],
+      ["设备 ID", device?.device_id || "未上报"],
+      ["MAC", device?.mac || "未上报"],
+      ["芯片型号", device?.hardware?.chip_model || "未上报"],
+      ["开发板型号", device?.hardware?.board_model || "未上报"],
+      ["固件版本", device?.firmware_version || "未上报"],
+      ["绑定时间", device?.bind_time || "未上报"],
+    ];
+  }
+  const value = { states, roomSummary, roleSummary, mediaRows, deviceRows };
   if (typeof module !== "undefined" && module.exports) module.exports = value;
   else root.DevicePresentation = value;
 })(typeof window !== "undefined" ? window : globalThis);

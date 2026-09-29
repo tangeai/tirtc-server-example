@@ -11,6 +11,25 @@ test('missing scene stays unreported and never borrows VoIP values', () => {
   assert.equal(rows['下行音频（首选顺序）'], 'Opus / AMR');
 });
 
+test('device details show optional hardware and firmware with legacy fallbacks', () => {
+  const rows = Object.fromEntries(view.deviceRows({
+    device_id: 'device-1',
+    device_name: '桌面模拟器',
+    mac: 'AA:BB:CC:DD:EE:FF',
+    hardware: {chip_model: 'x86_64', board_model: 'thingconnect-device-sim-py'},
+    firmware_version: '1.0.0',
+    bind_time: '2026-09-29T16:00:00+08:00',
+  }));
+  assert.equal(rows['芯片型号'], 'x86_64');
+  assert.equal(rows['开发板型号'], 'thingconnect-device-sim-py');
+  assert.equal(rows['固件版本'], '1.0.0');
+
+  const legacy = Object.fromEntries(view.deviceRows({device_id: 'legacy-device'}));
+  assert.equal(legacy['芯片型号'], '未上报');
+  assert.equal(legacy['开发板型号'], '未上报');
+  assert.equal(legacy['固件版本'], '未上报');
+});
+
 test('explicit zero, false, empty video and missing data remain distinct', () => {
   const rows = Object.fromEntries(view.mediaRows({voip: {camera_rotation: 0, hor_mirror: false, down_video_mt: '', audio_channels: 1}}, 'voip'));
   assert.equal(rows['摄像头旋转'], '0°（顺时针）');

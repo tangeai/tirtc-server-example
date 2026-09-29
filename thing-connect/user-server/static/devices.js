@@ -308,12 +308,7 @@ function showMedia(scene) {
 function openDeviceInfo() {
   const d = devices.find((d) => d.device_id === selectedDeviceID);
   if (!d) return;
-  $("device-details").innerHTML = [
-    ["设备名称", d.device_name || "未命名设备"],
-    ["设备 ID", d.device_id],
-    ["MAC", d.mac || "未上报"],
-    ["绑定时间", d.bind_time || "未上报"],
-  ]
+  $("device-details").innerHTML = DevicePresentation.deviceRows(d)
     .map(([k, v]) => `<dt>${escapeHTML(k)}</dt><dd>${escapeHTML(v)}</dd>`)
     .join("");
   showMedia("stream");
