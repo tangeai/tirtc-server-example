@@ -5,14 +5,26 @@ const path = require('node:path')
 const vm = require('node:vm')
 const { createRequire } = require('node:module')
 
-function makePage(result) {
+function makePage(result, voipPlugin) {
   let definition
   const filename = path.join(__dirname, '../pages/devices/index.js')
   const realRequire = createRequire(filename)
   const calls = []
+  const app = { globalData: { modelId: 'model-test' } }
+  const plugin = voipPlugin || {
+    CALL_PAGE_PATH: '/plugin/call',
+    setUIConfig() {},
+    async callDevice() { return { roomId: 'room-test' } },
+  }
   vm.runInNewContext(fs.readFileSync(filename, 'utf8'), {
     Page: value => { definition = value },
-    getApp: () => ({ globalData: {} }),
+    getApp: () => app,
+    requirePlugin: () => ({ default: plugin }),
+    console: {
+      info: (...args) => calls.push(['info', ...args]),
+      warn: (...args) => calls.push(['warn', ...args]),
+      error: (...args) => calls.push(['error', ...args]),
+    },
     require: id => {
       if (id.endsWith('/session')) return { expireSession: () => calls.push(['login']) }
       if (id.endsWith('/api')) return { userApi: async () => {
@@ -29,13 +41,20 @@ function makePage(result) {
       getStorageSync: () => 'test', removeStorageSync() {},
       showNavigationBarLoading() {}, hideNavigationBarLoading() {}, stopPullDownRefresh() {},
       showToast: value => calls.push(['toast', value.title]),
+      showLoading() {}, hideLoading() {},
+      showModal: value => calls.push(['modal', value.content]),
       reLaunch: value => calls.push(['login', value.url]),
       navigateTo: value => calls.push(['navigate', value.url]),
+      redirectTo: value => calls.push(['redirect', value.url]),
       setClipboardData: value => calls.push(['copy', value.data]),
+      getAccountInfoSync: () => ({
+        miniProgram: { version: '1.2.3', envVersion: 'develop' },
+      }),
+      getAppBaseInfo: () => ({ SDKVersion: '3.9.0' }),
     },
   })
   const page = { ...definition, data: { ...definition.data }, setData(value) { Object.assign(this.data, value) } }
-  return { page, calls }
+  return { page, calls, app, plugin }
 }
 
 test('首次网络失败显示重试状态，不误报暂无设备', async () => {
@@ -101,4 +120,44 @@ test('OpenID 获取失败可重试，关闭弹窗后忽略迟到结果', async (
   resolve('test-late-openid')
   await pending
   assert.notEqual(page.data.profileOpenId, 'test-late-openid')
+})
+
+test('小程序呼设备把 profile 旋转值传入插件并记录实际调用参数', async () => {
+  const calls = []
+  const plugin = {
+    CALL_PAGE_PATH: '/plugin/call',
+    setUIConfig() {},
+    async callDevice(options) {
+      calls.push(['callDevice', options])
+      return { roomId: 'room-test' }
+    },
+  }
+  const fixture = makePage(undefined, plugin)
+  fixture.page.data.contactRemark = '测试联系人'
+  fixture.page.data.deviceList = [{
+    device_id: 'device-test',
+    device_name: '测试设备',
+    online: true,
+    hasScreen: true,
+    hasCamera: true,
+    down_video_rotation: 1,
+    profiles: { voip: { down_video_rotation: 1 } },
+  }]
+
+  await fixture.page.onCall({ currentTarget: { dataset: { id: 'device-test' } } })
+
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0][1].encodeVideoRotation, 1)
+  const trace = fixture.calls.find(call => (
+    call[0] === 'info'
+      && call[1].startsWith('[DEBUG-voip-rotation] ')
+      && JSON.parse(call[1].slice('[DEBUG-voip-rotation] '.length)).stage === 'callDevice.request'
+  ))
+  assert.ok(trace)
+  const tracedRequest = JSON.parse(trace[1].slice('[DEBUG-voip-rotation] '.length))
+  assert.equal(tracedRequest.profileDownVideoRotation, 1)
+  assert.equal(tracedRequest.normalizedDownVideoRotation, 1)
+  assert.equal(tracedRequest.encodeVideoRotation, 1)
+  assert.equal(tracedRequest.miniProgramVersion, '1.2.3')
+  assert.equal(tracedRequest.baseLibraryVersion, '3.9.0')
 })

@@ -400,6 +400,42 @@ func checkSignature(got, token, timestamp, nonce string) bool {
 	return strings.EqualFold(got, hex.EncodeToString(h[:]))
 }
 
+type voipRotationTrace struct {
+	Direction         string
+	DownVideoRotation string
+	DownVideoMT       string
+	VideoResMode      string
+}
+
+// buildVoipRotationTrace reads the final JSON representation sent to the
+// TiRTC token service. It intentionally exposes only non-sensitive media
+// fields so production diagnostics cannot leak room credentials or tokens.
+func buildVoipRotationTrace(deviceID string, m *voipMessage, req tirtcapi.TokenWxvoipRequest) (voipRotationTrace, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return voipRotationTrace{}, err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &fields); err != nil {
+		return voipRotationTrace{}, err
+	}
+
+	direction := "mini-program-to-device"
+	if m != nil && m.PayloadData != nil && m.PayloadData.From == deviceID {
+		direction = "device-to-mini-program"
+	}
+	trace := voipRotationTrace{
+		Direction:         direction,
+		DownVideoRotation: "omitted",
+	}
+	if raw, ok := fields["down_video_rotation"]; ok {
+		trace.DownVideoRotation = string(bytes.TrimSpace(raw))
+	}
+	_ = json.Unmarshal(fields["down_video_mt"], &trace.DownVideoMT)
+	_ = json.Unmarshal(fields["video_res_mode"], &trace.VideoResMode)
+	return trace, nil
+}
+
 func pushJoinToDevice(c *gin.Context, appCfg WxAppCfg, tirtcCfg TirtcServerCfg, wxAppID, deviceID string, m *voipMessage, publisher MQTTPublisher, profiler DeviceProfileGetter) error {
 	if tirtcCfg.BaseURL == "" || tirtcCfg.AccessID == "" || tirtcCfg.AppID == "" || tirtcCfg.SecretKey == "" {
 		return fmt.Errorf("tirtc_server_api requires base_url, access_id, app_id, secret_key")
@@ -431,6 +467,16 @@ func pushJoinToDevice(c *gin.Context, appCfg WxAppCfg, tirtcCfg TirtcServerCfg, 
 		DeviceID:       deviceID,
 		WxPayload:      m.Payload,
 		WxModelID:      modelID,
+	}
+	if trace, traceErr := buildVoipRotationTrace(deviceID, m, voipReq); traceErr != nil {
+		slog.WarnContext(ctx, "[DEBUG-voip-rotation] token.request trace failed", "err", traceErr)
+	} else {
+		slog.InfoContext(ctx, "[DEBUG-voip-rotation] token.request",
+			"direction", trace.Direction,
+			"down_video_rotation", trace.DownVideoRotation,
+			"down_video_mt", trace.DownVideoMT,
+			"video_res_mode", trace.VideoResMode,
+		)
 	}
 
 	slog.InfoContext(ctx, "voip notify calling tirtc token service",

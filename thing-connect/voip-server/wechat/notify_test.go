@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"thing-connect/voip-server/tirtcapi"
 
 	"github.com/gin-gonic/gin"
 )
@@ -178,6 +179,54 @@ func TestPushJoinToDevice_RejectsKnownOfflineDevice(t *testing.T) {
 	}
 	if pub.called {
 		t.Fatal("offline call should not publish MQTT")
+	}
+}
+
+func TestBuildVoipRotationTrace_UsesFinalTokenBodyAndCallDirection(t *testing.T) {
+	tests := []struct {
+		name      string
+		deviceID  string
+		message   *voipMessage
+		direction string
+	}{
+		{
+			name:      "mini program calls device",
+			deviceID:  "dev1",
+			message:   &voipMessage{},
+			direction: "mini-program-to-device",
+		},
+		{
+			name:     "device calls mini program",
+			deviceID: "dev1",
+			message: &voipMessage{PayloadData: &voipCallPayload{
+				From: "dev1",
+			}},
+			direction: "device-to-mini-program",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			trace, err := buildVoipRotationTrace(tt.deviceID, tt.message, tirtcapi.TokenWxvoipRequest{
+				Profile: json.RawMessage(`{
+					"down_video_rotation": 1,
+					"down_video_mt": "mjpeg",
+					"video_res_mode": "fit_screen"
+				}`),
+			})
+			if err != nil {
+				t.Fatalf("buildVoipRotationTrace: %v", err)
+			}
+			if trace.Direction != tt.direction {
+				t.Errorf("direction=%q, want %q", trace.Direction, tt.direction)
+			}
+			if trace.DownVideoRotation != "1" {
+				t.Errorf("down_video_rotation=%q, want 1", trace.DownVideoRotation)
+			}
+			if trace.DownVideoMT != "mjpeg" || trace.VideoResMode != "fit_screen" {
+				t.Errorf("unexpected media trace: %+v", trace)
+			}
+		})
 	}
 }
 

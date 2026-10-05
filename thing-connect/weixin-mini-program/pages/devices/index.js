@@ -21,6 +21,33 @@ const app = getApp()
 
 const MAX_DEVICE_NAME_CHARS = 13
 const AUTH_NAME_POOL = ['爸爸', '妈妈', '爷爷', '奶奶', '哥哥', '姐姐', '朋友']
+const VOIP_ROTATION_DEBUG_TAG = '[DEBUG-voip-rotation]'
+
+function voipRuntimeVersions(wmpfVoip) {
+  let miniProgram = {}
+  let baseLibrary = {}
+  try {
+    const account = typeof wx.getAccountInfoSync === 'function' ? wx.getAccountInfoSync() : null
+    miniProgram = (account && account.miniProgram) || {}
+  } catch (_) {}
+  try {
+    baseLibrary = typeof wx.getAppBaseInfo === 'function' ? wx.getAppBaseInfo() : {}
+  } catch (_) {}
+  return {
+    miniProgramVersion: miniProgram.version || '',
+    envVersion: miniProgram.envVersion || '',
+    baseLibraryVersion: baseLibrary.SDKVersion || '',
+    wechatVersion: baseLibrary.version || '',
+    pluginVersion: (wmpfVoip && (wmpfVoip.version || wmpfVoip.VERSION)) || '',
+  }
+}
+
+function traceVoipRotation(stage, detail) {
+  console.info(`${VOIP_ROTATION_DEBUG_TAG} ${JSON.stringify({
+    stage,
+    ...(detail || {}),
+  })}`)
+}
 
 function generateUUID() {
   const hex = '0123456789abcdef'
@@ -909,12 +936,33 @@ Page({
         payload: randUuid,
         ...downVideoRotationOption(device.down_video_rotation),
       }
+      traceVoipRotation('callDevice.request', {
+        profileDownVideoRotation: device.profiles
+          && device.profiles.voip
+          && device.profiles.voip.down_video_rotation,
+        normalizedDownVideoRotation: device.down_video_rotation,
+        encodeVideoRotation: Object.prototype.hasOwnProperty.call(
+          callOptions, 'encodeVideoRotation'
+        ) ? callOptions.encodeVideoRotation : null,
+        roomType,
+        enableCallerCamera,
+        enableListenerCamera,
+        deviceListLoading: !!this.data.loading,
+        deviceListInitialized: !!this.data.initialized,
+        refreshInFlight: !!this._loadPromise,
+        ...voipRuntimeVersions(wmpfVoip),
+      })
       const { roomId } = await wmpfVoip.callDevice(callOptions)
+      traceVoipRotation('callDevice.result', { roomCreated: !!roomId })
       if (!roomId) throw new Error('创建房间失败')
       app.globalData.currentCall = { deviceId, roomId }
       wx.hideLoading()
       wx.redirectTo({ url: wmpfVoip.CALL_PAGE_PATH })
     } catch (err) {
+      traceVoipRotation('callDevice.error', {
+        errCode: err && (err.errCode || err.code),
+        errMsg: err && (err.errMsg || err.message),
+      })
       if (err.sessionExpired) return
       wx.showModal({ title: '呼叫失败', content: err.message || JSON.stringify(err), showCancel: false })
     } finally {
