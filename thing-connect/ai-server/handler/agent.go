@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"thing-connect/internal/ai"
 	"thing-connect/internal/apiresp"
 	"thing-connect/internal/model"
 	"thing-connect/internal/store"
@@ -70,6 +71,7 @@ func failAIUpstream(c *gin.Context, action string, err error) {
 
 // agentAPI is the subset of tirtcapi.AgentAPIClient used by AgentHandler.
 type agentAPI interface {
+	ai.PluginNames
 	GetRole(ctx context.Context, roleID string) (*tirtcapi.Role, error)
 	CreateRole(ctx context.Context, input tirtcapi.RoleInput) (*tirtcapi.Role, error)
 	UpdateRole(ctx context.Context, roleID string, input tirtcapi.RoleInput) (*tirtcapi.Role, error)
@@ -373,12 +375,13 @@ func (h *AgentHandler) deleteRole(c *gin.Context) {
 }
 
 func (h *AgentHandler) getDefaultRole(c *gin.Context) {
-	if h.defaultRole() == "" {
+	runtime := h.active()
+	if runtime.defaultRoleID == "" {
 		apiresp.Fail(c, http.StatusNotFound, 40400, "未配置默认角色")
 		return
 	}
 
-	role, err := h.api().GetRole(c.Request.Context(), h.defaultRole())
+	role, err := runtime.api.GetRole(c.Request.Context(), runtime.defaultRoleID)
 	if err != nil {
 		failAIUpstream(c, "查询默认角色", err)
 		return
@@ -387,7 +390,14 @@ func (h *AgentHandler) getDefaultRole(c *gin.Context) {
 		apiresp.Fail(c, http.StatusNotFound, 40400, "AI 云服务中不存在默认角色")
 		return
 	}
-	apiresp.OK(c, role)
+	var pluginIDs []string
+	if role.AgentConfig != nil {
+		pluginIDs = role.AgentConfig.DevicePlugins
+	}
+	apiresp.OK(c, struct {
+		*tirtcapi.Role
+		DevicePluginRefs []ai.PluginRef `json:"device_plugin_refs"`
+	}{role, ai.ResolvePluginNames(c.Request.Context(), runtime.api, pluginIDs)})
 }
 
 // ── Device-role binding ──
@@ -896,7 +906,10 @@ func (h *AgentHandler) deletePlugin(c *gin.Context) {
 		failAIUpstream(c, "删除设备插件", err)
 		return
 	}
-	_ = h.userResourceStore.Remove(c.Request.Context(), userID, model.ResourceTypeDevicePlugin, id)
+	if err := h.userResourceStore.Remove(c.Request.Context(), userID, model.ResourceTypeDevicePlugin, id); err != nil {
+		apiresp.Internal(c, err.Error())
+		return
+	}
 	apiresp.OK(c, nil)
 }
 

@@ -162,6 +162,9 @@ func (m *mockAgentAPI) CreateDevicePlugin(ctx context.Context, req tirtcapi.Devi
 func (m *mockAgentAPI) GetDevicePlugin(ctx context.Context, id string) (*tirtcapi.DevicePlugin, error) {
 	return nil, nil //nolint:nilnil // The mock mirrors the upstream not-found contract.
 }
+func (m *mockAgentAPI) DevicePluginName(ctx context.Context, id string) (string, error) {
+	return "", nil
+}
 func (m *mockAgentAPI) UpdateDevicePlugin(ctx context.Context, id string, req tirtcapi.DevicePluginUpdateRequest) (*tirtcapi.DevicePlugin, error) {
 	return nil, nil //nolint:nilnil // Tests that need a result configure the mock explicitly.
 }

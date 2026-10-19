@@ -481,14 +481,17 @@ let voiceLang = '';
 let knowledgeIndexes = [];
 let knowledgeFiles = [];
 let mcpTools = [];
+let mcpLoadError = false;
 let selectedMcpTools = [];
 let pluginTools = [];
+let pluginLoadError = false;
 let selectedPlugins = [];
 
 // ── Modal editing state ──
 let editingMcpToolId = null;
 let editingMcpConfig = null;
 let editingPluginId = null;
+let pluginModalRequest = 0;
 let pluginModalInputParams = [];
 let pluginModalReturnParams = [];
 let editingKnowledgeIndexId = null;
@@ -1189,47 +1192,63 @@ async function deleteKnowledgeModalFile(docId) {
 
 // ── MCP Tools ──
 
+// A role can reference resources absent from the user's catalog. Keep these
+// associations visible without treating them as user-managed resources.
+function roleResourceItems(catalog, selected, readonly) {
+  const byId = new Map(catalog.map(item => [item.id, item]));
+  const ids = readonly ? selected : [...byId.keys(), ...selected];
+  return [...new Set(ids)].filter(Boolean).map(id => ({
+    ...byId.get(id), id, referenceOnly: !byId.has(id),
+  }));
+}
+
 async function loadMcpTools() {
-  const [globalRes, appRes] = await Promise.all([
+  const results = await Promise.allSettled([
     api('/v1/ai/mcp/tools'),
     api('/v1/ai/mcp/app-tools'),
   ]);
-  mcpTools = [];
-  if (globalRes.code === 200 && globalRes.data?.items) {
-    mcpTools.push(...globalRes.data.items.map(t => ({ ...t, source: 'global' })));
-  }
-  if (appRes.code === 200 && appRes.data?.items) {
-    mcpTools.push(...appRes.data.items.map(t => ({ id: t.id, name: t.name, source: 'app' })));
-  }
+  mcpLoadError = false;
+  results.forEach((result, index) => {
+    const source = index === 0 ? 'global' : 'app';
+    if (result.status !== 'fulfilled' || result.value.code !== 200 || !Array.isArray(result.value.data?.items)) {
+      mcpLoadError = true;
+      return;
+    }
+    mcpTools = mcpTools.filter(t => t.source !== source);
+    mcpTools.push(...result.value.data.items.map(t => ({ ...t, source })));
+  });
+  if (mcpLoadError) toast('MCP 工具列表加载失败，请稍后重试', true);
   renderMcpTools();
 }
 
 function renderMcpTools() {
   const container = $('mcp-tools-list');
   const readonly = isEditingDefault;
-  if (!mcpTools.length) {
-    container.innerHTML = '<span class="text-[11px] text-gray-400">暂无可用工具</span>';
+  const items = roleResourceItems(mcpTools, selectedMcpTools, readonly);
+  if (!items.length) {
+    container.innerHTML = '<span class="text-[11px] text-gray-400">' + (mcpLoadError ? 'MCP 工具列表加载失败，请稍后重试' : readonly ? '未关联 MCP 工具' : '暂无可用工具') + '</span>';
   } else {
-    container.innerHTML = mcpTools.map(t => {
+    container.innerHTML = items.map(t => {
       const checked = selectedMcpTools.includes(t.id);
       const bg = checked ? 'bg-emerald-500' : 'bg-gray-200';
       const dot = checked ? 'translate-x-3.5' : '';
       const canToggle = !readonly;
       const op = canToggle ? 'cursor-pointer' : 'opacity-60 cursor-not-allowed';
-      const label = t.name;
-      const editBtns = (!readonly && t.source === 'app') ? `
-        <button onclick="event.stopPropagation(); openMcpToolModal('${t.id}')" class="text-[10px] text-gray-400 hover:text-emerald-500 flex-shrink-0 ml-1" title="编辑">✎</button>
-        <button onclick="event.stopPropagation(); deleteMcpTool('${t.id}')" class="text-[10px] text-red-400 hover:text-red-600 flex-shrink-0 ml-1" title="删除">&times;</button>
+      const label = t.name || t.id;
+      const editBtns = (!readonly && !t.referenceOnly && t.source === 'app') ? `
+        <button onclick="${escapeText('event.stopPropagation(); openMcpToolModal(' + JSON.stringify(t.id) + ')')}" class="text-[10px] text-gray-400 hover:text-emerald-500 flex-shrink-0 ml-1" title="编辑">✎</button>
+        <button onclick="${escapeText('event.stopPropagation(); deleteMcpTool(' + JSON.stringify(t.id) + ')')}" class="text-[10px] text-red-400 hover:text-red-600 flex-shrink-0 ml-1" title="删除">&times;</button>
       ` : '';
       return `
-      <div class="flex items-center ${op}" onclick="${canToggle ? `toggleMcp('${t.id}')` : ''}">
-        <span class="text-[11px] text-gray-600 truncate flex-1 mr-2" title="${t.name || ''}">${label}</span>
-        <div class="relative w-8 h-[18px] rounded-full transition-colors flex-shrink-0 ${bg}">
+      <div class="flex items-center min-w-0 ${op}" onclick="${canToggle ? escapeText('toggleMcp(' + JSON.stringify(t.id) + ')') : ''}">
+        <span class="text-[11px] text-gray-600 truncate flex-1 mr-2" title="${escapeText(t.name ? label : '名称暂不可用：' + t.id)}">${escapeText(label)}</span>
+        ${readonly ? '<span class="text-[10px] text-gray-400 flex-shrink-0">已关联</span>' : `<div class="relative w-8 h-[18px] rounded-full transition-colors flex-shrink-0 ${bg}">
           <div class="absolute top-0.5 left-0.5 w-3.5 h-3.5 rounded-full bg-white shadow-sm transition-transform ${dot}"></div>
-        </div>
+        </div>`}
         ${editBtns}
       </div>`;
     }).join('');
+    if (mcpLoadError) container.insertAdjacentHTML('beforeend', '<span class="text-[11px] text-gray-400">MCP 工具列表加载失败，请稍后重试</span>');
   }
   if (!readonly) {
     container.insertAdjacentHTML('beforeend', `<button onclick="openMcpToolModal()" class="text-[11px] text-emerald-600 hover:text-emerald-700 text-left mt-1 w-full">+ 新建 MCP 工具</button>`);
@@ -1328,40 +1347,46 @@ async function deleteMcpTool(id) {
 // ── Device Plugins ──
 
 async function loadPlugins() {
-  const data = await api('/v1/ai/plugins');
-  if (data.code === 200 && data.data?.items) {
+  try {
+    const data = await api('/v1/ai/plugins');
+    if (data.code !== 200 || !Array.isArray(data.data?.items)) throw new Error('plugin list unavailable');
     pluginTools = data.data.items;
-  } else {
-    pluginTools = [];
+    pluginLoadError = false;
+  } catch {
+    pluginLoadError = true;
+    toast('设备插件列表加载失败，请稍后重试', true);
   }
   renderPlugins();
 }
 
 function renderPlugins() {
   const container = $('plugin-tools-list');
-  if (!pluginTools.length) {
-    container.innerHTML = '<span class="text-[11px] text-gray-400">暂无设备插件，点击下方新建</span>';
+  const readonly = isEditingDefault;
+  const defaultNames = readonly ? (defaultRole?.device_plugin_refs || []).filter(p => p.name) : [];
+  const items = roleResourceItems([...pluginTools, ...defaultNames], selectedPlugins, readonly);
+  if (!items.length) {
+    container.innerHTML = '<span class="text-[11px] text-gray-400">' + (pluginLoadError ? '设备插件列表加载失败，请稍后重试' : readonly ? '未关联设备插件' : '暂无设备插件，点击下方新建') + '</span>';
   } else {
-    const readonly = isEditingDefault;
-    container.innerHTML = pluginTools.map(p => {
+    container.innerHTML = items.map(p => {
       const checked = selectedPlugins.includes(p.id);
       const bg = checked ? 'bg-emerald-500' : 'bg-gray-200';
       const dot = checked ? 'translate-x-3.5' : '';
       const op = readonly ? 'opacity-60' : 'cursor-pointer';
       return `
-      <div class="flex items-center gap-1.5">
-        <div class="flex items-center justify-between flex-1 ${op}" onclick="${readonly ? '' : `togglePlugin('${p.id}')`}">
-          <span class="text-[11px] text-gray-600 truncate flex-1 mr-1" title="${p.name}">${p.name}</span>
-          <div class="relative w-8 h-[18px] rounded-full transition-colors flex-shrink-0 ${bg}">
+      <div class="flex items-center min-w-0 gap-1.5">
+        <div class="flex items-center justify-between flex-1 min-w-0 ${op}" onclick="${readonly ? '' : escapeText('togglePlugin(' + JSON.stringify(p.id) + ')')}">
+          <span class="text-[11px] text-gray-600 truncate flex-1 mr-1" title="${escapeText(p.name || '名称暂不可用：' + p.id)}">${escapeText(p.name || p.id)}</span>
+          ${readonly ? '<span class="text-[10px] text-gray-400 flex-shrink-0">已关联</span>' : `<div class="relative w-8 h-[18px] rounded-full transition-colors flex-shrink-0 ${bg}">
             <div class="absolute top-0.5 left-0.5 w-3.5 h-3.5 rounded-full bg-white shadow-sm transition-transform ${dot}"></div>
-          </div>
+          </div>`}
         </div>
-        ${readonly ? '' : `
-        <button onclick="openPluginModal('${p.id}')" class="text-[10px] text-gray-400 hover:text-emerald-500 flex-shrink-0" title="编辑">✎</button>
-        <button onclick="deletePlugin('${p.id}')" class="text-[10px] text-red-400 hover:text-red-600 flex-shrink-0" title="删除">&times;</button>
+        ${readonly || p.referenceOnly ? '' : `
+        <button onclick="${escapeText('openPluginModal(' + JSON.stringify(p.id) + ')')}" class="text-[11px] text-emerald-600 hover:text-emerald-700 flex-shrink-0" title="编辑设备插件">编辑</button>
+        <button onclick="${escapeText('deletePlugin(' + JSON.stringify(p.id) + ')')}" class="text-[11px] text-red-400 hover:text-red-600 flex-shrink-0" title="删除设备插件">删除</button>
         `}
       </div>`;
     }).join('');
+    if (pluginLoadError) container.insertAdjacentHTML('beforeend', '<span class="text-[11px] text-gray-400">设备插件列表加载失败，请稍后重试</span>');
   }
   // "+ 新建" button always visible (unless readonly)
   if (!isEditingDefault) {
@@ -1427,13 +1452,24 @@ function removeParamRow(tableId, index) {
 }
 
 async function openPluginModal(id) {
-  editingPluginId = id || null;
+  const request = ++pluginModalRequest;
   // List only carries {id,name}; fetch full detail (action, params, etc.) on demand.
   let p = null;
   if (id) {
-    const res = await api('/v1/ai/plugins/' + id);
-    if (res.code === 200 && res.data) p = res.data;
+    try {
+      const res = await api('/v1/ai/plugins/' + encodeURIComponent(id));
+      if (request !== pluginModalRequest) return;
+      if (res.code !== 200 || !res.data) {
+        toast(res.msg || '设备插件详情加载失败，请重试', true);
+        return;
+      }
+      p = res.data;
+    } catch {
+      if (request === pluginModalRequest) toast('设备插件详情加载失败，请检查网络后重试', true);
+      return;
+    }
   }
+  editingPluginId = id || null;
   $('plugin-modal-title').textContent = p ? '编辑设备端插件' : '新增设备端插件';
   $('plugin-modal-submit-btn').textContent = p ? '确认修改' : '确认创建';
   $('plugin-modal-name').value = p?.name || '';
@@ -1448,6 +1484,7 @@ async function openPluginModal(id) {
 }
 
 function closePluginModal() {
+  pluginModalRequest += 1;
   $('plugin-modal').classList.add('hidden');
   $('plugin-modal').classList.remove('flex');
   editingPluginId = null;
@@ -1455,6 +1492,7 @@ function closePluginModal() {
 
 function cleanParams(rows) {
   return rows.filter(p => (p.name || '').trim()).map(p => ({
+    ...p,
     name: p.name.trim(),
     type: p.type || 'string',
     description: (p.description || '').trim(),
@@ -1477,21 +1515,22 @@ async function savePluginModal() {
     return_params: cleanParams(pluginModalReturnParams),
   };
 
-  const res = editingPluginId
+  const updating = !!editingPluginId;
+  const res = updating
     ? await api('/v1/ai/plugins/' + editingPluginId, { method: 'PUT', body: JSON.stringify(payload) })
     : await api('/v1/ai/plugins', { method: 'POST', body: JSON.stringify(payload) });
 
   if (res.code === 200 && res.data) {
     closePluginModal();
     await loadPlugins();
-    toast(editingPluginId ? '插件已更新' : '插件已创建');
+    toast(updating ? '插件已更新' : '插件已创建');
   } else {
-    toast(res.msg || (editingPluginId ? '更新失败' : '创建失败'), true);
+    toast(res.msg || (updating ? '更新失败' : '创建失败'), true);
   }
 }
 
 async function deletePlugin(id) {
-  if (!confirm('确定删除该插件？')) return;
+  if (!confirm('删除前请先在引用该插件的角色中关闭它并保存角色。确定删除该插件？')) return;
   const data = await api('/v1/ai/plugins/' + id, { method: 'DELETE' });
   if (data.code === 200) {
     pluginTools = pluginTools.filter(p => p.id !== id);

@@ -1215,6 +1215,15 @@ func (c *AgentAPIClient) GetDevicePlugin(ctx context.Context, id string) (*Devic
 	return item, err
 }
 
+// DevicePluginName supplies only display metadata to the AI role view.
+func (c *AgentAPIClient) DevicePluginName(ctx context.Context, id string) (string, error) {
+	plugin, err := c.GetDevicePlugin(ctx, id)
+	if err != nil || plugin == nil {
+		return "", err
+	}
+	return plugin.Name, nil
+}
+
 // UpdateDevicePlugin updates a device plugin.
 func (c *AgentAPIClient) UpdateDevicePlugin(ctx context.Context, id string, req DevicePluginUpdateRequest) (*DevicePlugin, error) {
 	path := devicePluginsPath + "/" + id
@@ -1303,12 +1312,16 @@ func (c *AgentAPIClient) doGetPlugin(ctx context.Context, path string) (*DeviceP
 	if err != nil {
 		return nil, err
 	}
+	var wrap roleResp
+	parseErr := json.Unmarshal(body, &wrap)
+	if parseErr == nil && wrap.Code == http.StatusNotFound && (res.StatusCode == http.StatusNotFound || res.StatusCode == http.StatusOK) {
+		return nil, nil //nolint:nilnil // Cloud-confirmed absence uses the existing not-found contract.
+	}
 	if res.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("agent: HTTP %d: %s", res.StatusCode, string(body))
 	}
-	var wrap roleResp
-	if err := json.Unmarshal(body, &wrap); err != nil {
-		return nil, fmt.Errorf("agent: parse response: %w", err)
+	if parseErr != nil {
+		return nil, fmt.Errorf("agent: parse response: %w", parseErr)
 	}
 	if wrap.Code != 200 {
 		return nil, fmt.Errorf("agent: upstream error code=%d msg=%s", wrap.Code, wrap.Msg)
@@ -1335,16 +1348,29 @@ func (c *AgentAPIClient) doPluginDelete(ctx context.Context, path string) error 
 		return fmt.Errorf("agent: delete plugin: %w", err)
 	}
 	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(res.Body)
-		return fmt.Errorf("agent: HTTP %d: %s", res.StatusCode, string(body))
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		return fmt.Errorf("agent: read plugin delete response: %w", err)
 	}
 	var wrap roleResp
-	body, _ := io.ReadAll(res.Body)
-	if len(body) > 0 {
-		if err := json.Unmarshal(body, &wrap); err == nil && wrap.Code != 0 && wrap.Code != 200 {
-			return fmt.Errorf("agent: upstream error code=%d msg=%s", wrap.Code, wrap.Msg)
-		}
+	parseErr := json.Unmarshal(body, &wrap)
+	// A resource can disappear outside this service, or a previous deletion
+	// can succeed before local index cleanup fails. Only a cloud JSON 404
+	// confirms absence; an HTML gateway 404 must not erase the local index.
+	if parseErr == nil && wrap.Code == http.StatusNotFound && (res.StatusCode == http.StatusNotFound || res.StatusCode == http.StatusOK) {
+		return nil
+	}
+	if res.StatusCode != http.StatusOK {
+		return fmt.Errorf("agent: HTTP %d: %s", res.StatusCode, string(body))
+	}
+	if len(body) == 0 {
+		return nil // Retain compatibility with an empty HTTP 200 response.
+	}
+	if parseErr != nil {
+		return fmt.Errorf("agent: parse plugin delete response: %w", parseErr)
+	}
+	if wrap.Code != 200 {
+		return fmt.Errorf("agent: upstream error code=%d msg=%s", wrap.Code, wrap.Msg)
 	}
 	return nil
 }
