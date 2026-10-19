@@ -483,9 +483,11 @@ let knowledgeFiles = [];
 let mcpTools = [];
 let mcpLoadError = false;
 let selectedMcpTools = [];
+let roleMcpCandidates = [];
 let pluginTools = [];
 let pluginLoadError = false;
 let selectedPlugins = [];
+let rolePluginCandidates = [];
 
 // ── Modal editing state ──
 let editingMcpToolId = null;
@@ -727,10 +729,7 @@ async function selectAgent(id) {
   setSelectValue('field-knowledge-index', ragIdxId);
   onKnowledgeIndexChange();
   // MCP tools & device plugins
-  selectedMcpTools = a.agent_config?.mcp_tools || [];
-  renderMcpTools();
-  selectedPlugins = a.agent_config?.device_plugins || [];
-  renderPlugins();
+  setRoleResourceSelections(a.agent_config);
   $('field-memory').checked = a.agent_config?.ali_memory?.enable === true;
 
   if (a.avatar && a.avatar.startsWith('http')) {
@@ -785,8 +784,7 @@ function newAgent() {
   $('field-knowledge-index').value = '';
   knowledgeFiles = [];
   onKnowledgeIndexChange();
-  selectedMcpTools = []; renderMcpTools();
-  selectedPlugins = []; renderPlugins();
+  setRoleResourceSelections();
   $('field-memory').checked = false;
   $('avatar-preview').textContent = '🤖';
 
@@ -1194,9 +1192,18 @@ async function deleteKnowledgeModalFile(docId) {
 
 // A role can reference resources absent from the user's catalog. Keep these
 // associations visible without treating them as user-managed resources.
-function roleResourceItems(catalog, selected, readonly) {
+function setRoleResourceSelections(config = {}) {
+  selectedMcpTools = [...(config?.mcp_tools || [])];
+  selectedPlugins = [...(config?.device_plugins || [])];
+  roleMcpCandidates = [...selectedMcpTools];
+  rolePluginCandidates = [...selectedPlugins];
+  renderMcpTools();
+  renderPlugins();
+}
+
+function roleResourceItems(catalog, selected, readonly, initial = []) {
   const byId = new Map(catalog.map(item => [item.id, item]));
-  const ids = readonly ? selected : [...byId.keys(), ...selected];
+  const ids = readonly ? selected : [...byId.keys(), ...initial, ...selected];
   return [...new Set(ids)].filter(Boolean).map(id => ({
     ...byId.get(id), id, referenceOnly: !byId.has(id),
   }));
@@ -1224,7 +1231,7 @@ async function loadMcpTools() {
 function renderMcpTools() {
   const container = $('mcp-tools-list');
   const readonly = isEditingDefault;
-  const items = roleResourceItems(mcpTools, selectedMcpTools, readonly);
+  const items = roleResourceItems(mcpTools, selectedMcpTools, readonly, roleMcpCandidates);
   if (!items.length) {
     container.innerHTML = '<span class="text-[11px] text-gray-400">' + (mcpLoadError ? 'MCP 工具列表加载失败，请稍后重试' : readonly ? '未关联 MCP 工具' : '暂无可用工具') + '</span>';
   } else {
@@ -1262,6 +1269,7 @@ function toggleMcp(toolId) {
   const idx = selectedMcpTools.indexOf(toolId);
   if (idx >= 0) selectedMcpTools.splice(idx, 1);
   else selectedMcpTools.push(toolId);
+  editorDirty = true;
   renderMcpTools();
 }
 
@@ -1336,7 +1344,9 @@ async function deleteMcpTool(id) {
   const res = await api('/v1/ai/mcp/app-tools/' + id, { method: 'DELETE' });
   if (res.code === 200) {
     mcpTools = mcpTools.filter(t => t.id !== id);
+    if (selectedMcpTools.includes(id)) editorDirty = true;
     selectedMcpTools = selectedMcpTools.filter(x => x !== id);
+    roleMcpCandidates = roleMcpCandidates.filter(x => x !== id);
     renderMcpTools();
     toast('已删除');
   } else {
@@ -1363,7 +1373,7 @@ function renderPlugins() {
   const container = $('plugin-tools-list');
   const readonly = isEditingDefault;
   const defaultNames = readonly ? (defaultRole?.device_plugin_refs || []).filter(p => p.name) : [];
-  const items = roleResourceItems([...pluginTools, ...defaultNames], selectedPlugins, readonly);
+  const items = roleResourceItems([...pluginTools, ...defaultNames], selectedPlugins, readonly, rolePluginCandidates);
   if (!items.length) {
     container.innerHTML = '<span class="text-[11px] text-gray-400">' + (pluginLoadError ? '设备插件列表加载失败，请稍后重试' : readonly ? '未关联设备插件' : '暂无设备插件，点击下方新建') + '</span>';
   } else {
@@ -1399,6 +1409,7 @@ function togglePlugin(pluginId) {
   const idx = selectedPlugins.indexOf(pluginId);
   if (idx >= 0) selectedPlugins.splice(idx, 1);
   else selectedPlugins.push(pluginId);
+  editorDirty = true;
   renderPlugins();
 }
 
@@ -1534,7 +1545,9 @@ async function deletePlugin(id) {
   const data = await api('/v1/ai/plugins/' + id, { method: 'DELETE' });
   if (data.code === 200) {
     pluginTools = pluginTools.filter(p => p.id !== id);
+    if (selectedPlugins.includes(id)) editorDirty = true;
     selectedPlugins = selectedPlugins.filter(x => x !== id);
+    rolePluginCandidates = rolePluginCandidates.filter(x => x !== id);
     renderPlugins();
     toast('已删除');
   } else {

@@ -6,7 +6,8 @@ async (page) => {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   const writes = [];
-  const role = { id: 'role-1', name: '测试角色', agent_config: {}, service_config: { name: 'default', type: 'custom-compose' } };
+  const roleWrites = [];
+  const role = { id: 'role-1', name: '测试角色', agent_config: { mcp_tools: ['saved-mcp'], device_plugins: ['saved-plugin'] }, service_config: { name: 'default', type: 'custom-compose' } };
   const defaultRole = { id: 'default-role', name: '默认角色', agent_config: {
     mcp_tools: ['global-mcp', 'cloud-mcp'], device_plugins: ['plugin-1', 'cloud-plugin'],
   }, device_plugin_refs: [{ id: 'cloud-plugin', name: '设备呼叫' }] };
@@ -26,7 +27,13 @@ async (page) => {
     if (path.endsWith('/device/test-device/role')) data = { role_id: role.id, default_role_id: defaultRole.id };
     else if (path === '/v1/ai/roles') data = { items: [role] };
     else if (path === '/v1/ai/roles/default') data = defaultRole;
-    else if (path === '/v1/ai/roles/role-1') data = role;
+    else if (path === '/v1/ai/roles/role-1') {
+      if (request.method() === 'PUT') {
+        roleWrites.push(request.postDataJSON());
+        Object.assign(role, request.postDataJSON());
+      }
+      data = role;
+    }
     else if (path === '/v1/ai/mcp/tools') data = { items: [{ id: 'global-mcp', name: '天气查询' }, { id: 'unrelated-mcp', name: '未关联工具' }] };
     else if (path === '/v1/ai/plugins') data = { items: plugins };
     else if (path === '/v1/ai/plugins/plugin-1') {
@@ -51,6 +58,36 @@ async (page) => {
   const check = (ok, message) => { if (!ok) throw Error(message); };
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto(base + '/ai-server/static/agent.html?device_id=test-device');
+  await page.waitForFunction(() => document.getElementById('field-name').value === '测试角色');
+  await page.evaluate(() => {
+    window.confirmations = [];
+    window.confirm = message => { window.confirmations.push(message); return false; };
+  });
+  for (const [list, id] of [['mcp-tools-list', 'saved-mcp'], ['plugin-tools-list', 'saved-plugin']]) {
+    const label = page.locator('#' + list).getByText(id, { exact: true });
+    await label.click();
+    check(await label.count() === 1, 'disabled missing-catalog association disappeared');
+    check(await label.locator('..').locator('.bg-emerald-500').count() === 0, 'association did not turn off');
+    await label.click();
+    check(await label.locator('..').locator('.bg-emerald-500').count() === 1, 'association could not turn back on');
+    check(await label.locator('..').locator('button').count() === 0, 'reference-only association became editable');
+    await page.locator('[data-role-id="default-role"]').click();
+    check(await page.locator('#field-name').inputValue() === '测试角色', 'cancelled role switch discarded draft');
+  }
+  check(await page.evaluate(() => window.confirmations.length) === 2, 'association-only changes did not prompt before switching');
+  await page.locator('#btn-save').click();
+  await page.waitForFunction(() => document.getElementById('toast').textContent === '保存成功');
+  check(roleWrites.length === 1 && roleWrites[0].agent_config.mcp_tools[0] === 'saved-mcp' && roleWrites[0].agent_config.device_plugins[0] === 'saved-plugin', 'restored associations not saved');
+  await page.locator('[data-role-id="default-role"]').click();
+  await page.waitForFunction(() => document.getElementById('field-name').value === '默认角色');
+  check(await page.evaluate(() => window.confirmations.length) === 2, 'successful save did not clear dirty state');
+  check(!(await page.locator('#plugin-tools-list').textContent()).includes('saved-plugin'), 'previous role candidate leaked into default role');
+  await page.locator('[data-role-id="role-1"]').click();
+  await page.waitForFunction(() => document.getElementById('field-name').value === '测试角色');
+  await page.getByRole('button', { name: '新建智能体', exact: true }).click();
+  check(!(await page.locator('#plugin-tools-list').textContent()).includes('saved-plugin'), 'previous role plugin candidate leaked into new role');
+  check(!(await page.locator('#mcp-tools-list').textContent()).includes('saved-mcp'), 'previous role MCP candidate leaked into new role');
+  await page.locator('[data-role-id="role-1"]').click();
   await page.waitForFunction(() => document.getElementById('field-name').value === '测试角色');
   const pluginRow = page.locator('#plugin-tools-list > div').filter({ hasText: '灯光控制' });
   await pluginRow.getByRole('button', { name: '编辑', exact: true }).click();
@@ -100,5 +137,5 @@ async (page) => {
     }
   }
   check(errors.length === 0, errors.join('\n'));
-  return 'PASS: plugin edit, detail errors, stale deletion, default role MCP/plugin associations, read-only controls and desktop/mobile layout';
+  return 'PASS: reversible associations, unsaved-change prompts, save/reset, plugin editing/deletion, default role read-only names and desktop/mobile layout';
 }

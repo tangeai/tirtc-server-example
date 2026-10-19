@@ -26,12 +26,13 @@ function pluginEditor(api) {
   const context = { $: element, api, toast(message, error) { messages.push({ message, error }); },
     pluginTools: [], selectedPlugins: [], isEditingDefault: false, defaultRole: null,
     mcpTools: [], selectedMcpTools: [], mcpLoadError: false,
+    roleMcpCandidates: [], rolePluginCandidates: [], editorDirty: false,
     editingPluginId: null, pluginModalRequest: 0, pluginLoadError: false,
     pluginModalInputParams: [], pluginModalReturnParams: [],
-    renderParamTable() {},
+    renderParamTable() {}, confirm() { return true; },
   };
   vm.createContext(context);
-  vm.runInContext(['escapeText', 'roleResourceItems', 'loadPlugins', 'renderPlugins', 'loadMcpTools', 'renderMcpTools', 'toggleMcp', 'togglePlugin', 'openPluginModal', 'closePluginModal', 'cleanParams', 'savePluginModal'].map(source).join('\n'), context);
+  vm.runInContext(['escapeText', 'setRoleResourceSelections', 'roleResourceItems', 'loadPlugins', 'renderPlugins', 'loadMcpTools', 'renderMcpTools', 'toggleMcp', 'togglePlugin', 'deletePlugin', 'deleteMcpTool', 'openPluginModal', 'closePluginModal', 'cleanParams', 'savePluginModal'].map(source).join('\n'), context);
   return { context, element, messages };
 }
 
@@ -185,6 +186,66 @@ test('default role shows linked MCP tools only, including absent catalog entries
   e.context.togglePlugin('plugin');
   assert.deepEqual(e.context.selectedMcpTools, ['known', 'cloud-mcp', 'cloud-mcp']);
   assert.deepEqual(e.context.selectedPlugins, ['plugin']);
+  assert.equal(e.context.editorDirty, false);
+});
+
+for (const kind of ['mcp', 'plugin']) {
+  test(`${kind} association absent from the catalog can be turned off and back on`, () => {
+    const e = pluginEditor();
+    const selected = kind === 'mcp' ? 'selectedMcpTools' : 'selectedPlugins';
+    const candidates = kind === 'mcp' ? 'roleMcpCandidates' : 'rolePluginCandidates';
+    const render = kind === 'mcp' ? 'renderMcpTools' : 'renderPlugins';
+    const toggle = kind === 'mcp' ? 'toggleMcp' : 'togglePlugin';
+    const list = kind === 'mcp' ? 'mcp-tools-list' : 'plugin-tools-list';
+    e.context[selected] = ['saved-reference'];
+    e.context[candidates] = ['saved-reference'];
+    e.context[render]();
+    e.context[toggle]('saved-reference');
+    assert.match(e.element(list).innerHTML, /saved-reference/);
+    assert.equal(e.context[selected].length, 0);
+    assert.equal(e.context.editorDirty, true);
+    assert.doesNotMatch(e.element(list).innerHTML, /deletePlugin|deleteMcpTool/);
+    e.context[toggle]('saved-reference');
+    assert.deepEqual(Array.from(e.context[selected]), ['saved-reference']);
+    assert.match(e.element(list).innerHTML, /bg-emerald-500/);
+  });
+
+  test(`${kind} catalog toggle marks the role dirty`, () => {
+    const e = pluginEditor();
+    const catalog = kind === 'mcp' ? 'mcpTools' : 'pluginTools';
+    const toggle = kind === 'mcp' ? 'toggleMcp' : 'togglePlugin';
+    e.context[catalog] = [{ id: 'owned', name: 'User resource', source: 'app' }];
+    e.context[toggle]('owned');
+    assert.equal(e.context.editorDirty, true);
+  });
+}
+
+test('role resource edits do not mutate saved data and candidates reset for another or new role', () => {
+  const e = pluginEditor();
+  const saved = { mcp_tools: ['old-mcp'], device_plugins: ['old-plugin'] };
+  e.context.setRoleResourceSelections(saved);
+  e.context.toggleMcp('old-mcp');
+  e.context.togglePlugin('old-plugin');
+  assert.deepEqual(saved, { mcp_tools: ['old-mcp'], device_plugins: ['old-plugin'] });
+  e.context.setRoleResourceSelections({ mcp_tools: ['new-mcp'], device_plugins: ['new-plugin'] });
+  assert.doesNotMatch(e.element('mcp-tools-list').innerHTML, /old-mcp/);
+  assert.doesNotMatch(e.element('plugin-tools-list').innerHTML, /old-plugin/);
+  e.context.setRoleResourceSelections();
+  assert.doesNotMatch(e.element('mcp-tools-list').innerHTML, /new-mcp/);
+  assert.doesNotMatch(e.element('plugin-tools-list').innerHTML, /new-plugin/);
+});
+
+test('successful resource deletion removes the candidate and marks changed role associations dirty', async () => {
+  const e = pluginEditor(async () => ({ code: 200 }));
+  e.context.setRoleResourceSelections({ mcp_tools: ['mcp'], device_plugins: ['plugin'] });
+  await e.context.deleteMcpTool('mcp');
+  assert.equal(e.context.editorDirty, true);
+  assert.equal(e.context.roleMcpCandidates.length, 0);
+  e.context.editorDirty = false;
+  await e.context.deletePlugin('plugin');
+  assert.equal(e.context.editorDirty, true);
+  assert.equal(e.context.rolePluginCandidates.length, 0);
+  assert.equal(e.context.selectedPlugins.length, 0);
 });
 
 test('custom role can associate public MCP tools and manage user MCP tools', () => {
