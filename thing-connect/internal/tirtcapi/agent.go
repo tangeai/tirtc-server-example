@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -94,6 +95,17 @@ type ServiceConfig struct {
 // CustomComposeConfig is the config for type="custom-compose".
 type CustomComposeConfig struct {
 	TTS *AliTtsComponent `json:"tts,omitempty"`
+	LLM *AliLLMComponent `json:"llm,omitempty"`
+}
+
+// AliLLMComponent selects the text model for a custom-compose role.
+type AliLLMComponent struct {
+	Provider       string               `json:"provider"`
+	ProviderParams AliLLMProviderParams `json:"provider_params"`
+}
+
+type AliLLMProviderParams struct {
+	Model string `json:"model"`
 }
 
 // AliTtsComponent is a TTS provider using Alibaba CosyVoice.
@@ -104,6 +116,7 @@ type AliTtsComponent struct {
 
 // AliTtsProviderParams are the Alibaba TTS provider parameters.
 type AliTtsProviderParams struct {
+	Model         string   `json:"model,omitempty"`
 	Voice         string   `json:"voice,omitempty"`
 	Volume        int      `json:"volume,omitempty"`
 	Rate          float64  `json:"rate,omitempty"`
@@ -115,16 +128,17 @@ type AliTtsProviderParams struct {
 type CozeConfig struct {
 	AppID       string `json:"app_id"`
 	BotID       string `json:"bot_id"`
-	PrivateKey  string `json:"private_key"`
+	APIKey      string `json:"api_key,omitempty"`
+	PrivateKey  string `json:"private_key,omitempty"`
 	WorkflowID  string `json:"workflow_id,omitempty"`
-	PublicKeyID string `json:"public_key_id"`
+	PublicKeyID string `json:"public_key_id,omitempty"`
 }
 
 // QwenAgentConfig is the config for type="qwen-agent".
 type QwenAgentConfig struct {
 	AppID       string `json:"app_id"`
-	APIKey      string `json:"api_key,omitempty"`
-	WorkspaceID string `json:"workspace_id,omitempty"`
+	APIKey      string `json:"api_key"`
+	WorkspaceID string `json:"workspace_id"`
 }
 
 // ── V2 Device-Role DTOs ──
@@ -177,7 +191,7 @@ type MCPAuthenticationConfig struct {
 
 // MCPToolExternalRuntimeConfig is the MCP tool runtime config (used in create/update/response).
 type MCPToolExternalRuntimeConfig struct {
-	Enable         bool                     `json:"enable,omitempty"`
+	Enable         *bool                    `json:"enable,omitempty"`
 	Type           string                   `json:"type,omitempty"`
 	Name           string                   `json:"name"`
 	Description    string                   `json:"description,omitempty"`
@@ -258,9 +272,9 @@ type CreateKnowledgeIndexRequest struct {
 
 // UpdateKnowledgeIndexRequest is the body for updating a knowledge index.
 type UpdateKnowledgeIndexRequest struct {
-	Name        string   `json:"name,omitempty"`
-	Description string   `json:"description,omitempty"`
-	DocumentIDs []string `json:"document_ids,omitempty"`
+	Name        *string   `json:"name,omitempty"`
+	Description *string   `json:"description,omitempty"`
+	DocumentIDs *[]string `json:"document_ids,omitempty"`
 }
 
 // KnowledgeIndexInfo is a knowledge index detail.
@@ -370,6 +384,15 @@ func (c *AgentAPIClient) listRoles(ctx context.Context, path, query string) ([]R
 		return nil, 0, fmt.Errorf("agent: upstream error code=%d msg=%s", wrap.Code, wrap.Msg)
 	}
 
+	// Current cloud responses contain an array. Keep accepting the older
+	// pagination envelope; an array does not provide a cross-page total.
+	if bytes.HasPrefix(bytes.TrimSpace(wrap.Data), []byte("[")) {
+		var items []Role
+		if err := json.Unmarshal(wrap.Data, &items); err != nil {
+			return nil, 0, fmt.Errorf("agent: parse roles: %w", err)
+		}
+		return items, len(items), nil
+	}
 	var data roleListData
 	if err := json.Unmarshal(wrap.Data, &data); err != nil {
 		return nil, 0, fmt.Errorf("agent: parse data: %w", err)
@@ -387,8 +410,7 @@ func (c *AgentAPIClient) GetRole(ctx context.Context, roleID string) (*Role, err
 	if err != nil {
 		slog.WarnContext(ctx, "agent GetRole failed", "id", roleID, "dur_ms", durMs, "err", err)
 	} else if role != nil {
-		respJSON, _ := json.Marshal(role)
-		slog.InfoContext(ctx, "agent GetRole ok", "id", roleID, "resp", string(respJSON), "dur_ms", durMs)
+		slog.InfoContext(ctx, "agent GetRole ok", "id", roleID, "dur_ms", durMs)
 	} else {
 		slog.InfoContext(ctx, "agent GetRole ok", "id", roleID, "resp", "null", "dur_ms", durMs)
 	}
@@ -443,12 +465,10 @@ func (c *AgentAPIClient) CreateRole(ctx context.Context, input RoleInput) (*Role
 	start := time.Now()
 	role, err := c.doCreate(ctx, rolesPath, input)
 	durMs := time.Since(start).Milliseconds()
-	reqJSON, _ := json.Marshal(input)
 	if err != nil {
-		slog.WarnContext(ctx, "agent CreateRole failed", "req", string(reqJSON), "dur_ms", durMs, "err", err)
+		slog.WarnContext(ctx, "agent CreateRole failed", "dur_ms", durMs, "err", err)
 	} else {
-		respJSON, _ := json.Marshal(role)
-		slog.InfoContext(ctx, "agent CreateRole ok", "req", string(reqJSON), "resp", string(respJSON), "dur_ms", durMs)
+		slog.InfoContext(ctx, "agent CreateRole ok", "id", role.ID, "dur_ms", durMs)
 	}
 	return role, err
 }
@@ -505,12 +525,10 @@ func (c *AgentAPIClient) UpdateRole(ctx context.Context, roleID string, input Ro
 	start := time.Now()
 	role, err := c.doUpdate(ctx, path, input)
 	durMs := time.Since(start).Milliseconds()
-	reqJSON, _ := json.Marshal(input)
 	if err != nil {
-		slog.WarnContext(ctx, "agent UpdateRole failed", "id", roleID, "req", string(reqJSON), "dur_ms", durMs, "err", err)
+		slog.WarnContext(ctx, "agent UpdateRole failed", "id", roleID, "dur_ms", durMs, "err", err)
 	} else {
-		respJSON, _ := json.Marshal(role)
-		slog.InfoContext(ctx, "agent UpdateRole ok", "id", roleID, "req", string(reqJSON), "resp", string(respJSON), "dur_ms", durMs)
+		slog.InfoContext(ctx, "agent UpdateRole ok", "id", roleID, "dur_ms", durMs)
 	}
 	return role, err
 }
@@ -557,6 +575,8 @@ func (c *AgentAPIClient) doUpdate(ctx context.Context, path string, input RoleIn
 		role = Role{
 			ID:            path[strings.LastIndex(path, "/")+1:],
 			Name:          input.Name,
+			Avatar:        input.Avatar,
+			ParentRoleID:  input.ParentRoleID,
 			AgentConfig:   input.AgentConfig,
 			ServiceConfig: input.ServiceConfig,
 			UserParams:    input.UserParams,
@@ -726,10 +746,10 @@ func (c *AgentAPIClient) doDeviceRoleQuery(ctx context.Context, req BatchDeviceR
 
 const voicesPath = "/ai/aigcrtc/voices"
 
-// ListVoices returns available TTS voices, optionally filtered by language.
-func (c *AgentAPIClient) ListVoices(ctx context.Context, language string) ([]VoiceInfo, error) {
+// ListVoices returns system TTS voices, optionally filtered by language and model.
+func (c *AgentAPIClient) ListVoices(ctx context.Context, language, model string) ([]VoiceInfo, error) {
 	start := time.Now()
-	voices, err := c.doListVoices(ctx, language)
+	voices, err := c.doListVoices(ctx, language, model)
 	durMs := time.Since(start).Milliseconds()
 	if err != nil {
 		slog.WarnContext(ctx, "agent ListVoices failed", "lang", language, "dur_ms", durMs, "err", err)
@@ -740,12 +760,16 @@ func (c *AgentAPIClient) ListVoices(ctx context.Context, language string) ([]Voi
 	return voices, err
 }
 
-func (c *AgentAPIClient) doListVoices(ctx context.Context, language string) ([]VoiceInfo, error) {
+func (c *AgentAPIClient) doListVoices(ctx context.Context, language, model string) ([]VoiceInfo, error) {
 	urlStr := strings.TrimRight(c.cfg.BaseURL, "/") + voicesPath
-	query := ""
+	params := url.Values{}
 	if language != "" {
-		query = "language=" + language
+		params.Set("language", language)
 	}
+	if model != "" {
+		params.Set("model", model)
+	}
+	query := params.Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, urlStr, nil)
 	if err != nil {
 		return nil, err
@@ -939,7 +963,7 @@ func (c *AgentAPIClient) doListAppMCPTools(ctx context.Context) ([]AppMCPTool, e
 // CreateAppMCPTool creates an app MCP tool.
 func (c *AgentAPIClient) CreateAppMCPTool(ctx context.Context, req AppMCPToolCreateRequest) (*AppMCPTool, error) {
 	start := time.Now()
-	item, err := c.doAppMCPWrite(ctx, http.MethodPost, appMCPToolsPath, req)
+	item, err := c.doAppMCPWrite(ctx, http.MethodPost, appMCPToolsPath, req, nil)
 	durMs := time.Since(start).Milliseconds()
 	if err != nil {
 		slog.WarnContext(ctx, "agent CreateAppMCPTool failed", "name", req.Config.Name, "dur_ms", durMs, "err", err)
@@ -967,7 +991,26 @@ func (c *AgentAPIClient) GetAppMCPTool(ctx context.Context, id string) (*AppMCPT
 func (c *AgentAPIClient) UpdateAppMCPTool(ctx context.Context, id string, req AppMCPToolUpdateRequest) (*AppMCPTool, error) {
 	path := appMCPToolsPath + "/" + id
 	start := time.Now()
-	item, err := c.doAppMCPWrite(ctx, http.MethodPut, path, req)
+	// The cloud PUT is a patch and may return no data. Preserve omitted fields
+	// before writing so a successful write never becomes a failed read-back.
+	fallback := &AppMCPTool{ID: id, AppID: c.cfg.AppID}
+	if req.Config == nil || req.Enabled == nil {
+		previous, err := c.doGetAppMCPTool(ctx, path)
+		if err != nil {
+			return nil, err
+		}
+		if previous == nil {
+			return nil, fmt.Errorf("agent: MCP tool not found")
+		}
+		*fallback = *previous
+	}
+	if req.Config != nil {
+		fallback.Config = req.Config
+	}
+	if req.Enabled != nil {
+		fallback.Enabled = *req.Enabled
+	}
+	item, err := c.doAppMCPWrite(ctx, http.MethodPut, path, req, fallback)
 	durMs := time.Since(start).Milliseconds()
 	if err != nil {
 		slog.WarnContext(ctx, "agent UpdateAppMCPTool failed", "id", id, "dur_ms", durMs, "err", err)
@@ -991,7 +1034,7 @@ func (c *AgentAPIClient) DeleteAppMCPTool(ctx context.Context, id string) error 
 	return err
 }
 
-func (c *AgentAPIClient) doAppMCPWrite(ctx context.Context, method, path string, req interface{}) (*AppMCPTool, error) {
+func (c *AgentAPIClient) doAppMCPWrite(ctx context.Context, method, path string, req interface{}, fallback *AppMCPTool) (*AppMCPTool, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("agent: marshal app mcp request: %w", err)
@@ -1020,6 +1063,9 @@ func (c *AgentAPIClient) doAppMCPWrite(ctx context.Context, method, path string,
 	}
 	if wrap.Code != 200 {
 		return nil, fmt.Errorf("agent: upstream error code=%d msg=%s", wrap.Code, wrap.Msg)
+	}
+	if fallback != nil && (len(wrap.Data) == 0 || string(wrap.Data) == "null") {
+		return fallback, nil
 	}
 	var item AppMCPTool
 	if err := json.Unmarshal(wrap.Data, &item); err != nil {
@@ -1145,7 +1191,7 @@ func (c *AgentAPIClient) doListPlugins(ctx context.Context) ([]DevicePlugin, err
 // CreateDevicePlugin creates a device plugin.
 func (c *AgentAPIClient) CreateDevicePlugin(ctx context.Context, req DevicePluginCreateRequest) (*DevicePlugin, error) {
 	start := time.Now()
-	item, err := c.doPluginWrite(ctx, http.MethodPost, devicePluginsPath, req)
+	item, err := c.doPluginWrite(ctx, http.MethodPost, devicePluginsPath, req, nil)
 	durMs := time.Since(start).Milliseconds()
 	if err != nil {
 		slog.WarnContext(ctx, "agent CreateDevicePlugin failed", "name", req.Name, "dur_ms", durMs, "err", err)
@@ -1173,7 +1219,11 @@ func (c *AgentAPIClient) GetDevicePlugin(ctx context.Context, id string) (*Devic
 func (c *AgentAPIClient) UpdateDevicePlugin(ctx context.Context, id string, req DevicePluginUpdateRequest) (*DevicePlugin, error) {
 	path := devicePluginsPath + "/" + id
 	start := time.Now()
-	item, err := c.doPluginWrite(ctx, http.MethodPut, path, req)
+	fallback := &DevicePlugin{
+		ID: id, AppID: c.cfg.AppID, Name: req.Name, Description: req.Description,
+		Action: req.Action, InputParams: req.InputParams, ReturnParams: req.ReturnParams,
+	}
+	item, err := c.doPluginWrite(ctx, http.MethodPut, path, req, fallback)
 	durMs := time.Since(start).Milliseconds()
 	if err != nil {
 		slog.WarnContext(ctx, "agent UpdateDevicePlugin failed", "id", id, "dur_ms", durMs, "err", err)
@@ -1197,7 +1247,7 @@ func (c *AgentAPIClient) DeleteDevicePlugin(ctx context.Context, id string) erro
 	return err
 }
 
-func (c *AgentAPIClient) doPluginWrite(ctx context.Context, method, path string, req interface{}) (*DevicePlugin, error) {
+func (c *AgentAPIClient) doPluginWrite(ctx context.Context, method, path string, req interface{}, fallback *DevicePlugin) (*DevicePlugin, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("agent: marshal plugin request: %w", err)
@@ -1226,6 +1276,9 @@ func (c *AgentAPIClient) doPluginWrite(ctx context.Context, method, path string,
 	}
 	if wrap.Code != 200 {
 		return nil, fmt.Errorf("agent: upstream error code=%d msg=%s", wrap.Code, wrap.Msg)
+	}
+	if fallback != nil && (len(wrap.Data) == 0 || string(wrap.Data) == "null") {
+		return fallback, nil
 	}
 	var item DevicePlugin
 	if err := json.Unmarshal(wrap.Data, &item); err != nil {
@@ -1315,7 +1368,7 @@ func (c *AgentAPIClient) ListKnowledgeIndexes(ctx context.Context, page, pageSiz
 
 func (c *AgentAPIClient) doListKnowledgeIndexes(ctx context.Context, page, pageSize int) ([]KnowledgeIndexInfo, int, error) {
 	urlStr := strings.TrimRight(c.cfg.BaseURL, "/") + knowledgeIndexesPath
-	query := fmt.Sprintf("page=%d&page_size=%d", page, pageSize)
+	query := fmt.Sprintf("page_number=%d&page_size=%d", page, pageSize)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, urlStr+"?"+query, nil)
 	if err != nil {
 		return nil, 0, err
@@ -1496,7 +1549,7 @@ func (c *AgentAPIClient) ListKnowledgeDocuments(ctx context.Context, indexID str
 
 func (c *AgentAPIClient) doListKnowledgeDocuments(ctx context.Context, path string, page, pageSize int) ([]KnowledgeDocument, int, error) {
 	urlStr := strings.TrimRight(c.cfg.BaseURL, "/") + path
-	query := fmt.Sprintf("page=%d&page_size=%d", page, pageSize)
+	query := fmt.Sprintf("page_number=%d&page_size=%d", page, pageSize)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, urlStr+"?"+query, nil)
 	if err != nil {
 		return nil, 0, err
@@ -1548,13 +1601,49 @@ func (c *AgentAPIClient) ListKnowledgeFiles(ctx context.Context) ([]KnowledgeFil
 	return items, err
 }
 
+// Limit both elapsed time and page count; never return a truncated list as success.
 func (c *AgentAPIClient) doListKnowledgeFiles(ctx context.Context) ([]KnowledgeFileInfo, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	items := make([]KnowledgeFileInfo, 0)
+	seen := make(map[string]bool)
+	cursor := ""
+	for page := 0; page < 1000; page++ {
+		result, err := c.knowledgeFilesPage(ctx, cursor)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, result.Items...)
+		if !result.HasNext {
+			return items, nil
+		}
+		if result.NextToken == "" || seen[result.NextToken] {
+			return nil, fmt.Errorf("agent: invalid knowledge file pagination cursor")
+		}
+		cursor = result.NextToken
+		seen[cursor] = true
+	}
+	return nil, fmt.Errorf("agent: knowledge file pagination limit exceeded")
+}
+
+type knowledgeFilePage struct {
+	Items     []KnowledgeFileInfo `json:"items"`
+	HasNext   bool                `json:"has_next"`
+	NextToken string              `json:"next_token"`
+}
+
+func (c *AgentAPIClient) knowledgeFilesPage(ctx context.Context, cursor string) (*knowledgeFilePage, error) {
 	urlStr := strings.TrimRight(c.cfg.BaseURL, "/") + knowledgeFilesPath
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, urlStr, nil)
+	params := url.Values{"max_results": {"100"}}
+	if cursor != "" {
+		params.Set("next_token", cursor)
+	}
+	query := params.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, urlStr+"?"+query, nil)
 	if err != nil {
 		return nil, err
 	}
-	c.signRequest(req, http.MethodGet, knowledgeFilesPath, "", nil)
+	c.signRequest(req, http.MethodGet, knowledgeFilesPath, query, nil)
 	res, err := c.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("agent: list knowledge files: %w", err)
@@ -1574,13 +1663,11 @@ func (c *AgentAPIClient) doListKnowledgeFiles(ctx context.Context) ([]KnowledgeF
 	if wrap.Code != 200 {
 		return nil, fmt.Errorf("agent: upstream error code=%d msg=%s", wrap.Code, wrap.Msg)
 	}
-	var listData struct {
-		Items []KnowledgeFileInfo `json:"items"`
-	}
+	var listData knowledgeFilePage
 	if err := json.Unmarshal(wrap.Data, &listData); err != nil {
 		return nil, fmt.Errorf("agent: parse data: %w", err)
 	}
-	return listData.Items, nil
+	return &listData, nil
 }
 
 // UploadKnowledgeFile uploads a file and returns its file_id. The caller provides

@@ -127,7 +127,7 @@
 
         <!-- System Prompt -->
         <div class="mb-4 sm:mb-5">
-          <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1 sm:mb-1.5 tracking-wide">角色设定 <span class="text-red-400">*</span></label>
+          <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1 sm:mb-1.5 tracking-wide">角色设定</label>
           <textarea id="field-prompt" rows="3" sm:rows="4" placeholder="设定智能体的人设、语气、知识范围和行为规则…"
             class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 sm:px-3.5 py-2 sm:py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400 resize-none"></textarea>
         </div>
@@ -193,6 +193,7 @@
           <select id="field-model"
             class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 sm:px-3.5 py-2 sm:py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 cursor-pointer transition-all appearance-none"
             style="background-image: url('data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2712%27 height=%2712%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%239CA3AF%27 stroke-width=%272%27%3E%3Cpath d=%27M6 9l6 6 6-6%27/%3E%3C/svg%3E'); background-repeat: no-repeat; background-position: right 12px center;">
+            <option value="">沿用基础配置</option>
             <option value="qwen3.5-flash">qwen3.5-flash</option>
             <option value="qwen3.7-plus">qwen3.7-plus</option>
           </select>
@@ -486,6 +487,7 @@ let selectedPlugins = [];
 
 // ── Modal editing state ──
 let editingMcpToolId = null;
+let editingMcpConfig = null;
 let editingPluginId = null;
 let pluginModalInputParams = [];
 let pluginModalReturnParams = [];
@@ -643,7 +645,7 @@ function setFieldsReadonly(readonly) {
   ['field-name','field-desc','field-prompt','field-welcome','field-voice','field-model','field-rate','field-pitch','field-knowledge-index','field-memory'].forEach(id => {
     const el = $(id);
     if (!el) return;
-    if (el.type === 'checkbox' || el.type === 'range') {
+    if (el.tagName === 'SELECT' || el.type === 'checkbox' || el.type === 'range') {
       if (readonly) el.setAttribute('disabled', '');
       else el.removeAttribute('disabled');
     } else {
@@ -708,11 +710,9 @@ async function selectAgent(id) {
   $('field-desc').value = a.user_params?.description || '';
   $('field-prompt').value = a.agent_config?.prompt || '';
   $('field-welcome').value = a.agent_config?.welcome_text || '';
-  $('field-voice').value = a.service_config?.config?.tts?.provider_params?.voice || a.user_params?.voice || '';
+  setSelectValue('field-voice', a.service_config?.config?.tts?.provider_params?.voice || a.user_params?.voice || '');
   const modelName = a.service_config?.config?.llm?.provider_params?.model || '';
-  if (modelName && [...$('field-model').options].some(o => o.value === modelName)) {
-    $('field-model').value = modelName;
-  }
+  setSelectValue('field-model', modelName);
   // TTS params
   const tts = a.service_config?.config?.tts?.provider_params;
   $('field-rate').value = tts?.rate ?? 1.0;
@@ -721,11 +721,7 @@ async function selectAgent(id) {
   $('label-pitch').textContent = $('field-pitch').value;
   // Knowledge base
   const ragIdxId = a.agent_config?.ali_rag?.index_id || '';
-  if (ragIdxId && [...$('field-knowledge-index').options].some(o => o.value === ragIdxId)) {
-    $('field-knowledge-index').value = ragIdxId;
-  } else {
-    $('field-knowledge-index').value = '';
-  }
+  setSelectValue('field-knowledge-index', ragIdxId);
   onKnowledgeIndexChange();
   // MCP tools & device plugins
   selectedMcpTools = a.agent_config?.mcp_tools || [];
@@ -745,7 +741,19 @@ async function selectAgent(id) {
   }
 
   setFieldsReadonly(isEditingDefault);
+  if (a.service_config?.type && a.service_config.type !== 'custom-compose') {
+    ['field-model', 'field-voice', 'field-rate', 'field-pitch'].forEach(id => { $(id).disabled = true; });
+  }
   renderAgentList();
+}
+
+// Keep saved values visible even when a resource list is filtered or unavailable.
+function setSelectValue(id, value) {
+  const select = $(id);
+  if (value && ![...select.options].some(option => option.value === value)) {
+    select.add(new Option(value, value));
+  }
+  select.value = value;
 }
 
 function newAgent() {
@@ -788,13 +796,8 @@ async function loadVoices() {
   if (data.code === 200 && data.data?.items?.length) {
     voices = data.data.items;
   } else {
-    // Fallback to hardcoded voices if API is unreachable
-    voices = [
-      { id: 'xiaona', name: '小娜 · 清晰温柔', languages: ['zh'] },
-      { id: 'xiaofeng', name: '小峰 · 成熟稳重', languages: ['zh'] },
-      { id: 'xiaomei', name: '小美 · 活泼甜美', languages: ['zh'] },
-      { id: 'longxiaochun', name: '龙小纯 · 自然亲切', languages: ['zh'] },
-    ];
+    voices = [];
+    if (data.code !== 200) toast('音色列表暂不可用，请稍后重试', true);
   }
   renderVoiceOptions();
 }
@@ -804,19 +807,17 @@ function renderVoiceOptions() {
   const currentVal = sel.value;
   // Keep the first "未选择" option, clear the rest
   while (sel.options.length > 1) sel.remove(1);
-  const filtered = voiceLang
-    ? voices.filter(v => v.languages && v.languages.includes(voiceLang))
-    : voices;
+  // This editor configures ali-tts. The system catalog also contains voices
+  // for other providers, which must not be offered as ali-tts choices.
+  const filtered = voices.filter(v => v.model === 'cosyvoice-v3-flash' &&
+    (!voiceLang || v.languages?.includes(voiceLang)));
   filtered.forEach(v => {
     const opt = document.createElement('option');
     opt.value = v.id;
     opt.textContent = v.name;
     sel.appendChild(opt);
   });
-  // Restore previous selection if still available
-  if (currentVal && [...sel.options].some(o => o.value === currentVal)) {
-    sel.value = currentVal;
-  }
+  setSelectValue('field-voice', currentVal);
   updateVoicePlayButton();
 }
 
@@ -1008,16 +1009,29 @@ async function deleteKnowledgeIndexBtn() {
   }
 }
 
+async function fetchKnowledgeDocuments(indexId) {
+  const items = [];
+  for (let page = 1; page <= 1000; page++) {
+    const result = await api('/v1/ai/knowledge/indexes/' + encodeURIComponent(indexId) + '/documents?page=' + page + '&page_size=100');
+    if (result.code !== 200 || !Array.isArray(result.data?.items)) throw new Error('读取知识库文档失败');
+    items.push(...result.data.items);
+    if (items.length >= result.data.total) return items;
+    if (!result.data.items.length) throw new Error('知识库文档分页不完整');
+  }
+  throw new Error('知识库文档过多，请缩小索引范围');
+}
+
 async function loadKnowledgeFiles() {
   const idxId = $('field-knowledge-index').value;
   if (!idxId) return;
-  const data = await api('/v1/ai/knowledge/indexes/' + idxId + '/documents?page_size=100');
-  if (data.code === 200 && data.data?.items) {
-    knowledgeFiles = data.data.items;
-  } else {
-    knowledgeFiles = [];
+  try {
+    const files = await fetchKnowledgeDocuments(idxId);
+    if ($('field-knowledge-index').value !== idxId) return;
+    knowledgeFiles = files;
+    renderKnowledgeFiles();
+  } catch {
+    if ($('field-knowledge-index').value === idxId) toast('读取知识库文档失败，请重试', true);
   }
-  renderKnowledgeFiles();
 }
 
 function renderKnowledgeFiles() {
@@ -1081,9 +1095,15 @@ let knowledgeModalFiles = [];
 
 async function loadKnowledgeModalFiles() {
   if (!editingKnowledgeIndexId) { knowledgeModalFiles = []; renderKnowledgeModalFiles(); return; }
-  const data = await api('/v1/ai/knowledge/indexes/' + editingKnowledgeIndexId + '/documents?page_size=100');
-  knowledgeModalFiles = (data.code === 200 && data.data?.items) ? data.data.items : [];
-  renderKnowledgeModalFiles();
+  const idxId = editingKnowledgeIndexId;
+  try {
+    const files = await fetchKnowledgeDocuments(idxId);
+    if (editingKnowledgeIndexId !== idxId) return;
+    knowledgeModalFiles = files;
+    renderKnowledgeModalFiles();
+  } catch {
+    if (editingKnowledgeIndexId === idxId) toast('读取知识库文档失败，请重试', true);
+  }
 }
 
 function renderKnowledgeModalFiles() {
@@ -1240,6 +1260,8 @@ async function openMcpToolModal(id) {
     const res = await api('/v1/ai/mcp/app-tools/' + id);
     if (res.code === 200 && res.data) tool = res.data;
   }
+  if (id && !tool) { toast('读取工具配置失败，请重试', true); return; }
+  editingMcpConfig = tool?.config || null;
   $('mcp-tool-modal-title').textContent = tool ? '编辑 MCP 工具' : '新增 MCP 工具';
   $('mcp-modal-submit-btn').textContent = tool ? '确认修改' : '确认创建';
   $('mcp-modal-name').value = tool?.config?.name || '';
@@ -1257,6 +1279,7 @@ function closeMcpToolModal() {
   $('mcp-tool-modal').classList.add('hidden');
   $('mcp-tool-modal').classList.remove('flex');
   editingMcpToolId = null;
+  editingMcpConfig = null;
 }
 
 async function saveMcpToolModal() {
@@ -1267,6 +1290,7 @@ async function saveMcpToolModal() {
 
   const authType = $('mcp-modal-auth-type').value;
   const config = {
+    ...editingMcpConfig,
     name,
     description: $('mcp-modal-desc').value.trim(),
     url,
@@ -1274,6 +1298,7 @@ async function saveMcpToolModal() {
   };
   const enabled = $('mcp-modal-enabled').checked;
 
+  const updating = !!editingMcpToolId;
   const res = editingMcpToolId
     ? await api('/v1/ai/mcp/app-tools/' + editingMcpToolId, { method: 'PUT', body: JSON.stringify({ config, enabled }) })
     : await api('/v1/ai/mcp/app-tools', { method: 'POST', body: JSON.stringify({ config, enabled }) });
@@ -1281,14 +1306,14 @@ async function saveMcpToolModal() {
   if (res.code === 200 && res.data) {
     closeMcpToolModal();
     await loadMcpTools();
-    toast(editingMcpToolId ? '工具已更新' : '工具已创建');
+    toast(updating ? '工具已更新' : '工具已创建');
   } else {
     toast(res.msg || (editingMcpToolId ? '更新失败' : '创建失败'), true);
   }
 }
 
 async function deleteMcpTool(id) {
-  if (!confirm('确定删除该 MCP 工具？')) return;
+  if (!confirm('删除前请在所有角色中解除该 MCP 工具的引用。确定删除？')) return;
   const res = await api('/v1/ai/mcp/app-tools/' + id, { method: 'DELETE' });
   if (res.code === 200) {
     mcpTools = mcpTools.filter(t => t.id !== id);
@@ -1354,7 +1379,7 @@ function togglePlugin(pluginId) {
 
 // ── Device Plugin Modal ──
 
-const PARAM_TYPES = ['string', 'number', 'boolean', 'array', 'object'];
+const PARAM_TYPES = ['string', 'integer', 'boolean', 'array', 'object'];
 
 function paramRowsOf(tableId) {
   return tableId === 'input' ? pluginModalInputParams : pluginModalReturnParams;
@@ -1374,7 +1399,7 @@ function renderParamTable(tableId) {
         class="w-full bg-gray-50 border border-gray-200 rounded px-2 py-1.5 text-[11px] outline-none focus:border-emerald-400"></td>
       <td class="p-1">
         <select onchange="updateParamField('${tableId}', ${i}, 'type', this.value)" class="w-full bg-gray-50 border border-gray-200 rounded px-1.5 py-1.5 text-[11px] outline-none focus:border-emerald-400 cursor-pointer">
-          ${PARAM_TYPES.map(t => `<option value="${t}" ${p.type === t ? 'selected' : ''}>${t}</option>`).join('')}
+          ${(p.type && !PARAM_TYPES.includes(p.type) ? [...PARAM_TYPES, p.type] : PARAM_TYPES).map(t => `<option value="${escapeText(t)}" ${p.type === t ? 'selected' : ''}>${escapeText(t)}</option>`).join('')}
         </select>
       </td>
       <td class="p-1"><input type="text" value="${p.description || ''}" oninput="updateParamField('${tableId}', ${i}, 'description', this.value)" placeholder="参数说明"
@@ -1527,13 +1552,20 @@ async function persistAgent() {
   if (isEditingDefault) { toast('默认角色不可修改', true); return; }
   const name = $('field-name').value.trim();
   if (!name) { toast('请输入智能体名称', true); return; }
+  if ([...name].length > 64) { toast('角色名称不能超过 64 个字符', true); return; }
   const promptText = $('field-prompt').value.trim();
-  if (!promptText) { toast('请输入角色设定', true); return; }
 
   const previous = agents.find(agent => agent.id === currentAgentId) || {};
+  const chosenVoice = voices.find(voice => voice.id === $('field-voice').value);
+  const editsAliTTS = !previous.service_config?.type || previous.service_config.type === 'custom-compose';
+  if (editsAliTTS && chosenVoice?.model && chosenVoice.model !== 'cosyvoice-v3-flash') {
+    toast('当前音色不适用于阿里语音服务，请重新选择音色', true);
+    return;
+  }
   const payload = {
     name,
     avatar: previous.avatar || '',
+    parent_role_id: previous.parent_role_id || '',
     agent_config: {
       ...previous.agent_config,
       prompt: promptText,
@@ -1542,9 +1574,9 @@ async function persistAgent() {
       mcp_tools: selectedMcpTools,
       device_plugins: selectedPlugins,
     },
-    service_config: {
+    service_config: previous.service_config?.type && previous.service_config.type !== 'custom-compose' ? previous.service_config : {
       ...previous.service_config,
-      name: name,
+      name: previous.service_config?.name || 'default',
       type: 'custom-compose',
       config: {
         ...previous.service_config?.config,
@@ -1558,6 +1590,7 @@ async function persistAgent() {
           provider: 'ali-tts',
           provider_params: {
             ...previous.service_config?.config?.tts?.provider_params,
+            model: chosenVoice?.model || previous.service_config?.config?.tts?.provider_params?.model || 'cosyvoice-v3-flash',
             voice: $('field-voice').value || undefined,
             rate: parseFloat($('field-rate').value),
             pitch: parseFloat($('field-pitch').value),
@@ -1571,6 +1604,13 @@ async function persistAgent() {
       voice: $('field-voice').value || undefined,
     },
   };
+
+  if (payload.service_config.type === 'custom-compose' && !$('field-model').value) {
+    delete payload.service_config.config.llm;
+  }
+  if (payload.service_config.type === 'custom-compose' && !$('field-voice').value) {
+    delete payload.service_config.config.tts;
+  }
 
   const ragIdx = $('field-knowledge-index').value;
   payload.agent_config.ali_rag = ragIdx ? { index_id: ragIdx } : null;

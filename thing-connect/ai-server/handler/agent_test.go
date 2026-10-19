@@ -96,7 +96,7 @@ func (m *mockAgentAPI) DeleteRole(ctx context.Context, roleID string) error {
 	return nil
 }
 
-func (m *mockAgentAPI) ListVoices(ctx context.Context, language string) ([]tirtcapi.VoiceInfo, error) {
+func (m *mockAgentAPI) ListVoices(ctx context.Context, language, model string) ([]tirtcapi.VoiceInfo, error) {
 	if m.listVoicesErr != nil {
 		return nil, m.listVoicesErr
 	}
@@ -605,7 +605,7 @@ func TestCreateRole_Success(t *testing.T) {
 	h := &AgentHandler{agentAPI: api, userRoleStore: userRoleStore}
 	router := setupTestRouter(h)
 
-	body := `{"name":"TestAgent","agent_config":{"prompt":"Hello"}}`
+	body := `{"name":"TestAgent","service_config":{"name":"default","type":"custom-compose"},"agent_config":{"prompt":"Hello"}}`
 	w := doRequest(router, "POST", "/v1/ai/roles", body, makeToken(1))
 	resp := parseJSON(t, w)
 
@@ -630,12 +630,37 @@ func TestCreateRole_MissingName(t *testing.T) {
 	}
 }
 
+func TestRoleWriteRequiresCompleteConfiguration(t *testing.T) {
+	for _, method := range []string{http.MethodPost, http.MethodPut} {
+		for _, body := range []string{
+			`{"name":"role"}`,
+			`{"service_config":{"name":"default","type":"custom-compose"}}`,
+			`{"name":"role","service_config":{"type":"custom-compose"}}`,
+			`{"name":"role","service_config":{"name":"default","type":"unknown"}}`,
+			fmt.Sprintf(`{"name":%q,"service_config":{"name":"default","type":"custom-compose"}}`, strings.Repeat("中", 65)),
+		} {
+			t.Run(method+body, func(t *testing.T) {
+				// A nil upstream would panic if validation forwarded this request.
+				h := &AgentHandler{}
+				path := "/v1/ai/roles"
+				if method == http.MethodPut {
+					path += "/r1"
+				}
+				w := doRequest(setupTestRouter(h), method, path, body, makeToken(1))
+				if resp := parseJSON(t, w); w.Code != 400 || resp.Code != 40000 {
+					t.Fatalf("invalid request accepted: HTTP=%d body=%s", w.Code, w.Body.String())
+				}
+			})
+		}
+	}
+}
+
 func TestCreateRole_APIError(t *testing.T) {
 	api := &mockAgentAPI{createRoleErr: errors.New("cloud unreachable")}
 	h := &AgentHandler{agentAPI: api}
 	router := setupTestRouter(h)
 
-	w := doRequest(router, "POST", "/v1/ai/roles", `{"name":"X"}`, makeToken(1))
+	w := doRequest(router, "POST", "/v1/ai/roles", `{"name":"X","service_config":{"name":"default","type":"custom-compose"}}`, makeToken(1))
 	resp := parseJSON(t, w)
 
 	if resp.Code != 50200 {
@@ -651,7 +676,7 @@ func TestCreateRole_APITimeout(t *testing.T) {
 	h := &AgentHandler{agentAPI: api}
 	router := setupTestRouter(h)
 
-	w := doRequest(router, "POST", "/v1/ai/roles", `{"name":"X"}`, makeToken(1))
+	w := doRequest(router, "POST", "/v1/ai/roles", `{"name":"X","service_config":{"name":"default","type":"custom-compose"}}`, makeToken(1))
 	resp := parseJSON(t, w)
 
 	if resp.Code != 50200 || resp.Msg != "创建角色失败：AI 云服务请求超时，请稍后重试" {
@@ -671,7 +696,7 @@ func TestCreateRole_UserRoleStoreError(t *testing.T) {
 	h := &AgentHandler{agentAPI: api, userRoleStore: userRoleStore}
 	router := setupTestRouter(h)
 
-	w := doRequest(router, "POST", "/v1/ai/roles", `{"name":"X"}`, makeToken(1))
+	w := doRequest(router, "POST", "/v1/ai/roles", `{"name":"X","service_config":{"name":"default","type":"custom-compose"}}`, makeToken(1))
 	resp := parseJSON(t, w)
 
 	// userRoleStore.AddUserRole fails → 500
@@ -762,7 +787,7 @@ func TestUpdateRole_Success(t *testing.T) {
 	h := &AgentHandler{agentAPI: api}
 	router := setupTestRouter(h)
 
-	w := doRequest(router, "PUT", "/v1/ai/roles/r1", `{"name":"New"}`, makeToken(1))
+	w := doRequest(router, "PUT", "/v1/ai/roles/r1", `{"name":"New","service_config":{"name":"default","type":"custom-compose"}}`, makeToken(1))
 	resp := parseJSON(t, w)
 
 	if resp.Code != 200 {
@@ -778,7 +803,7 @@ func TestUpdateRole_APIError(t *testing.T) {
 	h := &AgentHandler{agentAPI: api}
 	router := setupTestRouter(h)
 
-	w := doRequest(router, "PUT", "/v1/ai/roles/r1", `{"name":"X"}`, makeToken(1))
+	w := doRequest(router, "PUT", "/v1/ai/roles/r1", `{"name":"X","service_config":{"name":"default","type":"custom-compose"}}`, makeToken(1))
 	resp := parseJSON(t, w)
 
 	if resp.Code != 50200 {

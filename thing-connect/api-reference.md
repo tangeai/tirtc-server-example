@@ -3137,11 +3137,11 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 | 字段 | 类型 | 必填与说明 |
 |---|---|---|
-| `name` | string | 创建必填；更新可选，角色名称 |
+| `name` | string | 创建、更新均必填，非空且最多 64 个 Unicode 字符 |
 | `avatar` | string | 可选，头像地址 |
-| `parent_role_id` | string | 可选，继承的角色 ID |
+| `parent_role_id` | string | 可选，继承的角色 ID；须属同一应用，不能指向自身，最多一级父子关系 |
 | `agent_config` | object | 可选，行为配置，子字段见下表 |
-| `service_config` | object | 可选，模型与语音服务配置，子字段见下表 |
+| `service_config` | object | 创建、更新均必填，模型与语音服务配置，子字段见下表 |
 | `user_params` | object | 可选，自定义键值参数，值可为任意 JSON 类型 |
 
 **`agent_config` 子字段**
@@ -3161,26 +3161,30 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 | 字段 | 类型 | 必填与说明 |
 |---|---|---|
-| `name` | string | 可选，服务配置名称 |
-| `type` | string | 服务类型：`custom-compose`、`coze` 或 `qwen-agent` |
+| `name` | string | 必填，服务配置名称 |
+| `type` | string | 必填，服务类型：`custom-compose`、`coze` 或 `qwen-agent` |
 | `config` | object | 对应服务类型的配置 |
+| `config.llm` | object | `custom-compose` 的文字模型配置；创建角色时建议明确提供 |
+| `config.llm.provider` | string | LLM 提供方，使用 `ali-llm` |
+| `config.llm.provider_params.model` | string | 模型名称：`qwen3.5-flash` 或 `qwen3.7-plus` |
 | `config.tts` | object | `custom-compose` 的 TTS 组件 |
-| `config.tts.provider` | string | TTS 提供方标识 |
+| `config.tts.provider` | string | TTS 提供方标识，使用 `ali-tts` |
 | `config.tts.provider_params` | object | TTS 参数 |
-| `config.tts.provider_params.voice` | string | 音色 ID，通过音色列表获取 |
+| `config.tts.provider_params.model` | string | 配置 TTS 时必填，使用音色列表中对应的 `model`（如 `cosyvoice-v3-flash`） |
+| `config.tts.provider_params.voice` | string | 配置 TTS 时必填，音色 ID，通过音色列表获取；与 `model` 成对提交 |
 | `config.tts.provider_params.volume` | integer | 音量，范围由 TTS 提供方定义 |
 | `config.tts.provider_params.rate` | number | 语速，范围由 TTS 提供方定义 |
 | `config.tts.provider_params.pitch` | number | 音调，范围由 TTS 提供方定义 |
 | `config.tts.provider_params.language_hints` | string[] | 语言提示列表 |
 | `config.app_id` | string | `coze` 或 `qwen-agent` 的应用 ID |
 | `config.bot_id` | string | `coze` 的 Bot ID |
-| `config.private_key` | string | `coze` 的私钥，敏感字段 |
+| `config.private_key` | string | `coze` 的私钥，敏感字段；与 `public_key_id` 成对提供，或改用 `api_key` |
 | `config.public_key_id` | string | `coze` 的公钥 ID |
 | `config.workflow_id` | string | `coze` 的可选工作流 ID |
-| `config.api_key` | string | `qwen-agent` 的可选 API 密钥，敏感字段 |
-| `config.workspace_id` | string | `qwen-agent` 的可选工作空间 ID |
+| `config.api_key` | string | `qwen-agent` 配置中的必填 API 密钥；`coze` 可用它替代私钥和公钥 ID 组合，敏感字段 |
+| `config.workspace_id` | string | `qwen-agent` 配置中的必填工作空间 ID |
 
-角色请求会按上述结构转发；空字符串和空数组字段通常不转发。若携带 `agent_config` 却省略 `ali_rag`，该字段仍会以 `null` 转发；仅修改其他行为配置时，应同时带上需要保留的知识库绑定。
+角色更新为全量替换：应先读取详情，再提交需要保留的完整角色配置；遗漏的行为配置不会自动保留。角色请求按上述结构转发，空字符串和空数组通常省略，在全量更新中用于清除原配置。若携带 `agent_config` 却省略 `ali_rag`，该字段仍会以 `null` 转发；仅修改其他行为配置时，应同时带上需要保留的知识库绑定。
 
 **服务配置的互斥形态**
 
@@ -3190,8 +3194,8 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 ```jsonc
 {
-  "service_config": { // 可选，模型与语音服务配置；不同 type 的 config 结构不同
-    "name": "Coze 服务", // 可选，服务配置名称
+  "service_config": { // 模型与语音服务配置；创建、更新请求中必填，不同 type 的 config 结构不同
+    "name": "Coze 服务", // 服务配置名称，请求中必填
     "type": "coze", // 服务类型：custom-compose、coze 或 qwen-agent
     "config": { // 所选服务类型的配置
       "app_id": "<Coze应用ID>", // 所选 Coze/Qwen 服务的应用 ID
@@ -3208,13 +3212,13 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 ```jsonc
 {
-  "service_config": { // 可选，模型与语音服务配置；不同 type 的 config 结构不同
-    "name": "Qwen Agent 服务", // 可选，服务配置名称
+  "service_config": { // 模型与语音服务配置；创建、更新请求中必填，不同 type 的 config 结构不同
+    "name": "Qwen Agent 服务", // 服务配置名称，请求中必填
     "type": "qwen-agent", // 服务类型：custom-compose、coze 或 qwen-agent
     "config": { // 所选服务类型的配置
       "app_id": "<Qwen应用ID>", // 所选 Coze/Qwen 服务的应用 ID
-      "api_key": "<Qwen API密钥>", // 可选，Qwen 应用 API 密钥，敏感字段
-      "workspace_id": "<Qwen工作空间ID>" // 可选，Qwen 工作空间 ID
+      "api_key": "<Qwen API密钥>", // Qwen 配置必填 API 密钥，敏感字段
+      "workspace_id": "<Qwen工作空间ID>" // Qwen 配置必填工作空间 ID
     }
   }
 }
@@ -3326,13 +3330,15 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
           "mcp_tools": ["app_tool_001"], // 可选，绑定的 MCP 工具 ID 列表
           "device_plugins": ["plg_001"] // 可选，绑定的设备插件 ID 列表
         },
-        "service_config": { // 可选，模型与语音服务配置；不同 type 的 config 结构不同
-          "name": "中文语音服务", // 可选，服务配置名称
+        "service_config": { // 模型与语音服务配置；创建、更新请求中必填，不同 type 的 config 结构不同
+          "name": "中文语音服务", // 服务配置名称，请求中必填
           "type": "custom-compose", // 服务类型：custom-compose、coze 或 qwen-agent
           "config": { // 所选服务类型的配置
+            "llm": { "provider": "ali-llm", "provider_params": { "model": "qwen3.5-flash" } }, // 文字模型配置
             "tts": { // 可选，custom-compose 的语音合成组件
-              "provider": "<TTS提供方标识>", // TTS 提供方标识，以实际服务为准
+              "provider": "ali-tts", // 阿里 TTS 提供方标识
               "provider_params": { // TTS 参数，取值范围由提供方定义
+                "model": "cosyvoice-v3-flash", // 必填，与所选音色匹配的 TTS 模型
                 "voice": "<音色列表返回的ID>", // 音色列表返回的 ID
                 "volume": 50, // 音量，范围由提供方定义
                 "rate": 1.0, // 语速，范围由提供方定义
@@ -3395,13 +3401,15 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
       "mcp_tools": ["app_tool_001"], // 可选，绑定的 MCP 工具 ID 列表
       "device_plugins": ["plg_001"] // 可选，绑定的设备插件 ID 列表
     },
-    "service_config": { // 可选，模型与语音服务配置；不同 type 的 config 结构不同
-      "name": "中文语音服务", // 可选，服务配置名称
+    "service_config": { // 模型与语音服务配置；创建、更新请求中必填，不同 type 的 config 结构不同
+      "name": "中文语音服务", // 服务配置名称，请求中必填
       "type": "custom-compose", // 服务类型：custom-compose、coze 或 qwen-agent
       "config": { // 所选服务类型的配置
+        "llm": { "provider": "ali-llm", "provider_params": { "model": "qwen3.5-flash" } }, // 文字模型配置
         "tts": { // 可选，custom-compose 的语音合成组件
-          "provider": "<TTS提供方标识>", // TTS 提供方标识，以实际服务为准
+          "provider": "ali-tts", // 阿里 TTS 提供方标识
           "provider_params": { // TTS 参数，取值范围由提供方定义
+            "model": "cosyvoice-v3-flash", // 必填，与所选音色匹配的 TTS 模型
             "voice": "<音色列表返回的ID>", // 音色列表返回的 ID
             "volume": 50, // 音量，范围由提供方定义
             "rate": 1.0, // 语速，范围由提供方定义
@@ -3477,13 +3485,15 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
     "mcp_tools": ["app_tool_001"], // 可选，绑定的 MCP 工具 ID 列表
     "device_plugins": ["plg_001"] // 可选，绑定的设备插件 ID 列表
   },
-  "service_config": { // 可选，模型与语音服务配置；不同 type 的 config 结构不同
-    "name": "中文语音服务", // 可选，服务配置名称
+  "service_config": { // 模型与语音服务配置；创建、更新请求中必填，不同 type 的 config 结构不同
+    "name": "中文语音服务", // 服务配置名称，请求中必填
     "type": "custom-compose", // 服务类型：custom-compose、coze 或 qwen-agent
     "config": { // 所选服务类型的配置
+      "llm": { "provider": "ali-llm", "provider_params": { "model": "qwen3.5-flash" } }, // 文字模型配置
       "tts": { // 可选，custom-compose 的语音合成组件
-        "provider": "<TTS提供方标识>", // TTS 提供方标识，以实际服务为准
+        "provider": "ali-tts", // 阿里 TTS 提供方标识
         "provider_params": { // TTS 参数，取值范围由提供方定义
+          "model": "cosyvoice-v3-flash", // 必填，与所选音色匹配的 TTS 模型
           "voice": "<音色列表返回的ID>", // 音色列表返回的 ID
           "volume": 50, // 音量，范围由提供方定义
           "rate": 1.0, // 语速，范围由提供方定义
@@ -3524,13 +3534,15 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
       "mcp_tools": ["app_tool_001"], // 可选，绑定的 MCP 工具 ID 列表
       "device_plugins": ["plg_001"] // 可选，绑定的设备插件 ID 列表
     },
-    "service_config": { // 可选，模型与语音服务配置；不同 type 的 config 结构不同
-      "name": "中文语音服务", // 可选，服务配置名称
+    "service_config": { // 模型与语音服务配置；创建、更新请求中必填，不同 type 的 config 结构不同
+      "name": "中文语音服务", // 服务配置名称，请求中必填
       "type": "custom-compose", // 服务类型：custom-compose、coze 或 qwen-agent
       "config": { // 所选服务类型的配置
+        "llm": { "provider": "ali-llm", "provider_params": { "model": "qwen3.5-flash" } }, // 文字模型配置
         "tts": { // 可选，custom-compose 的语音合成组件
-          "provider": "<TTS提供方标识>", // TTS 提供方标识，以实际服务为准
+          "provider": "ali-tts", // 阿里 TTS 提供方标识
           "provider_params": { // TTS 参数，取值范围由提供方定义
+            "model": "cosyvoice-v3-flash", // 必填，与所选音色匹配的 TTS 模型
             "voice": "<音色列表返回的ID>", // 音色列表返回的 ID
             "volume": 50, // 音量，范围由提供方定义
             "rate": 1.0, // 语速，范围由提供方定义
@@ -3594,13 +3606,15 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
       "mcp_tools": ["app_tool_001"], // 可选，绑定的 MCP 工具 ID 列表
       "device_plugins": ["plg_001"] // 可选，绑定的设备插件 ID 列表
     },
-    "service_config": { // 可选，模型与语音服务配置；不同 type 的 config 结构不同
-      "name": "中文语音服务", // 可选，服务配置名称
+    "service_config": { // 模型与语音服务配置；创建、更新请求中必填，不同 type 的 config 结构不同
+      "name": "中文语音服务", // 服务配置名称，请求中必填
       "type": "custom-compose", // 服务类型：custom-compose、coze 或 qwen-agent
       "config": { // 所选服务类型的配置
+        "llm": { "provider": "ali-llm", "provider_params": { "model": "qwen3.5-flash" } }, // 文字模型配置
         "tts": { // 可选，custom-compose 的语音合成组件
-          "provider": "<TTS提供方标识>", // TTS 提供方标识，以实际服务为准
+          "provider": "ali-tts", // 阿里 TTS 提供方标识
           "provider_params": { // TTS 参数，取值范围由提供方定义
+            "model": "cosyvoice-v3-flash", // 必填，与所选音色匹配的 TTS 模型
             "voice": "<音色列表返回的ID>", // 音色列表返回的 ID
             "volume": 50, // 音量，范围由提供方定义
             "rate": 1.0, // 语速，范围由提供方定义
@@ -3635,7 +3649,7 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **鉴权**：`Authorization: Bearer <user_jwt>`（用户 JWT）
 
-**请求体**：[AI 资源字段](#ai-资源字段)中的角色请求体。所有顶层字段可选，`name` 无创建时的必填要求。
+**请求体**：[AI 资源字段](#ai-资源字段)中的角色请求体。`name`、`service_config` 必填；服务配置中的 `name`、`type` 必填。更新为全量替换，应重新提交需要保留的父角色、行为配置、服务配置和自定义参数。
 
 **路径参数**
 
@@ -3647,7 +3661,7 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 ```jsonc
 {
-  "name": "我的助手 v2", // 可选，角色名称
+  "name": "我的助手 v2", // 必填，角色名称，最多 64 个字符
   "avatar": "https://cdn.example.com/assistant.png", // 可选，角色头像地址
   "parent_role_id": "fin_parent_example", // 可选，继承的父角色 ID
   "agent_config": { // 可选，角色行为配置
@@ -3662,13 +3676,15 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
     "mcp_tools": ["app_tool_001"], // 可选，绑定的 MCP 工具 ID 列表
     "device_plugins": ["plg_001"] // 可选，绑定的设备插件 ID 列表
   },
-  "service_config": { // 可选，模型与语音服务配置；不同 type 的 config 结构不同
-    "name": "中文语音服务", // 可选，服务配置名称
+  "service_config": { // 模型与语音服务配置；创建、更新请求中必填，不同 type 的 config 结构不同
+    "name": "中文语音服务", // 服务配置名称，请求中必填
     "type": "custom-compose", // 服务类型：custom-compose、coze 或 qwen-agent
     "config": { // 所选服务类型的配置
+      "llm": { "provider": "ali-llm", "provider_params": { "model": "qwen3.5-flash" } }, // 文字模型配置
       "tts": { // 可选，custom-compose 的语音合成组件
-        "provider": "<TTS提供方标识>", // TTS 提供方标识，以实际服务为准
+        "provider": "ali-tts", // 阿里 TTS 提供方标识
         "provider_params": { // TTS 参数，取值范围由提供方定义
+          "model": "cosyvoice-v3-flash", // 必填，与所选音色匹配的 TTS 模型
           "voice": "<音色列表返回的ID>", // 音色列表返回的 ID
           "volume": 50, // 音量，范围由提供方定义
           "rate": 1.0, // 语速，范围由提供方定义
@@ -3683,6 +3699,8 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
   }
 }
 ```
+
+成功返回角色 ID 和提交的配置；云端未返回时间等元数据时，这些字段省略。需要核对云端最终配置时，调用详情接口。
 
 **成功响应示例**（HTTP 200）
 
@@ -3709,13 +3727,15 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
       "mcp_tools": ["app_tool_001"], // 可选，绑定的 MCP 工具 ID 列表
       "device_plugins": ["plg_001"] // 可选，绑定的设备插件 ID 列表
     },
-    "service_config": { // 可选，模型与语音服务配置；不同 type 的 config 结构不同
-      "name": "中文语音服务", // 可选，服务配置名称
+    "service_config": { // 模型与语音服务配置；创建、更新请求中必填，不同 type 的 config 结构不同
+      "name": "中文语音服务", // 服务配置名称，请求中必填
       "type": "custom-compose", // 服务类型：custom-compose、coze 或 qwen-agent
       "config": { // 所选服务类型的配置
+        "llm": { "provider": "ali-llm", "provider_params": { "model": "qwen3.5-flash" } }, // 文字模型配置
         "tts": { // 可选，custom-compose 的语音合成组件
-          "provider": "<TTS提供方标识>", // TTS 提供方标识，以实际服务为准
+          "provider": "ali-tts", // 阿里 TTS 提供方标识
           "provider_params": { // TTS 参数，取值范围由提供方定义
+            "model": "cosyvoice-v3-flash", // 必填，与所选音色匹配的 TTS 模型
             "voice": "<音色列表返回的ID>", // 音色列表返回的 ID
             "volume": 50, // 音量，范围由提供方定义
             "rate": 1.0, // 语速，范围由提供方定义
@@ -4065,7 +4085,7 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **调用方**：Web（含小程序内嵌页面）。
 
-获取可用 TTS 音色列表。
+获取可用 TTS 音色列表。音色须与 `service_config.config.tts.provider` 对应的引擎匹配；不同引擎的音色 ID 不能混用。Web 角色编辑页的 `custom-compose` 配置使用 `ali-tts`，音色选项来自 `model=cosyvoice-v3-flash` 的目录项。历史角色若保存了其他引擎的音色，需要重新选择后保存。
 
 **鉴权**：`Authorization: Bearer <user_jwt>`（用户 JWT）
 
@@ -4073,7 +4093,8 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 | 参数 | 必填 | 说明 |
 |------|:--:|------|
-| language | | 语言过滤（如 `zh-CN`），空则返回全部 |
+| language | | 语言过滤（如 `zh-CN`），空则不限制语言 |
+| model | | TTS 模型过滤，空则不限制模型 |
 
 **成功响应**（HTTP 200）
 
@@ -4087,7 +4108,7 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
         "id": "voice_001", // 音色 ID
         "name": "小云", // 音色名称
         "languages": ["zh-CN"], // 可选，支持的语言
-        "model": "cosyvoice", // 可选，语音模型
+        "model": "cosyvoice-v3-flash", // 可选，语音模型
         "scene": "default", // 可选，适用场景
         "sample_url": "<实际返回的 sample_url>" // 可选，试听音频地址
       }
@@ -4391,6 +4412,8 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 }
 ```
 
+成功返回当前提交的工具配置；只修改启用状态时，其余配置沿用更新前读取的值。需要核对云端最终配置时，调用详情接口。
+
 **成功响应**（HTTP 200）
 
 ```jsonc
@@ -4432,7 +4455,7 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **调用方**：Web（含小程序内嵌页面）。
 
-删除应用级 MCP 工具。
+删除应用级 MCP 工具。若角色仍引用该工具，应先更新相关角色解除引用，再删除。
 
 **鉴权**：`Authorization: Bearer <user_jwt>`（用户 JWT）
 
@@ -4713,6 +4736,8 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 }
 ```
 
+成功返回插件 ID 和本次提交的配置；云端未返回时间等元数据时，这些字段省略。需要完整详情时，调用详情接口。
+
 **成功响应示例**（HTTP 200）
 
 ```jsonc
@@ -4761,7 +4786,7 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **调用方**：Web（含小程序内嵌页面）。
 
-删除设备插件。
+删除设备插件。若角色仍引用该插件，应先更新相关角色解除引用，再删除。
 
 **鉴权**：`Authorization: Bearer <user_jwt>`（用户 JWT）
 
@@ -4933,7 +4958,7 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 
 **调用方**：Web（含小程序内嵌页面）。
 
-更新知识库索引。
+更新知识库索引。只更新传入字段；`description: ""` 清空描述，`document_ids: []` 清空全部文档关联。
 
 **鉴权**：`Authorization: Bearer <user_jwt>`（用户 JWT）
 
@@ -4943,7 +4968,7 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 |------|------|:--:|------|
 | name | string | | 索引名称 |
 | description | string | | 索引描述 |
-| document_ids | string[] | | 关联文档 ID 列表 |
+| document_ids | string[] | | 全量关联文档 ID 列表；传 `[]` 清除全部关联，省略或 `null` 保留原关联 |
 
 **请求示例**
 
@@ -4960,6 +4985,8 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `id` | string | 是 | 路径参数，当前用户创建的知识库索引 ID |
+
+成功响应可能仅包含 `index_id`，其余信息以详情接口为准。
 
 **成功响应示例**（HTTP 200）
 
@@ -5116,6 +5143,8 @@ H5 智能体管理页面为 `GET /v1/ai/agent?device_id=xxx`。该路径返回 H
 | `data.items[].status` | string | 可选，云端处理状态；服务端不固定枚举 |
 | `data.items[].size_in_bytes` | integer | 可选，文件大小，单位字节 |
 | `data.items[].create_time` | string | 可选，云端创建时间 |
+
+服务端遍历云端文件游标后按当前用户归属过滤；分页读取失败时返回错误，不将部分结果作为完整列表。
 
 **请求参数**：无。
 

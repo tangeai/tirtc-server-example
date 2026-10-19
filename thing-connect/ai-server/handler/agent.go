@@ -8,7 +8,9 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"sync/atomic"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 
@@ -72,7 +74,7 @@ type agentAPI interface {
 	CreateRole(ctx context.Context, input tirtcapi.RoleInput) (*tirtcapi.Role, error)
 	UpdateRole(ctx context.Context, roleID string, input tirtcapi.RoleInput) (*tirtcapi.Role, error)
 	DeleteRole(ctx context.Context, roleID string) error
-	ListVoices(ctx context.Context, language string) ([]tirtcapi.VoiceInfo, error)
+	ListVoices(ctx context.Context, language, model string) ([]tirtcapi.VoiceInfo, error)
 	BatchCreateDeviceRoles(ctx context.Context, req tirtcapi.BatchDeviceRolesRequest) error
 	BatchQueryDeviceRoles(ctx context.Context, req tirtcapi.BatchDeviceRolesQueryRequest) ([]tirtcapi.DeviceRoleBinding, error)
 	BatchDeleteDeviceRoles(ctx context.Context, req tirtcapi.BatchDeviceRolesRequest) error
@@ -252,8 +254,8 @@ func (h *AgentHandler) createRole(c *gin.Context) {
 		apiresp.BadParamError(c, err)
 		return
 	}
-	if input.Name == "" {
-		apiresp.BadParam(c, "缺少 name")
+	if message := validateRoleInput(input); message != "" {
+		apiresp.BadParam(c, message)
 		return
 	}
 
@@ -312,6 +314,14 @@ func (h *AgentHandler) updateRole(c *gin.Context) {
 		apiresp.BadParamError(c, err)
 		return
 	}
+	if message := validateRoleInput(input); message != "" {
+		apiresp.BadParam(c, message)
+		return
+	}
+	if input.ParentRoleID == roleID {
+		apiresp.BadParam(c, "父角色不能指向当前角色")
+		return
+	}
 
 	role, err := h.api().UpdateRole(c.Request.Context(), roleID, input)
 	if err != nil {
@@ -319,6 +329,27 @@ func (h *AgentHandler) updateRole(c *gin.Context) {
 		return
 	}
 	apiresp.OK(c, role)
+}
+
+func validateRoleInput(input tirtcapi.RoleInput) string {
+	if strings.TrimSpace(input.Name) == "" {
+		return "缺少 name"
+	}
+	if utf8.RuneCountInString(input.Name) > 64 {
+		return "角色名称不能超过 64 个字符"
+	}
+	if input.ServiceConfig == nil {
+		return "请提交完整的 service_config 服务配置"
+	}
+	if strings.TrimSpace(input.ServiceConfig.Name) == "" {
+		return "缺少 service_config.name"
+	}
+	switch input.ServiceConfig.Type {
+	case "custom-compose", "coze", "qwen-agent":
+	default:
+		return "service_config.type 仅支持 custom-compose、coze 或 qwen-agent"
+	}
+	return ""
 }
 
 func (h *AgentHandler) deleteRole(c *gin.Context) {
@@ -524,7 +555,7 @@ func (h *AgentHandler) requireOwnedDevices(c *gin.Context, deviceIDs []string) b
 
 func (h *AgentHandler) listVoices(c *gin.Context) {
 	language := c.Query("language")
-	voices, err := h.api().ListVoices(c.Request.Context(), language)
+	voices, err := h.api().ListVoices(c.Request.Context(), language, c.Query("model"))
 	if err != nil {
 		failAIUpstream(c, "查询音色列表", err)
 		return
@@ -959,8 +990,8 @@ func (h *AgentHandler) updateKnowledgeIndex(c *gin.Context) {
 		failAIUpstream(c, "更新知识库", err)
 		return
 	}
-	if req.Name != "" {
-		_ = h.userResourceStore.UpdateName(c.Request.Context(), userID, model.ResourceTypeKB, id, req.Name)
+	if req.Name != nil {
+		_ = h.userResourceStore.UpdateName(c.Request.Context(), userID, model.ResourceTypeKB, id, *req.Name)
 	}
 	apiresp.OK(c, item)
 }
