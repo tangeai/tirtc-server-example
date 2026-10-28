@@ -125,6 +125,11 @@ export function problemFromAPIResponse(
       '确认使用管理员邮箱登录，普通用户账号不能登录管理后台',
       '重新输入密码；已启用 MFA 时，同时检查验证码或恢复码',
     );
+  } else if (path === '/auth/mfa/verify' && status === 401 && code === 40101) {
+    suggestions.push(
+      '检查身份验证器设备的时间是否准确，再输入新的 6 位验证码',
+      '使用尚未用过的恢复码时请清空动态码；仍无法登录时联系超级管理员重置 MFA',
+    );
   } else if (status === 400 || status === 422) {
     suggestions.push('检查表单中的必填项、格式和取值范围后重试');
   } else if (status === 401) {

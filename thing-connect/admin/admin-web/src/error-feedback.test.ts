@@ -27,6 +27,29 @@ test('invalid administrator credentials include safe login guidance', () => {
   });
 });
 
+test('invalid MFA code does not look like an expired login session', () => {
+  const problem = problemFromAPIResponse('/auth/mfa/verify', 401, {
+    code: 40101,
+    msg: '账号、密码或验证码错误',
+    data: null,
+  });
+
+  assert.deepEqual(problem.suggestions, [
+    '检查身份验证器设备的时间是否准确，再输入新的 6 位验证码',
+    '使用尚未用过的恢复码时请清空动态码；仍无法登录时联系超级管理员重置 MFA',
+  ]);
+});
+
+test('expired MFA challenges and other unauthorized requests retain login guidance', () => {
+  for (const [path, code] of [
+    ['/auth/mfa/verify', 401],
+    ['/configs', 40101],
+  ] as const) {
+    const problem = problemFromAPIResponse(path, 401, { code, msg: '请重新登录' });
+    assert.deepEqual(problem.suggestions, ['登录状态已失效，请重新登录']);
+  }
+});
+
 test('service failures preserve server guidance and add a safe recovery action', () => {
   const problem = problemFromAPIResponse('/configs', 503, {
     code: 503,
