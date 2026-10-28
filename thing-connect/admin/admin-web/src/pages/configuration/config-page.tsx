@@ -64,6 +64,7 @@ const namespaceNames: Record<string, string> = {
   'voip-server': 'VoIP 服务',
   'ai-server': 'AI 服务',
   'call-server': '呼叫服务',
+  'recognition-server': 'AI识别',
   common: '通用配置',
   system: '系统配置',
 };

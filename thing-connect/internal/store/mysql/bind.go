@@ -335,7 +335,7 @@ func ApplyUnbindTx(ctx context.Context, tx *sqlx.Tx, deviceID string, userID int
 
 	res, err := tx.ExecContext(ctx,
 		`UPDATE device_bind
-		    SET user_id=0, device_name='', bind_time=NULL, unbind_time=NOW()
+		    SET user_id=0, device_name='', bind_time=NULL, unbind_time=NOW(), binding_revision=binding_revision+1
 		  WHERE device_id=? AND user_id=?`,
 		deviceID, userID)
 	if err != nil {

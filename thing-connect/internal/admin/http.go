@@ -34,6 +34,7 @@ type HTTPServer struct {
 	redis            *redis.Client
 	jobs             *JobService
 	devices          *DeviceService
+	recognition      *RecognitionService
 	boards           *BoardService
 	boardImages      *BoardImageService
 	cookieSecure     bool
@@ -101,6 +102,11 @@ func (s *HTTPServer) Register(r *gin.Engine) {
 	protected.GET("/devices", s.Require("device.read"), s.listDevices)
 	protected.GET("/device-pool", s.Require("device.read"), s.listDevicePool)
 	protected.GET("/devices/:device_id", s.Require("device.read"), s.getDevice)
+	protected.GET("/recognition/schemes", s.Require("recognition.read"), s.recognitionSchemes)
+	protected.POST("/recognition/schemes", s.Require("recognition.write"), s.recognitionSave)
+	protected.GET("/recognition/requests", s.Require("recognition.read"), s.recognitionRecords)
+	protected.GET("/devices/:device_id/recognition", s.Require("device.read"), s.getRecognition)
+	protected.PUT("/devices/:device_id/recognition", s.Require("device.recognition.write"), s.putRecognition)
 	protected.GET("/devices/:device_id/bind-logs", s.Require("device.read"), s.deviceBindLogs)
 	protected.POST("/devices/:device_id/force-unbind", s.Require("device.unbind"), s.forceUnbind)
 	protected.GET("/boards", s.Require("board.read"), s.listBoards)
@@ -556,7 +562,7 @@ func (s *HTTPServer) navigation(c *gin.Context) {
 	}
 	allowed := make([]Menu, 0, len(menus))
 	for _, menu := range menus {
-		if menu.PermissionCode == "" || s.access.Enforce(identity.UserID, menu.PermissionCode) {
+		if menu.PermissionCode == "" || s.access.Enforce(identity.UserID, menu.PermissionCode) || (menu.MenuCode == "recognition-config" && menu.Path == "/configs/recognition-server" && s.access.Enforce(identity.UserID, "recognition.read")) {
 			allowed = append(allowed, menu)
 		}
 	}

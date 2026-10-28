@@ -17,6 +17,7 @@ class SessionKind(str, Enum):
     AI = "ai"
     CALL = "call"
     ROOM = "room"
+    RECOGNITION = "recognition"
 
 
 @dataclass(frozen=True)

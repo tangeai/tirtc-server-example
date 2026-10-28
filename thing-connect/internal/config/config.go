@@ -13,6 +13,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"thing-connect/internal/model"
+	"thing-connect/internal/recognition"
 	"thing-connect/internal/room"
 	"thing-connect/internal/webnav"
 )
@@ -96,14 +97,15 @@ type AdminCfg struct {
 // DiscoveryCfg publishes the bootstrap endpoints consumed by device
 // reference implementations. It is hosted by user-server at /services.
 type DiscoveryCfg struct {
-	Enabled         bool   `yaml:"enabled"`
-	DeviceServerURL string `yaml:"device_server_url"`
-	UserServerURL   string `yaml:"user_server_url"`
-	VoIPServerURL   string `yaml:"voip_server_url"`
-	AIServerURL     string `yaml:"ai_server_url"`
-	CallServerURL   string `yaml:"call_server_url"`
-	MQTTURL         string `yaml:"mqtt_url"`
-	TiRTCEndpoint   string `yaml:"tirtc_endpoint"`
+	RecognitionServerURL string `yaml:"recognition_server_url"`
+	Enabled              bool   `yaml:"enabled"`
+	DeviceServerURL      string `yaml:"device_server_url"`
+	UserServerURL        string `yaml:"user_server_url"`
+	VoIPServerURL        string `yaml:"voip_server_url"`
+	AIServerURL          string `yaml:"ai_server_url"`
+	CallServerURL        string `yaml:"call_server_url"`
+	MQTTURL              string `yaml:"mqtt_url"`
+	TiRTCEndpoint        string `yaml:"tirtc_endpoint"`
 }
 
 type YidunCfg struct {
@@ -176,28 +178,29 @@ type WechatCfg struct {
 }
 
 type Config struct {
-	Navigation  webnav.Config  `yaml:"navigation"`
-	Room        room.Config    `yaml:"room"`
-	Server      ServerCfg      `yaml:"server"`
-	Log         LogCfg         `yaml:"log"`
-	Database    DatabaseCfg    `yaml:"database"`
-	Redis       RedisCfg       `yaml:"redis"`
-	MQTT        MQTTCfg        `yaml:"mqtt"`
-	JWTSecret   string         `yaml:"jwt_secret"`
-	Service     ServiceCfg     `yaml:"service"`
-	Yidun       YidunCfg       `yaml:"yidun"`
-	Captcha     CaptchaCfg     `yaml:"captcha"`
-	SMTP        SMTPCfg        `yaml:"smtp"`
-	Tirtc       TirtcCfg       `yaml:"tirtc"`
-	TirtcAichat TirtcAichatCfg `yaml:"tirtc_aichat"`
-	Wechat      WechatCfg      `yaml:"wechat"`
-	Ws          WsCfg          `yaml:"ws"`
-	Internal    InternalCfg    `yaml:"internal"`
-	Call        CallCfg        `yaml:"call"`
-	Voip        VoipCfg        `yaml:"voip"`
-	Ai          AiCfg          `yaml:"ai"`
-	Admin       AdminCfg       `yaml:"admin"`
-	Discovery   DiscoveryCfg   `yaml:"discovery"`
+	Recognition recognition.Config `yaml:"recognition"`
+	Navigation  webnav.Config      `yaml:"navigation"`
+	Room        room.Config        `yaml:"room"`
+	Server      ServerCfg          `yaml:"server"`
+	Log         LogCfg             `yaml:"log"`
+	Database    DatabaseCfg        `yaml:"database"`
+	Redis       RedisCfg           `yaml:"redis"`
+	MQTT        MQTTCfg            `yaml:"mqtt"`
+	JWTSecret   string             `yaml:"jwt_secret"`
+	Service     ServiceCfg         `yaml:"service"`
+	Yidun       YidunCfg           `yaml:"yidun"`
+	Captcha     CaptchaCfg         `yaml:"captcha"`
+	SMTP        SMTPCfg            `yaml:"smtp"`
+	Tirtc       TirtcCfg           `yaml:"tirtc"`
+	TirtcAichat TirtcAichatCfg     `yaml:"tirtc_aichat"`
+	Wechat      WechatCfg          `yaml:"wechat"`
+	Ws          WsCfg              `yaml:"ws"`
+	Internal    InternalCfg        `yaml:"internal"`
+	Call        CallCfg            `yaml:"call"`
+	Voip        VoipCfg            `yaml:"voip"`
+	Ai          AiCfg              `yaml:"ai"`
+	Admin       AdminCfg           `yaml:"admin"`
+	Discovery   DiscoveryCfg       `yaml:"discovery"`
 }
 
 func Load(path string) *Config {
@@ -217,11 +220,14 @@ func LoadFile(path string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("config: read %s: %w", path, err)
 	}
-	cfg := Config{Room: room.DefaultConfig()}
+	cfg := Config{Room: room.DefaultConfig(), Recognition: recognition.DefaultConfig()}
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&cfg); err != nil {
 		return nil, fmt.Errorf("config: parse %s: %w", path, err)
+	}
+	if err := cfg.Recognition.Validate(); err != nil {
+		return nil, fmt.Errorf("config: recognition: %w", err)
 	}
 	if _, err := cfg.Room.Policy(); err != nil {
 		return nil, fmt.Errorf("config: room: %w", err)

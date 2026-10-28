@@ -301,3 +301,6 @@ func DeviceNotifyTopic(clientID string) string {
 func DeviceACKTopic(clientID string) string {
 	return "device/" + clientID + "/ack"
 }
+
+// Connected reports whether the current MQTT transport is available.
+func (b *Broker) Connected() bool { return b.client != nil && b.client.IsConnectionOpen() }

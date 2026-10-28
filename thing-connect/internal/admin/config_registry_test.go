@@ -22,8 +22,8 @@ func TestRegistryRejectsUnknownAndBadValues(t *testing.T) {
 func TestRegistryDefinitionsAndUsableInitialValues(t *testing.T) {
 	registry := DefaultConfigRegistry()
 	definitions := registry.List("")
-	if len(definitions) != 25 {
-		t.Fatalf("registered configuration count = %d, want 25", len(definitions))
+	if len(definitions) != 27 {
+		t.Fatalf("registered configuration count = %d, want 27", len(definitions))
 	}
 	for _, definition := range definitions {
 		value := definition.Default

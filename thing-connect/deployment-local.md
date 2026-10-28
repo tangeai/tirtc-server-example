@@ -1,7 +1,7 @@
 # 本地开发联调部署
 
 [`scripts/deploy-local.sh`](scripts/deploy-local.sh) 将本地工作区部署到 `/opt/thing-connect`。
-源码可以包含未提交的修改。脚本在独立快照中构建六个服务和 Web，不修改开发仓库的
+源码可以包含未提交的修改。脚本在独立快照中构建服务清单中的服务和 Web，不修改开发仓库的
 Git 索引，也不拉取远程代码。它使用现有 Web 安装器创建数据库结构，使用
 `service-local.sh` 管理进程，适用于 Linux / WSL 开发联调。
 
@@ -90,3 +90,11 @@ sudo /opt/thing-connect/deploy-local.sh gateway
 如果预检提示数据库版本比二进制新，可能是另一个迁移历史的旧开发库。
 此时不替换服务文件，不改台账，也不补写 SQL 绕过检查。需要保留数据时先完成兼容升级；
 允许全新联调时使用上述归档安装流程和新空库。
+
+### 在已有安装中启用音频识别
+
+本地 `update` 在识别配置缺失时补入 `recognition-server`，监听 9006；已有独立配置或激活配置包中的识别配置保持原样。配置使用用户服务的运行数据库账号、Redis、业务 JWT、内部密钥和 Admin 地址，不使用迁移账号，也不复制 Admin 登录密钥。
+
+基础配置与首次安装器一致，不包含 MQTT 账号或千问 Key，也不读取、复制其他服务的 MQTT 配置。更新先启动 Admin 检查识别服务配置：MQTT 尚未发布时，识别服务文件完成部署并保持停止，其他已配置服务正常启动。进入 Admin 的“服务配置 → AI识别 → 服务配置”，自行填写、测试并发布 MQTT 和模型配置后，执行 `deploy-local.sh start` 启动识别服务。配置检查失败或已配置服务启动失败仍按失败处理，不标记为全部就绪。
+
+使用当前源码的 `scripts/deploy-local.sh update` 执行首次扩展，成功后 `/opt/thing-connect/deploy-local.sh` 同步为当前脚本。按上面的更新步骤重启独立 Nginx，使 `/v1/recognition/` 转发至 9006。模型 Key 在 Admin 的识别服务配置中发布，设备识别默认关闭。

@@ -49,6 +49,13 @@ func defaultConfigFields(namespace, key string) []ConfigFieldDefinition {
 		definitionID("user-server", "user.token_policy"): {
 			textConfigField("token_expiry", "用户登录有效期", "例如 168h 表示 7 天"),
 		},
+		definitionID("recognition-server", "mqtt.connection"): mqttConnectionFields(),
+		definitionID("recognition-server", "recognition.models"): {
+			textConfigField("base_url", "千问音频分析接口", "与 API Key 地域一致的兼容接口地址"),
+			textConfigField("tts_url", "千问语音合成接口", "完整 HTTP 接口地址"),
+			textConfigField("tts_model", "语音合成模型", "例如 qwen3-tts-flash"),
+			secretConfigField("api_key", "千问默认 API Key", "仅保留在服务端"),
+		},
 		definitionID("ai-server", "ai.role_policy"): {
 			textConfigField("default_role_id", "默认 AI 角色 ID", ""),
 			textConfigField("base_url", "AI 服务地址", ""),

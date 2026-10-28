@@ -1,4 +1,4 @@
 -r requirements.txt
 
-# Optional PC microphone/speaker support used by --with-mic.
+# Optional Windows microphone/speaker support for --with-mic and recognition recording/playback.
 sounddevice>=0.5.5; sys_platform == "win32"

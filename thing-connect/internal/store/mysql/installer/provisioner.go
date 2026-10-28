@@ -10,7 +10,6 @@ import (
 	"net"
 	"reflect"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -635,7 +634,7 @@ func validateCompleteVersionedShape(
 			return fmt.Errorf("读取表结构失败: %w", err)
 		}
 		if tableCount != 1 {
-			return installapp.ErrSchemaDrift
+			return fmt.Errorf("%w: 表 %s 缺失或引擎不是 InnoDB", installapp.ErrSchemaDrift, table)
 		}
 	}
 	type columnRow struct {
@@ -715,12 +714,12 @@ func validateCompleteVersionedShape(
 	for table, shape := range expected {
 		for column, columnShape := range shape.Columns {
 			if !reflect.DeepEqual(actualColumns[table][column], columnShape) {
-				return installapp.ErrSchemaDrift
+				return fmt.Errorf("%w: 字段 %s.%s 定义不一致", installapp.ErrSchemaDrift, table, column)
 			}
 		}
 		for index, indexShape := range shape.Indexes {
 			if !reflect.DeepEqual(actualIndexes[table][index], indexShape) {
-				return installapp.ErrSchemaDrift
+				return fmt.Errorf("%w: 索引 %s.%s 定义不一致", installapp.ErrSchemaDrift, table, index)
 			}
 		}
 	}
@@ -728,62 +727,25 @@ func validateCompleteVersionedShape(
 }
 
 func validateLegacyFingerprint(tables map[string]bool, versions map[string]int, hasMarker bool) error {
-	required := []string{"schema_migrations"}
-	if versions["core"] > 0 {
-		required = append(required,
-			"users", "device_pool", "device_bind", "device_bind_log",
-			"voip_device_profile", "voip_device_auth", "voip_user_profile",
-			"ai_user_role", "ai_device_role", "ai_user_resource",
-			"call_contact", "cleanup_outbox",
-		)
+	required, err := mysqlmigrate.SchemaShapeForVersions(versions, hasMarker)
+	if err != nil {
+		return fmt.Errorf("读取版本化表清单失败: %w", err)
 	}
-	if versions["core"] >= 2 {
-		required = append(required, "device_profile", "call_rooms", "call_room_codes", "call_assignments", "call_leases", "call_outbox")
-	}
-	if versions["core"] >= 4 {
-		required = append(required, "board_resources")
-	}
-	if versions["admin"] > 0 {
-		required = append(required,
-			"admin_users", "admin_roles", "admin_user_roles", "admin_role_permissions",
-			"admin_menus", "admin_role_menus", "admin_sessions", "admin_mfa_factors",
-			"admin_mfa_recovery_codes", "admin_login_log", "admin_dict_types",
-			"admin_dict_items", "admin_audit_log", "admin_jobs", "admin_job_items",
-			"config_entries", "config_publish_outbox",
-		)
-	}
-	if versions["admin"] >= 1 {
-		required = append(required, "thingconnect_installation_state")
-	}
-	for _, table := range required {
+	for table := range required {
 		if !tables[table] {
 			return installapp.ErrSchemaDrift
 		}
 	}
-	known := map[string]bool{
-		"schema_migrations": true, "users": true, "device_pool": true, "device_bind": true,
-		"device_profile": true, "device_bind_log": true, "call_contact": true, "voip_device_profile": true,
-		"call_rooms": true, "call_room_codes": true, "call_assignments": true,
-		"call_leases": true, "call_outbox": true, "board_resources": true,
-		"voip_device_auth": true, "voip_user_profile": true, "ai_user_role": true,
-		"ai_device_role": true, "ai_user_resource": true, "cleanup_outbox": true,
-		"admin_users": true, "admin_roles": true, "admin_user_roles": true,
-		"admin_role_permissions": true, "admin_menus": true, "admin_role_menus": true,
-		"admin_sessions": true, "admin_mfa_factors": true, "admin_mfa_recovery_codes": true,
-		"admin_login_log": true, "admin_dict_types": true, "admin_dict_items": true,
-		"admin_audit_log": true, "admin_jobs": true, "admin_job_items": true,
-		"config_entries": true, "config_publish_outbox": true,
-		"thingconnect_installation_state": true,
+	// Recognize every table owned by this binary, including a pending migration's
+	// tables. Column and index validation still uses the recorded ledger version.
+	known, err := mysqlmigrate.CurrentSchemaShape()
+	if err != nil {
+		return fmt.Errorf("读取当前表清单失败: %w", err)
 	}
-	unknown := make([]string, 0)
 	for table := range tables {
-		if !known[table] {
-			unknown = append(unknown, table)
+		if _, ok := known[table]; !ok {
+			return installapp.ErrSchemaDrift
 		}
-	}
-	if len(unknown) > 0 {
-		sort.Strings(unknown)
-		return installapp.ErrSchemaDrift
 	}
 	return nil
 }

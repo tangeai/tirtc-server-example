@@ -6882,3 +6882,598 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 | 5 | 查询参数 signature 校验失败 |
 | 9 | 请求体无效 |
 | 10 | TiRTC/MQTT 处理失败，或同一房间的上一笔回调仍在处理中 |
+
+## recognition-server：音频分析
+
+服务发现可选字段 `recognition-srv` 提供独立识别服务根地址，HTTP 前缀 `/v1/recognition`。设备默认关闭识别。完整字段、异步 MQTT 结果、下载和错误约定见 [设备音频分析接入](device-recognition.md)。
+
+| 接口 | 调用方 | 方法 | 路径 | 鉴权 |
+|---|---|---|---|---|
+| [读取识别配置](#recognition-config) | 设备 | GET | `/v1/recognition/config` | 正式设备 JWT |
+| [提交音频分析](#recognition-submit) | 设备 | POST | `/v1/recognition/requests` | 正式设备 JWT |
+| [查询分析结果](#recognition-task) | 设备 | GET | `/v1/recognition/requests/:request_id` | 正式设备 JWT |
+| [补查分析任务](#recognition-tasks) | 设备 | GET | `/v1/recognition/requests` | 正式设备 JWT |
+| [下载合成语音](#recognition-audio) | 设备 | GET | `/v1/recognition/requests/:request_id/audio/:item_id` | 正式设备 JWT |
+| [查询识别目录](#recognition-types) | 用户 Web | GET | `/v1/recognition/types` | 用户 JWT |
+| [读取设备识别设置](#recognition-device-config) | 用户 Web | GET | `/v1/recognition/devices/:device_id/config` | 用户 JWT |
+| [保存设备识别设置](#recognition-device-save) | 用户 Web | PUT | `/v1/recognition/devices/:device_id/config` | 用户 JWT |
+
+
+本节前半部分描述**当前可调用的接口**；末尾「待确认的结构整理方案」是评审草案，尚未作为线上契约实现。示例中的设备、类型和任务标识均为占位值。
+
+#### 接入约定
+
+- 一期只接入音频分析；不接受图片、视频，不提供流式播放。
+- HTTP 根地址取服务发现的 `recognition-srv`，统一代理可使用站点根地址；不是 AI 通话服务地址。
+- 设备使用 `Authorization: Bearer <mqtt_token>`，用户页面使用用户 JWT；设备身份从令牌读取，上传不传 `device_id`。临时设备不能使用。
+- JSON 成功响应统一为 `code/msg/data`。`code=200` 表示请求或通知正常，**不表示任务完成，也不表示没有异常**；报警判断看子项 `result.alarm`。
+- 客户端按数值 `code`、状态枚举处理业务，不比较 `msg`。忽略未知扩展字段。字段顺序无意义。
+- 用户可以选择最多8个识别类型，同一段音频按选择顺序执行。一段录音选 N 个类型，占用 N 次额度。分析 Token、TTS 字符分别统计。
+- HTTP 获取数据和语音均需鉴权；接口响应设置 `Cache-Control: no-store`。模型 Key 和提示词不下发设备。
+
+<a id="recognition-config"></a>
+
+### 读取识别配置
+
+**接口**：`GET /v1/recognition/config`
+
+**调用方**：设备。
+
+无请求体。响应示例：
+
+```json
+{
+  "code": 200,
+  "msg": "ok",
+  "data": {
+    "policy": {
+      "enabled": true,
+      "allowed": true,
+      "monthly_limit": 100,
+      "revision": 3,
+      "schemes": [
+        {
+          "scheme_id": "cry_detection",
+          "scheme_version": 1
+        }
+      ]
+    },
+    "schemes": [
+      {
+        "scheme_id": "cry_detection",
+        "scheme_version": 1,
+        "revision": 1,
+        "name": "哭声检测",
+        "description": "检测录音中是否有婴儿哭声",
+        "media_type": "audio",
+        "model": "qwen3-omni-flash",
+        "output_mode": "text_audio",
+        "voice": "Cherry",
+        "limits": {
+          "max_file_bytes": 1048576,
+          "max_audio_seconds": 15
+        },
+        "enabled": true
+      }
+    ],
+    "usage": {
+      "month": "2026-10",
+      "used": 1,
+      "input_tokens": 125,
+      "output_tokens": 80,
+      "unknown_calls": 0,
+      "tts_characters": 24
+    },
+    "effective_enabled": true,
+    "upload_limits": {
+      "max_file_bytes": 1048576,
+      "max_audio_seconds": 15
+    }
+  }
+}
+```
+
+| 字段 | 含义及设备处理 |
+|---|---|
+| policy.enabled | 用户保存的开关，默认 false |
+| policy.allowed | 后台是否允许该设备使用 |
+| policy.monthly_limit | UTC 自然月次数上限，默认100，0禁止新任务 |
+| policy.revision | 设备配置版本；上传使用此值作为 config_revision |
+| policy.schemes | 选中的类型标识和发布版本，数组顺序为执行顺序 |
+| schemes | 选中类型的公开详情，名称由后台定义；不含提示词。model、voice 等字段当前也会返回，设备无需据此选模型 |
+| effective_enabled | 综合开关、类型可用性、模型配置与剩余额度后的有效状态；为 false 时不要上传 |
+| upload_limits | 所选类型共同允许的最小大小和时长上限，仍受平台上限约束 |
+| usage.used | 已占用次数，包括受理后的失败和结果未知任务 |
+| usage.input_tokens / output_tokens | 已知分析 Token 累计，不包含未上报的用量 |
+| usage.tts_characters | 已知语音合成字符累计，不与 Token 相加 |
+| usage.unknown_calls | 用量未获得或不完整的调用数；不应把未知用量视为0 |
+
+`policy.revision`、类型的 `scheme_version` 和任务的 `status_revision` 是三个独立版本，不能互相替代。每次新上传前获取有效配置；超时重试原任务时保留原 request_id 和原 config_revision。
+
+<a id="recognition-submit"></a>
+
+### 提交音频分析
+
+**接口**：`POST /v1/recognition/requests`
+
+**调用方**：设备。
+
+Content-Type 为 `multipart/form-data`，不是 JSON，也不是把裸音频直接作为整个 HTTP body。
+
+| 表单字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| request_id | string | 是 | 设备范围内唯一，1–64位字母、数字、下划线或连字符；超时后使用原编号查询/重试 |
+| config_revision | integer | 是 | 最近读取的 policy.revision；不一致时拒绝新任务 |
+| media_type | string | 是 | 固定 audio |
+| audio_format | string | PCM 必填 | pcm_s16le：无文件头的16位有符号小端 PCM；wav：PCM16 WAV。省略时按 WAV 校验，兼容旧设备 |
+| sample_rate | integer | PCM 必填 | 8000–48000 Hz，建议16000；WAV 不传，由文件头提供 |
+| channels | integer | PCM 必填 | 1或2，建议1；WAV 不传。双声道 PCM 按采样帧交错排列 |
+| files | binary file | 是 | 恰好一个文件；PCM MIME 为 application/octet-stream，WAV 为 audio/wav |
+
+约束：1–60秒，平台大小上限5MiB，完整 multipart 请求体上限6MiB；实际必须同时满足 upload_limits。PCM 字节数须为 `channels × 2` 的整数倍，时长按 `字节数 / (sample_rate × channels × 2)` 校验。服务端只为 PCM 加44字节 WAV 头，采样数据不改变；大小限制按包含文件头的字节数计算。当前拒绝 MP3、A-law；不能通过改文件名或声明不同格式绕过。
+
+```bash
+curl "$RECOGNITION_SERVER/v1/recognition/requests" \
+  -H "Authorization: Bearer $DEVICE_TOKEN" \
+  -F 'request_id=audio_000001' \
+  -F 'config_revision=3' \
+  -F 'media_type=audio' \
+  -F 'audio_format=pcm_s16le' \
+  -F 'sample_rate=16000' \
+  -F 'channels=1' \
+  -F 'files=@recording.pcm;type=application/octet-stream'
+```
+
+首次受理返回 **HTTP 202、code=200**，仅表示已进入持久化任务队列，不等待模型完成：
+
+```json
+{
+  "code": 200,
+  "msg": "ok",
+  "data": {
+    "request_id": "audio_000001",
+    "device_id": "DEVICE001",
+    "status": "queued",
+    "status_revision": 1,
+    "results": [
+      {
+        "item_id": "item_1",
+        "order": 1,
+        "scheme_id": "cry_detection",
+        "scheme_version": 1,
+        "output_mode": "text_audio",
+        "status": "queued",
+        "result": null,
+        "error": null,
+        "speech": {
+          "status": "pending",
+          "error": null
+        }
+      }
+    ],
+    "error": null,
+    "created_at": "2026-10-28T07:30:07Z"
+  }
+}
+```
+
+相同 request_id、配置版本及规范化音频内容重试返回原任务（HTTP200），不重复占用额度；PCM 的采样率和声道影响规范化内容，因此也参与去重。相同编号不同内容或版本返回 HTTP409/code40901。解绑后的新绑定不能访问旧绑定任务。网络超时不代表服务端未受理，先查询原任务，不要立即换编号重传。
+
+<a id="recognition-task"></a>
+
+### 查询分析结果
+
+**接口**：`GET /v1/recognition/requests/:request_id`
+
+**调用方**：设备。
+
+| 路径参数 | 说明 |
+|---|---|
+| request_id | 设备提交时的请求标识 |
+
+查询返回当前快照，结构与 MQTT 结果通知的 payload 相同。文字完成、语音尚待合成的**当前实际返回**如下：
+
+```json
+{
+  "code": 200,
+  "msg": "ok",
+  "data": {
+    "request_id": "audio_000001",
+    "device_id": "DEVICE001",
+    "status": "queued",
+    "status_revision": 3,
+    "results": [
+      {
+        "item_id": "item_1",
+        "order": 1,
+        "scheme_id": "cry_detection",
+        "scheme_version": 1,
+        "output_mode": "text_audio",
+        "status": "succeeded",
+        "result": {
+          "summary": "检测到持续的婴儿哭声，建议查看宝宝情况。",
+          "alarm": true,
+          "labels": [
+            "婴儿哭声"
+          ],
+          "details": {
+            "uncertainty": "仅凭哭声无法可靠判断具体原因。"
+          }
+        },
+        "error": null,
+        "speech": {
+          "status": "pending",
+          "error": null
+        }
+      }
+    ],
+    "error": null,
+    "created_at": "2026-10-28T07:30:07Z"
+  }
+}
+```
+
+最终文字和语音均完成时：
+
+```json
+{
+  "code": 200,
+  "msg": "ok",
+  "data": {
+    "request_id": "audio_000001",
+    "device_id": "DEVICE001",
+    "status": "succeeded",
+    "status_revision": 5,
+    "results": [
+      {
+        "item_id": "item_1",
+        "order": 1,
+        "scheme_id": "cry_detection",
+        "scheme_version": 1,
+        "output_mode": "text_audio",
+        "status": "succeeded",
+        "result": {
+          "summary": "检测到持续的婴儿哭声，建议查看宝宝情况。",
+          "alarm": true,
+          "labels": [
+            "婴儿哭声"
+          ],
+          "details": {
+            "uncertainty": "仅凭哭声无法可靠判断具体原因。"
+          }
+        },
+        "error": null,
+        "speech": {
+          "status": "ready",
+          "url": "/v1/recognition/requests/audio_000001/audio/item_1",
+          "format": "wav",
+          "error": null
+        }
+      }
+    ],
+    "error": null,
+    "created_at": "2026-10-28T07:30:07Z"
+  }
+}
+```
+
+#### 当前任务及结果字段
+
+| 字段 | 含义 |
+|---|---|
+| data.request_id / device_id | 任务及所属设备 |
+| data.status | 整个任务的聚合状态；不能用子项状态代替 |
+| data.status_revision | 同一任务的递增快照版本；不是配置版本。版本可跳号，不保证每个版本都发通知 |
+| data.results | 按配置顺序排列的结果数组，不保证各项同时完成 |
+| results[].item_id / order | 任务内子项标识及从1开始的执行顺序 |
+| results[].scheme_id / scheme_version | 分析使用的类型和发布版本。当前结果不带类型名称，可从上传时保存的 schemes 映射 |
+| results[].output_mode | text、audio、text_audio，分别表示文字、语音、两者 |
+| results[].status | **仅分析阶段状态**，succeeded 不代表语音也已完成 |
+| results[].result | 文字分析对象；未完成、失败或纯语音类型时为 null |
+| result.summary | 中文说明，最多500字 |
+| result.alarm | 模型按该类型提示词判断是否需要提醒；不是接口错误或人工确认结论 |
+| result.labels | 声音类别数组；当前由模型生成，不是固定枚举 |
+| result.details | 扩展说明对象，键不固定；uncertainty 仅为示例，不保证存在 |
+| results[].speech | 语音处理状态；url/format 仅在就绪时返回，不应在 pending 时读取 |
+| data.error / results[].error / speech.error | 对应层级的错误，正常为 null；错误对象为 code/msg |
+| data.created_at | 任务创建时间，带时区的 RFC3339 字符串，可能有小数秒 |
+
+| 状态所属层 | 当前枚举及处理 |
+|---|---|
+| 任务 status | queued、processing：未结束；succeeded：全部成功；partial_failed：部分成功；failed：失败；unknown：结果不确定；cancelled：取消 |
+| 分析 results[].status | queued、processing、succeeded、failed、unknown、cancelled |
+| 语音 speech.status | pending、synthesizing、ready、failed、unknown、skipped |
+
+**当前语义注意**：文字完成、等待语音或下一个类型时，任务 status 可能回到 queued；示例并不代表文字任务重新排队。设备应以各阶段状态显示进度，不把它简单翻译成“尚未识别”。任务终态及 unknown 不应触发客户端自动新建任务；unknown 只允许补查原任务，避免重复付费调用。
+
+返回方式按每个已选类型的发布版本独立执行，不由上传参数覆盖：
+
+| output_mode | 是否分析声音 | 是否调用 TTS | 设备可见结果 |
+|---|---|---|---|
+| text | 是，产生分析次数和实际 Token 用量 | 否；无该任务的合成用量或音频文件 | result 有文字，speech.status 从受理起就是 skipped |
+| audio | 是，分析文字用于合成 | 分析成功后调用 | result=null，speech.ready 时提供下载地址 |
+| text_audio | 是 | 分析成功后调用 | 先返回文字，再通知语音就绪；TTS 失败保留文字 |
+
+草稿修改不改变任务的发布版本快照。未开启语音时不会将结果文字转成音频；仅文字不等于无需调用分析模型。验收是否调用 TTS 应查看该任务的调用记录，不能用设备所有历史任务的累计字符数是否为0判断。
+
+text 类型成功时 speech.status=skipped；audio 类型的 result=null，内部分析文字只用于 TTS；text_audio 的语音失败不会删除已成功的文字。模型或合成失败时，查询 HTTP 仍可成功返回 HTTP200/code200，具体失败位于子项中，例如：
+
+```json
+{
+  "status": "failed",
+  "error": {
+    "code": 50200,
+    "msg": "模型调用未完成，请查询任务状态"
+  }
+}
+```
+
+<a id="recognition-tasks"></a>
+
+### 补查分析任务
+
+**接口**：`GET /v1/recognition/requests`
+
+**调用方**：设备。
+
+| 查询参数 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| cursor | integer | 0 | 非负整数，按任务创建编号递增分页，每页最多50条 |
+
+响应 data 为 `{ "items": [], "next_cursor": null }`；items 中每项为上述任务对象，另带 cursor。满50条时 next_cursor 为最后一项的 cursor；不满50条时为 null。满页不保证确有下一页，继续请求可能为空。
+
+**这不是状态更新游标**：旧任务完成时不会获得新 cursor。不能只保留最后一个 cursor 来补齐所有结果变化。设备应持久化未完成 request_id，MQTT 重连后逐个 GET 原任务；不知道任务号时才通过列表寻找。没有固定定时轮询要求。
+
+<a id="recognition-audio"></a>
+
+### 下载合成语音
+
+**接口**：`GET /v1/recognition/requests/:request_id/audio/:item_id`
+
+**调用方**：设备。
+
+| 路径参数 | 说明 |
+|---|---|
+| request_id | 任务标识 |
+| item_id | results 中的子项标识 |
+
+仅在 speech.status=ready 后请求。成功返回 HTTP200、Content-Type: audio/wav 和完整 WAV 二进制，**没有 JSON 信封**。失败返回 JSON 错误；设备必须先检查 HTTP 状态和 Content-Type 再保存或播放。
+
+speech.url 为识别服务相对路径，相对 recognition-srv 解析，并携带同一设备 Bearer 凭证；不含 Token，不是公开地址。设备根据 WAV 文件头适配播放，不假定下载语音也是上传时的16kHz格式。按 request_id/item_id 去重下载、播放，多类型按 order 排队，不因通知重投重复播报或打断现有通话。
+
+<a id="recognition-types"></a>
+
+### 查询识别目录
+
+**接口**：`GET /v1/recognition/types`
+
+**调用方**：用户 Web。
+
+无请求体，返回启用且已发布的类型列表；data 为数组，每项结构同配置响应的 schemes 条目。不含提示词和模型 Key，停用及未发布草稿不可选。类型名称由管理员定义，不在设备端写死“哭声检测”等名称。
+
+<a id="recognition-device-config"></a>
+
+### 读取设备识别设置
+
+**接口**：`GET /v1/recognition/devices/:device_id/config`
+
+**调用方**：用户 Web。
+
+| 路径参数 | 说明 |
+|---|---|
+| device_id | 本人绑定的正式设备 ID |
+
+响应结构与「读取识别配置」一致。用户只能访问本人绑定设备。
+
+<a id="recognition-device-save"></a>
+
+### 保存设备识别设置
+
+**接口**：`PUT /v1/recognition/devices/:device_id/config`
+
+**调用方**：用户 Web。
+
+| 路径参数 | 说明 |
+|---|---|
+| device_id | 本人绑定的正式设备 ID |
+
+请求 Content-Type 为 application/json：
+
+```json
+{
+  "enabled": true,
+  "schemes": [
+    {
+      "scheme_id": "cry_detection",
+      "scheme_version": 1
+    }
+  ],
+  "expected_revision": 3
+}
+```
+
+开启时至少选一个类型，最多8个、不能重复；数组顺序即执行顺序。expected_revision 来自读取结果的 policy.revision，冲突返回409。关闭可保留已选类型。成功返回更新后的完整配置，policy.revision 递增，并发送配置变更通知。此接口不修改后台额度或 allowed。
+
+<a id="recognition-mqtt"></a>
+
+### MQTT 异步通知（当前协议）
+
+复用设备已有订阅 `device/sn_{device_id}/notify`，无需新 topic。服务端发布 QoS1、retain=false。结果通知的 payload 是与 HTTP 查询相同的 code/msg/data 信封，**包含完整任务快照，不是只含任务号的拉取提示**：
+
+```json
+{
+  "type": "recognition_result",
+  "channel": "recognition",
+  "event_id": "event_000005",
+  "payload": {
+    "code": 200,
+    "msg": "ok",
+    "data": {
+      "request_id": "audio_000001",
+      "device_id": "DEVICE001",
+      "status": "succeeded",
+      "status_revision": 5,
+      "results": [
+        {
+          "item_id": "item_1",
+          "order": 1,
+          "scheme_id": "cry_detection",
+          "scheme_version": 1,
+          "output_mode": "text_audio",
+          "status": "succeeded",
+          "result": {
+            "summary": "检测到持续的婴儿哭声，建议查看宝宝情况。",
+            "alarm": true,
+            "labels": [
+              "婴儿哭声"
+            ],
+            "details": {
+              "uncertainty": "仅凭哭声无法可靠判断具体原因。"
+            }
+          },
+          "error": null,
+          "speech": {
+            "status": "ready",
+            "url": "/v1/recognition/requests/audio_000001/audio/item_1",
+            "format": "wav",
+            "error": null
+          }
+        }
+      ],
+      "error": null,
+      "created_at": "2026-10-28T07:30:07Z"
+    }
+  }
+}
+```
+
+| MQTT 字段 | 处理规则 |
+|---|---|
+| type | recognition_result 表示结果快照；recognition_config_changed 表示设备配置变更 |
+| channel | 固定 recognition，用于与通话等消息分流 |
+| event_id | 同一 outbox 事件重试保持不变，可用于短期重复过滤 |
+| payload | HTTP 风格响应信封；code=200 不代表任务全部成功 |
+| payload.data.status_revision | 结果通知按 request_id 分组，仅接受高于本地版本的快照；重复或旧版本忽略 |
+
+保存用户设备识别设置时的配置通知如下，版本是 **policy.revision**，与结果通知的 status_revision 不同：
+
+```json
+{
+  "type": "recognition_config_changed",
+  "channel": "recognition",
+  "event_id": "event_config_000004",
+  "payload": {
+    "code": 200,
+    "msg": "ok",
+    "data": {
+      "device_id": "DEVICE001",
+      "revision": 4
+    }
+  }
+}
+```
+
+收到配置通知后重新 GET /config，不能把通知中的 revision 当成完整配置。此通知不承诺覆盖管理员所有全局配置变化；每次新上传前仍须读取有效配置。
+
+设备处理顺序：校验 topic/设备归属 → 按 type/channel 分流 → 检查信封 → 按任务版本去重 → 展示文字或阶段状态 → speech.ready 时鉴权下载语音。文字不需要再 GET 一遍；不想处理完整快照的设备也可拿 request_id 查询当前结果，但会增加一次请求。MQTT 回调内不要阻塞执行下载或播放，应交给设备工作队列。
+
+通知可能重复、乱序或在设备离线时丢失，不保证与上传 HTTP 响应的到达顺序。上传前就应建立 notify 订阅；不能因尚未收到 POST 响应而丢弃同一任务的通知。原始 HTTP queued 响应也不能覆盖已经收到的更高版本结果。
+
+服务端最多尝试投递8次并有退避；Broker 协议确认不是设备收到或播放完成的业务 ACK，当前没有设备结果 ACK 接口。订阅恢复后按未完成任务号补查。EMQX 账号认证和 topic 授权必须分别验证，ACL 片段见 [识别服务权限](deploy/emqx/recognition-acl.conf)，发布确认不能代替实际订阅收包验收。
+
+### 识别接口错误与恢复
+
+| HTTP / code | 含义 | 客户端处理 |
+|---|---|---|
+| 400 / 40000 | 参数、PCM元信息、音频格式、时长或大小不合法 | 修正输入；不要原样重试 |
+| 413 / 40000 | multipart 请求体过大 | 缩小音频 |
+| 401 / 401 | 凭证无效 | 重新获取正式设备凭证 |
+| 403 / 40300 | 无权访问设备或绑定不符 | 检查账号、设备和绑定 |
+| 404 / 40400 | 任务不存在，或语音尚不可下载 | 检查编号及 speech.status |
+| 409 / 40901 | 未开启、类型不可用、配置或幂等内容冲突 | 先查询原任务和当前配置，不盲目更换编号 |
+| 429 / 429 | 月额度不足 | 等待额度恢复或由管理员调整 |
+| 503 / 50300 | 模型未配置 | 联系管理员配置 |
+| 500 / 50000 | 服务内部错误 | 已上传时优先查询原任务 |
+
+错误响应示例（data 可能省略，不应强制读取）：
+
+```json
+{
+  "code": 40000,
+  "msg": "请检查音频格式、大小、时长和识别配置"
+}
+```
+
+### 待确认的结构整理方案（评审草案，未实现）
+
+以下用于评审设备侧协议，不是当前服务已经返回的字段。既有 v1 仍以上文为准；完成兼容方案前，设备不能按草案字段接入。
+
+**建议保留的设计**：继续用 code/msg/data；HTTP 上传受理、查询和 MQTT payload 复用同一个任务对象；保留多类型数组、任务编号、状态版本；文字随通知返回，语音鉴权下载。不要改成顶层 result，否则与项目其他接口不一致，也会和每项分析结果混淆。
+
+**建议调整的字段和语义**：
+
+| 当前问题 | 建议 |
+|---|---|
+| 文字完成后任务又变 queued | queued 仅用于尚未开始；任何阶段开始后，等待 TTS/后续类型均为 processing，直到终态 |
+| results[].status 看不出只代表分析 | 将分析状态收进 recognition，把子项 status 明确定义为整个类型的聚合状态 |
+| 结果仅有 scheme_id，需额外映射名称 | 每项带 name，取任务创建时的类型名称快照；名称后续编辑不影响历史结果 |
+| summary/details 与语音信息层次难懂 | recognition 内包含 status、alarm、labels、text、details、error；audio 内含 status、url、format、error |
+| 配置版本与任务版本容易混淆 | 继续保留明确的 config_revision / status_revision，不统一缩写成 revision |
+| 状态 succeeded/ready 混用 | 草案先保留现有阶段枚举，避免同时改名称；通过层级区分整体、分析和音频 |
+
+建议的文字已完成、语音尚待生成的对象：
+
+```json
+{
+  "code": 200,
+  "msg": "ok",
+  "data": {
+    "request_id": "audio_000001",
+    "device_id": "DEVICE001",
+    "status": "processing",
+    "status_revision": 3,
+    "items": [
+      {
+        "item_id": "item_1",
+        "order": 1,
+        "scheme_id": "cry_detection",
+        "scheme_version": 1,
+        "name": "哭声检测",
+        "output_mode": "text_audio",
+        "status": "processing",
+        "recognition": {
+          "status": "succeeded",
+          "alarm": true,
+          "labels": [
+            "婴儿哭声"
+          ],
+          "text": "检测到持续的婴儿哭声，建议查看宝宝情况。",
+          "details": {
+            "uncertainty": "仅凭哭声无法可靠判断具体原因。"
+          },
+          "error": null
+        },
+        "audio": {
+          "status": "pending",
+          "url": null,
+          "format": null,
+          "error": null
+        },
+        "error": null
+      }
+    ],
+    "error": null,
+    "created_at": "2026-10-28T07:30:07Z"
+  }
+}
+```
+
+草案中 `code` 仍只表示传输/业务请求是否正常；失败任务可用 HTTP200 查询。保留 unknown 表示无法确认模型是否完成，不等同于 failed，也不允许自动重跑。只有请求的文字/音频阶段均完成时，子项才为 succeeded；部分可交付内容成功时为 partial_failed；未获得可交付结果时为 failed；尚有阶段待处理时为 processing。
+
+纯文字类型 audio.status=skipped；纯语音类型 recognition.status 可以显示处理阶段，但 alarm、labels、text、details 置 null，避免违背“仅返回语音”的选择。音频就绪使用 ready，返回相对 url 和 format；pending/failed/unknown 时不提供可用下载地址。
+
+MQTT 草案保持当前外层 type/channel/event_id/payload，payload.data 与草案 HTTP 查询对象完全相同；不另造一套 MQTT 结果字段，也不在 MQTT 中放音频 Base64、模型 Key 或访问令牌。配置变更通知继续只带设备标识和配置版本，设备再拉配置。
+
+兼容要求：results→items、result→recognition、speech→audio 都是破坏性字段变化，不能直接覆盖现有 v1。实施时应选择新协议版本，或先增加兼容字段并给消费者迁移期；Python 模拟器、用户 Web 和相关接入文档同步验证。没有实现与协商之前，不承诺新路由或 schema_version 字段。
+
+评审重点：是否接受上述结果层级、是否继续“通知直接带文字快照、语音主动下载”、是否需要设备 ACK 与重连自动补查。后两项可靠性能力当前并未实现，不能将 QoS1 宣传为设备必达。

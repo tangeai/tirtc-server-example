@@ -1,0 +1,26 @@
+server:
+  http_port: 9006
+  trusted_proxies: []
+log:
+  level: info
+  format: text
+database:
+  dsn: "root:password@tcp(127.0.0.1:3306)/thing_connect?parseTime=true&charset=utf8mb4&loc=Local"
+redis:
+  addr: "127.0.0.1:6379"
+  password: ""
+  db: 0
+jwt_secret: "replace-with-same-secret-as-device-server"
+internal:
+  key: "replace-with-an-internal-key-at-least-32-characters"
+admin:
+  server_url: "http://127.0.0.1:9000"
+mqtt:
+  broker: "mqtt://127.0.0.1:1883"
+  username: "recognition-server"
+  password: "replace-with-mqtt-password"
+recognition:
+  base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+  api_key: ""
+  tts_url: "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
+  tts_model: "qwen3-tts-flash"

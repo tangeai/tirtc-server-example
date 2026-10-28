@@ -27,6 +27,9 @@ type roleSeed struct {
 }
 
 var PermissionDefinitions = []PermissionDefinition{
+	{Code: "recognition.read", Name: "查看AI识别", Group: "AI识别", Description: "查看识别类型、结果及逐次用量"},
+	{Code: "recognition.write", Name: "管理AI识别", Group: "AI识别", Description: "编辑、发布、停用识别类型"},
+	{Code: "device.recognition.write", Name: "配置设备 AI 识别", Group: "设备管理", Description: "管理设备识别可用性和每月额度"},
 	{Code: "dashboard.read", Name: "查看数据概览", Group: "数据概览", Description: "查看业务统计和最近管理操作"},
 	{Code: "service.status.read", Name: "查看服务状态", Group: "数据概览", Description: "查看五个业务服务及其实例状态"},
 	{Code: "user.read", Name: "查看用户", Group: "用户管理", Description: "查询用户列表和详情"},
@@ -82,6 +85,8 @@ var defaultMenus = []menuSeed{
 	{Code: "user-config", Name: "用户服务", Path: "/configs/user-server", Permission: "config.read", Sort: 20, ParentCode: "service-config", MenuType: 2},
 	{Code: "voip-config", Name: "VoIP 服务", Path: "/configs/voip-server", Permission: "voip.app.read", Sort: 30, ParentCode: "service-config", MenuType: 2},
 	{Code: "ai-config", Name: "AI 服务", Path: "/configs/ai-server", Permission: "config.read", Sort: 40, ParentCode: "service-config", MenuType: 2},
+	{Code: "recognition", Name: "AI识别", Path: "/recognition", Permission: "recognition.read", Sort: 40, ParentCode: "business", MenuType: 2},
+	{Code: "recognition-config", Name: "AI识别", Path: "/configs/recognition-server", Permission: "config.read", Sort: 46, ParentCode: "service-config", MenuType: 2},
 	{Code: "call-config", Name: "呼叫服务", Path: "/configs/call-server", Permission: "config.read", Sort: 50, ParentCode: "service-config", MenuType: 2},
 	{Code: "common-config", Name: "通用配置", Path: "/configs/common", Permission: "config.read", Sort: 60, ParentCode: "service-config", MenuType: 2},
 	{Code: "admin-users", Name: "管理员", Path: "/admin-users", Permission: "admin.read", Sort: 10, ParentCode: "system-management", MenuType: 2},

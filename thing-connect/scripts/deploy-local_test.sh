@@ -15,7 +15,7 @@ cat >"$FIXTURE/thing-connect/build.sh" <<'BUILD'
 #!/usr/bin/env bash
 set -Eeuo pipefail
 mkdir -p bin user-server/static ai-server/static admin/admin-web/dist
-for service in admin-server device-server user-server ai-server call-server voip-server; do
+for service in admin-server device-server user-server ai-server call-server voip-server recognition-server; do
     printf '#!/usr/bin/env bash\nexit 0\n' >"bin/$service"
     chmod +x "bin/$service"
 done
@@ -130,3 +130,79 @@ rg -q '数据库预检失败' "$TEST_ROOT/preflight.log"
 rg -q 'published' "$ARCHIVE_ROOT/published"
 echo 'PASS: migration incompatibility leaves deployed files intact'
 echo 'PASS: deploy-local.sh'
+
+# Existing direct/bundled configuration is never overwritten. Missing config is
+# published privately and becomes visible to the standard active-service scan.
+bash -c '
+    source "$SCRIPTS/deploy-local.sh"
+    LOCAL_DEPLOY_ROOT="$TEST_ROOT/recognition-expand"
+    LOCAL_SNAPSHOT="$TEST_ROOT/recognition-snapshot"
+    mkdir -p "$LOCAL_SNAPSHOT" "$LOCAL_DEPLOY_ROOT"
+    printf "server:\n  http_port: 9006\n" >"$LOCAL_SNAPSHOT/recognition-config.yaml"
+    chmod 600 "$LOCAL_SNAPSHOT/recognition-config.yaml"
+    LOCAL_RECOGNITION_CONFIG="$LOCAL_SNAPSHOT/recognition-config.yaml"
+    local_publish_recognition
+    test "$(stat -c %a "$LOCAL_DEPLOY_ROOT/recognition-server/config.yaml")" = 600
+    source "$SCRIPTS/deploy-prod.sh"
+    DEPLOY_ROOT="$LOCAL_DEPLOY_ROOT"
+    test "$(service_config_path recognition-server)" = "$LOCAL_DEPLOY_ROOT/recognition-server/config.yaml"
+    local_prepare_recognition
+    test -z "$LOCAL_RECOGNITION_CONFIG"
+    rg -q 9006 "$LOCAL_DEPLOY_ROOT/recognition-server/config.yaml"
+    LOCAL_DEPLOY_ROOT="$TEST_ROOT/recognition-bundled"
+    mkdir -p "$LOCAL_DEPLOY_ROOT/config-current/recognition-server"
+    printf "existing-config\n" >"$LOCAL_DEPLOY_ROOT/config-current/recognition-server/config.yaml"
+    local_prepare_recognition
+    test -z "$LOCAL_RECOGNITION_CONFIG"
+    test ! -e "$LOCAL_DEPLOY_ROOT/recognition-server/config.yaml"
+'
+echo 'PASS: recognition expansion uses 9006, preserves active config and publishes mode 600'
+
+bash -c '
+    source "$SCRIPTS/deploy-local.sh"
+    LOCAL_DEPLOY_ROOT="$TEST_ROOT/admin-managed-recognition"
+    BUILD_DIR="$TEST_ROOT"
+    mkdir -p "$LOCAL_DEPLOY_ROOT"
+    export START_LOG="$TEST_ROOT/start-order.log"
+    cat >"$LOCAL_DEPLOY_ROOT/service-local.sh" <<"STUB"
+#!/usr/bin/env bash
+printf "%s defer=%s\n" "$*" "${DEFER_RECOGNITION_START:-0}" >>"$START_LOG"
+STUB
+    chmod +x "$LOCAL_DEPLOY_ROOT/service-local.sh"
+    curl() { return 0; }
+    service_config_path() { printf "/unused/config.yaml\n"; }
+    go() { printf "%s\n" "$MQTT_STATE"; }
+    MQTT_STATE=pending
+    local_start_updated
+    test "$LOCAL_RECOGNITION_PENDING" = 1
+    rg -q "start admin-server defer=0" "$START_LOG"
+    rg -q "start-all defer=1" "$START_LOG"
+    : >"$START_LOG"
+    MQTT_STATE=ready
+    local_start_updated
+    rg -q "start-all defer=0" "$START_LOG"
+    : >"$START_LOG"
+    go() { return 1; }
+    if local_start_updated; then exit 1; fi
+    if rg -q start-all "$START_LOG"; then exit 1; fi
+'
+echo 'PASS: unpublished recognition MQTT defers only recognition; configuration errors fail closed'
+
+# Check the actual controller skips both recognition preflight and startup only
+# for the explicit local-update defer flag.
+bash -c '
+    export DEPLOY_ROOT="$TEST_ROOT/controller-defer"
+    export SERVICE_CATALOG="$SCRIPTS/../internal/installer/service_catalog.tsv"
+    source "$SCRIPTS/service-local.sh"
+    start_one() { printf "start %s\n" "$1"; }
+    wait_ready() { return 0; }
+    config_exists() { return 0; }
+    preflight_service() { printf "preflight %s\n" "$1"; }
+    DEFER_RECOGNITION_START=1 start_all >"$TEST_ROOT/deferred-services.log"
+    if rg -q recognition-server "$TEST_ROOT/deferred-services.log"; then exit 1; fi
+    rg -q "start call-server" "$TEST_ROOT/deferred-services.log"
+    DEFER_RECOGNITION_START=0 start_all >"$TEST_ROOT/all-services.log"
+    rg -q "preflight recognition-server" "$TEST_ROOT/all-services.log"
+    rg -q "start recognition-server" "$TEST_ROOT/all-services.log"
+'
+echo 'PASS: controller defers only recognition and normal start includes its readiness checks'

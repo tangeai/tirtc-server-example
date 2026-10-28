@@ -75,3 +75,27 @@ func TestBaselineAdminVersionRequiresInstallationStateTable(t *testing.T) {
 		t.Fatalf("validateLegacyFingerprint with complete baseline = %v", err)
 	}
 }
+
+func TestFingerprintAcceptsAllVersionedRecognitionTables(t *testing.T) {
+	versions := mysqlmigrate.CurrentMigrationVersions()
+	shape, err := mysqlmigrate.SchemaShapeForVersions(versions, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tables := make(map[string]bool, len(shape))
+	for name := range shape {
+		tables[name] = true
+	}
+	if err = validateLegacyFingerprint(tables, versions, true); err != nil {
+		t.Fatalf("complete current schema rejected: %v", err)
+	}
+	delete(tables, "recognition_task")
+	if err = validateLegacyFingerprint(tables, versions, true); !errors.Is(err, installapp.ErrSchemaDrift) {
+		t.Fatal("missing recognition table accepted")
+	}
+	tables["recognition_task"] = true
+	tables["unrelated_table"] = true
+	if err = validateLegacyFingerprint(tables, versions, true); !errors.Is(err, installapp.ErrSchemaDrift) {
+		t.Fatal("unknown table accepted")
+	}
+}

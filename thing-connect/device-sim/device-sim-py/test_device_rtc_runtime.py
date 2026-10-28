@@ -73,6 +73,41 @@ def _module_mock():
 
 
 class DeviceRtcRuntimeTests(unittest.TestCase):
+    def test_recognition_capture_uses_real_audio_selector_and_releases_lease(self):
+        from types import SimpleNamespace
+        from session_coordinator import SessionKind
+        for fail in (False, True):
+            arbiter = mock.Mock()
+            arbiter.begin.return_value = SimpleNamespace(generation=7)
+            runtime = SimpleNamespace(arbiter=arbiter, _recognition_cancel=threading.Event())
+            stop = threading.Event()
+            with mock.patch("audio_device.select_mic", return_value=3), \
+                    mock.patch("recognition_capture.capture_pcm", return_value=b"pcm") as capture:
+                if fail:
+                    capture.side_effect = ValueError("capture failed")
+                    with self.assertRaisesRegex(ValueError, "capture failed"):
+                        DeviceRtcRuntime._capture_recognition(runtime, stop)
+                else:
+                    self.assertEqual(DeviceRtcRuntime._capture_recognition(runtime, stop), b"pcm")
+                    self.assertFalse(capture.call_args.args[0]())
+                    stop.set()
+                    self.assertTrue(capture.call_args.args[0]())
+                self.assertEqual(capture.call_args.kwargs["device"], 3)
+                arbiter.finish.assert_called_once_with(SessionKind.RECOGNITION, 7)
+
+    def test_recognition_playback_uses_real_speaker_selector_and_releases_lease(self):
+        from types import SimpleNamespace
+        from session_coordinator import SessionKind
+        arbiter = mock.Mock()
+        arbiter.begin.return_value = SimpleNamespace(generation=8)
+        runtime = SimpleNamespace(arbiter=arbiter, _recognition_cancel=threading.Event())
+        with mock.patch("audio_device.select_speaker", return_value=4), \
+                mock.patch("recognition_capture.play_wav") as play:
+            DeviceRtcRuntime._play_recognition(runtime, "audio.wav", threading.Event())
+        self.assertEqual(play.call_args.args[0], "audio.wav")
+        self.assertEqual(play.call_args.kwargs["device"], 4)
+        arbiter.finish.assert_called_once_with(SessionKind.RECOGNITION, 8)
+
     def test_hardware_audio_keeps_ai_wire_format_on_alaw(self):
         config = RuntimeConfig(
             device_id="dev-1",

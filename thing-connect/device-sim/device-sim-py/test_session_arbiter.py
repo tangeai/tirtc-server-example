@@ -24,6 +24,20 @@ class SessionArbiterTests(unittest.TestCase):
     def tearDown(self):
         self.arbiter.shutdown()
 
+    def test_recognition_reserves_media_and_does_not_preempt_room(self):
+        self.arbiter.begin(SessionKind.ROOM, lambda: None)
+        before = list(self.events)
+        with self.assertRaises(SessionConflict):
+            self.arbiter.begin(SessionKind.RECOGNITION, lambda: None, allow_room_preemption=False)
+        self.assertEqual(before, self.events)
+        self.arbiter.finish(SessionKind.ROOM)
+        lease = self.arbiter.begin(SessionKind.RECOGNITION, lambda: None, allow_room_preemption=False)
+        self.assertEqual(self.arbiter.admit_incoming(SessionKind.CALL, 'incoming'), IncomingDecision.BUSY)
+        with self.assertRaises(SessionConflict):
+            self.arbiter.begin(SessionKind.AI, lambda: None)
+        self.arbiter.finish(SessionKind.RECOGNITION, lease.generation)
+        self.assertEqual(self.coordinator.current, SessionKind.STREAM)
+
     def test_room_preemption_rejects_stale_finish_and_waits_for_call(self):
         room = self.arbiter.begin(SessionKind.ROOM, lambda: None)
         self.assertEqual(self.arbiter.admit_incoming(SessionKind.CALL, 'incoming'),

@@ -13,7 +13,7 @@ local_usage() {
     cat <<'USAGE'
 用法: deploy-local.sh <命令> [--archive-existing]
 
-  prepare   从本地源码生成独立快照，完整构建六个服务和 Web；不替换服务
+  prepare   从本地源码生成独立快照，完整构建服务清单中的服务和 Web；不替换服务
   install   发布快照并启动 Web 首次安装页面；仅接受空安装目录
   update    保留配置和数据库升级；要求现有库通过正式迁移预检
   start     启动已安装服务并检查 readiness
@@ -196,6 +196,66 @@ local_install() (
     local_log "安装页面: http://127.0.0.1:9000/admin/；完整验收步骤见源码 deployment-local.md"
 )
 
+# Prepare only missing configuration. Existing direct and bundle configurations are authoritative.
+local_prepare_recognition() {
+    local source_config target="$LOCAL_DEPLOY_ROOT/recognition-server/config.yaml"
+    LOCAL_RECOGNITION_CONFIG=""
+    if [ -e "$target" ] || [ -L "$target" ] ||
+       [ -e "$LOCAL_DEPLOY_ROOT/config-current/recognition-server/config.yaml" ] ||
+       [ -L "$LOCAL_DEPLOY_ROOT/config-current/recognition-server/config.yaml" ]; then
+        return 0
+    fi
+    source_config="$LOCAL_DEPLOY_ROOT/user-server/config.yaml"
+    if [ ! -e "$source_config" ] && [ ! -L "$source_config" ]; then
+        source_config="$LOCAL_DEPLOY_ROOT/config-current/user-server/config.yaml"
+    fi
+    LOCAL_RECOGNITION_CONFIG="$LOCAL_SNAPSHOT/recognition-config.yaml"
+    (
+        cd "$BUILD_DIR"
+        go run ./scripts/local-recognition-config -source "$source_config" \
+            -output "$LOCAL_RECOGNITION_CONFIG"
+    ) || { local_error '识别服务配置准备失败，未发布文件或修改数据库'; return 1; }
+}
+
+local_publish_recognition() {
+    [ -n "${LOCAL_RECOGNITION_CONFIG:-}" ] || return 0
+    local target="$LOCAL_DEPLOY_ROOT/recognition-server"
+    [ ! -L "$target" ] || { local_error '识别服务目录不能是符号链接'; return 1; }
+    mkdir -p "$target"
+    # Stage on the target filesystem, then atomically create without replacement.
+    local staged
+    staged="$(mktemp "$target/.config.yaml.XXXXXX")" || return 1
+    if ! cat "$LOCAL_RECOGNITION_CONFIG" >"$staged" || ! chmod 600 "$staged" ||
+       ! ln "$staged" "$target/config.yaml"; then
+        rm -f -- "$staged"
+        return 1
+    fi
+    rm -f -- "$staged"
+    local_log '已补入 recognition-server 配置，端口 9006；后续更新保留此配置'
+}
+
+local_start_updated() {
+    local controller="$LOCAL_DEPLOY_ROOT/service-local.sh" state attempt
+    DEPLOY_ROOT="$LOCAL_DEPLOY_ROOT" "$controller" start admin-server || return 1
+    for ((attempt=0; attempt<60; attempt++)); do
+        if curl -fsS --max-time 3 http://127.0.0.1:9000/health/ready >/dev/null 2>&1; then break; fi
+        sleep 1
+    done
+    [ "$attempt" -lt 60 ] || { local_error 'Admin 未通过 readiness'; return 1; }
+    local recognition_config
+    recognition_config="$(service_config_path recognition-server)" || return 1
+    state="$(cd "$BUILD_DIR" && go run ./scripts/local-recognition-config -source "$recognition_config" -check-mqtt)" || return 1
+    case "$state" in
+        pending)
+            DEPLOY_ROOT="$LOCAL_DEPLOY_ROOT" DEFER_RECOGNITION_START=1 "$controller" start-all || return 1
+            LOCAL_RECOGNITION_PENDING=1
+            local_log '识别服务已部署（9006），等待在 Admin → 服务配置 → AI识别 → 服务配置中发布 MQTT；其他已配置服务正常启动'
+            ;;
+        ready) DEPLOY_ROOT="$LOCAL_DEPLOY_ROOT" "$controller" start-all || return 1 ;;
+        *) local_error '识别服务配置检查结果无效'; return 1 ;;
+    esac
+}
+
 local_update() (
     if [ -z "${MIGRATION_CONFIG:-}" ]; then
         if [ -r "$LOCAL_DEPLOY_ROOT/admin-server/config.yaml" ]; then
@@ -215,7 +275,9 @@ local_update() (
         -require-runtime-target -migration-check-only || {
         local_error '数据库预检失败，未停止服务或替换文件。旧迁移历史不能直接改版本号；请先完成兼容升级或选择保留旧库的全新安装。'; return 1;
     }
+    local_prepare_recognition
     local_require_stopped
+    local_publish_recognition
     source "$BUILD_DIR/scripts/deploy-prod.sh"
     pull_code() { [ -f "$BUILD_DIR/bin/.release-commit" ]; }
     build_services() { validate_build_release "$@"; }
@@ -227,7 +289,7 @@ local_update() (
         return 0
     }
     full_deploy
-    if ! DEPLOY_ROOT="$LOCAL_DEPLOY_ROOT" "$LOCAL_DEPLOY_ROOT/service-local.sh" start-all; then
+    if ! local_start_updated; then
         DEPLOY_ROOT="$LOCAL_DEPLOY_ROOT" "$LOCAL_DEPLOY_ROOT/service-local.sh" stop-all || true
         local_error '启动验收失败，服务保持停止；请检查 logs 下的服务日志'; return 1
     fi
@@ -236,7 +298,11 @@ local_update() (
     chmod 0755 "$LOCAL_DEPLOY_ROOT/.deploy-local.sh.new"
     mv -f "$LOCAL_DEPLOY_ROOT/.deploy-local.sh.new" "$LOCAL_DEPLOY_ROOT/deploy-local.sh"
     printf '%s\n' "$LOCAL_SOURCE_ROOT" >"$LOCAL_DEPLOY_ROOT/local-source-path"
-    local_log '发布完成，已安装服务全部通过 readiness'
+    if [ "${LOCAL_RECOGNITION_PENDING:-0}" = 1 ]; then
+        local_log '发布完成；recognition-server 待配置，发布 MQTT 后执行 deploy-local.sh start'
+    else
+        local_log '发布完成，已安装服务全部通过 readiness'
+    fi
 )
 
 local_gateway() {

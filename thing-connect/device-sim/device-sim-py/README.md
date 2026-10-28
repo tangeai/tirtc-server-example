@@ -1026,3 +1026,87 @@ WHIP 连接成功后需等 ~300ms KCP 握手再发 `start_session`。
 设备加入多人对讲房间后，终端显示房间号和房间 ID；成员快照同步完成后显示在线设备列表，成员进出时自动更新。`room status` 可随时查询列表，包含本机标记及成员的收听／发言状态。
 
 输入 `room status` 会显示本地房间状态，并向房间服务请求最新成员快照；收到快照后输出在线成员人数、设备 ID 和发言状态。加入成功时也主动请求一次快照。若持续显示“等待房间同步”，可输入 `room status` 重新查询，并检查房间服务的 `get_room_snapshot` / `room_snapshot` 信令。
+
+## AI 音频识别
+
+使用后台已发布的音频识别类型，并在用户设备列表开启此设备的 AI识别、选择类型后保存。模拟器复用正式设备的 `mqtt_token`，每次上传自动获取最新 `policy.revision`，不需要手工复制 Token 或版本号。
+
+沿用现有 `--endpoint`，模拟器从其 `/services` 响应中的 `recognition-srv` 获取识别地址，不需要额外指定服务端口。使用默认服务发现入口启动：
+
+```bash
+python device_sim_main.py
+```
+
+自建部署使用 `--endpoint <服务发现根地址>`；其 `/services` 响应需包含 `recognition-srv`，值为设备可访问的识别服务根地址。采用统一代理时，由代理将 `/v1/recognition/` 转发到识别服务，默认内部端口9006。旧服务发现没有此字段时，其他模拟器功能仍可使用；调用识别命令会提示补齐发现配置。`--recognition-server`（或 `RECOGNITION_SERVER`）仅用于临时调试覆盖地址，正常启动无需使用。
+
+进入模拟器命令行后：
+
+```text
+recognize config
+recognize /tmp/crying.pcm
+recognize pcm 8000 1 /tmp/crying_8k.pcm
+recognize "D:\audio samples\crying.wav"
+recognize status sim_上传时输出的任务号
+recognize audio sim_上传时输出的任务号
+```
+
+- `config`：查看当前有效开关、选中类型、上传限制和额度。
+- 文件路径：`.pcm` 按 PCM S16LE、16kHz、单声道原样上传；WAV 按文件头读取。需要指定参数时使用 `recognize pcm 采样率 声道数 文件路径`。上传返回任务号与受理状态；每次执行生成新任务，会占用额度。
+- `status 任务号`：通过 HTTP 查询异步结果，包括文字、声音标签、报警判断和语音状态；按需重复查询。
+- `audio 任务号`：下载所有 `speech.status=ready` 的语音，保存到 `--down-media-dir/<device_id>/recognition/`，打开 WAV 文件试听。纯文字类型没有语音文件。
+
+文件路径支持空格、Windows 反斜杠和外层双引号。接受1–60秒、8–48kHz、单/双声道的 PCM S16LE 原始音频和 PCM16 WAV，且必须满足设备配置中更小的时长和大小限制。原始 PCM 在服务端只补44字节文件头，不转码；文件大小限制包括这44字节。默认上行 G.711 文件不能直接用于识别，也不能把 MP3 改名为 `.pcm`。设备已有 PCM 采集数据时直接上传；仅从 MP3 制作测试素材时需要解码：
+
+```bash
+ffmpeg -i input.mp3 -t 10 -ac 1 -ar 16000 -c:a pcm_s16le -f s16le crying.pcm
+```
+
+上传超时时，先用输出的任务号查询，不要再次执行文件上传以免重复计量。设备 Token 失效时重新启动模拟器。识别结果通过设备现有 MQTT notify topic 自动显示，包含任务号、状态、文字结果及语音状态；Windows 在语音就绪时自动下载并播放，同时提供手动下载命令；其他平台只提示下载。模拟器按每个任务的 status_revision 忽略重复和旧通知，内存保留最近256个任务的版本。配置变更通知提示查看配置；上传仍读取最新配置。离线期间遗漏的通知可用 `status 任务号` 通过 HTTP 补查；详细字段见[设备音频分析接入](../../device-recognition.md)。
+
+### Windows 一次录音识别与自动播放
+
+在 Windows 安装可选依赖并启动模拟器，使用现有的设备绑定和服务发现配置：
+
+```powershell
+python -m pip install -r requirements-audio.txt
+python device_sim_main.py
+```
+
+在模拟器终端输入：
+
+```text
+recognize record
+```
+
+每次指令只采集一次10秒麦克风音频，以16kHz、单声道、16位小端 PCM 原样上传，不循环采集，不在本地转成 A-law 或 MP3。无需为这条指令开启 `--with-mic`，默认使用 Windows 输入设备；若已有 `--with-mic --mic-device N --speaker-device M` 配置，则复用所选设备。声卡打开复用 AI 对话、设备互呼的兼容逻辑：优先16kHz，再尝试同名 MME 设备，最后按声卡原生采样率采集并通过 soxr 归一到16kHz。此适配只处理电脑声卡与PCM采样率，不将上传数据编码成 A-law 或 MP3；麦克风权限不足、采集溢出时拒绝上传，不补静音。当前类型必须允许至少10秒、320044字节音频，否则录音前提示调整限制。
+
+录音期间暂停实时流并独占媒体资源，已有通话、多人对讲或待接来电时不启动录音；录音结束、取消或失败后释放麦克风并恢复实时流。输入 exit 或 Ctrl+C 可取消未完成录音，未完整录制时不上传。上传后等待 MQTT 异步结果；请求超时后只补查原任务，不自动重新采集或重复上传。
+
+Windows 收到 ready 语音通知后，由后台队列鉴权下载并按 WAV 文件头播放，扬声器复用通话模块的设备打开逻辑，必要时适配声卡原生采样率，不在 MQTT 回调里等待网络或声卡。同一运行周期内保留最近512个已播放子项标识，重复通知不会再次播放；文件保存在 `--down-media-dir/<device_id>/recognition/`。队列最多等待32项，媒体资源忙时等待最多120秒，超时、队列满或下载/播放失败时提示手动下载，不打断已有会话。播放期间暂停实时流，结束后恢复；退出时取消待播放任务并关闭声卡。
+
+仅文字类型不触发播放。Linux/macOS 的 `recognize record` 会提示不支持，PCM/WAV 文件上传和手动下载仍可使用。该指令是 Python 模拟器的终端输入，不是新增物理 UART 驱动；Linux C 示例不受影响。
+
+### 返回方式与测试验收
+
+返回方式由后台识别类型的已发布版本决定，模拟器不通过上传参数覆盖。每种方式均先分析声音，是否调用 TTS 取决于该类型的 output_mode：
+
+| 配置 | 预期结果 | 模拟器操作 |
+|---|---|---|
+| 文字（text） | result 有文字，speech.status=skipped；不调用 TTS | 查看异步结果即可，不需要下载音频 |
+| 语音（audio） | result=null，内部分析文字用于 TTS；成功后 speech.status=ready | Windows 自动下载播放；其他平台用 `recognize audio 任务号` 下载并手动试听 |
+| 文字＋语音（text_audio） | 先返回文字和 pending 语音状态，随后通知 ready；合成失败仍保留文字 | Windows 等待语音就绪后自动下载播放；其他平台手动下载 |
+
+`queued` 上传响应仅表示受理成功。当前协议中，文字完成、等待合成时，父任务仍可能显示 queued，而子项分析状态为 succeeded；应结合 speech.status 判断，不要重复上传。最终状态及错误处理见 [接口参考](../../api-reference.md#recognition-task)。
+
+验收时分别选择三种返回方式提交音频，核对文字/语音结果与后台调用记录：仅文字任务应只有 analysis 调用，没有 tts 调用及该任务的 TTS 用量；设备月累计 TTS 用量可能包含其他任务，不能用累计值是否为0判断。每个已受理的测试任务会占用额度。
+
+| 现象 | 检查与操作 |
+|---|---|
+| 文件不存在 | 示例路径必须替换为实际文件路径；不要把文件扩展名修改当作转码 |
+| 上传受理后无结果通知 | 先 `recognize status 任务号`；任务已完成时检查设备 notify 订阅及识别服务发布 ACL |
+| Broker 显示发布确认，设备仍无消息 | 检查 Broker 授权拒绝日志，并用独立订阅验证实际转发；连接成功不代表有发布权限 |
+| 仅文字类型没有音频 | speech.status=skipped 是正常行为，不是合成失败 |
+| 语音 failed/unknown | 查看 speech.error；unknown 时补查原任务，不重新上传触发重复调用 |
+| 重连后没有历史结果 | 模拟器不自动补查；使用已记录的 request_id 查询原任务 |
+
+模拟器自动展示 MQTT 结果；Windows 自动下载、播放就绪语音。单元测试不包含真实 SDK、硬件扬声器、Broker 或千问网络调用；实际消息收发和播放应单独验收。

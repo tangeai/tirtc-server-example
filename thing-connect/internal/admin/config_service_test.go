@@ -48,3 +48,31 @@ func TestCaptchaProvider(t *testing.T) {
 		}
 	}
 }
+
+func TestRecognitionModelSecretValidation(t *testing.T) {
+	service := &ConfigService{registry: DefaultConfigRegistry()}
+	definition, ok := service.registry.Lookup("recognition-server", "recognition.models")
+	if !ok {
+		t.Fatal("recognition model definition missing")
+	}
+	for _, tc := range []struct {
+		name, secret string
+		valid        bool
+	}{
+		{"api key", `{"api_key":"test-key"}`, true},
+		{"unknown field", `{"password":"test-key"}`, false},
+		{"null key", `{"api_key":null}`, false},
+		{"numeric key", `{"api_key":123}`, false},
+		{"masked key", `{"api_key":"******"}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := service.Validate(definition.Namespace, definition.Key, definition.Default, json.RawMessage(tc.secret), true)
+			if (err == nil) != tc.valid {
+				t.Fatalf("valid=%t, error=%v", tc.valid, err)
+			}
+		})
+	}
+	if err := service.Validate(definition.Namespace, definition.Key, definition.Default, nil, false); err != nil {
+		t.Fatalf("keeping existing secret rejected: %v", err)
+	}
+}

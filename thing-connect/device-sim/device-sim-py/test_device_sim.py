@@ -212,6 +212,11 @@ class DeviceSimulatorTests(unittest.TestCase):
                 return_value=JsonResponse(body)):
             services = device_flow.fetch_services("https://open.example")
         self.assertEqual(services["call_server"], "https://call.example")
+        self.assertEqual(services["recognition_server"], "")
+        body["recognition-srv"] = "https://recognition.example"
+        with mock.patch.object(device_flow.requests, "get", return_value=JsonResponse(body)):
+            discovered = device_flow.fetch_services("https://open.example")
+        self.assertEqual(discovered["recognition_server"], "https://recognition.example")
         self.assertEqual(services["tirtc_endpoint"], "http://rtc.example")
 
         body.pop("call-srv")

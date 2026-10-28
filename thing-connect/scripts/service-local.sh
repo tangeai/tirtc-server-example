@@ -290,11 +290,13 @@ start_all() {
         return 1
     fi
     for service in "${BUSINESS_SERVICES[@]}"; do
+        if [ "$service" = recognition-server ] && [ "${DEFER_RECOGNITION_START:-0}" = 1 ]; then continue; fi
         if config_exists "$service"; then
             preflight_service "$service" || return 1
         fi
     done
     for service in "${BUSINESS_SERVICES[@]}"; do
+        if [ "$service" = recognition-server ] && [ "${DEFER_RECOGNITION_START:-0}" = 1 ]; then continue; fi
         if config_exists "$service"; then
             start_one "$service" 1 || return 1
             port="$(service_port "$service")" || return 1

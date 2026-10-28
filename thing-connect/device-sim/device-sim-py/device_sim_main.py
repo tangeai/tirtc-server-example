@@ -300,6 +300,8 @@ def main():
     media.add_argument("--down-media-dir", default=os.getenv("DOWN_MEDIA_DIR",
                        os.path.join(os.path.dirname(__file__), "received")),
                        help="下行音视频保存目录（默认 ./received）")
+    parser.add_argument("--recognition-server", default=os.getenv("RECOGNITION_SERVER", ""),
+                        help="AI识别服务根地址；默认使用发现的 recognition-srv")
     parser.add_argument("--endpoint",   default=os.getenv("SERVICES_BASE_URL", "http://ep-open.tangeopen.com"),
                         help="服务发现入口地址（GET {endpoint}/services）")
     parser.add_argument("--log-level",  default=os.getenv("LOG_LEVEL", "debug"),
@@ -465,6 +467,7 @@ def main():
             device_id=device_id, device_key=device_key, client_id=args.mac,
             mqtt_token=mqtt_token, tirtc_endpoint=_tirtc_endpoint, device_server=_server,
             voip_server=_voip_server, ai_server=_ai_server, call_server=_call_server,
+            recognition_server=args.recognition_server or svc.get("recognition_server", ""),
             up_audio_file=args.up_audio_file, up_video_file=args.up_video_file,
             down_media_dir=args.down_media_dir,
             up_audio_format=args.up_audio_format,

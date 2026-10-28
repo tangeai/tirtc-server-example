@@ -11,6 +11,7 @@ import os
 import platform
 import re
 import threading
+import time
 
 from camera_video_source import describe_video_source
 from media_source import FileMediaSource
@@ -50,6 +51,7 @@ class RuntimeConfig:
     hardware_audio: bool = False
     log_level: str = "debug"
     device_server: str = ""
+    recognition_server: str = ""
 
 
 def _device_report_metadata() -> dict:
@@ -170,7 +172,9 @@ class DeviceRtcRuntime:
             callback_guard=call.callback_guard(),
         )
 
+        self._recognition_cancel = threading.Event()
         adapters = {
+            SessionKind.RECOGNITION: SessionAdapter(self._recognition_cancel.clear, self._recognition_cancel.set),
             SessionKind.STREAM: SessionAdapter(self._start_stream, self._stop_stream),
             SessionKind.VOIP: SessionAdapter(self._start_voip, self._stop_voip),
             SessionKind.AI: SessionAdapter(self._start_ai, self._stop_ai),
@@ -226,11 +230,61 @@ class DeviceRtcRuntime:
             self._finish_room,
             lambda: self.arbiter.current in (None, SessionKind.ROOM) and self.arbiter.pending is None)
         adapters[SessionKind.ROOM] = SessionAdapter(self.room.start_service, self.room.stop_service)
+        from audio_recognition import AudioRecognition
+        self.recognition = AudioRecognition(config.recognition_server, config.mqtt_token,
+                                            os.path.join(config.down_media_dir, config.device_id), device_id=config.device_id,
+                                            capture=self._capture_recognition)
+        self.recognition_playback = None
+        if platform.system() == "Windows":
+            from recognition_playback import RecognitionPlayback
+            self.recognition_playback = RecognitionPlayback(self.recognition.download, self._play_recognition)
+            self.recognition.audio_ready = self.recognition_playback.submit
         self.message_handler = SessionMessageRouter(
-            self.arbiter, self.voip, self.call, room=self.room)
+            self.arbiter, self.voip, self.call, room=self.room, recognition=self.recognition)
         self.terminal = TerminalController(
             self.arbiter, self.voip, self.ai, self.call,
-            video_capable=bool(config.up_video_file), room=self.room)
+            video_capable=bool(config.up_video_file), room=self.room, recognition=self.recognition)
+
+    def _play_recognition(self, filename, stop_event):
+        from recognition_capture import play_wav
+        from session_arbiter import SessionConflict
+        from audio_device import select_speaker
+        deadline = time.monotonic() + 120
+        warned = False
+        while not stop_event.is_set():
+            try:
+                lease = self.arbiter.begin(SessionKind.RECOGNITION, lambda: None,
+                                           allow_room_preemption=False)
+                break
+            except SessionConflict:
+                if not warned:
+                    print("[recognition] 媒体资源忙，语音等待播放（最多120秒）", flush=True)
+                    warned = True
+                if time.monotonic() >= deadline:
+                    raise ValueError("等待播放超时")
+                stop_event.wait(0.1)
+        else:
+            raise ValueError("播放已取消")
+        try:
+            play_wav(filename, lambda: stop_event.is_set() or self._recognition_cancel.is_set(),
+                     device=select_speaker())
+        finally:
+            self.arbiter.finish(SessionKind.RECOGNITION, lease.generation)
+
+    def _capture_recognition(self, stop_event):
+        from recognition_capture import capture_pcm
+        from session_arbiter import SessionConflict
+        from audio_device import select_mic
+        try:
+            lease = self.arbiter.begin(SessionKind.RECOGNITION, lambda: None,
+                                       allow_room_preemption=False)
+        except SessionConflict:
+            raise ValueError("通话、多人对讲或来电处理中，请结束后再录音识别") from None
+        try:
+            return capture_pcm(lambda: stop_event.is_set() or self._recognition_cancel.is_set(),
+                               device=select_mic())
+        finally:
+            self.arbiter.finish(SessionKind.RECOGNITION, lease.generation)
 
     def start(self) -> None:
         self._print_media_config()
@@ -272,6 +326,8 @@ class DeviceRtcRuntime:
             self._shutdown = True
 
         first_error = None
+        if self.recognition_playback is not None:
+            self.recognition_playback.close()
         try:
             self.room.shutdown()
         except BaseException as exc:

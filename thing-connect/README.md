@@ -736,3 +736,7 @@ thing-connect/
 ## License
 
 MIT © 探鸽智能
+
+### 音频分析服务
+
+`recognition-server` 提供独立的设备音频分析：后台发布提示词和模型配置，用户为设备多选类型并排序，设备上传单个音频后异步取得文字、完整语音或两者。设备默认关闭识别。接入和额度说明见 [设备音频分析](device-recognition.md)，部署配置见 [服务说明](recognition-server/README.md)。

@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"thing-connect/internal/recognition"
 	"thing-connect/internal/room"
 	"thing-connect/internal/webnav"
 	"time"
@@ -16,7 +17,7 @@ import (
 
 var validNamespaces = map[string]bool{
 	"device-server": true, "user-server": true, "voip-server": true,
-	"ai-server": true, "call-server": true, "common": true, "system": true,
+	"recognition-server": true, "ai-server": true, "call-server": true, "common": true, "system": true,
 }
 
 type ConfigDefinition struct {
@@ -80,6 +81,8 @@ func DefaultConfigRegistry() *ConfigRegistry {
 		testDef(restartDef(blockingDef(def("user-server", "mqtt.connection", "mqtt", "MQTT 连接", `{"broker":"","auth_mode":"username","username":"","client_id":""}`, []string{"password"}, []string{"user-server"}, validateMQTTConnection), "用户服务需要 MQTT 才能完成设备绑定消息交互")), "mqtt"),
 		def("voip-server", "wechat.apps", "wechat", "微信小程序", `{"default_app_id":"","apps":{}}`, []string{"apps.*.secret", "apps.*.token", "apps.*.encoding_aes_key"}, []string{"voip-server"}, validateWechatApps),
 		testDef(restartDef(blockingDef(def("voip-server", "mqtt.connection", "mqtt", "MQTT 连接", `{"broker":"","auth_mode":"username","username":"","client_id":""}`, []string{"password"}, []string{"voip-server"}, validateMQTTConnection), "VoIP 服务启动前必须配置可用的 MQTT 连接")), "mqtt"),
+		def("recognition-server", "recognition.models", "recognition", "千问识别与语音合成", recognitionDefaultJSON(), []string{"api_key"}, []string{"recognition-server"}, func(raw json.RawMessage) error { _, err := recognition.DecodeConfig(raw); return err }),
+		testDef(restartDef(blockingDef(def("recognition-server", "mqtt.connection", "mqtt", "MQTT 连接", `{"broker":"","auth_mode":"username","username":"","client_id":""}`, []string{"password"}, []string{"recognition-server"}, validateMQTTConnection), "识别结果通知需要 MQTT 连接")), "mqtt"),
 		def("ai-server", "ai.role_policy", "ai", "AI 角色策略", `{"default_role_id":"fin63bby1og0","base_url":"https://api-tirtc.tange365.com","base_role_url":"https://openapi-cn01.tange365.com"}`, nil, []string{"ai-server"}, validateAIRolePolicy),
 		def("ai-server", "ai.resource_policy", "ai", "AI 资源策略", `{"resource_quota":{"mcp":4,"device_plugin":20,"kb":5},"default_resources":{"mcp":[],"device_plugin":[],"kb":[]}}`, nil, []string{"ai-server"}, validateAIResourcePolicy),
 		def("call-server", "call.contact_policy", "call", "联系人策略", `{"max_contacts_per_device":200}`, nil, []string{"call-server"}, validatePositiveFields("max_contacts_per_device")),
@@ -533,4 +536,9 @@ func validateSessionPolicy(raw json.RawMessage) error {
 		return err
 	}
 	return validatePositiveFields("max_sessions", "login_max_attempts", "mfa_max_attempts")(raw)
+}
+
+func recognitionDefaultJSON() string {
+	raw, _ := json.Marshal(recognition.DefaultConfig())
+	return string(raw)
 }

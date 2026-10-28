@@ -60,6 +60,19 @@ func (s *Store) SeedDefaults(ctx context.Context) error {
 		}
 		menuIDs[menu.Code] = menuID
 	}
+	// Preserve access to types for roles assigned the old combined page. This
+	// runs only while that built-in entry still has its previous parent.
+	if _, err := tx.ExecContext(ctx, `INSERT IGNORE INTO admin_role_menus(role_id,menu_id) SELECT rm.role_id,? FROM admin_role_menus rm JOIN admin_menus m ON m.id=rm.menu_id WHERE m.menu_code='recognition' AND m.path='/recognition' AND m.parent_id=?`, menuIDs["recognition-config"], menuIDs["service-config"]); err != nil {
+		return err
+	}
+	// Relocate the existing built-in recognition entries without replacing their
+	// IDs, grants, visibility or status. Custom paths remain administrator-owned.
+	if _, err := tx.ExecContext(ctx, `UPDATE admin_menus SET parent_id=?,sort_no=40 WHERE menu_code='recognition' AND path='/recognition' AND parent_id=?`, menuIDs["business"], menuIDs["service-config"]); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE admin_menus SET name='AI识别' WHERE menu_code='recognition-config' AND path='/configs/recognition-server' AND name='识别服务配置'`); err != nil {
+		return err
+	}
 	for _, role := range defaultRoles {
 		roleID := roleIDs[role.Code]
 		if role.Code == "super_admin" {

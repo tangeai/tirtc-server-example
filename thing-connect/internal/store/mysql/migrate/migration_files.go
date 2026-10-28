@@ -202,6 +202,9 @@ func parseColumnClause(clause string) (string, ColumnShape, bool, bool, error) {
 	}
 	name := strings.Trim(fields[0], "`")
 	shape := ColumnShape{ColumnType: strings.ToLower(fields[1]), Nullable: true, Default: nullColumnDefault}
+	if shape.ColumnType == "boolean" || shape.ColumnType == "bool" {
+		shape.ColumnType = "tinyint(1)"
+	}
 	primary := false
 	unique := false
 	for index := 2; index < len(fields); index++ {
@@ -216,6 +219,12 @@ func parseColumnClause(clause string) (string, ColumnShape, bool, bool, error) {
 				return "", ColumnShape{}, false, false, fmt.Errorf("column %s has invalid DEFAULT", name)
 			}
 			shape.Default = normalizeDefault(fields[index+1])
+			if strings.EqualFold(fields[index+1], "FALSE") {
+				shape.Default = "0"
+			}
+			if strings.EqualFold(fields[index+1], "TRUE") {
+				shape.Default = "1"
+			}
 			index++
 		case "AUTO_INCREMENT":
 			shape.AutoIncrement = true
@@ -260,7 +269,11 @@ func namedIndexShape(clause string) (string, IndexShape, error) {
 		return "", IndexShape{}, fmt.Errorf("invalid index clause")
 	}
 	index, err := parseIndexClause(clause)
-	return strings.Trim(fields[nameIndex], "`"), index, err
+	name := fields[nameIndex]
+	if open := strings.IndexByte(name, '('); open >= 0 {
+		name = name[:open]
+	}
+	return strings.Trim(name, "`"), index, err
 }
 
 func parseIndexClause(clause string) (IndexShape, error) {
@@ -344,6 +357,12 @@ func normalizeDefault(value string) string {
 	}
 	if strings.EqualFold(trimmed, "CURRENT_TIMESTAMP") || strings.EqualFold(trimmed, "CURRENT_TIMESTAMP()") {
 		return "current_timestamp"
+	}
+	for precision := 0; precision <= 6; precision++ {
+		stamp := fmt.Sprintf("current_timestamp(%d)", precision)
+		if strings.EqualFold(trimmed, stamp) {
+			return stamp
+		}
 	}
 	return trimmed
 }

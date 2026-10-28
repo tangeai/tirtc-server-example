@@ -174,6 +174,7 @@ def fetch_services(base_url: str = "") -> dict:
         "voip_server":     raw["voip-srv"],
         "ai_server":       raw["ai-srv"],
         "call_server":     raw["call-srv"],
+        "recognition_server": raw.get("recognition-srv", ""),
         "mqtt_host":       mqtt_host,
         "mqtt_port":       mqtt_port,
         "mqtt_tls":        mqtt_tls,
@@ -483,7 +484,11 @@ def connect_mqtt_blocking(broker_host: str, broker_port: int,
             f"type={msg_type} channel={channel} bytes={len(msg.payload)}"
         )
         payload  = data.get("payload") or {}
-        if msg_type in ("room_assignment_changed", "room_closed"):
+        if channel == "recognition" and msg_type in ("recognition_result", "recognition_config_changed"):
+            callback = getattr(handler, "on_recognition_notification", None)
+            if callback:
+                callback(data)
+        elif msg_type in ("room_assignment_changed", "room_closed"):
             callback = getattr(handler, "on_room_assignment_changed", None)
             if callback:
                 callback(data)

@@ -22,7 +22,7 @@ const (
 	heartbeatTTL  = 45 * time.Second
 )
 
-var ExpectedServices = []string{"device-server", "user-server", "voip-server", "ai-server", "call-server"}
+var ExpectedServices = []string{"device-server", "user-server", "voip-server", "ai-server", "call-server", "recognition-server"}
 
 // BuildVersion and BuildCommit are set by build.sh through Go linker flags.
 // Environment variables retain precedence for packaged deployments.

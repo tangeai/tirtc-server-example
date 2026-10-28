@@ -40,6 +40,11 @@ import { ADMIN_PASSWORD_POLICY_MESSAGE, validateAdminPassword } from './password
 import { StepUpFields } from './shared/admin-ui';
 import { loadSetupStatus, SetupPage, type SetupSnapshot } from './setup';
 
+const RecognitionPage = lazy(() =>
+  import('./pages/configuration/recognition').then((module) => ({
+    default: module.RecognitionPage,
+  })),
+);
 const OverviewPage = lazy(() =>
   import('./pages/overview').then((module) => ({ default: module.OverviewPage })),
 );
@@ -360,6 +365,10 @@ function Shell({ onLogout }: { onLogout: () => void }) {
     );
   else if (path === '/overview') page = <OverviewPage />;
   else if (path === '/users') page = <UsersPage />;
+  else if (path === '/recognition')
+    page = <RecognitionPage key="recognition-business" mode="business" />;
+  else if (path === '/configs/recognition-server')
+    page = <RecognitionPage key="recognition-configuration" mode="configuration" />;
   else if (path === '/devices') page = <DevicesPage />;
   else if (path === '/boards') page = <BoardsPage />;
   else if (path === '/configs/user-server') page = <UserServicePage />;

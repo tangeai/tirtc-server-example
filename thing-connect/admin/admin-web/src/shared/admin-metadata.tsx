@@ -14,6 +14,7 @@ export const serviceNames: Record<string, string> = {
   'voip-server': 'VoIP 服务',
   'ai-server': 'AI 服务',
   'call-server': '呼叫服务',
+  'recognition-server': 'AI识别服务',
   'admin-server': '管理服务',
 };
 export const dependencyNames: Record<string, string> = {
@@ -31,6 +32,7 @@ export const configGroupNames: Record<string, string> = {
   user: '用户策略',
   wechat: '微信应用',
   ai: 'AI 策略',
+  recognition: '音频识别',
   call: '呼叫策略',
   tirtc: 'TiRTC 服务',
   security: '后台安全',

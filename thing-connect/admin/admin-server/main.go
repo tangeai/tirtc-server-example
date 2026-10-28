@@ -264,6 +264,7 @@ func main() {
 	}
 	configTester := adminapp.NewConfigTester(configService, adminMQTTConnectionProbe{})
 	adminHTTP := adminapp.NewHTTPServer(store, authService, access, configService, configTester, servicestatus.NewAggregator(redisClient), redisClient, jobService, deviceService, cfg.Admin.CookieSecure)
+	adminHTTP.SetRecognitionService(adminapp.NewRecognitionService(adminmysql.NewRecognitionStore(sqlDB)))
 	adminHTTP.SetBoardService(boardService)
 	adminHTTP.SetBoardImageService(boardImageService)
 	adminHTTP.SetServiceCommandRoot(root)
@@ -383,7 +384,7 @@ func checkBusinessServiceConfig(ctx context.Context, root, serviceName string, s
 		return fmt.Errorf("%s Redis 连接检查失败: %w", serviceName, err)
 	}
 	_ = redisClient.Close()
-	if serviceName == "user-server" || serviceName == "voip-server" || serviceName == "call-server" {
+	if serviceName == "recognition-server" || serviceName == "user-server" || serviceName == "voip-server" || serviceName == "call-server" {
 		mqttConfig, _, err := dynamicconfig.ResolveMQTT(ctx, directConfigLoader{service: configService}, serviceName, serviceConfig.MQTT)
 		if err != nil {
 			return fmt.Errorf("%s MQTT 配置检查失败: %w", serviceName, err)

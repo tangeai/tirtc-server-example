@@ -40,21 +40,22 @@ func (f Fingerprint) IsEmpty() bool { return f.MAC == "" }
 
 // DeviceBind is one row of device_bind (current state, PK=device_id).
 type DeviceBind struct {
-	ID         int64      `db:"id"`
-	DeviceID   string     `db:"device_id"`
-	MAC        string     `db:"mac"`
-	ChipUID    string     `db:"chip_uid"`
-	DeviceRand string     `db:"device_rand"`
-	Assign     string     `db:"assign"`       // 'dynamic' = pool分配, 'preburn' = 出厂预烧
-	DeviceName string     `db:"device_name"`  // current owner's display name; cleared on unbind
-	UserID     int64      `db:"user_id"`      // 0 = unowned
-	LastUserID int64      `db:"last_user_id"` // last owner, kept after unbind
-	ActiveTime *time.Time `db:"active_time"`
-	BindTime   *time.Time `db:"bind_time"`
-	UnbindTime *time.Time `db:"unbind_time"`
-	CreatedAt  time.Time  `db:"created_at"`
-	UpdatedAt  time.Time  `db:"updated_at"`
-	MacUserKey *string    `db:"mac_user_key"` // generated (read-only): nil for MAC-less/unbound rows, else "mac:user_id" — UNIQUE guard for per-user MAC uniqueness
+	BindingRevision int64      `db:"binding_revision"`
+	ID              int64      `db:"id"`
+	DeviceID        string     `db:"device_id"`
+	MAC             string     `db:"mac"`
+	ChipUID         string     `db:"chip_uid"`
+	DeviceRand      string     `db:"device_rand"`
+	Assign          string     `db:"assign"`       // 'dynamic' = pool分配, 'preburn' = 出厂预烧
+	DeviceName      string     `db:"device_name"`  // current owner's display name; cleared on unbind
+	UserID          int64      `db:"user_id"`      // 0 = unowned
+	LastUserID      int64      `db:"last_user_id"` // last owner, kept after unbind
+	ActiveTime      *time.Time `db:"active_time"`
+	BindTime        *time.Time `db:"bind_time"`
+	UnbindTime      *time.Time `db:"unbind_time"`
+	CreatedAt       time.Time  `db:"created_at"`
+	UpdatedAt       time.Time  `db:"updated_at"`
+	MacUserKey      *string    `db:"mac_user_key"` // generated (read-only): nil for MAC-less/unbound rows, else "mac:user_id" — UNIQUE guard for per-user MAC uniqueness
 }
 
 // FP extracts the Fingerprint from a DeviceBind row.

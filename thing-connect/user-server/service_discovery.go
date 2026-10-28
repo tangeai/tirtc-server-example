@@ -59,6 +59,13 @@ func discoveryPayload(cfg config.DiscoveryCfg) (gin.H, error) {
 		}
 		payload["user-srv"] = strings.TrimRight(value, "/")
 	}
+	if value := strings.TrimSpace(cfg.RecognitionServerURL); value != "" {
+		parsed, err := url.Parse(value)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil {
+			return nil, fmt.Errorf("discovery.recognition_server_url must be an absolute HTTP URL")
+		}
+		payload["recognition-srv"] = strings.TrimRight(value, "/")
+	}
 	return payload, nil
 }
 

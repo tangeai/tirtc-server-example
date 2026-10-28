@@ -20,7 +20,8 @@ TERMINAL_COMMAND_QUEUE_SIZE = 32
 class SessionMessageRouter:
     """保持各协议状态机独立，只转发其所属的 MQTT 消息。"""
 
-    def __init__(self, arbiter, voip, call, room=None):
+    def __init__(self, arbiter, voip, call, room=None, recognition=None):
+        self.recognition = recognition
         self.room = room
         self.arbiter = arbiter
         self.voip = voip
@@ -134,6 +135,10 @@ class SessionMessageRouter:
             previous.cancel()
         timer.start()
 
+    def on_recognition_notification(self, message):
+        if self.recognition is not None:
+            self.recognition.on_notification(message)
+
     def on_room_assignment_changed(self, payload=None):
         if self.room is not None:
             self.room.sync()
@@ -225,7 +230,8 @@ class TerminalController:
         "ct": "contact",
     }
 
-    def __init__(self, arbiter, voip, ai, call, video_capable: bool = True, room=None):
+    def __init__(self, arbiter, voip, ai, call, video_capable: bool = True, room=None, recognition=None):
+        self.recognition = recognition
         self.room = room
         self.arbiter = arbiter
         self.voip = voip
@@ -418,6 +424,13 @@ class TerminalController:
             print(f"[terminal] {exc}", flush=True)
 
     def _execute(self, line: str, stop_event) -> None:
+        if line.strip().split(maxsplit=1)[:1] == ["recognize"] and self.recognition is not None:
+            argument = line.strip()[len("recognize"):].strip()
+            if argument.split(maxsplit=1)[:1] == ["record"]:
+                self.recognition.command(argument, stop_event=stop_event)
+            else:
+                self.recognition.command(argument)
+            return
         parts = line.split()
         if self.room is not None and self.room.command(parts):
             return
@@ -656,6 +669,7 @@ class TerminalController:
         banner = "\n".join((
             f"{y}[terminal] ╔══════════════════════════════════════════════════╗{r}",
             f"{y}[terminal]   wxcall [N] [video|audio] 微信联系人呼叫       {r}",
+            f"{y}[terminal]   recognize record（Windows录音10秒） / 文件.pcm或.wav / pcm 16000 1 文件路径 / config / status 任务号 / audio 任务号{r}",
             f"{y}[terminal]   aicall           发起 AI 对话                {r}",
             f"{y}[terminal]   call [N|device_id|openid] [video|audio]    {r}",
             f"{y}[terminal]   accept / reject [reason] / cancel / hangup{r}",

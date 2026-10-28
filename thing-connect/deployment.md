@@ -586,3 +586,13 @@ Admin 功能、RBAC、配置中心和任务说明见 [Admin Server README](admin
 未发布此配置时使用 user-server YAML 的 `navigation.links`，省略时为空列表；发布空列表可显式隐藏 YAML 中的链接。该配置无密钥、作用域为全局、支持运行时应用，revision 通过服务状态及公开导航接口观察。
 
 设备页右上角头像显示账号菜单，可查看当前登录邮箱、进入邮箱验证码修改密码流程或退出登录。登录失效后进入登录页并显示“登录状态已失效，请重新登录”。
+
+## 独立 AI识别服务
+
+`recognition-server` 是可选业务服务，默认端口9006，与 ai-server、voip-server、call-server 并列。安装服务清单及构建脚本包含该服务；启用时需要相同 MySQL/Redis、共享 jwt_secret/internal.key 和独立 MQTT 连接身份。Admin 不与业务服务共用管理员 JWT。
+
+数据库迁移需包含 recognition 类型/任务/语音/用量/outbox 表及 device_bind.binding_revision 字段。按本文件既有备份、迁移和 readiness 流程执行；运行账号不需要 DDL 权限。配置模板在 recognition-server/config.yaml.example。
+
+Nginx 模板将 /v1/recognition/ 转发到9006并拒绝内部路径。/services 可通过 user-server 的 discovery.recognition_server_url 返回 recognition-srv；旧配置省略此字段时不影响原服务发现。统一代理部署下用户设备页面请求站点同源 /v1/recognition/。
+
+Admin 中配置识别服务 MQTT、千问默认 Key 及接口地域；只用音频识别无需配置 TiRTC 凭证。/health/ready 检查 MySQL、Redis 和 MQTT，缺少千问 Key 会拒绝新任务而不阻止配置管理。服务状态名称 recognition-server，动态模型配置 revision 随心跳上报。

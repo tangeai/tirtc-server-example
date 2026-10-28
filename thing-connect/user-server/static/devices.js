@@ -119,7 +119,7 @@ function renderCards() {
           <span data-online-status class="inline-flex items-center gap-1.5 shrink-0 text-xs ${d.online ? "text-emerald-600" : "text-gray-400"}"><span class="w-1.5 h-1.5 shrink-0 rounded-full ${d.online ? "bg-emerald-500" : "bg-gray-400"}" aria-hidden="true"></span>${d.online ? "在线" : "离线"}</span>
         </div>
       </div>
-      <div class="device-summary"><button type="button" data-device-id="${id}" onclick="goConfig(this.dataset.deviceId)"><b>AI 角色 <span aria-hidden="true">›</span></b><p data-role>正在查询…</p></button><button type="button" data-device-id="${id}" onclick="goRoom(this.dataset.deviceId)"><b>多人对讲 <span aria-hidden="true">›</span></b><p data-room>正在查询…</p></button></div>
+      <div class="device-summary recognition-summary"><button type="button" data-device-id="${id}" onclick="goConfig(this.dataset.deviceId)"><b>AI 角色 <span aria-hidden="true">›</span></b><p data-role>正在查询…</p></button><button type="button" data-device-id="${id}" onclick="openRecognition(this.dataset.deviceId)"><b>AI识别 <span aria-hidden="true">›</span></b><p data-recognition>正在查询…</p></button><button type="button" data-device-id="${id}" onclick="goRoom(this.dataset.deviceId)"><b>多人对讲 <span aria-hidden="true">›</span></b><p data-room>正在查询…</p></button></div>
       <div class="feature-buttons grid grid-cols-4 gap-1 px-3 py-2 border-t border-gray-100">
         <button type="button" class="flex flex-col items-center justify-center gap-1.5 min-h-[52px] rounded-lg text-xs text-gray-600 hover:bg-emerald-50 hover:text-emerald-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 transition-colors" data-device-id="${id}" onclick="goLive(this.dataset.deviceId)"><svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M9 21h6M12 17v4"/></svg><span>实时</span></button>
         <button type="button" class="flex flex-col items-center justify-center gap-1.5 min-h-[52px] rounded-lg text-xs text-gray-600 hover:bg-emerald-50 hover:text-emerald-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 transition-colors" data-device-id="${id}" onclick="goContacts(this.dataset.deviceId)"><svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2M16 5a3 3 0 0 1 0 6M21 20v-2a6 6 0 0 0-3-5"/></svg><span>联系人</span></button>
@@ -164,6 +164,19 @@ async function refreshSummaries() {
     while (cursor < list.length) {
       const d = list[cursor++];
       await Promise.allSettled([
+        (async () => {
+          let text = "状态获取失败，请刷新";
+          try {
+            const response = await api("/v1/recognition/devices/" + encodeURIComponent(d.device_id) + "/config");
+            if (response.code !== 200) throw Error();
+            const state = response.data;
+            text = state.policy.enabled ? `已开启 · ${state.schemes.length}项` : "已关闭";
+          } catch {}
+          if (generation === summaryGeneration) {
+            const label = cardFor(d.device_id)?.querySelector("[data-recognition]");
+            if (label) label.textContent = text;
+          }
+        })(),
         (async () => {
           try {
             const response = await api(

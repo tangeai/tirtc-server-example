@@ -75,7 +75,7 @@ jobs:
         working-directory: thing-connect
         run: |
           npm ci
-          node --test ai-server/tests/*.test.js call-server/tests/*.test.js user-server/tests/*.test.js
+          node --test ai-server/tests/*.test.js call-server/tests/*.test.js user-server/tests/*.test.js tests/recognition-ui.test.cjs
           npm run build:css
           npm --prefix admin/admin-web ci
           npm --prefix admin/admin-web run check
