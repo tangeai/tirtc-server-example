@@ -64,7 +64,11 @@ func (s *Service) SetSelection(c context.Context, a Actor, id string, on bool, b
 		}
 		seen[x.ID] = true
 	}
-	return s.store.SetSelection(c, a, id, on, b, rev)
+	v, e := s.store.SetSelection(c, a, id, on, b, rev)
+	if s.configCopy().APIKey == "" {
+		v.EffectiveEnabled = false
+	}
+	return v, e
 }
 func (s *Service) Submit(c context.Context, a Actor, id string, r Request) (Task, bool, error) {
 	if a.DeviceID != id || id == "" {
@@ -78,9 +82,7 @@ func (s *Service) Submit(c context.Context, a Actor, id string, r Request) (Task
 		return Task{}, false, err
 	}
 	r.Data = data
-	if s.configCopy().APIKey == "" {
-		return Task{}, false, ErrUnavailable
-	}
+	r.RejectNew = s.configCopy().APIKey == ""
 	sum := sha256.Sum256(r.Data)
 	return s.store.Submit(c, a, id, r, hex.EncodeToString(sum[:]))
 }

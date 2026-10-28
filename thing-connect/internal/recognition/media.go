@@ -9,8 +9,11 @@ func ValidAudio(b []byte, limits Limits) bool {
 	var rate, byteRate uint32
 	var channels, bits, align uint16
 	dataSize := 0
-	hasFmt := false
-	for offset := 12; offset+8 <= len(b); {
+	hasFmt, hasData := false, false
+	for offset := 12; offset < len(b); {
+		if len(b)-offset < 8 {
+			return false
+		}
 		n := int(binary.LittleEndian.Uint32(b[offset+4 : offset+8]))
 		start := offset + 8
 		if n > len(b)-start {
@@ -28,12 +31,16 @@ func ValidAudio(b []byte, limits Limits) bool {
 			align = binary.LittleEndian.Uint16(b[start+12 : start+14])
 			bits = binary.LittleEndian.Uint16(b[start+14 : start+16])
 		case "data":
-			if dataSize != 0 {
+			if !hasFmt || hasData {
 				return false
 			}
+			hasData = true
 			dataSize = n
 		}
 		offset = start + n + (n % 2)
+		if offset > len(b) {
+			return false
+		}
 	}
 	return hasFmt && channels >= 1 && channels <= 2 && bits == 16 && rate >= 8000 && rate <= 48000 && align == channels*2 && byteRate == rate*uint32(align) && dataSize > 0 && dataSize%int(align) == 0 && float64(dataSize)/float64(byteRate) <= float64(limits.MaxAudioSeconds) && float64(dataSize)/float64(byteRate) >= 1
 }

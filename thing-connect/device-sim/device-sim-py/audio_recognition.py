@@ -6,11 +6,13 @@ from pathlib import Path
 import re
 import sys
 import tempfile
+import time
 from urllib.parse import urlsplit
 import uuid
 import wave
 
 import requests
+from urllib3.exceptions import HTTPError as TransportReadError
 
 _ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
@@ -71,7 +73,7 @@ class AudioRecognition:
         try:
             return requests.request(method, self.server + "/v1/recognition" + path,
                                     headers={"Authorization": "Bearer " + self.token},
-                                    timeout=(5, 30), allow_redirects=False, **kwargs)
+                                    timeout=kwargs.pop("timeout", (5, 30)), allow_redirects=False, **kwargs)
         except requests.RequestException:
             raise ValueError("识别请求连接失败或超时；上传结果不确定时先查询原任务号，不要重复上传") from None
 
@@ -83,7 +85,7 @@ class AudioRecognition:
                 raise ValueError("识别服务未返回 JSON，请检查服务地址和代理路由") from None
             if not isinstance(body, dict) or response.status_code not in (200, 202) or body.get("code") != 200:
                 code = body.get("code") if isinstance(body, dict) else response.status_code
-                messages = {401: "设备凭证失效，请重新启动模拟器", 40300: "设备未绑定或无权访问", 40901: "识别未开启或配置已变更，请检查设备设置", 429: "本月识别额度已用完", 50300: "模型 Key 尚未配置", 40000: "音频或请求参数不符合要求"}
+                messages = {401: "设备凭证失效，请重新启动模拟器", 6006: "设备已解绑或重置，请重新绑定后使用", 40300: "无权访问该设备", 40901: "识别未开启或配置已变更，请检查设备设置", 429: "本月识别额度已用完", 50300: "模型 Key 尚未配置", 40000: "音频或请求参数不符合要求"}
                 raise ValueError(messages.get(code, "识别请求失败") + f"（code={code}）")
             return body["data"]
 
@@ -93,10 +95,31 @@ class AudioRecognition:
             raise ValueError("任务号或子项标识无效")
         return value
 
+    @staticmethod
+    def _require_available(state):
+        if state.get("effective_enabled"):
+            return
+        policy = state.get("policy", {})
+        if policy.get("enabled") is False:
+            raise ValueError("设备 AI识别开关未开启，请在设备设置中开启并保存")
+        if policy.get("allowed") is False:
+            raise ValueError("管理员已禁止此设备使用 AI识别，请联系管理员")
+        if policy.get("enabled") is not True:
+            raise ValueError("设备识别状态不可用，请执行 recognize config 检查服务返回")
+        if not policy.get("schemes"):
+            raise ValueError("设备尚未选择识别类型，请在设备设置中选择并保存")
+        schemes = state.get("schemes", [])
+        if len(schemes) != len(policy["schemes"]) or any(not item.get("enabled") for item in schemes):
+            raise ValueError("所选识别类型不可用，请检查类型是否已发布、停用或需要重新选择")
+        limit = policy.get("monthly_limit")
+        used = state.get("usage", {}).get("used")
+        if isinstance(limit, int) and isinstance(used, int) and used + len(schemes) > limit:
+            raise ValueError("设备本月剩余额度不足以执行所选识别类型，请联系管理员调整额度")
+        raise ValueError("设备已开启，但识别服务尚不可用；请管理员检查 AI识别的千问 Key 是否已配置、发布并由服务加载")
+
     def upload(self, filename, sample_rate=16000, channels=1, audio_format=None):
         state = self._json("GET", "/config")
-        if not state.get("effective_enabled"):
-            raise ValueError("设备 AI识别不可用，请先在用户设备列表开启并选择已发布类型，检查额度与后台配置")
+        self._require_available(state)
         limits = state["upload_limits"]
         maximum = min(int(limits["max_file_bytes"]), 5 << 20)
         try:
@@ -118,8 +141,7 @@ class AudioRecognition:
         if self.capture is None or stop_event is None:
             raise ValueError("麦克风录音入口未就绪")
         state = self._json("GET", "/config")
-        if not state.get("effective_enabled"):
-            raise ValueError("请先在设备设置中开启 AI识别并选择已发布类型")
+        self._require_available(state)
         limits = state["upload_limits"]
         if limits["max_audio_seconds"] < 10 or limits["max_file_bytes"] < 320044:
             raise ValueError("当前类型的上传限制不足10秒PCM录音，请调整类型限制后重试")
@@ -169,8 +191,43 @@ class AudioRecognition:
     def status(self, request_id):
         return self._json("GET", "/requests/" + self._id(request_id))
 
-    def download(self, request_id, item_id=None):
-        task = self.status(request_id)
+    @staticmethod
+    def _check_download(stop_event, deadline):
+        if stop_event is not None and stop_event.is_set():
+            raise ValueError("语音下载已取消")
+        if time.monotonic() >= deadline:
+            raise ValueError("语音下载超时，请重试")
+
+    def _download_body(self, path, limit, stop_event, deadline):
+        self._check_download(stop_event, deadline)
+        with self._request("GET", path, stream=True, timeout=(5, 1)) as response:
+            if response.status_code != 200:
+                raise ValueError("语音下载失败，请重新查询任务")
+            data = bytearray()
+            # read1 returns after one underlying read, so trickle traffic cannot
+            # indefinitely postpone cancellation/deadline checks. Older urllib3
+            # falls back to one byte for the same guarantee.
+            read1 = getattr(response.raw, "read1", None)
+            while True:
+                self._check_download(stop_event, deadline)
+                try:
+                    chunk = read1(65536, decode_content=True) if read1 else response.raw.read(1, decode_content=True)
+                except (TransportReadError, OSError):
+                    raise ValueError("语音下载中断或超时，请重试") from None
+                self._check_download(stop_event, deadline)
+                if not chunk:
+                    return data
+                data.extend(chunk)
+                if len(data) > limit:
+                    raise ValueError("返回内容超过大小上限")
+
+    def download(self, request_id, item_id=None, stop_event=None):
+        deadline = time.monotonic() + 60
+        raw = self._download_body("/requests/" + self._id(request_id), 1 << 20, stop_event, deadline)
+        body = json.loads(raw)
+        if not isinstance(body, dict) or body.get("code") != 200 or not isinstance(body.get("data"), dict):
+            raise ValueError("识别查询失败，请重新查询任务")
+        task = body["data"]
         saved = []
         for item in task["results"]:
             if item_id is not None and item.get("item_id") != item_id:
@@ -180,16 +237,10 @@ class AudioRecognition:
             current_item_id = self._id(item["item_id"])
             # Construct the authenticated local route; never follow an upstream URL.
             path = f"/requests/{self._id(request_id)}/audio/{current_item_id}"
-            with self._request("GET", path, stream=True) as response:
-                if response.status_code != 200:
-                    raise ValueError("语音下载失败，请重新查询任务")
-                data = bytearray()
-                for chunk in response.iter_content(65536):
-                    data.extend(chunk)
-                    if len(data) > 10 << 20:
-                        raise ValueError("返回语音超过大小上限")
+            data = self._download_body(path, 10 << 20, stop_event, deadline)
             if len(data) < 44 or data[:4] != b"RIFF" or data[8:12] != b"WAVE":
                 raise ValueError("返回的语音不是 WAV 文件")
+            self._check_download(stop_event, deadline)
             self.output_dir.mkdir(parents=True, exist_ok=True)
             destination = self.output_dir / f"{request_id}_{current_item_id}.wav"
             with tempfile.NamedTemporaryFile(dir=self.output_dir, delete=False) as output:

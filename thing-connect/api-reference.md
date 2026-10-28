@@ -11,6 +11,7 @@
 | 注册登录、绑定设备、用户配置 | [user-server](#user-server) | [开发者文档](README.md) |
 | 查询官网开发板及固件资源 | [user-server](#user-server) | 官网 `/boards` 页面 |
 | 微信 VoIP 呼叫与授权 | [voip-server](#voip-server) | [微信 VoIP](device-voip.md) |
+| 音频分析与识别结果 | [recognition-server](#recognition-server音频分析) | [音频识别接入](device-recognition.md) |
 | AI 对话、角色与知识库 | [ai-server](#ai-server) | [AI 接入](device-ai.md) |
 | 设备互呼、联系人管理 | [call-server](#call-server) | [设备互呼](device-call.md) |
 | 创建对讲房间、加入和续租 | [多人对讲](#多人对讲call-server) | [多人对讲接入](device-room.md) |
@@ -94,6 +95,7 @@ HTTPS 接入使用 HTTPS 入口，返回 HTTPS 业务服务地址和 MQTT TLS �
 | `voip-srv` | ✅ | voip-server 根地址 |
 | `ai-srv` | ✅ | ai-server 根地址 |
 | `call-srv` | ✅ | call-server 根地址 |
+| `recognition-srv` | — | AI识别服务根地址；未提供时设备不启用识别入口 |
 | `mqtt-srv` | ✅ | MQTT 地址，格式 `mqtt://host:port` 或 `mqtts://host:port` |
 | `tirtc-srv` | ✅ | TiRTC SDK 服务入口；用于 `TIRTC_OPT_SERVICE_ENDPOINT` |
 
@@ -142,6 +144,7 @@ HTTPS 接入使用 HTTPS 入口，返回 HTTPS 业务服务地址和 MQTT TLS �
 | device-server | 200 | `"ok"` | 实际状态码 | 错误通过 HTTP 状态码 + body `code` 字段区分 |
 | user-server | 200 | `"ok"` | 实际状态码 | 同上 |
 | ai-server | 200 | `"ok"` | 通常为实际状态码 | `/v1/ai/token` 的上游错误例外使用 HTTP 200，见该接口错误表 |
+| recognition-server | 200 | `"ok"` | 实际状态码 | 新任务受理为 HTTP 202；查询和幂等重试为 HTTP 200 |
 | voip-server | 0 | `"ok"` | 200（鉴权 401 除外） | 错误通过 body `code` 字段区分 |
 | call-server | 200 | `"ok"` | 200（鉴权 401 除外） | 成功码为 200；业务错误仍返回 HTTP 200，以 body `code` 判断 |
 
@@ -7081,7 +7084,7 @@ curl "$RECOGNITION_SERVER/v1/recognition/requests" \
   "data": {
     "request_id": "audio_000001",
     "device_id": "DEVICE001",
-    "status": "queued",
+    "status": "processing",
     "status_revision": 3,
     "results": [
       {
@@ -7199,7 +7202,7 @@ curl "$RECOGNITION_SERVER/v1/recognition/requests" \
 | 分析 results[].status | queued、processing、succeeded、failed、unknown、cancelled |
 | 语音 speech.status | pending、synthesizing、ready、failed、unknown、skipped |
 
-**状态处理**：文字完成、等待语音或下一个类型时，任务 status 可能回到 queued；示例并不代表文字任务重新排队。设备应以各阶段状态显示进度，不把它简单翻译成“尚未识别”。任务终态及 unknown 不应触发客户端自动新建任务；unknown 只允许补查原任务，避免重复付费调用。
+**状态处理**：queued 表示任务尚未开始；任一分析或语音阶段开始后，等待语音或下一个类型时保持 processing，直到进入终态。results[].status 仍只表示分析阶段；播放必须等待 speech.status=ready。任务终态及 unknown 不应触发客户端自动新建任务；unknown 只允许补查原任务，避免重复付费调用。
 
 返回方式按每个已选类型的发布版本独立执行，不由上传参数覆盖：
 
@@ -7404,6 +7407,7 @@ speech.url 为识别服务相对路径，相对 recognition-srv 解析，并携�
 | 413 / 40000 | multipart 请求体过大 | 缩小音频 |
 | 401 / 401 | 凭证无效 | 重新获取正式设备凭证 |
 | 403 / 40300 | 无权访问设备或绑定不符 | 检查账号、设备和绑定 |
+| 410 / 6006 | 设备已解绑或重置 | 停止识别请求，重新完成设备绑定 |
 | 404 / 40400 | 任务不存在，或语音尚不可下载 | 检查编号及 speech.status |
 | 409 / 40901 | 未开启、类型不可用、配置或幂等内容冲突 | 先查询原任务和当前配置，不盲目更换编号 |
 | 429 / 429 | 月额度不足 | 等待额度恢复或由管理员调整 |

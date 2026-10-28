@@ -143,8 +143,22 @@ class PlaybackTest(unittest.TestCase):
         player._work.drain()
         player.submit('req', 'item_1')
         player._work.drain()
-        download.assert_called_once_with('req', item_id='item_1')
+        download.assert_called_once_with('req', item_id='item_1', stop_event=player._stop)
         play.assert_called_once()
+
+    def test_close_cancels_active_download(self):
+        entered = threading.Event()
+        def download(request_id, item_id=None, stop_event=None):
+            entered.set()
+            if not stop_event.wait(2):
+                raise AssertionError('download was not cancelled')
+            return []
+        play = Mock()
+        player = RecognitionPlayback(download, play)
+        player.submit('req', 'item_1')
+        self.assertTrue(entered.wait(2))
+        player.close()
+        play.assert_not_called()
 
     def test_failure_can_be_retried_and_shutdown_blocks_new_work(self):
         download = Mock(side_effect=[ValueError('unavailable'), ['audio.wav']])

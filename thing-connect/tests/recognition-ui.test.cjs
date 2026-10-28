@@ -18,7 +18,7 @@ const all = node => [node,...node.children.flatMap(all)];
 async function setup(count=1, respond=()=>undefined) {
   const body=new Element('body'), writes=[], messages=[];
   const cards=['device-1','device-2','device-3'].map(device=>({dataset:{cardDevice:device},label:{textContent:'已关闭'},querySelector(){return this.label;}}));
-  const types=Array.from({length:count},(_,i)=>({scheme_id:`type-${i}`,scheme_version:1,name:`声音${i}`,output_mode:'text_audio',limits:{max_audio_seconds:10}}));
+  const types=Array.from({length:count},(_,i)=>({scheme_id:`type-${i}`,scheme_version:1,name:`声音${i}`,description:`说明${i}<b>原样文本</b>`,output_mode:'text_audio',limits:{max_audio_seconds:10}}));
   const context={window:{},document:{body,createElement:tag=>new Element(tag),querySelectorAll:()=>cards},toast:msg=>messages.push(msg),api:async(url,options)=>{
     if(options?.method==='PUT') writes.push(JSON.parse(options.body));
     const response=respond(url,options);
@@ -134,4 +134,11 @@ test('reopening a rebound device accepts its reset configuration revision',async
   await ui.click('＋ 添加音频类型');ui.select();await ui.click('保存设置');
   assert.equal(ui.writes[1].expected_revision,0);
   assert.equal(ui.cards[0].label.textContent,'已开启 · 1项');
+});
+
+test('descriptions are text in both picker and selected rows',async()=>{
+ const ui=await setup(); await ui.click('＋ 添加音频类型');
+ assert.ok(all(ui.body).some(n=>n.className==='recognition-description'&&n.textContent==='说明0<b>原样文本</b>'));
+ ui.select(); await ui.click('添加所选');
+ assert.ok(all(ui.body).some(n=>n.className==='recognition-description'&&n.textContent==='说明0<b>原样文本</b>'));
 });

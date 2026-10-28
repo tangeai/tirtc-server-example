@@ -35,7 +35,7 @@ class RecognitionPlayback:
         try:
             if self._stop.is_set():
                 return
-            files = self._download(key[0], item_id=key[1])
+            files = self._download(key[0], item_id=key[1], stop_event=self._stop)
             if self._stop.is_set():
                 return
             if not files:

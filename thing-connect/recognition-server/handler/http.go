@@ -188,6 +188,8 @@ func write(c *gin.Context, v any, e error) {
 	switch {
 	case errors.Is(e, r.ErrInvalid):
 		status, code, msg = 400, 40000, "请检查音频格式、大小、时长和识别配置"
+	case errors.Is(e, r.ErrUnbound):
+		status, code, msg = 410, apiresp.CodeDevReset, "设备已解绑或重置，请重新绑定后使用"
 	case errors.Is(e, r.ErrForbidden):
 		status, code, msg = 403, 40300, "无权访问该设备"
 	case errors.Is(e, r.ErrDisabled):

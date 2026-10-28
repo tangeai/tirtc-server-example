@@ -61,7 +61,7 @@ HTTP 与 MQTT 结果都使用 code/msg/data。data 包含 request_id、device_id
 
 summary 为中文说明；alarm 表示模型按管理员分析目标判断是否异常，不能将此标志解释为经过人工确认的真实事件。labels 是声音类别，details 可说明不确定性。未成功分析时 result=null，不能把它当作“无异常”。摘要最多500字，超长或非法结构作为明确失败处理，不静默截断后播报。
 
-父任务状态为 queued/processing/succeeded/partial_failed/failed/unknown/cancelled。当前协议在文字完成、等待语音或下一类型时可能回到 queued，不表示识别结果丢失；结合子项与语音状态显示进度。子项分析状态独立于 speech.status（pending/synthesizing/ready/failed/unknown/skipped）。明确失败后继续下一个类型；未知结果暂停，不自动重新调用模型。设备应展示失败或待确认，不能当作已经完成。
+父任务状态为 queued/processing/succeeded/partial_failed/failed/unknown/cancelled。queued 表示任务尚未开始；开始后等待语音或下一类型时保持 processing，直到进入终态。结合子项与语音状态显示进度。子项分析状态独立于 speech.status（pending/synthesizing/ready/failed/unknown/skipped）。明确失败后继续下一个类型；未知结果暂停，不自动重新调用模型。设备应展示失败或待确认，不能当作已经完成。
 
 MQTT topic 沿用 `device/sn_{device_id}/notify`，QoS1、retain=false，type=recognition_result、channel=recognition、event_id 为事件标识，payload 是固定响应信封。同一任务每次更新递增 status_revision，设备忽略旧版本。配置变化 type=recognition_config_changed，设备重新读取配置。通知最多尝试投递8次，失败后由查询补偿；MQTT 发布确认不代表设备收到或完成播放，当前没有设备结果 ACK 接口。文字随通知直接返回，语音就绪后通过 HTTP 下载。重连时逐个补查本地未完成任务；列表 cursor 只按任务创建顺序分页，不会因旧任务更新而变化。
 
@@ -77,7 +77,7 @@ speech.url 是本识别服务的相对路径，必须相对 recognition-srv 请�
 
 ## 错误及恢复
 
-400/40000：参数或音频不合规；413/40000：请求体超过上限；401/401：凭证无效；403/40300：设备归属不符；404/40400：任务或音频不存在；409/40901：开关关闭、配置冲突或类型不可用；429/429：月额度不足；503/50300：模型 Key 未配置；500/50000：内部错误。
+400/40000：参数或音频不合规；413/40000：请求体超过上限；401/401：凭证无效；403/40300：设备归属不符；410/6006：设备已解绑或重置，停止识别请求并重新绑定；404/40400：任务或音频不存在；409/40901：开关关闭、配置冲突或类型不可用；429/429：月额度不足；503/50300：模型 Key 未配置；500/50000：内部错误。
 
 模型分析和合成失败在子项 error/speech.error 中返回50200，读取任务本身仍是 HTTP200、code200。结果未知时继续查询原编号，不改编号盲目重试。服务端领取任务的120秒租约到期后标记 unknown，防止进程重启重复调用已经收费的模型。
 

@@ -1,7 +1,7 @@
 # API 错误响应规范
 
 本规范适用于 device-server、user-server、ai-server、call-server 和
-voip-server 的对外错误响应。客户端始终按 `code` 处理业务，`msg` 调整
+voip-server、recognition-server 的对外错误响应。客户端始终按 `code` 处理业务，`msg` 调整
 不影响客户端分支。
 
 ## 兼容性规则

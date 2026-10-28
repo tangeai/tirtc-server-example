@@ -30,10 +30,16 @@ func recOwner(ctx context.Context, tx *sqlx.Tx, a r.Actor, id string) (string, e
 	}
 	e := tx.GetContext(ctx, &v, `SELECT CONCAT(id,':',binding_revision) AS id,user_id FROM device_bind WHERE device_id=? FOR UPDATE`, id)
 	if errors.Is(e, sql.ErrNoRows) {
+		if a.DeviceID == id && id != "" {
+			return "", r.ErrUnbound
+		}
 		return "", r.ErrForbidden
 	}
 	if e != nil {
 		return "", e
+	}
+	if v.User <= 0 && a.DeviceID == id && id != "" {
+		return "", r.ErrUnbound
 	}
 	if v.User <= 0 || a.DeviceID != "" && a.DeviceID != id || a.DeviceID == "" && a.UserID != v.User {
 		return "", r.ErrForbidden
@@ -100,7 +106,7 @@ func recUsage(ctx context.Context, tx *sqlx.Tx, id string) (r.Usage, error) {
 			u.Unknown++
 			continue
 		}
-		if usage.Input == nil && usage.Characters == nil {
+		if (v.Stage == "analysis" && (usage.Input == nil || usage.Output == nil)) || (v.Stage == "tts" && usage.Characters == nil) {
 			u.Unknown++
 		}
 		if v.Stage == "analysis" {
@@ -258,6 +264,9 @@ func (s *RecognitionStore) Submit(c context.Context, a r.Actor, id string, req r
 	if !errors.Is(e, sql.ErrNoRows) {
 		return r.Task{}, false, e
 	}
+	if req.RejectNew {
+		return r.Task{}, false, r.ErrUnavailable
+	}
 	if e = r.ValidatePolicy(p, req.Revision); e != nil {
 		return r.Task{}, false, e
 	}
@@ -368,7 +377,7 @@ func (s *RecognitionStore) Claim(c context.Context) (*r.Work, error) {
 	}
 	defer tx.Rollback()
 	var row recRow
-	e = tx.GetContext(c, &row, `SELECT id,bind_id,fingerprint,config_revision,snapshot,media FROM recognition_task WHERE status='queued' ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED`)
+	e = tx.GetContext(c, &row, `SELECT id,bind_id,fingerprint,config_revision,snapshot,media FROM recognition_task WHERE status IN ('queued','processing') AND lease='' ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED`)
 	if errors.Is(e, sql.ErrNoRows) {
 		return nil, r.ErrNotFound
 	}

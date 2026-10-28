@@ -152,6 +152,37 @@ class RecognitionTest(unittest.TestCase):
                 client.upload('not-read.wav')
             self.assertEqual(request.call_count, 1)
 
+    def test_unavailable_reason_distinguishes_switch_quota_and_model_config(self):
+        import copy
+        import sys
+        base = {'effective_enabled': False,
+                'policy': {'enabled': True, 'allowed': True, 'monthly_limit': 100,
+                           'schemes': [{'scheme_id': 'cry', 'scheme_version': 1}]},
+                'schemes': [{'scheme_id': 'cry', 'scheme_version': 1, 'enabled': True}],
+                'usage': {'used': 0}}
+        cases = [(None, '千问 Key'),
+                 (lambda s: s['policy'].update(enabled=False), '开关未开启'),
+                 (lambda s: s['policy'].update(allowed=False), '管理员已禁止'),
+                 (lambda s: s['policy'].update(schemes=[]), '尚未选择'),
+                 (lambda s: s['schemes'][0].update(enabled=False), '类型不可用'),
+                 (lambda s: s['usage'].update(used=100), '剩余额度不足')]
+        for change, message in cases:
+            state = copy.deepcopy(base)
+            if change:
+                change(state)
+            for mode in ('upload', 'record'):
+                with self.subTest(reason=message, mode=mode):
+                    capture = MagicMock()
+                    client = AudioRecognition('http://localhost:9006', 'test-token', '.', capture=capture)
+                    with patch.object(sys, 'platform', 'win32'), patch.object(client, '_json', return_value=state) as request:
+                        with self.assertRaisesRegex(ValueError, message):
+                            if mode == 'upload':
+                                client.upload('not-read.wav')
+                            else:
+                                client.record_once(threading.Event())
+                    capture.assert_not_called()
+                    request.assert_called_once_with('GET', '/config')
+
     def test_download_uses_authenticated_local_route(self):
         with tempfile.TemporaryDirectory() as directory:
             client = AudioRecognition('http://localhost:9006', 'test-token', directory)
@@ -159,13 +190,68 @@ class RecognitionTest(unittest.TestCase):
             response = MagicMock()
             response.__enter__.return_value = response
             response.status_code = 200
-            response.iter_content.return_value = [wav()]
+            response.raw.read1.side_effect = [json.dumps({"code": 200, "data": task}).encode(), b"", wav(), b""]
             with patch.object(client, 'status', return_value=task), patch('audio_recognition.requests.request', return_value=response) as request:
                 files = client.download('task1')
             self.assertEqual(Path(files[0]).read_bytes(), wav())
             self.assertEqual(request.call_args.args[1], 'http://localhost:9006/v1/recognition/requests/task1/audio/item1')
             self.assertFalse(request.call_args.kwargs['allow_redirects'])
             self.assertEqual(request.call_args.kwargs['headers']['Authorization'], 'Bearer test-token')
+
+    def test_download_cancelled_before_network(self):
+        stop = threading.Event()
+        stop.set()
+        client = AudioRecognition('http://localhost:9006', 'test', '.')
+        with patch.object(client, '_request') as request, self.assertRaisesRegex(ValueError, '取消'):
+            client.download('task1', stop_event=stop)
+        request.assert_not_called()
+
+    def test_trickle_download_checks_deadline_and_closes_response(self):
+        client = AudioRecognition('http://localhost:9006', 'test', '.')
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.status_code = 200
+        response.raw.read1.return_value = b'x'
+        with patch.object(client, '_request', return_value=response), patch('audio_recognition.time.monotonic', side_effect=[0, 1, 61]), self.assertRaisesRegex(ValueError, '超时'):
+            client._download_body('/requests/task1', 1024, None, 60)
+        response.__exit__.assert_called_once()
+        response.raw.read1.assert_called_once()
+
+    def test_download_cancelled_during_read_leaves_no_file(self):
+        stop = threading.Event()
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.status_code = 200
+        def read(*args, **kwargs):
+            stop.set()
+            return b'x'
+        response.raw.read1.side_effect = read
+        with tempfile.TemporaryDirectory() as directory:
+            client = AudioRecognition('http://localhost:9006', 'test', directory)
+            with patch.object(client, '_request', return_value=response), self.assertRaisesRegex(ValueError, '取消'):
+                client.download('task1', stop_event=stop)
+            self.assertFalse(client.output_dir.exists())
+        response.__exit__.assert_called_once()
+
+    def test_download_read_error_is_sanitized(self):
+        from urllib3.exceptions import ReadTimeoutError
+        client = AudioRecognition('http://localhost:9006', 'test', '.')
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.status_code = 200
+        response.raw.read1.side_effect = ReadTimeoutError(None, 'private-address', 'raw details')
+        with patch.object(client, '_request', return_value=response), self.assertRaisesRegex(ValueError, '^语音下载中断或超时，请重试$'):
+            client.download('task1')
+        response.__exit__.assert_called_once()
+
+    def test_unbound_response_uses_code_not_message(self):
+        client = AudioRecognition('http://localhost:9006', 'test', '.')
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.status_code = 410
+        response.json.return_value = {"code": 6006, "msg": "arbitrary diagnostic"}
+        with patch.object(client, '_request', return_value=response), self.assertRaisesRegex(ValueError, '设备已解绑或重置.*6006'):
+            client._json('GET', '/config')
 
     def test_windows_path_not_shell_parsed(self):
         client = AudioRecognition('', '', '.')

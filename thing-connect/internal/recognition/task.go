@@ -24,14 +24,18 @@ func (v Snapshot) PublicTask() Task {
 
 func (v *Snapshot) Aggregate() {
 	good, bad := 0, 0
+	started, pending := v.Task.Status == "processing", false
 	for _, x := range v.Task.Results {
 		if x.Status == "unknown" || x.Speech.Status == "unknown" {
 			v.Task.Status = "unknown"
 			return
 		}
+		if x.Status == "processing" || x.Status == "succeeded" || x.Status == "failed" {
+			started = true
+		}
 		if x.Status == "queued" || x.Status == "processing" || x.Speech.Status == "pending" || x.Speech.Status == "synthesizing" {
-			v.Task.Status = "queued"
-			return
+			pending = true
+			continue
 		}
 		if x.Status == "succeeded" && (x.Speech.Status == "ready" || x.Speech.Status == "skipped") {
 			good++
@@ -41,6 +45,13 @@ func (v *Snapshot) Aggregate() {
 			}
 			bad++
 		}
+	}
+	if pending {
+		v.Task.Status = "queued"
+		if started {
+			v.Task.Status = "processing"
+		}
+		return
 	}
 	switch {
 	case bad == 0:

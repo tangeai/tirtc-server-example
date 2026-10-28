@@ -10,6 +10,7 @@ import (
 
 var (
 	ErrInvalid     = errors.New("识别参数无效")
+	ErrUnbound     = errors.New("设备已解绑或重置")
 	ErrForbidden   = errors.New("无权访问设备")
 	ErrDisabled    = errors.New("设备识别未启用")
 	ErrQuota       = errors.New("本月识别额度已用完")
@@ -73,6 +74,8 @@ type State struct {
 	Limits           Limits   `json:"upload_limits"`
 }
 type Request struct {
+	// RejectNew gates creation only; previously accepted requests remain replayable.
+	RejectNew   bool
 	ID          string
 	Revision    int64
 	MediaType   string

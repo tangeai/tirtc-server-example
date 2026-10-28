@@ -65,7 +65,7 @@ func TestUploadAcceptanceReplayAndErrors(t *testing.T) {
 		fresh        bool
 		err          error
 		status, code int
-	}{{"new", true, nil, 202, 200}, {"replay", false, nil, 200, 200}, {"quota", false, r.ErrQuota, 429, 429}, {"disabled", false, r.ErrDisabled, 409, 40901}} {
+	}{{"new", true, nil, 202, 200}, {"replay", false, nil, 200, 200}, {"unbound", false, r.ErrUnbound, 410, 6006}, {"forbidden", false, r.ErrForbidden, 403, 40300}, {"quota", false, r.ErrQuota, 429, 429}, {"disabled", false, r.ErrDisabled, 409, 40901}} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := &stubService{fresh: tc.fresh, err: tc.err}
 			var body bytes.Buffer

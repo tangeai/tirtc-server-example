@@ -1,6 +1,6 @@
 # AI 识别结果协议调整方案
 
-状态：待确认，仅用于评审。本文描述拟调整的目标行为，代码尚未实现；设备接入仍以 [API Reference](api-reference.md#recognition-task) 为准。确认后再修改服务端、模拟器和正式接口文档。
+状态：扩展字段待确认，仅用于评审。当前任务状态使用 queued → processing → 终态；本文的 overall_status、name 及整体成功判定调整仍为提案，不属于设备接入契约。设备接入以 [API Reference](api-reference.md#recognition-task) 为准。
 
 ## 调整范围
 
@@ -8,7 +8,7 @@
 
 | 项目 | 当前实现 | 建议调整 |
 |---|---|---|
-| 整个任务 `data.status` | 分析完成后等待语音或下一类型时可能回到 queued | queued 只表示任务从未开始；任一阶段开始后保持 processing，直到结束或结果未知 |
+| 整个任务 `data.status` | queued 表示尚未开始；开始后保持 processing，直到终态 | 保持当前语义 |
 | 单类型 `results[].status` | 表示分析阶段，不能代表语音完成 | 保留原含义，增加 overall_status 明确表示该类型整体进度 |
 | 类型名称 | 只有 scheme_id 和 scheme_version | 增加 name，保存任务创建时所选发布版本的名称快照 |
 

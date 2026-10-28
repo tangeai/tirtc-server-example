@@ -43,7 +43,7 @@ func TestTaskOutputModesAndStageOrder(t *testing.T) {
 					t.Fatal("text must never synthesize")
 				}
 			} else {
-				if v.NextStage(0) != "tts" || v.Task.Status != "queued" {
+				if v.NextStage(0) != "tts" || v.Task.Status != "processing" {
 					t.Fatal("speech must follow successful analysis")
 				}
 				v.Start(0, "tts")
@@ -123,5 +123,28 @@ func TestSubmissionPolicyQuotaAndLimits(t *testing.T) {
 				t.Fatalf("got %v want %v", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestTaskRemainsProcessingBetweenTypes(t *testing.T) {
+	v := taskFixture(t, "text", "text")
+	v.Aggregate()
+	if v.Task.Status != "queued" {
+		t.Fatal(v.Task.Status)
+	}
+	v.Start(0, "analysis")
+	v.Complete(Completion{Work: Work{ItemIndex: 0, Stage: "analysis"}, Result: &Result{Summary: "声音"}})
+	if v.Task.Status != "processing" {
+		t.Fatal(v.Task.Status)
+	}
+	v.Task.Status = "queued"
+	v.Aggregate()
+	if v.Task.Status != "processing" {
+		t.Fatal(v.Task.Status)
+	}
+	v.Start(1, "analysis")
+	v.Complete(Completion{Work: Work{ItemIndex: 1, Stage: "analysis"}, Failed: true})
+	if v.Task.Status != "partial_failed" {
+		t.Fatal(v.Task.Status)
 	}
 }

@@ -121,6 +121,18 @@ func TestRecognitionDurableOrderQuotaAndOwnership(t *testing.T) {
 	if t.Failed() {
 		return
 	}
+	t.Run("missing key allows replay but rejects new task", func(t *testing.T) {
+		replay := req
+		replay.RejectNew = true
+		task, fresh, err := store.Submit(ctx, r.Actor{DeviceID: id}, id, replay, "hash")
+		if err != nil || fresh || task.ID != req.ID {
+			t.Fatalf("replay fresh=%v err=%v", fresh, err)
+		}
+		replay.ID = "missing-key"
+		if _, _, err = store.Submit(ctx, r.Actor{DeviceID: id}, id, replay, "hash"); !errors.Is(err, r.ErrUnavailable) {
+			t.Fatal(err)
+		}
+	})
 	req.ID = "over-quota"
 	if _, _, e = store.Submit(ctx, r.Actor{DeviceID: id}, id, req, "hash"); !errors.Is(e, r.ErrQuota) {
 		t.Fatal("quota", e)
@@ -178,6 +190,29 @@ func TestRecognitionDurableOrderQuotaAndOwnership(t *testing.T) {
 	if e = store.Complete(ctx, r.Completion{Work: *w, Result: result}); e != nil {
 		t.Fatal(e)
 	}
+	if err := store.Recover(ctx); err != nil {
+		t.Fatal(err)
+	}
+	between, err := store.Get(ctx, r.Actor{DeviceID: id}, id, "same-request")
+	if err != nil || between.Status != "processing" {
+		t.Fatalf("between stages: %s %v", between.Status, err)
+	}
+	t.Run("partial token usage is unknown but preserves known totals", func(t *testing.T) {
+		if _, err := db.Exec(`UPDATE recognition_call SET usage_json='{"input_tokens":12,"output_tokens":null}' WHERE task_id=?`, w.TaskKey); err != nil {
+			t.Fatal(err)
+		}
+		state, err := store.State(ctx, actor, id)
+		if err != nil || state.Usage.Unknown != 1 || state.Usage.InputTokens != 12 {
+			t.Fatalf("usage=%+v err=%v", state.Usage, err)
+		}
+		if _, err := db.Exec(`UPDATE recognition_call SET usage_json='{"input_tokens":0,"output_tokens":0}' WHERE task_id=?`, w.TaskKey); err != nil {
+			t.Fatal(err)
+		}
+		state, err = store.State(ctx, actor, id)
+		if err != nil || state.Usage.Unknown != 0 {
+			t.Fatalf("known zero usage=%+v err=%v", state.Usage, err)
+		}
+	})
 	w, e = store.Claim(ctx)
 	if e != nil || w == nil || w.Scheme.ID != ids[1] || w.Stage != "analysis" {
 		t.Fatal("order", e)
@@ -384,5 +419,32 @@ func TestRecognitionOutboxUsesUTCAndDrainsLegacyFirstAttempts(t *testing.T) {
 		if v.ID == event.ID {
 			t.Fatal("delivered event returned again")
 		}
+	}
+}
+
+func TestRecognitionUnboundDeviceAndForeignUserErrors(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	id, _ := seedPool(t, db)
+	uid := seedUser(t, db)
+	if _, err := db.Exec(`INSERT INTO device_bind(device_id,user_id,bind_time) VALUES(?,?,NOW())`, id, uid); err != nil {
+		t.Fatal(err)
+	}
+	defer cleanBind(t, db, id)
+	store := m.NewRecognitionStore(db)
+	if _, err := store.State(ctx, r.Actor{UserID: uid + 1}, id); !errors.Is(err, r.ErrForbidden) {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE device_bind SET user_id=0,binding_revision=binding_revision+1 WHERE device_id=?`, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.State(ctx, r.Actor{DeviceID: id}, id); !errors.Is(err, r.ErrUnbound) {
+		t.Fatal(err)
+	}
+	if _, err := store.State(ctx, r.Actor{UserID: uid}, id); !errors.Is(err, r.ErrForbidden) {
+		t.Fatal(err)
+	}
+	if _, err := store.State(ctx, r.Actor{DeviceID: id}, id+"other"); !errors.Is(err, r.ErrForbidden) {
+		t.Fatal(err)
 	}
 }
