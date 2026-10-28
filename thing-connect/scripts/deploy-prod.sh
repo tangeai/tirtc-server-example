@@ -138,6 +138,51 @@ service_config_path() {
     return 1
 }
 
+service_config_template() {
+    if [ "$1" = admin-server ]; then
+        printf '%s/admin/admin-server/config.yaml.example\n' "$BUILD_DIR"
+    else
+        printf '%s/%s/config.yaml.example\n' "$BUILD_DIR" "$1"
+    fi
+}
+
+has_missing_service_configs() {
+    local svc
+    for svc in "${ALL_SERVICES[@]}"; do
+        service_config_path "$svc" >/dev/null || return 0
+    done
+    return 1
+}
+
+# Compile first, then prepare directories/configs. Existing direct and activated
+# bundle configurations stay authoritative; no live binary is changed here.
+prepare_service_configs() (
+    local svc template target stage
+    # Check all templates and paths before creating any configuration.
+    for svc in "${ALL_SERVICES[@]}"; do
+        if service_config_path "$svc" >/dev/null; then continue; fi
+        [ ! -L "$DEPLOY_ROOT/$svc" ] &&
+            [ ! -L "$DEPLOY_ROOT/config-current/$svc/config.yaml" ] || {
+            err "$svc: 服务目录或配置包链接无效，请先修复链接"; return 1;
+        }
+        template="$(service_config_template "$svc")"
+        [ -r "$template" ] || { err "$svc: 配置模板不存在或不可读: $template"; return 1; }
+    done
+    stage="$(mktemp -d "$DEPLOY_ROOT/.service-configs.XXXXXX")" || return 1
+    trap 'rm -rf -- "$stage"' EXIT
+    for svc in "${ALL_SERVICES[@]}"; do
+        target="$DEPLOY_ROOT/$svc"
+        mkdir -p "$target" || return 1
+        if service_config_path "$svc" >/dev/null; then continue; fi
+        template="$(service_config_template "$svc")"
+        cp "$template" "$stage/$svc.yaml" || return 1
+        chmod 600 "$stage/$svc.yaml" || return 1
+        # Atomic no-replace publication protects a concurrently supplied config.
+        ln "$stage/$svc.yaml" "$target/config.yaml" || return 1
+        log "$svc: 已从模板生成 $target/config.yaml（权限600），请填写实际生产配置"
+    done
+)
+
 # A service is installed when it has an active config. Required/optional
 # membership comes from the shared service catalog.
 resolve_active_services() {
@@ -675,6 +720,9 @@ validate_configs() {
     fi
     strict_validate_config_syntax || return 1
     log "基础生产配置校验通过；Admin 动态配置和依赖连接由业务服务启动预检确认"
+    if has_missing_service_configs; then
+        warn "部分服务尚无配置；update 编译完成后会创建服务目录，并从模板补齐缺失的 config.yaml"
+    fi
 }
 
 # ================== 拉代码 ==================
@@ -1373,7 +1421,8 @@ full_deploy() (
     # stopped-process checks are deferred until an update is actually needed.
     resolve_active_services || return 1
     pull_code || return 1
-    if release_state_is_current; then
+    load_deployment_service_catalog || return 1
+    if release_state_is_current && ! has_missing_service_configs; then
         log "当前已发布版本与待发布版本一致（$(git -C "$REPO_PATH" rev-parse --short HEAD)），无需更新"
         return 0
     fi
@@ -1382,12 +1431,18 @@ full_deploy() (
     invalidate_release_state || return 1
     validate_backup_retention || return 1
     validate_paths || return 1
-	load_deployment_service_catalog || return 1
 	prepare_update_service_control || return 1
-	services=("${ACTIVE_SERVICES[@]}")
     run_batch build "${ALL_SERVICES[@]}" || return 1
     validate_build_release "${ALL_SERVICES[@]}" || return 1
-    validate_configs || return 1
+    prepare_service_configs || return 1
+    if ! validate_configs; then
+        err "配置校验失败；新生成的 config.yaml 已保留，请填写后重新 update。未替换运行文件或执行数据库迁移"
+        return 1
+    fi
+    # Newly created configs add services to the managed inventory. Recheck before
+    # backup/migration so a missing Supervisor entry cannot cause a partial release.
+    prepare_update_service_control || return 1
+    services=("${ACTIVE_SERVICES[@]}")
     backup_release "${services[@]}" || return 1
 	if run_migrations; then
 		:
@@ -1483,7 +1538,9 @@ pull_action() {
 
 build_action() {
     validate_paths || return 1
-    run_batch build "${ALL_SERVICES[@]}"
+    run_batch build "${ALL_SERVICES[@]}" || return 1
+    validate_build_release "${ALL_SERVICES[@]}" || return 1
+    prepare_service_configs
 }
 
 deploy_files_action() {

@@ -331,6 +331,7 @@ test_manual_update_publishes_without_automatic_restart() (
     }
     run_batch() { :; }
     validate_build_release() { :; }
+    prepare_service_configs() { :; }
     validate_configs() { :; }
     backup_release() { BACKUP_DIR="$TEST_ROOT/manual-update-backup"; }
     run_migrations() { :; }
@@ -367,6 +368,7 @@ test_same_release_commit_skips_the_entire_update() (
     printf '%s\n%s\n' "$current_commit" "${ACTIVE_SERVICES[*]}" >"$DEPLOY_ROOT/.release-state"
     validate_deploy_root() { :; }
     resolve_active_services() { ACTIVE_SERVICES=(admin-server user-server); }
+    has_missing_service_configs() { return 1; }
     prepare_update_service_control() {
         echo "FAIL: same release checked service manager or required stopped services" >&2
         return 92
@@ -503,6 +505,7 @@ test_failed_same_commit_repair_invalidates_previous_release_state() (
     prepare_update_service_control() { ACTIVE_SERVICE_MANAGER="supervisor"; }
     run_batch() { :; }
     validate_build_release() { :; }
+    prepare_service_configs() { :; }
     validate_configs() { :; }
     backup_release() { BACKUP_DIR="$TEST_ROOT/incomplete-release-backup"; }
     run_migrations() { :; }
@@ -651,6 +654,7 @@ test_supervisor_boot_order_starts_admin_first() {
     grep -A1 '^\[program:voip-server\]$' "$config" | grep -qx 'priority=30'
     grep -A1 '^\[program:ai-server\]$' "$config" | grep -qx 'priority=30'
     grep -A1 '^\[program:call-server\]$' "$config" | grep -qx 'priority=30'
+    grep -A1 '^\[program:recognition-server\]$' "$config" | grep -qx 'priority=30'
 }
 
 test_activated_bundle_is_resolved_and_not_overwritten() (
@@ -936,6 +940,81 @@ test_daily_update_backs_up_files_before_database_migration() {
     }
 }
 
+test_build_prepares_missing_service_directories_and_templates() (
+    DEPLOY_ROOT="$TEST_ROOT/template-deploy"
+    BUILD_DIR="$TEST_ROOT/template-build"
+    ALL_SERVICES=(admin-server user-server recognition-server)
+    mkdir -p "$BUILD_DIR/admin/admin-server" "$BUILD_DIR/user-server" "$BUILD_DIR/recognition-server" "$DEPLOY_ROOT/user-server"
+    printf 'admin-example\n' >"$BUILD_DIR/admin/admin-server/config.yaml.example"
+    printf 'user-example\n' >"$BUILD_DIR/user-server/config.yaml.example"
+    printf 'server:\n  http_port: 9006\n' >"$BUILD_DIR/recognition-server/config.yaml.example"
+    printf 'existing-user-config\n' >"$DEPLOY_ROOT/user-server/config.yaml"
+    has_missing_service_configs
+    prepare_service_configs
+    [ -d "$DEPLOY_ROOT/recognition-server" ]
+    cmp "$BUILD_DIR/recognition-server/config.yaml.example" "$DEPLOY_ROOT/recognition-server/config.yaml"
+    assert_eq 600 "$(stat -c %a "$DEPLOY_ROOT/recognition-server/config.yaml")" "new config must be private"
+    assert_eq existing-user-config "$(cat "$DEPLOY_ROOT/user-server/config.yaml")" "existing config must survive"
+    if has_missing_service_configs; then exit 1; fi
+    printf 'edited\n' >"$DEPLOY_ROOT/recognition-server/config.yaml"
+    prepare_service_configs
+    assert_eq edited "$(cat "$DEPLOY_ROOT/recognition-server/config.yaml")" "rerun must not overwrite config"
+    rm "$DEPLOY_ROOT/recognition-server/config.yaml"
+    mkdir -p "$DEPLOY_ROOT/config-current/recognition-server"
+    printf 'bundle\n' >"$DEPLOY_ROOT/config-current/recognition-server/config.yaml"
+    prepare_service_configs
+    [ ! -e "$DEPLOY_ROOT/recognition-server/config.yaml" ]
+    rm "$DEPLOY_ROOT/config-current/recognition-server/config.yaml"
+    ln -s "$DEPLOY_ROOT/missing.yaml" "$DEPLOY_ROOT/config-current/recognition-server/config.yaml"
+    if prepare_service_configs >/dev/null 2>&1; then exit 1; fi
+    [ ! -e "$DEPLOY_ROOT/recognition-server/config.yaml" ]
+)
+
+test_missing_template_fails_before_partial_config_creation() (
+    DEPLOY_ROOT="$TEST_ROOT/template-missing-deploy"
+    BUILD_DIR="$TEST_ROOT/template-missing-build"
+    ALL_SERVICES=(user-server recognition-server)
+    mkdir -p "$BUILD_DIR/user-server" "$DEPLOY_ROOT"
+    printf 'example\n' >"$BUILD_DIR/user-server/config.yaml.example"
+    if prepare_service_configs >/dev/null 2>&1; then exit 1; fi
+    [ ! -e "$DEPLOY_ROOT/user-server/config.yaml" ]
+)
+
+test_same_commit_missing_config_is_prepared_before_release_mutations() (
+    DEPLOY_ROOT="$TEST_ROOT/template-full-deploy"
+    BUILD_DIR="$TEST_ROOT/template-full-build"
+    ALL_SERVICES=(admin-server recognition-server)
+    mkdir -p "$DEPLOY_ROOT/admin-server" "$BUILD_DIR/recognition-server"
+    printf 'existing\n' >"$DEPLOY_ROOT/admin-server/config.yaml"
+    printf 'template-placeholder\n' >"$BUILD_DIR/recognition-server/config.yaml.example"
+    local capture="$TEST_ROOT/template-full.capture" result=0
+    : >"$capture"
+    validate_release_options() { :; }
+    resolve_active_services() { ACTIVE_SERVICES=(admin-server); }
+    pull_code() { :; }
+    load_deployment_service_catalog() { :; }
+    release_state_is_current() { return 0; }
+    validate_backup_retention() { :; }
+    validate_paths() { :; }
+    prepare_update_service_control() { :; }
+    run_batch() { printf 'build\n' >>"$capture"; }
+    validate_build_release() { :; }
+    validate_configs() {
+        cmp "$BUILD_DIR/recognition-server/config.yaml.example" "$DEPLOY_ROOT/recognition-server/config.yaml" || return 90
+        return 1
+    }
+    backup_release() { printf 'backup\n' >>"$capture"; }
+    run_migrations() { printf 'migration\n' >>"$capture"; }
+    deploy_one() { printf 'deploy\n' >>"$capture"; }
+    full_deploy >/dev/null 2>&1 || result=$?
+    assert_eq 1 "$result" "new templates must be configured before publishing"
+    assert_eq build "$(cat "$capture")" "validation failure must precede backup, migration and file replacement"
+    [ -f "$DEPLOY_ROOT/recognition-server/config.yaml" ]
+)
+
+test_build_prepares_missing_service_directories_and_templates
+test_missing_template_fails_before_partial_config_creation
+test_same_commit_missing_config_is_prepared_before_release_mutations
 test_http_admin_cookie_is_allowed_by_default
 test_migration_refuses_missing_or_unverified_database_backup
 test_current_database_skips_backup_gate

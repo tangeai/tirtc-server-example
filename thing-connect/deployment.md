@@ -511,7 +511,7 @@ sudo /opt/thing-connect/deploy-prod.sh update
 
 | 当前状态 | 处理方式 |
 |---|---|
-| commit 和已安装服务集合都没变化 | 输出“当前已发布版本与待发布版本一致”，直接结束 |
+| commit 和服务集合都没变化，且所有服务已有配置 | 输出“当前已发布版本与待发布版本一致”，直接结束 |
 | 首次使用发布工具，或发布状态缺失、损坏 | 执行完整更新 |
 | 已安装服务集合发生变化 | 执行完整更新 |
 | 辅助发布文件没有完整刷新 | 执行完整更新 |
@@ -524,7 +524,9 @@ sudo /opt/thing-connect/deploy-prod.sh update
 sudo env FORCE_UPDATE=1 /opt/thing-connect/deploy-prod.sh update
 ```
 
-进入完整更新后，脚本先构建新版本，再使用迁移账号检查数据库所有权、完整结构和待迁移版本。检查过程只读。数据库已经是当前版本时，脚本输出“数据库已是当前版本”，跳过数据库备份门槛和 DDL，代码与静态资源仍会继续发布。
+进入完整更新后，脚本先构建新版本，为服务清单中的各服务创建部署目录。缺少 `config.yaml` 时复制该服务的 `config.yaml.example`，权限设为 600；已有独立配置或激活配置包保持不变。模板仍含必填占位值时，校验会停止发布，请填写实际生产配置后重新执行 `update`；此时不会替换运行中的程序或执行数据库迁移。相同 commit 下缺少服务配置也会执行此补齐流程。高级 `build` 命令同样在完整构建成功后准备目录和缺失配置。
+
+配置有效后，脚本重新检查服务托管清单，再使用迁移账号检查数据库所有权、完整结构和待迁移版本。检查过程只读。数据库已经是当前版本时，脚本输出“数据库已是当前版本”，跳过数据库备份门槛和 DDL，代码与静态资源仍会继续发布。
 
 存在待执行迁移时，脚本在 DDL 前停止并要求可恢复的数据库备份。使用 `mysqldump` 生成完整备份，在隔离 MySQL 实例完成恢复演练，再把绝对路径和恢复验证声明传给更新命令：
 
@@ -589,7 +591,7 @@ Admin 功能、RBAC、配置中心和任务说明见 [Admin Server README](admin
 
 ## 独立 AI识别服务
 
-`recognition-server` 是可选业务服务，默认端口9006，与 ai-server、voip-server、call-server 并列。安装服务清单及构建脚本包含该服务；启用时需要相同 MySQL/Redis、共享 jwt_secret/internal.key 和独立 MQTT 连接身份。Admin 不与业务服务共用管理员 JWT。
+`recognition-server` 是独立业务服务，默认端口9006，与 ai-server、voip-server、call-server 并列。生产发布脚本构建后会创建其部署目录，并在缺少配置时复制模板；请填写生产配置再继续发布。安装服务清单及构建脚本包含该服务；启用时需要相同 MySQL/Redis、共享 jwt_secret/internal.key 和独立 MQTT 连接身份。Admin 不与业务服务共用管理员 JWT。
 
 数据库迁移需包含 recognition 类型/任务/语音/用量/outbox 表及 device_bind.binding_revision 字段。按本文件既有备份、迁移和 readiness 流程执行；运行账号不需要 DDL 权限。配置模板在 recognition-server/config.yaml.example。
 
