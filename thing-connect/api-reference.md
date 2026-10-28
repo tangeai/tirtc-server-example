@@ -6899,7 +6899,7 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 | [保存设备识别设置](#recognition-device-save) | 用户 Web | PUT | `/v1/recognition/devices/:device_id/config` | 用户 JWT |
 
 
-本节前半部分描述**当前可调用的接口**；末尾「待确认的结构整理方案」是评审草案，尚未作为线上契约实现。示例中的设备、类型和任务标识均为占位值。
+本节描述音频识别接口的请求、响应与 MQTT 通知协议。示例中的设备、类型和任务标识均为占位值。
 
 #### 接入约定
 
@@ -6907,6 +6907,7 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 - HTTP 根地址取服务发现的 `recognition-srv`，统一代理可使用站点根地址；不是 AI 通话服务地址。
 - 设备使用 `Authorization: Bearer <mqtt_token>`，用户页面使用用户 JWT；设备身份从令牌读取，上传不传 `device_id`。临时设备不能使用。
 - JSON 成功响应统一为 `code/msg/data`。`code=200` 表示请求或通知正常，**不表示任务完成，也不表示没有异常**；报警判断看子项 `result.alarm`。
+- 上传受理、单个任务查询和 MQTT 结果通知复用相同的任务对象：HTTP 放在 `data`，MQTT 放在 `payload.data`。任务内的多类型结果为 `results[]`，文字分析为 `results[].result`，语音状态及下载地址为 `results[].speech`。
 - 客户端按数值 `code`、状态枚举处理业务，不比较 `msg`。忽略未知扩展字段。字段顺序无意义。
 - 用户可以选择最多8个识别类型，同一段音频按选择顺序执行。一段录音选 N 个类型，占用 N 次额度。分析 Token、TTS 字符分别统计。
 - HTTP 获取数据和语音均需鉴权；接口响应设置 `Cache-Control: no-store`。模型 Key 和提示词不下发设备。
@@ -7005,7 +7006,7 @@ Content-Type 为 `multipart/form-data`，不是 JSON，也不是把裸音频直�
 | request_id | string | 是 | 设备范围内唯一，1–64位字母、数字、下划线或连字符；超时后使用原编号查询/重试 |
 | config_revision | integer | 是 | 最近读取的 policy.revision；不一致时拒绝新任务 |
 | media_type | string | 是 | 固定 audio |
-| audio_format | string | PCM 必填 | pcm_s16le：无文件头的16位有符号小端 PCM；wav：PCM16 WAV。省略时按 WAV 校验，兼容旧设备 |
+| audio_format | string | PCM 必填 | pcm_s16le：无文件头的16位有符号小端 PCM；wav：PCM16 WAV。省略时按 WAV 校验 |
 | sample_rate | integer | PCM 必填 | 8000–48000 Hz，建议16000；WAV 不传，由文件头提供 |
 | channels | integer | PCM 必填 | 1或2，建议1；WAV 不传。双声道 PCM 按采样帧交错排列 |
 | files | binary file | 是 | 恰好一个文件；PCM MIME 为 application/octet-stream，WAV 为 audio/wav |
@@ -7071,7 +7072,7 @@ curl "$RECOGNITION_SERVER/v1/recognition/requests" \
 |---|---|
 | request_id | 设备提交时的请求标识 |
 
-查询返回当前快照，结构与 MQTT 结果通知的 payload 相同。文字完成、语音尚待合成的**当前实际返回**如下：
+查询返回当前快照，结构与 MQTT 结果通知的 payload 相同。文字完成、语音尚待合成时返回如下快照：
 
 ```json
 {
@@ -7157,7 +7158,21 @@ curl "$RECOGNITION_SERVER/v1/recognition/requests" \
 }
 ```
 
-#### 当前任务及结果字段
+#### 任务对象的层级
+
+| 层级 | HTTP 路径 | MQTT 结果通知路径 |
+|---|---|---|
+| 响应信封 | code、msg、data | payload.code、payload.msg、payload.data |
+| 任务编号、状态和快照版本 | data.request_id、data.status、data.status_revision | payload.data 中的同名字段 |
+| 多类型结果数组 | data.results | payload.data.results |
+| 单个类型的文字分析结果 | data.results[].result | payload.data.results[].result |
+| 单个类型的语音状态与下载信息 | data.results[].speech | payload.data.results[].speech |
+
+`result` 只表示某个识别类型的文字分析对象，响应顶层使用 `data`。文字结果包含在通知快照中；语音就绪后按 `speech.url` 携带设备凭证下载，不在 MQTT 中传输音频 Base64。
+
+任务列表接口使用 `data.items` 承载多个任务，每个任务内部仍为 `results[]`。列表的 `items` 与单个任务的多类型结果数组是不同层级。配置变更通知只携带设备标识和配置版本，不包含任务结果。
+
+#### 任务及结果字段
 
 | 字段 | 含义 |
 |---|---|
@@ -7184,7 +7199,7 @@ curl "$RECOGNITION_SERVER/v1/recognition/requests" \
 | 分析 results[].status | queued、processing、succeeded、failed、unknown、cancelled |
 | 语音 speech.status | pending、synthesizing、ready、failed、unknown、skipped |
 
-**当前语义注意**：文字完成、等待语音或下一个类型时，任务 status 可能回到 queued；示例并不代表文字任务重新排队。设备应以各阶段状态显示进度，不把它简单翻译成“尚未识别”。任务终态及 unknown 不应触发客户端自动新建任务；unknown 只允许补查原任务，避免重复付费调用。
+**状态处理**：文字完成、等待语音或下一个类型时，任务 status 可能回到 queued；示例并不代表文字任务重新排队。设备应以各阶段状态显示进度，不把它简单翻译成“尚未识别”。任务终态及 unknown 不应触发客户端自动新建任务；unknown 只允许补查原任务，避免重复付费调用。
 
 返回方式按每个已选类型的发布版本独立执行，不由上传参数覆盖：
 
@@ -7403,77 +7418,3 @@ speech.url 为识别服务相对路径，相对 recognition-srv 解析，并携�
   "msg": "请检查音频格式、大小、时长和识别配置"
 }
 ```
-
-### 待确认的结构整理方案（评审草案，未实现）
-
-以下用于评审设备侧协议，不是当前服务已经返回的字段。既有 v1 仍以上文为准；完成兼容方案前，设备不能按草案字段接入。
-
-**建议保留的设计**：继续用 code/msg/data；HTTP 上传受理、查询和 MQTT payload 复用同一个任务对象；保留多类型数组、任务编号、状态版本；文字随通知返回，语音鉴权下载。不要改成顶层 result，否则与项目其他接口不一致，也会和每项分析结果混淆。
-
-**建议调整的字段和语义**：
-
-| 当前问题 | 建议 |
-|---|---|
-| 文字完成后任务又变 queued | queued 仅用于尚未开始；任何阶段开始后，等待 TTS/后续类型均为 processing，直到终态 |
-| results[].status 看不出只代表分析 | 将分析状态收进 recognition，把子项 status 明确定义为整个类型的聚合状态 |
-| 结果仅有 scheme_id，需额外映射名称 | 每项带 name，取任务创建时的类型名称快照；名称后续编辑不影响历史结果 |
-| summary/details 与语音信息层次难懂 | recognition 内包含 status、alarm、labels、text、details、error；audio 内含 status、url、format、error |
-| 配置版本与任务版本容易混淆 | 继续保留明确的 config_revision / status_revision，不统一缩写成 revision |
-| 状态 succeeded/ready 混用 | 草案先保留现有阶段枚举，避免同时改名称；通过层级区分整体、分析和音频 |
-
-建议的文字已完成、语音尚待生成的对象：
-
-```json
-{
-  "code": 200,
-  "msg": "ok",
-  "data": {
-    "request_id": "audio_000001",
-    "device_id": "DEVICE001",
-    "status": "processing",
-    "status_revision": 3,
-    "items": [
-      {
-        "item_id": "item_1",
-        "order": 1,
-        "scheme_id": "cry_detection",
-        "scheme_version": 1,
-        "name": "哭声检测",
-        "output_mode": "text_audio",
-        "status": "processing",
-        "recognition": {
-          "status": "succeeded",
-          "alarm": true,
-          "labels": [
-            "婴儿哭声"
-          ],
-          "text": "检测到持续的婴儿哭声，建议查看宝宝情况。",
-          "details": {
-            "uncertainty": "仅凭哭声无法可靠判断具体原因。"
-          },
-          "error": null
-        },
-        "audio": {
-          "status": "pending",
-          "url": null,
-          "format": null,
-          "error": null
-        },
-        "error": null
-      }
-    ],
-    "error": null,
-    "created_at": "2026-10-28T07:30:07Z"
-  }
-}
-```
-
-草案中 `code` 仍只表示传输/业务请求是否正常；失败任务可用 HTTP200 查询。保留 unknown 表示无法确认模型是否完成，不等同于 failed，也不允许自动重跑。只有请求的文字/音频阶段均完成时，子项才为 succeeded；部分可交付内容成功时为 partial_failed；未获得可交付结果时为 failed；尚有阶段待处理时为 processing。
-
-纯文字类型 audio.status=skipped；纯语音类型 recognition.status 可以显示处理阶段，但 alarm、labels、text、details 置 null，避免违背“仅返回语音”的选择。音频就绪使用 ready，返回相对 url 和 format；pending/failed/unknown 时不提供可用下载地址。
-
-MQTT 草案保持当前外层 type/channel/event_id/payload，payload.data 与草案 HTTP 查询对象完全相同；不另造一套 MQTT 结果字段，也不在 MQTT 中放音频 Base64、模型 Key 或访问令牌。配置变更通知继续只带设备标识和配置版本，设备再拉配置。
-
-兼容要求：results→items、result→recognition、speech→audio 都是破坏性字段变化，不能直接覆盖现有 v1。实施时应选择新协议版本，或先增加兼容字段并给消费者迁移期；Python 模拟器、用户 Web 和相关接入文档同步验证。没有实现与协商之前，不承诺新路由或 schema_version 字段。
-
-评审重点：是否接受上述结果层级、是否继续“通知直接带文字快照、语音主动下载”、是否需要设备 ACK 与重连自动补查。后两项可靠性能力当前并未实现，不能将 QoS1 宣传为设备必达。

@@ -26,7 +26,7 @@ AI识别由独立的 `recognition-server` 提供，与 AI 通话、VoIP、设备
 
 | multipart 字段 | 说明 |
 |---|---|
-| audio_format | 原始 PCM 必填 `pcm_s16le`；WAV 可填 `wav` 或省略以兼容既有设备 |
+| audio_format | 原始 PCM 必填 `pcm_s16le`；WAV 可填 `wav`，省略时按 WAV 校验 |
 | sample_rate | 原始 PCM 必填整数采样率（Hz），8000–48000；WAV 不填写 |
 | channels | 原始 PCM 必填 `1` 或 `2`；WAV 不填写 |
 | files | 单个音频文件；PCM 使用 `application/octet-stream`，WAV 使用 `audio/wav` |
@@ -85,6 +85,6 @@ speech.url 是本识别服务的相对路径，必须相对 recognition-srv 请�
 
 ## 接口版本与验收边界
 
-可调用字段以 [API Reference 当前协议](api-reference.md#recognition-config) 为准。该文档末尾的“待确认的结构整理方案”是评审草案，不应按 items/recognition/audio 等草案字段解析现有 v1 响应。
+请求字段、响应字段和通知示例见 [API Reference](api-reference.md#recognition-config)。单个任务的多类型结果使用 `results[]`，文字分析使用 `results[].result`，语音状态与下载信息使用 `results[].speech`；任务列表的 `data.items` 是多个任务的分页容器。
 
 验收分别覆盖仅文字、仅语音、文字＋语音；核对每个任务的 analysis/tts 调用记录、额度占用、重复请求不重复扣量、重复/乱序通知过滤，以及语音下载鉴权和设备实际播放。未知用量保留未知，不与0混淆。测试结果须区分模拟单元测试、真实 MySQL/Redis 集成、真实千问调用、MQTT 实际转发和设备播放，跳过的场景不视为验收通过。
