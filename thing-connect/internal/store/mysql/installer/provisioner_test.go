@@ -56,6 +56,43 @@ func TestRuntimeDMLTablesCoverSharedAccountConsumers(t *testing.T) {
 	}
 }
 
+func TestRuntimeDMLTablesAcceptInstallationCatalog(t *testing.T) {
+	bootstrap := installapp.New(installapp.Options{DeployRoot: t.TempDir()}, installapp.Dependencies{})
+	t.Cleanup(func() { _ = bootstrap.Shutdown(context.Background()) })
+	status, err := bootstrap.Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var optional []string
+	for _, service := range status.AvailableServices {
+		if service.Business && !service.Required {
+			optional = append(optional, service.Name)
+		}
+	}
+	if _, err := runtimeDMLTables(optional); err != nil {
+		t.Fatalf("installation catalog rejected: %v: %v", optional, err)
+	}
+	if _, err := runtimeDMLTables([]string{"unknown-server"}); !errors.Is(err, installapp.ErrInvalidInput) {
+		t.Fatalf("unknown service error = %v", err)
+	}
+}
+
+func TestRuntimePrivilegesCoverCurrentSchema(t *testing.T) {
+	shape, err := mysqlmigrate.SchemaShapeForVersions(mysqlmigrate.CurrentMigrationVersions(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tables, err := runtimeDMLTables(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for table := range shape {
+		if !slices.Contains(tables, table) && !slices.Contains(runtimeReadOnlyTables, table) {
+			t.Errorf("runtime privileges omitted migrated table %s", table)
+		}
+	}
+}
+
 func TestBaselineAdminVersionRequiresInstallationStateTable(t *testing.T) {
 	shape, err := mysqlmigrate.SchemaShapeForVersions(map[string]int{"core": 0, "admin": 1}, false)
 	if err != nil {

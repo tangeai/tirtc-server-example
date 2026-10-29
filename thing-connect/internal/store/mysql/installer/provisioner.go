@@ -32,6 +32,9 @@ var managedTableNames = []string{
 	"ai_device_role", "ai_user_resource", "call_contact", "cleanup_outbox",
 	"call_rooms", "call_room_codes", "call_assignments", "call_leases", "call_outbox",
 	"board_resources",
+	"device_profile", "ai_recognition_policy", "ai_recognition_request",
+	"recognition_scheme", "recognition_scheme_version", "recognition_device",
+	"recognition_task", "recognition_audio", "recognition_call", "recognition_outbox",
 	"admin_users", "admin_roles", "admin_user_roles", "admin_role_permissions",
 	"admin_menus", "admin_role_menus", "admin_sessions", "admin_mfa_factors",
 	"admin_mfa_recovery_codes", "admin_login_log", "admin_dict_types", "admin_dict_items",
@@ -46,9 +49,10 @@ var requiredRuntimeDMLTables = append([]string(nil), managedTableNames[1:]...)
 var runtimeReadOnlyTables = []string{"schema_migrations"}
 
 var optionalRuntimeServices = map[string]bool{
-	"voip-server": true,
-	"ai-server":   true,
-	"call-server": true,
+	"voip-server":        true,
+	"ai-server":          true,
+	"call-server":        true,
+	"recognition-server": true,
 }
 
 type Provisioner struct{}
