@@ -12,7 +12,7 @@ async function connectWithProfiles(profiles) {
   const calls = {};
   const elements = new Map();
   const output = () => ({ attach() {}, detach() {} });
-  const context = {
+  const context = { WebI18n: require("../../tests/helpers/web-i18n.cjs")(),
     window: { MiniProgramPage: { token: 'test-token' }, addEventListener() {} },
     document: {
       getElementById(id) {

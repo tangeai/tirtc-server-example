@@ -156,6 +156,18 @@ HTTPS 接入使用 HTTPS 入口，返回 HTTPS 业务服务地址和 MQTT TLS �
 > `code`、HTTP 状态和 JSON 字段的前提下优化。完整规则见
 > [API 错误响应规范](error-response-policy.md)。
 
+### Web 页面语言初始化
+
+用户页面在加载时读取所属服务的语言初始化脚本，无需鉴权，响应为 `text/javascript; charset=utf-8` 并使用 `Cache-Control: no-store`：
+
+| 服务 | 脚本路径 | 页面范围 |
+|---|---|---|
+| user-server | `/v1/config/language.js` | 官网、登录注册、设备、联系人、播放及识别设置 |
+| ai-server | `/v1/ai/config/language.js` | AI 角色与资源配置 |
+| call-server | `/v1/call/config/language.js` | 多人对讲 |
+
+脚本包含本服务的有效 `default`、`allow_switch`、`revision` 和页面翻译字典，不包含服务凭证；`revision=0` 表示使用本服务 YAML 回退配置。页面使用共享的语言运行时代码，各服务独立提供配置及字典。脚本是 Web 页面的初始化资源，业务 API 仍保持原来的数值业务码和中文 `msg`；英文 Web 按业务码和操作场景展示本地化提示，不依赖中文文本判断业务。
+
 ### 鉴权与业务错误
 
 JWT 缺失、无效、过期或缺少必要 claim 时返回 HTTP 401 + `code=401`。JWT

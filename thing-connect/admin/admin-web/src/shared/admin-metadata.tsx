@@ -23,6 +23,7 @@ export const dependencyNames: Record<string, string> = {
   mqtt: 'MQTT 消息服务',
 };
 export const configGroupNames: Record<string, string> = {
+  web: '网站设置',
   device: '设备策略',
   mqtt: 'MQTT 通信',
   email: '邮件服务',
@@ -97,6 +98,7 @@ export const voipInvalidReasonNames: Record<string, string> = {
   wechat_errcode_9: '微信返回授权失效，请用户重新授权',
 };
 export const configNames: Record<string, string> = {
+  'web.language': '站点语言',
   'device.code_policy': '设备验证码策略',
   'device.token_policy': '设备登录有效期',
   'mqtt.ack_policy': 'MQTT 确认策略',

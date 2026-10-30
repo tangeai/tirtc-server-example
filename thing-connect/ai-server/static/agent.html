@@ -2,10 +2,11 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
+  <script src="/v1/ai/config/language.js"></script>
   <meta name="referrer" content="no-referrer">
-  <script src="/static/js/mini-program-page.js"></script>
+  <script src="/static/js/mini-program-page.js?v=b30453999596"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>智能体配置 — 探鸽 · 小钛</title>
+  <title data-ui-i18n="智能体配置 — 探鸽 · 小钛">智能体配置 — 探鸽 · 小钛</title>
   <link rel="stylesheet" href="/static/css/tailwind.css">
   <style>
     .thin-scroll::-webkit-scrollbar { width: 4px; }
@@ -14,9 +15,11 @@
     .thin-scroll::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
     .mini-program header > div:first-child > a { display: none; }
     .mini-program #editor-form { padding-bottom: calc(32px + env(safe-area-inset-bottom)); }
+    html[lang="en"] #voice-lang-filter { flex-wrap: wrap; }
+    html[lang="en"] #voice-lang-filter button { white-space: nowrap; }
     .mini-program input, .mini-program textarea, .mini-program select { font-size: 16px; }
   </style>
-  <script src="/static/user-shell.js?v=a3b29baae127"></script>
+  <script src="/static/user-shell.js?v=a0238275b6ec"></script>
 </head>
 <body class="bg-gray-50 min-h-screen font-sans">
 
@@ -25,20 +28,20 @@
   <div class="flex items-center gap-2 sm:gap-3">
     <a href="/devices" class="flex items-center gap-1 text-sm text-gray-400 hover:text-gray-600 transition-colors max-sm:text-xs">
       <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
-      <span class="max-sm:hidden">返回</span>
+      <span class="max-sm:hidden" data-ui-i18n="返回">返回</span>
     </a>
     <span class="w-px h-5 bg-gray-200 max-sm:hidden"></span>
     <div class="flex items-center gap-1.5 sm:gap-2">
-      <span class="text-xs text-gray-400">设备</span>
+      <span class="text-xs text-gray-400" data-ui-i18n="设备">设备</span>
       <span class="font-mono text-xs sm:text-sm font-medium text-gray-900 truncate max-w-[120px] sm:max-w-none" id="header-device-id">—</span>
     </div>
   </div>
   <div class="flex items-center gap-1.5 sm:gap-2" id="header-current-role">
     <span class="w-[6px] h-[6px] sm:w-[7px] sm:h-[7px] rounded-full bg-emerald-500"></span>
-    <span class="text-[11px] sm:text-xs text-gray-400 max-sm:hidden">当前角色</span>
-    <span class="text-xs sm:text-sm font-medium text-emerald-600 truncate max-w-[80px] sm:max-w-none" id="header-role-name">未绑定</span>
+    <span class="text-[11px] sm:text-xs text-gray-400 max-sm:hidden" data-ui-i18n="当前角色">当前角色</span>
+    <span class="text-xs sm:text-sm font-medium text-emerald-600 truncate max-w-[80px] sm:max-w-none" id="header-role-name" data-ui-i18n="未绑定">未绑定</span>
   </div>
-</header>
+<button type="button" data-language-toggle class="text-xs text-gray-500 px-2 py-1.5 border border-gray-200 rounded-lg shrink-0">English</button></header>
 
 <!-- MAIN -->
 <main id="main-layout" class="flex h-[calc(100vh-56px)] max-sm:h-[calc(100vh-50px)] max-sm:flex-col overflow-hidden">
@@ -50,7 +53,7 @@
       <div class="relative">
         <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
         <input type="text" id="search-input" placeholder="搜索智能体…" oninput="filterAgents()"
-          class="w-full bg-gray-50 border border-gray-200 rounded-lg pl-9 pr-3 py-2 sm:py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400">
+          class="w-full bg-gray-50 border border-gray-200 rounded-lg pl-9 pr-3 py-2 sm:py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400" data-ui-attrs="{&quot;placeholder&quot;:&quot;搜索智能体…&quot;}">
       </div>
     </div>
 
@@ -64,7 +67,7 @@
       <button onclick="newAgent()"
         class="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg border border-dashed border-emerald-300 text-sm text-emerald-600 hover:bg-emerald-50 hover:border-emerald-400 transition-all">
         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        新建智能体
+        <span data-ui-i18n="新建智能体">新建智能体</span>
       </button>
     </div>
   </aside>
@@ -76,7 +79,7 @@
     <div class="hidden max-sm:flex items-center gap-1.5 px-3.5 py-2.5 border-b border-gray-100 bg-white sticky top-0 z-10" id="mobile-back">
       <button onclick="showList()" class="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700">
         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
-        返回列表
+        <span data-ui-i18n="返回列表">返回列表</span>
       </button>
     </div>
 
@@ -87,78 +90,76 @@
           <circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
         </svg>
       </div>
-      <p class="text-base font-semibold text-gray-800 mb-1.5">选择或新建智能体</p>
-      <p class="text-sm text-gray-400 max-w-[280px] leading-relaxed">从左侧列表选择一个智能体进行编辑，或点击"新建智能体"创建角色</p>
+      <p class="text-base font-semibold text-gray-800 mb-1.5" data-ui-i18n="选择或新建智能体">选择或新建智能体</p>
+      <p class="text-sm text-gray-400 max-w-[280px] leading-relaxed" data-ui-i18n="从左侧列表选择一个智能体进行编辑，或点击&quot;新建智能体&quot;创建角色">从左侧列表选择一个智能体进行编辑，或点击"新建智能体"创建角色</p>
     </div>
 
     <!-- Editor form -->
     <div id="editor-form" class="hidden max-w-[640px] mx-auto px-3 sm:px-8 py-4 sm:py-8">
       <!-- Default role banner -->
-      <div id="default-banner" class="hidden mb-4 px-4 py-2.5 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
-        ⚠️ 这是系统默认角色，不可编辑。如需自定义，请新建角色后绑定到设备。
-      </div>
+      <div id="default-banner" class="hidden mb-4 px-4 py-2.5 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700" data-ui-i18n="⚠️ 这是系统默认角色，不可编辑。如需自定义，请新建角色后绑定到设备。">⚠️ 这是系统默认角色，不可编辑。如需自定义，请新建角色后绑定到设备。</div>
       <div class="bg-white border border-gray-200 rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-sm">
         <!-- Avatar -->
         <div class="mb-5 sm:mb-6">
-          <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1.5 sm:mb-2 tracking-wide">头像</label>
+          <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1.5 sm:mb-2 tracking-wide" data-ui-i18n="头像">头像</label>
           <div class="flex items-center gap-3 sm:gap-4">
             <div id="avatar-preview" class="w-14 h-14 sm:w-[72px] sm:h-[72px] rounded-xl sm:rounded-2xl bg-gradient-to-br from-emerald-100 to-emerald-200 border border-emerald-300 flex items-center justify-center text-2xl sm:text-3xl overflow-hidden flex-shrink-0">
               🤖
             </div>
             <div class="flex flex-col gap-1.5">
-              <span class="text-sm text-gray-500">角色头像</span>
+              <span class="text-sm text-gray-500" data-ui-i18n="角色头像">角色头像</span>
             </div>
           </div>
         </div>
 
         <!-- Name -->
         <div class="mb-4 sm:mb-5">
-          <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1 sm:mb-1.5 tracking-wide">智能体名称 <span class="text-red-400">*</span></label>
+          <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1 sm:mb-1.5 tracking-wide"><span data-ui-i18n="智能体名称">智能体名称</span> <span class="text-red-400">*</span></label>
           <input type="text" id="field-name" placeholder="给智能体起个名字"
-            class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 sm:px-3.5 py-2 sm:py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400">
+            class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 sm:px-3.5 py-2 sm:py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400" data-ui-attrs="{&quot;placeholder&quot;:&quot;给智能体起个名字&quot;}">
         </div>
 
         <!-- Description -->
         <div class="mb-4 sm:mb-5">
-          <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1 sm:mb-1.5 tracking-wide">智能体描述</label>
+          <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1 sm:mb-1.5 tracking-wide" data-ui-i18n="智能体描述">智能体描述</label>
           <input type="text" id="field-desc" placeholder="一句话描述智能体的特点和用途"
-            class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 sm:px-3.5 py-2 sm:py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400">
+            class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 sm:px-3.5 py-2 sm:py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400" data-ui-attrs="{&quot;placeholder&quot;:&quot;一句话描述智能体的特点和用途&quot;}">
         </div>
 
         <!-- System Prompt -->
         <div class="mb-4 sm:mb-5">
-          <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1 sm:mb-1.5 tracking-wide">角色设定</label>
+          <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1 sm:mb-1.5 tracking-wide" data-ui-i18n="角色设定">角色设定</label>
           <textarea id="field-prompt" rows="3" sm:rows="4" placeholder="设定智能体的人设、语气、知识范围和行为规则…"
-            class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 sm:px-3.5 py-2 sm:py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400 resize-none"></textarea>
+            class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 sm:px-3.5 py-2 sm:py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400 resize-none" data-ui-attrs="{&quot;placeholder&quot;:&quot;设定智能体的人设、语气、知识范围和行为规则…&quot;}"></textarea>
         </div>
 
         <!-- Welcome Text -->
         <div class="mb-4 sm:mb-5">
-          <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1 sm:mb-1.5 tracking-wide">开场白</label>
+          <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1 sm:mb-1.5 tracking-wide" data-ui-i18n="开场白">开场白</label>
           <input type="text" id="field-welcome" placeholder="用户连接时智能体说的第一句话"
-            class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 sm:px-3.5 py-2 sm:py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400">
+            class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 sm:px-3.5 py-2 sm:py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400" data-ui-attrs="{&quot;placeholder&quot;:&quot;用户连接时智能体说的第一句话&quot;}">
         </div>
 
         <!-- Voice Selector -->
         <div class="mb-4 sm:mb-5">
-          <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1 sm:mb-1.5 tracking-wide">语音</label>
+          <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1 sm:mb-1.5 tracking-wide" data-ui-i18n="语音">语音</label>
           <!-- Language filter -->
           <div class="flex gap-1.5 mb-2" id="voice-lang-filter">
-            <button onclick="filterVoiceLang('')" data-lang="" class="px-2.5 py-1 text-[11px] rounded-full border bg-emerald-50 border-emerald-300 text-emerald-700 font-medium transition-colors">全部</button>
-            <button onclick="filterVoiceLang('zh')" data-lang="zh" class="px-2.5 py-1 text-[11px] rounded-full border bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100 transition-colors">中文</button>
-            <button onclick="filterVoiceLang('en')" data-lang="en" class="px-2.5 py-1 text-[11px] rounded-full border bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100 transition-colors">英文（试听同中文）</button>
-            <button onclick="filterVoiceLang('ja')" data-lang="ja" class="px-2.5 py-1 text-[11px] rounded-full border bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100 transition-colors">日文</button>
-            <button onclick="filterVoiceLang('ko')" data-lang="ko" class="px-2.5 py-1 text-[11px] rounded-full border bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100 transition-colors">韩文</button>
+            <button onclick="filterVoiceLang('')" data-lang="" class="px-2.5 py-1 text-[11px] rounded-full border bg-emerald-50 border-emerald-300 text-emerald-700 font-medium transition-colors" data-ui-i18n="全部">全部</button>
+            <button onclick="filterVoiceLang('zh')" data-lang="zh" class="px-2.5 py-1 text-[11px] rounded-full border bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100 transition-colors" data-ui-i18n="中文">中文</button>
+            <button onclick="filterVoiceLang('en')" data-lang="en" title="英文试听使用中文示例" data-ui-attrs="{&quot;title&quot;:&quot;英文试听使用中文示例&quot;}" class="px-2.5 py-1 text-[11px] rounded-full border bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100 transition-colors" data-ui-i18n="英文（试听同中文）">英文（试听同中文）</button>
+            <button onclick="filterVoiceLang('ja')" data-lang="ja" class="px-2.5 py-1 text-[11px] rounded-full border bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100 transition-colors" data-ui-i18n="日文">日文</button>
+            <button onclick="filterVoiceLang('ko')" data-lang="ko" class="px-2.5 py-1 text-[11px] rounded-full border bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100 transition-colors" data-ui-i18n="韩文">韩文</button>
           </div>
           <div class="flex gap-2">
             <select id="field-voice" onchange="onVoiceChange()"
               class="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-3 sm:px-3.5 py-2 sm:py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 cursor-pointer transition-all appearance-none"
               style="background-image: url('data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2712%27 height=%2712%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%239CA3AF%27 stroke-width=%272%27%3E%3Cpath d=%27M6 9l6 6 6-6%27/%3E%3C/svg%3E'); background-repeat: no-repeat; background-position: right 12px center;">
-              <option value="">-请选择-</option>
+              <option value="" data-ui-i18n="-请选择-">-请选择-</option>
             </select>
             <button id="btn-voice-play" onclick="toggleVoicePreview()"
               class="flex-shrink-0 w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-lg border border-gray-200 text-gray-400 bg-gray-50 hover:bg-emerald-50 hover:border-emerald-300 hover:text-emerald-500 transition-all hidden"
-              title="试听">
+              title="试听" data-ui-attrs="{&quot;title&quot;:&quot;试听&quot;}">
               <svg id="icon-voice-play" class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
               <svg id="icon-voice-pause" class="w-4 h-4 hidden" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
             </button>
@@ -168,7 +169,7 @@
           <div class="grid grid-cols-2 gap-x-4 sm:gap-x-6 gap-y-2 mt-3">
             <div>
               <div class="flex items-center justify-between mb-0.5">
-                <label class="text-[11px] font-medium text-gray-500">语速</label>
+                <label class="text-[11px] font-medium text-gray-500" data-ui-i18n="语速">语速</label>
                 <span class="text-[11px] text-gray-400 tabular-nums" id="label-rate">1.0</span>
               </div>
               <input type="range" id="field-rate" min="0.5" max="2.0" step="0.1" value="1.0"
@@ -177,7 +178,7 @@
             </div>
             <div>
               <div class="flex items-center justify-between mb-0.5">
-                <label class="text-[11px] font-medium text-gray-500">音调</label>
+                <label class="text-[11px] font-medium text-gray-500" data-ui-i18n="音调">音调</label>
                 <span class="text-[11px] text-gray-400 tabular-nums" id="label-pitch">1.0</span>
               </div>
               <input type="range" id="field-pitch" min="0.5" max="2.0" step="0.1" value="1.0"
@@ -189,11 +190,11 @@
 
         <!-- Service Config -->
         <div class="mb-4 sm:mb-5">
-          <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1 sm:mb-1.5 tracking-wide">模型</label>
+          <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1 sm:mb-1.5 tracking-wide" data-ui-i18n="模型">模型</label>
           <select id="field-model"
             class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 sm:px-3.5 py-2 sm:py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 cursor-pointer transition-all appearance-none"
             style="background-image: url('data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2712%27 height=%2712%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%239CA3AF%27 stroke-width=%272%27%3E%3Cpath d=%27M6 9l6 6 6-6%27/%3E%3C/svg%3E'); background-repeat: no-repeat; background-position: right 12px center;">
-            <option value="">沿用基础配置</option>
+            <option value="" data-ui-i18n="沿用基础配置">沿用基础配置</option>
             <option value="qwen3.5-flash">qwen3.5-flash</option>
             <option value="qwen3.7-plus">qwen3.7-plus</option>
           </select>
@@ -201,25 +202,23 @@
 
         <!-- Knowledge Base -->
         <div class="mb-4 sm:mb-5">
-          <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1 sm:mb-1.5 tracking-wide">知识库</label>
+          <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1 sm:mb-1.5 tracking-wide" data-ui-i18n="知识库">知识库</label>
           <div class="flex gap-2 mb-2">
             <select id="field-knowledge-index" onchange="onKnowledgeIndexChange()"
               class="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 sm:py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 cursor-pointer transition-all appearance-none"
               style="background-image: url('data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2712%27 height=%2712%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%239CA3AF%27 stroke-width=%272%27%3E%3Cpath d=%27M6 9l6 6 6-6%27/%3E%3C/svg%3E'); background-repeat: no-repeat; background-position: right 12px center;">
-              <option value="">无</option>
+              <option value="" data-ui-i18n="无">无</option>
             </select>
             <button onclick="editKnowledgeIndex()" id="btn-knowledge-edit" disabled title="编辑知识库"
-              class="flex-shrink-0 w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-lg border border-gray-200 text-gray-400 bg-gray-50 hover:bg-emerald-50 hover:border-emerald-300 hover:text-emerald-500 transition-all opacity-40 cursor-not-allowed">
+              class="flex-shrink-0 w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-lg border border-gray-200 text-gray-400 bg-gray-50 hover:bg-emerald-50 hover:border-emerald-300 hover:text-emerald-500 transition-all opacity-40 cursor-not-allowed" data-ui-attrs="{&quot;title&quot;:&quot;编辑知识库&quot;}">
               <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
             </button>
             <button onclick="deleteKnowledgeIndexBtn()" id="btn-knowledge-delete" disabled title="删除知识库"
-              class="flex-shrink-0 w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-lg border border-gray-200 text-gray-400 bg-gray-50 hover:bg-red-50 hover:border-red-300 hover:text-red-500 transition-all opacity-40 cursor-not-allowed">
+              class="flex-shrink-0 w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-lg border border-gray-200 text-gray-400 bg-gray-50 hover:bg-red-50 hover:border-red-300 hover:text-red-500 transition-all opacity-40 cursor-not-allowed" data-ui-attrs="{&quot;title&quot;:&quot;删除知识库&quot;}">
               <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
             </button>
             <button onclick="openKnowledgeModalForCreate()" id="btn-knowledge-new"
-              class="flex-shrink-0 px-3 py-2 text-[11px] font-medium rounded-lg border border-dashed border-gray-300 text-gray-500 hover:border-emerald-300 hover:text-emerald-600 transition-colors">
-              + 新建
-            </button>
+              class="flex-shrink-0 px-3 py-2 text-[11px] font-medium rounded-lg border border-dashed border-gray-300 text-gray-500 hover:border-emerald-300 hover:text-emerald-600 transition-colors" data-ui-i18n="+ 新建">+ 新建</button>
           </div>
           <!-- File upload area (shown when index selected) -->
           <div id="knowledge-files-area" class="hidden">
@@ -227,9 +226,7 @@
               <input type="file" id="knowledge-file-input" accept=".txt,.pdf,.doc,.docx,.md,.json"
                 class="flex-1 text-[11px] text-gray-500 file:mr-2 file:py-1 file:px-2 file:rounded-md file:border-0 file:text-[11px] file:font-medium file:bg-emerald-50 file:text-emerald-600 hover:file:bg-emerald-100">
               <button onclick="uploadKnowledgeFile()"
-                class="flex-shrink-0 px-3 py-1.5 text-[11px] font-medium rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 transition-colors">
-                上传
-              </button>
+                class="flex-shrink-0 px-3 py-1.5 text-[11px] font-medium rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 transition-colors" data-ui-i18n="上传">上传</button>
             </div>
             <div id="knowledge-files-list" class="max-h-[120px] overflow-y-auto thin-scroll space-y-1">
               <!-- JS populated -->
@@ -242,7 +239,7 @@
 
         <!-- 长期记忆 -->
         <div class="flex items-center gap-2 mb-4 sm:mb-5">
-          <span class="text-[11px] sm:text-xs font-medium text-gray-500">长期记忆</span>
+          <span class="text-[11px] sm:text-xs font-medium text-gray-500" data-ui-i18n="长期记忆">长期记忆</span>
           <label class="relative w-9 h-5 rounded-full bg-gray-200 transition-colors has-[:checked]:bg-emerald-500 cursor-pointer">
             <input type="checkbox" id="field-memory" class="sr-only peer">
             <div class="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform peer-checked:translate-x-4"></div>
@@ -252,13 +249,13 @@
         <!-- MCP 工具 & 设备插件 -->
         <div class="grid grid-cols-2 gap-x-6 sm:gap-x-8 gap-y-4 sm:gap-y-5">
           <div class="flex flex-col gap-1.5">
-            <span class="text-[11px] sm:text-xs font-medium text-gray-500">MCP 工具</span>
+            <span class="text-[11px] sm:text-xs font-medium text-gray-500" data-ui-i18n="MCP 工具">MCP 工具</span>
             <div id="mcp-tools-list" class="flex flex-col gap-1.5">
               <!-- JS populated -->
             </div>
           </div>
           <div class="flex flex-col gap-1.5">
-            <span class="text-[11px] sm:text-xs font-medium text-gray-500">设备插件</span>
+            <span class="text-[11px] sm:text-xs font-medium text-gray-500" data-ui-i18n="设备插件">设备插件</span>
             <div id="plugin-tools-list" class="flex flex-col gap-1.5">
               <!-- JS populated -->
             </div>
@@ -268,20 +265,14 @@
         <!-- Action buttons -->
         <div class="flex gap-3 mt-6 sm:mt-8 pt-4 sm:pt-6 border-t border-gray-100">
           <button onclick="saveAgent()" id="btn-save"
-            class="flex-1 py-2.5 rounded-lg bg-emerald-500 text-white text-sm font-bold hover:bg-emerald-600 active:scale-[0.99] transition-all tracking-wide">
-            保存
-          </button>
+            class="flex-1 py-2.5 rounded-lg bg-emerald-500 text-white text-sm font-bold hover:bg-emerald-600 active:scale-[0.99] transition-all tracking-wide" data-ui-i18n="保存">保存</button>
           <button onclick="deleteAgent()" id="btn-delete"
-            class="px-4 sm:px-5 py-2.5 rounded-lg border border-red-200 text-red-500 text-sm font-medium hover:bg-red-50 hover:border-red-300 active:scale-[0.99] transition-all">
-            删除
-          </button>
+            class="px-4 sm:px-5 py-2.5 rounded-lg border border-red-200 text-red-500 text-sm font-medium hover:bg-red-50 hover:border-red-300 active:scale-[0.99] transition-all" data-ui-i18n="删除">删除</button>
         </div>
 
         <!-- Bind to device -->
         <button onclick="bindToDevice()" id="btn-bind"
-          class="w-full mt-3 sm:mt-4 py-2.5 rounded-lg border border-emerald-300 text-emerald-600 text-sm font-medium hover:bg-emerald-50 hover:border-emerald-400 active:scale-[0.99] transition-all">
-          绑定到此设备
-        </button>
+          class="w-full mt-3 sm:mt-4 py-2.5 rounded-lg border border-emerald-300 text-emerald-600 text-sm font-medium hover:bg-emerald-50 hover:border-emerald-400 active:scale-[0.99] transition-all" data-ui-i18n="绑定到此设备">绑定到此设备</button>
       </div>
     </div>
   </section>
@@ -291,38 +282,38 @@
 <div id="mcp-tool-modal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-[200] items-center justify-center p-4">
   <div class="bg-white rounded-2xl w-full max-w-[560px] max-sm:max-w-[calc(100vw-32px)] max-h-[90vh] overflow-y-auto thin-scroll shadow-xl">
     <div class="p-5 sm:p-6">
-      <h2 class="text-base sm:text-lg font-bold text-gray-900 mb-4" id="mcp-tool-modal-title">新增 MCP 工具</h2>
+      <h2 class="text-base sm:text-lg font-bold text-gray-900 mb-4" id="mcp-tool-modal-title" data-ui-i18n="新增 MCP 工具">新增 MCP 工具</h2>
 
       <div class="mb-4">
-        <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1.5">工具名称 <span class="text-red-400">*</span></label>
+        <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1.5"><span data-ui-i18n="工具名称">工具名称</span> <span class="text-red-400">*</span></label>
         <input type="text" id="mcp-modal-name" placeholder="请输入工具名称，确保名称含义清晰"
-          class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400">
+          class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400" data-ui-attrs="{&quot;placeholder&quot;:&quot;请输入工具名称，确保名称含义清晰&quot;}">
       </div>
 
       <div class="mb-4">
-        <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1.5">描述</label>
+        <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1.5" data-ui-i18n="描述">描述</label>
         <textarea id="mcp-modal-desc" rows="3" placeholder="请描述工具的主要功能和使用场景"
-          class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400 resize-none"></textarea>
+          class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400 resize-none" data-ui-attrs="{&quot;placeholder&quot;:&quot;请描述工具的主要功能和使用场景&quot;}"></textarea>
       </div>
 
       <div class="mb-4">
-        <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1.5">MCP 服务 URL <span class="text-red-400">*</span></label>
+        <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1.5"><span data-ui-i18n="MCP 服务 URL">MCP 服务 URL</span> <span class="text-red-400">*</span></label>
         <input type="text" id="mcp-modal-url" placeholder="https://..."
           class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400">
       </div>
 
       <div class="grid grid-cols-2 gap-3 mb-4">
         <div>
-          <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1.5">鉴权方式</label>
+          <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1.5" data-ui-i18n="鉴权方式">鉴权方式</label>
           <select id="mcp-modal-auth-type" onchange="onMcpAuthTypeChange()"
             class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 cursor-pointer transition-all appearance-none"
             style="background-image: url('data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2712%27 height=%2712%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%239CA3AF%27 stroke-width=%272%27%3E%3Cpath d=%27M6 9l6 6 6-6%27/%3E%3C/svg%3E'); background-repeat: no-repeat; background-position: right 12px center;">
-            <option value="">无</option>
+            <option value="" data-ui-i18n="无">无</option>
             <option value="bearer">Bearer Token</option>
           </select>
         </div>
         <label class="flex items-center justify-between cursor-pointer self-end pb-2.5">
-          <span class="text-[11px] sm:text-xs font-medium text-gray-500">启用</span>
+          <span class="text-[11px] sm:text-xs font-medium text-gray-500" data-ui-i18n="启用">启用</span>
           <div class="relative w-9 h-5 rounded-full bg-gray-200 transition-colors has-[:checked]:bg-emerald-500" onclick="this.querySelector('input').click()">
             <input type="checkbox" id="mcp-modal-enabled" class="sr-only peer" checked>
             <div class="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform peer-checked:translate-x-4"></div>
@@ -333,12 +324,12 @@
       <div id="mcp-modal-bearer-field" class="mb-4 hidden">
         <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1.5">Bearer Token</label>
         <input type="text" id="mcp-modal-bearer-token" placeholder="请输入 Bearer Token"
-          class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400">
+          class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400" data-ui-attrs="{&quot;placeholder&quot;:&quot;请输入 Bearer Token&quot;}">
       </div>
 
       <div class="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
-        <button onclick="closeMcpToolModal()" class="px-4 py-2.5 text-sm font-medium text-gray-600 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 transition-colors">取消</button>
-        <button onclick="saveMcpToolModal()" class="px-5 py-2.5 text-sm font-bold text-white bg-emerald-500 rounded-lg hover:bg-emerald-600 transition-colors" id="mcp-modal-submit-btn">确认创建</button>
+        <button onclick="closeMcpToolModal()" class="px-4 py-2.5 text-sm font-medium text-gray-600 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 transition-colors" data-ui-i18n="取消">取消</button>
+        <button onclick="saveMcpToolModal()" class="px-5 py-2.5 text-sm font-bold text-white bg-emerald-500 rounded-lg hover:bg-emerald-600 transition-colors" id="mcp-modal-submit-btn" data-ui-i18n="确认创建">确认创建</button>
       </div>
     </div>
   </div>
@@ -348,41 +339,41 @@
 <div id="plugin-modal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-[200] items-center justify-center p-4">
   <div class="bg-white rounded-2xl w-full max-w-[720px] max-sm:max-w-[calc(100vw-32px)] max-h-[90vh] overflow-y-auto thin-scroll shadow-xl">
     <div class="p-5 sm:p-6">
-      <h2 class="text-base sm:text-lg font-bold text-gray-900 mb-4" id="plugin-modal-title">新增设备端插件</h2>
+      <h2 class="text-base sm:text-lg font-bold text-gray-900 mb-4" id="plugin-modal-title" data-ui-i18n="新增设备端插件">新增设备端插件</h2>
 
       <div class="mb-4">
-        <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1.5">插件名称 <span class="text-red-400">*</span></label>
+        <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1.5"><span data-ui-i18n="插件名称">插件名称</span> <span class="text-red-400">*</span></label>
         <input type="text" id="plugin-modal-name" placeholder="请输入工具名称，确保名称含义清晰"
-          class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400">
+          class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400" data-ui-attrs="{&quot;placeholder&quot;:&quot;请输入工具名称，确保名称含义清晰&quot;}">
       </div>
 
       <div class="mb-4">
-        <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1.5">描述</label>
+        <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1.5" data-ui-i18n="描述">描述</label>
         <textarea id="plugin-modal-desc" rows="3" placeholder="请描述工具的主要功能和使用场景，确保内容含义清晰且符合平台规范"
-          class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400 resize-none"></textarea>
+          class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400 resize-none" data-ui-attrs="{&quot;placeholder&quot;:&quot;请描述工具的主要功能和使用场景，确保内容含义清晰且符合平台规范&quot;}"></textarea>
       </div>
 
       <div class="mb-5">
-        <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1.5">功能标识（Action） <span class="text-red-400">*</span></label>
+        <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1.5"><span data-ui-i18n="功能标识（Action）">功能标识（Action）</span> <span class="text-red-400">*</span></label>
         <input type="text" id="plugin-modal-action" placeholder="请输入工具函数名"
-          class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400">
+          class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400" data-ui-attrs="{&quot;placeholder&quot;:&quot;请输入工具函数名&quot;}">
       </div>
 
       <!-- Input params -->
       <div class="mb-5">
         <div class="flex items-center justify-between mb-2">
-          <span class="text-sm font-semibold text-gray-800">输入参数</span>
-          <button onclick="addParamRow('input')" class="text-[11px] font-medium text-emerald-600 hover:text-emerald-700">+ 添加</button>
+          <span class="text-sm font-semibold text-gray-800" data-ui-i18n="输入参数">输入参数</span>
+          <button onclick="addParamRow('input')" class="text-[11px] font-medium text-emerald-600 hover:text-emerald-700" data-ui-i18n="+ 添加">+ 添加</button>
         </div>
         <div class="overflow-x-auto border border-gray-200 rounded-lg">
           <table class="w-full text-[11px] min-w-[560px]">
             <thead>
               <tr class="bg-gray-50 text-gray-500">
-                <th class="text-left font-medium px-2 py-2 w-[22%]">参数名</th>
-                <th class="text-left font-medium px-2 py-2 w-[14%]">类型</th>
-                <th class="text-left font-medium px-2 py-2 w-[28%]">描述</th>
-                <th class="text-left font-medium px-2 py-2 w-[18%]">默认值</th>
-                <th class="text-center font-medium px-2 py-2 w-[8%]">必填</th>
+                <th class="text-left font-medium px-2 py-2 w-[22%]" data-ui-i18n="参数名">参数名</th>
+                <th class="text-left font-medium px-2 py-2 w-[14%]" data-ui-i18n="类型">类型</th>
+                <th class="text-left font-medium px-2 py-2 w-[28%]" data-ui-i18n="描述">描述</th>
+                <th class="text-left font-medium px-2 py-2 w-[18%]" data-ui-i18n="默认值">默认值</th>
+                <th class="text-center font-medium px-2 py-2 w-[8%]" data-ui-i18n="必填">必填</th>
                 <th class="w-[6%]"></th>
               </tr>
             </thead>
@@ -394,17 +385,17 @@
       <!-- Return params -->
       <div class="mb-2">
         <div class="flex items-center justify-between mb-2">
-          <span class="text-sm font-semibold text-gray-800">返回参数</span>
-          <button onclick="addParamRow('return')" class="text-[11px] font-medium text-emerald-600 hover:text-emerald-700">+ 添加</button>
+          <span class="text-sm font-semibold text-gray-800" data-ui-i18n="返回参数">返回参数</span>
+          <button onclick="addParamRow('return')" class="text-[11px] font-medium text-emerald-600 hover:text-emerald-700" data-ui-i18n="+ 添加">+ 添加</button>
         </div>
         <div class="overflow-x-auto border border-gray-200 rounded-lg">
           <table class="w-full text-[11px] min-w-[480px]">
             <thead>
               <tr class="bg-gray-50 text-gray-500">
-                <th class="text-left font-medium px-2 py-2 w-[24%]">参数名</th>
-                <th class="text-left font-medium px-2 py-2 w-[16%]">类型</th>
-                <th class="text-left font-medium px-2 py-2 w-[38%]">描述</th>
-                <th class="text-left font-medium px-2 py-2 w-[18%]">默认值</th>
+                <th class="text-left font-medium px-2 py-2 w-[24%]" data-ui-i18n="参数名">参数名</th>
+                <th class="text-left font-medium px-2 py-2 w-[16%]" data-ui-i18n="类型">类型</th>
+                <th class="text-left font-medium px-2 py-2 w-[38%]" data-ui-i18n="描述">描述</th>
+                <th class="text-left font-medium px-2 py-2 w-[18%]" data-ui-i18n="默认值">默认值</th>
                 <th class="w-[4%]"></th>
               </tr>
             </thead>
@@ -414,8 +405,8 @@
       </div>
 
       <div class="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
-        <button onclick="closePluginModal()" class="px-4 py-2.5 text-sm font-medium text-gray-600 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 transition-colors">取消</button>
-        <button onclick="savePluginModal()" class="px-5 py-2.5 text-sm font-bold text-white bg-emerald-500 rounded-lg hover:bg-emerald-600 transition-colors" id="plugin-modal-submit-btn">确认创建</button>
+        <button onclick="closePluginModal()" class="px-4 py-2.5 text-sm font-medium text-gray-600 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 transition-colors" data-ui-i18n="取消">取消</button>
+        <button onclick="savePluginModal()" class="px-5 py-2.5 text-sm font-bold text-white bg-emerald-500 rounded-lg hover:bg-emerald-600 transition-colors" id="plugin-modal-submit-btn" data-ui-i18n="确认创建">确认创建</button>
       </div>
     </div>
   </div>
@@ -425,32 +416,32 @@
 <div id="knowledge-modal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-[200] items-center justify-center p-4">
   <div class="bg-white rounded-2xl w-full max-w-[520px] max-sm:max-w-[calc(100vw-32px)] max-h-[90vh] overflow-y-auto thin-scroll shadow-xl">
     <div class="p-5 sm:p-6">
-      <h2 class="text-base sm:text-lg font-bold text-gray-900 mb-4" id="knowledge-modal-title">创建知识库</h2>
+      <h2 class="text-base sm:text-lg font-bold text-gray-900 mb-4" id="knowledge-modal-title" data-ui-i18n="创建知识库">创建知识库</h2>
 
       <div class="mb-4">
-        <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1.5">知识库名称 <span class="text-red-400">*</span></label>
+        <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1.5"><span data-ui-i18n="知识库名称">知识库名称</span> <span class="text-red-400">*</span></label>
         <input type="text" id="knowledge-modal-name" placeholder="输入知识库名称"
-          class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400">
+          class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400" data-ui-attrs="{&quot;placeholder&quot;:&quot;输入知识库名称&quot;}">
       </div>
 
       <div class="mb-4">
-        <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1.5">描述 <span class="text-red-400">*</span></label>
+        <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1.5"><span data-ui-i18n="描述">描述</span> <span class="text-red-400">*</span></label>
         <textarea id="knowledge-modal-desc" rows="3" placeholder="知识库描述用于帮助智能体判断是否需要检索该知识库，请准确描述知识库的内容范围和用途"
-          class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400 resize-none"></textarea>
+          class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400 resize-none" data-ui-attrs="{&quot;placeholder&quot;:&quot;知识库描述用于帮助智能体判断是否需要检索该知识库，请准确描述知识库的内容范围和用途&quot;}"></textarea>
       </div>
 
       <div id="knowledge-modal-files-section" class="mb-4 hidden">
-        <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1.5">关联文件</label>
+        <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1.5" data-ui-i18n="关联文件">关联文件</label>
         <div id="knowledge-modal-files-list" class="max-h-[160px] overflow-y-auto thin-scroll space-y-1 mb-2"></div>
         <div class="flex items-center gap-2">
           <input type="file" id="knowledge-modal-file-input" class="text-[11px] text-gray-600 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:bg-gray-100 file:text-gray-700 flex-1 min-w-0">
-          <button onclick="uploadKnowledgeModalFile()" class="px-3 py-1.5 text-[11px] font-medium text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition-colors flex-shrink-0">上传</button>
+          <button onclick="uploadKnowledgeModalFile()" class="px-3 py-1.5 text-[11px] font-medium text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition-colors flex-shrink-0" data-ui-i18n="上传">上传</button>
         </div>
       </div>
 
       <div class="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
-        <button onclick="closeKnowledgeModal()" class="px-4 py-2.5 text-sm font-medium text-gray-600 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 transition-colors">取消</button>
-        <button onclick="saveKnowledgeModal()" class="px-5 py-2.5 text-sm font-bold text-white bg-emerald-500 rounded-lg hover:bg-emerald-600 transition-colors" id="knowledge-modal-submit-btn">确认创建</button>
+        <button onclick="closeKnowledgeModal()" class="px-4 py-2.5 text-sm font-medium text-gray-600 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 transition-colors" data-ui-i18n="取消">取消</button>
+        <button onclick="saveKnowledgeModal()" class="px-5 py-2.5 text-sm font-bold text-white bg-emerald-500 rounded-lg hover:bg-emerald-600 transition-colors" id="knowledge-modal-submit-btn" data-ui-i18n="确认创建">确认创建</button>
       </div>
     </div>
   </div>
@@ -515,7 +506,7 @@ async function api(path, opts = {}) {
     try {
       result = await res.json();
     } catch {
-      return { code: res.status >= 400 ? res.status : 50000, msg: '服务暂时不可用，请稍后重试' };
+      return { code: res.status >= 400 ? res.status : 50000, get msg() { return WebI18n.t("服务暂时不可用，请稍后重试"); } };
     }
     if (result.code === 401) window.MiniProgramPage.requireLogin();
     return result;
@@ -527,7 +518,7 @@ async function api(path, opts = {}) {
 // ── Toast ──
 function toast(msg, error = false) {
   const el = $('toast');
-  el.textContent = msg;
+  WebI18n.bindText(el, () => (WebI18n.t(msg)), "textContent");
   el.style.borderColor = error ? 'rgba(239,68,68,0.4)' : 'rgba(16,185,129,0.4)';
   el.classList.add('!opacity-100');
   setTimeout(() => el.classList.remove('!opacity-100'), 2400);
@@ -539,14 +530,14 @@ async function init() {
   const params = new URLSearchParams(location.search);
   deviceId = params.get('device_id') || '';
   if (!deviceId) {
-    $('header-device-id').textContent = '未指定设备';
+    WebI18n.bindText($('header-device-id'), () => (WebI18n.t("未指定设备")), "textContent");
     return;
   }
-  $('header-device-id').textContent = deviceId;
+  WebI18n.bindText($('header-device-id'), () => (deviceId), "textContent");
 
   // Load bound role (also reveals default_role_id)
   const bindData = await api('/v1/ai/device/' + encodeURIComponent(deviceId) + '/role');
-  if (bindData.code !== 200) throw new Error('无法读取设备角色');
+  if (bindData.code !== 200) throw new Error(WebI18n.t("无法读取设备角色"));
   if (bindData.code === 200) {
     if (bindData.data?.role_id) boundRoleId = bindData.data.role_id;
     defaultRoleId = bindData.data?.default_role_id || '';
@@ -559,7 +550,7 @@ async function init() {
       defaultRole = defData.data;
     } else {
       // API unreachable — show placeholder until cloud API is available
-      defaultRole = { id: defaultRoleId, name: '默认智能体', agent_config: { prompt: '系统预置的默认 AI 角色' }, user_params: { description: '系统默认', interrupt_mode: 'auto' } };
+      defaultRole = { id: defaultRoleId, get name() { return WebI18n.t("默认智能体"); }, agent_config: { get prompt() { return WebI18n.t("系统预置的默认 AI 角色"); } }, user_params: { get description() { return WebI18n.t("系统默认"); }, interrupt_mode: 'auto' } };
     }
   }
 
@@ -581,7 +572,7 @@ async function loadAgents() {
   if (data.code === 200 && data.data?.items) {
     agents = data.data.items;
   } else {
-    throw new Error('无法加载角色列表');
+    throw new Error(WebI18n.t("无法加载角色列表"));
   }
   // Always prepend default role if it exists
   if (defaultRole) {
@@ -620,7 +611,7 @@ function renderAgentList() {
 
   const container = $('agent-list');
   if (!filtered.length) {
-    container.innerHTML = '<p class="text-center text-xs text-gray-400 py-12">没有匹配的智能体</p>';
+    container.innerHTML = "<p class=\"text-center text-xs text-gray-400 py-12\"><span data-ui-i18n=\"没有匹配的智能体\">没有匹配的智能体</span></p>";
     return;
   }
 
@@ -634,10 +625,10 @@ function renderAgentList() {
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-1.5 sm:gap-2">
           <span class="text-[13px] sm:text-sm font-medium text-gray-800 truncate">${escapeText(a.name)}</span>
-          ${isDefaultRole(a.id) ? '<span class="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-200">默认</span>' : ''}
-          ${a.id === effectiveRoleId() ? '<span class="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-200">使用中</span>' : ''}
+          ${isDefaultRole(a.id) ? "<span class=\"flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-200\"><span data-ui-i18n=\"默认\">默认</span></span>" : ''}
+          ${a.id === effectiveRoleId() ? "<span class=\"flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-200\"><span data-ui-i18n=\"使用中\">使用中</span></span>" : ''}
         </div>
-        <p class="text-[11px] sm:text-xs text-gray-400 mt-0.5 truncate">${escapeText(a.user_params?.description || a.agent_config?.prompt?.slice(0, 40) || '暂无描述')}</p>
+        <p class="text-[11px] sm:text-xs text-gray-400 mt-0.5 truncate">${a.user_params?.description || a.agent_config?.prompt?.slice(0, 40) ? escapeText(a.user_params?.description || a.agent_config?.prompt?.slice(0, 40)) : WebI18n.mark("暂无描述")}</p>
       </div>
     </div>
   `).join('');
@@ -673,7 +664,7 @@ function setFieldsReadonly(readonly) {
 
 async function selectAgent(id) {
   if (savingRole || bindingRole) return;
-  if (editorDirty && !confirm('当前修改尚未保存，确定切换角色吗？')) return;
+  if (editorDirty && !confirm(WebI18n.t("当前修改尚未保存，确定切换角色吗？"))) return;
   const request = ++selectingRole;
   let a = agents.find(x => x.id === id);
   if (!a) return;
@@ -682,13 +673,13 @@ async function selectAgent(id) {
       const detail = await api('/v1/ai/roles/' + encodeURIComponent(id));
       if (request !== selectingRole) return;
       if (detail.code !== 200 || !detail.data) {
-        toast(detail.msg || '角色详情加载失败，请重试', true);
+        toast(WebI18n.errorMessage(detail, WebI18n.t("角色详情加载失败，请重试")), true);
         return;
       }
       a = { ...a, ...detail.data };
       agents = agents.map(item => item.id === id ? a : item);
     } catch {
-      if (request === selectingRole) toast('角色详情加载失败，请检查网络后重试', true);
+      if (request === selectingRole) toast("角色详情加载失败，请检查网络后重试", true);
       return;
     }
   }
@@ -721,9 +712,9 @@ async function selectAgent(id) {
   // TTS params
   const tts = a.service_config?.config?.tts?.provider_params;
   $('field-rate').value = tts?.rate ?? 1.0;
-  $('label-rate').textContent = $('field-rate').value;
+  WebI18n.bindText($('label-rate'), () => ($('field-rate').value), "textContent");
   $('field-pitch').value = tts?.pitch ?? 1.0;
-  $('label-pitch').textContent = $('field-pitch').value;
+  WebI18n.bindText($('label-pitch'), () => ($('field-pitch').value), "textContent");
   // Knowledge base
   const ragIdxId = a.agent_config?.ali_rag?.index_id || '';
   setSelectValue('field-knowledge-index', ragIdxId);
@@ -735,11 +726,11 @@ async function selectAgent(id) {
   if (a.avatar && a.avatar.startsWith('http')) {
     const image = document.createElement('img');
     image.src = a.avatar;
-    image.alt = '角色头像';
+    WebI18n.bindText(image, () => (WebI18n.t("角色头像")), "alt");
     image.className = 'w-full h-full object-cover rounded-xl sm:rounded-2xl';
     $('avatar-preview').replaceChildren(image);
   } else {
-    $('avatar-preview').textContent = a.avatar || '🤖';
+    WebI18n.bindText($('avatar-preview'), () => (a.avatar || '🤖'), "textContent");
   }
 
   setFieldsReadonly(isEditingDefault);
@@ -760,7 +751,7 @@ function setSelectValue(id, value) {
 
 function newAgent() {
   if (savingRole || bindingRole) return;
-  if (editorDirty && !confirm('当前修改尚未保存，确定新建角色吗？')) return;
+  if (editorDirty && !confirm(WebI18n.t("当前修改尚未保存，确定新建角色吗？"))) return;
   selectingRole += 1;
   editorDirty = false;
   currentAgentId = null;
@@ -779,14 +770,14 @@ function newAgent() {
   $('field-voice').value = '';
   filterVoiceLang(''); // reset language filter
   $('field-model').value = 'qwen3.5-flash';
-  $('field-rate').value = 1.0; $('label-rate').textContent = '1.0';
-  $('field-pitch').value = 1.0; $('label-pitch').textContent = '1.0';
+  $('field-rate').value = 1.0; WebI18n.bindText($('label-rate'), () => ('1.0'), "textContent");
+  $('field-pitch').value = 1.0; WebI18n.bindText($('label-pitch'), () => ('1.0'), "textContent");
   $('field-knowledge-index').value = '';
   knowledgeFiles = [];
   onKnowledgeIndexChange();
   setRoleResourceSelections();
   $('field-memory').checked = false;
-  $('avatar-preview').textContent = '🤖';
+  WebI18n.bindText($('avatar-preview'), () => ('🤖'), "textContent");
 
   setFieldsReadonly(false);
   renderAgentList();
@@ -798,7 +789,7 @@ async function loadVoices() {
     voices = data.data.items;
   } else {
     voices = [];
-    if (data.code !== 200) toast('音色列表暂不可用，请稍后重试', true);
+    if (data.code !== 200) toast("音色列表暂不可用，请稍后重试", true);
   }
   renderVoiceOptions();
 }
@@ -815,7 +806,7 @@ function renderVoiceOptions() {
   filtered.forEach(v => {
     const opt = document.createElement('option');
     opt.value = v.id;
-    opt.textContent = v.name;
+    WebI18n.bindText(opt, () => (v.name), "textContent");
     sel.appendChild(opt);
   });
   setSelectValue('field-voice', currentVal);
@@ -898,7 +889,7 @@ function renderKnowledgeIndexOptions() {
   knowledgeIndexes.forEach(idx => {
     const opt = document.createElement('option');
     opt.value = idx.id;
-    opt.textContent = idx.name;
+    WebI18n.bindText(opt, () => (idx.name), "textContent");
     sel.appendChild(opt);
   });
 }
@@ -926,8 +917,8 @@ function onKnowledgeIndexChange() {
 
 function openKnowledgeModalForCreate() {
   editingKnowledgeIndexId = null;
-  $('knowledge-modal-title').textContent = '创建知识库';
-  $('knowledge-modal-submit-btn').textContent = '确认创建';
+  WebI18n.bindText($('knowledge-modal-title'), () => (WebI18n.t("创建知识库")), "textContent");
+  WebI18n.bindText($('knowledge-modal-submit-btn'), () => (WebI18n.t("确认创建")), "textContent");
   $('knowledge-modal-name').value = '';
   $('knowledge-modal-desc').value = '';
   $('knowledge-modal-files-section').classList.add('hidden');
@@ -941,10 +932,10 @@ async function editKnowledgeIndex() {
   // List only carries {id,name}; fetch full detail (description, etc.) on demand.
   const res = await api('/v1/ai/knowledge/indexes/' + idxId);
   const idx = (res.code === 200 && res.data) ? res.data : null;
-  if (!idx) { toast(res.msg || '加载失败', true); return; }
+  if (!idx) { toast(WebI18n.errorMessage(res, WebI18n.t("加载失败")), true); return; }
   editingKnowledgeIndexId = idxId;
-  $('knowledge-modal-title').textContent = '编辑知识库';
-  $('knowledge-modal-submit-btn').textContent = '确认修改';
+  WebI18n.bindText($('knowledge-modal-title'), () => (WebI18n.t("编辑知识库")), "textContent");
+  WebI18n.bindText($('knowledge-modal-submit-btn'), () => (WebI18n.t("确认修改")), "textContent");
   $('knowledge-modal-name').value = idx.name || '';
   $('knowledge-modal-desc').value = idx.description || '';
   $('knowledge-modal-files-section').classList.remove('hidden');
@@ -962,8 +953,8 @@ function closeKnowledgeModal() {
 async function saveKnowledgeModal() {
   const name = $('knowledge-modal-name').value.trim();
   const description = $('knowledge-modal-desc').value.trim();
-  if (!name) { toast('请输入知识库名称', true); return; }
-  if (!description) { toast('请输入知识库描述', true); return; }
+  if (!name) { toast("请输入知识库名称", true); return; }
+  if (!description) { toast("请输入知识库描述", true); return; }
 
   if (editingKnowledgeIndexId) {
     const res = await api('/v1/ai/knowledge/indexes/' + editingKnowledgeIndexId, {
@@ -974,9 +965,9 @@ async function saveKnowledgeModal() {
       await loadKnowledgeIndexes();
       $('field-knowledge-index').value = editingKnowledgeIndexId;
       closeKnowledgeModal();
-      toast('知识库已更新');
+      toast("知识库已更新");
     } else {
-      toast(res.msg || '更新失败', true);
+      toast(WebI18n.errorMessage(res, WebI18n.t("更新失败")), true);
     }
   } else {
     const res = await api('/v1/ai/knowledge/indexes', {
@@ -988,9 +979,9 @@ async function saveKnowledgeModal() {
       $('field-knowledge-index').value = res.data.index_id;
       onKnowledgeIndexChange();
       closeKnowledgeModal();
-      toast('知识库已创建');
+      toast("知识库已创建");
     } else {
-      toast(res.msg || '创建失败', true);
+      toast(WebI18n.errorMessage(res, WebI18n.t("创建失败")), true);
     }
   }
 }
@@ -998,15 +989,15 @@ async function saveKnowledgeModal() {
 async function deleteKnowledgeIndexBtn() {
   const idxId = $('field-knowledge-index').value;
   if (!idxId) return;
-  if (!confirm('确定删除该知识库？已绑定此知识库的智能体将失去检索能力。')) return;
+  if (!confirm(WebI18n.t("确定删除该知识库？已绑定此知识库的智能体将失去检索能力。"))) return;
   const res = await api('/v1/ai/knowledge/indexes/' + idxId, { method: 'DELETE' });
   if (res.code === 200) {
     await loadKnowledgeIndexes();
     $('field-knowledge-index').value = '';
     onKnowledgeIndexChange();
-    toast('已删除');
+    toast("已删除");
   } else {
-    toast(res.msg || '删除失败', true);
+    toast(WebI18n.errorMessage(res, WebI18n.t("删除失败")), true);
   }
 }
 
@@ -1014,12 +1005,12 @@ async function fetchKnowledgeDocuments(indexId) {
   const items = [];
   for (let page = 1; page <= 1000; page++) {
     const result = await api('/v1/ai/knowledge/indexes/' + encodeURIComponent(indexId) + '/documents?page=' + page + '&page_size=100');
-    if (result.code !== 200 || !Array.isArray(result.data?.items)) throw new Error('读取知识库文档失败');
+    if (result.code !== 200 || !Array.isArray(result.data?.items)) throw new Error(WebI18n.t("读取知识库文档失败"));
     items.push(...result.data.items);
     if (items.length >= result.data.total) return items;
-    if (!result.data.items.length) throw new Error('知识库文档分页不完整');
+    if (!result.data.items.length) throw new Error(WebI18n.t("知识库文档分页不完整"));
   }
-  throw new Error('知识库文档过多，请缩小索引范围');
+  throw new Error(WebI18n.t("知识库文档过多，请缩小索引范围"));
 }
 
 async function loadKnowledgeFiles() {
@@ -1031,21 +1022,21 @@ async function loadKnowledgeFiles() {
     knowledgeFiles = files;
     renderKnowledgeFiles();
   } catch {
-    if ($('field-knowledge-index').value === idxId) toast('读取知识库文档失败，请重试', true);
+    if ($('field-knowledge-index').value === idxId) toast("读取知识库文档失败，请重试", true);
   }
 }
 
 function renderKnowledgeFiles() {
   const container = $('knowledge-files-list');
   if (!knowledgeFiles.length) {
-    container.innerHTML = '<p class="text-[11px] text-gray-400 py-2">暂无文件，上传文件到知识库</p>';
+    container.innerHTML = "<p class=\"text-[11px] text-gray-400 py-2\"><span data-ui-i18n=\"暂无文件，上传文件到知识库\">暂无文件，上传文件到知识库</span></p>";
     return;
   }
   container.innerHTML = knowledgeFiles.map(f => `
     <div class="flex items-center justify-between py-1 px-2 rounded bg-gray-50 text-[11px]">
       <span class="text-gray-700 truncate flex-1">${f.name}</span>
       <span class="text-gray-400 mx-2 flex-shrink-0">${formatFileSize(f.size)}</span>
-      <button onclick="deleteKnowledgeFile('${f.document_id}')" class="text-red-400 hover:text-red-600 flex-shrink-0" title="删除">&times;</button>
+      <button onclick="deleteKnowledgeFile('${f.document_id}')" class="text-red-400 hover:text-red-600 flex-shrink-0" title="删除" data-ui-attrs="{&quot;title&quot;:&quot;删除&quot;}">&times;</button>
     </div>
   `).join('');
 }
@@ -1060,7 +1051,7 @@ function formatFileSize(bytes) {
 async function uploadKnowledgeFile() {
   const input = $('knowledge-file-input');
   const file = input.files[0];
-  if (!file) { toast('请选择文件', true); return; }
+  if (!file) { toast("请选择文件", true); return; }
   const formData = new FormData();
   formData.append('file', file);
   const res = await fetch('/v1/ai/knowledge/files', {
@@ -1070,23 +1061,23 @@ async function uploadKnowledgeFile() {
   });
   const data = await res.json();
   if (data.code === 200) {
-    toast('上传成功');
+    toast("上传成功");
     input.value = '';
     loadKnowledgeFiles();
   } else {
-    toast(data.msg || '上传失败', true);
+    toast(WebI18n.errorMessage(data, WebI18n.t("上传失败")), true);
   }
 }
 
 async function deleteKnowledgeFile(docId) {
-  if (!confirm('确定删除该文件？')) return;
+  if (!confirm(WebI18n.t("确定删除该文件？"))) return;
   const data = await api('/v1/ai/knowledge/files/' + docId, { method: 'DELETE' });
   if (data.code === 200) {
     knowledgeFiles = knowledgeFiles.filter(f => f.document_id !== docId);
     renderKnowledgeFiles();
-    toast('已删除');
+    toast("已删除");
   } else {
-    toast(data.msg || '删除失败', true);
+    toast(WebI18n.errorMessage(data, WebI18n.t("删除失败")), true);
   }
 }
 
@@ -1103,21 +1094,21 @@ async function loadKnowledgeModalFiles() {
     knowledgeModalFiles = files;
     renderKnowledgeModalFiles();
   } catch {
-    if (editingKnowledgeIndexId === idxId) toast('读取知识库文档失败，请重试', true);
+    if (editingKnowledgeIndexId === idxId) toast("读取知识库文档失败，请重试", true);
   }
 }
 
 function renderKnowledgeModalFiles() {
   const container = $('knowledge-modal-files-list');
   if (!knowledgeModalFiles.length) {
-    container.innerHTML = '<p class="text-[11px] text-gray-400 py-2">暂无关联文件</p>';
+    container.innerHTML = "<p class=\"text-[11px] text-gray-400 py-2\"><span data-ui-i18n=\"暂无关联文件\">暂无关联文件</span></p>";
     return;
   }
   container.innerHTML = knowledgeModalFiles.map(f => `
     <div class="flex items-center justify-between py-1 px-2 rounded bg-gray-50 text-[11px]">
       <span class="text-gray-700 truncate flex-1">${f.name}</span>
       <span class="text-gray-400 mx-2 flex-shrink-0">${formatFileSize(f.size)}</span>
-      <button onclick="deleteKnowledgeModalFile('${f.document_id}')" class="text-red-400 hover:text-red-600 flex-shrink-0" title="删除">&times;</button>
+      <button onclick="deleteKnowledgeModalFile('${f.document_id}')" class="text-red-400 hover:text-red-600 flex-shrink-0" title="删除" data-ui-attrs="{&quot;title&quot;:&quot;删除&quot;}">&times;</button>
     </div>
   `).join('');
 }
@@ -1128,7 +1119,7 @@ function renderKnowledgeModalFiles() {
 async function bindDocumentToIndex(docId) {
   const idxRes = await api('/v1/ai/knowledge/indexes/' + editingKnowledgeIndexId);
   if (idxRes.code !== 200 || !idxRes.data) {
-    toast('关联失败：读取知识库失败', true);
+    toast("关联失败：读取知识库失败", true);
     return false;
   }
   const docIds = idxRes.data.document_ids || [];
@@ -1139,7 +1130,7 @@ async function bindDocumentToIndex(docId) {
     body: JSON.stringify({ document_ids: docIds }),
   });
   if (putRes.code !== 200) {
-    toast(putRes.msg || '关联失败', true);
+    toast(WebI18n.errorMessage(putRes, WebI18n.t("关联失败")), true);
     return false;
   }
   return true;
@@ -1148,7 +1139,7 @@ async function bindDocumentToIndex(docId) {
 async function uploadKnowledgeModalFile() {
   const input = $('knowledge-modal-file-input');
   const file = input.files[0];
-  if (!file) { toast('请选择文件', true); return; }
+  if (!file) { toast("请选择文件", true); return; }
   const formData = new FormData();
   formData.append('file', file);
   const res = await fetch('/v1/ai/knowledge/files', {
@@ -1158,22 +1149,22 @@ async function uploadKnowledgeModalFile() {
   });
   const data = await res.json();
   if (data.code !== 200 || !data.data?.file_id) {
-    toast(data.msg || '上传失败', true);
+    toast(WebI18n.errorMessage(data, WebI18n.t("上传失败")), true);
     return;
   }
   // file_id IS the document_id (confirmed); upload only pools the file, so bind
   // it to this index next via PUT document_ids.
   if (!await bindDocumentToIndex(data.data.file_id)) return;
-  toast('已上传并关联');
+  toast("已上传并关联");
   input.value = '';
   loadKnowledgeModalFiles();
 }
 
 async function deleteKnowledgeModalFile(docId) {
-  if (!confirm('确定从该知识库移除该文件？文件本身保留在文件池。')) return;
+  if (!confirm(WebI18n.t("确定从该知识库移除该文件？文件本身保留在文件池。"))) return;
   // Unbind = remove from document_ids (PUT full list). The file is not deleted.
   const idxRes = await api('/v1/ai/knowledge/indexes/' + editingKnowledgeIndexId);
-  if (idxRes.code !== 200 || !idxRes.data) { toast('读取失败', true); return; }
+  if (idxRes.code !== 200 || !idxRes.data) { toast("读取失败", true); return; }
   const docIds = (idxRes.data.document_ids || []).filter(id => id !== docId);
   const putRes = await api('/v1/ai/knowledge/indexes/' + editingKnowledgeIndexId, {
     method: 'PUT',
@@ -1182,9 +1173,9 @@ async function deleteKnowledgeModalFile(docId) {
   if (putRes.code === 200) {
     knowledgeModalFiles = knowledgeModalFiles.filter(f => f.document_id !== docId);
     renderKnowledgeModalFiles();
-    toast('已移除');
+    toast("已移除");
   } else {
-    toast(putRes.msg || '移除失败', true);
+    toast(WebI18n.errorMessage(putRes, WebI18n.t("移除失败")), true);
   }
 }
 
@@ -1224,7 +1215,7 @@ async function loadMcpTools() {
     mcpTools = mcpTools.filter(t => t.source !== source);
     mcpTools.push(...result.value.data.items.map(t => ({ ...t, source })));
   });
-  if (mcpLoadError) toast('MCP 工具列表加载失败，请稍后重试', true);
+  if (mcpLoadError) toast("MCP 工具列表加载失败，请稍后重试", true);
   renderMcpTools();
 }
 
@@ -1233,7 +1224,7 @@ function renderMcpTools() {
   const readonly = isEditingDefault;
   const items = roleResourceItems(mcpTools, selectedMcpTools, readonly, roleMcpCandidates);
   if (!items.length) {
-    container.innerHTML = '<span class="text-[11px] text-gray-400">' + (mcpLoadError ? 'MCP 工具列表加载失败，请稍后重试' : readonly ? '未关联 MCP 工具' : '暂无可用工具') + '</span>';
+    container.innerHTML = '<span class="text-[11px] text-gray-400">' + (mcpLoadError ? WebI18n.mark("MCP 工具列表加载失败，请稍后重试") : readonly ? WebI18n.mark("未关联 MCP 工具") : WebI18n.mark("暂无可用工具")) + '</span>';
   } else {
     container.innerHTML = items.map(t => {
       const checked = selectedMcpTools.includes(t.id);
@@ -1243,22 +1234,22 @@ function renderMcpTools() {
       const op = canToggle ? 'cursor-pointer' : 'opacity-60 cursor-not-allowed';
       const label = t.name || t.id;
       const editBtns = (!readonly && !t.referenceOnly && t.source === 'app') ? `
-        <button onclick="${escapeText('event.stopPropagation(); openMcpToolModal(' + JSON.stringify(t.id) + ')')}" class="text-[10px] text-gray-400 hover:text-emerald-500 flex-shrink-0 ml-1" title="编辑">✎</button>
-        <button onclick="${escapeText('event.stopPropagation(); deleteMcpTool(' + JSON.stringify(t.id) + ')')}" class="text-[10px] text-red-400 hover:text-red-600 flex-shrink-0 ml-1" title="删除">&times;</button>
+        <button onclick="${escapeText('event.stopPropagation(); openMcpToolModal(' + JSON.stringify(t.id) + ')')}" class="text-[10px] text-gray-400 hover:text-emerald-500 flex-shrink-0 ml-1" title="编辑" data-ui-attrs="{&quot;title&quot;:&quot;编辑&quot;}">✎</button>
+        <button onclick="${escapeText('event.stopPropagation(); deleteMcpTool(' + JSON.stringify(t.id) + ')')}" class="text-[10px] text-red-400 hover:text-red-600 flex-shrink-0 ml-1" title="删除" data-ui-attrs="{&quot;title&quot;:&quot;删除&quot;}">&times;</button>
       ` : '';
       return `
       <div class="flex items-center min-w-0 ${op}" onclick="${canToggle ? escapeText('toggleMcp(' + JSON.stringify(t.id) + ')') : ''}">
-        <span class="text-[11px] text-gray-600 truncate flex-1 mr-2" title="${escapeText(t.name ? label : '名称暂不可用：' + t.id)}">${escapeText(label)}</span>
-        ${readonly ? '<span class="text-[10px] text-gray-400 flex-shrink-0">已关联</span>' : `<div class="relative w-8 h-[18px] rounded-full transition-colors flex-shrink-0 ${bg}">
+        <span class="text-[11px] text-gray-600 truncate flex-1 mr-2" title="${escapeText(t.name ? label : WebI18n.t("名称暂不可用：") + t.id)}">${escapeText(label)}</span>
+        ${readonly ? "<span class=\"text-[10px] text-gray-400 flex-shrink-0\"><span data-ui-i18n=\"已关联\">已关联</span></span>" : `<div class="relative w-8 h-[18px] rounded-full transition-colors flex-shrink-0 ${bg}">
           <div class="absolute top-0.5 left-0.5 w-3.5 h-3.5 rounded-full bg-white shadow-sm transition-transform ${dot}"></div>
         </div>`}
         ${editBtns}
       </div>`;
     }).join('');
-    if (mcpLoadError) container.insertAdjacentHTML('beforeend', '<span class="text-[11px] text-gray-400">MCP 工具列表加载失败，请稍后重试</span>');
+    if (mcpLoadError) container.insertAdjacentHTML('beforeend', "<span class=\"text-[11px] text-gray-400\"><span data-ui-i18n=\"MCP 工具列表加载失败，请稍后重试\">MCP 工具列表加载失败，请稍后重试</span></span>");
   }
   if (!readonly) {
-    container.insertAdjacentHTML('beforeend', `<button onclick="openMcpToolModal()" class="text-[11px] text-emerald-600 hover:text-emerald-700 text-left mt-1 w-full">+ 新建 MCP 工具</button>`);
+    container.insertAdjacentHTML('beforeend', `<button onclick="openMcpToolModal()" class="text-[11px] text-emerald-600 hover:text-emerald-700 text-left mt-1 w-full" data-ui-i18n="+ 新建 MCP 工具">+ 新建 MCP 工具</button>`);
   }
 }
 
@@ -1287,10 +1278,10 @@ async function openMcpToolModal(id) {
     const res = await api('/v1/ai/mcp/app-tools/' + id);
     if (res.code === 200 && res.data) tool = res.data;
   }
-  if (id && !tool) { toast('读取工具配置失败，请重试', true); return; }
+  if (id && !tool) { toast("读取工具配置失败，请重试", true); return; }
   editingMcpConfig = tool?.config || null;
-  $('mcp-tool-modal-title').textContent = tool ? '编辑 MCP 工具' : '新增 MCP 工具';
-  $('mcp-modal-submit-btn').textContent = tool ? '确认修改' : '确认创建';
+  WebI18n.bindText($('mcp-tool-modal-title'), () => (tool ? WebI18n.t("编辑 MCP 工具") : WebI18n.t("新增 MCP 工具")), "textContent");
+  WebI18n.bindText($('mcp-modal-submit-btn'), () => (tool ? WebI18n.t("确认修改") : WebI18n.t("确认创建")), "textContent");
   $('mcp-modal-name').value = tool?.config?.name || '';
   $('mcp-modal-desc').value = tool?.config?.description || '';
   $('mcp-modal-url').value = tool?.config?.url || '';
@@ -1312,8 +1303,8 @@ function closeMcpToolModal() {
 async function saveMcpToolModal() {
   const name = $('mcp-modal-name').value.trim();
   const url = $('mcp-modal-url').value.trim();
-  if (!name) { toast('请输入工具名称', true); return; }
-  if (!url) { toast('请输入 MCP 服务 URL', true); return; }
+  if (!name) { toast("请输入工具名称", true); return; }
+  if (!url) { toast("请输入 MCP 服务 URL", true); return; }
 
   const authType = $('mcp-modal-auth-type').value;
   const config = {
@@ -1333,14 +1324,14 @@ async function saveMcpToolModal() {
   if (res.code === 200 && res.data) {
     closeMcpToolModal();
     await loadMcpTools();
-    toast(updating ? '工具已更新' : '工具已创建');
+    toast(updating ? WebI18n.t("工具已更新") : WebI18n.t("工具已创建"));
   } else {
-    toast(res.msg || (editingMcpToolId ? '更新失败' : '创建失败'), true);
+    toast(WebI18n.errorMessage(res, editingMcpToolId ? WebI18n.t("更新失败") : WebI18n.t("创建失败")), true);
   }
 }
 
 async function deleteMcpTool(id) {
-  if (!confirm('删除前请在所有角色中解除该 MCP 工具的引用。确定删除？')) return;
+  if (!confirm(WebI18n.t("删除前请在所有角色中解除该 MCP 工具的引用。确定删除？"))) return;
   const res = await api('/v1/ai/mcp/app-tools/' + id, { method: 'DELETE' });
   if (res.code === 200) {
     mcpTools = mcpTools.filter(t => t.id !== id);
@@ -1348,9 +1339,9 @@ async function deleteMcpTool(id) {
     selectedMcpTools = selectedMcpTools.filter(x => x !== id);
     roleMcpCandidates = roleMcpCandidates.filter(x => x !== id);
     renderMcpTools();
-    toast('已删除');
+    toast("已删除");
   } else {
-    toast(res.msg || '删除失败', true);
+    toast(WebI18n.errorMessage(res, WebI18n.t("删除失败")), true);
   }
 }
 
@@ -1364,7 +1355,7 @@ async function loadPlugins() {
     pluginLoadError = false;
   } catch {
     pluginLoadError = true;
-    toast('设备插件列表加载失败，请稍后重试', true);
+    toast("设备插件列表加载失败，请稍后重试", true);
   }
   renderPlugins();
 }
@@ -1375,7 +1366,7 @@ function renderPlugins() {
   const defaultNames = readonly ? (defaultRole?.device_plugin_refs || []).filter(p => p.name) : [];
   const items = roleResourceItems([...pluginTools, ...defaultNames], selectedPlugins, readonly, rolePluginCandidates);
   if (!items.length) {
-    container.innerHTML = '<span class="text-[11px] text-gray-400">' + (pluginLoadError ? '设备插件列表加载失败，请稍后重试' : readonly ? '未关联设备插件' : '暂无设备插件，点击下方新建') + '</span>';
+    container.innerHTML = '<span class="text-[11px] text-gray-400">' + (pluginLoadError ? WebI18n.mark("设备插件列表加载失败，请稍后重试") : readonly ? WebI18n.mark("未关联设备插件") : WebI18n.mark("暂无设备插件，点击下方新建")) + '</span>';
   } else {
     container.innerHTML = items.map(p => {
       const checked = selectedPlugins.includes(p.id);
@@ -1385,22 +1376,22 @@ function renderPlugins() {
       return `
       <div class="flex items-center min-w-0 gap-1.5">
         <div class="flex items-center justify-between flex-1 min-w-0 ${op}" onclick="${readonly ? '' : escapeText('togglePlugin(' + JSON.stringify(p.id) + ')')}">
-          <span class="text-[11px] text-gray-600 truncate flex-1 mr-1" title="${escapeText(p.name || '名称暂不可用：' + p.id)}">${escapeText(p.name || p.id)}</span>
-          ${readonly ? '<span class="text-[10px] text-gray-400 flex-shrink-0">已关联</span>' : `<div class="relative w-8 h-[18px] rounded-full transition-colors flex-shrink-0 ${bg}">
+          <span class="text-[11px] text-gray-600 truncate flex-1 mr-1" title="${escapeText(p.name || WebI18n.t("名称暂不可用：") + p.id)}">${escapeText(p.name || p.id)}</span>
+          ${readonly ? "<span class=\"text-[10px] text-gray-400 flex-shrink-0\"><span data-ui-i18n=\"已关联\">已关联</span></span>" : `<div class="relative w-8 h-[18px] rounded-full transition-colors flex-shrink-0 ${bg}">
             <div class="absolute top-0.5 left-0.5 w-3.5 h-3.5 rounded-full bg-white shadow-sm transition-transform ${dot}"></div>
           </div>`}
         </div>
         ${readonly || p.referenceOnly ? '' : `
-        <button onclick="${escapeText('openPluginModal(' + JSON.stringify(p.id) + ')')}" class="text-[11px] text-emerald-600 hover:text-emerald-700 flex-shrink-0" title="编辑设备插件">编辑</button>
-        <button onclick="${escapeText('deletePlugin(' + JSON.stringify(p.id) + ')')}" class="text-[11px] text-red-400 hover:text-red-600 flex-shrink-0" title="删除设备插件">删除</button>
+        <button onclick="${escapeText('openPluginModal(' + JSON.stringify(p.id) + ')')}" class="text-[11px] text-emerald-600 hover:text-emerald-700 flex-shrink-0" title="编辑设备插件" data-ui-attrs="{&quot;title&quot;:&quot;编辑设备插件&quot;}" data-ui-i18n="编辑">编辑</button>
+        <button onclick="${escapeText('deletePlugin(' + JSON.stringify(p.id) + ')')}" class="text-[11px] text-red-400 hover:text-red-600 flex-shrink-0" title="删除设备插件" data-ui-attrs="{&quot;title&quot;:&quot;删除设备插件&quot;}" data-ui-i18n="删除">删除</button>
         `}
       </div>`;
     }).join('');
-    if (pluginLoadError) container.insertAdjacentHTML('beforeend', '<span class="text-[11px] text-gray-400">设备插件列表加载失败，请稍后重试</span>');
+    if (pluginLoadError) container.insertAdjacentHTML('beforeend', "<span class=\"text-[11px] text-gray-400\"><span data-ui-i18n=\"设备插件列表加载失败，请稍后重试\">设备插件列表加载失败，请稍后重试</span></span>");
   }
   // "+ 新建" button always visible (unless readonly)
   if (!isEditingDefault) {
-    container.insertAdjacentHTML('beforeend', `<button onclick="openPluginModal()" class="text-[11px] text-emerald-600 hover:text-emerald-700 text-left mt-1 w-full">+ 新建设备插件</button>`);
+    container.insertAdjacentHTML('beforeend', `<button onclick="openPluginModal()" class="text-[11px] text-emerald-600 hover:text-emerald-700 text-left mt-1 w-full" data-ui-i18n="+ 新建设备插件">+ 新建设备插件</button>`);
   }
 }
 
@@ -1426,24 +1417,24 @@ function renderParamTable(tableId) {
   const tbody = $(`plugin-modal-${tableId}-params`);
   const showRequired = tableId === 'input';
   if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="${showRequired ? 6 : 5}" class="text-center text-gray-400 py-3">暂无参数</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="${showRequired ? 6 : 5}" class="text-center text-gray-400 py-3" data-ui-i18n="暂无参数">暂无参数</td></tr>`;
     return;
   }
   tbody.innerHTML = rows.map((p, i) => `
     <tr class="border-t border-gray-100">
       <td class="p-1"><input type="text" value="${p.name || ''}" oninput="updateParamField('${tableId}', ${i}, 'name', this.value)" placeholder="仅字母、数字、下划线"
-        class="w-full bg-gray-50 border border-gray-200 rounded px-2 py-1.5 text-[11px] outline-none focus:border-emerald-400"></td>
+        class="w-full bg-gray-50 border border-gray-200 rounded px-2 py-1.5 text-[11px] outline-none focus:border-emerald-400" data-ui-attrs="{&quot;placeholder&quot;:&quot;仅字母、数字、下划线&quot;}"></td>
       <td class="p-1">
         <select onchange="updateParamField('${tableId}', ${i}, 'type', this.value)" class="w-full bg-gray-50 border border-gray-200 rounded px-1.5 py-1.5 text-[11px] outline-none focus:border-emerald-400 cursor-pointer">
           ${(p.type && !PARAM_TYPES.includes(p.type) ? [...PARAM_TYPES, p.type] : PARAM_TYPES).map(t => `<option value="${escapeText(t)}" ${p.type === t ? 'selected' : ''}>${escapeText(t)}</option>`).join('')}
         </select>
       </td>
       <td class="p-1"><input type="text" value="${p.description || ''}" oninput="updateParamField('${tableId}', ${i}, 'description', this.value)" placeholder="参数说明"
-        class="w-full bg-gray-50 border border-gray-200 rounded px-2 py-1.5 text-[11px] outline-none focus:border-emerald-400"></td>
+        class="w-full bg-gray-50 border border-gray-200 rounded px-2 py-1.5 text-[11px] outline-none focus:border-emerald-400" data-ui-attrs="{&quot;placeholder&quot;:&quot;参数说明&quot;}"></td>
       <td class="p-1"><input type="text" value="${p.default_value || ''}" oninput="updateParamField('${tableId}', ${i}, 'default_value', this.value)" placeholder="请输入"
-        class="w-full bg-gray-50 border border-gray-200 rounded px-2 py-1.5 text-[11px] outline-none focus:border-emerald-400"></td>
+        class="w-full bg-gray-50 border border-gray-200 rounded px-2 py-1.5 text-[11px] outline-none focus:border-emerald-400" data-ui-attrs="{&quot;placeholder&quot;:&quot;请输入&quot;}"></td>
       ${showRequired ? `<td class="p-1 text-center"><input type="checkbox" ${p.required ? 'checked' : ''} onchange="updateParamField('${tableId}', ${i}, 'required', this.checked)"></td>` : ''}
-      <td class="p-1 text-center"><button onclick="removeParamRow('${tableId}', ${i})" class="text-red-400 hover:text-red-600" title="删除">&times;</button></td>
+      <td class="p-1 text-center"><button onclick="removeParamRow('${tableId}', ${i})" class="text-red-400 hover:text-red-600" title="删除" data-ui-attrs="{&quot;title&quot;:&quot;删除&quot;}">&times;</button></td>
     </tr>
   `).join('');
 }
@@ -1471,18 +1462,18 @@ async function openPluginModal(id) {
       const res = await api('/v1/ai/plugins/' + encodeURIComponent(id));
       if (request !== pluginModalRequest) return;
       if (res.code !== 200 || !res.data) {
-        toast(res.msg || '设备插件详情加载失败，请重试', true);
+        toast(WebI18n.errorMessage(res, WebI18n.t("设备插件详情加载失败，请重试")), true);
         return;
       }
       p = res.data;
     } catch {
-      if (request === pluginModalRequest) toast('设备插件详情加载失败，请检查网络后重试', true);
+      if (request === pluginModalRequest) toast("设备插件详情加载失败，请检查网络后重试", true);
       return;
     }
   }
   editingPluginId = id || null;
-  $('plugin-modal-title').textContent = p ? '编辑设备端插件' : '新增设备端插件';
-  $('plugin-modal-submit-btn').textContent = p ? '确认修改' : '确认创建';
+  WebI18n.bindText($('plugin-modal-title'), () => (p ? WebI18n.t("编辑设备端插件") : WebI18n.t("新增设备端插件")), "textContent");
+  WebI18n.bindText($('plugin-modal-submit-btn'), () => (p ? WebI18n.t("确认修改") : WebI18n.t("确认创建")), "textContent");
   $('plugin-modal-name').value = p?.name || '';
   $('plugin-modal-desc').value = p?.description || '';
   $('plugin-modal-action').value = p?.action || '';
@@ -1515,8 +1506,8 @@ function cleanParams(rows) {
 async function savePluginModal() {
   const name = $('plugin-modal-name').value.trim();
   const action = $('plugin-modal-action').value.trim();
-  if (!name) { toast('请输入插件名称', true); return; }
-  if (!action) { toast('请输入功能标识（Action）', true); return; }
+  if (!name) { toast("请输入插件名称", true); return; }
+  if (!action) { toast("请输入功能标识（Action）", true); return; }
 
   const payload = {
     name,
@@ -1534,14 +1525,14 @@ async function savePluginModal() {
   if (res.code === 200 && res.data) {
     closePluginModal();
     await loadPlugins();
-    toast(updating ? '插件已更新' : '插件已创建');
+    toast(updating ? WebI18n.t("插件已更新") : WebI18n.t("插件已创建"));
   } else {
-    toast(res.msg || (updating ? '更新失败' : '创建失败'), true);
+    toast(WebI18n.errorMessage(res, updating ? WebI18n.t("更新失败") : WebI18n.t("创建失败")), true);
   }
 }
 
 async function deletePlugin(id) {
-  if (!confirm('删除前请先在引用该插件的角色中关闭它并保存角色。确定删除该插件？')) return;
+  if (!confirm(WebI18n.t("删除前请先在引用该插件的角色中关闭它并保存角色。确定删除该插件？"))) return;
   const data = await api('/v1/ai/plugins/' + id, { method: 'DELETE' });
   if (data.code === 200) {
     pluginTools = pluginTools.filter(p => p.id !== id);
@@ -1549,9 +1540,9 @@ async function deletePlugin(id) {
     selectedPlugins = selectedPlugins.filter(x => x !== id);
     rolePluginCandidates = rolePluginCandidates.filter(x => x !== id);
     renderPlugins();
-    toast('已删除');
+    toast("已删除");
   } else {
-    toast(data.msg || '删除失败', true);
+    toast(WebI18n.errorMessage(data, WebI18n.t("删除失败")), true);
   }
 }
 
@@ -1563,14 +1554,14 @@ function updateBindButton() {
   const isEffective = currentAgentId === effectiveRoleId();
   btn.disabled = bindingRole || !currentAgentId || isEffective;
   if (!currentAgentId) {
-    btn.textContent = '保存后再绑定';
+    WebI18n.bindText(btn, () => (WebI18n.t("保存后再绑定")), "textContent");
     btn.classList.add('opacity-50', 'pointer-events-none');
   } else if (isEffective) {
-    btn.textContent = '✓ 当前设备使用中';
+    WebI18n.bindText(btn, () => (WebI18n.t("✓ 当前设备使用中")), "textContent");
     btn.classList.remove('opacity-50', 'pointer-events-none');
     btn.classList.add('!border-emerald-400', '!text-emerald-600');
   } else {
-    btn.textContent = '绑定到此设备';
+    WebI18n.bindText(btn, () => (WebI18n.t("绑定到此设备")), "textContent");
     btn.classList.remove('opacity-50', 'pointer-events-none', '!border-emerald-400', '!text-emerald-600');
   }
 }
@@ -1578,7 +1569,7 @@ function updateBindButton() {
 function updateHeaderBinding() {
   const roleId = effectiveRoleId();
   const a = agents.find(x => x.id === roleId);
-  $('header-role-name').textContent = a ? a.name : (roleId || '未配置');
+  WebI18n.bindText($('header-role-name'), () => (a ? a.name : (roleId || WebI18n.t("未配置"))), "textContent");
 }
 
 // ── Actions ──
@@ -1588,30 +1579,30 @@ async function saveAgent() {
   savingRole = true;
   const button = $('btn-save');
   button.disabled = true;
-  button.textContent = '保存中…';
+  WebI18n.bindText(button, () => (WebI18n.t("保存中…")), "textContent");
   try {
     await persistAgent();
   } catch {
-    toast('保存失败，请检查网络后重试，当前填写内容已保留', true);
+    toast("保存失败，请检查网络后重试，当前填写内容已保留", true);
   } finally {
     savingRole = false;
     button.disabled = isEditingDefault;
-    button.textContent = '保存';
+    WebI18n.bindText(button, () => (WebI18n.t("保存")), "textContent");
   }
 }
 
 async function persistAgent() {
-  if (isEditingDefault) { toast('默认角色不可修改', true); return; }
+  if (isEditingDefault) { toast("默认角色不可修改", true); return; }
   const name = $('field-name').value.trim();
-  if (!name) { toast('请输入智能体名称', true); return; }
-  if ([...name].length > 64) { toast('角色名称不能超过 64 个字符', true); return; }
+  if (!name) { toast("请输入智能体名称", true); return; }
+  if ([...name].length > 64) { toast("角色名称不能超过 64 个字符", true); return; }
   const promptText = $('field-prompt').value.trim();
 
   const previous = agents.find(agent => agent.id === currentAgentId) || {};
   const chosenVoice = voices.find(voice => voice.id === $('field-voice').value);
   const editsAliTTS = !previous.service_config?.type || previous.service_config.type === 'custom-compose';
   if (editsAliTTS && chosenVoice?.model && chosenVoice.model !== 'cosyvoice-v3-flash') {
-    toast('当前音色不适用于阿里语音服务，请重新选择音色', true);
+    toast("当前音色不适用于阿里语音服务，请重新选择音色", true);
     return;
   }
   const payload = {
@@ -1673,9 +1664,9 @@ async function persistAgent() {
       const updated = res.data;
       const idx = agents.findIndex(a => a.id === currentAgentId);
       if (idx >= 0 && updated) agents[idx] = { ...agents[idx], ...updated };
-      toast('保存成功');
+      toast("保存成功");
     } else {
-      toast(res.msg || '保存失败', true);
+      toast(WebI18n.errorMessage(res, WebI18n.t("保存失败")), true);
       return;
     }
   } else {
@@ -1683,9 +1674,9 @@ async function persistAgent() {
     if (res.code === 200 && res.data) {
       currentAgentId = res.data.id;
       agents.push(res.data);
-      toast('创建成功');
+      toast("创建成功");
     } else {
-      toast(res.msg || '创建失败', true);
+      toast(WebI18n.errorMessage(res, WebI18n.t("创建失败")), true);
       return;
     }
   }
@@ -1700,8 +1691,8 @@ async function persistAgent() {
 async function deleteAgent() {
   if (savingRole || bindingRole) return;
   if (!currentAgentId) return;
-  if (isEditingDefault) { toast('默认角色不可删除', true); return; }
-  if (!confirm('确定要删除这个智能体吗？已绑定此角色的设备将恢复默认角色。')) return;
+  if (isEditingDefault) { toast("默认角色不可删除", true); return; }
+  if (!confirm(WebI18n.t("确定要删除这个智能体吗？已绑定此角色的设备将恢复默认角色。"))) return;
 
   const res = await api('/v1/ai/roles/' + currentAgentId, { method: 'DELETE' });
   if (res.code === 200) {
@@ -1718,17 +1709,17 @@ async function deleteAgent() {
     $('editor-form').classList.add('hidden');
     $('editor-empty').classList.remove('hidden');
     if (isMobile()) showList();
-    toast('已删除');
+    toast("已删除");
   } else {
-    toast(res.msg || '删除失败', true);
+    toast(WebI18n.errorMessage(res, WebI18n.t("删除失败")), true);
   }
 }
 
 async function bindToDevice() {
   if (savingRole || bindingRole) return;
   if (!currentAgentId || currentAgentId === effectiveRoleId()) return;
-  if (!deviceId) { toast('未指定设备', true); return; }
-  if (editorDirty) { toast('请先保存角色修改', true); return; }
+  if (!deviceId) { toast("未指定设备", true); return; }
+  if (editorDirty) { toast("请先保存角色修改", true); return; }
 
   bindingRole = true;
   selectingRole += 1;
@@ -1746,12 +1737,12 @@ async function bindToDevice() {
       updateHeaderBinding();
       renderAgentList();
       updateBindButton();
-      toast(selectingDefault ? '已恢复默认角色' : '绑定成功');
+      toast(selectingDefault ? WebI18n.t("已恢复默认角色") : WebI18n.t("绑定成功"));
     } else {
-      toast(res.msg || '绑定失败', true);
+      toast(WebI18n.errorMessage(res, WebI18n.t("绑定失败")), true);
     }
   } catch {
-    toast('设置失败，请检查网络后重试', true);
+    toast("设置失败，请检查网络后重试", true);
   } finally {
     bindingRole = false;
     updateBindButton();
@@ -1770,10 +1761,10 @@ function initializePage() {
   init().catch(() => {
     $('agent-list').replaceChildren();
     const message = document.createElement('p');
-    message.textContent = '角色加载失败，请检查网络后重试';
+    WebI18n.bindText(message, () => (WebI18n.t("角色加载失败，请检查网络后重试")), "textContent");
     message.style.cssText = 'padding:32px 16px;text-align:center;color:#666666;font-size:14px';
     const retry = document.createElement('button');
-    retry.textContent = '重新加载';
+    WebI18n.bindText(retry, () => (WebI18n.t("重新加载")), "textContent");
     retry.style.cssText = 'display:block;margin:0 auto;padding:12px 24px;border-radius:12px;background:#07C160;color:white';
     retry.onclick = initializePage;
     $('agent-list').append(message, retry);

@@ -36,3 +36,9 @@ room:
   code_cooldown: "24h"
   command_ttl: "20s"
   token_timeout: "5s"
+
+# 未发布 Admin 语言配置时使用；各服务独立配置。
+web:
+  language:
+    default: auto  # auto | zh-CN | en；海外站选择 en
+    allow_switch: true

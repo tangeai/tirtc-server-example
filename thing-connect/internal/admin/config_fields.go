@@ -3,6 +3,12 @@ package admin
 import "strings"
 
 func defaultConfigFields(namespace, key string) []ConfigFieldDefinition {
+	if key == "web.language" && (namespace == "user-server" || namespace == "ai-server" || namespace == "call-server") {
+		return []ConfigFieldDefinition{
+			selectConfigField("default", "默认语言", []ConfigFieldOption{{Label: "跟随浏览器", Value: "auto"}, {Label: "简体中文", Value: "zh-CN"}, {Label: "English", Value: "en"}}),
+			booleanConfigField("allow_switch", "允许用户切换语言", "开启时优先使用用户手动选择；关闭时使用本服务默认语言。发布后在下次打开页面时生效。"),
+		}
+	}
 	fields := map[string][]ConfigFieldDefinition{
 		definitionID("user-server", "web.navigation"): {{Path: []string{"links"}, Label: "顶部导航链接", Description: "最多 3 个；按列表顺序展示，统一在新标签页打开。未配置或全部停用时隐藏。", Kind: "navigation_links"}},
 		definitionID("device-server", "device.code_policy"): {

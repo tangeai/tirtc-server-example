@@ -315,3 +315,13 @@ X-Internal-Key: <shared-internal-key>
 设备 PUT 为 allowed、monthly_limit、expected_revision、reason。管理员不覆盖用户开关与选择。月限额0至1000000，每执行一个类型占一次，默认100；按UTC自然月计量。模型实际 usage 按 analysis/tts 调用分别记录，不因失败抹去已报告消耗。
 
 模型默认配置使用 namespace=recognition-server、key=recognition.models，字段 base_url、tts_url、tts_model 及密钥 api_key。沿用既有动态配置发布、密钥查看/修改权限和审计；MQTT 使用该命名空间下的 mqtt.connection，重启生效。
+
+## 用户页面语言配置
+
+`user-server`、`ai-server` 和 `call-server` 分别注册全局配置 `web.language`，通过现有 `/configs/:namespace/:config_key` 接口独立发布：
+
+```json
+{"value":{"default":"en","allow_switch":true},"status":1,"expected_revision":0,"reason":"海外站默认英文","confirm":true}
+```
+
+`default` 为 `auto`、`zh-CN` 或 `en`；`allow_switch` 为布尔值。两个字段均必填，未知字段、其他语言值和非布尔开关会被拒绝。注册表默认值为 `{"default":"auto","allow_switch":true}`，不含密钥，`reload=runtime`，每个定义的目标仅为本服务。revision 为 0 时，各服务使用本地 YAML 回退值；已发布值优先。配置运行时应用不改变已打开页面的语言，浏览器在下次打开页面时读取对应服务的有效版本。

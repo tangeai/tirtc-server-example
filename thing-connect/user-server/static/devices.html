@@ -3,34 +3,36 @@
 <head>
   <link rel="icon" href="/static/favicon.ico?v=3" type="image/x-icon">
   <meta charset="UTF-8">
+  <script src="/v1/config/language.js"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>探鸽 · 小钛 — 我的设备</title>
+  <title data-ui-i18n="探鸽 · 小钛 — 我的设备">探鸽 · 小钛 — 我的设备</title>
   <link rel="stylesheet" href="/static/css/tailwind.css">
 <style>
 [hidden]{display:none!important}
-.device-dialog{border:1px solid #e5e7eb;border-radius:18px;padding:24px;width:min(420px,calc(100vw - 32px));color:#172c25;max-height:90vh;overflow:auto}.device-dialog::backdrop{background:#0007}.device-dialog h2{font-size:18px;font-weight:700}.device-dialog h3{font-weight:600;margin:22px 0 12px}.device-dialog header{display:flex;justify-content:space-between;gap:12px}.detail-muted{color:#6b7280;font-size:13px;overflow-wrap:anywhere;margin:8px 0}.danger{color:#dc2626}.device-details{display:grid;grid-template-columns:130px minmax(0,1fr);gap:10px;font-size:13px;margin:18px 0}.device-details dt{color:#6b7280}.device-details dd{overflow-wrap:anywhere}.media-tabs{display:flex;gap:6px}.media-tabs button{flex:1;font-size:13px;border:1px solid #d1d5db;border-radius:8px;padding:9px 4px}.media-tabs [aria-selected=true]{background:#ecfdf5;border-color:#10b981;color:#047857}.device-info-dialog{width:min(580px,calc(100vw - 32px))}.device-summary{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:14px 16px}.device-summary>button{text-align:left;cursor:pointer;background:#f4f7f6;border-radius:10px;padding:10px;min-width:0}.device-summary>button:hover{background:#ecfdf5}.device-summary>button:focus-visible{outline:2px solid #10b981;outline-offset:2px}.device-summary b span{float:right}.device-summary b{display:block;color:#475569;font-size:12px;margin-bottom:5px}.device-summary p{font-size:12px;color:#64748b;overflow-wrap:anywhere}.room-dot[hidden]{display:none}.room-dot{display:inline-block;width:6px;height:6px;background:#10b981;border-radius:50%;margin-left:3px}.feature-buttons button{min-width:0;white-space:nowrap}
-</style>  <script src="/static/user-shell.js?v=a3b29baae127"></script>
+.device-dialog{border:1px solid #e5e7eb;border-radius:18px;padding:24px;width:min(420px,calc(100vw - 32px));color:#172c25;max-height:90vh;overflow:auto}.device-dialog::backdrop{background:#0007}.device-dialog h2{font-size:18px;font-weight:700}.device-dialog h3{font-weight:600;margin:22px 0 12px}.device-dialog header{display:flex;justify-content:space-between;gap:12px}.detail-muted{color:#6b7280;font-size:13px;overflow-wrap:anywhere;margin:8px 0}.danger{color:#dc2626}.device-details{display:grid;grid-template-columns:130px minmax(0,1fr);gap:10px;font-size:13px;margin:18px 0}.device-details dt{color:#6b7280}.device-details dd{overflow-wrap:anywhere}.media-tabs{display:flex;gap:6px}.media-tabs button{flex:1;font-size:13px;border:1px solid #d1d5db;border-radius:8px;padding:9px 4px}.media-tabs [aria-selected=true]{background:#ecfdf5;border-color:#10b981;color:#047857}.device-info-dialog{width:min(580px,calc(100vw - 32px))}.device-summary{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:14px 16px}.device-summary>button{text-align:left;cursor:pointer;background:#f4f7f6;border-radius:10px;padding:10px;min-width:0}.device-summary>button:hover{background:#ecfdf5}.device-summary>button:focus-visible{outline:2px solid #10b981;outline-offset:2px}.device-summary b span[aria-hidden]{float:right}.device-summary b{display:block;color:#475569;font-size:12px;margin-bottom:5px}.device-summary p{font-size:12px;color:#64748b;overflow-wrap:anywhere}.room-dot[hidden]{display:none}.room-dot{display:inline-block;width:6px;height:6px;background:#10b981;border-radius:50%;margin-left:3px}.feature-buttons button{min-width:0;white-space:nowrap}
+</style>  <script src="/static/user-shell.js?v=a0238275b6ec"></script>
   <link rel="stylesheet" href="/static/css/brand.css?v=2">
 </head>
 <body class="bg-gray-50 min-h-screen font-sans">
 
 <!-- TOPBAR -->
 <header class="sticky top-0 z-50 flex items-center justify-between h-[60px] px-4 sm:px-8 bg-white border-b border-gray-200">
-  <a class="flex items-center gap-2.5" href="/" aria-label="探鸽 · 小钛首页">
+  <a class="flex items-center gap-2.5" href="/" aria-label="探鸽 · 小钛首页" data-ui-attrs="{&quot;aria-label&quot;:&quot;探鸽 · 小钛首页&quot;}">
     <span class="brand-mark" aria-hidden="true"></span>
-    <span class="site-brand-name text-gray-900">探鸽 · 小钛</span>
+    <span class="site-brand-name text-gray-900" data-ui-i18n="探鸽 · 小钛">探鸽 · 小钛</span>
   </a>
   <div class="flex items-center gap-2 sm:gap-4">
+    <button type="button" data-language-toggle class="text-xs text-gray-500 px-2 py-1.5 border border-gray-200 rounded-lg shrink-0">English</button>
     <div data-navigation hidden></div>
     <div class="relative">
-      <button id="user-menu-trigger" type="button" aria-label="账号菜单" aria-expanded="false" aria-controls="user-menu" class="flex items-center gap-1.5 p-2 rounded-full border border-gray-200 bg-gray-50 hover:bg-gray-100">
+      <button id="user-menu-trigger" type="button" aria-label="账号菜单" aria-expanded="false" aria-controls="user-menu" class="flex items-center gap-1.5 p-2 rounded-full border border-gray-200 bg-gray-50 hover:bg-gray-100" data-ui-attrs="{&quot;aria-label&quot;:&quot;账号菜单&quot;}">
         <span id="user-avatar" class="w-[26px] h-[26px] rounded-full bg-gradient-to-br from-violet-400 to-blue-500 flex items-center justify-center text-[11px] font-bold text-white">U</span>
         <span class="text-xs text-gray-400" aria-hidden="true">▾</span>
       </button>
       <div id="user-menu" hidden class="absolute right-0 top-full mt-2 w-64 max-w-[calc(100vw-28px)] p-2 bg-white border border-gray-200 rounded-xl shadow-xl">
-        <div class="px-3 py-2 border-b border-gray-100 mb-1"><p class="text-xs text-gray-400 mb-1">当前账号</p><p id="user-account" class="text-sm text-gray-800 break-all">正在加载账号…</p><button id="user-account-retry" hidden class="text-xs text-emerald-600 mt-2">重试</button></div>
-        <a href="/forgot-password" class="block px-3 py-2.5 text-sm text-gray-700 rounded-lg hover:bg-gray-50">修改密码</a>
-        <button id="user-logout" type="button" class="w-full text-left px-3 py-2.5 text-sm text-red-600 rounded-lg hover:bg-red-50">退出登录</button>
+        <div class="px-3 py-2 border-b border-gray-100 mb-1"><p class="text-xs text-gray-400 mb-1" data-ui-i18n="当前账号">当前账号</p><p id="user-account" class="text-sm text-gray-800 break-all" data-ui-i18n="正在加载账号…">正在加载账号…</p><button id="user-account-retry" hidden class="text-xs text-emerald-600 mt-2" data-ui-i18n="重试">重试</button></div>
+        <a href="/forgot-password" class="block px-3 py-2.5 text-sm text-gray-700 rounded-lg hover:bg-gray-50" data-ui-i18n="修改密码">修改密码</a>
+        <button id="user-logout" type="button" class="w-full text-left px-3 py-2.5 text-sm text-red-600 rounded-lg hover:bg-red-50" data-ui-i18n="退出登录">退出登录</button>
       </div>
     </div>
   </div>
@@ -40,14 +42,14 @@
 <main class="relative max-w-[1200px] mx-auto px-8 pt-9 pb-24 max-sm:px-3.5 max-sm:pt-5 max-sm:pb-32">
   <div class="flex items-end justify-between mb-7">
     <h1 class="text-2xl font-bold tracking-tight text-gray-900">
-      我的设备 <span id="device-count" class="text-sm font-normal text-gray-400 ml-2"></span>
+      <span data-ui-i18n="我的设备">我的设备</span> <span id="device-count" class="text-sm font-normal text-gray-400 ml-2"></span>
     </h1>
     <button onclick="loadDevices()" class="flex items-center gap-1.5 text-xs text-gray-500 bg-white border border-gray-200 rounded-lg px-3.5 py-1.5 hover:border-gray-300 hover:text-gray-700 transition-all">
       <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
         <path d="M23 4v6h-6M1 20v-6h6"/>
         <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
       </svg>
-      <span>刷新</span>
+      <span data-ui-i18n="刷新">刷新</span>
     </button>
   </div>
 
@@ -60,8 +62,8 @@
           <path d="M8 21h8M12 17v4"/>
         </svg>
       </div>
-      <p class="text-base font-semibold text-gray-800 mb-2">还没有设备</p>
-      <p class="text-sm text-gray-400">点击"添加设备"，输入验证码完成绑定</p>
+      <p class="text-base font-semibold text-gray-800 mb-2" data-ui-i18n="还没有设备">还没有设备</p>
+      <p class="text-sm text-gray-400" data-ui-i18n="点击&quot;添加设备&quot;，输入验证码完成绑定">点击"添加设备"，输入验证码完成绑定</p>
     </div>
   </div>
 </main>
@@ -71,7 +73,7 @@
   <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
     <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
   </svg>
-  添加设备
+  <span data-ui-i18n="添加设备">添加设备</span>
 </button>
 
 <!-- DEVICE NAME MODAL -->
@@ -79,30 +81,28 @@
   <form class="bg-white border border-gray-200 rounded-2xl p-7 w-[380px] max-w-[calc(100vw-32px)] shadow-xl" onclick="event.stopPropagation()" onsubmit="saveDeviceName(); return false;">
     <div class="flex items-start justify-between gap-4 mb-5">
       <div>
-        <h2 class="text-[17px] font-bold text-gray-900 mb-1">设置设备名称</h2>
-        <p class="text-xs text-gray-400 leading-relaxed">最多 13 个字符，用于设备列表和微信设备来电显示。</p>
+        <h2 class="text-[17px] font-bold text-gray-900 mb-1" data-ui-i18n="设置设备名称">设置设备名称</h2>
+        <p class="text-xs text-gray-400 leading-relaxed" data-ui-i18n="最多 13 个字符，用于设备列表和微信设备来电显示。">最多 13 个字符，用于设备列表和微信设备来电显示。</p>
       </div>
-      <button type="button" onclick="closeNameModal()" class="flex-shrink-0 w-8 h-8 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors" aria-label="关闭">
+      <button type="button" onclick="closeNameModal()" class="flex-shrink-0 w-8 h-8 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors" aria-label="关闭" data-ui-attrs="{&quot;aria-label&quot;:&quot;关闭&quot;}">
         <svg class="w-4 h-4 mx-auto" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
           <path d="M18 6L6 18M6 6l12 12"/>
         </svg>
       </button>
     </div>
     <div class="mb-4">
-      <label for="device-name-input" class="block text-xs font-medium text-gray-600 mb-1.5">设备名称</label>
+      <label for="device-name-input" class="block text-xs font-medium text-gray-600 mb-1.5" data-ui-i18n="设备名称">设备名称</label>
       <input id="device-name-input" type="text" autocomplete="off" placeholder="例如：客厅学习机"
-        class="w-full px-3.5 py-2.5 text-sm border border-gray-200 rounded-lg outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all">
+        class="w-full px-3.5 py-2.5 text-sm border border-gray-200 rounded-lg outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all" data-ui-attrs="{&quot;placeholder&quot;:&quot;例如：客厅学习机&quot;}">
       <div class="flex items-center justify-between mt-1.5">
         <span id="name-device-id" class="font-mono text-[10px] text-gray-400 truncate"></span>
         <span id="name-char-count" class="text-[10px] text-gray-400">0 / 13</span>
       </div>
     </div>
-    <div class="px-3 py-2.5 mb-5 rounded-lg bg-amber-50 border border-amber-200 text-[11px] text-amber-700 leading-relaxed">
-      如果微信已保存旧的授权名称，需要清除原授权并重新授权后，新名称才会在微信端生效。
-    </div>
+    <div class="px-3 py-2.5 mb-5 rounded-lg bg-amber-50 border border-amber-200 text-[11px] text-amber-700 leading-relaxed" data-ui-i18n="如果微信已保存旧的授权名称，需要清除原授权并重新授权后，新名称才会在微信端生效。">如果微信已保存旧的授权名称，需要清除原授权并重新授权后，新名称才会在微信端生效。</div>
     <div class="flex gap-2.5">
-      <button type="button" onclick="closeNameModal()" class="flex-1 py-2.5 text-sm text-gray-500 bg-gray-50 border border-gray-200 rounded-lg hover:border-gray-300 transition-colors">取消</button>
-      <button id="name-save-button" type="submit" class="flex-1 py-2.5 text-sm font-semibold text-white bg-emerald-500 border border-emerald-500 rounded-lg hover:bg-emerald-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">保存名称</button>
+      <button type="button" onclick="closeNameModal()" class="flex-1 py-2.5 text-sm text-gray-500 bg-gray-50 border border-gray-200 rounded-lg hover:border-gray-300 transition-colors" data-ui-i18n="取消">取消</button>
+      <button id="name-save-button" type="submit" class="flex-1 py-2.5 text-sm font-semibold text-white bg-emerald-500 border border-emerald-500 rounded-lg hover:bg-emerald-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" data-ui-i18n="保存名称">保存名称</button>
     </div>
   </form>
 </div>
@@ -110,29 +110,29 @@
 <!-- RESET MODAL -->
 <div id="reset-modal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-[200] items-center justify-center">
   <div class="bg-white border border-gray-200 rounded-2xl p-7 w-[360px] max-w-[calc(100vw-48px)] shadow-xl">
-    <h2 class="text-[17px] font-bold text-gray-900 mb-2">确认解绑设备？</h2>
-    <p class="text-sm text-gray-500 leading-relaxed mb-6">解绑后设备会退出当前房间，并从我的设备中移除。再次使用需要重新绑定。</p>
+    <h2 class="text-[17px] font-bold text-gray-900 mb-2" data-ui-i18n="确认解绑设备？">确认解绑设备？</h2>
+    <p class="text-sm text-gray-500 leading-relaxed mb-6" data-ui-i18n="解绑后设备会退出当前房间，并从我的设备中移除。再次使用需要重新绑定。">解绑后设备会退出当前房间，并从我的设备中移除。再次使用需要重新绑定。</p>
     <div class="flex gap-2.5">
-      <button onclick="closeModal()" class="flex-1 py-2.5 text-sm text-gray-500 bg-gray-50 border border-gray-200 rounded-lg hover:border-gray-300 transition-colors">取消</button>
-      <button onclick="doReset()" class="flex-1 py-2.5 text-sm font-semibold text-red-600 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 transition-colors">确认解绑</button>
+      <button onclick="closeModal()" class="flex-1 py-2.5 text-sm text-gray-500 bg-gray-50 border border-gray-200 rounded-lg hover:border-gray-300 transition-colors" data-ui-i18n="取消">取消</button>
+      <button onclick="doReset()" class="flex-1 py-2.5 text-sm font-semibold text-red-600 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 transition-colors" data-ui-i18n="确认解绑">确认解绑</button>
     </div>
   </div>
 </div>
 
 
-<div id="device-menu" role="menu" aria-label="设备操作" hidden class="fixed z-[200] w-44 p-1.5 bg-white border border-gray-200 rounded-xl shadow-xl">
-  <button type="button" role="menuitem" data-menu-action="rename" class="w-full text-left px-3 py-2.5 text-sm text-gray-700 rounded-lg hover:bg-gray-50 focus:bg-gray-50 focus:outline-none">修改名称</button>
-  <button type="button" role="menuitem" data-menu-action="info" class="w-full text-left px-3 py-2.5 text-sm text-gray-700 rounded-lg hover:bg-gray-50 focus:bg-gray-50 focus:outline-none">设备信息</button>
+<div id="device-menu" role="menu" aria-label="设备操作" hidden class="fixed z-[200] w-44 p-1.5 bg-white border border-gray-200 rounded-xl shadow-xl" data-ui-attrs="{&quot;aria-label&quot;:&quot;设备操作&quot;}">
+  <button type="button" role="menuitem" data-menu-action="rename" class="w-full text-left px-3 py-2.5 text-sm text-gray-700 rounded-lg hover:bg-gray-50 focus:bg-gray-50 focus:outline-none" data-ui-i18n="修改名称">修改名称</button>
+  <button type="button" role="menuitem" data-menu-action="info" class="w-full text-left px-3 py-2.5 text-sm text-gray-700 rounded-lg hover:bg-gray-50 focus:bg-gray-50 focus:outline-none" data-ui-i18n="设备信息">设备信息</button>
   <div role="separator" class="my-1 border-t border-gray-100"></div>
-  <button type="button" role="menuitem" data-menu-action="unbind" class="w-full text-left px-3 py-2.5 text-sm text-red-600 rounded-lg hover:bg-red-50 focus:bg-red-50 focus:outline-none">解绑设备</button>
+  <button type="button" role="menuitem" data-menu-action="unbind" class="w-full text-left px-3 py-2.5 text-sm text-red-600 rounded-lg hover:bg-red-50 focus:bg-red-50 focus:outline-none" data-ui-i18n="解绑设备">解绑设备</button>
 </div>
 <dialog id="device-info" class="device-dialog device-info-dialog" aria-labelledby="info-title">
-  <header><h2 id="info-title">设备信息</h2><button type="button" id="info-close" aria-label="关闭设备信息">关闭</button></header>
-  <dl id="device-details" class="device-details"></dl><h3>媒体能力</h3>
-  <div class="media-tabs" role="tablist" aria-label="媒体场景">
-    <button type="button" role="tab" id="tab-stream" data-scene="stream" aria-controls="media-details" aria-selected="true">实时查看</button>
-    <button type="button" role="tab" id="tab-call" data-scene="call" aria-controls="media-details" aria-selected="false">设备通话</button>
-    <button type="button" role="tab" id="tab-voip" data-scene="voip" aria-controls="media-details" aria-selected="false">微信 VoIP</button>
+  <header><h2 id="info-title" data-ui-i18n="设备信息">设备信息</h2><button type="button" id="info-close" aria-label="关闭设备信息" data-ui-attrs="{&quot;aria-label&quot;:&quot;关闭设备信息&quot;}" data-ui-i18n="关闭">关闭</button></header>
+  <dl id="device-details" class="device-details"></dl><h3 data-ui-i18n="媒体能力">媒体能力</h3>
+  <div class="media-tabs" role="tablist" aria-label="媒体场景" data-ui-attrs="{&quot;aria-label&quot;:&quot;媒体场景&quot;}">
+    <button type="button" role="tab" id="tab-stream" data-scene="stream" aria-controls="media-details" aria-selected="true" data-ui-i18n="实时查看">实时查看</button>
+    <button type="button" role="tab" id="tab-call" data-scene="call" aria-controls="media-details" aria-selected="false" data-ui-i18n="设备通话">设备通话</button>
+    <button type="button" role="tab" id="tab-voip" data-scene="voip" aria-controls="media-details" aria-selected="false" data-ui-i18n="微信 VoIP">微信 VoIP</button>
   </div>
   <div id="media-details" role="tabpanel" aria-labelledby="tab-stream"></div>
 </dialog>
@@ -140,9 +140,9 @@
 <!-- TOAST -->
 <div id="toast" class="fixed bottom-[100px] left-1/2 bg-gray-900 text-white text-sm px-5 py-2.5 rounded-full pointer-events-none whitespace-nowrap z-[300] border border-transparent"></div>
 
-<script src="/static/device-presentation.js?v=657426df933a"></script>
-<script src="/static/devices.js?v=recognition1"></script>
+<script src="/static/device-presentation.js?v=baae8f7354bb"></script>
+<script src="/static/devices.js?v=1016bd04e7f9"></script>
 <link rel="stylesheet" href="/static/recognition.css?v=23d3d12c7f76">
-<script src="/static/recognition.js?v=db0a620a3b80"></script>
+<script src="/static/recognition.js?v=71994fae66ed"></script>
 </body>
 </html>

@@ -38,7 +38,7 @@
 Admin 配置中心管理 `device-server`、`user-server`、`voip-server`、`ai-server`、`call-server`、`common` 和 `system` 命名空间。
 
 - 数据库没有发布值时使用后端注册表默认值。
-- 不读取业务服务 YAML 中的同名旧业务值。
+- 普通业务配置不读取服务 YAML 中的同名旧业务值；`web.language` 的本地回退规则见下方“用户页面语言”。
 - TiRTC App ID、Access Key ID 和 Secret Key ID 没有可运行默认值，后台将其标记为必填阻塞项。
 - User、VoIP、Call 的 `mqtt.connection` 没有可运行默认值，三个服务分别发布独立账号。Admin、Device 和 AI 不连接 MQTT。
 - MQTT 表单可以先用尚未发布的值测试 Broker 网络、TLS 和账号认证；发布接口也会自动复检，失败时保持原配置不变。固定 ClientID 测试使用临时连接 ID，不会断开同名业务客户端；服务器启动预检再使用正式 ClientID 做最终检查。
@@ -87,3 +87,13 @@ TC-DEVICE-000001,replace-with-device-secret
 - 动态配置未生效：检查配置是否已经发布、目标实例是否在线及其配置 revision。
 
 接口契约见 [Admin API](API.md)，业务接口见 [API Reference](../../api-reference.md)。
+
+## 用户页面语言
+
+在用户服务、AI 服务和呼叫服务的配置页分别编辑 `web.language`：默认语言选择“跟随浏览器”“简体中文”或“English”，并设置是否允许用户切换。海外站将三个服务都设为 English。各服务独立读取配置，发布后下次打开对应页面使用该版本；已打开的页面保留当前语言和操作状态。
+
+允许切换时，同一站点的浏览器优先使用用户手动选择的语言；禁止切换时，使用本服务的默认语言。“跟随浏览器”对中文浏览器使用简体中文，其他浏览器使用英文。登录、注册和退出保留语言选择。
+
+`web.language` 没有发布值（revision 为 0）时，各服务使用自己的 `config.yaml` 中的 `web.language`；省略 YAML 配置时，默认跟随浏览器且允许切换。服务启动仍需要可用的 Admin；运行期间 Admin 暂时不可达时保留最后有效配置。语言值不含密钥，使用现有配置权限、发布审计和实例 revision 查看生效状态。
+
+界面语言只影响页面文案和操作提示，设备名称、用户填写的提示词、AI 对话及云端资源内容保持原文。邮件模板和第三方验证码按各自配置管理。Admin 管理页面使用中文。

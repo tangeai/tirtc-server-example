@@ -33,14 +33,14 @@ async function api(path, opts = {}) {
   const body = await res.json();
   if (res.status === 401 || body.code === 401) {
     location.href = "/login";
-    throw Error("登录已过期");
+    throw Error(WebI18n.t("登录已过期"));
   }
   return body;
 }
 
 function toast(msg, error = false) {
   const el = $("toast");
-  el.textContent = msg;
+  WebI18n.bindText(el, () => (WebI18n.t(msg)), "textContent");
   el.style.borderColor = error ? "rgba(239,68,68,0.4)" : "rgba(16,185,129,0.4)";
   el.classList.add("show");
   setTimeout(() => el.classList.remove("show"), 2600);
@@ -66,7 +66,7 @@ async function loadDevices() {
   }
   if (generation !== summaryGeneration) return;
   if (devData.code !== 200) {
-    toast(devData.msg || "设备列表加载失败，请刷新", true);
+    toast(WebI18n.errorMessage(devData, WebI18n.t("设备列表加载失败，请刷新")), true);
     return;
   }
 
@@ -74,7 +74,7 @@ async function loadDevices() {
 
   if (devData.code !== 200 || !devData.data?.length) {
     devices = [];
-    $("device-count").textContent = "";
+    WebI18n.bindText($("device-count"), () => (""), "textContent");
     grid.innerHTML = `
       <div class="col-span-full flex flex-col items-center py-20 text-center">
         <div class="w-16 h-16 mb-5 rounded-2xl bg-emerald-50 border border-dashed border-emerald-200 flex items-center justify-center text-emerald-500">
@@ -83,14 +83,14 @@ async function loadDevices() {
             <path d="M8 21h8M12 17v4"/>
           </svg>
         </div>
-        <p class="text-base font-semibold text-gray-800 mb-2">还没有设备</p>
-        <p class="text-sm text-gray-400">点击"添加设备"，输入验证码完成绑定</p>
+        <p class="text-base font-semibold text-gray-800 mb-2"><span data-ui-i18n="还没有设备">还没有设备</span></p>
+        <p class="text-sm text-gray-400"><span data-ui-i18n="点击&quot;添加设备&quot;，输入验证码完成绑定">点击"添加设备"，输入验证码完成绑定</span></p>
       </div>`;
     return;
   }
 
   devices = devData.data;
-  $("device-count").textContent = `(${devData.data.length})`;
+  WebI18n.bindText($("device-count"), () => (`(${devData.data.length})`), "textContent");
 
   renderCards();
   await refreshSummaries();
@@ -101,7 +101,7 @@ function renderCards() {
   $("device-grid").innerHTML = devices
     .map((d) => {
       const id = escapeHTML(d.device_id),
-        name = escapeHTML(d.device_name || "未命名设备");
+        name = escapeHTML(d.device_name || WebI18n.t("未命名设备"));
       return `<article class="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm" data-card-device="${id}">
       <div class="px-4 pt-4 pb-3 min-w-0">
         <div class="flex items-center gap-3 min-w-0">
@@ -111,20 +111,20 @@ function renderCards() {
               <path d="M9 21h6M12 17v4"/>
             </svg>
           </span>
-          <div class="min-w-0 flex-1"><h2 class="text-base font-semibold text-gray-900 truncate" title="${name}">${name}</h2>
+          <div class="min-w-0 flex-1"><h2 class="text-base font-semibold text-gray-900 truncate" title="${name}" ${d.device_name ? "" : 'data-ui-i18n="未命名设备" data-ui-attrs="{&quot;title&quot;:&quot;未命名设备&quot;}"'}>${name}</h2>
 </div>
-          <button type="button" data-device-id="${id}" onclick="openDeviceMenu(this.dataset.deviceId, this)" class="shrink-0 px-2.5 py-2 text-xs text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors" aria-haspopup="menu" aria-controls="device-menu" aria-expanded="false" aria-label="${name}更多操作">更多 ▾</button>
+          <button type="button" data-device-id="${id}" onclick="openDeviceMenu(this.dataset.deviceId, this)" class="shrink-0 px-2.5 py-2 text-xs text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors" aria-haspopup="menu" aria-controls="device-menu" aria-expanded="false" aria-label="${name}更多操作" data-ui-attrs='{"aria-label":"{p0}更多操作"}' data-ui-params="${escapeHTML(JSON.stringify({p0:d.device_name || WebI18n.t("未命名设备")}))}"><span data-ui-i18n="更多 ▾">更多 ▾</span></button>
         </div><div class="flex items-center justify-between gap-3 mt-3 min-w-0">
           <p class="font-mono text-xs text-gray-400 truncate min-w-0" title="${id}">ID：${id}</p>
-          <span data-online-status class="inline-flex items-center gap-1.5 shrink-0 text-xs ${d.online ? "text-emerald-600" : "text-gray-400"}"><span class="w-1.5 h-1.5 shrink-0 rounded-full ${d.online ? "bg-emerald-500" : "bg-gray-400"}" aria-hidden="true"></span>${d.online ? "在线" : "离线"}</span>
+          <span data-online-status class="inline-flex items-center gap-1.5 shrink-0 text-xs ${d.online ? "text-emerald-600" : "text-gray-400"}"><span class="w-1.5 h-1.5 shrink-0 rounded-full ${d.online ? "bg-emerald-500" : "bg-gray-400"}" aria-hidden="true"></span>${d.online ? WebI18n.mark("在线") : WebI18n.mark("离线")}</span>
         </div>
       </div>
-      <div class="device-summary recognition-summary"><button type="button" data-device-id="${id}" onclick="goConfig(this.dataset.deviceId)"><b>AI 角色 <span aria-hidden="true">›</span></b><p data-role>正在查询…</p></button><button type="button" data-device-id="${id}" onclick="openRecognition(this.dataset.deviceId)"><b>AI识别 <span aria-hidden="true">›</span></b><p data-recognition>正在查询…</p></button><button type="button" data-device-id="${id}" onclick="goRoom(this.dataset.deviceId)"><b>多人对讲 <span aria-hidden="true">›</span></b><p data-room>正在查询…</p></button></div>
+      <div class="device-summary recognition-summary"><button type="button" data-device-id="${id}" onclick="goConfig(this.dataset.deviceId)"><b><span data-ui-i18n="AI 角色">AI 角色</span> <span aria-hidden="true">›</span></b><p data-role><span data-ui-i18n="正在查询…">正在查询…</span></p></button><button type="button" data-device-id="${id}" onclick="openRecognition(this.dataset.deviceId)"><b><span data-ui-i18n="AI识别">AI识别</span> <span aria-hidden="true">›</span></b><p data-recognition><span data-ui-i18n="正在查询…">正在查询…</span></p></button><button type="button" data-device-id="${id}" onclick="goRoom(this.dataset.deviceId)"><b><span data-ui-i18n="多人对讲">多人对讲</span> <span aria-hidden="true">›</span></b><p data-room><span data-ui-i18n="正在查询…">正在查询…</span></p></button></div>
       <div class="feature-buttons grid grid-cols-4 gap-1 px-3 py-2 border-t border-gray-100">
-        <button type="button" class="flex flex-col items-center justify-center gap-1.5 min-h-[52px] rounded-lg text-xs text-gray-600 hover:bg-emerald-50 hover:text-emerald-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 transition-colors" data-device-id="${id}" onclick="goLive(this.dataset.deviceId)"><svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M9 21h6M12 17v4"/></svg><span>实时</span></button>
-        <button type="button" class="flex flex-col items-center justify-center gap-1.5 min-h-[52px] rounded-lg text-xs text-gray-600 hover:bg-emerald-50 hover:text-emerald-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 transition-colors" data-device-id="${id}" onclick="goContacts(this.dataset.deviceId)"><svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2M16 5a3 3 0 0 1 0 6M21 20v-2a6 6 0 0 0-3-5"/></svg><span>联系人</span></button>
-        <button type="button" class="flex flex-col items-center justify-center gap-1.5 min-h-[52px] rounded-lg text-xs text-gray-600 hover:bg-emerald-50 hover:text-emerald-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 transition-colors" data-device-id="${id}" onclick="goConfig(this.dataset.deviceId)"><svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="4" y="7" width="16" height="13" rx="3"/><path d="M12 3v4M1 12v4M23 12v4M9 16h6"/><path d="M9 11v1M15 11v1"/></svg><span>AI 角色</span></button>
-        <button type="button" class="flex flex-col items-center justify-center gap-1.5 min-h-[52px] rounded-lg text-xs text-gray-600 hover:bg-emerald-50 hover:text-emerald-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 transition-colors" data-device-id="${id}" onclick="goRoom(this.dataset.deviceId)"><svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M21 11a8 8 0 0 1-8 8H7l-4 3v-6a8 8 0 1 1 18-5Z"/><path d="M8 10v3M12 8v7M16 10v3"/></svg><span>多人对讲<span data-room-dot class="room-dot" hidden aria-label="有对讲关系"></span></span></button>
+        <button type="button" class="flex flex-col items-center justify-center gap-1.5 min-h-[52px] rounded-lg text-xs text-gray-600 hover:bg-emerald-50 hover:text-emerald-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 transition-colors" data-device-id="${id}" onclick="goLive(this.dataset.deviceId)"><svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M9 21h6M12 17v4"/></svg><span><span data-ui-i18n="实时">实时</span></span></button>
+        <button type="button" class="flex flex-col items-center justify-center gap-1.5 min-h-[52px] rounded-lg text-xs text-gray-600 hover:bg-emerald-50 hover:text-emerald-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 transition-colors" data-device-id="${id}" onclick="goContacts(this.dataset.deviceId)"><svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2M16 5a3 3 0 0 1 0 6M21 20v-2a6 6 0 0 0-3-5"/></svg><span><span data-ui-i18n="联系人">联系人</span></span></button>
+        <button type="button" class="flex flex-col items-center justify-center gap-1.5 min-h-[52px] rounded-lg text-xs text-gray-600 hover:bg-emerald-50 hover:text-emerald-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 transition-colors" data-device-id="${id}" onclick="goConfig(this.dataset.deviceId)"><svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="4" y="7" width="16" height="13" rx="3"/><path d="M12 3v4M1 12v4M23 12v4M9 16h6"/><path d="M9 11v1M15 11v1"/></svg><span><span data-ui-i18n="AI 角色">AI 角色</span></span></button>
+        <button type="button" class="flex flex-col items-center justify-center gap-1.5 min-h-[52px] rounded-lg text-xs text-gray-600 hover:bg-emerald-50 hover:text-emerald-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 transition-colors" data-device-id="${id}" onclick="goRoom(this.dataset.deviceId)"><svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M21 11a8 8 0 0 1-8 8H7l-4 3v-6a8 8 0 1 1 18-5Z"/><path d="M8 10v3M12 8v7M16 10v3"/></svg><span><span data-ui-i18n="多人对讲">多人对讲</span><span data-room-dot class="room-dot" hidden aria-label="有对讲关系" data-ui-attrs="{&quot;aria-label&quot;:&quot;有对讲关系&quot;}"></span></span></button>
       </div></article>`;
     })
     .join("");
@@ -140,6 +140,8 @@ function cardFor(id) {
 function updateOnlineStatus(card, online) {
   const status = card.querySelector("[data-online-status]");
   const dot = status.firstElementChild;
+  status.querySelector("[data-ui-i18n]")?.remove();
+  if (status.lastChild?.nodeType !== Node.TEXT_NODE) status.append(document.createTextNode(""));
   const icon = card.querySelector("[data-device-icon]");
   for (const [element, yes, no] of [
     [status, "text-emerald-600", "text-gray-400"],
@@ -151,7 +153,7 @@ function updateOnlineStatus(card, online) {
     element.classList.toggle(yes, online);
     element.classList.toggle(no, !online);
   }
-  status.lastChild.textContent = online ? "在线" : "离线";
+  WebI18n.bindText(status.lastChild, () => (online ? WebI18n.t("在线") : WebI18n.t("离线")), "textContent");
 }
 async function refreshSummaries() {
   if (summaryBusy || document.hidden) return;
@@ -165,16 +167,16 @@ async function refreshSummaries() {
       const d = list[cursor++];
       await Promise.allSettled([
         (async () => {
-          let text = "状态获取失败，请刷新";
+          let readText = () => WebI18n.t("状态获取失败，请刷新");
           try {
             const response = await api("/v1/recognition/devices/" + encodeURIComponent(d.device_id) + "/config");
             if (response.code !== 200) throw Error();
             const state = response.data;
-            text = state.policy.enabled ? `已开启 · ${state.schemes.length}项` : "已关闭";
+            readText = () => state.policy.enabled ? WebI18n.t("已开启 · {p0}项", {p0: state.schemes.length}) : WebI18n.t("已关闭");
           } catch {}
           if (generation === summaryGeneration) {
             const label = cardFor(d.device_id)?.querySelector("[data-recognition]");
-            if (label) label.textContent = text;
+            if (label) WebI18n.bindText(label, readText);
           }
         })(),
         (async () => {
@@ -191,23 +193,22 @@ async function refreshSummaries() {
               d.online = d.room.online;
               updateOnlineStatus(card, d.online);
             }
-            const text = DevicePresentation.roomSummary(d.room);
-            card.querySelector("[data-room]").textContent = text;
-            card.querySelector("[data-room]").title = text;
+            const readText = () => DevicePresentation.roomSummary(d.room);
+            WebI18n.bindText(card.querySelector("[data-room]"), readText);
+            WebI18n.bindText(card.querySelector("[data-room]"), readText, "title");
             card.querySelector("[data-room-dot]").hidden =
               d.room.desired_state !== "joined";
           } catch {
             if (generation === summaryGeneration) {
               const card = cardFor(d.device_id);
               if (card) {
-                card.querySelector("[data-room]").textContent =
-                  "状态获取失败，请刷新";
+                WebI18n.bindText(card.querySelector("[data-room]"), () => (WebI18n.t("状态获取失败，请刷新")), "textContent");
               }
             }
           }
         })(),
         (async () => {
-          let text = "角色获取失败，请刷新";
+          let readText = () => WebI18n.t("角色获取失败，请刷新");
           try {
             const binding = await api(
               "/v1/ai/device/" + encodeURIComponent(d.device_id) + "/role",
@@ -224,13 +225,13 @@ async function refreshSummaries() {
               else if (![403, 404, 40300, 40400].includes(detail.code))
                 throw Error();
             }
-            text = DevicePresentation.roleSummary(binding.data, role);
+            readText = () => DevicePresentation.roleSummary(binding.data, role);
           } catch {}
           if (generation === summaryGeneration) {
             const card = cardFor(d.device_id);
             if (card) {
-              card.querySelector("[data-role]").textContent = text;
-              card.querySelector("[data-role]").title = text;
+              WebI18n.bindText(card.querySelector("[data-role]"), readText);
+              WebI18n.bindText(card.querySelector("[data-role]"), readText, "title");
             }
           }
         })(),
@@ -316,7 +317,7 @@ function showMedia(scene) {
   const rows = DevicePresentation.mediaRows(d.profiles, scene);
   $("media-details").innerHTML = rows
     ? detailList(rows)
-    : '<p class="detail-muted">该场景能力未上报</p>';
+    : "<p class=\"detail-muted\"><span data-ui-i18n=\"该场景能力未上报\">该场景能力未上报</span></p>";
 }
 function openDeviceInfo() {
   const d = devices.find((d) => d.device_id === selectedDeviceID);
@@ -374,7 +375,7 @@ function goContacts(id) {
 
 function updateNameCharCount() {
   const length = Array.from($("device-name-input").value || "").length;
-  $("name-char-count").textContent = `${length} / 13`;
+  WebI18n.bindText($("name-char-count"), () => (`${length} / 13`), "textContent");
   $("name-char-count").classList.toggle("text-red-500", length > 13);
 }
 
@@ -386,7 +387,7 @@ function openNameModal(deviceID) {
   }
   editingDeviceID = deviceID;
   $("device-name-input").value = device.device_name || "";
-  $("name-device-id").textContent = deviceID;
+  WebI18n.bindText($("name-device-id"), () => (deviceID), "textContent");
   updateNameCharCount();
   const modal = $("name-modal");
   modal.classList.remove("hidden");
@@ -400,7 +401,7 @@ function closeNameModal() {
   modal.classList.add("hidden");
   modal.classList.remove("flex");
   $("name-save-button").disabled = false;
-  $("name-save-button").textContent = "保存名称";
+  WebI18n.bindText($("name-save-button"), () => (WebI18n.t("保存名称")), "textContent");
 }
 
 async function saveDeviceName() {
@@ -420,20 +421,20 @@ async function saveDeviceName() {
 
   const button = $("name-save-button");
   button.disabled = true;
-  button.textContent = "保存中…";
+  WebI18n.bindText(button, () => (WebI18n.t("保存中…")), "textContent");
   try {
     const data = await api("/v1/user/device/name", {
       method: "PUT",
       body: JSON.stringify({ device_id: deviceID, device_name: deviceName }),
     });
-    if (data.code !== 200) throw new Error(data.msg || "保存失败");
+    if (data.code !== 200) throw new Error(WebI18n.errorMessage(data, WebI18n.t("保存失败")));
     closeNameModal();
     toast("设备名称已保存");
     await loadDevices();
   } catch (error) {
     button.disabled = false;
-    button.textContent = "保存名称";
-    toast(error.message || "保存失败", true);
+    WebI18n.bindText(button, () => (WebI18n.t("保存名称")), "textContent");
+    toast(error.message || WebI18n.t("保存失败"), true);
   }
 }
 
@@ -460,16 +461,16 @@ async function doReset() {
       method: "DELETE",
       body: JSON.stringify({ device_id: id }),
     });
-    if (data.code !== 200) throw Error(data.msg || "解绑失败");
+    if (data.code !== 200) throw Error(WebI18n.errorMessage(data, WebI18n.t("解绑失败")));
     toast("设备已解绑");
     await loadDevices();
   } catch (error) {
-    toast(error.message || "解绑失败，请重试", true);
+    toast(error.message || WebI18n.t("解绑失败，请重试"), true);
   }
 }
 
 function logout() {
-  localStorage.clear();
+  WebI18n.clearLocalSession();
   sessionStorage.clear();
   location.href = "/login";
 }
@@ -483,4 +484,12 @@ loadDevices();
 
 addEventListener("pagehide", () => {
   summaryGeneration++;
+});
+
+WebI18n.onChange(() => {
+  if (!$("device-info").open) return;
+  const device = devices.find(item => item.device_id === selectedDeviceID);
+  if (!device) return;
+  $("device-details").innerHTML = DevicePresentation.deviceRows(device).map(([key, value]) => `<dt>${escapeHTML(key)}</dt><dd>${escapeHTML(value)}</dd>`).join("");
+  showMedia(document.querySelector("[data-scene][aria-selected=true]")?.dataset.scene || "stream");
 });

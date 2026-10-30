@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	_ "embed"
 	"errors"
 	"fmt"
 	"log"
@@ -29,7 +30,12 @@ import (
 	mysqlmigrate "thing-connect/internal/store/mysql/migrate"
 	"thing-connect/internal/tirtcapi"
 	"thing-connect/internal/userauth"
+	"thing-connect/internal/weblanguage"
+	"thing-connect/internal/webui"
 )
+
+//go:embed handler/call-i18n.json
+var languageMessages string
 
 func main() {
 	cfgPath := config.ParseFlags()
@@ -81,6 +87,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("dynamic config: %v", err)
 	}
+	language, err := weblanguage.New(cfg.Web.Language)
+	if err != nil {
+		log.Fatalf("web language: %v", err)
+	}
+	dynamicRefs = append(dynamicRefs, dynamicconfig.Ref{Namespace: "call-server", Key: "web.language", Apply: func(snapshot dynamicconfig.Snapshot) error { return language.Apply(snapshot.Value, snapshot.Revision) }})
 	statusCtx, statusCancel := context.WithCancel(context.Background())
 	configCtx, cancelConfig := context.WithTimeout(context.Background(), 10*time.Second)
 	if err := dynamicClient.ApplyInitial(configCtx, dynamicRefs); err != nil {
@@ -88,6 +99,7 @@ func main() {
 		log.Fatalf("dynamic config: %v", err)
 	}
 	cancelConfig()
+	webui.Register(r, "/v1/call", language, languageMessages)
 	roomPolicy, err := cfg.Room.Policy()
 	if err != nil {
 		log.Fatal(err)

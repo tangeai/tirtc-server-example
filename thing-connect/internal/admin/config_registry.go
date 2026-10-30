@@ -11,6 +11,7 @@ import (
 	"strings"
 	"thing-connect/internal/recognition"
 	"thing-connect/internal/room"
+	"thing-connect/internal/weblanguage"
 	"thing-connect/internal/webnav"
 	"time"
 )
@@ -64,6 +65,10 @@ type ConfigRegistry struct{ definitions map[string]ConfigDefinition }
 
 func DefaultConfigRegistry() *ConfigRegistry {
 	definitions := []ConfigDefinition{
+		def("user-server", "web.language", "web", "站点语言", weblanguage.DefaultJSON, nil, []string{"user-server"}, func(raw json.RawMessage) error { _, err := weblanguage.Parse(raw); return err }),
+		def("ai-server", "web.language", "web", "站点语言", weblanguage.DefaultJSON, nil, []string{"ai-server"}, func(raw json.RawMessage) error { _, err := weblanguage.Parse(raw); return err }),
+		def("call-server", "web.language", "web", "站点语言", weblanguage.DefaultJSON, nil, []string{"call-server"}, func(raw json.RawMessage) error { _, err := weblanguage.Parse(raw); return err }),
+
 		def("user-server", "web.navigation", "web", "顶部导航链接", `{"links":[]}`, nil, []string{"user-server"}, func(raw json.RawMessage) error { _, err := webnav.Parse(raw); return err }),
 		def("call-server", "room.policy", "call", "多人对讲策略", room.DefaultConfigJSON, nil, []string{"call-server"}, func(raw json.RawMessage) error { _, err := room.ParseConfig(raw); return err }),
 		def("device-server", "device.code_policy", "device", "设备验证码策略", `{"code_ttl":"190s","rate_limit_window":"190s","rate_limit_max_hits":10,"ip_rate_limit_window":"60s","ip_rate_limit_max_fingerprints":50,"global_max_pending_codes":10000}`, nil, []string{"device-server"}, validateDeviceCodePolicy),

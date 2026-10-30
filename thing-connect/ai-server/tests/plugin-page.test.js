@@ -23,7 +23,7 @@ function pluginEditor(api) {
     return fields.get(id);
   };
   const messages = [];
-  const context = { $: element, api, toast(message, error) { messages.push({ message, error }); },
+  const context = { WebI18n: require("../../tests/helpers/web-i18n.cjs")(), $: element, api, toast(message, error) { messages.push({ message, error }); },
     pluginTools: [], selectedPlugins: [], isEditingDefault: false, defaultRole: null,
     mcpTools: [], selectedMcpTools: [], mcpLoadError: false,
     roleMcpCandidates: [], rolePluginCandidates: [], editorDirty: false,
@@ -132,7 +132,7 @@ test('default role displays all linked plugins even when the local catalog is em
   const content = e.element('plugin-tools-list').innerHTML;
   assert.match(content, /cloud-plugin-1/);
   assert.match(content, /cloud-plugin-2/);
-  assert.equal((content.match(/已关联/g) || []).length, 2);
+  assert.equal((content.match(/>已关联</g) || []).length, 2);
   assert.doesNotMatch(content, /暂无设备插件|openPluginModal|deletePlugin|togglePlugin/);
 });
 
@@ -179,7 +179,7 @@ test('default role shows linked MCP tools only, including absent catalog entries
   const content = e.element('mcp-tools-list').innerHTML;
   assert.match(content, /天气/);
   assert.match(content, /cloud-mcp/);
-  assert.equal((content.match(/已关联/g) || []).length, 2);
+  assert.equal((content.match(/>已关联</g) || []).length, 2);
   assert.doesNotMatch(content, /私人 MCP|openMcpToolModal|deleteMcpTool|toggleMcp/);
   e.context.toggleMcp('known');
   e.context.selectedPlugins = ['plugin'];

@@ -22,8 +22,8 @@ func TestRegistryRejectsUnknownAndBadValues(t *testing.T) {
 func TestRegistryDefinitionsAndUsableInitialValues(t *testing.T) {
 	registry := DefaultConfigRegistry()
 	definitions := registry.List("")
-	if len(definitions) != 27 {
-		t.Fatalf("registered configuration count = %d, want 27", len(definitions))
+	if len(definitions) != 30 {
+		t.Fatalf("registered configuration count = %d, want 30", len(definitions))
 	}
 	for _, definition := range definitions {
 		value := definition.Default
@@ -246,5 +246,20 @@ func TestNavigationRegistryLimit(t *testing.T) {
 	}
 	if err := definition.validator([]byte(`{"links":[{"name":"链接","url":"javascript:alert(1)","enabled":true}]}`)); err == nil {
 		t.Fatal("unsafe URL allowed")
+	}
+}
+
+func TestWebLanguageRegistrationIsIndependentAndRuntime(t *testing.T) {
+	registry := DefaultConfigRegistry()
+	for _, namespace := range []string{"user-server", "ai-server", "call-server"} {
+		definition, ok := registry.Lookup(namespace, "web.language")
+		if !ok || definition.Reload != "runtime" || len(definition.SecretPaths) != 0 || len(definition.Targets) != 1 || definition.Targets[0] != namespace || len(definition.Fields) != 2 {
+			t.Fatalf("invalid language definition: %+v", definition)
+		}
+		for _, raw := range []string{`null`, `{}`, `{"default":"es","allow_switch":true}`, `{"default":"en","allow_switch":"true"}`} {
+			if err := registry.Validate(namespace, "web.language", json.RawMessage(raw)); err == nil {
+				t.Fatalf("%s accepted %s", namespace, raw)
+			}
+		}
 	}
 }

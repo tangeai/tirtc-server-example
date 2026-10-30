@@ -20,3 +20,9 @@ internal:
   key: "replace-with-an-internal-key-at-least-32-characters" # 须与 admin 及其他服务一致
 admin:
   server_url: "http://127.0.0.1:9000"
+
+# 未发布 Admin 语言配置时使用；各服务独立配置。
+web:
+  language:
+    default: auto  # auto | zh-CN | en；海外站选择 en
+    allow_switch: true

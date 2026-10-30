@@ -3,10 +3,11 @@
 <head>
   <link rel="icon" href="/static/favicon.ico?v=3" type="image/x-icon">
   <meta charset="UTF-8">
+  <script src="/v1/config/language.js"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>探鸽 · 小钛 — 添加设备</title>
+  <title data-ui-i18n="探鸽 · 小钛 — 添加设备">探鸽 · 小钛 — 添加设备</title>
   <link rel="stylesheet" href="/static/css/tailwind.css">
-  <script src="/static/user-shell.js?v=a3b29baae127"></script>
+  <script src="/static/user-shell.js?v=a0238275b6ec"></script>
 </head>
 <body class="bg-gray-50 min-h-screen font-sans">
 
@@ -18,9 +19,9 @@
         <path d="M19 12H5M12 19l-7-7 7-7"/>
       </svg>
     </a>
-    <span class="text-[15px] font-semibold text-gray-900">添加设备</span>
+    <span class="text-[15px] font-semibold text-gray-900" data-ui-i18n="添加设备">添加设备</span>
   </div>
-</header>
+<div class="flex items-center gap-3"><button type="button" data-language-toggle class="text-xs text-gray-500 px-2 py-1.5 border border-gray-200 rounded-lg shrink-0">English</button></div></header>
 
 <!-- MAIN -->
 <main class="relative max-w-[520px] mx-auto px-5 pt-10 pb-16 max-sm:px-4 max-sm:pt-6">
@@ -28,52 +29,46 @@
   <!-- 方式切换 -->
   <div class="flex bg-gray-100 rounded-xl p-1 mb-6 gap-1">
     <button id="tab-code" onclick="switchTab('code')"
-      class="flex-1 py-2 rounded-lg text-[13px] font-semibold transition-all bg-white text-gray-900 shadow-sm">
-      验证码绑定
-    </button>
+      class="flex-1 py-2 rounded-lg text-[13px] font-semibold transition-all bg-white text-gray-900 shadow-sm" data-ui-i18n="验证码绑定">验证码绑定</button>
     <button id="tab-id" onclick="switchTab('id')"
-      class="flex-1 py-2 rounded-lg text-[13px] font-semibold transition-all text-gray-500 hover:text-gray-700">
-      设备 ID 绑定
-    </button>
+      class="flex-1 py-2 rounded-lg text-[13px] font-semibold transition-all text-gray-500 hover:text-gray-700" data-ui-i18n="设备 ID 绑定">设备 ID 绑定</button>
   </div>
 
   <!-- ── 验证码方式 ── -->
   <div id="panel-code">
     <!-- 步骤说明 -->
     <div class="bg-white border border-gray-200 rounded-2xl p-7 shadow-sm mb-5 max-sm:p-5">
-      <p class="text-base font-semibold text-gray-900 mb-5">
-        操作步骤
-      </p>
+      <p class="text-base font-semibold text-gray-900 mb-5" data-ui-i18n="操作步骤">操作步骤</p>
       <ol class="flex flex-col gap-5">
         <li class="flex items-start gap-3.5">
           <span class="w-7 h-7 rounded-full bg-emerald-500 text-white text-sm font-bold flex items-center justify-center flex-shrink-0">1</span>
           <div>
-            <p class="text-[15px] font-semibold text-gray-900 leading-7">开机并联网</p>
-            <p class="mt-1 text-[13px] text-gray-500 leading-6">Wi-Fi 设备请先配网。<br>4G 设备请确认 SIM 卡可用，等待联网。</p>
+            <p class="text-[15px] font-semibold text-gray-900 leading-7" data-ui-i18n="开机并联网">开机并联网</p>
+            <p class="mt-1 text-[13px] text-gray-500 leading-6"><span data-ui-i18n="Wi-Fi 设备请先配网。">Wi-Fi 设备请先配网。</span><br><span data-ui-i18n="4G 设备请确认 SIM 卡可用，等待联网。">4G 设备请确认 SIM 卡可用，等待联网。</span></p>
           </div>
         </li>
         <li class="flex items-start gap-3.5">
           <span class="w-7 h-7 rounded-full bg-emerald-500 text-white text-sm font-bold flex items-center justify-center flex-shrink-0">2</span>
           <div>
-            <p class="text-[15px] font-semibold text-gray-900 leading-7">获取 6 位验证码</p>
-            <p class="mt-1 text-[13px] text-gray-500 leading-6">留意设备的语音播报或屏幕提示。</p>
+            <p class="text-[15px] font-semibold text-gray-900 leading-7" data-ui-i18n="获取 6 位验证码">获取 6 位验证码</p>
+            <p class="mt-1 text-[13px] text-gray-500 leading-6" data-ui-i18n="留意设备的语音播报或屏幕提示。">留意设备的语音播报或屏幕提示。</p>
           </div>
         </li>
         <li class="flex items-start gap-3.5">
           <span class="w-7 h-7 rounded-full bg-emerald-500 text-white text-sm font-bold flex items-center justify-center flex-shrink-0">3</span>
           <div>
-            <p class="text-[15px] font-semibold text-gray-900 leading-7">完成绑定</p>
-            <p class="mt-1 text-[13px] text-gray-500 leading-6">在下方输入验证码，点击“绑定设备”。</p>
+            <p class="text-[15px] font-semibold text-gray-900 leading-7" data-ui-i18n="完成绑定">完成绑定</p>
+            <p class="mt-1 text-[13px] text-gray-500 leading-6" data-ui-i18n="在下方输入验证码，点击“绑定设备”。">在下方输入验证码，点击“绑定设备”。</p>
           </div>
         </li>
       </ol>
-      <p class="mt-5 text-xs text-gray-400">验证码已过期时，请按设备提示重新获取。</p>
+      <p class="mt-5 text-xs text-gray-400" data-ui-i18n="验证码已过期时，请按设备提示重新获取。">验证码已过期时，请按设备提示重新获取。</p>
     </div>
 
     <!-- 输入表单 -->
     <div class="bg-white border border-gray-200 rounded-2xl p-7 shadow-sm" id="form-card-code">
       <div class="mb-5">
-        <label class="block text-xs font-medium text-gray-500 mb-2">6 位数字验证码</label>
+        <label class="block text-xs font-medium text-gray-500 mb-2" data-ui-i18n="6 位数字验证码">6 位数字验证码</label>
         <input
           id="code-input"
           type="text"
@@ -86,9 +81,7 @@
       </div>
 
       <button id="btn-bind-code" onclick="doBindByCode()" disabled
-        class="w-full bg-emerald-500 text-white font-bold py-3 rounded-xl hover:opacity-90 active:scale-[0.99] disabled:opacity-35 disabled:cursor-not-allowed transition-all">
-        绑定设备
-      </button>
+        class="w-full bg-emerald-500 text-white font-bold py-3 rounded-xl hover:opacity-90 active:scale-[0.99] disabled:opacity-35 disabled:cursor-not-allowed transition-all" data-ui-i18n="绑定设备">绑定设备</button>
       <p class="mt-3 text-xs text-red-400 text-center min-h-[16px]" id="err-msg-code"></p>
     </div>
   </div>
@@ -101,32 +94,32 @@
         <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
           <circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>
         </svg>
-        使用场景
+        <span data-ui-i18n="使用场景">使用场景</span>
       </p>
       <ol class="flex flex-col gap-1.5">
         <li class="flex items-start gap-2.5 text-[13px] text-gray-600 leading-relaxed">
           <span class="w-[18px] h-[18px] rounded-full bg-blue-100 border border-blue-300 text-blue-600 text-[10px] font-bold flex items-center justify-center flex-shrink-0 mt-[1px]">1</span>
-          设备已经内置有设备ID和设备KEY，启动时已经成功传给SDK
+          <span data-ui-i18n="设备已经内置有设备ID和设备KEY，启动时已经成功传给SDK">设备已经内置有设备ID和设备KEY，启动时已经成功传给SDK</span>
         </li>
         <li class="flex items-start gap-2.5 text-[13px] text-gray-600 leading-relaxed">
           <span class="w-[18px] h-[18px] rounded-full bg-blue-100 border border-blue-300 text-blue-600 text-[10px] font-bold flex items-center justify-center flex-shrink-0 mt-[1px]">2</span>
-          设备正常上电联网，等待绑定
+          <span data-ui-i18n="设备正常上电联网，等待绑定">设备正常上电联网，等待绑定</span>
         </li>
         <li class="flex items-start gap-2.5 text-[13px] text-gray-600 leading-relaxed">
           <span class="w-[18px] h-[18px] rounded-full bg-blue-100 border border-blue-300 text-blue-600 text-[10px] font-bold flex items-center justify-center flex-shrink-0 mt-[1px]">3</span>
-          在下方输入12位的设备ID，进行绑定
+          <span data-ui-i18n="在下方输入12位的设备ID，进行绑定">在下方输入12位的设备ID，进行绑定</span>
         </li>
       </ol>
-      <p class="mt-2.5 text-[11px] text-gray-400 font-mono">设备 ID 需在您的账号配额内才有权限添加</p>
+      <p class="mt-2.5 text-[11px] text-gray-400 font-mono" data-ui-i18n="设备 ID 需在您的账号配额内才有权限添加">设备 ID 需在您的账号配额内才有权限添加</p>
     </div>
 
     <!-- 输入表单 -->
     <div class="bg-white border border-gray-200 rounded-2xl p-7 shadow-sm" id="form-card-id">
-      <h2 class="text-base font-semibold text-gray-900 mb-1.5">输入设备 ID</h2>
-      <p class="text-[13px] text-gray-500 mb-6 leading-relaxed">设备 ID 由探鸽平台分配，绑定后设备即可正常连接</p>
+      <h2 class="text-base font-semibold text-gray-900 mb-1.5" data-ui-i18n="输入设备 ID">输入设备 ID</h2>
+      <p class="text-[13px] text-gray-500 mb-6 leading-relaxed" data-ui-i18n="设备 ID 由探鸽平台分配，绑定后设备即可正常连接">设备 ID 由探鸽平台分配，绑定后设备即可正常连接</p>
 
       <div class="mb-5">
-        <label class="block text-xs font-medium text-gray-500 mb-2">设备 ID</label>
+        <label class="block text-xs font-medium text-gray-500 mb-2" data-ui-i18n="设备 ID">设备 ID</label>
         <input
           id="devid-input"
           type="text"
@@ -137,9 +130,7 @@
       </div>
 
       <button id="btn-bind-id" onclick="doBindById()" disabled
-        class="w-full bg-blue-500 text-white font-bold py-3 rounded-xl hover:opacity-90 active:scale-[0.99] disabled:opacity-35 disabled:cursor-not-allowed transition-all">
-        确认绑定
-      </button>
+        class="w-full bg-blue-500 text-white font-bold py-3 rounded-xl hover:opacity-90 active:scale-[0.99] disabled:opacity-35 disabled:cursor-not-allowed transition-all" data-ui-i18n="确认绑定">确认绑定</button>
       <p class="mt-3 text-xs text-red-400 text-center min-h-[16px]" id="err-msg-id"></p>
     </div>
   </div>
@@ -147,18 +138,12 @@
   <!-- 结果卡片（共用） -->
   <div class="hidden bg-white border border-gray-200 rounded-2xl p-9 text-center shadow-sm" id="result-card">
     <div class="text-5xl mb-4 leading-none" id="result-icon">✅</div>
-    <h2 class="text-lg font-bold text-gray-900 mb-2" id="result-title">绑定成功！</h2>
+    <h2 class="text-lg font-bold text-gray-900 mb-2" id="result-title" data-ui-i18n="绑定成功！">绑定成功！</h2>
     <p class="text-[13px] text-gray-500 leading-relaxed mb-7 max-w-[300px] mx-auto" id="result-msg"></p>
     <div class="flex flex-col items-center gap-2.5">
-      <button id="btn-retry" onclick="retryBind()" class="hidden w-full max-w-[280px] bg-emerald-500 text-white font-semibold py-3 rounded-xl hover:opacity-90 transition-opacity">
-        重新输入验证码
-      </button>
-      <button id="btn-retry-id" onclick="retryBindId()" class="hidden w-full max-w-[280px] bg-blue-500 text-white font-semibold py-3 rounded-xl hover:opacity-90 transition-opacity">
-        重新输入设备 ID
-      </button>
-      <button onclick="location.href='/devices'" class="w-full max-w-[280px] border border-gray-200 text-gray-500 py-3 rounded-xl hover:border-gray-300 hover:text-gray-700 transition-all">
-        返回设备列表
-      </button>
+      <button id="btn-retry" onclick="retryBind()" class="hidden w-full max-w-[280px] bg-emerald-500 text-white font-semibold py-3 rounded-xl hover:opacity-90 transition-opacity" data-ui-i18n="重新输入验证码">重新输入验证码</button>
+      <button id="btn-retry-id" onclick="retryBindId()" class="hidden w-full max-w-[280px] bg-blue-500 text-white font-semibold py-3 rounded-xl hover:opacity-90 transition-opacity" data-ui-i18n="重新输入设备 ID">重新输入设备 ID</button>
+      <button onclick="location.href='/devices'" class="w-full max-w-[280px] border border-gray-200 text-gray-500 py-3 rounded-xl hover:border-gray-300 hover:text-gray-700 transition-all" data-ui-i18n="返回设备列表">返回设备列表</button>
     </div>
   </div>
 </main>
@@ -200,7 +185,7 @@
   }
 
   function showErr(type, msg) {
-    $('err-msg-' + type).textContent = msg;
+    WebI18n.bindText($('err-msg-' + type), () => (msg), "textContent");
   }
 
   async function doBindByCode() {
@@ -209,7 +194,7 @@
 
     const btn = $('btn-bind-code');
     btn.disabled = true;
-    btn.textContent = '绑定中…';
+    WebI18n.bindText(btn, () => (WebI18n.t("绑定中…")), "textContent");
 
     try {
       const res = await fetch('/v1/user/device/bind', {
@@ -222,10 +207,10 @@
       $('panel-code').classList.add('hidden');
       showResult(data, 'code');
     } catch (e) {
-      showErr('code', '网络错误，请检查连接后重试');
+      showErr('code', "网络错误，请检查连接后重试");
     } finally {
       btn.disabled = $('code-input').value.trim().length !== 6;
-      btn.textContent = '绑定设备';
+      WebI18n.bindText(btn, () => (WebI18n.t("绑定设备")), "textContent");
     }
   }
 
@@ -233,7 +218,7 @@
     $('result-card').classList.add('hidden');
     $('panel-code').classList.remove('hidden');
     const input = $('code-input');
-    $('btn-bind-code').textContent = '绑定设备';
+    WebI18n.bindText($('btn-bind-code'), () => (WebI18n.t("绑定设备")), "textContent");
     input.value = '';
     checkCodeReady();
     input.focus();
@@ -253,7 +238,7 @@
 
     const btn = $('btn-bind-id');
     btn.disabled = true;
-    btn.textContent = '绑定中…';
+    WebI18n.bindText(btn, () => (WebI18n.t("绑定中…")), "textContent");
 
     try {
       const res = await fetch('/v1/user/device/bind-by-id', {
@@ -266,10 +251,10 @@
       $('panel-id').classList.add('hidden');
       showResult(data, 'id');
     } catch (e) {
-      showErr('id', '网络错误，请检查连接后重试');
+      showErr('id', "网络错误，请检查连接后重试");
     } finally {
       btn.disabled = $('devid-input').value.trim().length === 0;
-      btn.textContent = '确认绑定';
+      WebI18n.bindText(btn, () => (WebI18n.t("确认绑定")), "textContent");
     }
   }
 
@@ -277,7 +262,7 @@
     $('result-card').classList.add('hidden');
     $('panel-id').classList.remove('hidden');
     const input = $('devid-input');
-    $('btn-bind-id').textContent = '确认绑定';
+    WebI18n.bindText($('btn-bind-id'), () => (WebI18n.t("确认绑定")), "textContent");
     input.value = '';
     checkIdReady();
     input.focus();
@@ -291,30 +276,28 @@
     $('btn-retry-id').classList.add('hidden');
 
     const errMapCode = {
-      4001: '验证码错误，请检查是否听清了设备播报的数字',
-      4002: '验证码已超时，请重新触发设备获取新验证码',
-      4003: '您的设备额度已用尽，请联系管理员扩容',
-      6002: '设备已离线，请重新触发设备获取验证码',
-      6004: '该设备已被其他账号绑定，若需使用请联系管理员重置',
-      5001: '网络波动，下发超时，请稍后重试（配额已保留）',
+      get 4001() { return WebI18n.t("验证码错误，请检查是否听清了设备播报的数字"); },
+      get 4002() { return WebI18n.t("验证码已超时，请重新触发设备获取新验证码"); },
+      get 4003() { return WebI18n.t("您的设备额度已用尽，请联系管理员扩容"); },
+      get 6002() { return WebI18n.t("设备已离线，请重新触发设备获取验证码"); },
+      get 6004() { return WebI18n.t("该设备已被其他账号绑定，若需使用请联系管理员重置"); },
+      get 5001() { return WebI18n.t("网络波动，下发超时，请稍后重试（配额已保留）"); },
     };
     const errMapId = {
-      4003: '设备额度已用尽，请联系管理员扩容',
-      4004: '设备 ID 不存在或不在您的账号配额内',
-      6003: '该设备已绑定，请勿重复添加',
+      get 4003() { return WebI18n.t("设备额度已用尽，请联系管理员扩容"); },
+      get 4004() { return WebI18n.t("设备 ID 不存在或不在您的账号配额内"); },
+      get 6003() { return WebI18n.t("该设备已绑定，请勿重复添加"); },
     };
 
     if (data.code === 200) {
-      $('result-icon').textContent  = '✅';
-      $('result-title').textContent = '绑定成功！';
-      $('result-msg').textContent   =
-        '设备 ' + (data.data?.device_id || '') + ' 已成功绑定，返回列表查看详情。';
+      WebI18n.bindText($('result-icon'), () => ('✅'), "textContent");
+      WebI18n.bindText($('result-title'), () => (WebI18n.t("绑定成功！")), "textContent");
+      WebI18n.bindText($('result-msg'), () => (WebI18n.t("设备 ") + (data.data?.device_id || '') + WebI18n.t(" 已成功绑定，返回列表查看详情。")), "textContent");
     } else {
-      $('result-icon').textContent  = '❌';
-      $('result-title').textContent = '绑定失败';
+      WebI18n.bindText($('result-icon'), () => ('❌'), "textContent");
+      WebI18n.bindText($('result-title'), () => (WebI18n.t("绑定失败")), "textContent");
       const errMap = via === 'code' ? errMapCode : errMapId;
-      $('result-msg').textContent   =
-        errMap[data.code] || data.msg || '未知错误，请重试';
+      WebI18n.bindText($('result-msg'), () => (errMap[data.code] || WebI18n.errorMessage(data, "未知错误，请重试")), "textContent");
 
       if (via === 'code') {
         const retryable = [4001, 4002, 6002, 5001];

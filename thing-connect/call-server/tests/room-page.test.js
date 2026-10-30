@@ -15,7 +15,7 @@ async function page(respond = async () => ({code: 200, data: {desired_state: 'jo
   const posts = [];
   let latest = {desired_state: 'left'};
   let reads = 0;
-  const context = vm.createContext({
+  const context = vm.createContext({ WebI18n: require("../../tests/helpers/web-i18n.cjs")(),
     document: {getElementById: node, querySelectorAll: selector => selector === 'button, input' ? buttons : []},
     location: {search: '?device_id=test-device'},
     localStorage: {getItem: () => 'test-token'},

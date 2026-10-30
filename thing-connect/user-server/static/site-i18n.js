@@ -164,17 +164,19 @@
 
   function setLanguage(nextLanguage) {
     if (!dictionaries[nextLanguage]) return;
+    if (root.WebI18n) { root.WebI18n.setLanguage(nextLanguage); return; }
     language = nextLanguage;
     try { root.localStorage.setItem(storageKey, language); } catch (_) { /* Storage may be disabled. */ }
     apply();
   }
 
-  language = savedLanguage() || (/^zh\b/i.test(root.navigator?.language || '') ? 'zh-CN' : 'en');
+  language = root.WebI18n?.getLanguage() || savedLanguage() || (/^zh\b/i.test(root.navigator?.language || '') ? 'zh-CN' : 'en');
   if (!dictionaries[language]) language = 'zh-CN';
   root.SiteI18n = { t, getLanguage: () => language, setLanguage, onChange: (listener) => listeners.add(listener) };
+  if (root.WebI18n) root.WebI18n.onChange(next => { language = next; apply(); });
   if (root.document) {
     root.document.querySelectorAll('[data-site-language-toggle]').forEach((button) => {
-      button.addEventListener('click', () => setLanguage(language === 'zh-CN' ? 'en' : 'zh-CN'));
+      if (!root.WebI18n) button.addEventListener('click', () => setLanguage(language === 'zh-CN' ? 'en' : 'zh-CN'));
     });
     apply();
   }

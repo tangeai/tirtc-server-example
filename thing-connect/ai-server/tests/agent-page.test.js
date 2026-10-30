@@ -22,7 +22,7 @@ function editor(previous = {}) {
   };
   const requests = [];
   const messages = [];
-  const context = {
+  const context = { WebI18n: require("../../tests/helpers/web-i18n.cjs")(),
     $: element, agents: previous.id ? [previous] : [],
     currentAgentId: previous.id || null, isEditingDefault: false,
     selectedMcpTools: ['mcp-1'], selectedPlugins: [], editorDirty: true,
@@ -122,7 +122,7 @@ test('MCP editing preserves the transport configuration', async () => {
 test('knowledge documents load subsequent pages and reject a failed page', async () => {
   const paths = [];
   let failSecondPage = false;
-  const context = { async api(path) {
+  const context = { WebI18n: require("../../tests/helpers/web-i18n.cjs")(), async api(path) {
     paths.push(path);
     if (path.includes('page=2')) {
       return failSecondPage ? { code: 50200 } : { code: 200, data: { items: [{ document_id: 'last' }], total: 2 } };

@@ -114,3 +114,36 @@ func TestResolvePathUsesActivatedBundleOnlyWhenConfiguredFileIsMissing(t *testin
 		t.Fatalf("ResolvePath broken symlink = %q, want fail-closed %q", got, configured)
 	}
 }
+
+func TestWebLanguageDefaultsAndYAMLFallback(t *testing.T) {
+	for _, test := range []struct {
+		yaml, language string
+		allow          bool
+		invalid        bool
+	}{
+		{"", "auto", true, false},
+		{"web:\n  language:\n    default: en\n    allow_switch: false\n", "en", false, false},
+		{"web:\n  language:\n    default: zh-CN\n", "zh-CN", true, false},
+		{"web:\n  language:\n    default: fr\n", "", false, true},
+		{"web:\n  language:\n    allow_switch: maybe\n", "", false, true},
+		{"web:\n  language:\n    unknown: true\n", "", false, true},
+	} {
+		file := filepath.Join(t.TempDir(), "config.yaml")
+		if err := os.WriteFile(file, []byte("jwt_secret: test-secret\n"+test.yaml), 0600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := LoadFile(file)
+		if test.invalid {
+			if err == nil {
+				t.Fatal("invalid language config accepted")
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Web.Language.Default != test.language || cfg.Web.Language.AllowSwitch != test.allow {
+			t.Fatal(cfg.Web.Language)
+		}
+	}
+}

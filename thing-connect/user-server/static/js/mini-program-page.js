@@ -14,7 +14,7 @@
     if (window.wx && wx.miniProgram) {
       wx.miniProgram.navigateBack();
     } else {
-      alert('请点击左上角返回小程序设备列表');
+      alert(WebI18n.t("请点击左上角返回小程序设备列表"));
     }
   }
 
@@ -38,11 +38,11 @@
     panel.id = 'mini-session-expired';
     panel.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#EDEDED;color:#1A1A1A;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center;font:16px/1.8 system-ui';
     const title = document.createElement('h2');
-    title.textContent = '登录状态已过期';
+    WebI18n.bindText(title, () => (WebI18n.t("登录状态已过期")), "textContent");
     const description = document.createElement('p');
-    description.textContent = '请返回小程序首页，重新登录。';
+    WebI18n.bindText(description, () => (WebI18n.t("请返回小程序首页，重新登录。")), "textContent");
     const button = document.createElement('button');
-    button.textContent = '重新登录';
+    WebI18n.bindText(button, () => (WebI18n.t("重新登录")), "textContent");
     button.style.cssText = 'border:0;border-radius:12px;padding:14px 28px;background:#07C160;color:white;font:inherit;margin-top:20px';
     button.onclick = returnToLogin;
     panel.append(title, description, button);

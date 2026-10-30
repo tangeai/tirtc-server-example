@@ -19,7 +19,7 @@ async function setup(count=1, respond=()=>undefined) {
   const body=new Element('body'), writes=[], messages=[];
   const cards=['device-1','device-2','device-3'].map(device=>({dataset:{cardDevice:device},label:{textContent:'已关闭'},querySelector(){return this.label;}}));
   const types=Array.from({length:count},(_,i)=>({scheme_id:`type-${i}`,scheme_version:1,name:`声音${i}`,description:`说明${i}<b>原样文本</b>`,output_mode:'text_audio',limits:{max_audio_seconds:10}}));
-  const context={window:{},document:{body,createElement:tag=>new Element(tag),querySelectorAll:()=>cards},toast:msg=>messages.push(msg),api:async(url,options)=>{
+  const context={WebI18n:require("./helpers/web-i18n.cjs")(),window:{},document:{body,createElement:tag=>new Element(tag),querySelectorAll:()=>cards},toast:msg=>messages.push(msg),api:async(url,options)=>{
     if(options?.method==='PUT') writes.push(JSON.parse(options.body));
     const response=respond(url,options);
     if(response!==undefined)return await response;

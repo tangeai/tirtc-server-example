@@ -3,10 +3,11 @@
 <head>
   <link rel="icon" href="/static/favicon.ico?v=3" type="image/x-icon">
   <meta charset="UTF-8">
+  <script src="/v1/config/language.js"></script>
   <meta name="referrer" content="no-referrer">
-  <script src="/static/js/mini-program-page.js"></script>
+  <script src="/static/js/mini-program-page.js?v=b30453999596"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>实时查看 — 探鸽 · 小钛</title>
+  <title data-ui-i18n="实时查看 — 探鸽 · 小钛">实时查看 — 探鸽 · 小钛</title>
   <link rel="stylesheet" href="/static/css/tailwind.css">
   <style>
     html, body { margin: 0; padding: 0; background: #000; color: #fff; height: 100%; overflow: hidden; }
@@ -44,7 +45,7 @@
       #video-wrap { max-width: 1100px; margin: 0 auto; border-radius: 12px; overflow: hidden; }
     }
   </style>
-  <script src="/static/user-shell.js?v=a3b29baae127"></script>
+  <script src="/static/user-shell.js?v=a0238275b6ec"></script>
 </head>
 <body>
 <!-- TOPBAR (mobile only) -->
@@ -55,6 +56,7 @@
     </svg>
   </button>
   <span id="page-title" class="text-sm font-medium truncate flex-1 text-white/90"></span>
+  <button type="button" data-language-toggle class="text-xs text-white/60 px-2 py-1 border border-white/20 rounded-lg shrink-0">English</button>
   <div id="status-dot" class="w-2 h-2 rounded-full bg-gray-500 flex-shrink-0"></div>
 </div>
 
@@ -69,8 +71,9 @@
         </svg>
       </button>
       <span id="page-title-pc" class="text-sm font-medium text-white/80 flex-1 truncate"></span>
-      <div id="status-dot-pc" class="w-2 h-2 rounded-full bg-gray-500"></div>
-      <span id="status-text-pc" class="text-xs text-white/40">连接中…</span>
+      <button type="button" data-language-toggle class="text-xs text-white/60 px-2 py-1 border border-white/20 rounded-lg shrink-0">English</button>
+  <div id="status-dot-pc" class="w-2 h-2 rounded-full bg-gray-500"></div>
+      <span id="status-text-pc" class="text-xs text-white/40" data-ui-i18n="连接中…">连接中…</span>
     </div>
     <div id="canvas-box">
       <canvas id="canvas" style="background:#000; display:block; width:100%; height:100%;"></canvas>
@@ -79,7 +82,7 @@
           <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
           <path d="M15.54 8.46a5 5 0 0 1 0 7.07M19.07 4.93a10 10 0 0 1 0 14.14"/>
         </svg>
-        <span style="color:white;font-size:13px;opacity:0.85">点击开启声音</span>
+        <span style="color:white;font-size:13px;opacity:0.85" data-ui-i18n="点击开启声音">点击开启声音</span>
       </div>
     </div>
 
@@ -91,7 +94,7 @@
         onmousedown="startTalk()" onmouseup="stopTalk()"
         ontouchstart="startTalk(event)" ontouchend="stopTalk(event)" ontouchcancel="stopTalk(event)" onmouseleave="stopTalk(event)">
         <span id="talk-dot" class="w-1.5 h-1.5 rounded-full bg-white/30"></span>
-        <span id="talk-label">按住说话</span>
+        <span id="talk-label" data-ui-i18n="按住说话">按住说话</span>
       </button>
       <button id="btn-mute" onclick="toggleMute()"
         class="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center transition-all">
@@ -109,8 +112,8 @@
 </div>
 
 <div id="player-feedback" role="status">
-  <p id="player-message">正在连接设备…</p>
-  <button id="player-retry" hidden>重新连接</button>
+  <p id="player-message" data-ui-i18n="正在连接设备…">正在连接设备…</p>
+  <button id="player-retry" hidden data-ui-i18n="重新连接">重新连接</button>
 </div>
 <script type="module">
 import { TiRtc, TiRtcInitOptions, TiRtcConn, TiRtcVideoOutput, TiRtcAudioOutput, TiRtcAudioInput } from '/static/js/tirtc.es.min.js';
@@ -143,11 +146,11 @@ function resolveStreamIds(profile) {
 }
 
 // ── Page title ────────────────────────────────────────────────────────────
-const titleText = deviceID ? `${deviceID} 实时查看` : '实时查看';
-document.title = titleText;
+const titleText = deviceID ? WebI18n.t("{p0} 实时查看", {p0: deviceID}) : WebI18n.t("实时查看");
+WebI18n.bindText(document, () => (titleText), "title");
 ['page-title','page-title-pc'].forEach(id => {
   const el = $(id);
-  if (el) el.textContent = titleText;
+  if (el) WebI18n.bindText(el, () => (titleText), "textContent");
 });
 
 function setStatus(online) {
@@ -157,7 +160,7 @@ function setStatus(online) {
     if (el) el.style.background = color;
   });
   const st = $('status-text-pc');
-  if (st) st.textContent = online ? '已连接' : '连接中…';
+  if (st) WebI18n.bindText(st, () => (online ? WebI18n.t("已连接") : WebI18n.t("连接中…")), "textContent");
 }
 
 // ── Fetch RTC token ───────────────────────────────────────────────────────
@@ -168,7 +171,7 @@ async function fetchRtcToken() {
   });
   const d = await res.json();
   if (d.code === 401) window.MiniProgramPage.requireLogin();
-  if (d.code !== 200) throw new Error(d.msg || '连接暂时不可用，请稍后重试');
+  if (d.code !== 200) throw new Error(WebI18n.errorMessage(d, WebI18n.t("连接暂时不可用，请稍后重试")));
   return {
     rtcToken: d.data.token,
     appId: d.data.app_id,
@@ -242,7 +245,7 @@ let subscribedVideoStreamId = null;
 let configuredAudioStreamId = null;
 
 function showFailure(message) {
-  $('player-message').textContent = message;
+  WebI18n.bindText($('player-message'), () => (message), "textContent");
   $('player-retry').hidden = false;
   setStatus(false);
 }
@@ -256,9 +259,9 @@ async function start() {
   startTimeout = setTimeout(() => {
     if (attempt !== generation) return;
     cleanup();
-    showFailure('连接超时，请检查设备和手机网络后重试');
+    showFailure(WebI18n.t("连接超时，请检查设备和手机网络后重试"));
   }, 20000);
-  $('player-message').textContent = '正在连接设备…';
+  WebI18n.bindText($('player-message'), () => (WebI18n.t("正在连接设备…")), "textContent");
   $('player-retry').hidden = true;
   try {
     const { rtcToken, appId, streamProfile } = await fetchRtcToken();
@@ -296,12 +299,12 @@ async function start() {
       connection.subscribeAudio({ streamId: upAudioStreamId });
     }
     updateMuteUI();
-    $('player-message').textContent = '已连接 · 点击声音按钮开启或关闭声音';
+    WebI18n.bindText($('player-message'), () => (WebI18n.t("已连接 · 点击声音按钮开启或关闭声音")), "textContent");
 
   } catch(e) {
     if (attempt !== generation) return;
     cleanup();
-    showFailure('暂时无法连接，请确认设备在线后重试');
+    showFailure(WebI18n.t("暂时无法连接，请确认设备在线后重试"));
   } finally {
     if (attempt === generation) {
       starting = false;
@@ -345,7 +348,7 @@ window.startTalk = function(e) {
   talking = true;
   $('talk-btn').classList.add('active');
   $('talk-dot').style.background = '#ef4444';
-  $('talk-label').textContent = '说话中…';
+  WebI18n.bindText($('talk-label'), () => (WebI18n.t("说话中…")), "textContent");
   input.start().then(() => {
     if (attempt !== generation || !talking) { input.stop(); return; }
     return input.attach();
@@ -354,7 +357,7 @@ window.startTalk = function(e) {
     talking = false;
     $('talk-btn').classList.remove('active');
     $('talk-dot').style.background = 'rgba(255,255,255,0.3)';
-    $('talk-label').textContent = '麦克风失败';
+    WebI18n.bindText($('talk-label'), () => (WebI18n.t("麦克风失败")), "textContent");
   });
 };
 
@@ -364,7 +367,7 @@ window.stopTalk = function(e) {
   talking = false;
   $('talk-btn').classList.remove('active');
   $('talk-dot').style.background = 'rgba(255,255,255,0.3)';
-  $('talk-label').textContent = '按住说话';
+  WebI18n.bindText($('talk-label'), () => (WebI18n.t("按住说话")), "textContent");
   if (audioInput) {
     const stopped = audioInput.stop();
     if (stopped && typeof stopped.catch === 'function') void stopped.catch(() => {});
@@ -405,7 +408,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 if (deviceID) start();
-else showFailure('未找到设备，请返回设备列表重新打开');
+else showFailure(WebI18n.t("未找到设备，请返回设备列表重新打开"));
 </script>
 </body>
 </html>

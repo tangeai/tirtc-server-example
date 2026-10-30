@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	_ "embed"
 	"errors"
 	"fmt"
 	"log"
@@ -18,13 +19,19 @@ import (
 	"thing-connect/internal/cache"
 	"thing-connect/internal/config"
 	"thing-connect/internal/db"
+	"thing-connect/internal/dynamicconfig"
 	"thing-connect/internal/logging"
 	"thing-connect/internal/servicestatus"
 	mysqlstore "thing-connect/internal/store/mysql"
 	mysqlmigrate "thing-connect/internal/store/mysql/migrate"
 	"thing-connect/internal/tirtcapi"
 	"thing-connect/internal/userauth"
+	"thing-connect/internal/weblanguage"
+	"thing-connect/internal/webui"
 )
+
+//go:embed static/ai-i18n.json
+var languageMessages string
 
 func main() {
 	cfgPath := config.ParseFlags()
@@ -96,6 +103,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("dynamic config: %v", err)
 	}
+	language, err := weblanguage.New(cfg.Web.Language)
+	if err != nil {
+		log.Fatalf("web language: %v", err)
+	}
+	dynamicRefs = append(dynamicRefs, dynamicconfig.Ref{Namespace: "ai-server", Key: "web.language", Apply: func(snapshot dynamicconfig.Snapshot) error { return language.Apply(snapshot.Value, snapshot.Revision) }})
 	statusCtx, statusCancel := context.WithCancel(context.Background())
 	configCtx, cancelConfig := context.WithTimeout(context.Background(), 10*time.Second)
 	if err := dynamicClient.ApplyInitial(configCtx, dynamicRefs); err != nil {
@@ -103,6 +115,7 @@ func main() {
 		log.Fatalf("dynamic config: %v", err)
 	}
 	cancelConfig()
+	webui.Register(r, "/v1/ai", language, languageMessages)
 	go dynamicClient.Run(statusCtx, dynamicRefs)
 	reporter, err := servicestatus.NewReporter(rdb, "ai-server", probes, dynamicClient.Revisions)
 	if err != nil {

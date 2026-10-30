@@ -4,7 +4,7 @@ const vm = require('node:vm');
 const fs = require('node:fs');
 function setup(response, search = '') {
   const redirects = [], removed = [], notices = [];
-  const context = { URL, URLSearchParams, Request, Headers, Error,
+  const context = { WebI18n: require("../../tests/helpers/web-i18n.cjs")(), URL, URLSearchParams, Request, Headers, Error,
     location: {search,href:'https://example.com/devices',origin:'https://example.com',replace:url=>redirects.push(url)},
     localStorage:{removeItem:key=>removed.push(key)},sessionStorage:{setItem:(...v)=>notices.push(v)},
     document:{addEventListener(){}},fetch:async()=>{if(response instanceof Error)throw response;return response.clone();}

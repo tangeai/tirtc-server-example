@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	_ "embed"
 	"errors"
 	"fmt"
 	"log"
@@ -30,9 +31,14 @@ import (
 	"thing-connect/internal/servicestatus"
 	mysqlstore "thing-connect/internal/store/mysql"
 	mysqlmigrate "thing-connect/internal/store/mysql/migrate"
+	"thing-connect/internal/weblanguage"
 	"thing-connect/internal/webnav"
+	"thing-connect/internal/webui"
 	usrhandler "thing-connect/user-server/handler"
 )
+
+//go:embed static/user-i18n.json
+var languageMessages string
 
 func main() {
 	cfgPath := config.ParseFlags()
@@ -102,6 +108,11 @@ func main() {
 	dynamicRefs = append(dynamicRefs, dynamicconfig.Ref{Namespace: "user-server", Key: "web.navigation", Apply: func(snapshot dynamicconfig.Snapshot) error {
 		return navigation.Apply(snapshot.Value, snapshot.Revision)
 	}})
+	language, err := weblanguage.New(cfg.Web.Language)
+	if err != nil {
+		log.Fatalf("web language: %v", err)
+	}
+	dynamicRefs = append(dynamicRefs, dynamicconfig.Ref{Namespace: "user-server", Key: "web.language", Apply: func(snapshot dynamicconfig.Snapshot) error { return language.Apply(snapshot.Value, snapshot.Revision) }})
 	configCtx, cancelConfig := context.WithTimeout(context.Background(), 10*time.Second)
 	if err := dynamicClient.ApplyInitial(configCtx, dynamicRefs); err != nil {
 		cancelConfig()
@@ -119,6 +130,7 @@ func main() {
 	probes := map[string]servicestatus.DependencyProbe{"database": servicestatus.SQLProbe(sqlDB), "redis": servicestatus.RedisProbe(rdb)}
 	probes["mqtt"] = broker.Ping
 	servicestatus.RegisterHealth(r, probes)
+	webui.Register(r, "/v1", language, languageMessages)
 	usrhandler.RegisterNavigation(r, navigation)
 	usrhandler.RegisterBoards(r, boardcatalog.New(mysqlstore.NewBoardCatalogStore(sqlDB)))
 	usrhandler.RegisterBoardImages(r, filepath.Join(filepath.Dir(filepath.Dir(staticDir)), "var", "board-images"))
