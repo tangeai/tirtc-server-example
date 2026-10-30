@@ -425,7 +425,8 @@ AI 的角色管理属于 H5 管理端职责，不在设备侧处理，但设备�
 
 - [`GET /v1/ai/token`](api-reference.md#get-v1aitoken) 返回 401：通常是 `mqtt_token` 失效，先按 [device-integration.md](device-integration.md#token-生命周期) 刷新 token
 - <a href="https://docs.tange.ai/products/tirtc/api-reference/c.html#tirtcwhipconnect" target="_blank" rel="noopener">`TiRtcWhipConnect`</a> 返回 0 但没进会话：以连接回调为准，不以函数返回值判断是否建连成功
-- `start_session` 发了没响应：确认 WHIP 连接回调 `error == 0`（`TiRtcWhipConnect` 返回 0 只代表请求已提交）
+- `start_session` 发了没响应：确认 WHIP 连接回调 `error == 0`（`TiRtcWhipConnect` 返回 0 只代表请求已提交）。Linux C 参考实现为 KCP 握手预留约 300ms，再由业务线程中的 `ai_poll()` 发送请求；若没有持续调用 `ai_poll()`，延迟请求不会发出。不要在 SDK 回调中 `sleep` 或直接执行阻塞等待；300ms 是该实现的延迟策略，不是通用的就绪保证，仍需检查发送结果和响应超时。
+- 文件发完但 AI 没有回复：先确认收到 `start_session` 成功响应，上行编码、采样率和声道与协商结果一致，并检查读取或发送失败。当前 Linux C 文件源在 EOF 后停止上行，保持连接等待服务端 VAD 和会话事件；不能把文件 EOF 当成整个会话结束，也不应直接断开或套用固定补 500ms 静音的做法。超时通过业务控制路径结束会话。
 - AI 没有说话但设备已经开始上行：建议按参考实现，收到 `start_session` 成功响应后再启动采集
 - 角色不对：检查 H5 管理端是否给该设备做了角色绑定；设备侧下一次重新调 [`/v1/ai/token`](api-reference.md#get-v1aitoken) 才会看到新角色
 

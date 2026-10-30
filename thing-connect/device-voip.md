@@ -891,6 +891,7 @@ payload:
 |------|--------|
 | 微信上已经呼出，设备没有收到 `call_incoming` | 确认设备已正式 MQTT 在线，并已调用 [`POST /v1/device/profile`](api-reference.md#post-v1deviceprofile) |
 | `TiRtcWhipConnect` 返回 0，但没有通话 | 返回 0 只表示请求已提交；检查连接回调及其 `error` 参数 |
+| VoIP 建连报 `-40012`，提示签名或凭证校验失败 | 先检查 `peer_id` 在保存和传递过程中是否被截断，见下方[连接字符串截断](#voip-peer-id-truncation)；再检查本次凭证是否完整有效 |
 | 设备收到来电，但无法拒接 | 确认拒接请求中的 `wx_*` 字段来自本次 `call_incoming` payload |
 | 收到 `callers_update` 后列表没有变化 | 确认设备重新调用了 [`GET /v1/voip/device/contacts`](api-reference.md#get-v1voipdevicecontacts) |
 | 设备呼叫小程序时 HTTP 成功，但没有通话 | 接口成功后仍要等待 MQTT `call_incoming` |
@@ -898,3 +899,13 @@ payload:
 | 通话已经结束，设备状态没有清理 | 确认同时处理 MQTT `call_cancel` 和 TiRTC `0x2001` |
 
 使用 C 参考实现验证时，按 [C 参考实现说明](device-sim/device-sim-c/README.md) 启动程序。收到来电后输入 `yes/no`，主动呼叫时输入 `wxcall [N]`。拒接字段和原因码见[拒接与取消](#拒接与取消)。
+
+<a id="voip-peer-id-truncation"></a>
+
+### VoIP 连接字符串截断：`-40012` 与签名校验失败
+
+**症状与原因。** VoIP 建连报 `-40012 TIRTC_E_SERVER_ERROR` 时，可能是设备传入的连接字符串不完整。`peer_id` 是包含 URL 编码会话参数的长字符串，其中 `session_key`、`session_token` 的内容和长度会变化；实际值可超过 580 字节。使用 `char peer_id[512]` 保存时，`strncpy` 等限长复制会截断尾部，导致服务端凭证或签名校验失败。该错误码表示服务端错误，不能仅凭它认定是服务端配置错误，也不能认定一定是截断。
+
+**接入要求。** 从 MQTT JSON 解析、待接听状态、队列消息到调用 `TiRtcWhipConnect` 的临时变量，每一处都必须完整保留 `peer_id` 和配套 `token`，不能重新编码或改写。固定缓冲区建议为 `peer_id` 预留 2048 字节，但这只是容量建议，不是协议长度上限。复制前检查源字符串字节数加结尾 `\0` 是否超过目标容量；超长时明确拒绝本次建连或在受控上限内扩容，禁止截断后继续连接。仅补结尾 `\0` 不能解决凭证被截断的问题。
+
+**排查与验收。** 对比 JSON 解析后、各次复制后和 SDK 调用前的字符串长度，并在本地确认内容逐字节一致。日志只记录长度、容量和是否超限，不输出完整连接 URL、token 或会话密钥。用超过 512 字节的模拟连接字符串检查完整传递，再验证容量边界：含结尾 `\0` 恰好能容纳时完整复制，超出容量时明确失败且不调用 SDK。字符串完整后仍报错，再排查凭证有效期与本次会话是否匹配。
