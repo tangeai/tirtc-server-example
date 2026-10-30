@@ -61,10 +61,18 @@ if not os.path.isfile(_LIB_PATH):
         f"[tirtc] 未找到 SDK 动态库: {_LIB_PATH}。"
         f"请检查 --sdk-version {_SDK_VERSION}，或下载匹配 {_PLATFORM} 的 TiRTC SDK。"
     )
+_dll_directory = None
+_webrtc_lib = None
 if sys.platform == "win32" and hasattr(os, "add_dll_directory"):
-    os.add_dll_directory(_LIB_DIR)
+    _dll_directory = os.add_dll_directory(_LIB_DIR)
 
 try:
+    # Desktop SDKs load webrtc.dll by basename via LoadLibraryA at startup.
+    # Preload the packaged dependency by absolute path so this also works
+    # when the simulator is launched outside the SDK directory (including UNC).
+    _webrtc_path = os.path.join(_LIB_DIR, "webrtc.dll")
+    if sys.platform == "win32" and os.path.isfile(_webrtc_path):
+        _webrtc_lib = ctypes.CDLL(_webrtc_path)
     _lib = ctypes.CDLL(_LIB_PATH)
 except OSError as e:
     sys.exit(f"[tirtc] 无法加载 {_LIB_PATH}（版本 {_SDK_VERSION}）: {e}")

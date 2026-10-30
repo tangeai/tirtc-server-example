@@ -1,6 +1,6 @@
 # TiRTC-Nano SDK 包说明
 
-本包面向 `windows-x86-64`，功能变体为 `standard`。机器可读的构建事实位于
+本包面向 `windows-x86-64-desktop`，功能变体为 `standard`。机器可读的构建事实位于
 `manifest/build-info.env`；下表逐项解释这些事实及其对接入工程的影响。
 
 ## 构建与兼容基线
@@ -9,14 +9,13 @@
 | --- | --- | --- | --- |
 | `SDK_NAME` | `TiRTC-Nano` | SDK 名称 | 用于确认正在接入 TiRTC Nano SDK。 |
 | `SDK_VERSION` | `v2.5.0` | SDK 版本 | 应与依赖声明和发布记录中的版本保持一致。 |
-| `TARGET` | `windows-x86-64` | 发布目标 | 选择与应用部署平台完全相同的包。 |
+| `TARGET` | `windows-x86-64-desktop` | 发布目标 | 选择与应用部署平台完全相同的包。 |
 | `VARIANT` | `standard` | 功能变体 | standard 与 mini 的能力和依赖不同，不能混用。 |
 | `ARCH` | `x86_64` | 处理器架构 | 应用与最终链接必须使用兼容的目标架构。 |
 | `ABI` | `mingw-w64` | 目标 ABI | 编译选项、浮点 ABI 和对象 ABI 必须兼容。 |
 | `TARGET_OS` | `windows` | 目标操作系统 | 应用需使用该系统对应的加载和链接方式。 |
 | `BUILD_TOOLCHAIN` | `GCC` | 构建工具链 | 记录本包实际使用的编译器系列。 |
 | `BUILD_TOOLCHAIN_VERSION` | `10` | 构建工具链版本 | 这是验证基线；更换版本时应重新完成编译和链接验证。 |
-| `SSL` | `disabled` | SSL 能力 | disabled 时 TLS 能力必须由平台或上层另行提供。 |
 
 `BUILD_*` 记录本包实际使用的构建基线。它们不自动等同于使用者唯一可用
 的版本；换用其他工具链或平台 SDK 时，应重新完成目标编译、链接和运行验证。
@@ -38,6 +37,7 @@
 - `lib/libTiRTC.dll`
 - `lib/libTiRTC.dll.a`
 - `lib/libTiRTC.lib`
+- `lib/webrtc.dll`
 - `manifest/build-info.env`
 
 ## 接入方法
@@ -48,9 +48,9 @@ TiRTC 入口库。动态运行库和 framework 必须随应用部署，并位于
 
 ## 平台注意事项
 
-## windows-x86_64 接入注意事项
+## windows-x86_64-desktop 接入注意事项
 
-MSVC 工程链接 libTiRTC.lib，MinGW 工程链接 libTiRTC.dll.a，运行时部署 libTiRTC.dll。本包使用 x86_64 MinGW ABI；调用约定、CRT 选择和 DLL 搜索路径必须由最终应用保持一致。
+MSVC 工程链接 libTiRTC.lib，MinGW 工程链接 libTiRTC.dll.a，运行时部署 libTiRTC.dll，并随程序发布 webrtc.dll。本包使用 x86_64 MinGW ABI；调用约定、CRT 选择和 DLL 搜索路径必须由最终应用保持一致。
 
 ## 验证范围
 
