@@ -518,7 +518,7 @@ async function api(path, opts = {}) {
 // ── Toast ──
 function toast(msg, error = false) {
   const el = $('toast');
-  WebI18n.bindText(el, () => (WebI18n.t(msg)), "textContent");
+  WebI18n.bindText(el, () => (typeof msg === "function" ? msg() : WebI18n.t(msg)), "textContent");
   el.style.borderColor = error ? 'rgba(239,68,68,0.4)' : 'rgba(16,185,129,0.4)';
   el.classList.add('!opacity-100');
   setTimeout(() => el.classList.remove('!opacity-100'), 2400);
@@ -673,7 +673,7 @@ async function selectAgent(id) {
       const detail = await api('/v1/ai/roles/' + encodeURIComponent(id));
       if (request !== selectingRole) return;
       if (detail.code !== 200 || !detail.data) {
-        toast(WebI18n.errorMessage(detail, WebI18n.t("角色详情加载失败，请重试")), true);
+        toast(() => WebI18n.errorMessage(detail, "角色详情加载失败，请重试"), true);
         return;
       }
       a = { ...a, ...detail.data };
@@ -932,7 +932,7 @@ async function editKnowledgeIndex() {
   // List only carries {id,name}; fetch full detail (description, etc.) on demand.
   const res = await api('/v1/ai/knowledge/indexes/' + idxId);
   const idx = (res.code === 200 && res.data) ? res.data : null;
-  if (!idx) { toast(WebI18n.errorMessage(res, WebI18n.t("加载失败")), true); return; }
+  if (!idx) { toast(() => WebI18n.errorMessage(res, "加载失败"), true); return; }
   editingKnowledgeIndexId = idxId;
   WebI18n.bindText($('knowledge-modal-title'), () => (WebI18n.t("编辑知识库")), "textContent");
   WebI18n.bindText($('knowledge-modal-submit-btn'), () => (WebI18n.t("确认修改")), "textContent");
@@ -967,7 +967,7 @@ async function saveKnowledgeModal() {
       closeKnowledgeModal();
       toast("知识库已更新");
     } else {
-      toast(WebI18n.errorMessage(res, WebI18n.t("更新失败")), true);
+      toast(() => WebI18n.errorMessage(res, "更新失败"), true);
     }
   } else {
     const res = await api('/v1/ai/knowledge/indexes', {
@@ -981,7 +981,7 @@ async function saveKnowledgeModal() {
       closeKnowledgeModal();
       toast("知识库已创建");
     } else {
-      toast(WebI18n.errorMessage(res, WebI18n.t("创建失败")), true);
+      toast(() => WebI18n.errorMessage(res, "创建失败"), true);
     }
   }
 }
@@ -997,7 +997,7 @@ async function deleteKnowledgeIndexBtn() {
     onKnowledgeIndexChange();
     toast("已删除");
   } else {
-    toast(WebI18n.errorMessage(res, WebI18n.t("删除失败")), true);
+    toast(() => WebI18n.errorMessage(res, "删除失败"), true);
   }
 }
 
@@ -1065,7 +1065,7 @@ async function uploadKnowledgeFile() {
     input.value = '';
     loadKnowledgeFiles();
   } else {
-    toast(WebI18n.errorMessage(data, WebI18n.t("上传失败")), true);
+    toast(() => WebI18n.errorMessage(data, "上传失败"), true);
   }
 }
 
@@ -1077,7 +1077,7 @@ async function deleteKnowledgeFile(docId) {
     renderKnowledgeFiles();
     toast("已删除");
   } else {
-    toast(WebI18n.errorMessage(data, WebI18n.t("删除失败")), true);
+    toast(() => WebI18n.errorMessage(data, "删除失败"), true);
   }
 }
 
@@ -1130,7 +1130,7 @@ async function bindDocumentToIndex(docId) {
     body: JSON.stringify({ document_ids: docIds }),
   });
   if (putRes.code !== 200) {
-    toast(WebI18n.errorMessage(putRes, WebI18n.t("关联失败")), true);
+    toast(() => WebI18n.errorMessage(putRes, "关联失败"), true);
     return false;
   }
   return true;
@@ -1149,7 +1149,7 @@ async function uploadKnowledgeModalFile() {
   });
   const data = await res.json();
   if (data.code !== 200 || !data.data?.file_id) {
-    toast(WebI18n.errorMessage(data, WebI18n.t("上传失败")), true);
+    toast(() => WebI18n.errorMessage(data, "上传失败"), true);
     return;
   }
   // file_id IS the document_id (confirmed); upload only pools the file, so bind
@@ -1175,7 +1175,7 @@ async function deleteKnowledgeModalFile(docId) {
     renderKnowledgeModalFiles();
     toast("已移除");
   } else {
-    toast(WebI18n.errorMessage(putRes, WebI18n.t("移除失败")), true);
+    toast(() => WebI18n.errorMessage(putRes, "移除失败"), true);
   }
 }
 
@@ -1324,9 +1324,9 @@ async function saveMcpToolModal() {
   if (res.code === 200 && res.data) {
     closeMcpToolModal();
     await loadMcpTools();
-    toast(updating ? WebI18n.t("工具已更新") : WebI18n.t("工具已创建"));
+    toast(() => updating ? WebI18n.t("工具已更新") : WebI18n.t("工具已创建"));
   } else {
-    toast(WebI18n.errorMessage(res, editingMcpToolId ? WebI18n.t("更新失败") : WebI18n.t("创建失败")), true);
+    toast(() => WebI18n.errorMessage(res, updating ? WebI18n.t("更新失败") : WebI18n.t("创建失败")), true);
   }
 }
 
@@ -1341,7 +1341,7 @@ async function deleteMcpTool(id) {
     renderMcpTools();
     toast("已删除");
   } else {
-    toast(WebI18n.errorMessage(res, WebI18n.t("删除失败")), true);
+    toast(() => WebI18n.errorMessage(res, "删除失败"), true);
   }
 }
 
@@ -1462,7 +1462,7 @@ async function openPluginModal(id) {
       const res = await api('/v1/ai/plugins/' + encodeURIComponent(id));
       if (request !== pluginModalRequest) return;
       if (res.code !== 200 || !res.data) {
-        toast(WebI18n.errorMessage(res, WebI18n.t("设备插件详情加载失败，请重试")), true);
+        toast(() => WebI18n.errorMessage(res, "设备插件详情加载失败，请重试"), true);
         return;
       }
       p = res.data;
@@ -1525,9 +1525,9 @@ async function savePluginModal() {
   if (res.code === 200 && res.data) {
     closePluginModal();
     await loadPlugins();
-    toast(updating ? WebI18n.t("插件已更新") : WebI18n.t("插件已创建"));
+    toast(() => updating ? WebI18n.t("插件已更新") : WebI18n.t("插件已创建"));
   } else {
-    toast(WebI18n.errorMessage(res, updating ? WebI18n.t("更新失败") : WebI18n.t("创建失败")), true);
+    toast(() => WebI18n.errorMessage(res, updating ? WebI18n.t("更新失败") : WebI18n.t("创建失败")), true);
   }
 }
 
@@ -1542,7 +1542,7 @@ async function deletePlugin(id) {
     renderPlugins();
     toast("已删除");
   } else {
-    toast(WebI18n.errorMessage(data, WebI18n.t("删除失败")), true);
+    toast(() => WebI18n.errorMessage(data, "删除失败"), true);
   }
 }
 
@@ -1666,7 +1666,7 @@ async function persistAgent() {
       if (idx >= 0 && updated) agents[idx] = { ...agents[idx], ...updated };
       toast("保存成功");
     } else {
-      toast(WebI18n.errorMessage(res, WebI18n.t("保存失败")), true);
+      toast(() => WebI18n.errorMessage(res, "保存失败"), true);
       return;
     }
   } else {
@@ -1676,7 +1676,7 @@ async function persistAgent() {
       agents.push(res.data);
       toast("创建成功");
     } else {
-      toast(WebI18n.errorMessage(res, WebI18n.t("创建失败")), true);
+      toast(() => WebI18n.errorMessage(res, "创建失败"), true);
       return;
     }
   }
@@ -1711,7 +1711,7 @@ async function deleteAgent() {
     if (isMobile()) showList();
     toast("已删除");
   } else {
-    toast(WebI18n.errorMessage(res, WebI18n.t("删除失败")), true);
+    toast(() => WebI18n.errorMessage(res, "删除失败"), true);
   }
 }
 
@@ -1737,9 +1737,9 @@ async function bindToDevice() {
       updateHeaderBinding();
       renderAgentList();
       updateBindButton();
-      toast(selectingDefault ? WebI18n.t("已恢复默认角色") : WebI18n.t("绑定成功"));
+      toast(() => selectingDefault ? WebI18n.t("已恢复默认角色") : WebI18n.t("绑定成功"));
     } else {
-      toast(WebI18n.errorMessage(res, WebI18n.t("绑定失败")), true);
+      toast(() => WebI18n.errorMessage(res, "绑定失败"), true);
     }
   } catch {
     toast("设置失败，请检查网络后重试", true);

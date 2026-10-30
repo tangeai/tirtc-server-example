@@ -123,16 +123,17 @@
           leaveTarget = null;
         WebI18n.bindText($("device"), () => (WebI18n.t("设备 ID：") + (device || WebI18n.t("未选择"))), "textContent");
         function message(text, kind = "operation") {
-          WebI18n.bindText($("message"), () => (WebI18n.t(text)), "textContent");
+          WebI18n.bindText($("message"), () => (typeof text === "function" ? text() : WebI18n.t(text)), "textContent");
           $("message").hidden = !text;
           messageKind = kind;
         }
         function errorText(e) {
+          if (e.response) return WebI18n.errorMessage(e.response, e.fallback);
           if (e.name === "TimeoutError" || e.name === "AbortError")
             return WebI18n.t("请求超时，请检查网络后重试");
           if (e instanceof TypeError) return WebI18n.t("网络连接失败，请检查网络后重试");
           if (e instanceof SyntaxError) return WebI18n.t("服务暂时不可用，请稍后重试");
-          return e.message || WebI18n.t("操作失败，请重试");
+          return WebI18n.t(e.message || "操作失败，请重试");
         }
         async function loadDevice() {
           $("retry").disabled = true;
@@ -147,16 +148,16 @@
               location.href = "/login";
               return;
             }
-            if (body.code !== 200) throw Error(WebI18n.errorMessage(body, WebI18n.t("设备信息加载失败")));
+            if (body.code !== 200) throw Object.assign(new Error(), {response: body, fallback: "设备信息加载失败"});
             const d = body.data.find((d) => d.device_id === device);
-            if (!d) throw Error(WebI18n.t("设备不属于当前账号，请返回设备列表"));
+            if (!d) throw Error("设备不属于当前账号，请返回设备列表");
             deviceName = d.device_name || WebI18n.t("未命名设备");
             WebI18n.bindText($("deviceName"), () => (deviceName), "textContent");
             deviceReady = true;
             $("retry").hidden = true;
             await refresh();
           } catch (e) {
-            message(errorText(e), "load");
+            message(() => errorText(e), "load");
             $("retry").hidden = false;
           } finally {
             $("loading").hidden = true;
@@ -194,10 +195,10 @@
           if (response.status === 401 || body.code === 401) {
             stopped = true;
             location.href = "/login";
-            throw Error(WebI18n.t("登录已过期，请重新登录"));
+            throw Error("登录已过期，请重新登录");
           }
           if (body.code !== 200) {
-            const error = Error(WebI18n.errorMessage(body, WebI18n.t("操作失败，请重试")));
+            const error = Object.assign(new Error(), {response: body, fallback: "操作失败，请重试"});
             error.code = body.code;
             throw error;
           }
@@ -247,7 +248,7 @@
                 WebI18n.bindText($("syncMessage"), () => (WebI18n.t("状态更新失败，当前显示上次结果；请返回设备列表刷新后重试。")), "textContent");
                 $("syncMessage").hidden = false;
               } else {
-                message(errorText(e), "load");
+                message(() => errorText(e), "load");
                 $("retry").hidden = false;
                 $("loading").hidden = true;
               }
@@ -265,7 +266,6 @@
           const controls = Array.from(document.querySelectorAll("button, input"));
           const disabled = controls.map((control) => control.disabled);
           const submit = $({create: "createSubmit", join: "joinSubmit", leave: "leave"}[kind]);
-          const label = submit.textContent;
           WebI18n.bindText(submit, () => ({get create() { return WebI18n.t("正在创建…"); }, get join() { return WebI18n.t("正在加入…"); }, get leave() { return WebI18n.t("正在退出…"); }}[kind]), "textContent");
           document
             .querySelectorAll("button, input")
@@ -299,11 +299,11 @@
             if (kind !== "leave") $("currentTitle").focus();
             else $("createSubmit").focus();
           } catch (e) {
-            message(errorText(e));
+            message(() => errorText(e));
           } finally {
             busy = false;
             controls.forEach((control, i) => (control.disabled = disabled[i]));
-            WebI18n.bindText(submit, () => (label), "textContent");
+            WebI18n.bindText(submit, () => WebI18n.t({create: "创建房间", join: "加入房间", leave: "退出房间"}[kind]), "textContent");
           }
         }
         $("create").onsubmit = (e) => {

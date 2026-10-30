@@ -8,14 +8,14 @@ const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 async function page(respond = async () => ({code: 200, data: {desired_state: 'joined', state: 'waiting_device', room_code: '001234'}}), readCurrent = null) {
   const nodes = new Map();
   const node = id => {
-    if (!nodes.has(id)) nodes.set(id, {textContent: '', value: '', hidden: false, disabled: false, style: {}, focus() {}, showModal() {}, close() {}});
+    if (!nodes.has(id)) nodes.set(id, {isConnected: true, textContent: '', value: '', hidden: false, disabled: false, style: {}, focus() {}, showModal() {}, close() {}});
     return nodes.get(id);
   };
   const buttons = [{disabled: false}, {disabled: false}];
   const posts = [];
   let latest = {desired_state: 'left'};
   let reads = 0;
-  const context = vm.createContext({ WebI18n: require("../../tests/helpers/web-i18n.cjs")(),
+  const context = vm.createContext({ WebI18n: require("../../tests/helpers/web-i18n.cjs")(undefined, null, undefined, "call"),
     document: {getElementById: node, querySelectorAll: selector => selector === 'button, input' ? buttons : []},
     location: {search: '?device_id=test-device'},
     localStorage: {getItem: () => 'test-token'},
@@ -33,7 +33,7 @@ async function page(respond = async () => ({code: 200, data: {desired_state: 'jo
   });
   vm.runInContext(script, context);
   await new Promise(resolve => setImmediate(resolve));
-  return {node, buttons, posts, reads: () => reads, change: (kind = 'create', body = {password: ''}) => context.change(kind, body)};
+  return {ui: context.WebI18n, node, buttons, posts, reads: () => reads, change: (kind = 'create', body = {password: ''}) => context.change(kind, body)};
 }
 
 test('HTTP create sends a request and displays the assigned room', async () => {
@@ -106,4 +106,32 @@ test('successful command with failed status read preserves success and never inv
   assert.equal(p.node('syncMessage').hidden,false);
   assert.equal(p.posts.length,1);
   assert.ok(p.buttons.every(b=>!b.disabled));
+});
+
+
+test('room buttons remain translatable after successful and rejected operations', async () => {
+  for (const code of [200, 40920]) {
+    const p = await page(async () => ({code, msg:'房间人数已满', data:{desired_state:'left'}}));
+    for (const [kind,id,zh,en] of [['create','createSubmit','创建房间','Create room'],['join','joinSubmit','加入房间','Join room'],['leave','leave','退出房间','Leave room']]) {
+      p.ui.setLanguage('zh-CN');
+      await p.change(kind);
+      const reads = p.reads(), posts = p.posts.length;
+      p.ui.setLanguage('en');
+      assert.equal(p.node(id).textContent, en);
+      p.ui.setLanguage('zh-CN');
+      assert.equal(p.node(id).textContent, zh);
+      assert.equal(p.reads(), reads);
+      assert.equal(p.posts.length, posts);
+    }
+  }
+});
+
+test('visible server error is retranslated from its code without another request', async () => {
+  const p = await page(async () => ({code:40920,msg:'房间人数已满'}));
+  p.ui.setLanguage('en');
+  await p.change();
+  assert.equal(p.node('message').textContent, p.ui.errorMessage({code:40920}));
+  p.ui.setLanguage('zh-CN');
+  assert.equal(p.node('message').textContent, '房间人数已满');
+  assert.equal(p.posts.length, 1);
 });

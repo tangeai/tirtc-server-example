@@ -23,7 +23,7 @@ function pluginEditor(api) {
     return fields.get(id);
   };
   const messages = [];
-  const context = { WebI18n: require("../../tests/helpers/web-i18n.cjs")(), $: element, api, toast(message, error) { messages.push({ message, error }); },
+  const context = { WebI18n: require("../../tests/helpers/web-i18n.cjs")(undefined, null, undefined, "ai"), $: element, api, toast(message, error) { messages.push({ message: typeof message === "function" ? message() : message, error }); },
     pluginTools: [], selectedPlugins: [], isEditingDefault: false, defaultRole: null,
     mcpTools: [], selectedMcpTools: [], mcpLoadError: false,
     roleMcpCandidates: [], rolePluginCandidates: [], editorDirty: false,

@@ -7,6 +7,9 @@ const path = require('node:path');
 // Run the real dialog handlers with only DOM construction and HTTP replaced.
 class Element {
   constructor(tag) { this.tagName=tag; this.children=[]; this.dataset={}; }
+  get isConnected() { return this.tagName === 'body' || !!this.parent?.isConnected; }
+  get textContent() { return (this.text || '') + this.children.map(n => n.textContent).join(''); }
+  set textContent(value) { this.text=String(value); this.children=[]; }
   append(...nodes) { for (const node of nodes) { node.parent=this; this.children.push(node); } }
   replaceChildren(...nodes) { this.children=[]; this.append(...nodes); }
   replaceWith(node) { const i=this.parent.children.indexOf(this); node.parent=this.parent; this.parent.children[i]=node; }
@@ -30,7 +33,7 @@ async function setup(count=1, respond=()=>undefined) {
   await context.window.openRecognition('device-1');
   const click=async text=>{const b=all(body).find(n=>n.tagName==='button'&&n.textContent===text); assert.ok(b,`button ${text}`); await b.onclick();};
   const select=(index=0,checked=true)=>{const picker=all(body).find(n=>n.className==='recognition-picker');const inputs=all(picker).filter(n=>n.tagName==='input'); inputs[index].checked=checked; inputs[index].onchange();};
-  return {body,writes,messages,click,select,cards,open:context.window.openRecognition};
+  return {ui:context.WebI18n,body,writes,messages,click,select,cards,open:context.window.openRecognition};
 }
 test('saving includes checked types without a separate add confirmation',async()=>{
   const ui=await setup(); await ui.click('＋ 添加音频类型'); ui.select(); await ui.click('保存设置');
@@ -141,4 +144,21 @@ test('descriptions are text in both picker and selected rows',async()=>{
  assert.ok(all(ui.body).some(n=>n.className==='recognition-description'&&n.textContent==='说明0<b>原样文本</b>'));
  ui.select(); await ui.click('添加所选');
  assert.ok(all(ui.body).some(n=>n.className==='recognition-description'&&n.textContent==='说明0<b>原样文本</b>'));
+});
+
+
+test('picker translates output modes while retaining descriptions and checked selections', async () => {
+  const p = await setup();
+  await p.click('＋ 添加音频类型');
+  p.select();
+  p.ui.setLanguage('en');
+  const picker=all(p.body).find(n=>n.className==='recognition-picker');
+  assert.ok(picker.textContent.includes('声音0 · Text + audio'));
+  assert.ok(picker.textContent.includes('说明0<b>原样文本</b>'));
+  assert.equal(all(picker).find(n=>n.tagName==='input').checked,true);
+  p.ui.setLanguage('zh-CN');
+  assert.ok(picker.textContent.includes('声音0 · 文字＋语音'));
+  await p.click('保存设置');
+  assert.equal(p.writes.length,1);
+  assert.equal(p.writes[0].schemes[0].scheme_id,'type-0');
 });

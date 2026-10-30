@@ -951,35 +951,89 @@
 
     .footer-contact {
       display: flex;
-      flex-wrap: wrap;
       align-items: center;
       justify-content: space-between;
-      gap: 28px;
-      padding-top: 32px;
-      padding-bottom: 32px;
+      gap: 48px;
+      padding-top: 48px;
+      padding-bottom: 48px;
       border-bottom: 1px solid var(--soft-line);
     }
 
-    .footer-contact h2 {
-      margin-bottom: 10px;
-      font-size: 16px;
+    .footer-support {
+      display: flex;
+      align-items: center;
+      gap: 28px;
+      margin: 0;
+      min-width: 0;
     }
 
-    .footer-contact a {
+    .footer-support img {
+      display: block;
+      width: 144px;
+      height: 144px;
+      flex: 0 0 144px;
+    }
+
+    .footer-contact h2 {
+      margin: 0 0 12px;
+      font-size: 21px;
+      line-height: 1.5;
+      letter-spacing: -0.4px;
+    }
+
+    .footer-support p {
+      margin: 0 0 16px;
+      color: #778187;
+      font-size: 13px;
+      line-height: 1.8;
+    }
+
+    .footer-support a {
       color: var(--accent);
-      font-size: 16px;
+      font-size: 14px;
     }
 
     .footer-miniprogram {
-      width: 300px;
-      max-width: 100%;
+      width: 280px;
+      flex: 0 0 280px;
       margin: 0;
+      padding-left: 40px;
+      border-left: 1px solid var(--soft-line);
+    }
+
+    .footer-miniprogram figcaption {
+      margin-bottom: 12px;
+      color: #778187;
+      font-size: 12px;
     }
 
     .footer-miniprogram img {
       display: block;
       width: 100%;
       height: auto;
+    }
+
+    @media (max-width: 760px) {
+      .footer-contact {
+        align-items: stretch;
+        flex-direction: column;
+        gap: 32px;
+        padding-top: 32px;
+        padding-bottom: 32px;
+      }
+      .footer-support { gap: 20px; }
+      .footer-support img { width: 120px; height: 120px; flex-basis: 120px; }
+      .footer-contact h2 { font-size: 17px; letter-spacing: 0; }
+      .footer-support p { margin-bottom: 10px; font-size: 12px; }
+      .footer-support a { font-size: 13px; }
+      .footer-miniprogram {
+        width: 100%;
+        flex: auto;
+        padding: 24px 0 0;
+        border-left: 0;
+        border-top: 1px solid var(--soft-line);
+      }
+      .footer-miniprogram img { width: 240px; max-width: 100%; }
     }
 
     .footer-legal {
@@ -1474,11 +1528,16 @@
 
   <footer class="site-footer">
     <div class="footer-contact shell">
-      <div>
-        <h2 data-i18n="home.contact">商务合作与技术咨询</h2>
-        <a href="mailto:developer@tange.ai">openapi@tange.ai</a>
-      </div>
+      <figure class="footer-support">
+        <img src="/static/images/wecom-support.png" width="396" height="396" alt="企业客服二维码，使用微信扫码添加" data-i18n-alt="home.supportQrAlt" loading="lazy">
+        <figcaption>
+          <h2 data-i18n="home.contact">商务合作与技术咨询</h2>
+          <p data-i18n="home.supportConnect">微信扫码添加企业客服</p>
+          <a href="mailto:developer@tange.ai">openapi@tange.ai</a>
+        </figcaption>
+      </figure>
       <figure class="footer-miniprogram">
+        <figcaption data-i18n="home.tryMiniProgram">在微信里体验小钛</figcaption>
         <img src="/static/images/wx-xiaotai.png?v=2" width="869" height="320" alt="微信扫码或搜一搜「探鸽小钛」小程序" data-i18n-alt="home.qrAlt" loading="lazy">
       </figure>
     </div>
@@ -1495,7 +1554,7 @@
     </div>
   </footer>
 
-  <script src="/static/site-i18n.js?v=8bd4a58ac917"></script>
+  <script src="/static/site-i18n.js?v=3da6e1de59a7"></script>
   <script>
     const nav = document.querySelector(".nav");
     const menuButton = document.querySelector(".menu-button");

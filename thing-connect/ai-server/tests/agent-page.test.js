@@ -22,14 +22,14 @@ function editor(previous = {}) {
   };
   const requests = [];
   const messages = [];
-  const context = { WebI18n: require("../../tests/helpers/web-i18n.cjs")(),
+  const context = { WebI18n: require("../../tests/helpers/web-i18n.cjs")(undefined, null, undefined, "ai"),
     $: element, agents: previous.id ? [previous] : [],
     currentAgentId: previous.id || null, isEditingDefault: false,
     selectedMcpTools: ['mcp-1'], selectedPlugins: [], editorDirty: true,
     voices: [],
     Option: function(text, value) { this.text = text; this.value = value; },
     renderAgentList() {}, updateHeaderBinding() {}, updateBindButton() {},
-    toast(message, error) { messages.push({ message, error }); },
+    toast(message, error) { messages.push({ message: typeof message === "function" ? message() : message, error }); },
     async api(path, options) {
       const body = JSON.parse(options.body);
       requests.push({ path, method: options.method, body });
@@ -122,7 +122,7 @@ test('MCP editing preserves the transport configuration', async () => {
 test('knowledge documents load subsequent pages and reject a failed page', async () => {
   const paths = [];
   let failSecondPage = false;
-  const context = { WebI18n: require("../../tests/helpers/web-i18n.cjs")(), async api(path) {
+  const context = { WebI18n: require("../../tests/helpers/web-i18n.cjs")(undefined, null, undefined, "ai"), async api(path) {
     paths.push(path);
     if (path.includes('page=2')) {
       return failSecondPage ? { code: 50200 } : { code: 200, data: { items: [{ document_id: 'last' }], total: 2 } };
@@ -262,4 +262,17 @@ test('double save while a request is pending sends once, and timeout restores th
   assert.equal(e.context.savingRole, false);
   assert.equal(e.context.editorDirty, true);
   assert.equal(e.messages.at(-1).error, true);
+});
+
+
+test('visible AI error toast switches language using the original business response', () => {
+  const ui=require('../../tests/helpers/web-i18n.cjs')({default:'en',allow_switch:true},null,undefined,'ai');
+  const el={isConnected:true,textContent:'',style:{},classList:{add(){},remove(){}}};
+  const context={WebI18n:ui,$:()=>el,setTimeout(){}};
+  vm.createContext(context);
+  vm.runInContext(source('toast'),context);
+  context.toast(()=>ui.errorMessage({code:40300,msg:'无权操作该资源'},'保存失败'),true);
+  assert.equal(el.textContent,ui.errorMessage({code:40300}));
+  ui.setLanguage('zh-CN');
+  assert.equal(el.textContent,'无权操作该资源');
 });

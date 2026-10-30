@@ -2,7 +2,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-module.exports = function languageRuntime(config = {default: 'zh-CN', allow_switch: true}, saved = null, storage = new Map(saved ? [['xiaotai.site.language', saved]] : [])) {
+module.exports = function languageRuntime(config = {default: 'zh-CN', allow_switch: true}, saved = null, storage = new Map(saved ? [['xiaotai.site.language', saved]] : []), service = "user") {
   const events = {};
   const window = {
     WebLanguageConfig: config, navigator: {language: 'zh-CN'},
@@ -12,7 +12,7 @@ module.exports = function languageRuntime(config = {default: 'zh-CN', allow_swit
   };
   const root = path.join(__dirname, '../..');
   vm.runInNewContext(fs.readFileSync(path.join(root, 'internal/webui/runtime.js'), 'utf8'), {window});
-  for (const file of ['internal/webui/common.json', 'user-server/static/user-i18n.json', 'ai-server/static/ai-i18n.json', 'call-server/handler/call-i18n.json']) {
+  for (const file of ['internal/webui/common.json', {user: 'user-server/static/user-i18n.json', ai: 'ai-server/static/ai-i18n.json', call: 'call-server/handler/call-i18n.json'}[service]]) {
     window.WebI18n.addMessages(JSON.parse(fs.readFileSync(path.join(root, file), 'utf8')));
   }
   return window.WebI18n;
