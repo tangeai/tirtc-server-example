@@ -35,7 +35,7 @@
 
 ## 动态配置
 
-Admin 配置中心管理 `device-server`、`user-server`、`voip-server`、`ai-server`、`call-server`、`common` 和 `system` 命名空间。
+Admin 配置中心管理 `device-server`、`user-server`、`voip-server`、`ai-server`、`call-server`、`recognition-server`、`common` 和 `system` 命名空间。
 
 - 数据库没有发布值时使用后端注册表默认值。
 - 普通业务配置不读取服务 YAML 中的同名旧业务值；`web.language` 的本地回退规则见下方“用户页面语言”。
@@ -74,7 +74,7 @@ TC-DEVICE-000001,replace-with-device-secret
 
 首次安装页面持续显示结构化失败原因和处理建议。MySQL 预检分别验证迁移账号连接和运行账号登录；运行账号失败时按页面检查密码、账号锁定、TLS、MySQL 实际识别的来源 Host 及目标库 DML 授权。Redis 失败时检查地址、认证、DB 编号、防火墙和监听地址。客户可见响应不包含 SQL、Redis、MQTT 客户端原始错误、内网连接串或凭据，详细原因只进入受保护的服务日志。
 
-首次安装只启动 Admin，并为五个业务服务生成基础配置。Admin 不执行主机进程命令。服务状态页展示五个业务服务的版本、提交号、依赖状态、配置 revision、缺少的阻断配置和可复制的服务器启动或重启命令。
+首次安装只启动 Admin，并为六个业务服务生成基础配置。Admin 不执行主机进程命令。服务状态页展示六个业务服务的版本、提交号、依赖状态、配置 revision、缺少的阻断配置和可复制的服务器启动或重启命令。
 
 服务器上的 `service-local.sh` 在业务服务启动前运行 Admin 只读预检，检查基础配置、阻断动态配置、MySQL schema、Redis 和对应 MQTT 账号。失败时服务保持停止，终端显示可操作建议。预检不执行数据库迁移或数据修改。
 

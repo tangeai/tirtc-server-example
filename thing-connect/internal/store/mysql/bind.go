@@ -344,6 +344,12 @@ func ApplyUnbindTx(ctx context.Context, tx *sqlx.Tx, deviceID string, userID int
 	if n, _ := res.RowsAffected(); n != 1 {
 		return store.ErrSlotConflict
 	}
+	// Shared device presentation belongs to the binding transaction, not a
+	// delayed VoIP cleanup request which could race with a later binding.
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE device_profile SET profile=JSON_REMOVE(profile,'$.voip') WHERE device_id=?`, deviceID); err != nil {
+		return fmt.Errorf("bindStore.CommitUnbind profile: %w", err)
+	}
 
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE users SET bind_quota=bind_quota+1 WHERE id=?`, userID); err != nil {

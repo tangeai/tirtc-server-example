@@ -1714,6 +1714,13 @@ void voip_on_call_incoming(void *ctx, const struct cJSON *payload) {
     }
 
     /* New incoming call */
+    /* Validate before changing pending state: STR_COPY reports truncation but
+     * the truncated credential must never become eligible for connection. */
+    if (strlen(peer_id) >= sizeof(vs->pending_peer_id) ||
+        strlen(token) >= sizeof(vs->pending_token)) {
+        LOG_W("来电连接凭证超过本机容量，拒绝建连");
+        return;
+    }
     pthread_mutex_lock(&vs->lock);
     vs->incoming_generation++;
     vs->pending_call = 1;

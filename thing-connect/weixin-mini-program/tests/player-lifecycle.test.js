@@ -3,6 +3,7 @@ const test = require('node:test')
 const fs = require('node:fs')
 const path = require('node:path')
 const vm = require('node:vm')
+const languageRuntime = require('../../tests/helpers/web-i18n.cjs')
 
 function deferred() {
   let resolve
@@ -26,8 +27,9 @@ function player(options = {}) {
   const style = () => ({ setProperty(name, value) { this[name] = value } })
   const document = {
     hidden: false,
+    isConnected: true,
     getElementById(id) {
-      if (!elements.has(id)) elements.set(id, { style: style(), classList: { add() {}, remove() {}, toggle() {} } })
+      if (!elements.has(id)) elements.set(id, { isConnected: true, style: style(), classList: { add() {}, remove() {}, toggle() {} } })
       return elements.get(id)
     },
     addEventListener: (name, fn) => { listeners[name] = fn },
@@ -52,7 +54,9 @@ function player(options = {}) {
     unsubscribeVideo({ streamId }) { calls.unsubscribeVideo.push(streamId) }
     unsubscribeAudio({ streamId }) { calls.unsubscribeAudio.push(streamId) }
   }
+  const WebI18n = languageRuntime()
   const context = {
+    WebI18n,
     window, document, URLSearchParams, AbortController,
     setTimeout: () => 1, clearTimeout() {},
     location: { search: '?device_id=one' },
@@ -62,7 +66,7 @@ function player(options = {}) {
     TiRtcAudioOutput: output, TiRtcVideoOutput: output,
   }
   vm.runInNewContext(script, context)
-  return { window, document, calls, listeners, elements }
+  return { window, document, calls, listeners, elements, WebI18n }
 }
 
 test('离开页面后迟到的 token 响应不能重新建立媒体连接', async () => {
@@ -182,4 +186,15 @@ test('旋转九十度时交换画布尺寸并保持上报比例', async () => {
   assert.equal(Number.parseFloat(canvasStyle.height), 75)
   assert.equal(canvasStyle.objectFit, 'cover')
   assert.equal(canvasStyle.transform, 'translate(-50%, -50%) rotate(90deg) scaleX(-1)')
+})
+
+test('切换语言同步更新实时查看页面和浏览器标题', async () => {
+  const p = player()
+  await tick()
+  assert.equal(p.document.title, 'one 实时查看')
+  p.WebI18n.setLanguage('en')
+  assert.equal(p.document.title, 'one live view')
+  for (const id of ['page-title', 'page-title-pc']) {
+    assert.equal(p.elements.get(id).textContent, 'one live view')
+  }
 })

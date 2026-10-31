@@ -166,6 +166,10 @@ func TestCommitUnbind(t *testing.T) {
 	}
 	defer sqlDB.Exec(`DELETE FROM call_contact WHERE device_id_a=? OR device_id_b=?`, gotID, gotID)
 	defer sqlDB.Exec(`DELETE FROM cleanup_outbox WHERE device_id=?`, gotID)
+	if _, err := sqlDB.Exec(`INSERT INTO device_profile(device_id,profile) VALUES (?,?) ON DUPLICATE KEY UPDATE profile=VALUES(profile)`, gotID, `{"voip":{"enabled":true},"stream":{"width":640}}`); err != nil {
+		t.Fatal(err)
+	}
+	defer sqlDB.Exec(`DELETE FROM device_profile WHERE device_id=?`, gotID)
 
 	cleanupStore, ok := bindStore.(store.UnbindCleanupStore)
 	if !ok {
@@ -185,6 +189,13 @@ func TestCommitUnbind(t *testing.T) {
 	}
 	if deviceName != "" {
 		t.Errorf("after unbind device_name: want empty, got %q", deviceName)
+	}
+	var hasVoip, hasStream int
+	if err := sqlDB.QueryRow(`SELECT JSON_CONTAINS_PATH(profile,'one','$.voip'),JSON_CONTAINS_PATH(profile,'one','$.stream') FROM device_profile WHERE device_id=?`, gotID).Scan(&hasVoip, &hasStream); err != nil {
+		t.Fatal(err)
+	}
+	if hasVoip != 0 || hasStream != 1 {
+		t.Fatalf("profile cleanup: voip=%d stream=%d", hasVoip, hasStream)
 	}
 
 	var quota int

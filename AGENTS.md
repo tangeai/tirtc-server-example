@@ -33,7 +33,7 @@ Go 服务向以下目标依赖方向收敛：
 ## 按改动读取契约
 
 - 业务 HTTP 接口、鉴权、字段或错误：完整阅读 `thing-connect/api-reference.md` 和 `thing-connect/error-response-policy.md`；Admin 接口另读 `thing-connect/admin/admin-server/API.md`。
-- 配置、动态配置、服务发现、部署或数据库：阅读 `thing-connect/deployment.md`、`thing-connect/admin/admin-server/README.md`、相关 `config.yaml.example`、`thing-connect/internal/config`、`thing-connect/internal/db/migrate.go`、`thing-connect/internal/admin/config_registry.go` 和 `thing-connect/scripts/schema.sql`。
+- 配置、动态配置、服务发现、部署或数据库：阅读 `thing-connect/deployment.md`、`thing-connect/admin/admin-server/README.md`、相关 `config.yaml.example`、`thing-connect/internal/config`、`thing-connect/internal/store/mysql/migrate/migrate.go`、`thing-connect/internal/admin/config_registry.go` 和 `thing-connect/scripts/schema.sql`。
 - 设备上线、MQTT 或 TiRTC 信令：阅读相应 `thing-connect/device-*.md`；涉及业务互斥、资源抢占、迟到回调或会话代次时，阅读 `thing-connect/device-session-model.md` 和 `thing-connect/device-session-arbiter.md`。
 - Admin 产品行为、RBAC 或运维任务：阅读 `thing-connect/admin/admin-server/README.md`、`thing-connect/admin/admin-server/API.md` 和 `thing-connect/internal/admin` 中相邻测试。
 - Python 或 Linux C：先读 `thing-connect/device-sim/` 下对应示例目录的 `README.md`。SDK 头文件是 SDK 接口事实源，服务端文档与集成测试是业务协议事实源。
@@ -45,7 +45,7 @@ Go 服务向以下目标依赖方向收敛：
 
 - 公开 JSON 字段、HTTP 状态、业务码、鉴权方式、MQTT topic/payload、Redis key/TTL、服务发现字段和配置默认值都属于兼容性契约。除非需求明确允许破坏性变化，保持现有消费者可继续工作。
 - 客户端按数值 `code` 处理业务，不按 `msg` 文本分支。`msg` 使用可操作的简体中文；SQL、Redis、MQTT、上游 SDK、内网地址、堆栈和密钥等原始信息只进入脱敏日志。
-- 所有内部接口，包括 `/v1/internal/*` 与 `/v1/{ai,voip,call}/internal/*`，只用于服务间调用，使用共同的 `internal.key`，不进入公网代理。五个业务服务共享 `jwt_secret`，六个服务共享 `internal.key`，Admin 使用独立的 `admin.jwt_secret`。
+- 所有内部接口，包括 `/v1/internal/*` 与 `/v1/{ai,voip,call}/internal/*`，只用于服务间调用，使用共同的 `internal.key`，不进入公网代理。六个业务服务共享 `jwt_secret`，七个服务共享 `internal.key`，Admin 使用独立的 `admin.jwt_secret`。
 - MySQL 8 是数据库语义基线。数据库集成测试使用真实 MySQL/Redis 和库名以 `_test` 结尾的专用数据库，不能用 SQLite 替代。
 - Schema 变化同时更新有序、可重复执行的迁移与 `thing-connect/scripts/schema.sql`。迁移保留既有数据；应用运行账号只依赖 DML 权限，DDL 由迁移账号执行。
 - 多表、配额或所有权不变量必须在同一数据库事务内完成，并用唯一约束、条件更新或锁处理并发。事务中不等待 HTTP、MQTT、邮件等远端副作用。
@@ -75,6 +75,7 @@ Go 集成测试会在本地依赖不可用时跳过，但 CI 中缺少测试配�
 ## 对外文档
 
 - `README.md`、接入指南、API Reference 和各示例目录的说明文档面向使用者与二次开发者，只描述稳定的当前行为、使用步骤、接入约束、验收标准和故障排查。
+- 保留仍适用的踩坑经验，以触发条件、症状、排查方法、处理办法和未解决限制组织在对应指南中。问题修复后删除失效现象和临时绕行步骤；仍有接入价值的经验改写为当前约束，历史修复过程遵循发布文档规则。
 - 使用当前时态表达，不写某次提交“新增了什么、修复了什么、改成了什么”，不使用“本次修改、已经修复、现已支持、不再”等变更记录口吻。
 - 版本差异、修复清单、性能对比和提交历史只进入 CHANGELOG、release notes 或用户明确指定的发布文档；未被要求时不创建变更日志。
 - 只有公开接口、配置、命令、操作流程、兼容性、接入约束或用户可见行为变化时才同步对应使用文档。内部重构、测试补充和不改变使用方式的缺陷修复通常不改对外文档。

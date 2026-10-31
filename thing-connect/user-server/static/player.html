@@ -146,11 +146,11 @@ function resolveStreamIds(profile) {
 }
 
 // ── Page title ────────────────────────────────────────────────────────────
-const titleText = deviceID ? WebI18n.t("{p0} 实时查看", {p0: deviceID}) : WebI18n.t("实时查看");
-WebI18n.bindText(document, () => (titleText), "title");
+const titleText = () => deviceID ? WebI18n.t("{p0} 实时查看", {p0: deviceID}) : WebI18n.t("实时查看");
+WebI18n.bindText(document, titleText, "title");
 ['page-title','page-title-pc'].forEach(id => {
   const el = $(id);
-  if (el) WebI18n.bindText(el, () => (titleText), "textContent");
+  if (el) WebI18n.bindText(el, titleText, "textContent");
 });
 
 function setStatus(online) {

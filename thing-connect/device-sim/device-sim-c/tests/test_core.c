@@ -1346,6 +1346,22 @@ static void test_voip_malformed_cancel_and_failed_recovery(void) {
         "https://voip.example", "device-1", "token", "audio.g711a");
     assert(voip);
 
+    /* The fixed 1024-byte pending fields include the terminating NUL. */
+    char oversized[1025];
+    memset(oversized, 'x', sizeof(oversized) - 1);
+    oversized[sizeof(oversized) - 1] = '\0';
+    const char *credential_fields[] = {"peer_id", "token"};
+    for (size_t i = 0; i < sizeof(credential_fields) / sizeof(credential_fields[0]); ++i) {
+        cJSON *long_call = cJSON_Parse(
+            "{\"peer_id\":\"peer\",\"token\":\"token\",\"wx_room_id\":\"long\"}");
+        assert(long_call);
+        cJSON_ReplaceItemInObject(long_call, credential_fields[i],
+                                  cJSON_CreateString(oversized));
+        voip_on_call_incoming(voip, long_call);
+        assert(!voip_has_pending(voip));
+        cJSON_Delete(long_call);
+    }
+
     cJSON *incoming = cJSON_Parse(
         "{\"peer_id\":\"peer\",\"token\":\"token\","
         "\"wx_room_id\":\"room-1\"}");

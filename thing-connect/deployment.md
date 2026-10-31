@@ -22,7 +22,7 @@ flowchart TB
 
     subgraph Host["ThingConnect 应用服务器"]
         direction LR
-        Services["服务进程<br/>Admin 先运行 / 五个业务服务后启动"]
+        Services["服务进程<br/>Admin 先运行 / 六个业务服务后启动"]
         Config["config-current/&lt;service&gt;/config.yaml<br/>各服务启动配置"]
         Services <-->|"安装器写入 / 服务启动读取"| Config
     end
@@ -63,8 +63,9 @@ Nginx、HTTPS 和生产进程托管都不是首次安装页面的前置条件。
 | `voip-server` | 9003 | 生成基础配置，完成 MQTT、TiRTC 后启动 |
 | `ai-server` | 9004 | 生成基础配置，完成 TiRTC 后启动 |
 | `call-server` | 9005 | 生成基础配置，完成 MQTT、TiRTC 后启动 |
+| `recognition-server` | 9006 | 生成基础配置，完成 MQTT 后启动；受理识别任务还需配置千问 Key |
 
-首次安装会构建服务清单中的全部服务，并为 Admin 与五个业务服务生成基础配置。安装结束时只有 Admin 运行；安装器和 Admin 都不会自动启动业务服务。管理员可以逐个完成配置并启动，也可以全部配置完成后执行 `start-all`。
+首次安装会构建服务清单中的全部服务，并为 Admin 与六个业务服务生成基础配置。安装结束时只有 Admin 运行；安装器和 Admin 都不会自动启动业务服务。管理员可以逐个完成配置并启动，也可以全部配置完成后执行 `start-all`。
 
 应用端口使用上表默认值。安装页面只填写 MySQL、Redis 及部署访问地址，不在首次安装中任意重排应用端口。业务服务必须在 Admin 就绪且启动前检查通过后启动。
 
@@ -289,7 +290,7 @@ http://127.0.0.1:9000/admin/
 3. 首个管理员账号。
 4. 统一对外访问地址、可信代理和 HTTPS Cookie。生产环境即使稍后才配置 Nginx，也应填写最终的 `https://` 地址并勾选 HTTPS Cookie；只做本机或可信内网直连验收时可以留空并关闭 HTTPS Cookie。同机 Nginx 使用默认可信代理 `127.0.0.1`。
 
-页面不要求 MQTT、TiRTC 或业务服务选择。安装器始终生成五个业务服务的基础配置，但只启动 Admin。
+页面不要求 MQTT、TiRTC 或业务服务选择。安装器始终生成六个业务服务的基础配置，但只启动 Admin。
 
 先执行“连接检查并生成安装计划”，核对数据库动作，再确认安装：
 
@@ -370,7 +371,7 @@ sudo /opt/thing-connect/service-local.sh start-all
 - Redis 连接
 - 对应服务的 MQTT 账号认证
 
-任一检查失败时，五个业务服务都保持停止，终端会显示原因和处理建议。预检不会执行数据库迁移，也不会修改业务数据。
+任一检查失败时，六个业务服务都保持停止，终端会显示原因和处理建议。预检不会执行数据库迁移，也不会修改业务数据。
 
 也可以逐个启动：
 
@@ -434,7 +435,7 @@ sudo /opt/thing-connect/service-local.sh restart thing-connect:admin-server
 不要求安装 Supervisor。可以继续用 `service-local.sh` 手动管理服务；需要异常拉起、开机自启、集中日志或自动发布验收时，再接入 systemd、Supervisor、容器平台或其他现有编排系统。托管配置必须满足以下约束：
 
 - 切换前执行 `sudo /opt/thing-connect/service-local.sh stop-all`，确认本地脚本管理的进程已停止，再启动新的进程管理器。
-- Admin 先启动并达到 `/health/ready`，再预检并启动五个业务服务。
+- Admin 先启动并达到 `/health/ready`，再预检并启动六个业务服务。
 - 每个进程使用安装器生成的对应 `config-current/<service>/config.yaml`，不要复制或手工拆分配置 revision。
 - 每个进程设置稳定且唯一的 `SERVICE_INSTANCE_ID`；Username MQTT 模式依赖它生成不冲突的连接 ClientID。
 - 向进程发送 `SIGTERM` 并留出优雅退出时间，不使用强制终止作为正常重启方式。

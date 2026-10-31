@@ -3,6 +3,7 @@ const test = require('node:test')
 const fs = require('node:fs')
 const path = require('node:path')
 const vm = require('node:vm')
+const languageRuntime = require('../../tests/helpers/web-i18n.cjs')
 const { buildDeviceWebPage } = require('../utils/device-web-page')
 
 test('H5 过期等待微信 SDK 就绪后自动返回登录首页，并去重', () => {
@@ -11,7 +12,7 @@ test('H5 过期等待微信 SDK 就绪后自动返回登录首页，并去重', 
   let sdk, panel
   const window = {}
   vm.runInNewContext(source, {
-    window, URLSearchParams,
+    window, URLSearchParams, WebI18n: languageRuntime(),
     location: { search: '?source=miniprogram', hash: '#mini_token=test-token', pathname: '/player' },
     history: { replaceState() {} },
     document: {
@@ -124,7 +125,7 @@ test('H5 登录隔离：先清理片段，内嵌页面不读取或改写浏览�
     const calls = []
     const window = {}
     const context = {
-      window, URLSearchParams,
+      window, URLSearchParams, WebI18n: languageRuntime(),
       location: { search: embedded ? '?source=miniprogram&device_id=one' : '?device_id=one',
         hash: '#mini_token=native-token', pathname: '/player' },
       history: { replaceState: (_, __, url) => calls.push(['clear', url]) },

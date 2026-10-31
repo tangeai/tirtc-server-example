@@ -147,9 +147,19 @@ func (o *Outbox) deliver(ctx context.Context, current task) error {
 		return err
 	}
 	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("%s returned HTTP %d", current.Target, resp.StatusCode)
+	}
+	// VoIP reports business failures with HTTP 200. A transport success alone
+	// must not acknowledge and delete a durable cleanup task.
+	var result struct {
+		Code *int `json:"code"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&result); err != nil {
+		return fmt.Errorf("%s returned invalid cleanup response: %w", current.Target, err)
+	}
+	if result.Code == nil || (*result.Code != 0 && *result.Code != 200) {
+		return fmt.Errorf("%s rejected cleanup", current.Target)
 	}
 	return nil
 }

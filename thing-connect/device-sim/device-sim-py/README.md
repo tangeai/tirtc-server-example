@@ -1096,7 +1096,7 @@ Windows 收到 ready 语音通知后，由后台队列鉴权下载并按 WAV 文
 | 语音（audio） | result=null，内部分析文字用于 TTS；成功后 speech.status=ready | Windows 自动下载播放；其他平台用 `recognize audio 任务号` 下载并手动试听 |
 | 文字＋语音（text_audio） | 先返回文字和 pending 语音状态，随后通知 ready；合成失败仍保留文字 | Windows 等待语音就绪后自动下载播放；其他平台手动下载 |
 
-`queued` 上传响应仅表示受理成功。当前协议中，文字完成、等待合成时，父任务仍可能显示 queued，而子项分析状态为 succeeded；应结合 speech.status 判断，不要重复上传。最终状态及错误处理见 [接口参考](../../api-reference.md#recognition-task)。
+`queued` 上传响应仅表示受理成功。任务开始后，文字完成、等待语音合成时，父任务保持 `processing`，子项分析状态可以为 `succeeded`；应结合 `speech.status` 判断进度，不要重复上传。最终状态及错误处理见 [接口参考](../../api-reference.md#recognition-task)。
 
 验收时分别选择三种返回方式提交音频，核对文字/语音结果与后台调用记录：仅文字任务应只有 analysis 调用，没有 tts 调用及该任务的 TTS 用量；设备月累计 TTS 用量可能包含其他任务，不能用累计值是否为0判断。每个已受理的测试任务会占用额度。
 

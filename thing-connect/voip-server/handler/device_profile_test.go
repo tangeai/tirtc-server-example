@@ -53,7 +53,7 @@ func TestLegacyVoIPSceneTranslatesVideoAndDropsIdentity(t *testing.T) {
 func TestDeprecatedProfileEndpointWritesUnifiedScene(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	store := &profileStoreStub{}
-	server := NewServer(nil, nil, nil, nil, deviceprofile.NewService(store))
+	server := NewServer(nil, nil, nil, nil, deviceprofile.NewService(store), nil)
 	router := gin.New()
 	router.POST("/profile", func(c *gin.Context) {
 		c.Set("device_id", "device-1")

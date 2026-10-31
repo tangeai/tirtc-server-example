@@ -23,7 +23,12 @@ type mqttOnlineChecker interface {
 	IsOnline(ctx context.Context, clientID string) bool
 }
 
+type Unbinder interface {
+	Unbind(context.Context, string) error
+}
+
 type Server struct {
+	cleanup  Unbinder
 	mu       sync.RWMutex
 	cfg      *config.Config
 	db       *sqlx.DB
@@ -40,8 +45,8 @@ func (s *Server) Config() *config.Config {
 }
 func (s *Server) UpdateConfig(cfg *config.Config) { s.mu.Lock(); s.cfg = cfg; s.mu.Unlock() }
 
-func NewServer(cfg *config.Config, db *sqlx.DB, rdb *redis.Client, broker MQTTPublisher, profiles *deviceprofile.Service) *Server {
-	return &Server{cfg: cfg, db: db, rdb: rdb, broker: broker, profiles: profiles}
+func NewServer(cfg *config.Config, db *sqlx.DB, rdb *redis.Client, broker MQTTPublisher, profiles *deviceprofile.Service, cleanup Unbinder) *Server {
+	return &Server{cfg: cfg, db: db, rdb: rdb, broker: broker, profiles: profiles, cleanup: cleanup}
 }
 
 // IsDeviceOnline allows the WeChat callback path to reject a call before

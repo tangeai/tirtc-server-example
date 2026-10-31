@@ -21,60 +21,13 @@ func (s *Server) postInternalUnbind(c *gin.Context) {
 		apiresp.Fail(c, apiresp.ErrBadParam, "缺少 device_id")
 		return
 	}
-	ctx := c.Request.Context()
-
-	tx, err := s.db.BeginTxx(ctx, nil)
-	if err != nil {
+	if s.cleanup == nil {
+		apiresp.Fail(c, apiresp.ErrInternal, "VoIP cleanup is not configured")
+		return
+	}
+	if err := s.cleanup.Unbind(c.Request.Context(), body.DeviceID); err != nil {
 		apiresp.Fail(c, apiresp.ErrInternal, err.Error())
 		return
 	}
-	defer tx.Rollback()
-	var contacts []struct {
-		WxAppID  string `db:"wx_app_id"`
-		WxOpenID string `db:"wx_open_id"`
-	}
-	if err := tx.SelectContext(ctx, &contacts,
-		`SELECT wx_app_id, wx_open_id FROM voip_device_auth WHERE device_id=?`,
-		body.DeviceID); err != nil {
-		apiresp.Fail(c, apiresp.ErrInternal, err.Error())
-		return
-	}
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE device_bind SET device_name='' WHERE device_id=?`,
-		body.DeviceID); err != nil {
-		apiresp.Fail(c, apiresp.ErrInternal, err.Error())
-		return
-	}
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE device_profile SET profile=JSON_REMOVE(profile,'$.voip') WHERE device_id=?`,
-		body.DeviceID); err != nil {
-		apiresp.Fail(c, apiresp.ErrInternal, err.Error())
-		return
-	}
-	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM voip_device_auth WHERE device_id=?`,
-		body.DeviceID); err != nil {
-		apiresp.Fail(c, apiresp.ErrInternal, err.Error())
-		return
-	}
-	if err := tx.Commit(); err != nil {
-		apiresp.Fail(c, apiresp.ErrInternal, err.Error())
-		return
-	}
-	deviceGuardKey := deviceCallGuardKey(body.DeviceID)
-	callID, callIDErr := s.rdb.Get(ctx, deviceGuardKey).Result()
-	if callIDErr == nil && callID != "" {
-		for _, contact := range contacts {
-			s.ReleaseOutgoingCallGuards(
-				ctx,
-				contact.WxAppID,
-				body.DeviceID,
-				contact.WxOpenID,
-				callID,
-			)
-		}
-	}
-	_ = s.rdb.Del(ctx, deviceGuardKey).Err()
-	s.publishAuthUpdate(ctx, body.DeviceID)
 	apiresp.OK(c, nil)
 }

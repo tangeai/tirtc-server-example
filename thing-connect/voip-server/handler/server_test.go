@@ -38,7 +38,7 @@ func (b *onlineCheckingBroker) IsOnline(_ context.Context, clientID string) bool
 
 func TestIsDeviceOnlineUsesFormalMQTTClientID(t *testing.T) {
 	broker := &onlineCheckingBroker{online: true}
-	server := NewServer(nil, nil, nil, broker, nil)
+	server := NewServer(nil, nil, nil, broker, nil, nil)
 
 	if !server.IsDeviceOnline(context.Background(), "TIR123") {
 		t.Fatal("expected configured online checker result")
@@ -153,7 +153,7 @@ func TestInternalUnbindInvalidCredentialUsesBusinessCode(t *testing.T) {
 		nil,
 		nil,
 		nil,
-	)
+		nil)
 	router := gin.New()
 	router.POST("/", server.postInternalUnbind)
 	recorder := httptest.NewRecorder()
@@ -259,7 +259,7 @@ func TestVideoUIProfile(t *testing.T) {
 }
 
 func TestPostDeviceProfileRejectsNonObject(t *testing.T) {
-	server := NewServer(nil, nil, nil, nil, nil)
+	server := NewServer(nil, nil, nil, nil, nil, nil)
 	router := gin.New()
 	router.POST("/", func(c *gin.Context) {
 		c.Set("device_id", "device-1")
