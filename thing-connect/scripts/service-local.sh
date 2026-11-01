@@ -284,18 +284,24 @@ wait_ready() {
 
 start_all() {
     local service port
+    validate_enabled_services || return 1
     start_one "$ADMIN_SERVICE" || return 1
     if ! wait_ready "$ADMIN_SERVICE" "$SETUP_PORT"; then
         stop_one "$ADMIN_SERVICE" >/dev/null || true
         return 1
     fi
     for service in "${BUSINESS_SERVICES[@]}"; do
+        service_is_enabled "$service" || continue
         if [ "$service" = recognition-server ] && [ "${DEFER_RECOGNITION_START:-0}" = 1 ]; then continue; fi
         if config_exists "$service"; then
             preflight_service "$service" || return 1
+        elif [ -f "$DEPLOY_ROOT/enabled-services" ]; then
+            err "$service 已启用但配置不存在；请配置后重试，或停用该可选服务"
+            return 1
         fi
     done
     for service in "${BUSINESS_SERVICES[@]}"; do
+        service_is_enabled "$service" || continue
         if [ "$service" = recognition-server ] && [ "${DEFER_RECOGNITION_START:-0}" = 1 ]; then continue; fi
         if config_exists "$service"; then
             start_one "$service" 1 || return 1
@@ -316,11 +322,39 @@ stop_all() {
     stop_one "$ADMIN_SERVICE" >/dev/null
 }
 
+set_service_enabled() (
+    local service="$1" enabled="$2" item pending
+    [ "${SERVICE_REQUIRED[$service]}" != true ] || {
+        [ "$enabled" = 1 ] && return 0
+        err "必需服务不能停用: $service"; return 1
+    }
+    mkdir -p "$STATE_DIR"
+    exec 6>"$DEPLOY_ROOT/deploy.lock"
+    flock -n 6 || { err "另一个安装或发布任务正在运行"; return 1; }
+    exec 7>"$STATE_DIR/enabled-services.lock"
+    flock 7
+    validate_enabled_services || return 1
+    pending="$(mktemp "$DEPLOY_ROOT/.enabled-services.XXXXXX")" || return 1
+    trap 'rm -f -- "$pending"' EXIT
+    for item in "${ALL_SERVICES[@]}"; do
+        if [ "$item" = "$service" ]; then
+            [ "$enabled" != 1 ] || printf '%s\n' "$item" >>"$pending"
+        elif service_is_enabled "$item"; then
+            printf '%s\n' "$item" >>"$pending"
+        fi
+    done
+    chmod 600 "$pending"
+    if [ "$enabled" = 0 ]; then stop_one "$service" || return 1; fi
+    mv -f "$pending" "$DEPLOY_ROOT/enabled-services" || return 1
+    echo "$service 启用状态=$enabled；执行 start-all 启动已启用服务"
+)
+
 usage() {
     cat <<'USAGE'
 用法: service-local.sh <命令> [thing-connect:服务名]
 
-命令：status、start、stop、restart、start-all、stop-all、status-all
+命令：status、start、stop、restart、start-all、stop-all、status-all、enable、disable
+enable/disable 持久化可选服务启用状态；disable 停止该服务。start-all 只启动已启用服务。
 该脚本用于首次安装、故障排查，以及未接入 Supervisor 等进程管理器时的本机运行。
 它不注册开机自启、不轮转日志；生产环境需由运维系统补齐这些能力。
 USAGE
@@ -338,6 +372,11 @@ main() {
                 stop) stop_one "$service" ;;
                 restart) stop_one "$service" >/dev/null; start_one "$service" ;;
             esac
+            ;;
+        enable|disable)
+            [ "$#" -eq 2 ] || { usage; return 2; }
+            service="$(service_name "$2")" || return $?
+            if [ "$command_name" = enable ]; then set_service_enabled "$service" 1; else set_service_enabled "$service" 0; fi
             ;;
         start-all) [ "$#" -eq 1 ] || return 2; start_all ;;
         stop-all) [ "$#" -eq 1 ] || return 2; stop_all ;;

@@ -37,7 +37,7 @@ if rg -q 'DATABASE_BACKUP_FILE|DATABASE_BACKUP_RESTORE_VERIFIED|恢复演练确�
     exit 1
 fi
 OVERRIDE_LINE="$(grep -n '^    validate_database_backup()' "$SCRIPTS/deploy-local.sh" | head -1 | cut -d: -f1)"
-DEPLOY_LINE="$(grep -n '^    full_deploy$' "$SCRIPTS/deploy-local.sh" | head -1 | cut -d: -f1)"
+DEPLOY_LINE="$(grep -n '^    full_deploy\( || return \$?\)\?$' "$SCRIPTS/deploy-local.sh" | head -1 | cut -d: -f1)"
 [ -n "$OVERRIDE_LINE" ] && [ -n "$DEPLOY_LINE" ] && [ "$OVERRIDE_LINE" -lt "$DEPLOY_LINE" ]
 echo 'PASS: local update bypasses only the production backup restore gate'
 run prepare >"$TEST_ROOT/prepare.log" 2>&1

@@ -104,3 +104,36 @@ load_service_catalog() {
         return 1
     }
 }
+
+# Absence preserves the installed-service behavior of older deployments.
+# Fresh installers write an explicit required-only list.
+service_is_enabled() {
+    local service="$1" file="$DEPLOY_ROOT/enabled-services"
+    [ -f "$file" ] || return 0
+    grep -Fxq -- "$service" "$file"
+}
+
+validate_enabled_services() {
+    local file="$DEPLOY_ROOT/enabled-services" service
+    [ -e "$file" ] || { [ ! -L "$file" ]; return; }
+    [ -f "$file" ] && [ ! -L "$file" ] || { echo '[ERROR] enabled-services 必须为普通文件' >&2; return 1; }
+    while IFS= read -r service || [ -n "$service" ]; do
+        [ -n "$service" ] && [ -n "${SERVICE_PORT[$service]+present}" ] || {
+            echo "[ERROR] enabled-services 包含未知或空服务名: $service" >&2; return 1;
+        }
+    done <"$file"
+    for service in "${REQUIRED_SERVICES[@]}"; do
+        service_is_enabled "$service" || { echo "[ERROR] 必需服务不能停用: $service" >&2; return 1; }
+    done
+}
+
+initialize_enabled_services() {
+    [ ! -e "$DEPLOY_ROOT/enabled-services" ] && [ ! -L "$DEPLOY_ROOT/enabled-services" ] || return 0
+    local pending
+    mkdir -p "$DEPLOY_ROOT" || return 1
+    pending="$(mktemp "$DEPLOY_ROOT/.enabled-services.XXXXXX")" || return 1
+    printf '%s\n' "${REQUIRED_SERVICES[@]}" >"$pending"
+    chmod 600 "$pending"
+    ln "$pending" "$DEPLOY_ROOT/enabled-services" || { rm -f "$pending"; return 1; }
+    rm -f "$pending"
+}

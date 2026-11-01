@@ -14,7 +14,7 @@ local_usage() {
 用法: deploy-local.sh <命令> [--archive-existing]
 
   prepare   从本地源码生成独立快照，完整构建服务清单中的服务和 Web；不替换服务
-  install   发布快照并启动 Web 首次安装页面；仅接受空安装目录
+  install   发布快照并启动 Web 首次安装页面；未完成安装可恢复
   update    保留配置和数据库升级；要求现有库通过正式迁移预检
   start     启动已安装服务并检查 readiness
   stop      停止本地脚本管理的服务
@@ -26,7 +26,7 @@ local_usage() {
   SOURCE_ROOT       本地仓库根目录，默认脚本所在仓库（包含未提交文件）
   DEPLOY_ROOT       安装目录，默认 /opt/thing-connect
   GATEWAY_PORT      独立 Nginx 端口，默认 18080
-  MIGRATION_CONFIG  update 使用的数据库配置；默认复用当前已激活的 Admin 配置
+  MIGRATION_CONFIG  独立 DDL 账号配置；未指定时先用 Admin 运行配置只读检查
 
 install --archive-existing 仅用于全新安装：要求旧服务全部停止，将旧目录
 整体移动到旁边的带时间戳目录，旧数据库保持原样。Web 安装必须填写新的空库。
@@ -73,6 +73,7 @@ local_validate() {
 
 local_prepare() {
     local archive_root file
+    ( source "$LOCAL_SOURCE_ROOT/thing-connect/scripts/install.sh"; require_commands ) || return 1
     # Keep snapshots outside the installation root so archiving it cannot invalidate paths.
     archive_root="${LOCAL_DEPLOY_ROOT}.sources"
     mkdir -p -- "$archive_root"
@@ -163,6 +164,14 @@ local_require_stopped() {
 
 local_install() (
     local previous=""
+    if [ "$LOCAL_ARCHIVE_EXISTING" = 0 ] &&
+       [ -d "$LOCAL_DEPLOY_ROOT/var/installer" ] &&
+       [ ! -e "$LOCAL_DEPLOY_ROOT/var/installer/installed.json" ]; then
+        export DEPLOY_ROOT="$LOCAL_DEPLOY_ROOT"
+        source "$LOCAL_SOURCE_ROOT/thing-connect/scripts/install.sh"
+        resume_install
+        return $?
+    fi
     local_require_stopped
     if [ "$LOCAL_ARCHIVE_EXISTING" = 0 ]; then
         DEPLOY_ROOT="$LOCAL_DEPLOY_ROOT" source "$LOCAL_SOURCE_ROOT/thing-connect/scripts/install.sh"
@@ -251,32 +260,38 @@ local_start_updated() {
             LOCAL_RECOGNITION_PENDING=1
             local_log '识别服务已部署（9006），等待在 Admin → 服务配置 → AI识别 → 服务配置中发布 MQTT；其他已配置服务正常启动'
             ;;
-        ready) DEPLOY_ROOT="$LOCAL_DEPLOY_ROOT" "$controller" start-all || return 1 ;;
+        ready) DEPLOY_ROOT="$LOCAL_DEPLOY_ROOT" DEFER_RECOGNITION_START=0 "$controller" start-all || return 1 ;;
         *) local_error '识别服务配置检查结果无效'; return 1 ;;
     esac
 }
 
 local_update() (
-    if [ -z "${MIGRATION_CONFIG:-}" ]; then
-        if [ -r "$LOCAL_DEPLOY_ROOT/admin-server/config.yaml" ]; then
-            MIGRATION_CONFIG="$LOCAL_DEPLOY_ROOT/admin-server/config.yaml"
+    local check_config="${MIGRATION_CONFIG:-}"
+    if [ -z "$check_config" ]; then
+        if [ -r "$LOCAL_DEPLOY_ROOT/admin-server/migration-config.yaml" ]; then
+            check_config="$LOCAL_DEPLOY_ROOT/admin-server/migration-config.yaml"
+        elif [ -r "$LOCAL_DEPLOY_ROOT/admin-server/config.yaml" ]; then
+            check_config="$LOCAL_DEPLOY_ROOT/admin-server/config.yaml"
         else
-            MIGRATION_CONFIG="$LOCAL_DEPLOY_ROOT/config-current/admin-server/config.yaml"
+            check_config="$LOCAL_DEPLOY_ROOT/config-current/admin-server/config.yaml"
         fi
     fi
-    [ -r "$MIGRATION_CONFIG" ] || {
-        local_error "迁移配置不可读: $MIGRATION_CONFIG"; return 1;
+    [ -r "$check_config" ] || {
+        local_error "迁移检查配置不可读: $check_config"; return 1;
     }
     [ "${SKIP_MIGRATIONS:-0}" = 0 ] || { local_error '本地模拟生产部署必须检查迁移，不能跳过'; return 1; }
     local_prepare
     export DEPLOY_ROOT="$LOCAL_DEPLOY_ROOT" REPO_PATH="$LOCAL_SNAPSHOT/repository"
     export BUILD_DIR="$REPO_PATH/thing-connect" FORCE_UPDATE=1
-    "$BUILD_DIR/bin/admin-server" -c "$MIGRATION_CONFIG" -deploy-root "$DEPLOY_ROOT" \
+    "$BUILD_DIR/bin/admin-server" -c "$check_config" -deploy-root "$DEPLOY_ROOT" \
         -require-runtime-target -migration-check-only || {
         local_error '数据库预检失败，未停止服务或替换文件。旧迁移历史不能直接改版本号；请先完成兼容升级或选择保留旧库的全新安装。'; return 1;
     }
     local_prepare_recognition
-    local_require_stopped
+    # Updates stop managed services only after preparation succeeds.
+    if command -v supervisorctl >/dev/null && supervisorctl status 2>/dev/null | grep -q "thing-connect:"; then
+        local_error "已有 Supervisor 托管，请使用 deploy-prod.sh update"; return 1
+    fi
     local_publish_recognition
     source "$BUILD_DIR/scripts/deploy-prod.sh"
     pull_code() { [ -f "$BUILD_DIR/bin/.release-commit" ]; }
@@ -288,7 +303,10 @@ local_update() (
         local_log '本地开发部署跳过生产数据库恢复演练门槛'
         return 0
     }
-    full_deploy
+    # Recognition readiness requires the new Admin. Publish it while stopped,
+    # then resolve its optional MQTT configuration in local_start_updated.
+    export DEFER_RECOGNITION_START=1
+    full_deploy || return $?
     if ! local_start_updated; then
         DEPLOY_ROOT="$LOCAL_DEPLOY_ROOT" "$LOCAL_DEPLOY_ROOT/service-local.sh" stop-all || true
         local_error '启动验收失败，服务保持停止；请检查 logs 下的服务日志'; return 1

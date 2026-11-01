@@ -15,12 +15,16 @@ Git 索引，也不拉取远程代码。它使用现有 Web 安装器创建数�
 
 ```bash
 cd /home/workspace/tirtc-server-example
-sudo bash thing-connect/scripts/deploy-local.sh install
+sudo env \
+  PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin \
+  bash thing-connect/scripts/deploy-local.sh install
 ```
 
-`sudo` 环境需要能找到 `go` 和 `npm`；它不会自动继承用户版本管理器的路径。
+`sudo` 环境需要能找到 Go、Node.js 和 npm；它不会自动继承用户版本管理器的路径。
+使用其他工具链目录时，在示例的受控 `PATH` 中加入实际目录。
+自定义安装目录时，每次调用 `deploy-local.sh` 都传入相同的 `DEPLOY_ROOT`；同机的不同安装仍使用固定业务端口，不能同时启动。
 
-安装目录已有实例时，普通 `install` 会拒绝覆盖。如果选择全新建立联调环境，先停止
+安装尚未完成时，用相同目录再次执行 `install` 恢复安装页面；已有安装完成标记时，普通 `install` 会拒绝覆盖。如果选择全新建立联调环境，先停止
 旧服务，再显式归档旧目录：
 
 ```bash
@@ -37,12 +41,29 @@ MySQL 运行账号必须拥有新库的 SELECT、INSERT、UPDATE、DELETE 权限
 账号准备步骤见部署指南的“MySQL 账号”一节。开发联调实例也应使用独立的 Redis DB。
 
 脚本显示一次性安装令牌后，打开 `http://127.0.0.1:9000/admin/`，完成 MySQL、Redis
-和管理员初始化。在 Admin 中发布 TiRTC、User / VoIP / Call 的 MQTT 配置，然后执行：
+和管理员初始化。登录 Admin 后绑定 TOTP，先发布 `common/tirtc` 和
+`user-server/mqtt.connection`，即可启动基础服务。需要可选业务时，先发布该业务的必需配置，
+再启用，例如：
+
+```bash
+# 仅在需要 AI 服务、并完成其必需配置时执行。
+sudo /opt/thing-connect/service-local.sh enable ai-server
+```
+
+启动服务并检查健康状态：
 
 ```bash
 sudo /opt/thing-connect/deploy-local.sh start
-sudo /opt/thing-connect/deploy-local.sh gateway
 sudo /opt/thing-connect/deploy-local.sh status
+curl -fsS http://127.0.0.1:9000/health/ready
+curl -fsS http://127.0.0.1:9001/health/ready
+curl -fsS http://127.0.0.1:9002/health/ready
+```
+
+需要统一 H5 入口且已经安装 Nginx 时，再执行：
+
+```bash
+sudo /opt/thing-connect/deploy-local.sh gateway
 ```
 
 - 用户 H5：`http://127.0.0.1:18080/`
@@ -71,20 +92,28 @@ sudo bash thing-connect/scripts/deploy-local.sh prepare
 仅部署用户可读。源码中的忽略文件不会进入快照；符号链接会被拒绝。快照不自动删除。
 
 保留已安装实例的数据更新时，默认复用当前已激活的
-`/opt/thing-connect/config-current/admin-server/config.yaml` 执行迁移。开发联调环境可以让运行账号同时拥有
-DDL 权限；如需使用独立迁移账号，再通过 `MIGRATION_CONFIG` 指定配置。本地更新不要求生产环境的
+`/opt/thing-connect/config-current/admin-server/config.yaml` 只读检查迁移状态。存在待执行迁移时，
+通过 `MIGRATION_CONFIG` 指定独立 DDL 账号的配置，或准备 `admin-server/migration-config.yaml`，文件准备步骤见部署指南第 4.6 节。本地更新不要求生产环境的
 数据库恢复演练确认：
 
 ```bash
-sudo /opt/thing-connect/deploy-local.sh gateway-stop
-sudo /opt/thing-connect/deploy-local.sh stop
+cd /home/workspace/tirtc-server-example
 sudo env \
+  PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin \
   SOURCE_ROOT=/home/workspace/tirtc-server-example \
   bash thing-connect/scripts/deploy-local.sh update
+```
+
+不必提前停止业务服务或独立 Nginx。若使用独立 Nginx，并且本次更新涉及代理路由，更新成功后执行：
+
+```bash
+sudo /opt/thing-connect/deploy-local.sh gateway-stop
 sudo /opt/thing-connect/deploy-local.sh gateway
 ```
 
-本地脚本仍复用 `deploy-prod.sh` 的迁移失败处理；数据库结构发生变化后迁移失败时，不自动启动旧版本。
+更新先完成源码快照、构建和配置检查，再自动停止受管服务、迁移及发布，最后按 Admin 优先顺序启动并检查 readiness。构建或前置检查失败不停止原服务。
+
+本地脚本复用 `deploy-prod.sh` 的迁移失败处理；数据库结构发生变化后迁移失败时，不自动启动旧版本。
 需要保留重要联调数据时，应在更新前自行备份。生产环境的备份和恢复步骤见[部署指南](deployment.md)。
 
 如果预检提示数据库版本比二进制新，可能是另一个迁移历史的旧开发库。
@@ -95,6 +124,6 @@ sudo /opt/thing-connect/deploy-local.sh gateway
 
 本地 `update` 在识别配置缺失时补入 `recognition-server`，监听 9006；已有独立配置或激活配置包中的识别配置保持原样。配置使用用户服务的运行数据库账号、Redis、业务 JWT、内部密钥和 Admin 地址，不使用迁移账号，也不复制 Admin 登录密钥。
 
-基础配置与首次安装器一致，不包含 MQTT 账号或千问 Key，也不读取、复制其他服务的 MQTT 配置。更新先启动 Admin 检查识别服务配置：MQTT 尚未发布时，识别服务文件完成部署并保持停止，其他已配置服务正常启动。进入 Admin 的“服务配置 → AI识别 → 服务配置”，自行填写、测试并发布 MQTT 和模型配置后，执行 `deploy-local.sh start` 启动识别服务。配置检查失败或已配置服务启动失败仍按失败处理，不标记为全部就绪。
+基础配置与首次安装器一致，不包含 MQTT 账号或千问 Key，也不读取、复制其他服务的 MQTT 配置。更新在 Admin 就绪后检查已发布的识别服务配置：MQTT 尚未发布时，识别服务文件完成部署并保持停止，其他已配置服务正常启动。进入 Admin 的“服务配置 → AI识别 → 服务配置”，自行填写、测试并发布 MQTT 和模型配置后，执行 `service-local.sh enable recognition-server`，再执行 `deploy-local.sh start` 启动识别服务。配置检查失败或已配置服务启动失败仍按失败处理，不标记为全部就绪。
 
 使用当前源码的 `scripts/deploy-local.sh update` 执行首次扩展，成功后 `/opt/thing-connect/deploy-local.sh` 同步为当前脚本。按上面的更新步骤重启独立 Nginx，使 `/v1/recognition/` 转发至 9006。模型 Key 在 Admin 的识别服务配置中发布，设备识别默认关闭。

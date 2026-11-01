@@ -239,7 +239,7 @@ BASH
 
     validate_service_manager
 
-    assert_eq "manual" "$ACTIVE_SERVICE_MANAGER" \
+    assert_eq "local" "$ACTIVE_SERVICE_MANAGER" \
         "missing Supervisor must select manual service-local control"
 )
 
@@ -334,6 +334,8 @@ test_manual_update_publishes_without_automatic_restart() (
     prepare_service_configs() { :; }
     validate_configs() { :; }
     backup_release() { BACKUP_DIR="$TEST_ROOT/manual-update-backup"; }
+    inspect_migrations() { :; }
+    preflight_business_services() { :; }
     run_migrations() { :; }
     deploy_one() { printf 'deployed=%s\n' "$1" >>"$capture"; }
     restart_one() { printf 'restarted=%s\n' "$1" >>"$capture"; }
@@ -508,8 +510,11 @@ test_failed_same_commit_repair_invalidates_previous_release_state() (
     prepare_service_configs() { :; }
     validate_configs() { :; }
     backup_release() { BACKUP_DIR="$TEST_ROOT/incomplete-release-backup"; }
+    inspect_migrations() { :; }
     run_migrations() { :; }
     deploy_one() { :; }
+    stop_one() { :; }
+    start_one() { :; }
     restart_one() { :; }
     mark_backup_successful() { :; }
     publish_service_catalog() { [ "$failure_mode" != "auxiliary" ]; }
@@ -748,7 +753,7 @@ test_deploy_lock_is_scoped_to_one_mutating_command() (
 test_menu_starts_with_maintenance_update() {
     local output
     output="$(menu <<<'invalid')"
-    [[ "$output" == *$'1) 维护发布更新（Supervisor 自动重启；无 Supervisor 时手动启停）\n2) 仅执行数据库迁移'* ]] || {
+    [[ "$output" == *$'1) 维护发布更新（Supervisor 自动重启；无 Supervisor 时本地自动启停）\n2) 仅执行数据库迁移'* ]] || {
         echo "FAIL: maintenance update and migration are not the first menu actions" >&2
         exit 1
     }

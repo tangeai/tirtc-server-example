@@ -57,8 +57,7 @@ load_deployment_service_catalog() {
 
 load_deployment_service_catalog || exit 1
 
-# Supervisor 是可选的自动进程管理器；未接入 Supervisor 时，发布脚本只更新
-# 文件和数据库，服务由运维人员通过 service-local.sh 手动停止、启动和验收。
+# 未接入 Supervisor 时使用 service-local.sh 自动停启；manual 保留外部编排入口。
 SUPERVISORCTL="${SUPERVISORCTL:-supervisorctl}"
 # 对应 deploy/supervisor/thing-connect.supervisor.conf 的 [group:thing-connect]。
 SUPERVISOR_WAIT_SECONDS="${SUPERVISOR_WAIT_SECONDS:-15}"
@@ -75,7 +74,8 @@ BACKUP_KEEP_COUNT="${BACKUP_KEEP_COUNT:-10}"
 # non-empty backup file whose restore has been tested before migration starts.
 DATABASE_BACKUP_FILE="${DATABASE_BACKUP_FILE:-}"
 DATABASE_BACKUP_RESTORE_VERIFIED="${DATABASE_BACKUP_RESTORE_VERIFIED:-0}"
-MIGRATION_CONFIG="${MIGRATION_CONFIG:-$DEPLOY_ROOT/admin-server/migration-config.yaml}"
+MIGRATION_CONFIG="${MIGRATION_CONFIG:-}"
+MIGRATIONS_PENDING=0
 SKIP_MIGRATIONS="${SKIP_MIGRATIONS:-0}"
 FORCE_UPDATE="${FORCE_UPDATE:-0}"
 ALLOW_INSECURE_ADMIN_COOKIE="${ALLOW_INSECURE_ADMIN_COOKIE:-1}"
@@ -149,6 +149,7 @@ service_config_template() {
 has_missing_service_configs() {
     local svc
     for svc in "${ALL_SERVICES[@]}"; do
+        service_is_enabled "$svc" || continue
         service_config_path "$svc" >/dev/null || return 0
     done
     return 1
@@ -160,6 +161,7 @@ prepare_service_configs() (
     local svc template target stage
     # Check all templates and paths before creating any configuration.
     for svc in "${ALL_SERVICES[@]}"; do
+        service_is_enabled "$svc" || continue
         if service_config_path "$svc" >/dev/null; then continue; fi
         [ ! -L "$DEPLOY_ROOT/$svc" ] &&
             [ ! -L "$DEPLOY_ROOT/config-current/$svc/config.yaml" ] || {
@@ -171,6 +173,7 @@ prepare_service_configs() (
     stage="$(mktemp -d "$DEPLOY_ROOT/.service-configs.XXXXXX")" || return 1
     trap 'rm -rf -- "$stage"' EXIT
     for svc in "${ALL_SERVICES[@]}"; do
+        service_is_enabled "$svc" || continue
         target="$DEPLOY_ROOT/$svc"
         mkdir -p "$target" || return 1
         if service_config_path "$svc" >/dev/null; then continue; fi
@@ -187,6 +190,7 @@ prepare_service_configs() (
 # membership comes from the shared service catalog.
 resolve_active_services() {
     local svc
+    validate_enabled_services || return 1
     ACTIVE_SERVICES=()
     ACTIVE_BUSINESS_SERVICES=()
     ACTIVE_STOP_ORDER=()
@@ -198,6 +202,7 @@ resolve_active_services() {
     done
     ACTIVE_SERVICES=("$ADMIN_SERVICE")
     for svc in "${BUSINESS_SERVICES[@]}"; do
+        service_is_enabled "$svc" || continue
         if service_config_path "$svc" >/dev/null; then
             ACTIVE_SERVICES+=("$svc")
             ACTIVE_BUSINESS_SERVICES+=("$svc")
@@ -281,38 +286,38 @@ validate_supervisor_inventory() {
 select_service_manager() {
     local svc state configured=0 total="${#ACTIVE_SERVICES[@]}"
     case "$SERVICE_MANAGER" in
-        auto|supervisor|manual) ;;
+        auto|supervisor|local|manual) ;;
         *)
-            err "SERVICE_MANAGER 只能是 auto、supervisor 或 manual"
+            err "SERVICE_MANAGER 只能是 auto、supervisor、local 或 manual"
             return 1
             ;;
     esac
 
-    if [ "$SERVICE_MANAGER" = "manual" ]; then
+    if [ "$SERVICE_MANAGER" = "manual" ] || [ "$SERVICE_MANAGER" = "local" ]; then
         if command -v "$SUPERVISORCTL" >/dev/null 2>&1; then
             for svc in "${ACTIVE_SERVICES[@]}"; do
                 state="$(supervisor_state "$svc")"
                 [ -z "$state" ] || configured=$((configured + 1))
             done
             if [ "$configured" -ne 0 ]; then
-                err "SERVICE_MANAGER=manual 不能忽略 Supervisor 中已有的 $configured 个 ThingConnect 服务"
+                err "SERVICE_MANAGER=$SERVICE_MANAGER 不能忽略 Supervisor 中已有的 $configured 个 ThingConnect 服务"
                 err "请先停止并移除这些 Supervisor 条目，避免两个进程管理器重复启动服务"
                 return 1
             fi
         fi
-        ACTIVE_SERVICE_MANAGER="manual"
+        ACTIVE_SERVICE_MANAGER="$SERVICE_MANAGER"
     elif [ "$SERVICE_MANAGER" = "supervisor" ]; then
         validate_supervisor_inventory "${ACTIVE_SERVICES[@]}" || return 1
         ACTIVE_SERVICE_MANAGER="supervisor"
     elif ! command -v "$SUPERVISORCTL" >/dev/null 2>&1; then
-        ACTIVE_SERVICE_MANAGER="manual"
+        ACTIVE_SERVICE_MANAGER="local"
     else
         for svc in "${ACTIVE_SERVICES[@]}"; do
             state="$(supervisor_state "$svc")"
             [ -z "$state" ] || configured=$((configured + 1))
         done
         if [ "$configured" -eq 0 ]; then
-            ACTIVE_SERVICE_MANAGER="manual"
+            ACTIVE_SERVICE_MANAGER="local"
         elif [ "$configured" -eq "$total" ]; then
             ACTIVE_SERVICE_MANAGER="supervisor"
         else
@@ -322,12 +327,12 @@ select_service_manager() {
         fi
     fi
 
-    if [ "$ACTIVE_SERVICE_MANAGER" = "manual" ]; then
+    if [ "$ACTIVE_SERVICE_MANAGER" != "supervisor" ]; then
         [ -x "$LOCAL_SERVICECTL" ] || {
             err "未使用 Supervisor，且本地服务脚本不存在或不可执行: $LOCAL_SERVICECTL"
             return 1
         }
-        log "未检测到完整的 ThingConnect Supervisor 清单；使用手动服务管理模式"
+        log "本地服务管理模式: $ACTIVE_SERVICE_MANAGER"
     else
         validate_supervisor_inventory "${ACTIVE_SERVICES[@]}" || return 1
         log "服务管理器校验通过：Supervisor"
@@ -373,7 +378,7 @@ validate_manual_services_stopped() {
         fi
     done
     if [ "$active" -ne 0 ]; then
-        err "手动服务管理模式要求更新前停止全部本地服务，避免迁移期间混跑新旧版本"
+        err "更新要求全部本地服务停止，避免迁移期间混跑新旧版本"
         printf '%s\n' "$output" >&2
         manual_service_control_hint stop
         err "停止后重新执行本次更新命令"
@@ -752,6 +757,7 @@ build_services() {
         err "源码目录存在未提交修改，拒绝生成生产发布产物: $REPO_PATH"
         return 1
     fi
+    ( source "$BUILD_DIR/scripts/install.sh"; require_commands ) || return 1
     "$BUILD_DIR/build.sh" "$@" || return 1
 }
 
@@ -894,26 +900,29 @@ abort_migration_on_signal() {
 	exit "$status"
 }
 
-run_migrations() {
+inspect_migrations() {
 	local migration_output migration_status=0 inspection_output inspection_status=0
-	MIGRATION_CHANGED=0
+	MIGRATIONS_PENDING=0
     if [ "$SKIP_MIGRATIONS" = "1" ]; then
         warn "已按 SKIP_MIGRATIONS=1 跳过数据库迁移；仅应在迁移已独立完成时使用"
         return
     fi
-    [ -f "$MIGRATION_CONFIG" ] || {
-        err "缺少迁移配置: $MIGRATION_CONFIG"
-        err "请复制 admin-server/config.yaml，使用具备 DDL 权限的 database.dsn，并设置权限 600"
-        return 1
-    }
-    chmod 600 "$MIGRATION_CONFIG" || return 1
+    local check_config="$MIGRATION_CONFIG"
+    if [ -z "$check_config" ]; then
+        if [ -f "$DEPLOY_ROOT/admin-server/migration-config.yaml" ]; then
+            check_config="$DEPLOY_ROOT/admin-server/migration-config.yaml"
+        else
+            check_config="$(service_config_path admin-server)" || return 1
+        fi
+    fi
+    [ -r "$check_config" ] || { err "迁移检查配置不可读: $check_config"; return 1; }
     [ -x "$BUILD_DIR/bin/admin-server" ] || {
         err "缺少迁移程序: $BUILD_DIR/bin/admin-server"
         return 1
     }
 	log "只读检查数据库迁移状态..."
 	if inspection_output="$("$BUILD_DIR/bin/admin-server" \
-		-c "$MIGRATION_CONFIG" \
+		-c "$check_config" \
 		-deploy-root "$DEPLOY_ROOT" \
 		-require-runtime-target \
 		-migration-check-only 2>&1)"; then
@@ -935,7 +944,37 @@ run_migrations() {
 		err "迁移检查程序没有返回可识别的结果，拒绝继续发布"
 		return 1
 	fi
+    MIGRATIONS_PENDING=1
+    if [ -z "$MIGRATION_CONFIG" ]; then MIGRATION_CONFIG="$DEPLOY_ROOT/admin-server/migration-config.yaml"; fi
+    [ -r "$MIGRATION_CONFIG" ] || {
+        err "数据库需要迁移，请提供具备 DDL 权限的 MIGRATION_CONFIG"; return 1;
+    }
+    chmod 600 "$MIGRATION_CONFIG" || return 1
     validate_database_backup || return 1
+}
+
+preflight_business_services() {
+    local svc cfg
+    [ "${#ACTIVE_BUSINESS_SERVICES[@]}" -gt 0 ] || return 0
+    if [ "$MIGRATIONS_PENDING" = 1 ]; then
+        warn "数据库待迁移，业务依赖预检将在迁移后、启动前执行"
+        return 0
+    fi
+    cfg="$(service_config_path "$ADMIN_SERVICE")" || return 1
+    for svc in "${ACTIVE_BUSINESS_SERVICES[@]}"; do
+        if [ "$svc" = recognition-server ] && [ "${DEFER_RECOGNITION_START:-0}" = 1 ]; then continue; fi
+        log "停服前检查 $svc 必填配置及依赖连接..."
+        "$BUILD_DIR/bin/admin-server" -c "$cfg" -deploy-root "$DEPLOY_ROOT" \
+            -check-service-config "$svc" || return 1
+    done
+}
+
+run_migrations() {
+    local migration_output migration_status=0
+    MIGRATION_CHANGED=0
+    inspect_migrations || return $?
+    [ "$MIGRATIONS_PENDING" = 1 ] || return 0
+
     warn "数据库迁移不能随二进制回滚；执行前应确认已有可恢复的数据库备份"
 	log "校验迁移账号与所有已安装服务的运行配置指向同一数据库，并执行零写入所有权预检..."
     log "执行数据库迁移..."
@@ -1105,6 +1144,11 @@ wait_for_readiness() {
             log "$svc readiness 检查通过"
             return
         fi
+        if [ "$ACTIVE_SERVICE_MANAGER" = local ]; then
+            sleep 1
+            elapsed=$((elapsed + 1))
+            continue
+        fi
         state="$(supervisor_state "$svc")"
         if [ "$state" != "RUNNING" ] && [ "$state" != "STARTING" ]; then
             err "$svc readiness 检查期间 Supervisor 状态变为 ${state:-UNKNOWN}"
@@ -1121,6 +1165,10 @@ wait_for_readiness() {
 # ================== 停服务 ==================
 stop_one() {
     local svc="$1"
+    if [ "$ACTIVE_SERVICE_MANAGER" = local ]; then
+        "$LOCAL_SERVICECTL" stop "$SUPERVISOR_GROUP:$svc"
+        return $?
+    fi
 
     log "停止 $svc ..."
 
@@ -1185,6 +1233,15 @@ deploy_one() {
 # ================== 启动 ==================
 start_one() {
     local svc="$1"
+    if [ "$svc" = recognition-server ] && [ "${DEFER_RECOGNITION_START:-0}" = 1 ]; then
+        log "识别服务等待 MQTT 配置发布，保持停止"
+        return 0
+    fi
+    if [ "$ACTIVE_SERVICE_MANAGER" = local ]; then
+        "$LOCAL_SERVICECTL" start "$SUPERVISOR_GROUP:$svc" || return 1
+        wait_for_readiness "$svc"
+        return $?
+    fi
 
     local bin="$DEPLOY_ROOT/$svc/$svc"
     local cfg
@@ -1217,6 +1274,10 @@ start_one() {
 # ================== 重启 ==================
 restart_one() {
     local svc="$1"
+    if [ "$ACTIVE_SERVICE_MANAGER" = local ]; then
+        stop_one "$svc" && start_one "$svc"
+        return $?
+    fi
 
     require_supervisor_service "$svc" || return 1
     log "重启 $svc（Supervisor）..."
@@ -1229,6 +1290,10 @@ restart_one() {
 # ================== 状态 ==================
 status_one() {
     local svc="$1"
+    if [ "$ACTIVE_SERVICE_MANAGER" = local ]; then
+        "$LOCAL_SERVICECTL" status "$SUPERVISOR_GROUP:$svc"
+        return $?
+    fi
     require_supervisor_service "$svc" || return 1
     "$SUPERVISORCTL" status "$(supervisor_program "$svc")" || return 1
 }
@@ -1326,7 +1391,7 @@ rollback_release() {
     for svc in "${DEPLOYED_SERVICES[@]}"; do
         backup="$BACKUP_DIR/$svc"
         target="$DEPLOY_ROOT/$svc"
-        if [ "$ACTIVE_SERVICE_MANAGER" = "supervisor" ]; then
+        if [ "$ACTIVE_SERVICE_MANAGER" != "manual" ]; then
             stop_one "$svc" || rollback_failed=1
         fi
         if [ -f "$backup/$svc" ]; then
@@ -1352,7 +1417,7 @@ rollback_release() {
         elif [ -d "$target/static" ]; then
             rm -rf "$target/static" || rollback_failed=1
         fi
-        if [ -f "$backup/$svc" ] && [ "$ACTIVE_SERVICE_MANAGER" = "supervisor" ]; then
+        if [ -f "$backup/$svc" ] && [ "$ACTIVE_SERVICE_MANAGER" != "manual" ] && service_is_enabled "$svc"; then
             if ! start_one "$svc"; then
                 err "$svc 回滚后启动失败，请人工处理"
                 rollback_failed=1
@@ -1444,26 +1509,30 @@ full_deploy() (
     prepare_update_service_control || return 1
     services=("${ACTIVE_SERVICES[@]}")
     backup_release "${services[@]}" || return 1
-	if run_migrations; then
-		:
-	else
-		status=$?
-		mark_backup_failed || true
-		if [ "$MIGRATION_CHANGED" = "1" ]; then
-			quiesce_after_schema_change || true
-			err "迁移失败且数据库可能已部分变化，整个服务组已停止"
-		fi
-		return "$status"
-	fi
-    DEPLOYED_SERVICES=()
+    inspect_migrations || { mark_backup_failed; return 1; }
+    preflight_business_services || { mark_backup_failed; return 1; }
+    DEPLOYED_SERVICES=("${services[@]}")
     trap 'status=$?; rollback_active_release "$status"; exit "$status"' ERR
     trap 'abort_active_release 130' INT
     trap 'abort_active_release 143' TERM
-
+    if [ "$ACTIVE_SERVICE_MANAGER" != manual ]; then
+        for svc in "${ACTIVE_STOP_ORDER[@]}"; do
+            stop_one "$svc" || { status=$?; rollback_active_release "$status"; return "$status"; }
+        done
+        if [ "$ACTIVE_SERVICE_MANAGER" = local ]; then
+            validate_manual_services_stopped || {
+                status=$?; rollback_active_release "$status"; return "$status";
+            }
+        fi
+    fi
+    if run_migrations; then :; else
+        status=$?
+        rollback_active_release "$status"
+        return "$status"
+    fi
     for svc in "${services[@]}"; do
         # Include the current service before touching it so a mid-deploy error
         # also restores and restarts that service.
-        DEPLOYED_SERVICES+=("$svc")
         if deploy_one "$svc"; then
             :
         else
@@ -1471,16 +1540,14 @@ full_deploy() (
             rollback_active_release "$status"
             return "$status"
         fi
-        if [ "$ACTIVE_SERVICE_MANAGER" = "supervisor" ]; then
-            if restart_one "$svc"; then
-                :
-            else
-                status=$?
-                rollback_active_release "$status"
-                return "$status"
-            fi
-        fi
     done
+    if [ "$ACTIVE_SERVICE_MANAGER" != manual ]; then
+        for svc in "${ACTIVE_SERVICES[@]}"; do
+            if start_one "$svc"; then :; else
+                status=$?; rollback_active_release "$status"; return "$status"
+            fi
+        done
+    fi
     if mark_backup_successful; then
         :
     else
@@ -1514,7 +1581,7 @@ full_deploy() (
         return 1
     fi
     prune_successful_backups || warn "清理过期备份失败，请稍后人工清理"
-    if [ "$ACTIVE_SERVICE_MANAGER" = "supervisor" ]; then
+    if [ "$ACTIVE_SERVICE_MANAGER" != "manual" ]; then
         log "全流程发布成功: $(git -C "$REPO_PATH" rev-parse --short HEAD)"
     else
         log "代码、配置校验和数据库迁移已完成: $(git -C "$REPO_PATH" rev-parse --short HEAD)"
@@ -1603,7 +1670,7 @@ usage() {
 用法: deploy-prod.sh [命令]
 
 命令：
-  update         维护发布：拉取、构建、备份、迁移和发布；Supervisor 模式自动重启验收
+  update         维护发布：拉取、构建、备份、迁移和发布；自动管理本地脚本或 Supervisor 的停启和验收
   migrate        仅执行版本化数据库迁移
   validate       校验必需服务及已启用可选服务的基础生产配置
   status         查看全部服务状态
@@ -1620,7 +1687,7 @@ usage() {
 
 不带命令时进入交互菜单。数据库迁移账号读取 MIGRATION_CONFIG；由外部迁移
 平台处理 DDL 时可显式设置 SKIP_MIGRATIONS=1 后执行 update。Supervisor 可选；
-未配置时先用 service-local.sh stop-all，更新完成后手动 start-all 和 status-all。
+默认自动停启；SERVICE_MANAGER=manual 才要求手动 stop-all/start-all。
 同一 Git commit 需要重新构建和发布时，显式设置 FORCE_UPDATE=1。
 USAGE
 }
@@ -1657,7 +1724,7 @@ run_named_command() {
 menu() {
     local choice command_name
     echo ""
-    echo "1) 维护发布更新（Supervisor 自动重启；无 Supervisor 时手动启停）"
+    echo "1) 维护发布更新（Supervisor 自动重启；无 Supervisor 时本地自动启停）"
     echo "2) 仅执行数据库迁移"
     echo "3) 校验基础生产配置"
     echo "4) 查看全部服务状态"

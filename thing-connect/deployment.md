@@ -12,6 +12,22 @@
 
 任何一步失败都应先处理错误，不要跳过检查继续安装。
 
+## 部署顺序
+
+首次部署按下面顺序执行。完成 Web 安装只代表数据库和 Admin 已就绪，业务服务还需要配置和启动。
+
+| 顺序 | 操作 | 完成标志 |
+|---|---|---|
+| 1 | 按第 2 节准备工具链、MySQL 8、Redis 和数据库账号 | 工具版本正确，数据库与 Redis 连接检查通过 |
+| 2 | 按第 3.1 节运行 `install.sh`；Ubuntu 可加 `--install-deps` 准备工具链 | 终端输出安装地址和一次性令牌 |
+| 3 | 打开 `http://服务器IP:9000/admin/`，按第 3.2 节检查连接并确认安装 | 安装成功，可以进入 Admin 登录页 |
+| 4 | 登录 Admin、绑定 TOTP，发布 `common/tirtc` 和 `user-server/mqtt.connection` | 基础用户服务的必填配置已发布 |
+| 5 | 按第 4.2 节启用需要的可选服务，再执行 `service-local.sh start-all` | Admin、Device、User 及选中的可选服务启动成功 |
+| 6 | 检查各已启用服务的 `/health/ready`，再完成进程托管、HTTPS 和公网代理 | 健康接口成功，对外入口可访问 |
+| 7 | 后续按第 4.6 节执行 `deploy-prod.sh update` | 更新成功；不需要重新运行安装向导 |
+
+如果只需要基础用户服务，第 5 步无需启用任何可选服务。使用 AI、VoIP、Call 或 Recognition 时，先发布该业务的必需配置，再启用。
+
 ## 整体架构
 
 ```mermaid
@@ -65,7 +81,7 @@ Nginx、HTTPS 和生产进程托管都不是首次安装页面的前置条件。
 | `call-server` | 9005 | 生成基础配置，完成 MQTT、TiRTC 后启动 |
 | `recognition-server` | 9006 | 生成基础配置，完成 MQTT 后启动；受理识别任务还需配置千问 Key |
 
-首次安装会构建服务清单中的全部服务，并为 Admin 与六个业务服务生成基础配置。安装结束时只有 Admin 运行；安装器和 Admin 都不会自动启动业务服务。管理员可以逐个完成配置并启动，也可以全部配置完成后执行 `start-all`。
+首次安装会构建服务清单中的全部服务，并为 Admin 与六个业务服务生成基础配置。安装结束时只有 Admin 运行；安装器和 Admin 都不会自动启动业务服务。管理员按需完成配置并启用业务服务，`start-all` 只启动启用清单中的服务。
 
 应用端口使用上表默认值。安装页面只填写 MySQL、Redis 及部署访问地址，不在首次安装中任意重排应用端口。业务服务必须在 Admin 就绪且启动前检查通过后启动。
 
@@ -133,6 +149,8 @@ Nginx、HTTPS 和生产进程托管都不是首次安装页面的前置条件。
 
 ### 2.2 准备依赖和网络
 
+MySQL 和 Redis 可以部署在同机或独立服务器。上述工具安装命令和 `--install-deps` 只准备工具链及数据库客户端，不安装 MySQL/Redis 服务，也不创建账号；先由运维准备可连接的实例，再继续安装。
+
 准备以下信息：
 
 - MySQL 8.0+ 地址、端口、目标数据库名及迁移、运行账号凭据（允许使用同一账号）。
@@ -140,7 +158,7 @@ Nginx、HTTPS 和生产进程托管都不是首次安装页面的前置条件。
 - 应用服务器 IP；生产反向代理还需提前确定最终域名和 HTTPS 方案。
 - 首个管理员邮箱和密码。密码至少 8 位，且必须包含英文大写字母、英文小写字母和数字；允许同时使用中文和特殊字符。
 
-首次安装时只需允许管理员来源访问 TCP 9000。完成后按实际启用服务允许受信网络访问 9000～9005。MySQL 和 Redis 不应对公网开放；MQTT 仅在公网设备确需连接时开放启用 TLS、强认证和 Topic ACL 的设备接入端口，Broker 管理端口不得开放公网。
+首次安装时只需允许管理员来源访问 TCP 9000。完成后按实际启用服务允许受信网络访问 9000～9006。MySQL 和 Redis 不应对公网开放；MQTT 仅在公网设备确需连接时开放启用 TLS、强认证和 Topic ACL 的设备接入端口，Broker 管理端口不得开放公网。
 
 直接暴露业务端口会同时暴露该进程的路由面，只适合可信网络或验收。公网部署应使用第 4 节的 Nginx 单一入口，并禁止代理 `/v1/internal/*` 及各业务服务的 `/internal/*`。
 
@@ -263,13 +281,17 @@ sudo env \
 
 `install.sh` 依次执行：
 
-1. 检查目标不是已安装实例，并取得部署锁。
+1. 取得部署锁，检查工具链版本、安装状态和安装端口；未完成安装进入恢复流程。
 2. 克隆仓库；已有干净工作树时只允许 `git pull --ff-only`。
 3. 按服务清单完整构建所有服务和 Web 静态资源。
 4. 发布首次运行所需的二进制、静态资源、服务清单和本地服务脚本。
 5. 生成只显示一次的安装令牌，通过本地启动脚本启动 Admin 安装模式。
 
-脚本不配置反向代理、HTTPS、开机自启或日志轮转，也不复制示例配置。检测到正式配置、激活配置或安装完成标记时会拒绝重新安装。
+Ubuntu 使用 `sudo env PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin /tmp/thing-connect-install.sh --install-deps` 可安装缺少的基础工具及 Go、Node Snap。已有 Snap 工具链保留；版本不符合要求时按报错升级。MySQL、Redis 和第三方账号仍需提前准备。
+
+安装中断后，使用相同 `DEPLOY_ROOT` 再次执行安装入口。已有安装状态时复用已发布文件；尚未提交配置时停止旧安装进程、生成新令牌并恢复页面，旧令牌失效。配置已经提交时启动 Admin 完成恢复；安装完成时提示使用更新入口。恢复文件不完整时保留现场并报出缺失项，不删除配置或数据库。
+
+脚本不配置反向代理、HTTPS、开机自启或日志轮转，也不复制示例配置。
 
 ### 3.2 完成 Web 安装
 
@@ -328,9 +350,16 @@ sudo env \
 
 首次登录 Admin Web 时绑定 TOTP，并把恢复码离线保存。然后在配置中心发布：
 
-- User、VoIP、AI、Call 共享的 `common / tirtc`。
-- User、VoIP、Call 各自的 `mqtt.connection`，每个服务使用独立账号或 ClientID。
-- Device 没有 MQTT 和 TiRTC 启动阻断配置，可以直接通过服务器预检。
+| 服务 | 启动前需发布的配置 |
+|---|---|
+| Device（必需） | 没有 MQTT 和 TiRTC 启动阻断配置 |
+| User（必需） | `common/tirtc`、`user-server/mqtt.connection` |
+| AI（按需启用） | `common/tirtc`；角色和资源按业务需要配置 |
+| VoIP（按需启用） | `common/tirtc`、`voip-server/mqtt.connection`；使用微信通话还需配置微信应用 |
+| Call（按需启用） | `common/tirtc`、`call-server/mqtt.connection` |
+| Recognition（按需启用） | `recognition-server/mqtt.connection`；使用模型能力还需配置模型 Key |
+
+各 MQTT 服务使用独立账号或 ClientID。未使用的可选业务无需为了启动基础服务而填写配置。
 
 MQTT 配置表单提供“测试连接”和“测试并发布”两个操作：
 
@@ -358,32 +387,43 @@ TiRTC 配置只检查字段完整性和格式，业务服务启动预检会再�
 
 ### 4.2 在服务器预检并启动业务服务
 
+首次安装的 `/opt/thing-connect/enabled-services` 只启用 Admin、Device、User。VoIP、AI、Call、Recognition 的配置文件可以存在，但需要先在 Admin 发布该业务的必需配置，再显式启用。例如启用 AI：
+
+```bash
+sudo /opt/thing-connect/service-local.sh enable ai-server
+sudo /opt/thing-connect/service-local.sh start-all
+curl -fsS http://127.0.0.1:9004/health/ready
+```
+
+`disable ai-server` 保存停用状态并停止服务；必需服务不能停用。没有启用清单的旧安装保留按已有配置启动的行为。`enable` / `disable` 适用于本地进程管理；Supervisor 部署还需同步其进程定义，避免两个管理器混用。
+
+
 需要的配置发布后，在安装服务器执行：
 
 ```bash
 sudo /opt/thing-connect/service-local.sh start-all
 ```
 
-`start-all` 先确认 Admin readiness，再依次检查：
+`start-all` 先确认 Admin readiness，再依次检查已启用业务服务：
 
 - 基础 YAML 和 Admin 启动阻断配置
 - MySQL 连接及 schema 版本
 - Redis 连接
 - 对应服务的 MQTT 账号认证
 
-任一检查失败时，六个业务服务都保持停止，终端会显示原因和处理建议。预检不会执行数据库迁移，也不会修改业务数据。
+首次启动的预检失败时，待启动业务服务保持停止，终端会显示原因和处理建议。预检不会执行数据库迁移，也不会修改业务数据。
 
-也可以逐个启动：
+逐个启动可用于排查。`start` 本身不保存启用状态；可选服务先执行 `enable`，后续 `start-all` 和更新才会管理它：
 
 ```bash
 sudo /opt/thing-connect/service-local.sh start thing-connect:device-server
 sudo /opt/thing-connect/service-local.sh start thing-connect:user-server
-sudo /opt/thing-connect/service-local.sh start thing-connect:voip-server
-sudo /opt/thing-connect/service-local.sh start thing-connect:ai-server
+# 例如需要多人对讲时，先完成 Call 配置，再启用和启动：
+sudo /opt/thing-connect/service-local.sh enable call-server
 sudo /opt/thing-connect/service-local.sh start thing-connect:call-server
 ```
 
-启动完成后检查全部进程和直接端口：
+启动完成后检查进程和已启用服务的直接端口：
 
 ```bash
 (
@@ -392,9 +432,6 @@ sudo /opt/thing-connect/service-local.sh start thing-connect:call-server
   curl -fsS http://127.0.0.1:9000/health/ready
   curl -fsS http://127.0.0.1:9001/health/ready
   curl -fsS http://127.0.0.1:9002/health/ready
-  curl -fsS http://127.0.0.1:9003/health/ready
-  curl -fsS http://127.0.0.1:9004/health/ready
-  curl -fsS http://127.0.0.1:9005/health/ready
 )
 ```
 
@@ -418,6 +455,7 @@ sudo /opt/thing-connect/service-local.sh stop-all
 sudo /opt/thing-connect/service-local.sh restart thing-connect:admin-server
 ```
 
+
 该脚本不注册开机服务，也不提供日志轮转。长期运行时，运维环境需要另外负责开机启动、日志收集和轮转；具体做法见 4.3 节。
 
 本地服务脚本可能显示以下状态：
@@ -432,10 +470,10 @@ sudo /opt/thing-connect/service-local.sh restart thing-connect:admin-server
 
 ### 4.3 可选：接入生产进程托管
 
-不要求安装 Supervisor。可以继续用 `service-local.sh` 手动管理服务；需要异常拉起、开机自启、集中日志或自动发布验收时，再接入 systemd、Supervisor、容器平台或其他现有编排系统。托管配置必须满足以下约束：
+不要求安装 Supervisor。可以继续用 `service-local.sh` 管理服务并由更新脚本自动停启及验收；需要开机自启、集中日志时，再接入 systemd、Supervisor、容器平台或其他现有编排系统。托管配置必须满足以下约束：
 
 - 切换前执行 `sudo /opt/thing-connect/service-local.sh stop-all`，确认本地脚本管理的进程已停止，再启动新的进程管理器。
-- Admin 先启动并达到 `/health/ready`，再预检并启动六个业务服务。
+- Admin 先启动并达到 `/health/ready`，再预检并启动已启用的业务服务。
 - 每个进程使用安装器生成的对应 `config-current/<service>/config.yaml`，不要复制或手工拆分配置 revision。
 - 每个进程设置稳定且唯一的 `SERVICE_INSTANCE_ID`；Username MQTT 模式依赖它生成不冲突的连接 ClientID。
 - 向进程发送 `SIGTERM` 并留出优雅退出时间，不使用强制终止作为正常重启方式。
@@ -531,14 +569,28 @@ sudo /opt/thing-connect/deploy-prod.sh update
 sudo env FORCE_UPDATE=1 /opt/thing-connect/deploy-prod.sh update
 ```
 
-进入完整更新后，脚本先构建新版本，为服务清单中的各服务创建部署目录。缺少 `config.yaml` 时复制该服务的 `config.yaml.example`，权限设为 600；已有独立配置或激活配置包保持不变。模板仍含必填占位值时，校验会停止发布，请填写实际生产配置后重新执行 `update`；此时不会替换运行中的程序或执行数据库迁移。相同 commit 下缺少服务配置也会执行此补齐流程。高级 `build` 命令同样在完整构建成功后准备目录和缺失配置。
+进入完整更新后，脚本先构建新版本，为已启用服务创建部署目录。缺少 `config.yaml` 时复制该服务的 `config.yaml.example`，权限设为 600；已有独立配置或激活配置包保持不变。模板仍含必填占位值时，校验会停止发布，请填写实际生产配置后重新执行 `update`；此时不会替换运行中的程序或执行数据库迁移。相同 commit 下缺少服务配置也会执行此补齐流程。高级 `build` 命令同样在完整构建成功后准备目录和缺失配置。
 
-配置有效后，脚本重新检查服务托管清单，再使用迁移账号检查数据库所有权、完整结构和待迁移版本。检查过程只读。数据库已经是当前版本时，脚本输出“数据库已是当前版本”，跳过数据库备份门槛和 DDL，代码与静态资源仍会继续发布。
+配置有效后，脚本重新检查服务托管清单，再检查数据库所有权、完整结构和待迁移版本。检查过程只读，优先使用显式 `MIGRATION_CONFIG` 或已有 `admin-server/migration-config.yaml`；未配置独立迁移账号时使用 Admin 当前运行配置。数据库已经是当前版本时，脚本输出“数据库已是当前版本”，跳过数据库备份门槛和 DDL，代码与静态资源仍会继续发布。停服前还会使用新版本 Admin 程序检查已启用业务的必填动态配置和 MySQL、Redis、MQTT 连接，失败时保留原进程。存在待执行迁移时，依赖预检在迁移后、业务启动前执行。
 
-存在待执行迁移时，脚本在 DDL 前停止并要求可恢复的数据库备份。使用 `mysqldump` 生成完整备份，在隔离 MySQL 实例完成恢复演练，再把绝对路径和恢复验证声明传给更新命令：
+需要迁移时，准备独立配置文件。首次使用可以从当前 Admin 配置复制，保留主机、端口、数据库名及其他字段，只把 `database.dsn` 中的用户名和密码改为第 2.3 节准备的迁移账号：
+
+```bash
+# 仅在 migration-config.yaml 尚不存在时复制，避免覆盖已有迁移凭据。
+sudo test -e /opt/thing-connect/admin-server/migration-config.yaml || \
+  sudo install -m 600 /opt/thing-connect/config-current/admin-server/config.yaml \
+    /opt/thing-connect/admin-server/migration-config.yaml
+sudoedit /opt/thing-connect/admin-server/migration-config.yaml
+sudo chmod 600 /opt/thing-connect/admin-server/migration-config.yaml
+```
+
+手动部署未使用 `config-current` 时，从实际使用的 Admin `config.yaml` 复制。不要修改业务服务的运行账号，也不要把迁移配置指向其他数据库。安装页面填写的迁移密码不会自动保存成这个文件。
+
+存在待执行迁移时，脚本在停服前要求具备 DDL 权限的独立 `MIGRATION_CONFIG` 和可恢复的数据库备份。使用 `mysqldump` 生成完整备份，在隔离 MySQL 实例完成恢复演练，再把绝对路径和恢复验证声明传给更新命令：
 
 ```bash
 sudo env \
+  MIGRATION_CONFIG=/opt/thing-connect/admin-server/migration-config.yaml \
   DATABASE_BACKUP_FILE=/secure/backups/thing-connect-before-update.sql \
   DATABASE_BACKUP_RESTORE_VERIFIED=1 \
   /opt/thing-connect/deploy-prod.sh update
@@ -554,23 +606,12 @@ sudo env \
 
 | 环境 | 发布方式 |
 |---|---|
-| Supervisor 中包含全部已安装服务 | 按 Admin 优先顺序逐个发布、重启并检查 readiness |
-| 没有 `supervisorctl`，或没有任何 ThingConnect 条目 | 进入手动模式，不控制服务进程 |
+| Supervisor 中包含全部已启用服务 | 预检完成后停止服务，迁移、发布，再按 Admin 优先顺序启动并检查 readiness |
+| 没有 `supervisorctl`，或没有任何 ThingConnect 条目 | 使用 `service-local.sh` 自动完成相同停启和验收流程 |
 
-手动模式下，更新前必须先停止本地服务：
+普通更新只需执行 `deploy-prod.sh update`。构建、配置校验和迁移前置检查失败时保留运行中的服务；停服后的发布失败触发文件恢复。数据库结构已经变化时，失败会保持整个服务组停止，需人工恢复数据库或确认兼容性，不能直接启动旧版本。
 
-```bash
-sudo /opt/thing-connect/service-local.sh stop-all
-sudo /opt/thing-connect/deploy-prod.sh update
-sudo /opt/thing-connect/service-local.sh start-all
-sudo /opt/thing-connect/service-local.sh status-all
-```
-
-手动模式检测到待迁移版本时，同样先完成数据库备份和恢复演练，再使用带 `DATABASE_BACKUP_FILE` 与 `DATABASE_BACKUP_RESTORE_VERIFIED=1` 的更新命令重试；服务在整个过程中保持停止。
-
-手动模式检测到 `RUNNING`、`STARTING`、`CONFLICT`，或发现已安装服务的端口仍在监听时，会在拉取、迁移和发布前停止，并显示准确的 `stop-all` 命令。更新完成后，终端会显示 `start-all` 和 `status-all`。
-
-Supervisor 只配置了部分已安装服务时，脚本会拒绝发布，避免 Supervisor 与本地脚本同时管理同一服务。可以通过 `SERVICE_MANAGER=supervisor` 或 `SERVICE_MANAGER=manual` 明确指定模式。即使显式选择手动模式，也必须先停止并移除已有的 ThingConnect Supervisor 条目。
+`SERVICE_MANAGER=local` 和 `SERVICE_MANAGER=supervisor` 可明确指定管理器。Supervisor 只配置部分已启用服务时拒绝发布。使用 systemd、容器等外部编排时可显式选择 `SERVICE_MANAGER=manual`，自行完成 stop-all、更新、start-all 和健康检查；该模式要求服务事先停止，并且没有冲突的 Supervisor 条目。
 
 新版本增加服务时，需要同时更新：
 
@@ -582,7 +623,18 @@ Supervisor 只配置了部分已安装服务时，脚本会拒绝发布，避免
 
 表结构变化还要增加有序、可重入的迁移，并更新 `scripts/schema.sql`。
 
-Supervisor 部署在发布前执行 `supervisorctl reread` 和 `supervisorctl update`。缺少任何已安装服务的进程定义时，发布会在修改文件和数据库前停止。使用手动模式、systemd、容器平台或其他编排系统时，也要提供等价的显式迁移、Admin 优先启动和 readiness 门槛。
+Supervisor 部署在发布前执行 `supervisorctl reread` 和 `supervisorctl update`。缺少任何已启用服务的进程定义时，发布会在修改文件和数据库前停止。使用手动模式、systemd、容器平台或其他编排系统时，也要提供等价的显式迁移、Admin 优先启动和 readiness 门槛。
+
+### 4.7 失败后从哪里继续
+
+| 停止位置 | 处理后继续执行 |
+|---|---|
+| 工具缺失、版本过低或构建失败 | 修复工具链或下载网络，重跑同一个安装/更新命令；构建日志按终端给出的路径查看 |
+| 安装页面尚未完成、令牌丢失 | 使用同一目录再次执行 `install.sh`，按第 3.2 节恢复，不删表或配置 |
+| 必填配置或 MQTT 认证预检失败 | 在 Admin 补齐、测试并发布；首次启动重跑 `start-all`，更新重跑 `update` |
+| 提示需要数据库迁移 | 准备独立迁移配置及可恢复备份，使用第 4.6 节带参数的命令重试 |
+| 数据库结构已变化后发布失败 | 保持服务停止，先恢复数据库备份或确认版本兼容性，再处理文件回滚；不能直接启动旧二进制 |
+| 服务启动或 readiness 失败 | 查看 `/opt/thing-connect/logs/<服务名>.err.log` 和 `.out.log`，按错误修复；不要只凭 `RUNNING` 判断就绪 |
 
 ## 5. 相关文档
 

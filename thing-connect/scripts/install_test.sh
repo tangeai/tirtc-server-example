@@ -37,7 +37,7 @@ make_release_fixture() {
 test_install_help_is_single_purpose() {
     local output
     output="$(usage)"
-    [[ "$output" == *"仅用于空服务器的首次安装"* ]]
+    [[ "$output" == *"用于首次安装及未完成安装的恢复"* ]]
     [[ "$output" == *"deploy-prod.sh"* ]]
     [[ "$output" != *"日常更新："* ]]
 }

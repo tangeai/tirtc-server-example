@@ -30,13 +30,14 @@ err() { echo -e "[ERROR] $1" >&2; }
 
 usage() {
     cat <<'USAGE'
-用法: install.sh
+用法: install.sh [--install-deps]
 
-仅用于空服务器的首次安装：拉取源码、构建并发布服务，通过本地启动
-脚本在 9000 端口启动一次性 Web 安装页。
+用于首次安装及未完成安装的恢复：拉取源码、构建并发布服务，通过本地启动
+脚本在 9000 端口启动一次性 Web 安装页。重复执行恢复安装，不覆盖现有配置。
+--install-deps 在 Ubuntu 上准备构建工具；MySQL/Redis 账号及第三方配置仍需提供。
 
 安装完成后可用 /opt/thing-connect/service-local.sh 管理本地进程；配置
-Supervisor 后，更新和迁移使用 /opt/thing-connect/deploy-prod.sh。
+Supervisor 或本地进程管理均可使用 /opt/thing-connect/deploy-prod.sh。
 USAGE
 }
 
@@ -99,13 +100,77 @@ prepare_deploy_root() {
 }
 
 require_commands() {
-    local command_name
-    for command_name in cp curl flock git go mv npm setsid; do
+    local command_name failures=0 version major minor
+    for command_name in cp curl flock git go mv node npm setsid; do
         command -v "$command_name" >/dev/null 2>&1 || {
-            err "缺少首次安装命令: $command_name"
-            return 1
+            err "缺少首次安装命令: $command_name"; failures=1;
         }
     done
+    if command -v go >/dev/null 2>&1; then
+        version="$(go env GOVERSION 2>/dev/null)" || version=""
+        if ! awk -v v="${version#go}" 'BEGIN {split(v,a,"."); exit !(a[1]>1 || (a[1]==1 && a[2]>=21))}'; then
+            err "Go 需要 1.21+，当前: $version"; failures=1
+        fi
+    fi
+    if command -v node >/dev/null 2>&1; then
+        version="$(node -p 'process.versions.node' 2>/dev/null)" || version=""
+        major="${version%%.*}"; minor="${version#*.}"; minor="${minor%%.*}"
+        if ! [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ ]] ||
+           ! (( (major == 20 && minor >= 19) || (major == 22 && minor >= 12) || major > 22 )); then
+            err "Node.js 需要 20.19+ 或 22.12+，当前: $version"; failures=1
+        fi
+    fi
+    if command -v npm >/dev/null 2>&1; then
+        version="$(npm --version 2>/dev/null)" || version=""; major="${version%%.*}"
+        if ! [[ "$major" =~ ^[0-9]+$ ]] || (( major < 10 )); then
+            err "npm 需要 10+，当前: $version"; failures=1
+        fi
+    fi
+    if [ "$failures" -ne 0 ]; then
+        err '请一次补齐上述依赖；sudo 环境也必须能找到工具链。Ubuntu 可使用 install.sh --install-deps。'
+        return 1
+    fi
+}
+
+install_dependencies() {
+    # Explicit opt-in: never silently replace a server toolchain.
+    [ -r /etc/os-release ] || { err '无法识别系统，请按部署指南安装依赖'; return 1; }
+    local ID VERSION_ID
+    source /etc/os-release
+    [ "$ID" = ubuntu ] || { err '--install-deps 仅支持 Ubuntu；其他系统请按部署指南准备工具链'; return 1; }
+    command -v systemctl >/dev/null || { err '自动准备依赖需要 systemd'; return 1; }
+    apt-get update || return 1
+    apt-get install -y ca-certificates curl git util-linux snapd default-mysql-client redis-tools || return 1
+    systemctl enable --now snapd.socket || return 1
+    if ! snap list go >/dev/null 2>&1; then snap install go --classic || return 1; fi
+    if ! snap list node >/dev/null 2>&1; then snap install node --classic --channel=24/stable || return 1; fi
+    export PATH="/snap/bin:$PATH"
+}
+
+resume_install() {
+    [ ! -e "$DEPLOY_ROOT/var/installer/installed.json" ] &&
+        [ ! -L "$DEPLOY_ROOT/var/installer/installed.json" ] || {
+        log "安装已完成；更新请执行 $DEPLOY_ROOT/deploy-prod.sh update"; return 0;
+    }
+    [ -x "$DEPLOY_ROOT/admin-server/admin-server" ] && [ -x "$LOCAL_CONTROLLER" ] || {
+        err '安装状态存在但恢复程序不完整；保留现场，请恢复 Admin 二进制和 service-local.sh'; return 1;
+    }
+    ADMIN_SERVICE=admin-server
+    BUSINESS_SERVICES=()
+    if [ -e "$DEPLOY_ROOT/config-current" ] || [ -L "$DEPLOY_ROOT/config-current" ] ||
+       [ -e "$DEPLOY_ROOT/admin-server/config.yaml" ]; then
+        "$LOCAL_CONTROLLER" start "$SERVICE_GROUP:$ADMIN_SERVICE" || return 1
+        log '已有配置保持不变；Admin 启动后核对并恢复安装状态，请访问 /admin/'
+        return 0
+    fi
+    [ -f "$DEPLOY_ROOT/var/installer/first-run.allowed" ] || {
+        err '未找到有效首次安装授权，拒绝重建或覆盖已有状态'; return 1;
+    }
+    # Stop before rotating the token so the old process cannot accept stale requests.
+    "$LOCAL_CONTROLLER" stop "$SERVICE_GROUP:$ADMIN_SERVICE" || return 1
+    prepare_setup || return 1
+    start_setup_server || return 1
+    log "已恢复首次安装入口：http://<服务器IP>:$SETUP_PORT/admin/；使用上方新的安装令牌"
 }
 
 pull_source() {
@@ -370,7 +435,15 @@ start_setup_server() {
 
 run_install() {
     local setup_output
+    if [ -d "$DEPLOY_ROOT/var/installer" ] &&
+       find "$DEPLOY_ROOT/var/installer" -mindepth 1 -print -quit | grep -q .; then
+        resume_install
+        return $?
+    fi
     require_commands || return 1
+    if (exec 3<>"/dev/tcp/127.0.0.1/$SETUP_PORT") 2>/dev/null; then
+        err "安装端口 $SETUP_PORT 已被占用；请确认占用进程，不会自动终止其他实例"; return 1
+    fi
     validate_empty_deployment || return 1
     pull_source || return 1
     load_install_catalog || return 1
@@ -381,6 +454,7 @@ run_install() {
     publish_install_script || return 1
     publish_service_catalog || return 1
     publish_local_controller || return 1
+    initialize_enabled_services || return 1
     setup_output="$(prepare_setup)" || return 1
     printf '%s\n' "$setup_output"
     warn "安装令牌只显示这一次；不要发送到聊天、工单或监控系统"
@@ -397,11 +471,12 @@ main() {
         return 2
     fi
     case "${1:-}" in
-        "") ;;
+        ""|--install-deps) ;;
         help|-h|--help) usage; return 0 ;;
         *) err "未知参数: $1"; usage; return 2 ;;
     esac
     require_root || return 1
+    if [ "${1:-}" = --install-deps ]; then install_dependencies || return 1; fi
     validate_options || return 1
     prepare_deploy_root || return 1
     with_install_lock run_install

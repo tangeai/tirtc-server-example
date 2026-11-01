@@ -71,6 +71,7 @@ jobs:
           bash scripts/service-local_test.sh
           bash scripts/deploy-prod_test.sh
           bash scripts/deploy-local_test.sh
+          bash scripts/deployment-workflow_test.sh
       - name: Build web applications
         working-directory: thing-connect
         run: |
