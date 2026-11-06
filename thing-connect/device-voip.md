@@ -349,7 +349,7 @@ sequenceDiagram
 | `wx_session_key` | 本次微信会话密钥；设备业务层不应自行生成或改写 |
 | `wx_payload` | 微信原始 `Payload` 字符串；拒接时原样回传 |
 | `wx_user_openid` | 主叫微信用户标识，也是设备联系人主键之一 |
-| `wx_user_remark`、`wx_user_nickname` | 当前统一联系人名称；两个字段的值相同 |
+| `wx_user_remark`、`wx_user_nickname` | 当前设备独立保存的微信联系人备注；两个字段的值相同 |
 | `wx_call_id`、`wx_from`、`wx_room_type` | 可选的外呼关联字段；用于识别设备此前发起的呼叫及其音频/视频类型 |
 
 同一份字段定义也可在
@@ -695,7 +695,7 @@ Authorization: Bearer <mqtt_token>
 | `data.contacts[].wx_open_id` | 联系人的微信 OpenID；发起外呼时写入 `wx_user_openid` |
 | `data.contacts[].wx_app_id` | 联系人所属小程序 AppID |
 | `data.contacts[].wx_model_id` | 授权时对应的微信设备型号 ID；新设备外呼不需要自行回传 |
-| `data.contacts[].remark` | 当前微信身份的统一联系人名称，可能为空 |
+| `data.contacts[].remark` | 当前设备对该微信身份的独立备注，可能为空 |
 | `data.contacts[].created_at` | 该设备授权记录的创建时间，RFC 3339 格式 |
 
 ### 2. 响应 `callers_update`
@@ -719,10 +719,11 @@ Python 与 C 参考实现均按此处理。
 
 | 项目 | 规则 |
 |------|------|
-| 名称范围 | `report-auth.remark` 属于 `wx_open_id + wx_app_id`，不是设备名称，也不属于某一台设备 |
-| 修改入口 | 小程序、设备端和 H5 均可修改；最后一次成功写入生效 |
-| 跨设备同步 | 所有已授权设备使用同一名称，修改后都会收到刷新通知 |
-| 空值 | `report-auth` 未传或传空值时，沿用已有名称 |
+| 名称范围 | `device_id + wx_open_id + wx_app_id`，不同设备互不覆盖 |
+| 修改入口 | 控制台联系人编辑或原设备联系人备注接口，参数和成功响应保持兼容 |
+| 通知 | 仅通知被修改的设备；topic、消息类型与字段保持兼容 |
+| 空值 | 未设置返回空字符串；旧共享名称不作为回退；界面可显示“微信用户” |
+| 旧授权上报 | `report-auth.remark` 接受但忽略，不阻断授权，不覆盖独立备注 |
 
 **MQTT 下行通知：**
 

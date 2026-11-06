@@ -24,7 +24,7 @@ async function connectWithProfiles(profiles) {
       addEventListener() {},
     },
     location: { search: '?device_id=test-device' },
-    URLSearchParams, AbortController,
+    URLSearchParams, AbortController, AbortSignal,
     setTimeout() { return 1; }, clearTimeout() {},
     fetch: async () => ({ json: async () => ({ code: 200, data: {
       token: 'rtc-token', app_id: 'app', ...(profiles === undefined ? {} : { profiles }),

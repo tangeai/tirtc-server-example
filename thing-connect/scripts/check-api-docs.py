@@ -19,7 +19,8 @@ METHODS = r"GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS"
 def registered_routes():
     """Read literal Gin registrations; reject unrecognized route expressions.
 
-    The only supported dynamic form is a suffix from a literal []string loop.
+    Supported forms include literal RedirectPage registrations and suffixes
+    from a literal []string loop.
     Fail instead of silently ignoring a new registration pattern.
     """
     routes = set()
@@ -43,6 +44,16 @@ def registered_routes():
                 if group[2] not in groups:
                     raise ValueError(f"{path}:{number}: unknown Gin group {group[2]}")
                 groups[group[1]] = groups[group[2]] + group[3]
+            redirect = re.search(r'webui\.RedirectPage\((.*)', line)
+            if redirect:
+                args = re.fullmatch(r'(\w+),\s*"([^"]+)",\s*"([^"]+)"\s*\)\s*', redirect[1])
+                if not args or args[1] not in groups:
+                    raise ValueError(f"{path}:{number}: unsupported redirect declaration: {line.strip()}")
+                route = ("GET", groups[args[1]] + args[2])
+                if route in routes:
+                    raise ValueError(f"Duplicate route: {route}")
+                routes.add(route)
+                continue
             call = re.search(rf'(\w+)\.({METHODS})\((.*)', line)
             if not call:
                 continue

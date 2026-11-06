@@ -57,7 +57,7 @@ function player(options = {}) {
   const WebI18n = languageRuntime()
   const context = {
     WebI18n,
-    window, document, URLSearchParams, AbortController,
+    window, document, URLSearchParams, AbortController, AbortSignal,
     setTimeout: () => 1, clearTimeout() {},
     location: { search: '?device_id=one' },
     fetch: () => options.fetchResult || Promise.resolve({ json: async () => ({ code: 200, data: { token: 'rtc', app_id: 'one' } }) }),

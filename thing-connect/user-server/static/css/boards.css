@@ -15,3 +15,17 @@
 .featured-card button{margin-top:7px;padding:5px;font-size:12px;cursor:pointer}
 @media(max-width:820px){.featured-list{grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.featured-card img{height:170px}}
 @media(max-width:560px){.featured-list{grid-template-columns:1fr}.featured-card{padding:12px}.featured-card img{height:210px}}
+
+/* Long model identifiers and resource URLs must stay inside the detail sheet. */
+.detail-dialog { overflow-wrap: anywhere; max-height: calc(100dvh - 32px); overflow-y: auto; }
+
+/* Catalog text and actions remain readable at desktop and phone widths. */
+.featured-card small,.featured-card code,.status,.capabilities,.model,.chip{font-size:13px}
+.featured-card button,.detail{min-height:44px;padding:10px 8px;font-size:14px}
+.detail-dialog{max-height:calc(100dvh - 32px);overflow:auto}
+.dialog-close{width:44px;height:44px;top:10px;right:10px}
+.detail-content dt{font-size:13px}
+.detail-content dd,.detail-links a{font-size:14px}
+.detail-links a{min-height:44px;display:flex;align-items:center;justify-content:center}
+.merchant-note{font-size:13px!important}
+@media(max-width:560px){.detail-content{padding:20px}.detail-content h2{font-size:22px}.identity h2{font-size:16px}}

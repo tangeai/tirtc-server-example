@@ -1,12 +1,13 @@
 package handler
 
 import (
-	"database/sql"
 	"errors"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
 	"thing-connect/call-server/apiresp"
+	"thing-connect/internal/voip"
 )
 
 // GET /v1/call/device/contacts
@@ -195,6 +196,7 @@ func (s *Server) putDeviceContactRemark(c *gin.Context) {
 		apiresp.Fail(c, apiresp.ErrBadParam, "缺少 peer_id")
 		return
 	}
+	body.Remark = strings.TrimSpace(body.Remark)
 	if !validContactRemark(body.Remark) {
 		apiresp.Fail(c, apiresp.ErrBadParam, "remark 不能超过 64 个字符")
 		return
@@ -217,26 +219,20 @@ func (s *Server) putDeviceContactRemark(c *gin.Context) {
 	}
 
 	// 再尝试 VoIP 联系人（peer_id = wx_open_id）
-	var voipID int64
-	if err := s.db.GetContext(ctx, &voipID,
-		`SELECT id FROM voip_device_auth
-			  WHERE device_id=? AND wx_open_id=? AND auth_status='active'
-		  ORDER BY created_at DESC, id DESC LIMIT 1`,
-		self, body.PeerID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			apiresp.Fail(c, apiresp.ErrContactNotExist, "联系人不存在")
-		} else {
-			apiresp.Fail(c, apiresp.ErrInternal, err.Error())
+	if s.remarks == nil {
+		apiresp.Fail(c, apiresp.ErrInternal, "联系人备注服务不可用")
+		return
+	}
+	if err := s.remarks.Set(ctx, self, body.PeerID, body.Remark, 0); err != nil {
+		code := apiresp.ErrInternal
+		if errors.Is(err, voip.ErrContactMissing) {
+			code = apiresp.ErrContactNotExist
 		}
+		if errors.Is(err, voip.ErrRemarkInvalid) {
+			code = apiresp.ErrBadParam
+		}
+		apiresp.Fail(c, code, err.Error())
 		return
-	}
-	deviceIDs, err := s.setVoipRemark(ctx, voipID, body.Remark)
-	if err != nil {
-		apiresp.Fail(c, contactErrCode(err), err.Error())
-		return
-	}
-	for _, deviceID := range deviceIDs {
-		s.publishCallersUpdate(deviceID, "remark", "voip", body.PeerID)
 	}
 	apiresp.OK(c, nil)
 }

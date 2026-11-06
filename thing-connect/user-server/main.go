@@ -138,19 +138,9 @@ func main() {
 	if err := registerServiceDiscovery(r, cfg.Discovery); err != nil {
 		log.Fatalf("service discovery: %v", err)
 	}
-	r.Static("/static", staticDir)
-	r.StaticFile("/", staticDir+"/index.html")
-	r.StaticFile("/login", staticDir+"/auth.html")
-	r.StaticFile("/register", staticDir+"/auth.html")
-	r.StaticFile("/forgot-password", staticDir+"/auth.html")
-	r.StaticFile("/devices", staticDir+"/devices.html")
-	r.StaticFile("/bind", staticDir+"/bind.html")
-	r.StaticFile("/player", staticDir+"/player.html")
-	r.StaticFile("/contacts", staticDir+"/contacts.html")
-	r.StaticFile("/boards", staticDir+"/boards.html")
-	// SDK loads wasm from root path (hardcoded), so expose them at /
-	r.StaticFile("/librender.wasm", staticDir+"/js/librender.wasm")
-	r.StaticFile("/plugin.wasm", staticDir+"/js/plugin.wasm")
+	if err := registerUserPages(r, staticDir); err != nil {
+		log.Fatalf("user web build missing: run npm --prefix user-server/user-web run build: %v", err)
+	}
 
 	roleStore := mysqlstore.NewRoleBindingStore(sqlDB)
 

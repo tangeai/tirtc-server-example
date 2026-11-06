@@ -515,6 +515,12 @@ sudo /opt/thing-connect/service-local.sh restart thing-connect:admin-server
 | 其他路径 | User H5 |
 | 所有内部接口 | 明确拒绝，不向公网代理 |
 
+用户控制台使用 React、TypeScript 和 Vite，源码位于 `user-server/user-web`，构建产物位于 `user-server/static/app`，由 user-server 提供。登录、设备、联系人、角色、多人对讲和实时查看使用同一个应用入口；首页、开发板目录和协议政策为 user-server 的静态内容页。AI、通话等业务服务提供 API，用户页面使用同源 `/v1/*` 地址调用；Admin Web 保持独立的管理入口和权限体系。
+
+`./build.sh user-server` 包含用户前端构建。单独开发前端可执行 `npm --prefix user-server/user-web ci`、`npm --prefix user-server/user-web run dev`，浏览器打开 `http://localhost:5174/login`。Vite 开发代理连接本机默认业务端口，生产环境使用上述 Nginx 分发；不能只启动 user-server 就访问其他服务的业务 API。
+
+角色页入口为 `/agent?device_id=...`，多人对讲入口为 `/room?device_id=...`。旧入口 `/v1/ai/agent` 与 `/v1/call/group/page` 保留同源跳转，查询参数及浏览器片段继续传递。小程序内嵌页与浏览器页面使用相同入口；设备端 API 和 MQTT 协议不依赖页面构建产物。
+
 模板属于运维配置，`install.sh` 不会把它写入系统。Nginx 与服务同机时，安装页面中的 `trusted_proxies` 使用默认值 `127.0.0.1`，不要填写 `0.0.0.0/0`。
 
 模板只监听 80，不申请或管理证书。已有证书时自行增加 443、证书路径和 HTTP 跳转，再执行 `sudo nginx -t && sudo systemctl reload nginx`。安装页面填写的统一对外访问地址和 HTTPS Cookie 必须与最终入口一致，不能只改 Nginx。
@@ -570,6 +576,8 @@ sudo env FORCE_UPDATE=1 /opt/thing-connect/deploy-prod.sh update
 ```
 
 进入完整更新后，脚本先构建新版本，为已启用服务创建部署目录。缺少 `config.yaml` 时复制该服务的 `config.yaml.example`，权限设为 600；已有独立配置或激活配置包保持不变。模板仍含必填占位值时，校验会停止发布，请填写实际生产配置后重新执行 `update`；此时不会替换运行中的程序或执行数据库迁移。相同 commit 下缺少服务配置也会执行此补齐流程。高级 `build` 命令同样在完整构建成功后准备目录和缺失配置。
+
+联系人备注与角色关联保护依赖当前完整 schema：`voip_device_auth.device_remark`、`voip_remark_outbox`、`ai_user_role.deleting` 和 `ai_cloud_role_ref`。部署应按完整更新流程迁移并统一更新服务，不能仅替换联系人页面或单个服务。运行账号需要这些新表的 DML 权限。设备 HTTP/MQTT 协议保持兼容，无需同时升级设备固件。旧共享备注保留在数据库中，但不迁移、不作为展示回退；独立备注未设置时为空。
 
 配置有效后，脚本重新检查服务托管清单，再检查数据库所有权、完整结构和待迁移版本。检查过程只读，优先使用显式 `MIGRATION_CONFIG` 或已有 `admin-server/migration-config.yaml`；未配置独立迁移账号时使用 Admin 当前运行配置。数据库已经是当前版本时，脚本输出“数据库已是当前版本”，跳过数据库备份门槛和 DDL，代码与静态资源仍会继续发布。停服前还会使用新版本 Admin 程序检查已启用业务的必填动态配置和 MySQL、Redis、MQTT 连接，失败时保留原进程。存在待执行迁移时，依赖预检在迁移后、业务启动前执行。
 

@@ -2,7 +2,6 @@ async function refreshVoipAuthState(tasks) {
   const {
     refreshOpenId,
     syncWechatAuthState,
-    syncContactRemark,
     syncServerAuthList,
     reconcileAuthorizedDevices,
   } = tasks
@@ -22,7 +21,6 @@ async function refreshVoipAuthState(tasks) {
     return { serverAuthListLoaded: false, serverAuthChanged: false }
   }
 
-  await syncContactRemark()
   const serverAuthListLoaded = await syncServerAuthList()
   if (!serverAuthListLoaded) {
     return { serverAuthListLoaded: false, serverAuthChanged: false }

@@ -27,14 +27,18 @@ type aiDynamicState struct {
 	resources     map[string][]model.ResourceRef
 	legacy        *aihandler.Server
 	agents        *aihandler.AgentHandler
+	cloud         *tirtcapi.RoleCloudProvider
 }
 
-func aiDynamicConfig(cfg *config.Config, redisClient *redis.Client, legacy *aihandler.Server, agents *aihandler.AgentHandler) (*dynamicconfig.Client, []dynamicconfig.Ref, error) {
+func aiDynamicConfig(cfg *config.Config, redisClient *redis.Client, legacy *aihandler.Server, agents *aihandler.AgentHandler, clouds ...*tirtcapi.RoleCloudProvider) (*dynamicconfig.Client, []dynamicconfig.Ref, error) {
 	client, err := dynamicconfig.New(cfg.Admin.ServerURL, cfg.Internal.Key, redisClient)
 	if err != nil {
 		return nil, nil, err
 	}
 	state := &aiDynamicState{defaultRoleID: cfg.TirtcAichat.DefaultRoleID, baseURL: cfg.TirtcAichat.BaseURL, rolesBaseURL: cfg.TirtcAichat.RolesBaseURL, appID: cfg.Tirtc.AppID, accessKeyID: cfg.Tirtc.AccessKeyID, secretKeyID: cfg.Tirtc.SecretKeyID, quota: cfg.TirtcAichat.ResourceQuota, resources: cfg.TirtcAichat.DefaultResources, legacy: legacy, agents: agents}
+	if len(clouds) > 0 {
+		state.cloud = clouds[0]
+	}
 	refs := []dynamicconfig.Ref{
 		{Namespace: "ai-server", Key: "ai.role_policy", Apply: func(snapshot dynamicconfig.Snapshot) error {
 			var value struct {
@@ -90,6 +94,9 @@ func (s *aiDynamicState) apply() {
 		rolesURL = s.baseURL
 	}
 	api := tirtcapi.NewAgentAPIClient(tirtcapi.AgentAPIConfig{BaseURL: rolesURL, AppID: s.appID, AccessKeyID: s.accessKeyID, SecretKeyID: s.secretKeyID}, &http.Client{Timeout: 10 * time.Second})
+	if s.cloud != nil {
+		s.cloud.SetAPI(api)
+	}
 	s.agents.SetRuntime(api, s.defaultRoleID, copyIntMap(s.quota), copyResources(s.resources))
 }
 

@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
 	"thing-connect/call-server/apiresp"
+	"thing-connect/internal/voip"
 )
 
 // userDeviceIDs returns every device_id bound to userID.
@@ -62,7 +64,7 @@ func (s *Server) contactSideForUser(ctx context.Context, row *deviceContact, use
 }
 
 // GET /v1/call/user/contacts?device_id=xxx — full contact list for one of the
-// current user's devices (same shape as the device-side GET /v1/call/device/contacts).
+// current user's devices, including display names for visible device contacts.
 func (s *Server) getUserContacts(c *gin.Context) {
 	userID := currentUserID(c)
 	deviceID := c.Query("device_id")
@@ -86,16 +88,25 @@ func (s *Server) getUserContacts(c *gin.Context) {
 		apiresp.Fail(c, apiresp.ErrInternal, err.Error())
 		return
 	}
+	names := map[string]string{}
+	if s.contactNames != nil {
+		names, err = s.contactNames.VisibleContactNames(ctx, userID, deviceID)
+		if err != nil {
+			apiresp.Fail(c, apiresp.ErrInternal, "加载联系人名称失败，请重试")
+			return
+		}
+	}
 	out := make([]gin.H, 0, len(rows))
 	for _, row := range rows {
 		peer := row.peer(deviceID)
 		out = append(out, gin.H{
-			"id":        row.ID,
-			"device_id": peer,
-			"type":      "device",
-			"remark":    row.remarkFor(deviceID),
-			"source":    row.Source,
-			"online":    s.isOnline(ctx, peer),
+			"id":          row.ID,
+			"device_id":   peer,
+			"device_name": names[peer],
+			"type":        "device",
+			"remark":      row.remarkFor(deviceID),
+			"source":      row.Source,
+			"online":      s.isOnline(ctx, peer),
 		})
 	}
 
@@ -292,6 +303,7 @@ func (s *Server) putUserContactRemark(c *gin.Context) {
 		apiresp.Fail(c, apiresp.ErrBadParam, "缺少 device_id 或 peer_id")
 		return
 	}
+	body.Remark = strings.TrimSpace(body.Remark)
 	if !validContactRemark(body.Remark) {
 		apiresp.Fail(c, apiresp.ErrBadParam, "remark 不能超过 64 个字符")
 		return
@@ -323,26 +335,20 @@ func (s *Server) putUserContactRemark(c *gin.Context) {
 		return
 	}
 
-	var voipID int64
-	if err := s.db.GetContext(ctx, &voipID,
-		`SELECT id FROM voip_device_auth
-			  WHERE device_id=? AND wx_open_id=? AND auth_status='active'
-		  ORDER BY created_at DESC, id DESC LIMIT 1`,
-		body.DeviceID, body.PeerID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			apiresp.Fail(c, apiresp.ErrContactNotExist, "联系人不存在")
-		} else {
-			apiresp.Fail(c, apiresp.ErrInternal, err.Error())
+	if s.remarks == nil {
+		apiresp.Fail(c, apiresp.ErrInternal, "联系人备注服务不可用")
+		return
+	}
+	if err := s.remarks.Set(ctx, body.DeviceID, body.PeerID, body.Remark, userID); err != nil {
+		code := apiresp.ErrInternal
+		if errors.Is(err, voip.ErrContactMissing) {
+			code = apiresp.ErrContactNotExist
 		}
+		if errors.Is(err, voip.ErrRemarkInvalid) {
+			code = apiresp.ErrBadParam
+		}
+		apiresp.Fail(c, code, err.Error())
 		return
-	}
-	deviceIDs, err := s.setVoipRemark(ctx, voipID, body.Remark)
-	if err != nil {
-		apiresp.Fail(c, contactErrCode(err), err.Error())
-		return
-	}
-	for _, deviceID := range deviceIDs {
-		s.publishCallersUpdate(deviceID, "remark", "voip", body.PeerID)
 	}
 	apiresp.OK(c, nil)
 }

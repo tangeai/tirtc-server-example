@@ -1,0 +1,29 @@
+{
+  "name": "thingconnect-user-web",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0",
+    "npm": ">=10"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "test": "node --experimental-strip-types --test src/lib/*.test.ts src/media/*.test.ts",
+    "check": "npm test && npm run build",
+    "test:browser": "node tests/run-browser.cjs"
+  },
+  "dependencies": {
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.12",
+    "@types/react-dom": "^19.1.9",
+    "@vitejs/plugin-react": "^5.0.2",
+    "playwright": "1.65.0",
+    "typescript": "~5.8.3",
+    "vite": "^7.1.4"
+  }
+}

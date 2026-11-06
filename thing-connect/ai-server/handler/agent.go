@@ -23,6 +23,7 @@ import (
 
 // AgentHandler handles role CRUD (proxied to tange cloud) and device-role binding.
 type AgentHandler struct {
+	roles             ai.RoleOperations
 	agentAPI          agentAPI
 	roleStore         store.RoleBindingStore
 	userRoleStore     store.UserRoleStore
@@ -125,6 +126,8 @@ func NewAgentHandler(
 	}
 }
 
+func (h *AgentHandler) SetRoles(roles ai.RoleOperations) { h.roles = roles }
+
 // Register mounts agent routes under the gin engine (authenticated group).
 func (h *AgentHandler) Register(r *gin.Engine, jwtSecret string) {
 	auth := r.Group("/v1/ai", JWTAuth(jwtSecret))
@@ -201,21 +204,13 @@ func (h *AgentHandler) internalUnbind(c *gin.Context) {
 		apiresp.BadParam(c, "缺少 device_id")
 		return
 	}
-	// Clean up local ai_device_role
-	if h.roleStore != nil {
-		if err := h.roleStore.DeleteDeviceRole(c.Request.Context(), body.DeviceID); err != nil {
-			apiresp.Internal(c, err.Error())
-			return
-		}
+	if h.roles == nil {
+		apiresp.Internal(c, "角色服务未配置")
+		return
 	}
-	// Clean up cloud device-role bindings
-	if h.api() != nil {
-		if err := h.api().BatchDeleteDeviceRoles(c.Request.Context(), tirtcapi.BatchDeviceRolesRequest{
-			DeviceIDs: []string{body.DeviceID},
-		}); err != nil {
-			failAIUpstream(c, "解绑设备角色", err)
-			return
-		}
+	if err := h.roles.CleanupDevice(c.Request.Context(), body.DeviceID); err != nil {
+		roleMutationError(c, err)
+		return
 	}
 	apiresp.OK(c, nil)
 }
@@ -365,12 +360,18 @@ func (h *AgentHandler) deleteRole(c *gin.Context) {
 		return
 	}
 
-	if err := h.api().DeleteRole(c.Request.Context(), roleID); err != nil {
-		failAIUpstream(c, "删除角色", err)
+	if roleID == h.defaultRole() {
+		apiresp.Fail(c, http.StatusForbidden, 40300, "默认角色不能删除")
 		return
 	}
-	// Remove local mapping (ignore error if it didn't exist)
-	_ = h.userRoleStore.RemoveUserRole(c.Request.Context(), userID, roleID)
+	if h.roles == nil {
+		apiresp.Internal(c, "角色服务不可用")
+		return
+	}
+	if err := h.roles.Delete(c.Request.Context(), userID, roleID); err != nil {
+		roleMutationError(c, err)
+		return
+	}
 	apiresp.OK(c, nil)
 }
 
@@ -439,8 +440,8 @@ func (h *AgentHandler) setDeviceRole(c *gin.Context) {
 		return
 	}
 
-	if err := h.roleStore.SetDeviceRole(c.Request.Context(), deviceID, req.RoleID, userID); err != nil {
-		apiresp.Internal(c, err.Error())
+	if err := h.roles.SetLocal(c.Request.Context(), userID, deviceID, req.RoleID); err != nil {
+		roleMutationError(c, err)
 		return
 	}
 	apiresp.OK(c, nil)
@@ -452,8 +453,8 @@ func (h *AgentHandler) deleteDeviceRole(c *gin.Context) {
 		return
 	}
 
-	if err := h.roleStore.DeleteDeviceRole(c.Request.Context(), deviceID); err != nil {
-		apiresp.Internal(c, err.Error())
+	if err := h.roles.SetLocal(c.Request.Context(), currentUserID(c), deviceID, ""); err != nil {
+		roleMutationError(c, err)
 		return
 	}
 	apiresp.OK(c, nil)
@@ -478,8 +479,8 @@ func (h *AgentHandler) batchCreateDeviceRoles(c *gin.Context) {
 	if !h.requireOwnedRole(c, req.RoleID) || !h.requireOwnedDevices(c, req.DeviceIDs) {
 		return
 	}
-	if err := h.api().BatchCreateDeviceRoles(c.Request.Context(), req); err != nil {
-		failAIUpstream(c, "批量绑定设备角色", err)
+	if err := h.roles.SetCloud(c.Request.Context(), currentUserID(c), req.DeviceIDs, req.RoleID, false); err != nil {
+		roleMutationError(c, err)
 		return
 	}
 	apiresp.OK(c, nil)
@@ -519,8 +520,8 @@ func (h *AgentHandler) batchDeleteDeviceRoles(c *gin.Context) {
 	if !h.requireOwnedDevices(c, req.DeviceIDs) {
 		return
 	}
-	if err := h.api().BatchDeleteDeviceRoles(c.Request.Context(), req); err != nil {
-		failAIUpstream(c, "批量解绑设备角色", err)
+	if err := h.roles.SetCloud(c.Request.Context(), currentUserID(c), req.DeviceIDs, req.RoleID, true); err != nil {
+		roleMutationError(c, err)
 		return
 	}
 	apiresp.OK(c, nil)
@@ -1191,4 +1192,20 @@ func parseInt(s string) (int, error) {
 		n = n*10 + int(c-'0')
 	}
 	return n, nil
+}
+
+func roleMutationError(c *gin.Context, err error) {
+	var used *ai.RoleInUse
+	switch {
+	case errors.As(err, &used):
+		c.JSON(http.StatusConflict, gin.H{"code": 40900, "msg": used.Error(), "data": gin.H{"devices": used.Devices}})
+	case errors.Is(err, ai.ErrRoleBusy), errors.Is(err, ai.ErrRoleDeleting):
+		apiresp.Fail(c, http.StatusConflict, 40900, err.Error())
+	case errors.Is(err, ai.ErrRoleForbidden):
+		apiresp.Fail(c, http.StatusForbidden, 40300, "角色或设备不属于当前用户")
+	case errors.Is(err, ai.ErrRoleUpstream):
+		failAIUpstream(c, "角色操作", err)
+	default:
+		apiresp.Internal(c, err.Error())
+	}
 }

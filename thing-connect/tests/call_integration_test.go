@@ -25,9 +25,11 @@ import (
 	"thing-connect/call-server/apiresp"
 	callhandler "thing-connect/call-server/handler"
 	"thing-connect/internal/config"
+	"thing-connect/internal/mqttc"
 	mysqlstore "thing-connect/internal/store/mysql"
 	mysqlmigrate "thing-connect/internal/store/mysql/migrate"
 	"thing-connect/internal/testenv"
+	"thing-connect/internal/voip"
 )
 
 // ── fake MQTT broker ─────────────────────────────────────────────────────────
@@ -121,7 +123,10 @@ func newCallSuite(t *testing.T) *callSuite {
 	devStore := mysqlstore.NewDeviceStore(sqlDB)
 
 	r := gin.New()
-	callhandler.NewServer(cfg, sqlDB, rdb, broker, devStore).Register(r)
+	contactHTTP := callhandler.NewServer(cfg, sqlDB, rdb, broker, devStore)
+	contactHTTP.SetContactNames(mysqlstore.NewContactNamesStore(sqlDB))
+	contactHTTP.SetRemarks(voip.NewRemarks(mysqlstore.NewVoipRemarkStore(sqlDB), mqttc.NewRemarkNotifier(broker)))
+	contactHTTP.Register(r)
 
 	srv := httptest.NewServer(r)
 	cs := &callSuite{callSrv: srv, sqlDB: sqlDB, rdb: rdb, cfg: cfg, broker: broker}
@@ -1115,6 +1120,41 @@ func TestContacts_UserRemarkUsesDeviceAndPeerID(t *testing.T) {
 		t.Fatal(err)
 	}
 	jwt := userJWT(t, cs.cfg.JWTSecret, user1)
+	if _, err := cs.sqlDB.Exec(`UPDATE device_bind SET device_name='门口设备' WHERE device_id=?`, d2); err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range []struct {
+		path, token string
+		web         bool
+	}{{"/v1/call/user/contacts?device_id=" + d1, jwt, true}, {"/v1/call/device/contacts", deviceJWT(t, cs.cfg.JWTSecret, d1), false}} {
+		res := cs.GET(t, entry.path, entry.token)
+		if res.Code != 200 {
+			t.Fatalf("contacts: %d %s", res.Code, res.Msg)
+		}
+		var data struct {
+			Contacts []map[string]any `json:"contacts"`
+		}
+		if err := json.Unmarshal(res.Data, &data); err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, item := range data.Contacts {
+			if item["device_id"] == d2 {
+				found = true
+				name, present := item["device_name"]
+				if entry.web && name != "门口设备" {
+					t.Fatalf("visible contact name: %v", item)
+				}
+				if !entry.web && present {
+					t.Fatalf("device response gained a web-only field: %v", item)
+				}
+			}
+		}
+		if !found {
+			t.Fatal("device contact missing")
+		}
+	}
+
 	denied := cs.PUT(t, "/v1/call/user/contacts/remark", jwt, map[string]any{
 		"device_id": d2, "peer_id": d1, "remark": "越权备注",
 	})
@@ -1136,20 +1176,17 @@ func TestContacts_UserRemarkUsesDeviceAndPeerID(t *testing.T) {
 	}
 	var voipRemarks []string
 	if err := cs.sqlDB.Select(&voipRemarks,
-		`SELECT remark FROM voip_device_auth WHERE device_id IN (?, ?) AND wx_open_id=? ORDER BY device_id`,
+		`SELECT device_remark FROM voip_device_auth WHERE device_id IN (?, ?) AND wx_open_id=? ORDER BY device_id`,
 		d1, d3, openID); err != nil || len(voipRemarks) != 2 ||
-		voipRemarks[0] != "微信联系人" || voipRemarks[1] != "微信联系人" {
-		t.Fatalf("global voip remarks=%v err=%v", voipRemarks, err)
+		voipRemarks[0] != "微信联系人" || voipRemarks[1] != "" {
+		t.Fatalf("independent voip remarks=%v err=%v", voipRemarks, err)
 	}
-	var profileRemark string
-	if err := cs.sqlDB.Get(&profileRemark,
-		`SELECT remark FROM voip_user_profile WHERE wx_open_id=? AND wx_app_id=?`,
-		openID, wxAppID); err != nil || profileRemark != "微信联系人" {
-		t.Fatalf("profile remark=%q err=%v", profileRemark, err)
+	var profileCount int
+	if err := cs.sqlDB.Get(&profileCount, `SELECT COUNT(*) FROM voip_user_profile WHERE wx_open_id=? AND wx_app_id=?`, openID, wxAppID); err != nil || profileCount != 0 {
+		t.Fatalf("unexpected global write: count=%d err=%v", profileCount, err)
 	}
-	if cs.broker.findPublished("callers_update", "sn_"+d1) == nil ||
-		cs.broker.findPublished("callers_update", "sn_"+d3) == nil {
-		t.Fatal("global H5 VoIP remark did not notify all authorized devices")
+	if cs.broker.findPublished("callers_update", "sn_"+d1) == nil || cs.broker.findPublished("callers_update", "sn_"+d3) != nil {
+		t.Fatal("remark notification must only target the edited device")
 	}
 
 	deviceVoip := cs.PUT(t, "/v1/call/device/contacts/remark",
@@ -1161,10 +1198,10 @@ func TestContacts_UserRemarkUsesDeviceAndPeerID(t *testing.T) {
 	}
 	voipRemarks = nil
 	if err := cs.sqlDB.Select(&voipRemarks,
-		`SELECT remark FROM voip_device_auth WHERE device_id IN (?, ?) AND wx_open_id=? ORDER BY device_id`,
+		`SELECT device_remark FROM voip_device_auth WHERE device_id IN (?, ?) AND wx_open_id=? ORDER BY device_id`,
 		d1, d3, openID); err != nil || len(voipRemarks) != 2 ||
-		voipRemarks[0] != "设备端最后写入" || voipRemarks[1] != "设备端最后写入" {
-		t.Fatalf("device global voip remarks=%v err=%v", voipRemarks, err)
+		voipRemarks[0] != "设备端最后写入" || voipRemarks[1] != "" {
+		t.Fatalf("device independent voip remarks=%v err=%v", voipRemarks, err)
 	}
 
 	device := cs.PUT(t, "/v1/call/user/contacts/remark", jwt, map[string]any{

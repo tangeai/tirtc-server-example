@@ -94,10 +94,10 @@ test('销毁列表页后，迟到结果不能更新视图', async () => {
   assert.equal(page.data.deviceList.length, 0)
 })
 
-test('联系人设置展示 OpenID 并复制完整值', async () => {
+test('账号信息展示 OpenID 并复制完整值', async () => {
   const { page, calls } = makePage()
   page._fetchOpenId = async () => 'test-openid-complete'
-  await page.onEditContactRemark()
+  await page.onOpenProfile()
   assert.equal(page.data.authNameMode, 'profile')
   assert.equal(page.data.profileOpenId, 'test-openid-complete')
   page.onCopyProfileOpenId()
@@ -107,7 +107,7 @@ test('联系人设置展示 OpenID 并复制完整值', async () => {
 test('OpenID 获取失败可重试，关闭弹窗后忽略迟到结果', async () => {
   const { page } = makePage()
   page._fetchOpenId = async () => { throw new Error('network') }
-  await page.onEditContactRemark()
+  await page.onOpenProfile()
   assert.equal(page.data.profileOpenIdError, true)
   page._fetchOpenId = async () => 'test-retry-openid'
   await page.loadProfileOpenId()
@@ -161,3 +161,10 @@ test('小程序呼设备把 profile 旋转值传入插件并记录实际调用�
   assert.equal(tracedRequest.miniProgramVersion, '1.2.3')
   assert.equal(tracedRequest.baseLibraryVersion, '3.9.0')
 })
+
+
+test('授权不要求设置联系人名称', async () => {
+ const {page}=makePage();let requested='';page._authorizeDevice=async id=>{requested=id};
+ await page._continueAuthorize('legacy-device');assert.equal(requested,'legacy-device');assert.equal(page.data.authNameModalVisible,false);
+ assert.equal(page._saveGlobalContactRemark,undefined);
+});

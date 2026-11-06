@@ -105,20 +105,18 @@ func legacyVoIPScene(raw json.RawMessage) (json.RawMessage, error) {
 }
 
 // GetDeviceVoipContactRemark returns the name this device should display for
-// an authorized mini-program caller. The global profile is authoritative and
-// the per-device authorization remark remains a compatibility fallback.
+// an authorized mini-program caller. Names are scoped to this authorization;
+// legacy shared names are never used as a fallback.
 func (s *Server) GetDeviceVoipContactRemark(
 	ctx context.Context, deviceID, wxOpenID, wxAppID string,
 ) (string, error) {
 	var remark string
 	err := s.db.GetContext(ctx, &remark,
-		`SELECT COALESCE(profile.remark, auth.remark)
+		`SELECT auth.device_remark
 		   FROM voip_device_auth auth
 		   JOIN device_bind bind_record
 		     ON bind_record.device_id=auth.device_id AND bind_record.user_id<>0
-		   LEFT JOIN voip_user_profile profile
-		     ON profile.wx_open_id=auth.wx_open_id AND profile.wx_app_id=auth.wx_app_id
-			  WHERE auth.device_id=? AND auth.wx_open_id=? AND auth.wx_app_id=?
+					  WHERE auth.device_id=? AND auth.wx_open_id=? AND auth.wx_app_id=?
 			    AND auth.auth_status=?
 			  LIMIT 1`,
 		deviceID, wxOpenID, wxAppID, voipAuthStatusActive)
@@ -168,13 +166,11 @@ func (s *Server) getActiveDeviceAuth(
 	var auth activeDeviceAuth
 	err := s.db.GetContext(ctx, &auth,
 		`SELECT auth.wx_app_id, auth.wx_model_id,
-		        COALESCE(profile.remark, auth.remark) AS remark
+		        auth.device_remark AS remark
 		   FROM voip_device_auth auth
 		   JOIN device_bind bind_record
 		     ON bind_record.device_id=auth.device_id AND bind_record.user_id<>0
-		   LEFT JOIN voip_user_profile profile
-		     ON profile.wx_open_id=auth.wx_open_id AND profile.wx_app_id=auth.wx_app_id
-		  WHERE auth.device_id=?
+				  WHERE auth.device_id=?
 		    AND auth.wx_open_id=?
 		    AND auth.wx_app_id=?
 		    AND auth.auth_status=?
@@ -210,13 +206,11 @@ func (s *Server) invalidateDeviceAuth(
 func (s *Server) listDeviceVoipContacts(ctx context.Context, deviceID string) ([]deviceVoipContact, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT auth.wx_open_id, auth.wx_app_id, auth.wx_model_id,
-		        COALESCE(profile.remark, auth.remark) AS remark, auth.created_at
+		        auth.device_remark AS remark, auth.created_at
 		   FROM voip_device_auth auth
 		   JOIN device_bind bind_record
 		     ON bind_record.device_id=auth.device_id AND bind_record.user_id<>0
-		   LEFT JOIN voip_user_profile profile
-		     ON profile.wx_open_id=auth.wx_open_id AND profile.wx_app_id=auth.wx_app_id
-			  WHERE auth.device_id=? AND auth.auth_status=?
+					  WHERE auth.device_id=? AND auth.auth_status=?
 			  ORDER BY auth.created_at DESC`,
 		deviceID, voipAuthStatusActive)
 	if err != nil {

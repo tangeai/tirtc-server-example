@@ -227,13 +227,11 @@ func (s *Server) getUserAuthList(c *gin.Context) {
 
 	list := make([]userAuthItem, 0)
 	if err := s.db.SelectContext(c.Request.Context(), &list,
-		`SELECT auth.device_id, COALESCE(profile.remark, auth.remark) AS remark,
+		`SELECT auth.device_id, auth.device_remark AS remark,
 		        auth.authorized_device_name, auth.auth_status
 		   FROM voip_device_auth auth
 		   JOIN device_bind bind_record ON bind_record.device_id=auth.device_id
-		   LEFT JOIN voip_user_profile profile
-		     ON profile.wx_open_id=auth.wx_open_id AND profile.wx_app_id=auth.wx_app_id
-		  WHERE bind_record.user_id=?
+				  WHERE bind_record.user_id=?
 		    AND auth.wx_open_id=?
 		    AND auth.wx_app_id=?
 		    AND auth.auth_status=?
@@ -246,65 +244,6 @@ func (s *Server) getUserAuthList(c *gin.Context) {
 	}
 
 	apiresp.OK(c, gin.H{"list": list})
-}
-
-func (s *Server) globalVoipRemark(ctx context.Context, wxOpenID, wxAppID string) (string, error) {
-	var remark string
-	err := s.db.GetContext(ctx, &remark,
-		`SELECT remark FROM voip_user_profile WHERE wx_open_id=? AND wx_app_id=?`,
-		wxOpenID, wxAppID)
-	if err == nil {
-		return remark, nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return "", err
-	}
-
-	err = s.db.GetContext(ctx, &remark,
-		`SELECT remark FROM voip_device_auth
-		  WHERE wx_open_id=? AND wx_app_id=? AND remark<>''
-		  ORDER BY created_at DESC, id DESC LIMIT 1`,
-		wxOpenID, wxAppID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
-	}
-	return remark, err
-}
-
-func (s *Server) setGlobalVoipRemark(ctx context.Context, wxOpenID, wxAppID, remark string) error {
-	tx, err := s.db.BeginTxx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO voip_user_profile (wx_open_id, wx_app_id, remark)
-		 VALUES (?, ?, ?)
-		 ON DUPLICATE KEY UPDATE remark=VALUES(remark)`,
-		wxOpenID, wxAppID, remark); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE voip_device_auth SET remark=? WHERE wx_open_id=? AND wx_app_id=?`,
-		remark, wxOpenID, wxAppID); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
-func (s *Server) publishGlobalVoipRemarkUpdate(ctx context.Context, wxOpenID, wxAppID string) {
-	var deviceIDs []string
-	if err := s.db.SelectContext(ctx, &deviceIDs,
-		`SELECT device_id FROM voip_device_auth WHERE wx_open_id=? AND wx_app_id=?`,
-		wxOpenID, wxAppID); err != nil {
-		slog.ErrorContext(ctx, "query global remark devices failed",
-			"wx_app_id", wxAppID, "err", err)
-		return
-	}
-	for _, deviceID := range deviceIDs {
-		s.publishAuthUpdate(ctx, deviceID)
-	}
 }
 
 func (s *Server) getUserContactRemark(c *gin.Context) {
@@ -322,52 +261,13 @@ func (s *Server) getUserContactRemark(c *gin.Context) {
 		apiresp.Fail(c, apiresp.ErrInternal, "get wechat login: "+err.Error())
 		return
 	}
-	remark, err := s.globalVoipRemark(c.Request.Context(), wxOpenID, wxAppID)
-	if err != nil {
-		apiresp.Fail(c, apiresp.ErrInternal, "query contact remark: "+err.Error())
-		return
-	}
-	apiresp.OK(c, gin.H{"wx_open_id": wxOpenID, "remark": remark})
+	apiresp.OK(c, gin.H{"wx_open_id": wxOpenID, "remark": ""})
 }
 
 func (s *Server) putUserContactRemark(c *gin.Context) {
-	var req struct {
-		WxAppID string `json:"wx_app_id"`
-		Remark  string `json:"remark"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		apiresp.Fail(c, apiresp.ErrBadParam, "请求参数格式错误，请检查必填字段和字段类型")
-		return
-	}
-	remark, valid := normalizeAuthRemark(req.Remark)
-	if !valid || remark == "" {
-		apiresp.Fail(c, apiresp.ErrBadParam, "remark 不能为空且不能超过 64 个字符")
-		return
-	}
-	if req.WxAppID == "" {
-		req.WxAppID = s.Config().DefaultVoipAppID()
-	}
-	userID := currentUserID(c)
-	wxOpenID, err := s.currentWeChatOpenID(c.Request.Context(), userID, req.WxAppID)
-	if errors.Is(err, redis.Nil) {
-		apiresp.Fail(c, apiresp.ErrWechatLoginInvalid, "需要先完成微信登录")
-		return
-	}
-	if err != nil {
-		apiresp.Fail(c, apiresp.ErrInternal, "get wechat login: "+err.Error())
-		return
-	}
-	if err := s.setGlobalVoipRemark(c.Request.Context(), wxOpenID, req.WxAppID, remark); err != nil {
-		apiresp.Fail(c, apiresp.ErrInternal, "save contact remark: "+err.Error())
-		return
-	}
-	s.publishGlobalVoipRemarkUpdate(c.Request.Context(), wxOpenID, req.WxAppID)
-	apiresp.OK(c, nil)
+	apiresp.Fail(c, apiresp.ErrForbidden, "请在控制台联系人列表中修改备注")
 }
 
-// getUserVoipContacts lets H5 query one owned device's mini-program VoIP
-// contacts. It deliberately uses user JWT and an explicit device_id, unlike
-// the device endpoint which derives device identity from its MQTT token.
 func (s *Server) getUserVoipContacts(c *gin.Context) {
 	deviceID := c.Query("device_id")
 	if deviceID == "" {
@@ -388,13 +288,6 @@ func (s *Server) getUserVoipContacts(c *gin.Context) {
 
 // ── /v1/voip/user/report-auth ────────────────────────────────────────────────
 
-const maxAuthRemarkChars = 64
-
-func normalizeAuthRemark(raw string) (string, bool) {
-	remark := strings.TrimSpace(raw)
-	return remark, utf8.RuneCountInString(remark) <= maxAuthRemarkChars
-}
-
 func (s *Server) postReportAuth(c *gin.Context) {
 	var req struct {
 		DeviceID             string `json:"device_id"`
@@ -413,11 +306,7 @@ func (s *Server) postReportAuth(c *gin.Context) {
 		apiresp.Fail(c, apiresp.ErrBadParam, "缺少 device_id 或 wx_open_id")
 		return
 	}
-	remark, validRemark := normalizeAuthRemark(req.Remark)
-	if !validRemark {
-		apiresp.Fail(c, apiresp.ErrBadParam, "remark 不能超过 64 个字符")
-		return
-	}
+	// Legacy remark is accepted but does not modify device-owned names.
 	deviceName := strings.TrimSpace(req.DeviceName)
 	if deviceName != "" && utf8.RuneCountInString(deviceName) > 13 {
 		apiresp.Fail(c, apiresp.ErrBadParam, "device_name 不能超过 13 个字符")
@@ -428,7 +317,6 @@ func (s *Server) postReportAuth(c *gin.Context) {
 		// device SN before business device names were introduced.
 		deviceName = req.DeviceID
 	}
-	writeGlobalRemark := remark != ""
 	userID := currentUserID(c)
 	if !s.requireOwnedDevice(c, req.DeviceID) {
 		return
@@ -469,15 +357,6 @@ func (s *Server) postReportAuth(c *gin.Context) {
 		}
 	}
 
-	if remark == "" {
-		if saved, lookupErr := s.globalVoipRemark(c.Request.Context(), req.WxOpenID, wxAppID); lookupErr != nil {
-			apiresp.Fail(c, apiresp.ErrInternal, "query contact remark: "+lookupErr.Error())
-			return
-		} else {
-			remark = saved
-		}
-	}
-
 	tx, err := s.db.BeginTxx(c.Request.Context(), nil)
 	if err != nil {
 		apiresp.Fail(c, apiresp.ErrInternal, "begin auth save: "+err.Error())
@@ -485,43 +364,13 @@ func (s *Server) postReportAuth(c *gin.Context) {
 	}
 	defer tx.Rollback()
 
-	globalRemarkChanged := false
-	if writeGlobalRemark {
-		var currentGlobalRemark string
-		globalRemarkErr := tx.GetContext(c.Request.Context(), &currentGlobalRemark,
-			`SELECT remark
-			   FROM voip_user_profile
-			  WHERE wx_open_id=? AND wx_app_id=?
-			  FOR UPDATE`,
-			req.WxOpenID, wxAppID)
-		if globalRemarkErr != nil && !errors.Is(globalRemarkErr, sql.ErrNoRows) {
-			apiresp.Fail(c, apiresp.ErrInternal, "query existing contact remark: "+globalRemarkErr.Error())
-			return
-		}
-		globalRemarkChanged = errors.Is(globalRemarkErr, sql.ErrNoRows) || currentGlobalRemark != remark
-
-		var staleRemarkAuthIDs []int64
-		if err := tx.SelectContext(c.Request.Context(), &staleRemarkAuthIDs,
-			`SELECT id
-			   FROM voip_device_auth
-			  WHERE wx_open_id=? AND wx_app_id=? AND remark<>?
-			  ORDER BY id
-			  FOR UPDATE`,
-			req.WxOpenID, wxAppID, remark); err != nil {
-			apiresp.Fail(c, apiresp.ErrInternal, "query stale authorization remarks: "+err.Error())
-			return
-		}
-		globalRemarkChanged = globalRemarkChanged || len(staleRemarkAuthIDs) > 0
-	}
-
 	var existingAuth struct {
 		WxModelID            string `db:"wx_model_id"`
-		Remark               string `db:"remark"`
 		AuthorizedDeviceName string `db:"authorized_device_name"`
 		AuthStatus           string `db:"auth_status"`
 	}
 	existingAuthErr := tx.GetContext(c.Request.Context(), &existingAuth,
-		`SELECT wx_model_id, remark, authorized_device_name, auth_status
+		`SELECT wx_model_id, authorized_device_name, auth_status
 		   FROM voip_device_auth
 		  WHERE device_id=? AND wx_open_id=? AND wx_app_id=?
 		  FOR UPDATE`,
@@ -536,40 +385,26 @@ func (s *Server) postReportAuth(c *gin.Context) {
 	}
 	authChanged := errors.Is(existingAuthErr, sql.ErrNoRows) ||
 		existingAuth.WxModelID != wxModelID ||
-		existingAuth.Remark != remark ||
 		existingAuth.AuthorizedDeviceName != desiredAuthorizedDeviceName ||
 		existingAuth.AuthStatus != voipAuthStatusActive
 
 	_, err = tx.ExecContext(c.Request.Context(),
 		`INSERT INTO voip_device_auth (
-		     device_id, wx_open_id, wx_app_id, wx_model_id, remark,
+		     device_id, wx_open_id, wx_app_id, wx_model_id,
 		     authorized_device_name, auth_status, invalid_reason,
 		     invalid_at, last_verified_at, created_at
 		 )
-	         VALUES (?, ?, ?, ?, ?, ?, ?, '', NULL, ?, ?)
+	         VALUES (?, ?, ?, ?, ?, ?, '', NULL, ?, ?)
 	         ON DUPLICATE KEY UPDATE
 	           wx_model_id=VALUES(wx_model_id),
-	           remark=VALUES(remark),
 	           authorized_device_name=IF(? OR authorized_device_name='', VALUES(authorized_device_name), authorized_device_name),
 	           auth_status=VALUES(auth_status),
 	           invalid_reason='',
 	           invalid_at=NULL,
 	           last_verified_at=VALUES(last_verified_at)`,
-		req.DeviceID, req.WxOpenID, wxAppID, wxModelID, remark,
+		req.DeviceID, req.WxOpenID, wxAppID, wxModelID,
 		deviceName, voipAuthStatusActive, time.Now(), time.Now(),
 		req.AuthorizationCreated)
-	if err == nil && writeGlobalRemark {
-		_, err = tx.ExecContext(c.Request.Context(),
-			`INSERT INTO voip_user_profile (wx_open_id, wx_app_id, remark)
-			 VALUES (?, ?, ?)
-			 ON DUPLICATE KEY UPDATE remark=VALUES(remark)`,
-			req.WxOpenID, wxAppID, remark)
-	}
-	if err == nil && writeGlobalRemark {
-		_, err = tx.ExecContext(c.Request.Context(),
-			`UPDATE voip_device_auth SET remark=? WHERE wx_open_id=? AND wx_app_id=?`,
-			remark, req.WxOpenID, wxAppID)
-	}
 	if err == nil {
 		err = tx.Commit()
 	}
@@ -580,9 +415,7 @@ func (s *Server) postReportAuth(c *gin.Context) {
 		return
 	}
 
-	if globalRemarkChanged {
-		s.publishGlobalVoipRemarkUpdate(c.Request.Context(), req.WxOpenID, wxAppID)
-	} else if authChanged {
+	if authChanged {
 		s.publishAuthUpdate(c.Request.Context(), req.DeviceID)
 	}
 	apiresp.OK(c, nil)

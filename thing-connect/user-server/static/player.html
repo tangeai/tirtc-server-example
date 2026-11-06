@@ -7,8 +7,8 @@
   <meta name="referrer" content="no-referrer">
   <script src="/static/js/mini-program-page.js?v=b30453999596"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title data-ui-i18n="实时查看 — 探鸽 · 小钛">实时查看 — 探鸽 · 小钛</title>
-  <link rel="stylesheet" href="/static/css/tailwind.css">
+  <title data-ui-i18n="实时查看 — 小钛控制台">实时查看 — 小钛控制台</title>
+  <link rel="stylesheet" href="/static/css/tailwind.css?v=15627deec0a4">
   <style>
     html, body { margin: 0; padding: 0; background: #000; color: #fff; height: 100%; overflow: hidden; }
     #video-wrap { position: relative; width: 100%; background: #000; }
@@ -45,12 +45,12 @@
       #video-wrap { max-width: 1100px; margin: 0 auto; border-radius: 12px; overflow: hidden; }
     }
   </style>
-  <script src="/static/user-shell.js?v=a0238275b6ec"></script>
+  <script src="/static/user-shell.js?v=118621c9e6ba"></script>
 </head>
 <body>
 <!-- TOPBAR (mobile only) -->
 <div id="topbar" class="flex items-center gap-3 px-4 py-3 bg-[#111] border-b border-white/10 md:hidden">
-  <button onclick="history.back()" class="p-1 text-white/60 hover:text-white">
+  <button onclick="location.href='/devices'" aria-label="返回设备列表" data-ui-attrs="{&quot;aria-label&quot;:&quot;返回设备列表&quot;}" class="p-1 text-white/60 hover:text-white">
     <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
       <path d="M15 18l-6-6 6-6"/>
     </svg>
@@ -65,7 +65,7 @@
   <div id="video-wrap">
     <!-- PC topbar inside video area -->
     <div class="hidden md:flex items-center gap-3 px-4 py-3 bg-[#1a1a1a]">
-      <button onclick="history.back()" class="p-1 text-white/50 hover:text-white transition-colors">
+      <button onclick="location.href='/devices'" aria-label="返回设备列表" data-ui-attrs="{&quot;aria-label&quot;:&quot;返回设备列表&quot;}" class="p-1 text-white/50 hover:text-white transition-colors">
         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
           <path d="M15 18l-6-6 6-6"/>
         </svg>
@@ -146,12 +146,20 @@ function resolveStreamIds(profile) {
 }
 
 // ── Page title ────────────────────────────────────────────────────────────
-const titleText = () => deviceID ? WebI18n.t("{p0} 实时查看", {p0: deviceID}) : WebI18n.t("实时查看");
+let displayDeviceName = '';
+const titleText = () => deviceID ? WebI18n.t("{p0} 实时查看", {p0: (displayDeviceName ? displayDeviceName + " · " : "") + deviceID}) : WebI18n.t("实时查看");
 WebI18n.bindText(document, titleText, "title");
 ['page-title','page-title-pc'].forEach(id => {
   const el = $(id);
   if (el) WebI18n.bindText(el, titleText, "textContent");
 });
+
+if (deviceID && jwtToken) fetch('/v1/user/device/list', {headers:{Authorization:'Bearer '+jwtToken},signal:AbortSignal.timeout(10000)})
+  .then(response=>response.json()).then(result=>{
+    if(result.code!==200 || !Array.isArray(result.data)) return;
+    displayDeviceName=result.data.find(device=>device.device_id===deviceID)?.device_name || '';
+    ['page-title','page-title-pc'].forEach(id=>{if($(id)) WebI18n.bindText($(id),titleText,'textContent');});
+  }).catch(()=>{});
 
 function setStatus(online) {
   const color = online ? '#10b981' : '#6b7280';

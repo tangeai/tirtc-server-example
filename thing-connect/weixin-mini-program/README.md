@@ -39,7 +39,7 @@
 - 展示、刷新和解绑当前账号下的设备
 - 从设备卡片进入实时查看 H5 页面
 - 从设备卡片进入 AI 角色页面，编辑角色并设置设备使用的角色
-- 获取微信 OpenID，维护当前微信用户的统一联系人名称
+- 获取微信 OpenID，展示账号信息
 - 申请微信设备 VoIP 授权
 - 小程序主动呼叫设备
 - 接收设备主动发起的微信 VoIP 呼叫
@@ -145,7 +145,7 @@ weixin-mini-program/
 ├── app.wxss                       # 全局样式
 ├── pages/
 │   ├── login/                     # 邮箱登录、注册和验证码
-│   ├── devices/                   # 设备列表、联系人名称、授权和呼叫
+│   ├── devices/                   # 设备列表、账号信息、授权和呼叫
 │   ├── bind/                      # 验证码、设备 ID、扫码绑定
 │   ├── device-web/                # 实时查看与 AI 角色 H5 承接
 │   └── call-box/                  # 预留空页面，当前不承载插件通话 UI
@@ -164,7 +164,7 @@ weixin-mini-program/
 | 页面 | 路径 | 职责 |
 |---|---|---|
 | 登录/注册 | `pages/login/index` | 登录、注册、发送邮箱验证码、存储 JWT |
-| 设备列表 | `pages/devices/index` | 拉取设备、同步授权、编辑联系人名称、解绑和呼叫 |
+| 设备列表 | `pages/devices/index` | 拉取设备、同步授权、查看账号信息、解绑和呼叫 |
 | 绑定设备 | `pages/bind/index` | 验证码绑定、设备 ID 绑定、扫码解析 |
 | 设备网页 | `pages/device-web/index` | 验证设备归属、承接实时查看与 AI 角色页面、失败重试 |
 | 预留页 | `pages/call-box/index` | 当前为空；微信通话使用插件的 `CALL_PAGE_PATH` |
@@ -270,7 +270,7 @@ resolve 后页面仍要检查服务端业务码：
 2. 将设备按绑定时间排序并归一化媒体字段
 3. 更新设备视频 profile 本地缓存
 4. 调 `wx.getDeviceVoIPList()` 同步微信侧授权状态
-5. 同步服务端授权名称快照和当前 OpenID 的统一联系人名称
+5. 同步服务端授权名称快照
 
 解绑调用 `DELETE /v1/user/device/reset`。`user-server` 会完成设备所有权和 VoIP 授权
 清理，并清空设备名称；小程序解绑成功后不要再用已经失去所有权的设备调用
@@ -316,7 +316,7 @@ fragment 传入，页面启动时立即清除，只保存在页面内存，不�
 6. 授权结果已通过 `/v1/voip/user/report-auth` 同步到服务端。
 
 微信侧授权成功但 `report-auth` 失败时，页面会保留“微信已授权”的状态并提示用户重新
-保存联系人名称。不要把这两步当成一个不可区分的操作。
+下拉刷新以重试授权同步。微信授权和服务端同步分别反馈结果。
 
 ### 2. 初始化和授权
 
@@ -325,19 +325,17 @@ fragment 传入，页面启动时立即清除，只保存在页面内存，不�
 - [`wx.login()`](https://developers.weixin.qq.com/miniprogram/dev/api/open-api/login/wx.login.html) + `wechat-mini-login`
 - `GET /v1/user/device/list`
 - [`wx.getDeviceVoIPList()`](https://developers.weixin.qq.com/miniprogram/dev/api/open-api/device-voip/wx.getDeviceVoIPList.html)
-- `GET /v1/voip/user/contact-remark`
 
 首次授权流程：
 
-1. 用户设置设备名称和“我的联系人名称”。
+1. 用户设置设备名称。
 2. 小程序调 `POST /v1/voip/user/sn-ticket`。
 3. 小程序把响应中的 `device_name` 传给
    [`wx.requestDeviceVoIP(...)`](https://developers.weixin.qq.com/miniprogram/dev/framework/device/voip/auth.html)。
 4. 再次刷新微信登录关系，避免服务端缓存过期。
 5. 小程序将同一 `device_name` 调 `POST /v1/voip/user/report-auth`。
 
-联系人名称属于 `wx_open_id + wx_app_id`，不是设备名称。同一微信身份授权的所有设备
-共用该名称，设备端、H5 或小程序最后一次成功修改的值生效。
+联系人备注通过控制台联系人编辑设置，按设备独立保存。小程序账号信息只展示 OpenID。未设置备注时显示“微信用户”；授权上报不写入备注。旧小程序的统一改名请求返回错误，旧授权上报携带的 `remark` 被忽略，授权流程保持兼容。
 
 设备名称属于绑定关系，新绑定默认空，最多 13 个 Unicode 字符。授权时的名称是微信
 快照；授权后改名会显示“待重新授权”，用户需在微信“最近使用”中删除本小程序并重新
@@ -533,8 +531,6 @@ AI、VoIP、H5 实时流和设备互呼共用设备媒体资源。产品设备�
 | 接口 | 使用位置 | 用途 |
 |---|---|---|
 | `POST /v1/voip/user/wechat-mini-login` | 设备列表 | 微信 code 换 OpenID |
-| `GET /v1/voip/user/contact-remark` | 设备列表 | 获取统一联系人名称 |
-| `PUT /v1/voip/user/contact-remark` | 用户资料弹窗 | 修改统一联系人名称 |
 | `POST /v1/voip/user/sn-ticket` | 授权流程 | 获取微信设备授权票据 |
 | `POST /v1/voip/user/report-auth` | 授权流程 | 同步微信授权结果 |
 | `POST /v1/voip/user/delete-auth` | 独立取消授权入口 | 删除授权关系 |

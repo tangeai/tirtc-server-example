@@ -13,6 +13,7 @@ import (
 
 	"thing-connect/internal/config"
 	"thing-connect/internal/store"
+	"thing-connect/internal/voip"
 )
 
 // mqttBroker is the subset of *mqttc.Broker call-server depends on. Kept as a
@@ -23,8 +24,14 @@ type mqttBroker interface {
 	Publish(topic string, qos byte, payload any) error
 }
 
+type ContactNames interface {
+	VisibleContactNames(context.Context, int64, string) (map[string]string, error)
+}
+
 type Server struct {
-	intercom interface {
+	contactNames ContactNames
+	remarks      *voip.Remarks
+	intercom     interface {
 		Unbind(context.Context, string) error
 	}
 	mu     sync.RWMutex
@@ -46,6 +53,8 @@ func (s *Server) UpdateConfig(cfg *config.Config) { s.mu.Lock(); s.cfg = cfg; s.
 func NewServer(cfg *config.Config, db *sqlx.DB, rdb *redis.Client, broker mqttBroker, dev store.DeviceStore) *Server {
 	return &Server{cfg: cfg, db: db, rdb: rdb, broker: broker, dev: dev}
 }
+
+func (s *Server) SetRemarks(remarks *voip.Remarks) { s.remarks = remarks }
 
 func (s *Server) Register(r *gin.Engine) {
 	v1 := r.Group("/v1")
@@ -160,3 +169,5 @@ func (s *Server) SetIntercom(service interface {
 }) {
 	s.intercom = service
 }
+
+func (s *Server) SetContactNames(names ContactNames) { s.contactNames = names }

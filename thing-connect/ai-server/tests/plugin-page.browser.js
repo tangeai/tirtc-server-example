@@ -57,7 +57,7 @@ async (page) => {
   });
   const check = (ok, message) => { if (!ok) throw Error(message); };
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.goto(base + '/ai-server/static/agent.html?device_id=test-device');
+  await page.goto(base + '/user-server/static/agent.html?device_id=test-device');
   await page.waitForFunction(() => document.getElementById('field-name').value === '测试角色');
   await page.evaluate(() => {
     window.confirmations = [];

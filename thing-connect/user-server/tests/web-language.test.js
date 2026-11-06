@@ -36,8 +36,8 @@ test('each page uses its own service bootstrap and each marked key has a diction
   const common=JSON.parse(fs.readFileSync(path.join(root,'internal/webui/common.json'),'utf8'));
   for(const [service,dict,files,prefix] of [
     ['user-server','static/user-i18n.json',['static/auth.html','static/bind.html','static/devices.html','static/contacts.html','static/player.html','static/devices.js','static/recognition.js'],'/v1'],
-    ['ai-server','static/ai-i18n.json',['static/agent.html'],'/v1/ai'],
-    ['call-server','handler/call-i18n.json',['handler/room_page.html'],'/v1/call'],
+    ['ai-server','static/ai-i18n.json',['../user-server/static/agent.html'],'/v1/ai'],
+    ['call-server','handler/call-i18n.json',['../user-server/static/room.html'],'/v1/call'],
   ]) {
     const messages={...common,...JSON.parse(fs.readFileSync(path.join(root,service,dict),'utf8'))};
     for(const file of files){
@@ -54,8 +54,8 @@ test('static marked copy has translations and session cleanup retains the langua
   const decode=value=>value.replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&');
   for(const [folder,dict,files]of [
     ['user-server','static/user-i18n.json',['static/auth.html','static/devices.html','static/bind.html','static/contacts.html','static/player.html']],
-    ['ai-server','static/ai-i18n.json',['static/agent.html']],
-    ['call-server','handler/call-i18n.json',['handler/room_page.html']],
+    ['ai-server','static/ai-i18n.json',['../user-server/static/agent.html']],
+    ['call-server','handler/call-i18n.json',['../user-server/static/room.html']],
   ]) {
     const messages={...common,...JSON.parse(fs.readFileSync(path.join(root,folder,dict),'utf8'))};
     for(const file of files){

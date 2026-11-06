@@ -1,6 +1,6 @@
 const PAGES = {
   live: { path: '/player', title: '实时查看' },
-  agent: { path: '/v1/ai/agent', title: 'AI 角色' },
+  agent: { path: '/agent', title: 'AI 角色' },
 }
 
 function buildDeviceWebPage(baseUrl, kind, deviceId, token) {

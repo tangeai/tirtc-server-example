@@ -46,6 +46,7 @@ jobs:
           cache-dependency-path: |
             thing-connect/package-lock.json
             thing-connect/admin/admin-web/package-lock.json
+            thing-connect/user-server/user-web/package-lock.json
       - name: Go lint
         uses: golangci/golangci-lint-action@v8
         with:
@@ -78,8 +79,23 @@ jobs:
           npm ci
           node --test weixin-mini-program/tests/*.test.js ai-server/tests/*.test.js call-server/tests/*.test.js user-server/tests/*.test.js tests/recognition-ui.test.cjs
           npm run build:css
+          npm --prefix user-server/user-web ci
+          npm --prefix user-server/user-web run check
           npm --prefix admin/admin-web ci
           npm --prefix admin/admin-web run check
+      - name: Install user browser test engine
+        working-directory: thing-connect/user-server/user-web
+        run: npx playwright install --with-deps chromium
+      - name: User browser acceptance
+        working-directory: thing-connect/user-server/user-web
+        run: npm run test:browser
+      - name: Preserve user browser acceptance results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: user-browser-acceptance
+          path: output/playwright/
+          if-no-files-found: ignore
 
   device-sim:
     runs-on: ubuntu-latest

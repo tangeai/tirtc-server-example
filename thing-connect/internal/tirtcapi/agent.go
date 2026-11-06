@@ -7,6 +7,7 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -587,6 +588,8 @@ func (c *AgentAPIClient) doUpdate(ctx context.Context, path string, input RoleIn
 	return &role, nil
 }
 
+var ErrRoleNotFound = errors.New("cloud role does not exist")
+
 // DeleteRole deletes a role.
 func (c *AgentAPIClient) DeleteRole(ctx context.Context, roleID string) error {
 	path := rolesPath + "/" + roleID
@@ -616,6 +619,9 @@ func (c *AgentAPIClient) doDelete(ctx context.Context, path string) error {
 	}
 	defer res.Body.Close()
 
+	if res.StatusCode == http.StatusNotFound {
+		return ErrRoleNotFound
+	}
 	if res.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(res.Body)
 		return fmt.Errorf("agent: HTTP %d: %s", res.StatusCode, string(body))
@@ -626,6 +632,9 @@ func (c *AgentAPIClient) doDelete(ctx context.Context, path string) error {
 	body, _ := io.ReadAll(res.Body)
 	if len(body) > 0 {
 		if err := json.Unmarshal(body, &wrap); err == nil && wrap.Code != 200 {
+			if wrap.Code == 404 {
+				return ErrRoleNotFound
+			}
 			return fmt.Errorf("agent: upstream error code=%d msg=%s", wrap.Code, wrap.Msg)
 		}
 	}
@@ -964,6 +973,9 @@ func (c *AgentAPIClient) doListAppMCPTools(ctx context.Context) ([]AppMCPTool, e
 func (c *AgentAPIClient) CreateAppMCPTool(ctx context.Context, req AppMCPToolCreateRequest) (*AppMCPTool, error) {
 	start := time.Now()
 	item, err := c.doAppMCPWrite(ctx, http.MethodPost, appMCPToolsPath, req, nil)
+	if err == nil && req.Enabled != nil && !*req.Enabled {
+		item, err = c.finishDisabledMCPCreate(ctx, item, req)
+	}
 	durMs := time.Since(start).Milliseconds()
 	if err != nil {
 		slog.WarnContext(ctx, "agent CreateAppMCPTool failed", "name", req.Config.Name, "dur_ms", durMs, "err", err)
@@ -971,6 +983,60 @@ func (c *AgentAPIClient) CreateAppMCPTool(ctx context.Context, req AppMCPToolCre
 		slog.InfoContext(ctx, "agent CreateAppMCPTool ok", "name", req.Config.Name, "id", item.ID, "dur_ms", durMs)
 	}
 	return item, err
+}
+
+// The cloud create endpoint can echo enabled=false while persisting its default
+// true. Keep this provider-specific protocol adaptation out of HTTP handlers and
+// browsers. Success means that a read has confirmed the requested disabled state.
+func (c *AgentAPIClient) finishDisabledMCPCreate(ctx context.Context, created *AppMCPTool, req AppMCPToolCreateRequest) (*AppMCPTool, error) {
+	if created == nil || created.ID == "" {
+		return nil, errors.New("agent: MCP create returned no resource ID")
+	}
+	_, err := c.UpdateAppMCPTool(ctx, created.ID, AppMCPToolUpdateRequest{Config: req.Config, Enabled: req.Enabled})
+	if err == nil {
+		for attempt := 0; attempt < 4; attempt++ {
+			var stored *AppMCPTool
+			stored, err = c.GetAppMCPTool(ctx, created.ID)
+			if err == nil && stored != nil && !stored.Enabled {
+				return stored, nil
+			}
+			if err == nil {
+				err = errors.New("agent: MCP disabled state was not persisted")
+			}
+			if attempt == 3 || !waitMCPRetry(ctx, time.Duration(1<<attempt)*100*time.Millisecond) {
+				break
+			}
+		}
+	}
+	// Once an ID is known, a failed provisioning operation must not silently
+	// return the half-configured object. Cancellation of the caller must not
+	// cancel compensation as well. No create request is retried.
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	var cleanupErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		cleanupErr = c.DeleteAppMCPTool(cleanupCtx, created.ID)
+		if cleanupErr == nil {
+			return nil, fmt.Errorf("agent: MCP provisioning failed (resource removed): %w", err)
+		}
+		if attempt == 2 || !waitMCPRetry(cleanupCtx, time.Duration(attempt+1)*100*time.Millisecond) {
+			break
+		}
+	}
+	// Preserve both failures and the resource ID for operational recovery; never
+	// report success or discard a failed compensation. Public errors are sanitized.
+	return nil, fmt.Errorf("agent: MCP provisioning and cleanup failed for %s: %w", created.ID, errors.Join(err, cleanupErr))
+}
+
+func waitMCPRetry(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
 }
 
 // GetAppMCPTool returns a single app MCP tool.

@@ -80,15 +80,28 @@ func (s *userStore) GetDeviceList(ctx context.Context, userID int64) ([]model.Us
 func (s *userStore) UpdateDeviceName(
 	ctx context.Context, userID int64, deviceID, deviceName string,
 ) (bool, error) {
-	res, err := s.db.ExecContext(ctx,
-		`UPDATE device_bind SET device_name=? WHERE device_id=? AND user_id=?`,
-		deviceName, deviceID, userID)
+	// A repeated save is successful when the binding still belongs to this user.
+	// Lock the binding so an unbind/rebind cannot slip between ownership and save.
+	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return false, fmt.Errorf("userStore.UpdateDeviceName: %w", err)
+		return false, fmt.Errorf("userStore.UpdateDeviceName begin: %w", err)
 	}
-	n, err := res.RowsAffected()
+	defer tx.Rollback() //nolint:errcheck // Commit or cancellation may already finish it.
+	var previous string
+	err = tx.GetContext(ctx, &previous, `SELECT device_name FROM device_bind WHERE device_id=? AND user_id=? FOR UPDATE`, deviceID, userID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
 	if err != nil {
-		return false, fmt.Errorf("userStore.UpdateDeviceName rows affected: %w", err)
+		return false, fmt.Errorf("userStore.UpdateDeviceName binding: %w", err)
 	}
-	return n > 0, nil
+	if previous != deviceName {
+		if _, err := tx.ExecContext(ctx, `UPDATE device_bind SET device_name=? WHERE device_id=? AND user_id=?`, deviceName, deviceID, userID); err != nil {
+			return false, fmt.Errorf("userStore.UpdateDeviceName: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("userStore.UpdateDeviceName commit: %w", err)
+	}
+	return true, nil
 }

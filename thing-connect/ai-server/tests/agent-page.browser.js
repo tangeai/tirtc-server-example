@@ -57,7 +57,7 @@ async (page) => {
   });
   const check = (ok, message) => { if (!ok) throw Error(message); };
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.goto(base + '/ai-server/static/agent.html?device_id=test-device');
+  await page.goto(base + '/user-server/static/agent.html?device_id=test-device');
   await page.waitForFunction(() => document.getElementById('field-name').value === '自定义角色');
   check(await page.locator('#field-model').inputValue() === 'saved-model', 'saved model lost');
   check(await page.locator('#field-voice option[value="ve-voice"]').count() === 0, 'incompatible voice offered');

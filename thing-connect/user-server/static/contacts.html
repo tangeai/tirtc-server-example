@@ -5,314 +5,260 @@
   <meta charset="UTF-8">
   <script src="/v1/config/language.js"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title data-ui-i18n="探鸽 · 小钛 — 联系人管理">探鸽 · 小钛 — 联系人管理</title>
-  <link rel="stylesheet" href="/static/css/tailwind.css">
-  <script src="/static/user-shell.js?v=a0238275b6ec"></script>
+  <title data-ui-i18n="小钛控制台 — 联系人管理">小钛控制台 — 联系人管理</title>
+  <link rel="stylesheet" href="/static/css/tailwind.css?v=15627deec0a4">
+  <script src="/static/user-shell.js?v=118621c9e6ba"></script>
 </head>
-<body class="bg-gray-50 min-h-screen font-sans">
-
-<!-- TOPBAR -->
-<header class="sticky top-0 z-50 flex items-center justify-between h-[60px] px-8 bg-white border-b border-gray-200">
+<body class="bg-gray-50 min-h-screen font-sans text-gray-900">
+<header class="sticky top-0 z-50 flex items-center justify-between flex-wrap gap-2 min-h-[60px] py-3 px-5 sm:px-8 bg-white border-b border-gray-200">
   <div class="flex items-center gap-3">
-    <button onclick="location.href='/devices'" class="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 transition-colors">
-      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
-        <path d="M15 18l-6-6 6-6"/>
-      </svg>
-      <span data-ui-i18n="设备">设备</span>
-    </button>
-    <span class="text-base font-bold tracking-tight text-gray-900" data-ui-i18n="联系人管理">联系人管理</span>
+    <a href="/devices" class="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-900" aria-label="返回设备列表" data-ui-attrs='{"aria-label":"返回设备列表"}'>
+      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 18l-6-6 6-6"/></svg>
+      <span data-ui-i18n="返回设备列表">返回设备列表</span>
+    </a>
+    <span class="h-4 border-l border-gray-200"></span>
+    <h1 class="text-base font-semibold" data-ui-i18n="联系人管理">联系人管理</h1>
   </div>
-  <button onclick="logout()" class="text-xs text-gray-400 hover:text-gray-600 transition-colors px-2 py-1" data-ui-i18n="退出">退出</button>
-<div class="flex items-center gap-3"><button type="button" data-language-toggle class="text-xs text-gray-500 px-2 py-1.5 border border-gray-200 rounded-lg shrink-0">English</button></div></header>
-
-<!-- MAIN -->
-<main class="relative max-w-[720px] mx-auto px-8 pt-9 pb-24 max-sm:px-3.5 max-sm:pt-5 max-sm:pb-32">
-
-  <!-- device picker -->
-  <div class="mb-7">
-    <label class="text-xs font-medium text-gray-400 mb-1.5 block" data-ui-i18n="当前设备">当前设备</label>
-    <select id="device-select" onchange="onDeviceChange()" class="w-full font-mono text-sm bg-white border border-gray-200 rounded-lg px-3.5 py-2.5 text-gray-800 focus:outline-none focus:border-emerald-400"></select>
-  </div>
-
-  <!-- add contact -->
-  <div class="bg-white border border-gray-200 rounded-2xl p-5 mb-7">
-    <h2 class="text-sm font-bold text-gray-900 mb-3" data-ui-i18n="添加联系人">添加联系人</h2>
-    <div class="flex gap-2">
-      <input id="add-target" type="text" placeholder="对方设备 ID" class="flex-1 font-mono text-sm bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-2.5 focus:outline-none focus:border-emerald-400" data-ui-attrs="{&quot;placeholder&quot;:&quot;对方设备 ID&quot;}">
-      <button onclick="addContact()" class="px-5 py-2.5 bg-emerald-500 text-white text-sm font-semibold rounded-lg hover:bg-emerald-600 transition-colors whitespace-nowrap" data-ui-i18n="发起申请">发起申请</button>
+  <button type="button" data-language-toggle class="text-xs text-gray-500 px-2 py-1.5 border border-gray-200 rounded-lg">English</button>
+<p id="contact-device-context" class="w-full text-xs text-gray-500 break-all"></p>
+</header>
+<main class="max-w-[880px] mx-auto px-4 sm:px-8 py-6 sm:py-8 space-y-5">
+  <section class="bg-white border border-gray-200 rounded-2xl p-5" aria-labelledby="current-device-label">
+    <div class="flex items-center justify-between gap-4 mb-3"><label id="current-device-label" for="device-select" class="text-sm font-semibold" data-ui-i18n="当前管理设备">当前管理设备</label><span class="text-xs text-gray-500" data-ui-i18n="切换设备查看对应联系人">切换设备查看对应联系人</span></div>
+    <select id="device-select" onchange="onDeviceChange()" disabled class="w-full text-sm bg-gray-50 border border-gray-200 rounded-lg px-3 py-3"><option data-ui-i18n="正在加载设备…">正在加载设备…</option></select>
+    <p class="text-xs text-gray-500 mt-3 leading-relaxed" data-ui-i18n="联系人和备注按设备分别管理。修改这里的备注，不会影响其他设备。">联系人和备注按设备分别管理。修改这里的备注，不会影响其他设备。</p>
+    <div id="device-status" role="status" class="text-sm text-gray-500 mt-2"></div>
+  </section>
+  <section class="bg-white border border-gray-200 rounded-2xl overflow-hidden" aria-labelledby="contacts-title">
+    <div class="p-5 border-b border-gray-100">
+      <div class="flex items-center justify-between gap-3 mb-4"><h2 id="contacts-title" class="font-semibold"><span data-ui-i18n="联系人">联系人</span> <span id="contact-count" class="text-sm text-gray-400 font-normal"></span></h2>
+        <button id="open-add" type="button" onclick="openAddModal()" disabled class="px-4 py-2 text-sm font-medium rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white disabled:opacity-50" data-ui-i18n="添加联系人">添加联系人</button>
+      </div>
+      <div class="flex gap-2">
+        <input id="contact-search" type="search" oninput="renderContacts()" aria-label="搜索联系人" placeholder="搜索备注、设备名称或 ID" data-ui-attrs='{"aria-label":"搜索联系人","placeholder":"搜索备注、设备名称或 ID"}' class="border border-gray-200 rounded-lg px-3 py-2 text-sm flex-1 min-w-0 focus:outline-none focus:border-emerald-500">
+        <button id="refresh-contacts" type="button" onclick="refreshAll()" class="px-3 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50" data-ui-i18n="刷新">刷新</button>
+      </div>
+      <div id="contact-filters" class="flex flex-wrap gap-2 mt-3" role="group" aria-label="联系人来源" data-ui-attrs='{"aria-label":"联系人来源"}'>
+        <button type="button" data-filter="all" onclick="setFilter('all')" aria-pressed="true" data-ui-i18n="全部">全部</button>
+        <button type="button" data-filter="mine" onclick="setFilter('mine')" aria-pressed="false" data-ui-i18n="我的设备">我的设备</button>
+        <button type="button" data-filter="manual" onclick="setFilter('manual')" aria-pressed="false" data-ui-i18n="手动添加">手动添加</button>
+        <button type="button" data-filter="voip" onclick="setFilter('voip')" aria-pressed="false" data-ui-i18n="微信授权">微信授权</button>
+      </div>
+      <p id="source-help" class="mt-3 text-xs text-gray-500 leading-relaxed"></p>
     </div>
-    <p class="text-xs text-gray-400 mt-2" data-ui-i18n="同账号下的设备会自动互相关联，不需要手动申请">同账号下的设备会自动互相关联，不需要手动申请</p>
-  </div>
-
-  <!-- pending -->
-  <div class="mb-7">
-    <h2 class="text-sm font-bold text-gray-900 mb-3"><span data-ui-i18n="待审批">待审批</span> <span id="pending-count" class="text-xs font-normal text-gray-400"></span></h2>
-    <div id="pending-list" class="space-y-2"></div>
-  </div>
-
-  <!-- contacts -->
-  <div>
-    <h2 class="text-sm font-bold text-gray-900 mb-3"><span data-ui-i18n="我的联系人">我的联系人</span> <span id="contact-count" class="text-xs font-normal text-gray-400"></span></h2>
-    <div id="contact-list" class="space-y-2"></div>
-  </div>
+    <div id="contacts-status" role="status" class="px-5 text-sm text-gray-500"></div>
+    <div id="contact-list" class="divide-y divide-gray-100"></div>
+  </section>
+  <details id="pending-section" class="bg-white border border-gray-200 rounded-2xl">
+    <summary class="p-5 cursor-pointer flex items-center gap-2 flex-wrap"><span class="font-semibold text-sm" data-ui-i18n="待审批申请">待审批申请</span><span id="pending-count" class="text-xs text-amber-700"></span><span class="text-xs text-gray-500 ml-auto" data-ui-i18n="账号下全部设备">账号下全部设备</span><span aria-hidden="true">⌄</span></summary>
+    <div class="px-5 pb-5"><p class="text-xs text-gray-500 mb-3" data-ui-i18n="同意后，对方会成为申请所指向设备的联系人。">同意后，对方会成为申请所指向设备的联系人。</p><div id="pending-status" role="status" class="text-sm text-gray-500"></div><div id="pending-list" class="space-y-3"></div></div>
+  </details>
 </main>
-
-<!-- REMARK MODAL -->
-<div id="remark-modal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-[200] items-center justify-center">
-  <div class="bg-white border border-gray-200 rounded-2xl p-7 w-[360px] max-w-[calc(100vw-48px)] shadow-xl">
-    <h2 class="text-[17px] font-bold text-gray-900 mb-4" data-ui-i18n="修改备注">修改备注</h2>
-    <input id="remark-input" type="text" placeholder="备注名称" class="w-full text-sm bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-2.5 mb-6 focus:outline-none focus:border-emerald-400" data-ui-attrs="{&quot;placeholder&quot;:&quot;备注名称&quot;}">
-    <div class="flex gap-2.5">
-      <button onclick="closeRemarkModal()" class="flex-1 py-2.5 text-sm text-gray-500 bg-gray-50 border border-gray-200 rounded-lg hover:border-gray-300 transition-colors" data-ui-i18n="取消">取消</button>
-      <button onclick="saveRemark()" class="flex-1 py-2.5 text-sm font-semibold text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition-colors" data-ui-i18n="保存">保存</button>
-    </div>
-  </div>
-</div>
-
-<!-- DELETE MODAL -->
-<div id="delete-modal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-[200] items-center justify-center">
-  <div class="bg-white border border-gray-200 rounded-2xl p-7 w-[360px] max-w-[calc(100vw-48px)] shadow-xl">
-    <h2 class="text-[17px] font-bold text-gray-900 mb-2" data-ui-i18n="删除该联系人？">删除该联系人？</h2>
-    <p class="text-sm text-gray-500 leading-relaxed mb-6" data-ui-i18n="删除后对方将不再出现在联系人列表中，需要重新发起申请才能恢复。">删除后对方将不再出现在联系人列表中，需要重新发起申请才能恢复。</p>
-    <div class="flex gap-2.5">
-      <button onclick="closeDeleteModal()" class="flex-1 py-2.5 text-sm text-gray-500 bg-gray-50 border border-gray-200 rounded-lg hover:border-gray-300 transition-colors" data-ui-i18n="取消">取消</button>
-      <button onclick="doDelete()" class="flex-1 py-2.5 text-sm font-semibold text-red-600 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 transition-colors" data-ui-i18n="确认删除">确认删除</button>
-    </div>
-  </div>
-</div>
-
-<!-- TOAST -->
-<div id="toast" class="fixed bottom-[100px] left-1/2 bg-gray-900 text-white text-sm px-5 py-2.5 rounded-full pointer-events-none whitespace-nowrap z-[300] border border-transparent"></div>
-
+<dialog id="add-modal" aria-labelledby="add-title" class="rounded-2xl p-0 w-[420px] max-w-[calc(100vw-32px)] max-h-[90vh] overflow-y-auto backdrop:bg-black/50">
+  <form class="p-6" onsubmit="addContact();return false;">
+    <div class="flex items-center justify-between gap-3 mb-4"><h2 id="add-title" class="font-semibold text-lg" data-ui-i18n="添加联系人">添加联系人</h2><button type="button" onclick="closeAddModal()" class="dialog-close" aria-label="关闭弹窗" data-ui-attrs='{"aria-label":"关闭弹窗"}'>×</button></div>
+    <div class="bg-gray-50 rounded-xl p-3 mb-5"><p class="text-xs text-gray-500 mb-1" data-ui-i18n="发起设备">发起设备</p><p id="add-source-name" class="text-sm font-medium break-words"></p><p id="add-source-id" class="text-xs text-gray-500 font-mono break-all mt-1"></p></div>
+    <label for="add-target" class="block text-sm font-medium mb-2" data-ui-i18n="对方设备 ID">对方设备 ID</label><input id="add-target" autocomplete="off" type="text" placeholder="请输入对方设备 ID" data-ui-attrs='{"placeholder":"请输入对方设备 ID"}' class="w-full border border-gray-200 rounded-lg px-3 py-3 text-sm focus:outline-none focus:border-emerald-500">
+    <p class="text-xs text-gray-500 mt-3 leading-relaxed" data-ui-i18n="发送后需对方同意，才能成为联系人。我的设备会自动关联，无需申请；微信联系人请在小程序中授权。">发送后需对方同意，才能成为联系人。我的设备会自动关联，无需申请；微信联系人请在小程序中授权。</p>
+    <p id="add-error" role="alert" class="text-sm text-red-600 mt-3"></p><p id="add-success" role="status" class="text-sm text-emerald-700 mt-3"></p>
+    <div class="flex justify-end gap-2 mt-5"><button type="button" onclick="closeAddModal()" class="px-4 py-2 text-sm border border-gray-200 rounded-lg" data-ui-i18n="取消">取消</button><button id="contact-add" type="submit" class="px-4 py-2 text-sm bg-emerald-500 text-white rounded-lg disabled:opacity-50" data-ui-i18n="发送申请">发送申请</button></div>
+  </form>
+</dialog>
+<dialog id="delete-modal" aria-labelledby="delete-title" class="rounded-2xl p-6 w-[420px] max-w-[calc(100vw-32px)] backdrop:bg-black/50">
+  <div class="flex items-center justify-between gap-3 mb-4"><h2 id="delete-title" class="font-semibold text-lg" data-ui-i18n="删除联系人？">删除联系人？</h2><button type="button" onclick="closeDeleteModal()" class="dialog-close" aria-label="关闭弹窗" data-ui-attrs='{"aria-label":"关闭弹窗"}'>×</button></div>
+  <div id="delete-context" class="bg-gray-50 rounded-xl p-3 text-sm break-words mb-4"></div>
+  <p class="text-sm text-gray-600 leading-relaxed" data-ui-i18n="删除后双方将解除好友关系，彼此从联系人列表中移除。恢复好友关系需要重新申请并获得对方同意。">删除后双方将解除好友关系，彼此从联系人列表中移除。恢复好友关系需要重新申请并获得对方同意。</p><p id="delete-error" role="alert" class="text-sm text-red-600 mt-3"></p>
+  <div class="flex justify-end gap-2 mt-5"><button type="button" onclick="closeDeleteModal()" class="px-4 py-2 text-sm border border-gray-200 rounded-lg" data-ui-i18n="取消">取消</button><button id="contact-delete" type="button" onclick="doDelete()" class="px-4 py-2 text-sm bg-red-50 text-red-600 border border-red-200 rounded-lg disabled:opacity-50" data-ui-i18n="确认删除">确认删除</button></div>
+</dialog>
+<div id="toast" role="status" class="fixed bottom-[100px] left-1/2 bg-gray-900 text-white text-sm px-5 py-2.5 rounded-xl pointer-events-none max-w-[calc(100vw-32px)] z-[300]"></div>
 <script>
+
 const $ = id => document.getElementById(id);
+const t = (key, params) => WebI18n.t(key, params);
+const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const token = localStorage.getItem('token');
 if (!token) location.href = '/login';
-
-let devices = [];
+let devices = [], lastContacts = [], lastPending = [];
 let currentDeviceId = new URLSearchParams(location.search).get('device_id') || '';
-let lastContacts = [];
-let lastPending = [];
-let remarkTarget = null;
-let deleteTarget = null;
-
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let filter = 'all', loadedDevice = null, contactsRequest = 0, pendingRequest = 0;
+let contactLoading = false, contactError = '', pendingLoaded = false, pendingLoading = false, pendingError = '';
+let draft = null, addSession = null, deleteTarget = null, toastTimer;
+const responding = new Set();
+async function api(path, options = {}) {
+  try {
+    const response = await fetch(path, {signal:AbortSignal.timeout(10000),...options, headers:{Authorization:'Bearer '+token,'Content-Type':'application/json',...options.headers}});
+    return await response.json();
+  } catch { return {code:50300,msg:t('网络异常，请重试')}; }
 }
-
-async function api(path, opts = {}) {
-  const res = await fetch(path, {
-    ...opts,
-    headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json', ...(opts.headers || {}) },
-  });
-  return res.json();
+function toast(message) {
+  $('toast').textContent = t(message); $('toast').classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(()=>$('toast').classList.remove('show'),3200);
 }
-
-function toast(msg, error = false) {
-  const el = $('toast');
-  WebI18n.bindText(el, () => (WebI18n.t(msg)), "textContent");
-  el.style.borderColor = error ? 'rgba(239,68,68,0.4)' : 'rgba(16,185,129,0.4)';
-  el.classList.add('show');
-  setTimeout(() => el.classList.remove('show'), 2600);
+function deviceName(id) { return devices.find(d=>d.device_id===id)?.device_name?.trim() || t('未命名'); }
+function contactName(c) { return (c.remark || '').trim() || (c.type==='voip' ? t('微信用户') : (c.device_name || '').trim() || c.device_id); }
+function fallbackName(c) { return c.type==='voip' ? t('微信用户') : (c.device_name || '').trim() || c.device_id; }
+function contactKey(c) { return JSON.stringify([c.type,c.id,c.device_id,c.wx_app_id || '']); }
+function updateDeviceContext() {WebI18n.bindText($('contact-device-context'),()=>currentDeviceId?deviceName(currentDeviceId)+' · '+currentDeviceId:'','textContent');}
+function renderDevices() {
+  updateDeviceContext();
+  $('device-select').innerHTML = devices.map(d=>`<option value="${esc(d.device_id)}" ${d.device_id===currentDeviceId?'selected':''}>${esc(deviceName(d.device_id))} · ${esc(d.device_id)}</option>`).join('');
 }
-
-function logout() {
-  WebI18n.clearLocalSession();
-  sessionStorage.clear();
-  location.href = '/login';
-}
-
 async function loadDevices() {
-  const res = await api('/v1/user/device/list');
-  if (res.code !== 200) { toast(WebI18n.errorMessage(res, WebI18n.t("加载设备失败")), true); return; }
-  devices = (res.data || []).filter(d => d.status === 1);
-  const sel = $('device-select');
-  if (!devices.length) {
-    sel.innerHTML = "<option value=\"\" data-ui-i18n=\"（还没有已绑定设备）\">（还没有已绑定设备）</option>";
-    return;
+  $('device-status').textContent=t('正在加载设备…');
+  const result=await api('/v1/user/device/list');
+  if(result.code!==200) { if(!devices.length)$('device-select').innerHTML=`<option>${esc(t('加载设备失败'))}</option>`; $('device-status').innerHTML=`${esc(WebI18n.errorMessage(result,'加载设备失败'))} <button type="button" onclick="loadDevices()" class="text-emerald-700 underline">${esc(t('重试'))}</button>`;return; }
+  devices=(result.data || []).filter(d=>d.status===1);
+  if(!devices.length) {
+    currentDeviceId='';$('device-select').innerHTML=`<option>${esc(t('暂无已绑定设备'))}</option>`;
+    $('device-select').disabled=true;$('open-add').disabled=true;$('device-status').innerHTML=`<a href="/devices" class="text-emerald-700 underline">${esc(t('返回设备列表添加设备'))}</a>`;
+    $('contact-list').replaceChildren();$('contacts-status').textContent='';return;
   }
-  if (!currentDeviceId || !devices.some(d => d.device_id === currentDeviceId)) {
-    currentDeviceId = devices[0].device_id;
-  }
-  sel.innerHTML = devices.map(d =>
-    `<option value="${d.device_id}" ${d.device_id === currentDeviceId ? 'selected' : ''}>${d.device_id}</option>`
-  ).join('');
-  loadContacts();
+  if(!devices.some(d=>d.device_id===currentDeviceId)) currentDeviceId=devices[0].device_id;
+  renderDevices();$('device-select').disabled=false;$('open-add').disabled=false;$('device-status').textContent='';
+  renderPending();await loadContacts();
 }
-
 function onDeviceChange() {
-  currentDeviceId = $('device-select').value;
-  loadContacts();
+  draft=null; closeAddModal();closeDeleteModal();currentDeviceId=$('device-select').value;
+  const url=new URL(location.href);url.searchParams.set('device_id',currentDeviceId);history.replaceState(null,'',url);
+  loadedDevice=null;lastContacts=[];updateDeviceContext();loadContacts();
 }
-
+function refreshAll() { loadContacts();loadPending(); }
 async function loadContacts() {
-  if (!currentDeviceId) return;
-  const res = await api('/v1/call/user/contacts?device_id=' + encodeURIComponent(currentDeviceId));
-  const list = $('contact-list');
-  if (res.code !== 200) {
-    list.innerHTML = `<p class="text-sm text-gray-400 py-6 text-center"><span data-ui-i18n="加载失败：">加载失败：</span>${escapeHtml(WebI18n.errorMessage(res, "操作失败，请重试"))}</p>`;
-    WebI18n.bindText($('contact-count'), () => (''), "textContent");
-    return;
+  if(!currentDeviceId)return;
+  const device=currentDeviceId,request=++contactsRequest;
+  contactLoading=true;contactError='';renderContacts();
+  const result=await api('/v1/call/user/contacts?device_id='+encodeURIComponent(device));
+  if(request!==contactsRequest || device!==currentDeviceId)return;
+  contactLoading=false;
+  if(result.code!==200) {contactError=WebI18n.errorMessage(result,'联系人加载失败，请重试');renderContacts();return;}
+  lastContacts=result.data.contacts || [];loadedDevice=device;
+  if(draft && !lastContacts.some(c=>contactKey(c)===draft.key))draft=null;
+  renderContacts();
+}
+function setFilter(value) {filter=value;renderContacts();}
+function clearFilters() {$('contact-search').value='';filter='all';renderContacts();}
+function renderContacts() {
+  $('refresh-contacts').disabled=contactLoading;
+  $('contact-count').textContent=loadedDevice===currentDeviceId?`(${lastContacts.length})`:'';
+  document.querySelectorAll('[data-filter]').forEach(button=>{
+    const active=button.dataset.filter===filter;button.setAttribute('aria-pressed',String(active));
+    button.className='px-3 py-1.5 rounded-lg border text-xs font-medium '+(active?'bg-emerald-50 border-emerald-200 text-emerald-700':'bg-white border-gray-200 text-gray-500 hover:bg-gray-50');
+  });
+  const help={all:'我的设备自动关联；手动添加需对方同意；微信联系人来自小程序授权。',mine:'同账号下的设备会自动互相关联，不需要手动申请。',manual:'经对方同意后建立的设备联系人，可修改备注或删除。',voip:'微信联系人来自小程序授权。取消授权请在微信小程序中操作。'};
+  $('source-help').textContent=t(help[filter]);
+  const status=$('contacts-status');status.classList.toggle('py-4',contactLoading||!!contactError);
+  status.innerHTML=contactLoading?esc(t('联系人加载中…')):contactError?`${esc(t('联系人加载失败，请重试'))} <button type="button" onclick="loadContacts()" class="text-emerald-700 underline">${esc(t('重试'))}</button>`:'';
+  if(loadedDevice!==currentDeviceId){$('contact-list').replaceChildren();return;}
+  const query=$('contact-search').value.trim().toLowerCase();
+  const rows=lastContacts.filter(c=>(!query||[c.remark,c.device_name,c.device_id].some(v=>String(v||'').toLowerCase().includes(query)))&&(filter==='all'||(filter==='voip'?c.type==='voip':c.type!=='voip'&&(filter==='mine'?c.source==='auto':c.source==='manual'))));
+  if(!rows.length){
+    const filtered=!!query||filter!=='all';
+    $('contact-list').innerHTML=`<div class="p-8 text-center"><p class="text-sm text-gray-500 mb-3">${esc(t(filtered?'没有匹配的联系人':'暂无联系人'))}</p><button type="button" onclick="${filtered?'clearFilters()':'openAddModal()'}" class="text-sm text-emerald-700 font-medium underline">${esc(t(filtered?'清除搜索和筛选':'添加联系人'))}</button></div>`;return;
   }
-  const contacts = res.data.contacts || [];
-  lastContacts = contacts;
-  WebI18n.bindText($('contact-count'), () => (contacts.length ? `(${contacts.length})` : ''), "textContent");
-  if (!contacts.length) {
-    list.innerHTML = "<p class=\"text-sm text-gray-400 py-6 text-center\"><span data-ui-i18n=\"还没有联系人\">还没有联系人</span></p>";
-    return;
-  }
-  list.innerHTML = contacts.map((c, index) => {
-    const isVoip = c.type === "voip";
-    if (isVoip) {
-      return `
-        <div class="bg-white border border-blue-200 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
-          <div class="min-w-0 flex-1">
-            <div class="flex items-center gap-2">
-              <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-200 flex-shrink-0 font-medium">VoIP</span>
-              <span class="font-mono text-[13px] font-medium text-gray-900 truncate">${escapeHtml(c.device_id)}</span>
-            </div>
-            <div class="text-xs text-gray-400 mt-1 truncate">${escapeHtml(c.remark) || WebI18n.mark("小程序授权 · ") + (c.wx_app_id ? escapeHtml(c.wx_app_id) : WebI18n.mark("未知应用"))}</div>
-          </div>
-          <div class="flex gap-1.5 flex-shrink-0">
-            <button onclick="askRemark(${index})" class="text-[11px] font-medium px-2.5 py-1 rounded-md border border-gray-200 text-gray-500 hover:border-gray-300 hover:text-gray-700 transition-all" data-ui-i18n="改备注">改备注</button>
-            <span class="text-[11px] text-gray-400 self-center" data-ui-i18n="自动">自动</span>
-          </div>
-        </div>`;
-    }
-    return `
-      <div class="bg-white border border-gray-200 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
-        <div class="min-w-0 flex-1">
-          <div class="flex items-center gap-2">
-            <span class="w-[7px] h-[7px] rounded-full flex-shrink-0 ${c.online ? 'bg-emerald-500 animate-pulse-dot' : 'bg-gray-300'}" title="${c.online ? WebI18n.t("在线") : WebI18n.t("离线")}"></span>
-            <span class="font-mono text-[13px] font-medium text-gray-900 truncate">${escapeHtml(c.device_id)}</span>
-            ${c.source === 'auto' ? "<span class=\"text-[10px] px-1.5 py-0.5 rounded-full bg-violet-50 text-violet-600 border border-violet-200 flex-shrink-0\"><span data-ui-i18n=\"同账号\">同账号</span></span>" : ''}
-          </div>
-          <div class="text-xs text-gray-400 mt-1 truncate">${escapeHtml(c.remark) || WebI18n.mark("（无备注）")}</div>
-        </div>
-        <div class="flex gap-1.5 flex-shrink-0">
-          <button onclick="askRemark(${index})" class="text-[11px] font-medium px-2.5 py-1 rounded-md border border-gray-200 text-gray-500 hover:border-gray-300 hover:text-gray-700 transition-all" data-ui-i18n="改备注">改备注</button>
-          ${c.source === 'manual' ? `<button onclick="askDelete(${index})" class="text-[11px] font-medium px-2.5 py-1 rounded-md border border-gray-200 text-gray-400 hover:border-red-200 hover:text-red-500 hover:bg-red-50 transition-all" data-ui-i18n="删除">删除</button>` : ''}
-        </div>
-      </div>`;
+  $('contact-list').innerHTML=rows.map(c=>{
+    const index=lastContacts.indexOf(c),isVoip=c.type==='voip',editing=draft?.key===contactKey(c);
+    const source=isVoip?'微信授权':c.source==='auto'?'我的设备':'手动添加';
+    const state=isVoip?'':`<span class="text-xs ${c.online?'text-emerald-600':'text-gray-400'}">${esc(t(c.online?'在线':'离线'))}</span>`;
+    return `<article class="p-5" data-contact-index="${index}"><div class="flex items-start justify-between gap-3"><div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-2"><h3 class="text-sm font-semibold break-all">${esc(contactName(c))}</h3><span class="text-[11px] px-2 py-0.5 rounded-full ${isVoip?'bg-blue-50 text-blue-600':'bg-gray-100 text-gray-500'}">${esc(t(source))}</span>${state}</div>${isVoip?'':`<p class="font-mono text-xs text-gray-400 break-all mt-1.5">${esc(c.device_id)}</p>`}</div><div class="flex shrink-0 gap-2"><button type="button" data-edit="${index}" onclick="askRemark(${index})" ${editing?'disabled':''} class="px-3 py-1.5 text-xs text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-40">${esc(t('改备注'))}</button>${c.source==='manual'&&!isVoip?`<button type="button" onclick="askDelete(${index})" class="px-3 py-1.5 text-xs text-red-600 border border-red-100 rounded-lg hover:bg-red-50">${esc(t('删除'))}</button>`:''}</div></div>${editing?renderRemarkEditor(c):''}</article>`;
   }).join('');
+  updateRemarkHint();
 }
-
-async function loadPending() {
-  const res = await api('/v1/call/user/contacts/pending');
-  const list = $('pending-list');
-  if (res.code !== 200) {
-    list.innerHTML = `<p class="text-sm text-gray-400 py-4 text-center"><span data-ui-i18n="加载失败：">加载失败：</span>${escapeHtml(WebI18n.errorMessage(res, "操作失败，请重试"))}</p>`;
-    WebI18n.bindText($('pending-count'), () => (''), "textContent");
-    return;
-  }
-  const pending = res.data.pending || [];
-  lastPending = pending;
-  WebI18n.bindText($('pending-count'), () => (pending.length ? `(${pending.length})` : ''), "textContent");
-  if (!pending.length) {
-    list.innerHTML = "<p class=\"text-sm text-gray-400 py-4 text-center\"><span data-ui-i18n=\"没有待审批的申请\">没有待审批的申请</span></p>";
-    return;
-  }
-  list.innerHTML = pending.map((p, index) => `
-    <div class="bg-white border border-amber-200 bg-amber-50/40 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
-      <div class="min-w-0 flex-1">
-        <div class="font-mono text-[13px] font-medium text-gray-900 truncate">${escapeHtml(p.initiator_device)}</div>
-        <div class="text-xs text-gray-400 mt-0.5"><span data-ui-i18n="申请添加">申请添加</span> ${escapeHtml(p.target_device)} <span data-ui-i18n="为联系人">为联系人</span></div>
-      </div>
-      <div class="flex gap-1.5 flex-shrink-0">
-        <button onclick="respond(${index}, 'accept')" class="text-[11px] font-medium px-2.5 py-1 rounded-md border border-emerald-200 text-emerald-600 bg-emerald-50 hover:bg-emerald-100 transition-all" data-ui-i18n="同意">同意</button>
-        <button onclick="respond(${index}, 'reject')" class="text-[11px] font-medium px-2.5 py-1 rounded-md border border-gray-200 text-gray-400 hover:border-red-200 hover:text-red-500 transition-all" data-ui-i18n="拒绝">拒绝</button>
-      </div>
-    </div>`).join('');
+function renderRemarkEditor(c) {
+  return `<form onsubmit="saveRemark();return false;" class="mt-4 rounded-xl bg-gray-50 p-3"><label for="remark-input" class="block text-xs text-gray-600 mb-2">${esc(t('联系人备注'))}</label><div class="flex flex-wrap gap-2"><input id="remark-input" value="${esc(draft.value)}" oninput="draft.value=this.value;draft.error='';updateRemarkHint()" onkeydown="if(event.key==='Escape'){event.preventDefault();cancelRemark()}" ${draft.busy?'disabled':''} class="min-w-0 flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm" autocomplete="off"><button id="remark-save" type="submit" ${draft.busy?'disabled':''} class="px-3 py-2 text-sm bg-emerald-500 text-white rounded-lg disabled:opacity-50">${esc(t(draft.busy?'保存中…':'保存'))}</button><button type="button" onclick="cancelRemark()" ${draft.busy?'disabled':''} class="px-3 py-2 text-sm border border-gray-200 rounded-lg">${esc(t('取消'))}</button></div><p id="remark-hint" class="mt-2 text-xs text-gray-500"></p><p id="remark-error" role="alert" class="mt-2 text-xs text-red-600">${esc(draft.error||'')}</p></form>`;
 }
-
-async function addContact() {
-  const target = $('add-target').value.trim();
-  if (!target) { toast("请输入对方设备 ID", true); return; }
-  if (target === currentDeviceId) { toast("不能添加自己为联系人", true); return; }
-  const res = await api('/v1/call/user/contacts/request', {
-    method: 'POST',
-    body: JSON.stringify({ device_id: currentDeviceId, target_device_id: target }),
-  });
-  if (res.code === 200) {
-    $('add-target').value = '';
-    toast(res.data.status === 'accepted' ? WebI18n.t("已自动关联（同账号）") : WebI18n.t("申请已发送"));
-    loadContacts();
-  } else {
-    toast(WebI18n.errorMessage(res, WebI18n.t("发起申请失败")), true);
-  }
+function updateRemarkHint() {
+  if(!draft||!$('remark-input'))return;
+  $('remark-hint').textContent=t('清空后显示“{name}”；仅对当前设备生效。最多 64 个字符。',{name:fallbackName(draft.contact)});
+  $('remark-error').textContent=draft.error||'';
 }
-
-async function respond(index, action) {
-  const pending = lastPending[index];
-  if (!pending) return;
-  const res = await api('/v1/call/user/contacts/respond', {
-    method: 'POST',
-    body: JSON.stringify({ id: pending.id, action }),
-  });
-  if (res.code === 200) {
-    toast(action === 'accept' ? WebI18n.t("已同意") : WebI18n.t("已拒绝"));
-    loadPending();
-    loadContacts();
-  } else {
-    toast(WebI18n.errorMessage(res, WebI18n.t("操作失败")), true);
-  }
-}
-
 function askRemark(index) {
-  remarkTarget = lastContacts[index] || null;
-  const contact = remarkTarget;
-  $('remark-input').value = contact ? contact.remark || '' : '';
-  const modal = $('remark-modal');
-  modal.classList.remove('hidden');
-  modal.classList.add('flex');
+  if(draft?.busy)return;
+  const c=lastContacts[index];if(!c)return;
+  draft={key:contactKey(c),contact:{...c},device:currentDeviceId,value:c.remark||'',busy:false,error:''};
+  renderContacts();updateRemarkHint();$('remark-input')?.focus();
 }
-
-function closeRemarkModal() {
-  remarkTarget = null;
-  const modal = $('remark-modal');
-  modal.classList.add('hidden');
-  modal.classList.remove('flex');
-}
-
+function cancelRemark(){if(draft?.busy)return;const index=lastContacts.findIndex(c=>contactKey(c)===draft?.key);draft=null;renderContacts();document.querySelector(`[data-edit="${index}"]`)?.focus();}
 async function saveRemark() {
-  const contact = remarkTarget;
-  const remark = $('remark-input').value.trim();
-  closeRemarkModal();
-  if (!contact) return;
-  const res = await api('/v1/call/user/contacts/remark', {
-    method: 'PUT',
-    body: JSON.stringify({ device_id: currentDeviceId, peer_id: contact.device_id, remark }),
-  });
-  if (res.code === 200) { toast("备注已更新"); loadContacts(); }
-  else toast(WebI18n.errorMessage(res, WebI18n.t("修改失败")), true);
+  const edit=draft;if(!edit||edit.busy)return;
+  const value=edit.value.trim();
+  if(Array.from(value).length>64){edit.error=t('备注不能超过 64 个字符');updateRemarkHint();return;}
+  edit.busy=true;renderContacts();updateRemarkHint();
+  const result=await api('/v1/call/user/contacts/remark',{method:'PUT',body:JSON.stringify({device_id:edit.device,peer_id:edit.contact.device_id,remark:value})});
+  edit.busy=false;
+  if(edit!==draft||edit.device!==currentDeviceId)return;
+  if(result.code!==200){edit.error=WebI18n.errorMessage(result,'修改失败');renderContacts();updateRemarkHint();$('remark-input')?.focus();return;}
+  contactsRequest++;contactLoading=false;contactError='';
+  lastContacts=lastContacts.map(c=>contactKey(c)===edit.key?{...c,remark:value}:c);draft=null;renderContacts();toast('备注已更新');
 }
-
-function askDelete(index) {
-  deleteTarget = lastContacts[index] || null;
-  const modal = $('delete-modal');
-  modal.classList.remove('hidden');
-  modal.classList.add('flex');
+function openAddModal(){
+  if(!currentDeviceId)return;
+  addSession={device:currentDeviceId,busy:false,sent:false};
+  $('add-source-name').textContent=deviceName(currentDeviceId);$('add-source-id').textContent=currentDeviceId;
+  $('add-target').value='';$('add-target').disabled=false;$('contact-add').disabled=false;$('add-error').textContent='';$('add-success').textContent='';
+  $('add-modal').showModal();$('add-target').focus();
 }
-
-function closeDeleteModal() {
-  deleteTarget = null;
-  const modal = $('delete-modal');
-  modal.classList.add('hidden');
-  modal.classList.remove('flex');
+function closeAddModal(){addSession=null;$('add-modal').close();}
+async function addContact(){
+  const session=addSession;if(!session||session.busy||session.sent)return;
+  const target=$('add-target').value.trim();
+  let error=!target?'请输入对方设备 ID':target===session.device?'不能添加自己为联系人':lastContacts.some(c=>c.type!=='voip'&&c.device_id===target)?'该设备已在联系人列表中':devices.some(d=>d.device_id===target)?'我的设备会自动关联，无需申请':'';
+  if(error){$('add-error').textContent=t(error);return;}
+  session.busy=true;$('contact-add').disabled=true;$('add-target').disabled=true;$('add-error').textContent='';
+  const result=await api('/v1/call/user/contacts/request',{method:'POST',body:JSON.stringify({device_id:session.device,target_device_id:target})});
+  session.busy=false;if(session!==addSession)return;
+  if(result.code!==200){$('contact-add').disabled=false;$('add-target').disabled=false;$('add-error').textContent=WebI18n.errorMessage(result,'发起申请失败');return;}
+  session.sent=true;$('add-success').textContent=t(result.data?.status==='accepted'?'已自动关联（同账号）':'申请已发送，等待对方同意');
+  if(result.data?.status==='accepted'&&session.device===currentDeviceId)loadContacts();
 }
-
-async function doDelete() {
-  const contact = deleteTarget;
-  closeDeleteModal();
-  if (!contact) return;
-  const path = '/v1/call/user/contacts/' + encodeURIComponent(contact.id);
-  const res = await api(path, { method: 'DELETE' });
-  if (res.code === 200) { toast("已删除"); loadContacts(); }
-  else toast(WebI18n.errorMessage(res, WebI18n.t("删除失败")), true);
+async function loadPending(){
+  const request=++pendingRequest;pendingLoading=true;pendingError='';renderPending();
+  const result=await api('/v1/call/user/contacts/pending');if(request!==pendingRequest)return;
+  pendingLoading=false;
+  if(result.code!==200){pendingError=WebI18n.errorMessage(result,'加载申请失败，请重试');$('pending-section').open=true;renderPending();return;}
+  const first=!pendingLoaded;pendingLoaded=true;lastPending=result.data.pending||[];
+  if(first&&lastPending.length)$('pending-section').open=true;
+  renderPending();
 }
+function renderPending(){
+  $('pending-count').textContent=lastPending.length?`(${lastPending.length})`:'';
+  $('pending-status').innerHTML=pendingLoading?esc(t('正在加载…')):pendingError?`${esc(pendingError)} <button type="button" onclick="loadPending()" class="underline text-emerald-700">${esc(t('重试'))}</button>`:'';
+  if(!pendingLoaded)return;
+  $('pending-list').innerHTML=lastPending.length?lastPending.map((p,index)=>`<div class="border border-gray-200 rounded-xl p-3"><div class="flex flex-wrap items-center gap-2 text-sm"><span class="break-all font-mono">${esc(p.initiator_device)}</span><span class="text-gray-400" aria-hidden="true">→</span><span class="font-medium">${esc(deviceName(p.target_device))}</span></div><p class="mt-1 text-xs text-gray-500 break-all">${esc(t('你的目标设备'))} · ${esc(p.target_device)}</p><div class="flex justify-end gap-2 mt-3"><button type="button" onclick="respond(${index},'reject')" ${responding.has(p.id)?'disabled':''} class="px-3 py-1.5 text-xs border border-gray-200 rounded-lg disabled:opacity-50">${esc(t('拒绝'))}</button><button type="button" onclick="respond(${index},'accept')" ${responding.has(p.id)?'disabled':''} class="px-3 py-1.5 text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg disabled:opacity-50">${esc(t('同意'))}</button></div></div>`).join(''):`<p class="text-sm text-gray-400 py-2">${esc(t('没有待审批的申请'))}</p>`;
+}
+async function respond(index,action){
+  const item=lastPending[index];if(!item||responding.has(item.id))return;
+  responding.add(item.id);renderPending();
+  const result=await api('/v1/call/user/contacts/respond',{method:'POST',body:JSON.stringify({id:item.id,action})});
+  responding.delete(item.id);
+  if(result.code!==200){pendingError=WebI18n.errorMessage(result,'操作失败');renderPending();return;}
+  // Invalidate older snapshots so an already handled request cannot reappear.
+  pendingRequest++;pendingLoading=false;pendingError='';lastPending=lastPending.filter(p=>p.id!==item.id);renderPending();
+  toast(action==='accept'?'已同意':'已拒绝');
+  if(action==='accept'&&item.target_device===currentDeviceId)loadContacts();
+}
+function askDelete(index){
+  const c=lastContacts[index];if(!c||c.type==='voip'||c.source!=='manual')return;
+  deleteTarget={...c,device:currentDeviceId,busy:false};
+  $('delete-context').textContent=`${deviceName(currentDeviceId)} (${currentDeviceId}) ↔ ${contactName(c)} (${c.device_id})`;
+  $('delete-error').textContent='';$('contact-delete').disabled=false;$('delete-modal').showModal();
+}
+function closeDeleteModal(){deleteTarget=null;$('delete-modal').close();}
+async function doDelete(){
+  const target=deleteTarget;if(!target||target.busy)return;
+  target.busy=true;$('contact-delete').disabled=true;
+  const result=await api('/v1/call/user/contacts/'+encodeURIComponent(target.id),{method:'DELETE'});
+  target.busy=false;
+  if(result.code===200&&target.device===currentDeviceId){contactsRequest++;contactLoading=false;contactError='';lastContacts=lastContacts.filter(c=>contactKey(c)!==contactKey(target));if(draft?.key===contactKey(target))draft=null;renderContacts();}
+  if(target!==deleteTarget)return;
+  $('contact-delete').disabled=false;
+  if(result.code!==200){$('delete-error').textContent=WebI18n.errorMessage(result,'删除失败');return;}
+  closeDeleteModal();toast('已删除');
+}
+$('add-modal').addEventListener('cancel',()=>{addSession=null;});
+$('delete-modal').addEventListener('cancel',()=>{deleteTarget=null;});
+WebI18n.onChange(()=>{if(devices.length)renderDevices();renderContacts();updateRemarkHint();renderPending();});
+renderContacts();loadDevices();loadPending();
 
-loadDevices();
-loadPending();
 </script>
 </body>
 </html>

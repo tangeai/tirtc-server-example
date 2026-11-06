@@ -3,6 +3,8 @@ import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
+from tempfile import TemporaryDirectory
 
 SPEC = importlib.util.spec_from_file_location('api_docs', Path(__file__).with_name('check-api-docs.py'))
 CHECKER = importlib.util.module_from_spec(SPEC)
@@ -20,6 +22,21 @@ class APIDocsCheckTest(unittest.TestCase):
 
     def test_current_contract(self):
         self.assertEqual(self.errors_for(self.original), [])
+
+    def test_redirect_registration_is_part_of_contract(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            handler = root / 'call-server/handler'
+            handler.mkdir(parents=True)
+            (root / 'user-server').mkdir()
+            (root / 'user-server/service_discovery.go').write_text('')
+            source = handler / 'pages.go'
+            source.write_text('func pages(r *gin.Engine) {\n webui.RedirectPage(r, "/legacy", "/room")\n}\n')
+            with patch.object(CHECKER, 'ROOT', root):
+                self.assertEqual(CHECKER.registered_routes(), {('GET', '/legacy')})
+                source.write_text('func pages(r *gin.Engine) {\n webui.RedirectPage(r, dynamicPath, "/room")\n}\n')
+                with self.assertRaises(ValueError):
+                    CHECKER.registered_routes()
 
     def test_wrong_path(self):
         text = self.original.replace('**接口**：`GET /services`', '**接口**：`GET /wrong-services`')

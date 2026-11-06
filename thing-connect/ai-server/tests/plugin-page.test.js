@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 
-const html = fs.readFileSync(__dirname + '/../static/agent.html', 'utf8');
+const html = fs.readFileSync(__dirname + '/../../user-server/static/agent.html', 'utf8');
 function source(name) {
   const match = html.match(new RegExp(`((?:async )?function ${name}\\([\\s\\S]*?)(?=\\n(?:async )?function |\\n</script>)`));
   assert.ok(match, `missing function ${name}`);
@@ -15,7 +15,7 @@ function pluginEditor(api) {
   const element = id => {
     if (!fields.has(id)) {
       const classes = new Set(['hidden']);
-      fields.set(id, { value: '', textContent: '', innerHTML: '',
+      fields.set(id, { append() {}, querySelector() {return null;}, dataset: {}, setAttribute() {}, removeAttribute() {}, querySelectorAll() { return []; }, showModal() {}, close() {}, value: '', textContent: '', innerHTML: '',
         classList: { add(name) { classes.add(name); }, remove(name) { classes.delete(name); }, contains(name) { return classes.has(name); } },
         insertAdjacentHTML(position, content) { this.innerHTML += content; },
       });
@@ -23,16 +23,16 @@ function pluginEditor(api) {
     return fields.get(id);
   };
   const messages = [];
-  const context = { WebI18n: require("../../tests/helpers/web-i18n.cjs")(undefined, null, undefined, "ai"), $: element, api, toast(message, error) { messages.push({ message: typeof message === "function" ? message() : message, error }); },
+  const context = { document: { createElement() {return {setAttribute() {},remove() {}};} }, updateEditorActions() {}, clearRoleFeedback() {}, WebI18n: require("../../tests/helpers/web-i18n.cjs")(undefined, null, undefined, "ai"), $: element, api, toast(message, error) { messages.push({ message: typeof message === "function" ? message() : message, error }); },
     pluginTools: [], selectedPlugins: [], isEditingDefault: false, defaultRole: null,
     mcpTools: [], selectedMcpTools: [], mcpLoadError: false,
     roleMcpCandidates: [], rolePluginCandidates: [], editorDirty: false,
     editingPluginId: null, pluginModalRequest: 0, pluginLoadError: false,
     pluginModalInputParams: [], pluginModalReturnParams: [],
-    renderParamTable() {}, confirm() { return true; },
+    renderParamTable() {}, async confirmAction() { return true; },
   };
   vm.createContext(context);
-  vm.runInContext(['escapeText', 'setRoleResourceSelections', 'roleResourceItems', 'loadPlugins', 'renderPlugins', 'loadMcpTools', 'renderMcpTools', 'toggleMcp', 'togglePlugin', 'deletePlugin', 'deleteMcpTool', 'openPluginModal', 'closePluginModal', 'cleanParams', 'savePluginModal'].map(source).join('\n'), context);
+  vm.runInContext(['setEditorDirty', 'runModalSave', 'escapeText', 'setRoleResourceSelections', 'roleResourceItems', 'loadPlugins', 'renderPlugins', 'loadMcpTools', 'renderMcpTools', 'toggleMcp', 'togglePlugin', 'deletePlugin', 'deleteMcpTool', 'openPluginModal', 'closePluginModal', 'cleanParams', 'savePluginModal'].map(source).join('\n'), context);
   return { context, element, messages };
 }
 

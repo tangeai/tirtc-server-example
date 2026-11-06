@@ -67,3 +67,5 @@ __pycache__/
 /thing-connect/device-sim/device-sim-c/device-sim
 /thing-connect/device-sim/device-sim-c/device-sim-product
 /thing-connect/device-sim/device-sim-c/libdevice-reference.a
+
+/thing-connect/user-server/static/app/

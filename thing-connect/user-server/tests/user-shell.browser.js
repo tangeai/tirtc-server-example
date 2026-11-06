@@ -24,8 +24,8 @@ async page => {
   check(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'horizontal overflow '+width);
   await page.screenshot({path:'output/playwright/navigation-'+width+'.png',fullPage:true});
  }
- await page.locator('.device-summary button').last().click();await page.waitForURL('**/v1/call/group/page?device_id=test-device');
- await page.goto(base+'/devices');await page.locator('.device-summary button').first().click();await page.waitForURL('**/v1/ai/agent?device_id=test-device');
+ await page.locator('.device-summary button').last().click();await page.waitForURL('**/room?device_id=test-device');
+ await page.goto(base+'/devices');await page.locator('.device-summary button').first().click();await page.waitForURL('**/agent?device_id=test-device');
  await page.goto(base+'/devices');await page.evaluate(()=>sessionStorage.setItem('testing-expiry','1'));expired=true;await page.reload();await page.waitForURL('**/login');
  await page.getByText('登录状态已失效，请重新登录',{exact:true}).waitFor();
  check(await page.evaluate(()=>localStorage.getItem('token'))===null,'stale token retained');

@@ -46,6 +46,8 @@ rm -f bin/.release-commit
 if contains_service user-server; then
     npm ci
     npm run build:css
+    npm --prefix user-server/user-web ci
+    npm --prefix user-server/user-web run build
 fi
 
 if contains_service admin-server; then

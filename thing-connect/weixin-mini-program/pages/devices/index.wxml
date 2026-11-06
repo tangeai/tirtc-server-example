@@ -2,7 +2,7 @@
   <view class="navbar">
     <text class="navbar-title">我的设备</text>
     <view class="navbar-actions">
-      <view class="icon-btn" bindtap="onEditContactRemark" aria-label="联系人设置" role="button">
+      <view class="icon-btn" bindtap="onOpenProfile" aria-label="联系人设置" role="button">
         <view class="icon-openid"></view>
       </view>
       <view class="icon-btn" bindtap="onConfirmLogout" aria-label="退出登录" role="button">
@@ -75,7 +75,7 @@
 
   <view wx:if="{{authNameModalVisible}}" class="auth-name-mask" catchtap="noop" catchtouchmove="noop">
     <view class="auth-name-dialog">
-      <text class="auth-name-title">{{authNameMode === 'profile' ? '联系人设置' : '设置联系人名称'}}</text>
+      <text class="auth-name-title">账号信息</text>
       <view wx:if="{{authNameMode === 'profile'}}" class="profile-openid-card">
         <view class="profile-openid-header">
           <text class="profile-openid-label">微信 OpenID</text>
@@ -84,30 +84,9 @@
         </view>
         <text class="profile-openid-value" selectable>{{profileOpenId || (profileOpenIdError ? '获取失败，请点击重试' : '正在获取…')}}</text>
       </view>
-      <text class="auth-name-subtitle">设备来电时显示的联系人名称，所有已授权设备共用。</text>
-      <input
-        class="auth-name-input"
-        value="{{authName}}"
-        maxlength="64"
-        focus="{{authNameModalVisible}}"
-        placeholder="请输入联系人名称"
-        bindinput="onAuthNameInput"
-      />
-      <view class="auth-name-suggestions">
-        <text class="auth-name-suggestions-label">常用称呼</text>
-        <view class="auth-name-tags">
-          <view
-            wx:for="{{authNameSuggestions}}"
-            wx:key="*this"
-            class="auth-name-tag {{authName === item ? 'auth-name-tag-active' : ''}}"
-            data-name="{{item}}"
-            bindtap="onSelectAuthName"
-          >{{item}}</view>
-        </view>
-      </view>
+      <text class="auth-name-subtitle">联系人备注请在控制台的联系人编辑中设置，各设备独立保存。</text>
       <view class="auth-name-actions">
-        <button class="auth-name-button auth-name-cancel" bindtap="onCancelAuthName">取消</button>
-        <button class="auth-name-button auth-name-confirm" bindtap="onConfirmAuthName">{{authNameMode === 'profile' ? '保存名称' : '确认并授权'}}</button>
+        <button class="auth-name-button auth-name-cancel" bindtap="onCancelAuthName">关闭</button>
       </view>
     </view>
   </view>

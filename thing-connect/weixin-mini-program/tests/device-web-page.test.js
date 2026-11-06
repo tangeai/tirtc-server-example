@@ -34,7 +34,7 @@ test('H5 过期等待微信 SDK 就绪后自动返回登录首页，并去重', 
 })
 
 test('固定 HTTPS 页面及编码参数，凭证仅在 fragment 中传递', () => {
-  for (const [kind, pathname] of [['live', '/player'], ['agent', '/v1/ai/agent']]) {
+  for (const [kind, pathname] of [['live', '/player'], ['agent', '/agent']]) {
     const page = buildDeviceWebPage('https://app.example.com/', kind, '设备 &/#', 'test-token')
     const url = new URL(page.url)
     assert.equal(url.pathname, pathname)
@@ -88,7 +88,7 @@ test('二次验证所有权和在线状态，离线可编辑 AI 角色', async (
   assert.match(page.data.error, /离线/)
   page._options.kind = 'agent'
   await page.openPage()
-  assert.match(page.data.src, /\/v1\/ai\/agent\?/)
+  assert.match(page.data.src, /\/agent\?/)
   page.onWebError()
   assert.equal(page.data.src, '')
   assert.equal(page.data.loading, false)

@@ -2,16 +2,13 @@ package handler
 
 import (
 	"context"
-	_ "embed"
 	"errors"
 	"github.com/gin-gonic/gin"
 	"log/slog"
 	"net/http"
 	intercom "thing-connect/internal/room"
+	"thing-connect/internal/webui"
 )
-
-//go:embed room_page.html
-var roomPage string
 
 type Intercom interface {
 	Change(context.Context, intercom.Operation) (intercom.Assignment, error)
@@ -21,7 +18,7 @@ type Intercom interface {
 }
 
 func RegisterIntercom(r *gin.Engine, secret string, service Intercom) {
-	r.GET("/v1/call/group/page", func(c *gin.Context) { c.Data(200, "text/html; charset=utf-8", []byte(roomPage)) })
+	webui.RedirectPage(r, "/v1/call/group/page", "/room")
 	web := r.Group("/v1/call/group/web", UserJWTAuth(secret))
 	web.GET("/device/:device_id", func(c *gin.Context) {
 		a, e := service.Current(c.Request.Context(), c.Param("device_id"), currentUserID(c))

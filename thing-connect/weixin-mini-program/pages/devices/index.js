@@ -20,7 +20,6 @@ const { refreshVoipAuthState } = require('../../utils/voip-auth-refresh')
 const app = getApp()
 
 const MAX_DEVICE_NAME_CHARS = 13
-const AUTH_NAME_POOL = ['爸爸', '妈妈', '爷爷', '奶奶', '哥哥', '姐姐', '朋友']
 const VOIP_ROTATION_DEBUG_TAG = '[DEBUG-voip-rotation]'
 
 function voipRuntimeVersions(wmpfVoip) {
@@ -59,17 +58,6 @@ function generateUUID() {
     }
     return s
   }).join('-')
-}
-
-function randomAuthNames(count = 4) {
-  const names = AUTH_NAME_POOL.slice()
-  for (let i = names.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1))
-    const current = names[i]
-    names[i] = names[j]
-    names[j] = current
-  }
-  return names.slice(0, count)
 }
 
 function normalizeMediaCodec(value) {
@@ -149,11 +137,7 @@ Page({
     initialized: false,
     loadError: '',
     authNameModalVisible: false,
-    authName: '',
-    authNameSuggestions: [],
-    authDeviceId: '',
     authNameMode: 'authorize',
-    contactRemark: '',
     profileOpenId: '',
     profileOpenIdError: false,
     deviceNameModalVisible: false,
@@ -324,7 +308,6 @@ Page({
           await refreshVoipAuthState({
             refreshOpenId: () => this._fetchOpenId(true),
             syncWechatAuthState: () => this._syncVoIPAuthState(),
-            syncContactRemark: () => this._syncContactRemark(),
             syncServerAuthList: () => this._syncServerAuthList(),
             reconcileAuthorizedDevices: () => this._reconcileAuthorizedDevices(),
           })
@@ -461,7 +444,6 @@ Page({
       try {
         await this._reportVoIPAuth(
           device.device_id,
-          this.data.contactRemark,
           device.authorizedDeviceName || device.device_name || device.device_id,
           false,
           false,
@@ -496,22 +478,6 @@ Page({
       }
     }
     return serverAuthChanged
-  },
-
-  async _syncContactRemark() {
-    try {
-      // loadDevices 已统一刷新本轮微信登录关系；这里只复用当前 OpenID，
-      // 避免与 auth-list 各自再次调用 wechat-mini-login。
-      await this._fetchOpenId()
-      const res = await voipApi('/v1/voip/user/contact-remark', 'GET', {
-        wx_app_id: app.globalData.wxAppId,
-      })
-      if (!res || res.code !== 0 || !res.data) return
-      const contactRemark = res.data.remark || ''
-      this._updateData({ contactRemark })
-    } catch (_) {
-      // 保留当前页面已有名称，用户仍可从右上角入口重新保存。
-    }
   },
 
   goAdd() {
@@ -651,17 +617,6 @@ Page({
   },
 
   // ── VoIP 授权 ─────────────────────────────────────
-  _openAuthNameModal(deviceId, mode, currentName = '') {
-    const suggestions = randomAuthNames()
-    this._updateData({
-      authNameModalVisible: true,
-      authName: currentName || suggestions[0],
-      authNameSuggestions: suggestions,
-      authDeviceId: deviceId,
-      authNameMode: mode,
-    })
-  },
-
   onAuthorize(e) {
     const deviceId = e.currentTarget.dataset.id
     const device = this.data.deviceList.find(d => d.device_id === deviceId)
@@ -685,15 +640,11 @@ Page({
   },
 
   _continueAuthorize(deviceId) {
-    if (this.data.contactRemark) {
-      return this._authorizeDevice(deviceId, this.data.contactRemark)
-    }
-    this._openAuthNameModal(deviceId, 'authorize')
-    return Promise.resolve()
+    return this._authorizeDevice(deviceId)
   },
 
-  onEditContactRemark() {
-    this._openAuthNameModal('', 'profile', this.data.contactRemark)
+  onOpenProfile() {
+    this._updateData({ authNameModalVisible: true, authNameMode: 'profile' })
     return this.loadProfileOpenId()
   },
 
@@ -721,48 +672,16 @@ Page({
     })
   },
 
-  onAuthNameInput(e) {
-    this._updateData({ authName: e.detail.value })
-  },
-
-  onSelectAuthName(e) {
-    this._updateData({ authName: e.currentTarget.dataset.name })
-  },
-
   onCancelAuthName() {
     this._profileRequest = (this._profileRequest || 0) + 1
     this._updateData({
       authNameModalVisible: false,
-      authName: '',
-      authNameSuggestions: [],
-      authDeviceId: '',
       authNameMode: 'authorize',
     })
   },
 
-  onConfirmAuthName() {
-    const deviceId = this.data.authDeviceId
-    const remark = String(this.data.authName || '').trim()
-    if (!remark) {
-      wx.showToast({ title: '请输入联系人名称', icon: 'none' })
-      return
-    }
-    if (Array.from(remark).length > 64) {
-      wx.showToast({ title: '名称最多 64 个字符', icon: 'none' })
-      return
-    }
-    const mode = this.data.authNameMode
-    this.onCancelAuthName()
-    if (mode === 'profile') {
-      this._saveGlobalContactRemark(remark)
-    } else {
-      this._authorizeDevice(deviceId, remark)
-    }
-  },
-
   async _reportVoIPAuth(
     deviceId,
-    remark,
     deviceName,
     authorizationCreated,
     refreshLogin = true,
@@ -776,16 +695,15 @@ Page({
       wx_app_id: app.globalData.wxAppId,
       wx_model_id: app.globalData.modelId,
       wx_open_id: wxOpenId,
-      remark,
-      device_name: deviceName,
+        device_name: deviceName,
       authorization_created: !!authorizationCreated,
     })
     if (!res || res.code !== 0) {
-      throw new Error((res && res.msg) || '保存联系人名称失败')
+      throw new Error((res && res.msg) || '同步通话授权失败')
     }
   },
 
-  async _authorizeDevice(deviceId, remark) {
+  async _authorizeDevice(deviceId) {
     const device = this.data.deviceList.find(d => d.device_id === deviceId)
     const deviceName = String((device && device.device_name) || '').trim()
     if (!deviceName) {
@@ -829,8 +747,7 @@ Page({
       }
       await this._reportVoIPAuth(
         deviceId,
-        remark,
-        authorizationDeviceName,
+            authorizationDeviceName,
         !alreadyAuthorized,
       )
       const list = this.data.deviceList.map((item) => {
@@ -848,8 +765,8 @@ Page({
           deviceNamePending: authorizedDeviceName !== authorizationDeviceName,
         }
       })
-      this._updateData({ deviceList: list, contactRemark: remark })
-      wx.showToast({ title: alreadyAuthorized ? '名称已保存' : '授权成功' })
+      this._updateData({ deviceList: list })
+      wx.showToast({ title: alreadyAuthorized ? '授权已同步' : '授权成功' })
     } catch (err) {
       if (err.sessionExpired) return
       if (wechatAuthorized) {
@@ -858,34 +775,13 @@ Page({
         ))
         this._updateData({ deviceList: list })
         wx.showModal({
-          title: '名称保存失败',
-          content: `${err.message || JSON.stringify(err)}。微信授权已完成，请点击右上角用户图标设置“我的联系人名称”后重试。`,
+          title: '授权同步失败',
+          content: `${err.message || JSON.stringify(err)}。微信授权已完成，请下拉刷新重试同步。`,
           showCancel: false,
         })
       } else {
         wx.showModal({ title: '授权失败', content: err.message || JSON.stringify(err), showCancel: false })
       }
-    } finally {
-      wx.hideLoading()
-    }
-  },
-
-  async _saveGlobalContactRemark(remark) {
-    wx.showLoading({ title: '保存中...', mask: true })
-    try {
-      await this._fetchOpenId(true)
-      const res = await voipApi('/v1/voip/user/contact-remark', 'PUT', {
-        wx_app_id: app.globalData.wxAppId,
-        remark,
-      })
-      if (!res || res.code !== 0) {
-        throw new Error((res && res.msg) || '保存联系人名称失败')
-      }
-      this._updateData({ contactRemark: remark })
-      wx.showToast({ title: '联系人名称已保存' })
-    } catch (err) {
-      if (err.sessionExpired) return
-      wx.showModal({ title: '保存失败', content: err.message || JSON.stringify(err), showCancel: false })
     } finally {
       wx.hideLoading()
     }
@@ -930,7 +826,7 @@ Page({
         roomType,
         enableCallerCamera,
         enableListenerCamera,
-        nickName: this.data.contactRemark || '微信用户',
+        nickName: '微信用户',
         deviceName: displayDeviceName,
         isCloud: true,
         payload: randUuid,

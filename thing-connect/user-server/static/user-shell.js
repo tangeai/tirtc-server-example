@@ -2,7 +2,11 @@
   'use strict';
   const embedded = new URLSearchParams(location.search).get('source') === 'miniprogram';
   let redirecting = false;
+  function clearDeviceSnapshots() {
+    try {for (const key of Object.keys(sessionStorage)) if (key.startsWith('device-list-v1:')) sessionStorage.removeItem(key);} catch {}
+  }
   function requireLogin() {
+    clearDeviceSnapshots();
     if (embedded) { window.MiniProgramPage?.requireLogin(); return; }
     if (redirecting) return;
     redirecting = true;
@@ -60,7 +64,7 @@
     trigger.onclick=()=>{menu.hidden=!menu.hidden;trigger.setAttribute('aria-expanded',String(!menu.hidden));};
     document.addEventListener('click',event=>{if(!menu.contains(event.target)&&!trigger.contains(event.target))close();});
     document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!menu.hidden){close();trigger.focus();}});
-    document.getElementById('user-logout').onclick=()=>{localStorage.removeItem('token');sessionStorage.removeItem('login-notice');location.replace('/login');};
+    document.getElementById('user-logout').onclick=()=>{clearDeviceSnapshots();localStorage.removeItem('token');sessionStorage.removeItem('login-notice');location.replace('/login');};
     const label=document.getElementById('user-account');
     const retry=document.getElementById('user-account-retry');
     const load=async()=>{
@@ -75,5 +79,20 @@
     retry.onclick=load;
     await load();
   }
+  // Keep keyboard navigation inside the topmost native modal, including dynamically created confirmations.
+  document.addEventListener('keydown', event => {
+    if (event.key !== 'Tab') return;
+    const modals = [...document.querySelectorAll('dialog:modal')];
+    const modal = modals[modals.length - 1];
+    if (!modal) return;
+    const focusable = [...modal.querySelectorAll('button, [href], input, select, textarea, summary, [tabindex]')]
+      .filter(element => !element.disabled && element.tabIndex >= 0 && element.getClientRects().length && !element.closest('[inert]'));
+    const first = focusable[0], last = focusable[focusable.length - 1];
+    if (!first) { event.preventDefault(); return; }
+    if (!modal.contains(document.activeElement) || (event.shiftKey ? document.activeElement === first : document.activeElement === last)) {
+      event.preventDefault();
+      (event.shiftKey ? last : first).focus();
+    }
+  });
   document.addEventListener('DOMContentLoaded',()=>{navigation();accountMenu();});
 })();

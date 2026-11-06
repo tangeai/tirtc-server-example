@@ -5,21 +5,23 @@
   <meta charset="UTF-8">
   <script src="/v1/config/language.js"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title data-ui-i18n="探鸽 · 小钛 — 添加设备">探鸽 · 小钛 — 添加设备</title>
-  <link rel="stylesheet" href="/static/css/tailwind.css">
-  <script src="/static/user-shell.js?v=a0238275b6ec"></script>
+  <title data-ui-i18n="小钛控制台 — 添加设备">小钛控制台 — 添加设备</title>
+  <link rel="stylesheet" href="/static/css/tailwind.css?v=15627deec0a4">
+  <script src="/static/user-shell.js?v=118621c9e6ba"></script>
 </head>
 <body class="bg-gray-50 min-h-screen font-sans">
 
 <!-- TOPBAR -->
-<header class="sticky top-0 z-50 flex items-center justify-between h-[60px] px-8 bg-white border-b border-gray-200 max-sm:px-4">
-  <div class="flex items-center gap-3">
-    <a href="/devices" class="w-[34px] h-[34px] flex items-center justify-center rounded-lg border border-gray-200 bg-gray-50 text-gray-500 hover:border-gray-300 hover:text-gray-800 transition-all">
+<header class="sticky top-0 z-50 flex items-center justify-between flex-wrap gap-2 min-h-[60px] py-3 px-8 bg-white border-b border-gray-200 max-sm:px-4">
+  <div class="flex items-center gap-3 flex-wrap max-w-full">
+    <a href="/devices" aria-label="返回设备列表" data-ui-attrs="{&quot;aria-label&quot;:&quot;返回设备列表&quot;}" class="min-h-[36px] gap-1 flex items-center text-gray-500 hover:text-gray-900 transition-colors">
       <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
         <path d="M19 12H5M12 19l-7-7 7-7"/>
       </svg>
+      <span class="text-sm" data-ui-i18n="返回设备列表">返回设备列表</span>
     </a>
-    <span class="text-[15px] font-semibold text-gray-900" data-ui-i18n="添加设备">添加设备</span>
+    <span class="h-4 border-l border-gray-200" aria-hidden="true"></span>
+    <h1 class="text-base font-semibold text-gray-900 whitespace-nowrap" data-ui-i18n="添加设备">添加设备</h1>
   </div>
 <div class="flex items-center gap-3"><button type="button" data-language-toggle class="text-xs text-gray-500 px-2 py-1.5 border border-gray-200 rounded-lg shrink-0">English</button></div></header>
 
@@ -116,7 +118,7 @@
     <!-- 输入表单 -->
     <div class="bg-white border border-gray-200 rounded-2xl p-7 shadow-sm" id="form-card-id">
       <h2 class="text-base font-semibold text-gray-900 mb-1.5" data-ui-i18n="输入设备 ID">输入设备 ID</h2>
-      <p class="text-[13px] text-gray-500 mb-6 leading-relaxed" data-ui-i18n="设备 ID 由探鸽平台分配，绑定后设备即可正常连接">设备 ID 由探鸽平台分配，绑定后设备即可正常连接</p>
+      <p class="text-[13px] text-gray-500 mb-6 leading-relaxed" data-ui-i18n="设备 ID 由平台分配，绑定后设备即可正常连接">设备 ID 由平台分配，绑定后设备即可正常连接</p>
 
       <div class="mb-5">
         <label class="block text-xs font-medium text-gray-500 mb-2" data-ui-i18n="设备 ID">设备 ID</label>

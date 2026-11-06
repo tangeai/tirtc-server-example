@@ -9,13 +9,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
 	aihandler "thing-connect/ai-server/handler"
+	"thing-connect/internal/ai"
 	"thing-connect/internal/cache"
 	"thing-connect/internal/config"
 	"thing-connect/internal/db"
@@ -60,8 +60,6 @@ func main() {
 	userRoleStore := mysqlstore.NewUserRoleStore(sqlDB)
 	userResourceStore := mysqlstore.NewUserResourceStore(sqlDB)
 
-	staticDir := findStaticDir()
-
 	r := gin.New()
 	if err := r.SetTrustedProxies(cfg.Server.TrustedProxies); err != nil {
 		log.Fatalf("trusted proxies: %v", err)
@@ -70,8 +68,7 @@ func main() {
 	r.Use(userauth.EnforceState(sqlDB, cfg.JWTSecret))
 	probes := map[string]servicestatus.DependencyProbe{"database": servicestatus.SQLProbe(sqlDB), "redis": servicestatus.RedisProbe(rdb)}
 	servicestatus.RegisterHealth(r, probes)
-	r.Static("/static", staticDir)
-	r.StaticFile("/v1/ai/agent", staticDir+"/agent.html")
+	webui.RedirectPage(r, "/v1/ai/agent", "/agent")
 
 	// AI token endpoint (legacy, device-facing)
 	legacyAI := aihandler.NewServer(
@@ -98,8 +95,11 @@ func main() {
 	}
 	agentClient := tirtcapi.NewAgentAPIClient(agentCfg, &http.Client{Timeout: 10 * time.Second})
 	agentHTTP := aihandler.NewAgentHandler(agentClient, roleStore, userRoleStore, userResourceStore, cfg.TirtcAichat.DefaultRoleID, cfg.Internal.Key, cfg.TirtcAichat.ResourceQuota, cfg.TirtcAichat.DefaultResources)
+	roleCloud := tirtcapi.NewRoleCloudProvider(agentClient)
+	roleLifecycle := ai.NewRoles(mysqlstore.NewRoleLifecycleStore(sqlDB), roleCloud.Snapshot)
+	agentHTTP.SetRoles(roleLifecycle)
 	agentHTTP.Register(r, cfg.JWTSecret)
-	dynamicClient, dynamicRefs, err := aiDynamicConfig(cfg, rdb, legacyAI, agentHTTP)
+	dynamicClient, dynamicRefs, err := aiDynamicConfig(cfg, rdb, legacyAI, agentHTTP, roleCloud)
 	if err != nil {
 		log.Fatalf("dynamic config: %v", err)
 	}
@@ -116,6 +116,8 @@ func main() {
 	}
 	cancelConfig()
 	webui.Register(r, "/v1/ai", language, languageMessages)
+	roleWorkerDone := make(chan struct{})
+	go func() { defer close(roleWorkerDone); roleLifecycle.Run(statusCtx) }()
 	go dynamicClient.Run(statusCtx, dynamicRefs)
 	reporter, err := servicestatus.NewReporter(rdb, "ai-server", probes, dynamicClient.Revisions)
 	if err != nil {
@@ -150,6 +152,7 @@ func main() {
 		log.Printf("ai-server shutdown: %v", err)
 	}
 	statusCancel()
+	<-roleWorkerDone
 	if err := rdb.Close(); err != nil {
 		log.Printf("ai-server close redis: %v", err)
 	}
@@ -157,25 +160,4 @@ func main() {
 		log.Printf("ai-server close database: %v", err)
 	}
 	log.Printf("ai-server stopped")
-}
-
-func findStaticDir() string {
-	exe, err := os.Executable()
-	if err != nil {
-		log.Fatalf("resolve executable path: %v", err)
-	}
-	exeDir := filepath.Dir(exe)
-	candidates := []string{
-		filepath.Join(exeDir, "static"),
-		filepath.Join(exeDir, "ai-server", "static"),
-		filepath.Join(exeDir, "..", "ai-server", "static"),
-		filepath.Join(exeDir, "..", "thing-connect", "ai-server", "static"),
-	}
-	for _, dir := range candidates {
-		if info, err := os.Stat(dir); err == nil && info.IsDir() {
-			return dir
-		}
-	}
-	log.Fatalf("static directory not found (tried %v)", candidates)
-	return ""
 }

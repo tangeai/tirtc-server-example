@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -113,7 +114,7 @@ func TestVoipDeviceCallSeparatesJWTAndBusinessErrors(t *testing.T) {
 	}
 }
 
-func TestVoipContactRemarkIsGlobalAndLastWriteWins(t *testing.T) {
+func TestVoipLegacyNameRejectedAndAuthRemarkIgnored(t *testing.T) {
 	s := newSuite(t)
 	cfg := loadConfig(t)
 
@@ -207,7 +208,7 @@ func TestVoipContactRemarkIsGlobalAndLastWriteWins(t *testing.T) {
 		"wx_app_id": wxAppID,
 		"remark":    "右上角统一名称",
 	})
-	if updated.Code != 0 {
+	if updated.Code != 40300 {
 		t.Fatalf("PUT contact-remark: code=%d msg=%s", updated.Code, updated.Msg)
 	}
 
@@ -216,14 +217,14 @@ func TestVoipContactRemarkIsGlobalAndLastWriteWins(t *testing.T) {
 		for _, deviceID := range deviceIDs {
 			var got string
 			if err := s.sqlDB.Get(&got,
-				`SELECT remark FROM voip_device_auth
+				`SELECT device_remark FROM voip_device_auth
 				  WHERE device_id=? AND wx_open_id=? AND wx_app_id=?`,
 				deviceID, wxOpenID, wxAppID); err != nil || got != want {
 				t.Fatalf("device %s remark=%q err=%v, want %q", deviceID, got, err, want)
 			}
 		}
 	}
-	assertRemarks("右上角统一名称", device1, device2)
+	assertRemarks("", device1, device2)
 
 	gotRemark := requestJSON(
 		http.MethodGet,
@@ -240,7 +241,7 @@ func TestVoipContactRemarkIsGlobalAndLastWriteWins(t *testing.T) {
 	if err := json.Unmarshal(gotRemark.Data, &remarkData); err != nil {
 		t.Fatal(err)
 	}
-	if remarkData.WxOpenID != wxOpenID || remarkData.Remark != "右上角统一名称" {
+	if remarkData.WxOpenID != wxOpenID || remarkData.Remark != "" {
 		t.Fatalf("contact-remark=%+v", remarkData)
 	}
 
@@ -249,12 +250,12 @@ func TestVoipContactRemarkIsGlobalAndLastWriteWins(t *testing.T) {
 		"wx_app_id":   wxAppID,
 		"wx_model_id": "model-test",
 		"wx_open_id":  wxOpenID,
-		"remark":      "小程序最后写入",
+		"remark":      strings.Repeat("旧名称", 100),
 	})
 	if reported.Code != 0 {
-		t.Fatalf("report-auth global write: code=%d msg=%s", reported.Code, reported.Msg)
+		t.Fatalf("legacy report-auth: code=%d msg=%s", reported.Code, reported.Msg)
 	}
-	assertRemarks("小程序最后写入", device1, device2)
+	assertRemarks("", device1, device2)
 
 	broker.mu.Lock()
 	publishedBeforeRepeat := len(broker.published)
@@ -264,7 +265,7 @@ func TestVoipContactRemarkIsGlobalAndLastWriteWins(t *testing.T) {
 		"wx_app_id":   wxAppID,
 		"wx_model_id": "model-test",
 		"wx_open_id":  wxOpenID,
-		"remark":      "小程序最后写入",
+		"remark":      strings.Repeat("旧名称", 100),
 	})
 	if repeated.Code != 0 {
 		t.Fatalf("repeat report-auth: code=%d msg=%s", repeated.Code, repeated.Msg)
@@ -286,7 +287,7 @@ func TestVoipContactRemarkIsGlobalAndLastWriteWins(t *testing.T) {
 	if inherited.Code != 0 {
 		t.Fatalf("report-auth inherit: code=%d msg=%s", inherited.Code, inherited.Msg)
 	}
-	assertRemarks("小程序最后写入", device1, device2, device3)
+	assertRemarks("", device1, device2, device3)
 }
 
 func TestVoipReleaseOutgoingCallGuards(t *testing.T) {
@@ -497,8 +498,8 @@ func TestVoipUserAuthListReturnsCurrentWechatRemarksForOwnedDevices(t *testing.T
 	for _, item := range data.List {
 		got[item.DeviceID] = item.Remark
 	}
-	if len(got) != 2 || got[device1] != "统一名称" || got[device2] != "统一名称" {
-		t.Fatalf("auth-list=%v, want only current user's two authorizations with global name", got)
+	if len(got) != 2 || got[device1] != "" || got[device2] != "" {
+		t.Fatalf("auth-list=%v, want only current user's two authorizations without legacy shared names", got)
 	}
 
 	req, _ = http.NewRequest(
@@ -612,6 +613,20 @@ func TestVoipContactsKeepsDeviceAndH5RoutesSeparate(t *testing.T) {
 		}
 		if err := json.Unmarshal(data[field], &contacts); err != nil {
 			t.Fatalf("decode %s: %v", field, err)
+		}
+		var raw []map[string]any
+		if err := json.Unmarshal(data[field], &raw); err != nil {
+			t.Fatal(err)
+		}
+		for _, item := range raw {
+			if len(item) != 5 {
+				t.Fatalf("legacy contact shape changed: %v", item)
+			}
+			for _, key := range []string{"wx_open_id", "wx_app_id", "wx_model_id", "remark", "created_at"} {
+				if _, ok := item[key].(string); !ok {
+					t.Fatalf("legacy string field %s missing or changed: %v", key, item)
+				}
+			}
 		}
 		return contacts
 	}

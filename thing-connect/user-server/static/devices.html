@@ -5,21 +5,21 @@
   <meta charset="UTF-8">
   <script src="/v1/config/language.js"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title data-ui-i18n="探鸽 · 小钛 — 我的设备">探鸽 · 小钛 — 我的设备</title>
-  <link rel="stylesheet" href="/static/css/tailwind.css">
+  <title data-ui-i18n="小钛控制台 — 我的设备">小钛控制台 — 我的设备</title>
+  <link rel="stylesheet" href="/static/css/tailwind.css?v=15627deec0a4">
 <style>
 [hidden]{display:none!important}
 .device-dialog{border:1px solid #e5e7eb;border-radius:18px;padding:24px;width:min(420px,calc(100vw - 32px));color:#172c25;max-height:90vh;overflow:auto}.device-dialog::backdrop{background:#0007}.device-dialog h2{font-size:18px;font-weight:700}.device-dialog h3{font-weight:600;margin:22px 0 12px}.device-dialog header{display:flex;justify-content:space-between;gap:12px}.detail-muted{color:#6b7280;font-size:13px;overflow-wrap:anywhere;margin:8px 0}.danger{color:#dc2626}.device-details{display:grid;grid-template-columns:130px minmax(0,1fr);gap:10px;font-size:13px;margin:18px 0}.device-details dt{color:#6b7280}.device-details dd{overflow-wrap:anywhere}.media-tabs{display:flex;gap:6px}.media-tabs button{flex:1;font-size:13px;border:1px solid #d1d5db;border-radius:8px;padding:9px 4px}.media-tabs [aria-selected=true]{background:#ecfdf5;border-color:#10b981;color:#047857}.device-info-dialog{width:min(580px,calc(100vw - 32px))}.device-summary{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:14px 16px}.device-summary>button{text-align:left;cursor:pointer;background:#f4f7f6;border-radius:10px;padding:10px;min-width:0}.device-summary>button:hover{background:#ecfdf5}.device-summary>button:focus-visible{outline:2px solid #10b981;outline-offset:2px}.device-summary b span[aria-hidden]{float:right}.device-summary b{display:block;color:#475569;font-size:12px;margin-bottom:5px}.device-summary p{font-size:12px;color:#64748b;overflow-wrap:anywhere}.room-dot[hidden]{display:none}.room-dot{display:inline-block;width:6px;height:6px;background:#10b981;border-radius:50%;margin-left:3px}.feature-buttons button{min-width:0;white-space:nowrap}
-</style>  <script src="/static/user-shell.js?v=a0238275b6ec"></script>
+</style>  <script src="/static/user-shell.js?v=118621c9e6ba"></script>
   <link rel="stylesheet" href="/static/css/brand.css?v=2">
 </head>
 <body class="bg-gray-50 min-h-screen font-sans">
 
 <!-- TOPBAR -->
 <header class="sticky top-0 z-50 flex items-center justify-between h-[60px] px-4 sm:px-8 bg-white border-b border-gray-200">
-  <a class="flex items-center gap-2.5" href="/" aria-label="探鸽 · 小钛首页" data-ui-attrs="{&quot;aria-label&quot;:&quot;探鸽 · 小钛首页&quot;}">
+  <a class="flex items-center gap-2.5" href="/" aria-label="小钛控制台首页" data-ui-attrs="{&quot;aria-label&quot;:&quot;小钛控制台首页&quot;}">
     <span class="brand-mark" aria-hidden="true"></span>
-    <span class="site-brand-name text-gray-900" data-ui-i18n="探鸽 · 小钛">探鸽 · 小钛</span>
+    <span class="site-brand-name text-gray-900" data-ui-i18n="小钛控制台">小钛控制台</span>
   </a>
   <div class="flex items-center gap-2 sm:gap-4">
     <button type="button" data-language-toggle class="text-xs text-gray-500 px-2 py-1.5 border border-gray-200 rounded-lg shrink-0">English</button>
@@ -53,18 +53,10 @@
     </button>
   </div>
 
+  <div id="devices-feedback" hidden role="alert" class="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700"></div>
+  <p id="devices-snapshot-notice" hidden class="mb-3 text-xs text-gray-500" data-ui-i18n="显示上次查看的设备状态，点击刷新获取最新状态。">显示上次查看的设备状态，点击刷新获取最新状态。</p>
   <div id="device-grid" class="grid gap-4" style="grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr))">
-    <!-- cards injected by JS -->
-    <div class="col-span-full flex flex-col items-center py-20 text-center">
-      <div class="w-16 h-16 mb-5 rounded-2xl bg-emerald-50 border border-dashed border-emerald-200 flex items-center justify-center text-emerald-500">
-        <svg class="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
-          <rect x="2" y="3" width="20" height="14" rx="2"/>
-          <path d="M8 21h8M12 17v4"/>
-        </svg>
-      </div>
-      <p class="text-base font-semibold text-gray-800 mb-2" data-ui-i18n="还没有设备">还没有设备</p>
-      <p class="text-sm text-gray-400" data-ui-i18n="点击&quot;添加设备&quot;，输入验证码完成绑定">点击"添加设备"，输入验证码完成绑定</p>
-    </div>
+    <p class="col-span-full py-12 text-center text-gray-500" role="status" data-ui-i18n="正在加载设备…">正在加载设备…</p>
   </div>
 </main>
 
@@ -77,18 +69,14 @@
 </button>
 
 <!-- DEVICE NAME MODAL -->
-<div id="name-modal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-[200] items-center justify-center" onclick="closeNameModal()">
+<dialog aria-modal="true" aria-labelledby="name-modal-title" id="name-modal" style="width:100%;height:100%;max-width:none;max-height:none;margin:0;border:0" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-[200] items-center justify-center" onclick="closeNameModal()">
   <form class="bg-white border border-gray-200 rounded-2xl p-7 w-[380px] max-w-[calc(100vw-32px)] shadow-xl" onclick="event.stopPropagation()" onsubmit="saveDeviceName(); return false;">
     <div class="flex items-start justify-between gap-4 mb-5">
       <div>
-        <h2 class="text-[17px] font-bold text-gray-900 mb-1" data-ui-i18n="设置设备名称">设置设备名称</h2>
+        <h2 id="name-modal-title" class="text-[17px] font-bold text-gray-900 mb-1" data-ui-i18n="设置设备名称">设置设备名称</h2>
         <p class="text-xs text-gray-400 leading-relaxed" data-ui-i18n="最多 13 个字符，用于设备列表和微信设备来电显示。">最多 13 个字符，用于设备列表和微信设备来电显示。</p>
       </div>
-      <button type="button" onclick="closeNameModal()" class="flex-shrink-0 w-8 h-8 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors" aria-label="关闭" data-ui-attrs="{&quot;aria-label&quot;:&quot;关闭&quot;}">
-        <svg class="w-4 h-4 mx-auto" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-          <path d="M18 6L6 18M6 6l12 12"/>
-        </svg>
-      </button>
+      <button type="button" onclick="closeNameModal()" class="dialog-close" aria-label="关闭弹窗" data-ui-attrs="{&quot;aria-label&quot;:&quot;关闭弹窗&quot;}">×</button>
     </div>
     <div class="mb-4">
       <label for="device-name-input" class="block text-xs font-medium text-gray-600 mb-1.5" data-ui-i18n="设备名称">设备名称</label>
@@ -105,19 +93,20 @@
       <button id="name-save-button" type="submit" class="flex-1 py-2.5 text-sm font-semibold text-white bg-emerald-500 border border-emerald-500 rounded-lg hover:bg-emerald-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" data-ui-i18n="保存名称">保存名称</button>
     </div>
   </form>
-</div>
+</dialog>
 
 <!-- RESET MODAL -->
-<div id="reset-modal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-[200] items-center justify-center">
+<dialog aria-modal="true" aria-labelledby="reset-modal-title" id="reset-modal" style="width:100%;height:100%;max-width:none;max-height:none;margin:0;border:0" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-[200] items-center justify-center">
   <div class="bg-white border border-gray-200 rounded-2xl p-7 w-[360px] max-w-[calc(100vw-48px)] shadow-xl">
-    <h2 class="text-[17px] font-bold text-gray-900 mb-2" data-ui-i18n="确认解绑设备？">确认解绑设备？</h2>
+    <button type="button" onclick="closeModal()" class="dialog-close float-right" aria-label="关闭弹窗" data-ui-attrs="{&quot;aria-label&quot;:&quot;关闭弹窗&quot;}">×</button>
+    <h2 id="reset-modal-title" class="text-[17px] font-bold text-gray-900 mb-2" data-ui-i18n="确认解绑设备？">确认解绑设备？</h2>
     <p class="text-sm text-gray-500 leading-relaxed mb-6" data-ui-i18n="解绑后设备会退出当前房间，并从我的设备中移除。再次使用需要重新绑定。">解绑后设备会退出当前房间，并从我的设备中移除。再次使用需要重新绑定。</p>
     <div class="flex gap-2.5">
       <button onclick="closeModal()" class="flex-1 py-2.5 text-sm text-gray-500 bg-gray-50 border border-gray-200 rounded-lg hover:border-gray-300 transition-colors" data-ui-i18n="取消">取消</button>
       <button onclick="doReset()" class="flex-1 py-2.5 text-sm font-semibold text-red-600 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 transition-colors" data-ui-i18n="确认解绑">确认解绑</button>
     </div>
   </div>
-</div>
+</dialog>
 
 
 <div id="device-menu" role="menu" aria-label="设备操作" hidden class="fixed z-[200] w-44 p-1.5 bg-white border border-gray-200 rounded-xl shadow-xl" data-ui-attrs="{&quot;aria-label&quot;:&quot;设备操作&quot;}">
@@ -127,7 +116,7 @@
   <button type="button" role="menuitem" data-menu-action="unbind" class="w-full text-left px-3 py-2.5 text-sm text-red-600 rounded-lg hover:bg-red-50 focus:bg-red-50 focus:outline-none" data-ui-i18n="解绑设备">解绑设备</button>
 </div>
 <dialog id="device-info" class="device-dialog device-info-dialog" aria-labelledby="info-title">
-  <header><h2 id="info-title" data-ui-i18n="设备信息">设备信息</h2><button type="button" id="info-close" aria-label="关闭设备信息" data-ui-attrs="{&quot;aria-label&quot;:&quot;关闭设备信息&quot;}" data-ui-i18n="关闭">关闭</button></header>
+  <header><h2 id="info-title" data-ui-i18n="设备信息">设备信息</h2><button type="button" id="info-close" class="dialog-close" aria-label="关闭设备信息" data-ui-attrs="{&quot;aria-label&quot;:&quot;关闭设备信息&quot;}" >×</button></header>
   <dl id="device-details" class="device-details"></dl><h3 data-ui-i18n="媒体能力">媒体能力</h3>
   <div class="media-tabs" role="tablist" aria-label="媒体场景" data-ui-attrs="{&quot;aria-label&quot;:&quot;媒体场景&quot;}">
     <button type="button" role="tab" id="tab-stream" data-scene="stream" aria-controls="media-details" aria-selected="true" data-ui-i18n="实时查看">实时查看</button>
@@ -140,9 +129,9 @@
 <!-- TOAST -->
 <div id="toast" class="fixed bottom-[100px] left-1/2 bg-gray-900 text-white text-sm px-5 py-2.5 rounded-full pointer-events-none whitespace-nowrap z-[300] border border-transparent"></div>
 
-<script src="/static/device-presentation.js?v=baae8f7354bb"></script>
-<script src="/static/devices.js?v=1016bd04e7f9"></script>
+<script src="/static/device-presentation.js?v=8e9dc43c2baf"></script>
+<script src="/static/devices.js?v=39c07fa85c84"></script>
 <link rel="stylesheet" href="/static/recognition.css?v=23d3d12c7f76">
-<script src="/static/recognition.js?v=bd0b56046f59"></script>
+<script src="/static/recognition.js?v=1deb6866f6c0"></script>
 </body>
 </html>

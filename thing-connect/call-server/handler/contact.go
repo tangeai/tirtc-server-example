@@ -429,62 +429,14 @@ func (s *Server) listVoipContacts(ctx context.Context, deviceID string) ([]voipC
 	var rows []voipContact
 	if err := s.db.SelectContext(ctx, &rows,
 		`SELECT auth.id, auth.wx_open_id, auth.wx_app_id, auth.wx_model_id,
-		        COALESCE(profile.remark, auth.remark) AS remark
+		        auth.device_remark AS remark
 		   FROM voip_device_auth auth
-		   LEFT JOIN voip_user_profile profile
-		     ON profile.wx_open_id=auth.wx_open_id AND profile.wx_app_id=auth.wx_app_id
-			  WHERE auth.device_id=? AND auth.auth_status='active'
+					  WHERE auth.device_id=? AND auth.auth_status='active'
 		  ORDER BY auth.created_at DESC`,
 		deviceID); err != nil {
 		return nil, fmt.Errorf("listVoipContacts: %w", err)
 	}
 	return rows, nil
-}
-
-// setVoipRemark changes the contact name of one mini-program user globally.
-// Every authorization for the same (wx_open_id, wx_app_id) receives the same
-// value, regardless of which device/H5 entry performed the last write.
-func (s *Server) setVoipRemark(ctx context.Context, id int64, remark string) ([]string, error) {
-	tx, err := s.db.BeginTxx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("setVoipRemark begin: %w", err)
-	}
-	defer tx.Rollback()
-
-	var identity struct {
-		WxOpenID string `db:"wx_open_id"`
-		WxAppID  string `db:"wx_app_id"`
-	}
-	if err := tx.GetContext(ctx, &identity,
-		`SELECT wx_open_id, wx_app_id FROM voip_device_auth WHERE id=? FOR UPDATE`, id); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, errContactNotExist
-		}
-		return nil, fmt.Errorf("setVoipRemark identity: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO voip_user_profile (wx_open_id, wx_app_id, remark)
-		 VALUES (?, ?, ?)
-		 ON DUPLICATE KEY UPDATE remark=VALUES(remark)`,
-		identity.WxOpenID, identity.WxAppID, remark); err != nil {
-		return nil, fmt.Errorf("setVoipRemark profile: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE voip_device_auth SET remark=? WHERE wx_open_id=? AND wx_app_id=?`,
-		remark, identity.WxOpenID, identity.WxAppID); err != nil {
-		return nil, fmt.Errorf("setVoipRemark authorizations: %w", err)
-	}
-
-	var deviceIDs []string
-	if err := tx.SelectContext(ctx, &deviceIDs,
-		`SELECT DISTINCT device_id FROM voip_device_auth WHERE wx_open_id=? AND wx_app_id=?`,
-		identity.WxOpenID, identity.WxAppID); err != nil {
-		return nil, fmt.Errorf("setVoipRemark devices: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("setVoipRemark commit: %w", err)
-	}
-	return deviceIDs, nil
 }
 
 func minStr(a, b string) string {

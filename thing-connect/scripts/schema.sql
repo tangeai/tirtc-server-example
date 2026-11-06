@@ -140,6 +140,7 @@ CREATE TABLE IF NOT EXISTS voip_device_auth (
     wx_open_id  VARCHAR(64) NOT NULL,
     wx_app_id   VARCHAR(64) NOT NULL DEFAULT '',
     wx_model_id VARCHAR(64) NOT NULL DEFAULT '',
+    device_remark VARCHAR(64) NOT NULL DEFAULT '' COMMENT '当前设备对该微信联系人的独立备注，空值表示未设置',
     remark      VARCHAR(64) NOT NULL DEFAULT '' COMMENT '备注名',
     authorized_device_name VARCHAR(64) NOT NULL DEFAULT '' COMMENT '最近一次微信授权时的设备名称快照',
     auth_status VARCHAR(16) NOT NULL DEFAULT 'active' COMMENT 'active/invalid',
@@ -167,6 +168,7 @@ CREATE TABLE IF NOT EXISTS ai_user_role (
     id         BIGINT      NOT NULL AUTO_INCREMENT,
     user_id    BIGINT      NOT NULL COMMENT '用户ID',
     role_id    VARCHAR(64) NOT NULL COMMENT '探鸽云端角色ID',
+    deleting TINYINT(1) NOT NULL DEFAULT 0 COMMENT '角色删除中标记，未完成时禁止设备应用',
     created_at DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     UNIQUE KEY uq_ai_user_role (user_id, role_id)
@@ -177,6 +179,7 @@ CREATE TABLE IF NOT EXISTS ai_device_role (
     device_id  VARCHAR(64) NOT NULL,
     role_id    VARCHAR(64) NOT NULL COMMENT '探鸽云端角色ID',
     user_id    BIGINT      NOT NULL COMMENT '绑定操作人',
+    binding_revision BIGINT NOT NULL DEFAULT 0 COMMENT '设备归属代次',
     created_at DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
@@ -478,7 +481,9 @@ INSERT IGNORE INTO schema_migrations (component, version) VALUES
     ('core', 5),
     ('core', 6),
     ('core', 7),
-    ('core', 8);
+    ('core', 8),
+    ('core', 9),
+    ('core', 10), ('core', 11);
 CREATE TABLE IF NOT EXISTS ai_recognition_policy (
  device_id VARCHAR(64) NOT NULL COMMENT '设备标识',
  enabled BOOLEAN NOT NULL DEFAULT FALSE COMMENT '是否启用媒体识别',
@@ -570,3 +575,34 @@ CREATE TABLE IF NOT EXISTS recognition_outbox (
  delivered BOOLEAN NOT NULL DEFAULT FALSE COMMENT 'Broker是否已接收',
  KEY idx_recognition_delivery(delivered,next_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='持久化结果和配置通知，有限重试后查询补偿';
+
+
+CREATE TABLE IF NOT EXISTS voip_remark_outbox (
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT '通知事件ID',
+    device_id VARCHAR(20) NOT NULL COMMENT '需刷新联系人缓存的设备ID',
+    peer_id VARCHAR(64) NOT NULL COMMENT '微信联系人OpenID',
+    attempts INT NOT NULL DEFAULT 0 COMMENT '已失败次数，最多记录7次',
+    next_attempt_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '下次投递时间',
+    PRIMARY KEY (id),
+    KEY idx_voip_remark_due (next_attempt_at, id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='设备独立备注的缓存刷新通知';
+
+
+CREATE TABLE IF NOT EXISTS ai_cloud_role_ref (
+    device_id VARCHAR(64) NOT NULL COMMENT '云端关联或待确认关联的设备ID',
+    role_id VARCHAR(64) NOT NULL COMMENT '被引用的角色ID',
+    user_id BIGINT NOT NULL COMMENT '发起关联的用户ID',
+    PRIMARY KEY (device_id, role_id),
+    KEY idx_ai_cloud_role (role_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='云端角色关联的持久化删除保护';
+
+CREATE TABLE IF NOT EXISTS ai_cloud_role_target (
+ device_id VARCHAR(64) NOT NULL PRIMARY KEY COMMENT '设备 ID',
+ user_id BIGINT NOT NULL COMMENT '目标所属用户',
+ binding_revision BIGINT NOT NULL COMMENT '设备归属代次',
+ role_id VARCHAR(64) NOT NULL DEFAULT '' COMMENT '目标角色 ID',
+ remove_role TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否清除云端角色',
+ attempts INT NOT NULL DEFAULT 0 COMMENT '对账重试次数',
+ next_attempt_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '下次对账时间',
+ KEY idx_ai_cloud_role_target_due(next_attempt_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='设备代次下的云端角色目标及持久化对账队列';

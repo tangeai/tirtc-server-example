@@ -6,8 +6,8 @@
   <meta name="referrer" content="no-referrer">
   <script src="/static/js/mini-program-page.js?v=b30453999596"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title data-ui-i18n="智能体配置 — 探鸽 · 小钛">智能体配置 — 探鸽 · 小钛</title>
-  <link rel="stylesheet" href="/static/css/tailwind.css">
+  <title data-ui-i18n="智能体配置 — 小钛控制台">智能体配置 — 小钛控制台</title>
+  <link rel="stylesheet" href="/static/css/tailwind.css?v=15627deec0a4">
   <style>
     .thin-scroll::-webkit-scrollbar { width: 4px; }
     .thin-scroll::-webkit-scrollbar-track { background: transparent; }
@@ -18,28 +18,33 @@
     html[lang="en"] #voice-lang-filter { flex-wrap: wrap; }
     html[lang="en"] #voice-lang-filter button { white-space: nowrap; }
     .mini-program input, .mini-program textarea, .mini-program select { font-size: 16px; }
+    [hidden] { display:none !important; }
+    #editor-form { padding-bottom:140px; }
+    .mini-program #editor-form { padding-bottom:calc(140px + env(safe-area-inset-bottom)); }
+    #role-save-bar { position:fixed;bottom:0;left:340px;right:0;z-index:40;background:white;border-top:1px solid #d1d5db;padding:14px 16px calc(14px + env(safe-area-inset-bottom));box-shadow:0 -4px 16px #00000008; }
+    .role-save-inner { max-width:576px;margin:auto;display:flex;align-items:center;justify-content:space-between;gap:12px; }
+    @media(max-width:639px){#role-save-bar{left:0}.role-save-inner{flex-wrap:wrap}.role-save-inner>div:last-child{margin-left:auto}}
   </style>
-  <script src="/static/user-shell.js?v=a0238275b6ec"></script>
+  <script src="/static/user-shell.js?v=118621c9e6ba"></script>
 </head>
 <body class="bg-gray-50 min-h-screen font-sans">
 
 <!-- TOPBAR -->
 <header class="sticky top-0 z-50 flex items-center justify-between h-[56px] px-4 sm:px-8 bg-white border-b border-gray-200 max-sm:h-[50px] max-sm:px-3.5">
   <div class="flex items-center gap-2 sm:gap-3">
-    <a href="/devices" class="flex items-center gap-1 text-sm text-gray-400 hover:text-gray-600 transition-colors max-sm:text-xs">
+    <a href="/devices" aria-label="返回设备列表" data-ui-attrs='{"aria-label":"返回设备列表"}' class="flex items-center gap-1 text-sm text-gray-400 hover:text-gray-600 transition-colors max-sm:text-xs">
       <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
-      <span class="max-sm:hidden" data-ui-i18n="返回">返回</span>
+      <span class="max-sm:hidden" data-ui-i18n="返回设备列表">返回设备列表</span>
     </a>
     <span class="w-px h-5 bg-gray-200 max-sm:hidden"></span>
     <div class="flex items-center gap-1.5 sm:gap-2">
-      <span class="text-xs text-gray-400" data-ui-i18n="设备">设备</span>
+      <span class="text-xs text-gray-500 truncate max-w-[100px]" id="header-device-name" data-ui-i18n="设备">设备</span>
       <span class="font-mono text-xs sm:text-sm font-medium text-gray-900 truncate max-w-[120px] sm:max-w-none" id="header-device-id">—</span>
     </div>
   </div>
   <div class="flex items-center gap-1.5 sm:gap-2" id="header-current-role">
-    <span class="w-[6px] h-[6px] sm:w-[7px] sm:h-[7px] rounded-full bg-emerald-500"></span>
     <span class="text-[11px] sm:text-xs text-gray-400 max-sm:hidden" data-ui-i18n="当前角色">当前角色</span>
-    <span class="text-xs sm:text-sm font-medium text-emerald-600 truncate max-w-[80px] sm:max-w-none" id="header-role-name" data-ui-i18n="未绑定">未绑定</span>
+    <span class="text-xs sm:text-sm font-medium text-emerald-600 truncate max-w-[110px] sm:max-w-none" id="header-role-name" data-ui-i18n="未绑定">未绑定</span>
   </div>
 <button type="button" data-language-toggle class="text-xs text-gray-500 px-2 py-1.5 border border-gray-200 rounded-lg shrink-0">English</button></header>
 
@@ -57,6 +62,9 @@
       </div>
     </div>
 
+    <div id="role-feedback" role="alert" hidden class="mx-3 my-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 break-words"></div>
+    <div id="role-binding-status" role="status" hidden class="mx-3 my-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800"></div>
+    <p class="px-4 pb-3 text-xs text-gray-500" data-ui-i18n="点击角色查看配置，切换仅影响当前设备。">点击角色查看配置，切换仅影响当前设备。</p>
     <!-- Agent list -->
     <div class="flex-1 overflow-y-auto thin-scroll px-2 sm:px-3 pb-2" id="agent-list">
       <!-- JS populated -->
@@ -79,10 +87,12 @@
     <div class="hidden max-sm:flex items-center gap-1.5 px-3.5 py-2.5 border-b border-gray-100 bg-white sticky top-0 z-10" id="mobile-back">
       <button onclick="showList()" class="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700">
         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
-        <span data-ui-i18n="返回列表">返回列表</span>
+        <span data-ui-i18n="返回角色列表">返回角色列表</span>
       </button>
     </div>
 
+    <p id="role-loading" hidden role="status" class="p-4 text-sm text-gray-500" data-ui-i18n="正在加载角色详情…">正在加载角色详情…</p>
+    <div id="editor-feedback" hidden role="alert" class="sticky top-10 sm:top-0 z-20 mx-3 my-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 break-words"></div>
     <!-- Empty state -->
     <div id="editor-empty" class="flex flex-col items-center justify-center h-full text-center px-8">
       <div class="w-16 sm:w-20 h-16 sm:h-20 mb-4 sm:mb-5 rounded-2xl bg-emerald-50 border border-dashed border-emerald-200 flex items-center justify-center">
@@ -96,8 +106,9 @@
 
     <!-- Editor form -->
     <div id="editor-form" class="hidden max-w-[640px] mx-auto px-3 sm:px-8 py-4 sm:py-8">
+      <h1 id="editor-title" class="text-lg font-semibold mb-4"></h1>
       <!-- Default role banner -->
-      <div id="default-banner" class="hidden mb-4 px-4 py-2.5 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700" data-ui-i18n="⚠️ 这是系统默认角色，不可编辑。如需自定义，请新建角色后绑定到设备。">⚠️ 这是系统默认角色，不可编辑。如需自定义，请新建角色后绑定到设备。</div>
+      <div id="default-banner" class="hidden mb-4 px-4 py-2.5 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700" data-ui-i18n="这是系统预设，只能查看。需要修改时请新建自己的角色。">这是系统预设，只能查看。需要修改时请新建自己的角色。</div>
       <div class="bg-white border border-gray-200 rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-sm">
         <!-- Avatar -->
         <div class="mb-5 sm:mb-6">
@@ -140,9 +151,12 @@
             class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 sm:px-3.5 py-2 sm:py-2.5 text-sm text-gray-900 outline-none focus:border-emerald-400 focus:bg-white transition-all placeholder:text-gray-400" data-ui-attrs="{&quot;placeholder&quot;:&quot;用户连接时智能体说的第一句话&quot;}">
         </div>
 
+        <section class="mb-4">
         <!-- Voice Selector -->
         <div class="mb-4 sm:mb-5">
           <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1 sm:mb-1.5 tracking-wide" data-ui-i18n="语音">语音</label>
+          <input id="voice-search" type="search" oninput="renderVoiceOptions()" placeholder="搜索声音" data-ui-attrs='{"placeholder":"搜索声音"}' class="w-full border border-gray-200 rounded-lg px-3 py-2 mb-2">
+          <p id="voice-empty" class="text-xs text-gray-500"></p>
           <!-- Language filter -->
           <div class="flex gap-1.5 mb-2" id="voice-lang-filter">
             <button onclick="filterVoiceLang('')" data-lang="" class="px-2.5 py-1 text-[11px] rounded-full border bg-emerald-50 border-emerald-300 text-emerald-700 font-medium transition-colors" data-ui-i18n="全部">全部</button>
@@ -165,6 +179,7 @@
             </button>
           </div>
           <audio id="voice-audio" class="hidden" onended="onVoicePreviewEnded()" onerror="onVoicePreviewEnded()"></audio>
+          <details class="mt-3"><summary class="cursor-pointer text-sm text-gray-500" data-ui-i18n="高级语音设置">高级语音设置</summary>
           <!-- Rate & Pitch -->
           <div class="grid grid-cols-2 gap-x-4 sm:gap-x-6 gap-y-2 mt-3">
             <div>
@@ -174,7 +189,7 @@
               </div>
               <input type="range" id="field-rate" min="0.5" max="2.0" step="0.1" value="1.0"
                 oninput="$('label-rate').textContent = this.value"
-                class="w-full h-1.5 rounded-full appearance-none bg-gray-200 cursor-pointer accent-emerald-500">
+                class="w-full h-1.5 rounded-full appearance-none bg-gray-200 cursor-pointer accent-emerald-500"><div class="relative text-xs text-gray-400 mt-2 flex justify-between"><span data-ui-i18n="慢">慢</span><span style="position:absolute;left:33.333%;transform:translateX(-50%)" data-ui-i18n="标准">标准</span><span data-ui-i18n="快">快</span></div>
             </div>
             <div>
               <div class="flex items-center justify-between mb-0.5">
@@ -183,11 +198,14 @@
               </div>
               <input type="range" id="field-pitch" min="0.5" max="2.0" step="0.1" value="1.0"
                 oninput="$('label-pitch').textContent = this.value"
-                class="w-full h-1.5 rounded-full appearance-none bg-gray-200 cursor-pointer accent-emerald-500">
+                class="w-full h-1.5 rounded-full appearance-none bg-gray-200 cursor-pointer accent-emerald-500"><div class="relative text-xs text-gray-400 mt-2 flex justify-between"><span data-ui-i18n="低">低</span><span style="position:absolute;left:33.333%;transform:translateX(-50%)" data-ui-i18n="标准">标准</span><span data-ui-i18n="高">高</span></div>
             </div>
           </div>
+          </details>
         </div>
 
+        </section>
+        <details class="mb-4 border border-gray-200 rounded-xl p-3"><summary class="cursor-pointer font-medium" data-ui-i18n="模型与记忆">模型与记忆</summary>
         <!-- Service Config -->
         <div class="mb-4 sm:mb-5">
           <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1 sm:mb-1.5 tracking-wide" data-ui-i18n="模型">模型</label>
@@ -200,6 +218,17 @@
           </select>
         </div>
 
+        <!-- 长期记忆 -->
+        <div class="flex items-center gap-2 mb-4 sm:mb-5">
+          <span class="text-[11px] sm:text-xs font-medium text-gray-500" data-ui-i18n="长期记忆">长期记忆</span>
+          <label class="relative w-9 h-5 rounded-full bg-gray-200 transition-colors has-[:checked]:bg-emerald-500 cursor-pointer">
+            <input type="checkbox" id="field-memory" class="sr-only peer">
+            <div class="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform peer-checked:translate-x-4"></div>
+          </label>
+        </div>
+
+        </details>
+        <details class="mb-4 border border-gray-200 rounded-xl p-3"><summary class="cursor-pointer font-medium" data-ui-i18n="知识库">知识库</summary>
         <!-- Knowledge Base -->
         <div class="mb-4 sm:mb-5">
           <label class="block text-[11px] sm:text-xs font-medium text-gray-500 mb-1 sm:mb-1.5 tracking-wide" data-ui-i18n="知识库">知识库</label>
@@ -237,15 +266,8 @@
         <!-- Divider -->
         <div class="border-t border-gray-100 my-4 sm:my-6"></div>
 
-        <!-- 长期记忆 -->
-        <div class="flex items-center gap-2 mb-4 sm:mb-5">
-          <span class="text-[11px] sm:text-xs font-medium text-gray-500" data-ui-i18n="长期记忆">长期记忆</span>
-          <label class="relative w-9 h-5 rounded-full bg-gray-200 transition-colors has-[:checked]:bg-emerald-500 cursor-pointer">
-            <input type="checkbox" id="field-memory" class="sr-only peer">
-            <div class="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform peer-checked:translate-x-4"></div>
-          </label>
-        </div>
-
+        </details>
+        <details class="mb-4 border border-gray-200 rounded-xl p-3"><summary class="cursor-pointer font-medium" data-ui-i18n="工具与插件">工具与插件</summary>
         <!-- MCP 工具 & 设备插件 -->
         <div class="grid grid-cols-2 gap-x-6 sm:gap-x-8 gap-y-4 sm:gap-y-5">
           <div class="flex flex-col gap-1.5">
@@ -262,26 +284,30 @@
           </div>
         </div>
 
+        </details>
+        <p class="text-xs text-gray-500 mb-3" data-ui-i18n="保存角色会影响所有使用该角色的设备；应用到设备只切换当前设备。">保存角色会影响所有使用该角色的设备；应用到设备只切换当前设备。</p>
         <!-- Action buttons -->
         <div class="flex gap-3 mt-6 sm:mt-8 pt-4 sm:pt-6 border-t border-gray-100">
-          <button onclick="saveAgent()" id="btn-save"
-            class="flex-1 py-2.5 rounded-lg bg-emerald-500 text-white text-sm font-bold hover:bg-emerald-600 active:scale-[0.99] transition-all tracking-wide" data-ui-i18n="保存">保存</button>
           <button onclick="deleteAgent()" id="btn-delete"
             class="px-4 sm:px-5 py-2.5 rounded-lg border border-red-200 text-red-500 text-sm font-medium hover:bg-red-50 hover:border-red-300 active:scale-[0.99] transition-all" data-ui-i18n="删除">删除</button>
         </div>
 
-        <!-- Bind to device -->
-        <button onclick="bindToDevice()" id="btn-bind"
-          class="w-full mt-3 sm:mt-4 py-2.5 rounded-lg border border-emerald-300 text-emerald-600 text-sm font-medium hover:bg-emerald-50 hover:border-emerald-400 active:scale-[0.99] transition-all" data-ui-i18n="绑定到此设备">绑定到此设备</button>
       </div>
     </div>
   </section>
+<div id="role-save-bar" hidden role="region" aria-label="角色修改" data-ui-attrs='{"aria-label":"角色修改"}'>
+  <div class="role-save-inner">
+    <div><strong class="text-sm" data-ui-i18n="有未保存修改">有未保存修改</strong><p class="text-xs text-gray-500 mt-1" data-ui-i18n="保存会影响使用此角色的所有设备。">保存会影响使用此角色的所有设备。</p></div>
+    <div class="flex gap-2 shrink-0"><button id="btn-discard" type="button" onclick="discardRoleDraft()" class="px-4 py-2 text-sm rounded-lg border border-gray-300 bg-white disabled:opacity-50" data-ui-i18n="放弃修改">放弃修改</button><button id="btn-save" type="button" onclick="saveAgent()" class="px-4 py-2 text-sm rounded-lg bg-emerald-600 text-white disabled:opacity-50" data-ui-i18n="保存角色">保存角色</button></div>
+  </div>
+</div>
 </main>
 
 <!-- MCP TOOL MODAL -->
-<div id="mcp-tool-modal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-[200] items-center justify-center p-4">
+<dialog aria-modal="true" aria-labelledby="mcp-tool-modal-title" id="mcp-tool-modal" style="width:100%;height:100%;max-width:none;max-height:none;margin:0;border:0" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-[200] items-center justify-center p-4">
   <div class="bg-white rounded-2xl w-full max-w-[560px] max-sm:max-w-[calc(100vw-32px)] max-h-[90vh] overflow-y-auto thin-scroll shadow-xl">
     <div class="p-5 sm:p-6">
+      <button type="button" onclick="closeMcpToolModal()" class="dialog-close float-right" aria-label="关闭弹窗" data-ui-attrs="{&quot;aria-label&quot;:&quot;关闭弹窗&quot;}">×</button>
       <h2 class="text-base sm:text-lg font-bold text-gray-900 mb-4" id="mcp-tool-modal-title" data-ui-i18n="新增 MCP 工具">新增 MCP 工具</h2>
 
       <div class="mb-4">
@@ -333,12 +359,13 @@
       </div>
     </div>
   </div>
-</div>
+</dialog>
 
 <!-- DEVICE PLUGIN MODAL -->
-<div id="plugin-modal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-[200] items-center justify-center p-4">
+<dialog aria-modal="true" aria-labelledby="plugin-modal-title" id="plugin-modal" style="width:100%;height:100%;max-width:none;max-height:none;margin:0;border:0" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-[200] items-center justify-center p-4">
   <div class="bg-white rounded-2xl w-full max-w-[720px] max-sm:max-w-[calc(100vw-32px)] max-h-[90vh] overflow-y-auto thin-scroll shadow-xl">
     <div class="p-5 sm:p-6">
+      <button type="button" onclick="closePluginModal()" class="dialog-close float-right" aria-label="关闭弹窗" data-ui-attrs="{&quot;aria-label&quot;:&quot;关闭弹窗&quot;}">×</button>
       <h2 class="text-base sm:text-lg font-bold text-gray-900 mb-4" id="plugin-modal-title" data-ui-i18n="新增设备端插件">新增设备端插件</h2>
 
       <div class="mb-4">
@@ -410,12 +437,13 @@
       </div>
     </div>
   </div>
-</div>
+</dialog>
 
 <!-- KNOWLEDGE INDEX MODAL -->
-<div id="knowledge-modal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-[200] items-center justify-center p-4">
+<dialog aria-modal="true" aria-labelledby="knowledge-modal-title" id="knowledge-modal" style="width:100%;height:100%;max-width:none;max-height:none;margin:0;border:0" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-[200] items-center justify-center p-4">
   <div class="bg-white rounded-2xl w-full max-w-[520px] max-sm:max-w-[calc(100vw-32px)] max-h-[90vh] overflow-y-auto thin-scroll shadow-xl">
     <div class="p-5 sm:p-6">
+      <button type="button" onclick="closeKnowledgeModal()" class="dialog-close float-right" aria-label="关闭弹窗" data-ui-attrs="{&quot;aria-label&quot;:&quot;关闭弹窗&quot;}">×</button>
       <h2 class="text-base sm:text-lg font-bold text-gray-900 mb-4" id="knowledge-modal-title" data-ui-i18n="创建知识库">创建知识库</h2>
 
       <div class="mb-4">
@@ -445,7 +473,7 @@
       </div>
     </div>
   </div>
-</div>
+</dialog>
 
 <!-- TOAST -->
 <div id="toast" class="fixed bottom-6 sm:bottom-8 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-xs sm:text-sm px-4 sm:px-5 py-2.5 rounded-full pointer-events-none whitespace-nowrap z-[300] opacity-0 transition-opacity duration-200 border border-transparent"></div>
@@ -464,8 +492,12 @@ let defaultRoleId = '';
 let defaultRole = null;
 let isEditingDefault = false;
 let selectingRole = 0;
+let loadingRole = false;
 let savingRole = false;
 let bindingRole = false;
+let switchingRole = false;
+let switchingTarget = null;
+let boundRoleLookup = 'loading';
 let editorDirty = false;
 let voices = [];
 let voiceLang = '';
@@ -482,6 +514,8 @@ let rolePluginCandidates = [];
 
 // ── Modal editing state ──
 let editingMcpToolId = null;
+let mcpModalRequest = 0;
+let knowledgeModalRequest = 0;
 let editingMcpConfig = null;
 let editingPluginId = null;
 let pluginModalRequest = 0;
@@ -515,8 +549,53 @@ async function api(path, opts = {}) {
   }
 }
 
+function setEditorDirty(value) {
+  editorDirty = value;
+  updateEditorActions();
+}
+
+function updateEditorActions() {
+  const bar = $('role-save-bar');
+  if (!bar) return;
+  const mobileList = isMobile() && $('editor-panel').classList.contains('max-sm:hidden');
+  bar.hidden = !editorDirty || isEditingDefault || mobileList;
+  $('toast').style.bottom = bar.hidden ? '' : (bar.offsetHeight + 16) + 'px';
+  $('btn-save').disabled = savingRole || bindingRole || loadingRole || isEditingDefault;
+  $('btn-discard').disabled = savingRole || bindingRole || loadingRole;
+  const role = agents.find(item => item.id === currentAgentId);
+  WebI18n.bindText($('editor-title'), () => role ? WebI18n.t('正在查看：{p0}', {p0:role.name}) : WebI18n.t('新建角色'), 'textContent');
+}
+
+async function discardRoleDraft() {
+  if (savingRole || bindingRole || !editorDirty) return;
+  if (!(await confirmLeaveDraft())) return;
+  // selectAgent replaces the draft only after its detail request succeeds.
+  if (currentAgentId) await selectAgent(currentAgentId, true);
+  else { setEditorDirty(false); await newAgent(); }
+}
+
+function clearRoleFeedback() {
+  for (const id of ['role-feedback','editor-feedback']) {const element=$(id);if(element){element.hidden=true;element.replaceChildren();}}
+}
+
+function roleError(message) {
+  const modal = document.querySelector('dialog[open]');
+  let element = modal?.querySelector('[data-modal-feedback]');
+  if (modal && !element) {
+    element = document.createElement('p'); element.dataset.modalFeedback = '';
+    element.className = 'mt-3 text-sm text-red-700 break-words'; element.setAttribute('role','alert');
+    (modal.querySelector('h2')?.parentElement || modal).append(element);
+  }
+  element ||= $('role-feedback');
+  if (!element) return;
+  WebI18n.bindText(element, () => typeof message === 'function' ? message() : WebI18n.t(message), 'textContent');
+  element.hidden = false;
+  if (!modal) {const inline=$('editor-feedback');if(inline){WebI18n.bindText(inline,()=>typeof message==='function'?message():WebI18n.t(message),'textContent');inline.hidden=false;}}
+}
+
 // ── Toast ──
 function toast(msg, error = false) {
+  if (error && typeof roleError === 'function') roleError(msg);
   const el = $('toast');
   WebI18n.bindText(el, () => (typeof msg === "function" ? msg() : WebI18n.t(msg)), "textContent");
   el.style.borderColor = error ? 'rgba(239,68,68,0.4)' : 'rgba(16,185,129,0.4)';
@@ -535,22 +614,31 @@ async function init() {
   }
   WebI18n.bindText($('header-device-id'), () => (deviceId), "textContent");
 
+  try {
+    const devices = await api('/v1/user/device/list');
+    if (devices.code === 200 && Array.isArray(devices.data)) {
+      const device = devices.data.find(item => item.device_id === deviceId);
+      if (device) WebI18n.bindText($('header-device-name'), () => device.device_name || WebI18n.t('未命名设备'), 'textContent');
+    }
+  } catch { /* Device ID remains visible if its optional display name cannot be read. */ }
+
   // Load bound role (also reveals default_role_id)
   const bindData = await api('/v1/ai/device/' + encodeURIComponent(deviceId) + '/role');
   if (bindData.code !== 200) throw new Error(WebI18n.t("无法读取设备角色"));
   if (bindData.code === 200) {
-    if (bindData.data?.role_id) boundRoleId = bindData.data.role_id;
+    boundRoleId = bindData.data?.role_id || '';
     defaultRoleId = bindData.data?.default_role_id || '';
   }
 
-  // Fetch default role (with fallback if cloud API is unreachable)
+  // Keep failed default-role reads distinct from successfully loaded presets.
   if (defaultRoleId) {
-    const defData = await api('/v1/ai/roles/default');
+    let defData;
+    try { defData = await api('/v1/ai/roles/default'); } catch { defData = {code:50300}; }
     if (defData.code === 200 && defData.data) {
       defaultRole = defData.data;
     } else {
       // API unreachable — show placeholder until cloud API is available
-      defaultRole = { id: defaultRoleId, get name() { return WebI18n.t("默认智能体"); }, agent_config: { get prompt() { return WebI18n.t("系统预置的默认 AI 角色"); } }, user_params: { get description() { return WebI18n.t("系统默认"); }, interrupt_mode: 'auto' } };
+      defaultRole = { unavailable: true, id: defaultRoleId, get name() { return WebI18n.t("默认智能体"); }, agent_config: { get prompt() { return WebI18n.t("系统预置的默认 AI 角色"); } }, user_params: { get description() { return WebI18n.t("系统默认"); }, interrupt_mode: 'auto' } };
     }
   }
 
@@ -558,10 +646,31 @@ async function init() {
   await Promise.all([loadAgents(), loadVoices(), loadKnowledgeIndexes(), loadMcpTools(), loadPlugins()]);
 
   // Auto-select bound role or default role on page load
-  const targetId = boundRoleId || defaultRoleId;
-  if (targetId && agents.find(a => a.id === targetId)) {
-    await selectAgent(targetId);
-  }
+  const targetId = effectiveRoleId();
+  await resolveBoundRole();
+  renderAgentList();
+  updateHeaderBinding();
+  // Preview a known role when the current one cannot be read; never change the device binding.
+  const preview = agents.find(a => a.id === targetId && !a.unavailable) || agents.find(a => !a.unavailable);
+  if (preview) await selectAgent(preview.id);
+  if (boundRoleLookup === 'failed') toast('当前角色信息加载失败，请刷新后重试', true);
+
+}
+
+async function resolveBoundRole() {
+  const targetId = effectiveRoleId();
+  if (targetId && !agents.some(a => a.id === targetId && !a.unavailable)) {
+    try {
+      const detail = await api(targetId === defaultRoleId ? '/v1/ai/roles/default' : '/v1/ai/roles/' + encodeURIComponent(targetId));
+      if (detail.code === 200 && detail.data) {
+        const resolved = {...detail.data, id: targetId};
+        agents = agents.filter(a => a.id !== targetId);
+        agents.push(resolved);
+        if (targetId === defaultRoleId) defaultRole = resolved;
+        boundRoleLookup = 'loaded';
+      } else boundRoleLookup = [40300,40400].includes(detail.code) ? 'unavailable' : 'failed';
+    } catch { boundRoleLookup = 'failed'; }
+  } else boundRoleLookup = 'loaded';
 }
 
 function isDefaultRole(id) { return defaultRole && id === defaultRole.id; }
@@ -589,6 +698,7 @@ function showEditor() {
   $('editor-panel').classList.remove('max-sm:hidden');
   $('mobile-back').classList.add('max-sm:flex');
   $('mobile-back').classList.remove('hidden');
+  updateEditorActions();
 }
 
 function showList() {
@@ -596,6 +706,7 @@ function showList() {
   $('list-panel').classList.remove('max-sm:hidden');
   $('mobile-back').classList.remove('max-sm:flex');
   $('mobile-back').classList.add('hidden');
+  updateEditorActions();
 }
 
 // ── Render ──
@@ -606,38 +717,53 @@ function escapeText(value) {
 function renderAgentList() {
   const query = ($('search-input').value || '').toLowerCase();
   const filtered = agents.filter(a =>
-    !query || a.name.toLowerCase().includes(query) || (a.user_params?.description || '').toLowerCase().includes(query)
+    !query || (a.name || '').toLowerCase().includes(query) || (a.user_params?.description || '').toLowerCase().includes(query)
   );
 
   const container = $('agent-list');
   if (!filtered.length) {
-    container.innerHTML = "<p class=\"text-center text-xs text-gray-400 py-12\"><span data-ui-i18n=\"没有匹配的智能体\">没有匹配的智能体</span></p>";
+    container.replaceChildren();
+    const message = document.createElement('p'); message.className='text-center text-sm text-gray-500 py-6';
+    WebI18n.bindText(message, () => WebI18n.t(query ? '没有匹配的角色' : '暂无角色，可新建自己的角色'), 'textContent');
+    const action = document.createElement('button'); action.className='block mx-auto px-4 py-2 text-sm text-emerald-700';
+    WebI18n.bindText(action, () => WebI18n.t(query ? '清除搜索' : '新建角色'), 'textContent');
+    action.onclick = () => {if(query){$('search-input').value='';renderAgentList();$('search-input').focus();}else newAgent();};
+    container.append(message, action);
     return;
   }
 
   container.innerHTML = filtered.map(a => `
     <div class="group flex items-start gap-2.5 sm:gap-3 px-2.5 sm:px-3 py-2.5 sm:py-3 rounded-lg cursor-pointer mb-1 transition-all
-      ${currentAgentId === a.id ? 'bg-emerald-50 border border-emerald-200' : 'border border-transparent hover:bg-gray-50 hover:border-gray-200'}"
+      ${a.id === effectiveRoleId() && !a.unavailable ? 'bg-emerald-50 border border-emerald-300 border-l-4 border-l-emerald-500' : (currentAgentId === a.id ? 'bg-white border border-gray-500' : 'border border-gray-200 hover:bg-gray-50')}"
       data-role-id="${escapeText(a.id)}">
       <div class="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-emerald-100 to-emerald-200 border border-emerald-300 flex items-center justify-center text-lg sm:text-xl flex-shrink-0">
         AI
       </div>
       <div class="flex-1 min-w-0">
-        <div class="flex items-center gap-1.5 sm:gap-2">
-          <span class="text-[13px] sm:text-sm font-medium text-gray-800 truncate">${escapeText(a.name)}</span>
-          ${isDefaultRole(a.id) ? "<span class=\"flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-200\"><span data-ui-i18n=\"默认\">默认</span></span>" : ''}
-          ${a.id === effectiveRoleId() ? "<span class=\"flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-200\"><span data-ui-i18n=\"使用中\">使用中</span></span>" : ''}
+        <div class="flex flex-wrap items-center gap-1.5 sm:gap-2">
+          <button type="button" data-view-role="${escapeText(a.id)}" class="text-[13px] sm:text-sm font-medium text-gray-800 truncate text-left hover:underline">${escapeText(a.name)}</button>
+          ${isDefaultRole(a.id) ? "<span class=\"flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-200\"><span data-ui-i18n=\"系统预设\">系统预设</span></span>" : '<span class="text-[10px] text-gray-400" data-ui-i18n="我的角色">我的角色</span>'}
+          ${a.id === effectiveRoleId() && !a.unavailable ? "<span class=\"flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded-full text-emerald-800 bg-emerald-100 border border-emerald-200\"><span aria-hidden=\"true\">✓</span> <span data-ui-i18n=\"当前设备使用中\">当前设备使用中</span></span>" : ''}
         </div>
         <p class="text-[11px] sm:text-xs text-gray-400 mt-0.5 truncate">${a.user_params?.description || a.agent_config?.prompt?.slice(0, 40) ? escapeText(a.user_params?.description || a.agent_config?.prompt?.slice(0, 40)) : WebI18n.mark("暂无描述")}</p>
+        ${a.id !== effectiveRoleId() && !a.unavailable ? `<button type="button" data-switch-role="${escapeText(a.id)}" class="mt-3 w-full rounded-lg border border-emerald-300 py-2 text-xs font-medium text-emerald-700 bg-white hover:bg-emerald-50 disabled:opacity-50" data-ui-i18n="切换到此角色">切换到此角色</button>` : ''}
       </div>
     </div>
   `).join('');
   container.querySelectorAll('[data-role-id]').forEach(row => {
-    row.onclick = () => selectAgent(row.dataset.roleId);
+    row.onclick = event => {
+      if (event.target.closest('[data-switch-role]')) return;
+      selectAgent(row.dataset.roleId);
+    };
   });
+  container.querySelectorAll('[data-switch-role]').forEach(button => {
+    button.onclick = event => { event.stopPropagation(); switchDeviceRole(button.dataset.switchRole); };
+  });
+  updateBindButton();
 }
 
 function setFieldsReadonly(readonly) {
+  $('btn-save').disabled = readonly;
   ['field-name','field-desc','field-prompt','field-welcome','field-voice','field-model','field-rate','field-pitch','field-knowledge-index','field-memory'].forEach(id => {
     const el = $(id);
     if (!el) return;
@@ -662,13 +788,19 @@ function setFieldsReadonly(readonly) {
   onKnowledgeIndexChange();
 }
 
-async function selectAgent(id) {
+async function selectAgent(id, discardConfirmed = false) {
   if (savingRole || bindingRole) return;
-  if (editorDirty && !confirm(WebI18n.t("当前修改尚未保存，确定切换角色吗？"))) return;
+  if (!discardConfirmed && !(await confirmLeaveDraft())) return;
   const request = ++selectingRole;
   let a = agents.find(x => x.id === id);
   if (!a) return;
+  if (a.unavailable) { toast('角色信息未加载，请重试', true); return; }
   if (!isDefaultRole(id)) {
+    loadingRole=true;
+    $('editor-form').inert=true;
+    $('editor-form').setAttribute('aria-busy','true');
+    $('role-loading').hidden=false;
+    updateEditorActions();
     try {
       const detail = await api('/v1/ai/roles/' + encodeURIComponent(id));
       if (request !== selectingRole) return;
@@ -681,10 +813,13 @@ async function selectAgent(id) {
     } catch {
       if (request === selectingRole) toast("角色详情加载失败，请检查网络后重试", true);
       return;
+    } finally {
+      if(request === selectingRole){loadingRole=false;$('editor-form').inert=false;$('editor-form').removeAttribute('aria-busy');$('role-loading').hidden=true;updateEditorActions();}
     }
   }
+  loadingRole=false;$('editor-form').inert=false;$('editor-form').removeAttribute('aria-busy');$('role-loading').hidden=true;
   currentAgentId = id;
-  editorDirty = false;
+  setEditorDirty(false);
   isEditingDefault = isDefaultRole(id);
 
   // Reset language filter so the agent's voice is always visible
@@ -734,10 +869,16 @@ async function selectAgent(id) {
   }
 
   setFieldsReadonly(isEditingDefault);
-  if (a.service_config?.type && a.service_config.type !== 'custom-compose') {
-    ['field-model', 'field-voice', 'field-rate', 'field-pitch'].forEach(id => { $(id).disabled = true; });
+  const custom = !a.service_config?.type || a.service_config.type === 'custom-compose';
+  const config = a.service_config?.config;
+  if (!custom || (config?.llm?.provider && config.llm.provider !== 'ali-llm')) $('field-model').disabled = true;
+  if (!custom || (config?.tts?.provider && config.tts.provider !== 'ali-tts')) {
+    ['field-voice', 'field-rate', 'field-pitch'].forEach(id => { $(id).disabled = true; });
   }
   renderAgentList();
+  clearRoleFeedback();
+  updateEditorActions();
+  return true;
 }
 
 // Keep saved values visible even when a resource list is filtered or unavailable.
@@ -749,11 +890,12 @@ function setSelectValue(id, value) {
   select.value = value;
 }
 
-function newAgent() {
+async function newAgent() {
   if (savingRole || bindingRole) return;
-  if (editorDirty && !confirm(WebI18n.t("当前修改尚未保存，确定新建角色吗？"))) return;
+  if (!(await confirmLeaveDraft())) return;
   selectingRole += 1;
-  editorDirty = false;
+  loadingRole=false;$('editor-form').inert=false;$('editor-form').removeAttribute('aria-busy');$('role-loading').hidden=true;
+  setEditorDirty(false);
   currentAgentId = null;
   isEditingDefault = false;
   $('editor-empty').classList.add('hidden');
@@ -781,6 +923,8 @@ function newAgent() {
 
   setFieldsReadonly(false);
   renderAgentList();
+  clearRoleFeedback();
+  updateEditorActions();
 }
 
 async function loadVoices() {
@@ -802,7 +946,8 @@ function renderVoiceOptions() {
   // This editor configures ali-tts. The system catalog also contains voices
   // for other providers, which must not be offered as ali-tts choices.
   const filtered = voices.filter(v => v.model === 'cosyvoice-v3-flash' &&
-    (!voiceLang || v.languages?.includes(voiceLang)));
+    (!voiceLang || v.languages?.includes(voiceLang)) && (!($('voice-search').value.trim()) || [v.name,v.id].some(value=>String(value||'').toLowerCase().includes($('voice-search').value.trim().toLowerCase()))));
+  $('voice-empty').textContent = filtered.length ? '' : WebI18n.t('没有匹配的声音，当前选择保持不变');
   filtered.forEach(v => {
     const opt = document.createElement('option');
     opt.value = v.id;
@@ -913,9 +1058,14 @@ function onKnowledgeIndexChange() {
   }
 }
 
+$('mcp-tool-modal').addEventListener('cancel', event => {event.preventDefault();closeMcpToolModal();});
+$('plugin-modal').addEventListener('cancel', event => {event.preventDefault();closePluginModal();});
+$('knowledge-modal').addEventListener('cancel', event => {event.preventDefault();closeKnowledgeModal();});
 // ── Knowledge Index Modal ──
 
 function openKnowledgeModalForCreate() {
+  knowledgeModalRequest++;
+  if ($('knowledge-modal').dataset.submitting === 'true') return;
   editingKnowledgeIndexId = null;
   WebI18n.bindText($('knowledge-modal-title'), () => (WebI18n.t("创建知识库")), "textContent");
   WebI18n.bindText($('knowledge-modal-submit-btn'), () => (WebI18n.t("确认创建")), "textContent");
@@ -924,13 +1074,19 @@ function openKnowledgeModalForCreate() {
   $('knowledge-modal-files-section').classList.add('hidden');
   $('knowledge-modal').classList.remove('hidden');
   $('knowledge-modal').classList.add('flex');
+  const oldFeedback=$('knowledge-modal').querySelector('[data-modal-feedback]');if(oldFeedback)oldFeedback.hidden=true;
+  $('knowledge-modal').showModal();
 }
 
 async function editKnowledgeIndex() {
+  if ($('knowledge-modal').dataset.submitting === 'true') return;
   const idxId = $('field-knowledge-index').value;
   if (!idxId) return;
+  const request=++knowledgeModalRequest;
+  try {
   // List only carries {id,name}; fetch full detail (description, etc.) on demand.
   const res = await api('/v1/ai/knowledge/indexes/' + idxId);
+  if(request!==knowledgeModalRequest)return;
   const idx = (res.code === 200 && res.data) ? res.data : null;
   if (!idx) { toast(() => WebI18n.errorMessage(res, "加载失败"), true); return; }
   editingKnowledgeIndexId = idxId;
@@ -941,16 +1097,46 @@ async function editKnowledgeIndex() {
   $('knowledge-modal-files-section').classList.remove('hidden');
   $('knowledge-modal').classList.remove('hidden');
   $('knowledge-modal').classList.add('flex');
+  const oldFeedback=$('knowledge-modal').querySelector('[data-modal-feedback]');if(oldFeedback)oldFeedback.hidden=true;
+  $('knowledge-modal').showModal();
   loadKnowledgeModalFiles();
+  }catch{if(request===knowledgeModalRequest)toast('加载失败',true);}
 }
 
-function closeKnowledgeModal() {
+function closeKnowledgeModal(saved = false) {
+  if (!saved && $('knowledge-modal').dataset.submitting === 'true') return;
+  knowledgeModalRequest++;
   $('knowledge-modal').classList.add('hidden');
   $('knowledge-modal').classList.remove('flex');
+  $('knowledge-modal').close();
   editingKnowledgeIndexId = null;
 }
 
+async function runModalSave(id, action) {
+  const modal = $(id);
+  if (modal.dataset.submitting === 'true') return;
+  modal.dataset.submitting = 'true';
+  modal.setAttribute('aria-busy', 'true');
+  const feedback = modal.querySelector('[data-modal-feedback]');
+  if (feedback) feedback.hidden=true;
+  const progress = document.createElement('p');progress.className='mt-3 text-sm text-gray-600';progress.setAttribute('role','status');
+  WebI18n.bindText(progress,()=>WebI18n.t('正在保存，请稍候…'),'textContent');
+  (modal.querySelector('h2')?.parentElement || modal).append(progress);
+  const controls = [...modal.querySelectorAll('button, input, select, textarea')];
+  const disabled = controls.map(control => control.disabled);
+  controls.forEach(control => { control.disabled = true; });
+  try { await action(); }
+  catch { toast("保存失败，请检查网络后重试，当前填写内容已保留", true); }
+  finally {
+    delete modal.dataset.submitting;
+    modal.removeAttribute('aria-busy');
+    progress.remove();
+    controls.forEach((control, index) => { control.disabled = disabled[index]; });
+  }
+}
+
 async function saveKnowledgeModal() {
+  return runModalSave('knowledge-modal', async () => {
   const name = $('knowledge-modal-name').value.trim();
   const description = $('knowledge-modal-desc').value.trim();
   if (!name) { toast("请输入知识库名称", true); return; }
@@ -964,7 +1150,7 @@ async function saveKnowledgeModal() {
     if (res.code === 200) {
       await loadKnowledgeIndexes();
       $('field-knowledge-index').value = editingKnowledgeIndexId;
-      closeKnowledgeModal();
+      closeKnowledgeModal(true);
       toast("知识库已更新");
     } else {
       toast(() => WebI18n.errorMessage(res, "更新失败"), true);
@@ -978,18 +1164,19 @@ async function saveKnowledgeModal() {
       await loadKnowledgeIndexes();
       $('field-knowledge-index').value = res.data.index_id;
       onKnowledgeIndexChange();
-      closeKnowledgeModal();
+      closeKnowledgeModal(true);
       toast("知识库已创建");
     } else {
       toast(() => WebI18n.errorMessage(res, "创建失败"), true);
     }
   }
+  });
 }
 
 async function deleteKnowledgeIndexBtn() {
   const idxId = $('field-knowledge-index').value;
   if (!idxId) return;
-  if (!confirm(WebI18n.t("确定删除该知识库？已绑定此知识库的智能体将失去检索能力。"))) return;
+  if (!(await confirmAction(WebI18n.t("确定删除该知识库？已绑定此知识库的智能体将失去检索能力。")))) return;
   const res = await api('/v1/ai/knowledge/indexes/' + idxId, { method: 'DELETE' });
   if (res.code === 200) {
     await loadKnowledgeIndexes();
@@ -1070,7 +1257,7 @@ async function uploadKnowledgeFile() {
 }
 
 async function deleteKnowledgeFile(docId) {
-  if (!confirm(WebI18n.t("确定删除该文件？"))) return;
+  if (!(await confirmAction(WebI18n.t("确定删除该文件？")))) return;
   const data = await api('/v1/ai/knowledge/files/' + docId, { method: 'DELETE' });
   if (data.code === 200) {
     knowledgeFiles = knowledgeFiles.filter(f => f.document_id !== docId);
@@ -1161,7 +1348,7 @@ async function uploadKnowledgeModalFile() {
 }
 
 async function deleteKnowledgeModalFile(docId) {
-  if (!confirm(WebI18n.t("确定从该知识库移除该文件？文件本身保留在文件池。"))) return;
+  if (!(await confirmAction(WebI18n.t("确定从该知识库移除该文件？文件本身保留在文件池。")))) return;
   // Unbind = remove from document_ids (PUT full list). The file is not deleted.
   const idxRes = await api('/v1/ai/knowledge/indexes/' + editingKnowledgeIndexId);
   if (idxRes.code !== 200 || !idxRes.data) { toast("读取失败", true); return; }
@@ -1260,7 +1447,7 @@ function toggleMcp(toolId) {
   const idx = selectedMcpTools.indexOf(toolId);
   if (idx >= 0) selectedMcpTools.splice(idx, 1);
   else selectedMcpTools.push(toolId);
-  editorDirty = true;
+  setEditorDirty(true);
   renderMcpTools();
 }
 
@@ -1271,14 +1458,18 @@ function onMcpAuthTypeChange() {
 }
 
 async function openMcpToolModal(id) {
-  editingMcpToolId = id || null;
+  if ($('mcp-tool-modal').dataset.submitting === 'true') return;
+  const request = ++mcpModalRequest;
+  try {
   // List only carries {id,name}; fetch full config on demand when editing.
   let tool = null;
   if (id) {
     const res = await api('/v1/ai/mcp/app-tools/' + id);
+    if(request!==mcpModalRequest)return;
     if (res.code === 200 && res.data) tool = res.data;
   }
   if (id && !tool) { toast("读取工具配置失败，请重试", true); return; }
+  editingMcpToolId = id || null;
   editingMcpConfig = tool?.config || null;
   WebI18n.bindText($('mcp-tool-modal-title'), () => (tool ? WebI18n.t("编辑 MCP 工具") : WebI18n.t("新增 MCP 工具")), "textContent");
   WebI18n.bindText($('mcp-modal-submit-btn'), () => (tool ? WebI18n.t("确认修改") : WebI18n.t("确认创建")), "textContent");
@@ -1291,16 +1482,23 @@ async function openMcpToolModal(id) {
   onMcpAuthTypeChange();
   $('mcp-tool-modal').classList.remove('hidden');
   $('mcp-tool-modal').classList.add('flex');
+  const oldFeedback=$('mcp-tool-modal').querySelector('[data-modal-feedback]');if(oldFeedback)oldFeedback.hidden=true;
+  $('mcp-tool-modal').showModal();
+  } catch {if(request===mcpModalRequest)toast('读取工具配置失败，请重试',true);}
 }
 
-function closeMcpToolModal() {
+function closeMcpToolModal(saved = false) {
+  if (!saved && $('mcp-tool-modal').dataset.submitting === 'true') return;
+  mcpModalRequest++;
   $('mcp-tool-modal').classList.add('hidden');
   $('mcp-tool-modal').classList.remove('flex');
+  $('mcp-tool-modal').close();
   editingMcpToolId = null;
   editingMcpConfig = null;
 }
 
 async function saveMcpToolModal() {
+  return runModalSave('mcp-tool-modal', async () => {
   const name = $('mcp-modal-name').value.trim();
   const url = $('mcp-modal-url').value.trim();
   if (!name) { toast("请输入工具名称", true); return; }
@@ -1322,20 +1520,21 @@ async function saveMcpToolModal() {
     : await api('/v1/ai/mcp/app-tools', { method: 'POST', body: JSON.stringify({ config, enabled }) });
 
   if (res.code === 200 && res.data) {
-    closeMcpToolModal();
+    closeMcpToolModal(true);
     await loadMcpTools();
     toast(() => updating ? WebI18n.t("工具已更新") : WebI18n.t("工具已创建"));
   } else {
     toast(() => WebI18n.errorMessage(res, updating ? WebI18n.t("更新失败") : WebI18n.t("创建失败")), true);
   }
+  });
 }
 
 async function deleteMcpTool(id) {
-  if (!confirm(WebI18n.t("删除前请在所有角色中解除该 MCP 工具的引用。确定删除？"))) return;
+  if (!(await confirmAction(WebI18n.t("删除前请在所有角色中解除该 MCP 工具的引用。确定删除？")))) return;
   const res = await api('/v1/ai/mcp/app-tools/' + id, { method: 'DELETE' });
   if (res.code === 200) {
     mcpTools = mcpTools.filter(t => t.id !== id);
-    if (selectedMcpTools.includes(id)) editorDirty = true;
+    if (selectedMcpTools.includes(id)) setEditorDirty(true);
     selectedMcpTools = selectedMcpTools.filter(x => x !== id);
     roleMcpCandidates = roleMcpCandidates.filter(x => x !== id);
     renderMcpTools();
@@ -1400,7 +1599,7 @@ function togglePlugin(pluginId) {
   const idx = selectedPlugins.indexOf(pluginId);
   if (idx >= 0) selectedPlugins.splice(idx, 1);
   else selectedPlugins.push(pluginId);
-  editorDirty = true;
+  setEditorDirty(true);
   renderPlugins();
 }
 
@@ -1454,6 +1653,7 @@ function removeParamRow(tableId, index) {
 }
 
 async function openPluginModal(id) {
+  if ($('plugin-modal').dataset.submitting === 'true') return;
   const request = ++pluginModalRequest;
   // List only carries {id,name}; fetch full detail (action, params, etc.) on demand.
   let p = null;
@@ -1483,12 +1683,16 @@ async function openPluginModal(id) {
   renderParamTable('return');
   $('plugin-modal').classList.remove('hidden');
   $('plugin-modal').classList.add('flex');
+  const oldFeedback=$('plugin-modal').querySelector('[data-modal-feedback]');if(oldFeedback)oldFeedback.hidden=true;
+  $('plugin-modal').showModal();
 }
 
-function closePluginModal() {
+function closePluginModal(saved = false) {
+  if (!saved && $('plugin-modal').dataset.submitting === 'true') return;
   pluginModalRequest += 1;
   $('plugin-modal').classList.add('hidden');
   $('plugin-modal').classList.remove('flex');
+  $('plugin-modal').close();
   editingPluginId = null;
 }
 
@@ -1504,6 +1708,7 @@ function cleanParams(rows) {
 }
 
 async function savePluginModal() {
+  return runModalSave('plugin-modal', async () => {
   const name = $('plugin-modal-name').value.trim();
   const action = $('plugin-modal-action').value.trim();
   if (!name) { toast("请输入插件名称", true); return; }
@@ -1523,20 +1728,21 @@ async function savePluginModal() {
     : await api('/v1/ai/plugins', { method: 'POST', body: JSON.stringify(payload) });
 
   if (res.code === 200 && res.data) {
-    closePluginModal();
+    closePluginModal(true);
     await loadPlugins();
     toast(() => updating ? WebI18n.t("插件已更新") : WebI18n.t("插件已创建"));
   } else {
     toast(() => WebI18n.errorMessage(res, updating ? WebI18n.t("更新失败") : WebI18n.t("创建失败")), true);
   }
+  });
 }
 
 async function deletePlugin(id) {
-  if (!confirm(WebI18n.t("删除前请先在引用该插件的角色中关闭它并保存角色。确定删除该插件？"))) return;
+  if (!(await confirmAction(WebI18n.t("删除前请先在引用该插件的角色中关闭它并保存角色。确定删除该插件？")))) return;
   const data = await api('/v1/ai/plugins/' + id, { method: 'DELETE' });
   if (data.code === 200) {
     pluginTools = pluginTools.filter(p => p.id !== id);
-    if (selectedPlugins.includes(id)) editorDirty = true;
+    if (selectedPlugins.includes(id)) setEditorDirty(true);
     selectedPlugins = selectedPlugins.filter(x => x !== id);
     rolePluginCandidates = rolePluginCandidates.filter(x => x !== id);
     renderPlugins();
@@ -1550,33 +1756,42 @@ function filterAgents() { renderAgentList(); }
 
 // ── Bind button state ──
 function updateBindButton() {
-  const btn = $('btn-bind');
-  const isEffective = currentAgentId === effectiveRoleId();
-  btn.disabled = bindingRole || !currentAgentId || isEffective;
-  if (!currentAgentId) {
-    WebI18n.bindText(btn, () => (WebI18n.t("保存后再绑定")), "textContent");
-    btn.classList.add('opacity-50', 'pointer-events-none');
-  } else if (isEffective) {
-    WebI18n.bindText(btn, () => (WebI18n.t("✓ 当前设备使用中")), "textContent");
-    btn.classList.remove('opacity-50', 'pointer-events-none');
-    btn.classList.add('!border-emerald-400', '!text-emerald-600');
-  } else {
-    WebI18n.bindText(btn, () => (WebI18n.t("绑定到此设备")), "textContent");
-    btn.classList.remove('opacity-50', 'pointer-events-none', '!border-emerald-400', '!text-emerald-600');
-  }
+  document.querySelectorAll('[data-switch-role]').forEach(button => {
+    button.disabled = savingRole || bindingRole || switchingRole || button.dataset.switchRole === effectiveRoleId();
+    WebI18n.bindText(button,()=>WebI18n.t(bindingRole && button.dataset.switchRole === switchingTarget ? '切换中…' : '切换到此角色'),'textContent');
+  });
 }
 
 function updateHeaderBinding() {
   const roleId = effectiveRoleId();
-  const a = agents.find(x => x.id === roleId);
-  WebI18n.bindText($('header-role-name'), () => (a ? a.name : (roleId || WebI18n.t("未配置"))), "textContent");
+  const a = agents.find(x => x.id === roleId && !x.unavailable);
+  WebI18n.bindText($('header-role-name'), () => a ? a.name : !roleId ? WebI18n.t('未配置') : boundRoleLookup === 'unavailable' ? WebI18n.t('当前角色无法访问，请选择其他角色') : boundRoleLookup === 'failed' ? WebI18n.t('当前角色信息加载失败，请刷新后重试') : WebI18n.t('正在读取当前角色'), 'textContent');
+  $('header-role-name').style.color = a ? '#059669' : '#b45309';
+  const status = $('role-binding-status');
+  status.hidden = !roleId || !!a;
+  if (!status.hidden) {
+    status.replaceChildren();
+    const text = document.createElement('p');
+    WebI18n.bindText(text, () => boundRoleLookup === 'unavailable' ? WebI18n.t('当前角色无法访问，请选择其他角色') : boundRoleLookup === 'failed' ? WebI18n.t('当前角色信息加载失败，请重试；设备角色未改变。') : WebI18n.t('正在读取当前角色'), 'textContent');
+    status.append(text);
+    const retry = document.createElement('button');retry.className='mt-2 underline';retry.type='button';
+    WebI18n.bindText(retry,()=>WebI18n.t('重试'),'textContent');
+    retry.onclick=async()=>{retry.disabled=true;await resolveBoundRole();renderAgentList();updateHeaderBinding();};
+    status.append(retry);
+  }
 }
 
 // ── Actions ──
 async function saveAgent() {
-  if (savingRole || bindingRole) return;
+  if (savingRole || bindingRole || loadingRole) return;
   selectingRole += 1;
   savingRole = true;
+  clearRoleFeedback();
+  const fields = [...$('editor-form').querySelectorAll('input, textarea, select, button')];
+  const disabled = fields.map(field => field.disabled);
+  fields.forEach(field => {field.disabled=true;});
+  updateEditorActions();
+  updateBindButton();
   const button = $('btn-save');
   button.disabled = true;
   WebI18n.bindText(button, () => (WebI18n.t("保存中…")), "textContent");
@@ -1586,8 +1801,11 @@ async function saveAgent() {
     toast("保存失败，请检查网络后重试，当前填写内容已保留", true);
   } finally {
     savingRole = false;
+    fields.forEach((field,index)=>{field.disabled=disabled[index];});
+    updateEditorActions();
+    updateBindButton();
     button.disabled = isEditingDefault;
-    WebI18n.bindText(button, () => (WebI18n.t("保存")), "textContent");
+    WebI18n.bindText(button, () => (WebI18n.t("保存角色")), "textContent");
   }
 }
 
@@ -1600,8 +1818,12 @@ async function persistAgent() {
 
   const previous = agents.find(agent => agent.id === currentAgentId) || {};
   const chosenVoice = voices.find(voice => voice.id === $('field-voice').value);
-  const editsAliTTS = !previous.service_config?.type || previous.service_config.type === 'custom-compose';
-  if (editsAliTTS && chosenVoice?.model && chosenVoice.model !== 'cosyvoice-v3-flash') {
+  const custom = !previous.service_config?.type || previous.service_config.type === 'custom-compose';
+  const oldConfig = previous.service_config?.config || {};
+  const editsAliTTS = custom && (!oldConfig.tts?.provider || oldConfig.tts.provider === 'ali-tts');
+  const editsAliLLM = custom && (!oldConfig.llm?.provider || oldConfig.llm.provider === 'ali-llm');
+  const voiceChanged = !previous.id || $('field-voice').value !== (oldConfig.tts?.provider_params?.voice || previous.user_params?.voice || '');
+  if (editsAliTTS && voiceChanged && chosenVoice?.model && chosenVoice.model !== 'cosyvoice-v3-flash') {
     toast("当前音色不适用于阿里语音服务，请重新选择音色", true);
     return;
   }
@@ -1613,22 +1835,22 @@ async function persistAgent() {
       ...previous.agent_config,
       prompt: promptText,
       welcome_text: $('field-welcome').value.trim(),
-      ali_memory: { enable: $('field-memory').checked },
+      ali_memory: { ...previous.agent_config?.ali_memory, enable: $('field-memory').checked },
       mcp_tools: selectedMcpTools,
       device_plugins: selectedPlugins,
     },
     service_config: previous.service_config?.type && previous.service_config.type !== 'custom-compose' ? previous.service_config : {
       ...previous.service_config,
-      name: previous.service_config?.name || 'default',
+      ...(previous.service_config ? {} : {name: 'default'}),
       type: 'custom-compose',
       config: {
         ...previous.service_config?.config,
-        llm: {
+        llm: !editsAliLLM ? oldConfig.llm : {
           ...previous.service_config?.config?.llm,
           provider: 'ali-llm',
           provider_params: { ...previous.service_config?.config?.llm?.provider_params, model: $('field-model').value },
         },
-        tts: {
+        tts: !editsAliTTS ? oldConfig.tts : {
           ...previous.service_config?.config?.tts,
           provider: 'ali-tts',
           provider_params: {
@@ -1648,15 +1870,29 @@ async function persistAgent() {
     },
   };
 
-  if (payload.service_config.type === 'custom-compose' && !$('field-model').value) {
+  if (editsAliLLM && !$('field-model').value) {
     delete payload.service_config.config.llm;
   }
-  if (payload.service_config.type === 'custom-compose' && !$('field-voice').value) {
+  if (editsAliTTS && !$('field-voice').value) {
     delete payload.service_config.config.tts;
   }
 
+  if (previous.service_config && custom) {
+    if ($('field-model').value === (oldConfig.llm?.provider_params?.model || '')) {
+      if (oldConfig.llm) payload.service_config.config.llm = oldConfig.llm;
+      else delete payload.service_config.config.llm;
+    }
+    const oldTTS = oldConfig.tts?.provider_params;
+    if ($('field-voice').value === (oldTTS?.voice || previous.user_params?.voice || '') &&
+        Number($('field-rate').value) === Number(oldTTS?.rate ?? 1) &&
+        Number($('field-pitch').value) === Number(oldTTS?.pitch ?? 1)) {
+      if (oldConfig.tts) payload.service_config.config.tts = oldConfig.tts;
+      else delete payload.service_config.config.tts;
+    }
+  }
+
   const ragIdx = $('field-knowledge-index').value;
-  payload.agent_config.ali_rag = ragIdx ? { index_id: ragIdx } : null;
+  payload.agent_config.ali_rag = ragIdx ? { ...previous.agent_config?.ali_rag, index_id: ragIdx } : null;
 
   if (currentAgentId) {
     const res = await api('/v1/ai/roles/' + currentAgentId, { method: 'PUT', body: JSON.stringify(payload) });
@@ -1682,75 +1918,189 @@ async function persistAgent() {
   }
 
   renderAgentList();
-  editorDirty = false;
+  setEditorDirty(false);
   updateHeaderBinding();
   $('btn-delete').classList.remove('hidden');
   updateBindButton();
+}
+
+function confirmAction(message, allowConfirm = true) {
+  const dialog = document.createElement('dialog');
+  dialog.className = 'rounded-2xl p-5 w-full max-w-md';
+  dialog.style.maxWidth = 'min(448px, calc(100vw - 32px))';
+  dialog.style.maxHeight = 'calc(100dvh - 32px)';
+  const heading = WebI18n.t(allowConfirm ? '操作确认' : '暂时无法删除角色');
+  dialog.setAttribute('aria-label', heading);
+  const close = document.createElement('button');
+  close.className = 'dialog-close float-right';
+  close.textContent = '×';
+  close.setAttribute('aria-label', WebI18n.t('关闭弹窗'));
+  const text = document.createElement('p');
+  text.className = 'clear-both py-4 whitespace-pre-wrap break-words';
+  text.textContent = message;
+  const confirmButton = document.createElement('button');
+  confirmButton.className = 'px-4 py-2 rounded-lg bg-emerald-500 text-white';
+  confirmButton.textContent = WebI18n.t(allowConfirm ? '确认删除' : '知道了');
+  const cancel = document.createElement('button');
+  cancel.className = 'px-4 py-2 mr-2 rounded-lg border border-gray-200';
+  cancel.textContent = WebI18n.t('取消');
+  cancel.onclick = () => dialog.close();
+  const title = document.createElement('h2');
+  title.className = 'font-semibold text-lg';
+  title.textContent = heading;
+  const actions = document.createElement('div');
+  actions.className = 'flex justify-end gap-2';
+  dialog.append(close, title, text);
+  if (allowConfirm) actions.append(cancel);
+  actions.append(confirmButton);
+  dialog.append(actions);
+  document.body.append(dialog);
+  return new Promise(resolve => {
+    let accepted = false;
+    close.onclick = () => dialog.close();
+    confirmButton.onclick = () => { accepted = allowConfirm; dialog.close(); };
+    dialog.addEventListener('close', () => { dialog.remove(); resolve(accepted); }, {once:true});
+    dialog.showModal();
+    close.focus();
+  });
+}
+
+async function roleDevices(roleID) {
+  const result = await api('/v1/user/device/list');
+  if (result.code !== 200 || !Array.isArray(result.data)) throw Error('device list');
+  const devices = result.data;
+  const used = new Set();
+  // Bounded batches include offline devices, local selections and cloud bindings.
+  for (let index = 0; index < devices.length; index += 20) {
+    const batch = devices.slice(index, index + 20);
+    const local = await Promise.all(batch.map(device => api('/v1/ai/device/' + encodeURIComponent(device.device_id) + '/role')));
+    local.forEach((response, i) => {
+      if (response.code !== 200) throw Error('role selection');
+      if (response.data?.role_id === roleID) used.add(batch[i].device_id);
+    });
+    const cloud = await api('/v1/ai/device-roles/query', {method:'POST', body:JSON.stringify({device_ids:batch.map(device => device.device_id)})});
+    if (cloud.code !== 200 || !Array.isArray(cloud.data?.items)) throw Error('cloud bindings');
+    cloud.data.items.forEach(item => {if (item.role_id === roleID) used.add(item.device_id);});
+  }
+  return devices.filter(device => used.has(device.device_id));
+}
+
+function roleUsageMessage(devices) {
+  return WebI18n.t('角色正在使用或有未完成操作，请先解除设备关联') + '\n' +
+    devices.map(device => (device.device_name || WebI18n.t('未命名设备')) + ' (' + device.device_id + ')').join('\n');
 }
 
 async function deleteAgent() {
   if (savingRole || bindingRole) return;
   if (!currentAgentId) return;
   if (isEditingDefault) { toast("默认角色不可删除", true); return; }
-  if (!confirm(WebI18n.t("确定要删除这个智能体吗？已绑定此角色的设备将恢复默认角色。"))) return;
+  savingRole = true;
+  $('btn-delete').disabled = true;
+  try {
+    const used = await roleDevices(currentAgentId);
+    if (used.length) { await confirmAction(roleUsageMessage(used), false); return; }
+    if (!(await confirmAction(WebI18n.t("确定删除该角色？使用中的角色需先解除所有设备关联。")))) return;
+  } catch { toast("无法确认角色关联状态，请稍后重试", true); return; }
+  finally { savingRole = false; $('btn-delete').disabled = false; }
 
-  const res = await api('/v1/ai/roles/' + currentAgentId, { method: 'DELETE' });
+  savingRole=true; $('btn-delete').disabled=true;
+  let res;
+  try {res = await api('/v1/ai/roles/' + currentAgentId, { method: 'DELETE' });}
+  catch {toast("删除失败，请检查网络后重试",true);return;}
+  finally {savingRole=false;$('btn-delete').disabled=false;}
   if (res.code === 200) {
     agents = agents.filter(a => a.id !== currentAgentId);
-    if (boundRoleId === currentAgentId) {
-      if (deviceId) await api('/v1/ai/device/' + deviceId + '/role', { method: 'DELETE' });
-      boundRoleId = null;
-    }
     currentAgentId = null;
     renderAgentList();
     updateHeaderBinding();
-    editorDirty = false;
-    newAgent();
+    setEditorDirty(false);
+    await newAgent();
     $('editor-form').classList.add('hidden');
     $('editor-empty').classList.remove('hidden');
     if (isMobile()) showList();
     toast("已删除");
   } else {
-    toast(() => WebI18n.errorMessage(res, "删除失败"), true);
+    const devices = res.data && Array.isArray(res.data.devices) ? res.data.devices : [];
+    if (res.code === 40900) await confirmAction(roleUsageMessage(devices), false);
+    else toast(() => WebI18n.errorMessage(res, '删除失败'), true);
   }
 }
 
-async function bindToDevice() {
-  if (savingRole || bindingRole) return;
-  if (!currentAgentId || currentAgentId === effectiveRoleId()) return;
-  if (!deviceId) { toast("未指定设备", true); return; }
-  if (editorDirty) { toast("请先保存角色修改", true); return; }
+function confirmSwitchDraft(roleName) {
+  const dialog = document.createElement('dialog');
+  dialog.className = 'rounded-2xl p-5 w-full max-w-sm';
+  dialog.style.maxWidth = 'min(384px, calc(100vw - 32px))';
+  dialog.style.maxHeight = 'calc(100dvh - 32px)';
+  dialog.setAttribute('aria-label', WebI18n.t('修改尚未保存'));
+  const close = document.createElement('button');
+  close.className = 'dialog-close float-right'; close.textContent = '×';
+  close.setAttribute('aria-label', WebI18n.t('关闭弹窗'));
+  const title = document.createElement('h2'); title.className = 'font-semibold text-lg'; title.textContent = WebI18n.t('修改尚未保存');
+  const description = document.createElement('p'); description.className = 'clear-both py-4 text-sm text-gray-500';
+  description.textContent = WebI18n.t('切换到“{p0}”前，请处理当前角色的修改。', {p0: roleName});
+  dialog.append(close, title, description);
+  document.body.append(dialog);
+  return new Promise(resolve => {
+    let choice = 'keep';
+    const finish = value => { choice = value; dialog.close(); };
+    close.onclick = () => finish('keep');
+    for (const [value, label] of [['save','保存并切换'],['discard','放弃修改并切换'],['keep','继续编辑']]) {
+      const button = document.createElement('button');
+      button.className = 'block w-full rounded-lg px-4 py-3 mt-2 text-sm ' + (value === 'save' ? 'bg-emerald-500 text-white' : 'border border-gray-200');
+      button.textContent = WebI18n.t(label); button.onclick = () => finish(value); dialog.append(button);
+    }
+    dialog.addEventListener('close', () => { dialog.remove(); resolve(choice); }, {once:true});
+    dialog.showModal(); close.focus();
+  });
+}
 
-  bindingRole = true;
-  selectingRole += 1;
-  $('btn-bind').disabled = true;
+async function switchDeviceRole(roleID) {
+  if (savingRole || bindingRole || loadingRole || switchingRole || roleID === effectiveRoleId()) return;
+  const role = agents.find(item => item.id === roleID);
+  if (!role || !deviceId) return;
+  switchingRole = true;
+  switchingTarget = roleID;
+  clearRoleFeedback();
+  updateBindButton();
   try {
-    const selectingDefault = isDefaultRole(currentAgentId);
+    if (editorDirty) {
+      const choice = await confirmSwitchDraft(role.name);
+      if (choice === 'keep') return;
+      if (choice === 'save') {
+        await saveAgent();
+        if (editorDirty) return;
+      } else {
+        if (currentAgentId) {
+          if (!(await selectAgent(currentAgentId, true))) return;
+        } else {setEditorDirty(false); await newAgent();}
+      }
+    }
+    bindingRole = true;
+    updateBindButton();
+    updateEditorActions();
+    selectingRole += 1;
+    const selectingDefault = isDefaultRole(roleID);
     const res = await api('/v1/ai/device/' + encodeURIComponent(deviceId) + '/role', selectingDefault ? {
       method: 'DELETE',
-    } : {
-      method: 'PUT',
-      body: JSON.stringify({ role_id: currentAgentId }),
-    });
+    } : { method: 'PUT', body: JSON.stringify({role_id: roleID}) });
     if (res.code === 200) {
-      boundRoleId = selectingDefault ? '' : currentAgentId;
+      boundRoleId = selectingDefault ? '' : roleID;
       updateHeaderBinding();
-      renderAgentList();
-      updateBindButton();
-      toast(() => selectingDefault ? WebI18n.t("已恢复默认角色") : WebI18n.t("绑定成功"));
-    } else {
-      toast(() => WebI18n.errorMessage(res, "绑定失败"), true);
-    }
-  } catch {
-    toast("设置失败，请检查网络后重试", true);
-  } finally {
+      toast(() => WebI18n.t('已切换到“{p0}”', {p0: role.name}));
+    } else toast(() => WebI18n.errorMessage(res, '切换失败，请重试'), true);
+  } catch { toast('切换失败，请检查网络后重试', true); }
+  finally {
     bindingRole = false;
-    updateBindButton();
+    switchingRole = false;
+    switchingTarget = null;
+    renderAgentList();
+    updateEditorActions();
   }
 }
 
-$('editor-form').addEventListener('input', () => { editorDirty = true; });
-$('editor-form').addEventListener('change', () => { editorDirty = true; });
+['input','change'].forEach(type => $('editor-form').addEventListener(type, event => {
+  if (!isEditingDefault && event.target.id.startsWith('field-')) setEditorDirty(true);
+}));
 window.addEventListener('beforeunload', event => {
   if (!editorDirty) return;
   event.preventDefault();
@@ -1759,7 +2109,7 @@ window.addEventListener('beforeunload', event => {
 
 function initializePage() {
   init().catch(() => {
-    $('agent-list').replaceChildren();
+    if (!agents.length) $('agent-list').replaceChildren();
     const message = document.createElement('p');
     WebI18n.bindText(message, () => (WebI18n.t("角色加载失败，请检查网络后重试")), "textContent");
     message.style.cssText = 'padding:32px 16px;text-align:center;color:#666666;font-size:14px';
@@ -1770,6 +2120,28 @@ function initializePage() {
     $('agent-list').append(message, retry);
   });
 }
+let leaveDraftPromise = null;
+function confirmLeaveDraft() {
+  if (!editorDirty) return Promise.resolve(true);
+  if (leaveDraftPromise) return leaveDraftPromise;
+  leaveDraftPromise = new Promise(resolve => {
+    const dialog = document.createElement('dialog');
+    dialog.className = 'rounded-2xl p-6 max-w-sm';
+    const title = document.createElement('h2');title.textContent=WebI18n.t('修改尚未保存');
+    const finish = discard => {dialog.close();dialog.remove();leaveDraftPromise=null;resolve(discard);};
+    const close = document.createElement('button');close.textContent='×';close.setAttribute('aria-label',WebI18n.t('关闭弹窗'));close.className='dialog-close float-right';close.onclick=()=>finish(false);
+    const keep=document.createElement('button');keep.textContent=WebI18n.t('继续编辑');keep.className='px-4 py-3';keep.onclick=()=>finish(false);
+    const discard=document.createElement('button');discard.textContent=WebI18n.t('放弃修改');discard.className='px-4 py-3';discard.onclick=()=>finish(true);
+    dialog.append(close,title,keep,discard);dialog.oncancel=e=>{e.preventDefault();finish(false);};document.body.append(dialog);dialog.showModal();keep.focus();
+  });
+  return leaveDraftPromise;
+}
+document.addEventListener('click', async event => {
+  const target=event.target.closest('a[href],#user-logout');
+  if(!target || !editorDirty || event.ctrlKey || event.metaKey || target.target==='_blank')return;
+  event.preventDefault();event.stopImmediatePropagation();
+  if(await confirmLeaveDraft()){setEditorDirty(false);target.click();}
+},true);
 initializePage();
 </script>
 </body>

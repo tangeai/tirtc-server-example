@@ -16,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 
+	"thing-connect/internal/ai"
 	"thing-connect/internal/apiresp"
 	"thing-connect/internal/model"
 	"thing-connect/internal/tirtcapi"
@@ -391,6 +392,9 @@ func setupTestRouter(h *AgentHandler) *gin.Engine {
 	}
 	if h.roleStore == nil {
 		h.roleStore = &mockRoleBindingStore{allowAll: true}
+	}
+	if h.roles == nil {
+		h.SetRoles(ai.NewRoles(&fixtureRoleLifecycle{h: h, deleting: map[string]bool{}}, func() ai.RoleCloud { return tirtcapi.NewRoleCloud(h.api()) }))
 	}
 	jwtSecret := "test-secret"
 	h.Register(r, jwtSecret)

@@ -65,5 +65,7 @@
   "退出房间？": "Leave room?",
   "重新加载": "Reload",
   "首页": "Home",
-  "（无密码房间留空）": "(Leave empty for rooms without a password)"
+  "（无密码房间留空）": "(Leave empty for rooms without a password)",
+  "多人对讲 — 小钛控制台": "Group intercom — Xiaotai Console",
+  "刷新": "Refresh"
 }

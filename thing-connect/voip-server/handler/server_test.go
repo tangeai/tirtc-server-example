@@ -175,23 +175,6 @@ func TestInternalUnbindInvalidCredentialUsesBusinessCode(t *testing.T) {
 	}
 }
 
-func TestNormalizeAuthRemark(t *testing.T) {
-	remark, ok := normalizeAuthRemark("  小雨  ")
-	if !ok || remark != "小雨" {
-		t.Fatalf("normalizeAuthRemark = %q, %v; want 小雨, true", remark, ok)
-	}
-
-	remark, ok = normalizeAuthRemark("")
-	if !ok || remark != "" {
-		t.Fatalf("empty normalizeAuthRemark = %q, %v; want empty, true", remark, ok)
-	}
-
-	_, ok = normalizeAuthRemark(string(make([]rune, maxAuthRemarkChars+1)))
-	if ok {
-		t.Fatal("remark longer than 64 characters should be rejected")
-	}
-}
-
 func TestVideoUIProfile(t *testing.T) {
 	for _, rotation := range []int{0, 90, 180, 270} {
 		profile := json.RawMessage(fmt.Sprintf(`{"camera_rotation":%d}`, rotation))

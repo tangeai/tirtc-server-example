@@ -4,26 +4,26 @@
   <meta charset="UTF-8">
   <script src="/v1/call/config/language.js"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title data-ui-i18n="多人对讲 — 探鸽 · 小钛">多人对讲 — 探鸽 · 小钛</title>
-  <link rel="stylesheet" href="/static/css/tailwind.css">
+  <title data-ui-i18n="多人对讲 — 小钛控制台">多人对讲 — 小钛控制台</title>
+  <link rel="stylesheet" href="/static/css/tailwind.css?v=15627deec0a4">
   <style>[hidden] { display: none !important; }</style>
-  <script src="/static/user-shell.js?v=a0238275b6ec"></script>
+  <script src="/static/user-shell.js?v=118621c9e6ba"></script>
 </head>
 <body class="bg-gray-50 min-h-screen font-sans text-gray-900">
-<header class="sticky top-0 z-50 flex items-center justify-between h-[56px] px-4 sm:px-8 bg-white border-b border-gray-200 max-sm:h-[50px] max-sm:px-3.5">
+<header class="sticky top-0 z-50 flex items-center justify-between flex-wrap gap-2 min-h-[56px] py-3 px-4 sm:px-8 bg-white border-b border-gray-200 max-sm:min-h-[50px] max-sm:px-3.5">
   <div class="flex items-center gap-2 sm:gap-3 min-w-0">
-    <a href="/devices" aria-label="返回我的设备" class="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 transition-colors shrink-0" data-ui-attrs="{&quot;aria-label&quot;:&quot;返回我的设备&quot;}">
+    <a href="/devices" aria-label="返回设备列表" class="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 transition-colors shrink-0" data-ui-attrs="{&quot;aria-label&quot;:&quot;返回设备列表&quot;}">
       <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
-      <span data-ui-i18n="返回">返回</span>
+      <span data-ui-i18n="返回设备列表">返回设备列表</span>
     </a>
     <span class="w-px h-5 bg-gray-200"></span>
     <span class="text-sm font-semibold truncate" data-ui-i18n="多人对讲">多人对讲</span>
   </div>
-  <a href="/devices" class="text-sm text-gray-500 hover:text-gray-700 transition-colors shrink-0" data-ui-i18n="首页">首页</a>
-<button type="button" data-language-toggle class="text-xs text-gray-500 px-2 py-1.5 border border-gray-200 rounded-lg shrink-0">English</button></header>
+<button type="button" data-language-toggle class="text-xs text-gray-500 px-2 py-1.5 border border-gray-200 rounded-lg shrink-0">English</button><p id="room-device-context" class="w-full text-xs text-gray-500 break-all"></p>
+</header>
 <main class="max-w-[640px] mx-auto px-3.5 sm:px-8 pt-5 sm:pt-8 pb-12">
   <div class="mb-6">
-    <h1 class="text-2xl font-bold tracking-tight" data-ui-i18n="多人对讲">多人对讲</h1>
+    <div class="flex items-center justify-between"><h1 class="text-2xl font-bold tracking-tight" data-ui-i18n="多人对讲">多人对讲</h1><button id="refresh-room" type="button" class="text-sm px-3 py-2 border border-gray-200 rounded-lg" data-ui-i18n="刷新">刷新</button></div>
     <div class="flex items-start justify-between gap-3 mt-4">
       <div class="min-w-0">
         <p id="deviceName" class="text-sm font-semibold break-words" data-ui-i18n="正在加载设备…">正在加载设备…</p>
@@ -53,7 +53,7 @@
     </div>
     <p id="stateHelp" class="mt-2 text-sm text-gray-500 leading-relaxed"></p>
     <div class="flex gap-2.5 mt-6">
-      <a id="home" href="/devices" class="flex-1 text-center py-2.5 px-3 text-sm font-semibold text-white bg-emerald-500 rounded-lg hover:bg-emerald-600 transition-colors" data-ui-i18n="返回首页">返回首页</a>
+      <a id="home" href="/devices" class="flex-1 text-center py-2.5 px-3 text-sm font-semibold text-white bg-emerald-500 rounded-lg hover:bg-emerald-600 transition-colors" data-ui-i18n="返回设备列表">返回设备列表</a>
       <button id="leave" type="button" class="flex-1 py-2.5 px-3 text-sm font-medium text-red-600 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 transition-colors disabled:opacity-50" data-ui-i18n="退出房间">退出房间</button>
     </div>
   </section>
@@ -78,7 +78,7 @@
       <h2 class="text-base font-semibold" data-ui-i18n="加入房间">加入房间</h2>
       <p class="text-sm text-gray-500 mt-1 mb-5" data-ui-i18n="输入已有房间的房间号，与其他设备对讲。">输入已有房间的房间号，与其他设备对讲。</p>
       <label for="roomCode" class="block text-xs font-medium text-gray-600 mb-1.5" data-ui-i18n="6 位房间号">6 位房间号</label>
-      <input id="roomCode" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" required autocomplete="off" placeholder="输入 6 位房间号" class="w-full px-3.5 py-2.5 text-base border border-gray-200 rounded-lg outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20" data-ui-attrs="{&quot;placeholder&quot;:&quot;输入 6 位房间号&quot;}">
+      <input id="roomCode" type="text" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" required autocomplete="off" placeholder="输入 6 位房间号" class="w-full px-3.5 py-2.5 text-base border border-gray-200 rounded-lg outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20" data-ui-attrs="{&quot;placeholder&quot;:&quot;输入 6 位房间号&quot;}">
       <label for="joinPassword" class="block text-xs font-medium text-gray-600 mt-4 mb-1.5"><span data-ui-i18n="房间密码">房间密码</span> <span class="font-normal text-gray-400" data-ui-i18n="（无密码房间留空）">（无密码房间留空）</span></label>
       <input id="joinPassword" type="password" inputmode="numeric" maxlength="4" pattern="[0-9]{4}" autocomplete="off" placeholder="输入 4 位数字密码" class="w-full px-3.5 py-2.5 text-base border border-gray-200 rounded-lg outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20" data-ui-attrs="{&quot;placeholder&quot;:&quot;输入 4 位数字密码&quot;}">
       <button id="joinSubmit" type="submit" class="w-full mt-5 py-2.5 text-sm font-semibold text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition-colors disabled:opacity-50 disabled:cursor-wait" data-ui-i18n="加入房间">加入房间</button>
@@ -90,6 +90,7 @@
   </div>
 </main>
 <dialog id="leaveDialog" aria-labelledby="leaveTitle" class="w-[360px] max-w-[calc(100vw-32px)] p-6 bg-white border border-gray-200 rounded-2xl shadow-xl backdrop:bg-black/50">
+  <button type="button" onclick="document.getElementById('leaveDialog').close()" class="dialog-close float-right" aria-label="关闭弹窗" data-ui-attrs="{&quot;aria-label&quot;:&quot;关闭弹窗&quot;}">×</button>
   <h2 id="leaveTitle" class="text-base font-semibold text-gray-900" data-ui-i18n="退出房间？">退出房间？</h2>
   <p id="leaveDescription" class="text-sm text-gray-500 leading-relaxed break-words mt-2 mb-5"></p>
   <div class="flex gap-2.5">
@@ -152,6 +153,7 @@
             const d = body.data.find((d) => d.device_id === device);
             if (!d) throw Error("设备不属于当前账号，请返回设备列表");
             deviceName = d.device_name || WebI18n.t("未命名设备");
+            WebI18n.bindText($("room-device-context"),()=>deviceName+" · "+device,"textContent");
             WebI18n.bindText($("deviceName"), () => (deviceName), "textContent");
             deviceReady = true;
             $("retry").hidden = true;
@@ -165,6 +167,26 @@
           }
         }
         $("retry").onclick = loadDevice;
+        $("refresh-room").onclick = async () => {$("refresh-room").disabled=true;try{await loadDevice();}finally{$("refresh-room").disabled=false;}};
+        const roomCodeInput = $("roomCode");
+        function filterRoomCode() {
+          const cursor = roomCodeInput.selectionStart ?? roomCodeInput.value.length;
+          const position = roomCodeInput.value.slice(0, cursor).replace(/[^0-9]/g, "").length;
+          roomCodeInput.value = roomCodeInput.value.replace(/[^0-9]/g, "").slice(0, 6);
+          roomCodeInput.setSelectionRange(Math.min(position, 6), Math.min(position, 6));
+        }
+        roomCodeInput.addEventListener("input", filterRoomCode);
+        roomCodeInput.addEventListener("change", filterRoomCode);
+        roomCodeInput.addEventListener("paste", (event) => {
+          if (!event.clipboardData) return;
+          event.preventDefault();
+          const digits = event.clipboardData.getData("text").replace(/[^0-9]/g, "");
+          const start = roomCodeInput.selectionStart ?? 0;
+          const end = roomCodeInput.selectionEnd ?? roomCodeInput.value.length;
+          const available = 6 - (roomCodeInput.value.length - (end - start));
+          roomCodeInput.setRangeText(digits.slice(0, Math.max(0, available)), start, end, "end");
+          filterRoomCode();
+        });
         document.querySelectorAll("[name=passwordMode]").forEach(
           (input) =>
             (input.onchange = () => {
@@ -314,6 +336,7 @@
         };
         $("join").onsubmit = (e) => {
           e.preventDefault();
+          if (!roomCodeInput.reportValidity()) return;
           change("join", {
             room_code: $("roomCode").value,
             password: $("joinPassword").value,
@@ -336,7 +359,7 @@
         } else if (!device) {
           $("loading").hidden = true;
           WebI18n.bindText($("deviceName"), () => (WebI18n.t("未选择设备")), "textContent");
-          message("请返回我的设备，选择一台设备后打开多人对讲");
+          message("请返回设备列表，选择一台设备后打开多人对讲");
         } else {
           loadDevice();
           addEventListener("pagehide", () => {

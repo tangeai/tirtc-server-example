@@ -39,8 +39,8 @@ test('explicit zero, false, empty video and missing data remain distinct', () =>
   assert.equal(rows['上行视频'], '未上报');
 });
 
-test('VoIP downlink video rotation uses product-facing labels and defaults to zero', () => {
-  for (const [value, expected] of [[undefined, '默认'], [0, '默认'], [1, '正向画面'], [2, '保留旋转画面']]) {
+test('VoIP downlink video rotation distinguishes missing values from explicit zero', () => {
+  for (const [value, expected] of [[undefined, '未上报'], [null, '未上报'], [0, '默认'], [1, '正向画面'], [2, '保留旋转画面']]) {
     const profile = {camera_rotation: 0};
     if (value !== undefined) profile.down_video_rotation = value;
     const rows = Object.fromEntries(view.mediaRows({voip: profile}, 'voip'));

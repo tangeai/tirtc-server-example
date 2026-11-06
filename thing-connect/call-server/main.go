@@ -30,6 +30,7 @@ import (
 	mysqlmigrate "thing-connect/internal/store/mysql/migrate"
 	"thing-connect/internal/tirtcapi"
 	"thing-connect/internal/userauth"
+	"thing-connect/internal/voip"
 	"thing-connect/internal/weblanguage"
 	"thing-connect/internal/webui"
 )
@@ -82,6 +83,9 @@ func main() {
 	servicestatus.RegisterHealth(r, probes)
 
 	callHTTP := callhandler.NewServer(cfg, sqlDB, rdb, broker, devStore)
+	remarks := voip.NewRemarks(mysqlstore.NewVoipRemarkStore(sqlDB), mqttc.NewRemarkNotifier(broker))
+	callHTTP.SetRemarks(remarks)
+	callHTTP.SetContactNames(mysqlstore.NewContactNamesStore(sqlDB))
 	callHTTP.Register(r)
 	dynamicClient, dynamicRefs, err := callDynamicConfig(dynamicClient, cfg.Tirtc, callHTTP)
 	if err != nil {
@@ -129,6 +133,8 @@ func main() {
 	dynamicRefs = append(dynamicRefs, roomRefs...)
 	callHTTP.SetIntercom(rooms)
 	callhandler.RegisterIntercom(r, cfg.JWTSecret, rooms)
+	remarksDone := make(chan struct{})
+	go func() { defer close(remarksDone); remarks.Run(statusCtx) }()
 	roomDone := make(chan struct{})
 	go func() {
 		defer close(roomDone)
@@ -169,6 +175,7 @@ func main() {
 	}
 	statusCancel()
 	<-roomDone
+	<-remarksDone
 	broker.Close()
 	if err := rdb.Close(); err != nil {
 		log.Printf("call-server close redis: %v", err)

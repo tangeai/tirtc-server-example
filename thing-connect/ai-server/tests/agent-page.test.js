@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 
-const html = fs.readFileSync(__dirname + '/../static/agent.html', 'utf8');
+const html = fs.readFileSync(__dirname + '/../../user-server/static/agent.html', 'utf8');
 function source(name) {
   const match = html.match(new RegExp(`((?:async )?function ${name}\\([\\s\\S]*?)(?=\\n(?:async )?function |\\n</script>)`));
   assert.ok(match, `missing function ${name}`);
@@ -14,7 +14,7 @@ function editor(previous = {}) {
   const fields = new Map();
   const element = id => {
     if (!fields.has(id)) fields.set(id, {
-      value: '', checked: false, disabled: false, options: [],
+      append() {}, querySelector() {return null;}, dataset: {}, setAttribute() {}, removeAttribute() {}, querySelectorAll() { return []; }, showModal() {}, close() {}, value: '', checked: false, disabled: false, options: [],
       classList: { add() {}, remove() {}, toggle() {} },
       add(option) { this.options.push(option); },
     });
@@ -22,9 +22,9 @@ function editor(previous = {}) {
   };
   const requests = [];
   const messages = [];
-  const context = { WebI18n: require("../../tests/helpers/web-i18n.cjs")(undefined, null, undefined, "ai"),
+  const context = { document: { createElement() {return {setAttribute() {},remove() {}};} }, updateEditorActions() {}, clearRoleFeedback() {}, WebI18n: require("../../tests/helpers/web-i18n.cjs")(undefined, null, undefined, "ai"),
     $: element, agents: previous.id ? [previous] : [],
-    currentAgentId: previous.id || null, isEditingDefault: false,
+    currentAgentId: previous.id || null, loadingRole: false, isEditingDefault: false,
     selectedMcpTools: ['mcp-1'], selectedPlugins: [], editorDirty: true,
     voices: [],
     Option: function(text, value) { this.text = text; this.value = value; },
@@ -43,7 +43,7 @@ function editor(previous = {}) {
   element('field-voice').value = 'voice-1';
   element('field-knowledge-index').value = 'index-1';
   vm.createContext(context);
-  vm.runInContext(source('persistAgent') + '\n' + source('setSelectValue'), context);
+  vm.runInContext(source('setEditorDirty') + '\n' + source('persistAgent') + '\n' + source('setSelectValue'), context);
   return { context, element, requests, messages };
 }
 
@@ -113,7 +113,7 @@ test('MCP editing preserves the transport configuration', async () => {
   });
   e.element('mcp-modal-name').value = 'weather';
   e.element('mcp-modal-url').value = 'https://example.com/mcp';
-  vm.runInContext(source('saveMcpToolModal'), e.context);
+  vm.runInContext(source('runModalSave') + '\n' + source('saveMcpToolModal'), e.context);
   await e.context.saveMcpToolModal();
   assert.equal(e.requests[0].body.config.type, 'streamableHttp');
   assert.equal(e.requests[0].body.config.enable, false);
@@ -122,7 +122,7 @@ test('MCP editing preserves the transport configuration', async () => {
 test('knowledge documents load subsequent pages and reject a failed page', async () => {
   const paths = [];
   let failSecondPage = false;
-  const context = { WebI18n: require("../../tests/helpers/web-i18n.cjs")(undefined, null, undefined, "ai"), async api(path) {
+  const context = { document: { createElement() {return {setAttribute() {},remove() {}};} }, updateEditorActions() {}, clearRoleFeedback() {}, WebI18n: require("../../tests/helpers/web-i18n.cjs")(undefined, null, undefined, "ai"), async api(path) {
     paths.push(path);
     if (path.includes('page=2')) {
       return failSecondPage ? { code: 50200 } : { code: 200, data: { items: [{ document_id: 'last' }], total: 2 } };
@@ -275,4 +275,84 @@ test('visible AI error toast switches language using the original business respo
   assert.equal(el.textContent,ui.errorMessage({code:40300}));
   ui.setLanguage('zh-CN');
   assert.equal(el.textContent,'无权操作该资源');
+});
+
+for (const providers of [['legacy-llm', 'legacy-tts'], ['ali-llm', 'ali-tts']]) {
+  test(`name-only edit preserves the exact service configuration for ${providers.join('/')}`, async () => {
+    const previous = {id:'existing', agent_config:{ali_memory:{enable:false,custom:'kept'},ali_rag:{index_id:'index-1',custom:'kept'}}, service_config:{type:'custom-compose',config:{
+      llm:{provider:providers[0],provider_params:{model:'existing-model',custom:'kept'}},
+      tts:{provider:providers[1],provider_params:{voice:'existing-voice',custom:'kept'}},
+      asr:{provider:'existing-asr'},
+    }}};
+    const e = editor(previous);
+    e.element('field-model').value='existing-model';
+    e.element('field-voice').value='existing-voice';
+    e.element('field-rate').value='1';
+    e.element('field-pitch').value='1';
+    await e.context.persistAgent();
+    assert.deepEqual(e.requests[0].body.service_config, previous.service_config);
+    assert.equal(e.requests[0].body.agent_config.ali_memory.custom, 'kept');
+    assert.equal(e.requests[0].body.agent_config.ali_rag.custom, 'kept');
+  });
+}
+
+test('unsupported providers cannot be overwritten even if controls are changed programmatically', async () => {
+  const previous={id:'old',service_config:{type:'custom-compose',config:{llm:{provider:'other-llm',provider_params:{model:'old'}},tts:{provider:'other-tts',provider_params:{voice:'old'}}}}};
+  const e=editor(previous);
+  await e.context.persistAgent();
+  assert.deepEqual(e.requests[0].body.service_config,previous.service_config);
+});
+
+test('resource submit locks controls, rejects repeated saves and restores the previous disabled state on failure', async () => {
+  const e=editor();
+  const controls=[{disabled:false},{disabled:true}];
+  e.element('modal').querySelectorAll=()=>controls;
+  vm.runInContext(source('runModalSave'),e.context);
+  let release, calls=0;
+  const first=e.context.runModalSave('modal',async()=>{calls++;await new Promise(resolve=>release=resolve);throw Error('network');});
+  assert.deepEqual(controls.map(x=>x.disabled),[true,true]);
+  await e.context.runModalSave('modal',async()=>{calls++;});
+  assert.equal(calls,1);
+  release();await first;
+  assert.deepEqual(controls.map(x=>x.disabled),[false,true]);
+  assert.equal(e.element('modal').dataset.submitting,undefined);
+  assert.equal(e.messages.at(-1).error,true);
+});
+
+test('role deletion preflight includes offline local and cloud references and fails closed on lookup errors', async () => {
+  const e=editor();
+  vm.runInContext(source('roleDevices'),e.context);
+  let fail=false;
+  e.context.api=async path=>{
+    if(path==='/v1/user/device/list')return {code:200,data:[{device_id:'offline',status:0},{device_id:'cloud',status:0}]};
+    if(path==='/v1/ai/device-roles/query')return fail?{code:50200}:{code:200,data:{items:[{device_id:'cloud',role_id:'old'}]}};
+    return {code:200,data:{role_id:path.includes('/offline/')?'old':''}};
+  };
+  assert.deepEqual(Array.from(await e.context.roleDevices('old'),x=>x.device_id),['offline','cloud']);
+  fail=true;
+  await assert.rejects(e.context.roleDevices('old'));
+});
+
+for (const scenario of [
+  {label:'missing list entry with valid detail',reply:{code:200,data:{id:'old',name:'Existing'}},state:'loaded'},
+  {label:'access denied',reply:{code:40300},state:'unavailable'},
+  {label:'not found',reply:{code:40400},state:'unavailable'},
+  {label:'upstream failed',reply:{code:50200},state:'failed'},
+  {label:'network timeout',reply:new Error('timeout'),state:'failed'},
+]) test(`current role lookup distinguishes ${scenario.label} without changing the binding`,async()=>{
+  const e=editor();const reads=[];
+  Object.assign(e.context,{agents:[],boundRoleId:'old',defaultRoleId:'preset',defaultRole:null,boundRoleLookup:'loading',effectiveRoleId(){return 'old';},async api(path,options){reads.push({path,options});if(scenario.reply instanceof Error)throw scenario.reply;return scenario.reply;}});
+  vm.runInContext(source('resolveBoundRole'),e.context);
+  await e.context.resolveBoundRole();
+  assert.equal(e.context.boundRoleLookup,scenario.state);
+  assert.equal(e.context.boundRoleId,'old');
+  assert.equal(reads[0].path,'/v1/ai/roles/old');assert.equal(reads[0].options,undefined);
+  assert.equal(e.context.agents.length,scenario.state==='loaded'?1:0);
+});
+
+test('unavailable preset retries through the default endpoint and replaces its placeholder',async()=>{
+  const e=editor();const paths=[];
+  Object.assign(e.context,{agents:[{id:'preset',unavailable:true}],defaultRoleId:'preset',defaultRole:{id:'preset',unavailable:true},boundRoleLookup:'failed',effectiveRoleId(){return 'preset';},async api(path){paths.push(path);return {code:200,data:{id:'canonical',name:'Preset'}};}});
+  vm.runInContext(source('resolveBoundRole'),e.context);await e.context.resolveBoundRole();
+  assert.deepEqual(paths,['/v1/ai/roles/default']);assert.equal(e.context.defaultRole.id,'preset');assert.equal(e.context.defaultRole.unavailable,undefined);assert.equal(e.context.agents.length,1);
 });

@@ -44,7 +44,7 @@ test('普通下拉只登录一次并读取一次 auth-list', async () => {
   assert.deepEqual(calls, {
     login: 1,
     wechatAuth: 1,
-    remark: 1,
+    remark: 0,
     authList: 1,
     reconcile: 1,
   })

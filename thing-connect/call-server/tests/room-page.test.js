@@ -2,13 +2,13 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const html = fs.readFileSync(require('node:path').join(__dirname, '../handler/room_page.html'), 'utf8');
+const html = fs.readFileSync(require('node:path').join(__dirname, '../../user-server/static/room.html'), 'utf8');
 const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 
 async function page(respond = async () => ({code: 200, data: {desired_state: 'joined', state: 'waiting_device', room_code: '001234'}}), readCurrent = null) {
   const nodes = new Map();
   const node = id => {
-    if (!nodes.has(id)) nodes.set(id, {isConnected: true, textContent: '', value: '', hidden: false, disabled: false, style: {}, focus() {}, showModal() {}, close() {}});
+    if (!nodes.has(id)) nodes.set(id, {isConnected: true, textContent: '', value: '', hidden: false, disabled: false, style: {}, focus() {}, addEventListener() {}, reportValidity() { return true; }, showModal() {}, close() {}});
     return nodes.get(id);
   };
   const buttons = [{disabled: false}, {disabled: false}];

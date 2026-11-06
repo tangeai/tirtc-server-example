@@ -63,3 +63,19 @@ func TestUploadBinaryBodyPreserved(t *testing.T) {
 		t.Errorf("Go 发送的 multipart body 丢失了高位字节；received=% x", received)
 	}
 }
+
+func TestLifecycleDeleteMissingRoleIsIdempotent(t *testing.T) {
+	for _, tt := range []struct {
+		status int
+		body   string
+	}{{404, "missing"}, {200, `{"code":404}`}} {
+		client := newDeleteTestClient(t, tt.status, tt.body)
+		if err := NewRoleCloud(client).Delete(context.Background(), "role_1"); err != nil {
+			t.Fatalf("retry of missing role: %v", err)
+		}
+	}
+	client := newDeleteTestClient(t, 503, `{"code":503}`)
+	if err := NewRoleCloud(client).Delete(context.Background(), "role_1"); err == nil {
+		t.Fatal("upstream outage must not be treated as deletion success")
+	}
+}

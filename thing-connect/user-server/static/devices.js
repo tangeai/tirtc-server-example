@@ -39,6 +39,7 @@ async function api(path, opts = {}) {
 }
 
 function toast(msg, error = false) {
+  if (error) deviceFeedback(msg);
   const el = $("toast");
   WebI18n.bindText(el, () => (WebI18n.t(msg)), "textContent");
   el.style.borderColor = error ? "rgba(239,68,68,0.4)" : "rgba(16,185,129,0.4)";
@@ -56,17 +57,20 @@ async function goAdd() {
 }
 
 async function loadDevices() {
+  $("devices-feedback").hidden = true;
+  $("devices-snapshot-notice").hidden = true;
   const generation = ++summaryGeneration;
   let devData;
   try {
     devData = await api("/v1/user/device/list");
   } catch {
-    toast("设备列表加载失败，请刷新", true);
+    if (generation !== summaryGeneration) return;
+    deviceFeedback("设备列表加载失败，请刷新", true);
     return;
   }
   if (generation !== summaryGeneration) return;
   if (devData.code !== 200) {
-    toast(WebI18n.errorMessage(devData, WebI18n.t("设备列表加载失败，请刷新")), true);
+    deviceFeedback(WebI18n.errorMessage(devData, WebI18n.t("设备列表加载失败，请刷新")), true);
     return;
   }
 
@@ -246,7 +250,7 @@ async function refreshSummaries() {
   }
 }
 function goRoom(id) {
-  location.href = "/v1/call/group/page?device_id=" + encodeURIComponent(id);
+  location.href = "/room?device_id=" + encodeURIComponent(id);
 }
 let selectedDeviceID = null;
 let menuTrigger = null;
@@ -367,7 +371,7 @@ function goLive(id) {
   location.href = "/player?device_id=" + encodeURIComponent(id);
 }
 function goConfig(id) {
-  location.href = "/v1/ai/agent?device_id=" + encodeURIComponent(id);
+  location.href = "/agent?device_id=" + encodeURIComponent(id);
 }
 function goContacts(id) {
   location.href = "/contacts?device_id=" + encodeURIComponent(id);
@@ -379,12 +383,14 @@ function updateNameCharCount() {
   $("name-char-count").classList.toggle("text-red-500", length > 13);
 }
 
+let nameModalGeneration = 0;
 function openNameModal(deviceID) {
   const device = devices.find((item) => item.device_id === deviceID);
   if (!device) {
     toast("未找到该设备，请刷新后重试", true);
     return;
   }
+  nameModalGeneration++;
   editingDeviceID = deviceID;
   $("device-name-input").value = device.device_name || "";
   WebI18n.bindText($("name-device-id"), () => (deviceID), "textContent");
@@ -392,19 +398,25 @@ function openNameModal(deviceID) {
   const modal = $("name-modal");
   modal.classList.remove("hidden");
   modal.classList.add("flex");
+  modal.showModal();
   setTimeout(() => $("device-name-input").focus(), 0);
 }
 
 function closeNameModal() {
+  nameModalGeneration++;
+  $("device-name-input").disabled = false;
   editingDeviceID = null;
   const modal = $("name-modal");
   modal.classList.add("hidden");
   modal.classList.remove("flex");
+  modal.close();
   $("name-save-button").disabled = false;
   WebI18n.bindText($("name-save-button"), () => (WebI18n.t("保存名称")), "textContent");
 }
 
 async function saveDeviceName() {
+  if ($("name-save-button").disabled) return;
+  const generation = nameModalGeneration;
   const deviceID = editingDeviceID;
   const deviceName = $("device-name-input").value.trim();
   if (!deviceID) return;
@@ -421,6 +433,7 @@ async function saveDeviceName() {
 
   const button = $("name-save-button");
   button.disabled = true;
+  $("device-name-input").disabled = true;
   WebI18n.bindText(button, () => (WebI18n.t("保存中…")), "textContent");
   try {
     const data = await api("/v1/user/device/name", {
@@ -428,10 +441,13 @@ async function saveDeviceName() {
       body: JSON.stringify({ device_id: deviceID, device_name: deviceName }),
     });
     if (data.code !== 200) throw new Error(WebI18n.errorMessage(data, WebI18n.t("保存失败")));
+    if (generation !== nameModalGeneration) { await loadDevices(); return; }
     closeNameModal();
     toast("设备名称已保存");
     await loadDevices();
   } catch (error) {
+    if (generation !== nameModalGeneration) return;
+    $("device-name-input").disabled = false;
     button.disabled = false;
     WebI18n.bindText(button, () => (WebI18n.t("保存名称")), "textContent");
     toast(error.message || WebI18n.t("保存失败"), true);
@@ -443,6 +459,7 @@ function askReset(deviceID) {
   const modal = $("reset-modal");
   modal.classList.remove("hidden");
   modal.classList.add("flex");
+  modal.showModal();
 }
 
 function closeModal() {
@@ -450,6 +467,7 @@ function closeModal() {
   const modal = $("reset-modal");
   modal.classList.add("hidden");
   modal.classList.remove("flex");
+  modal.close();
 }
 
 async function doReset() {
@@ -480,9 +498,9 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && !$("name-modal").classList.contains("hidden"))
     closeNameModal();
 });
-loadDevices();
 
 addEventListener("pagehide", () => {
+  saveDeviceSnapshot();
   summaryGeneration++;
 });
 
@@ -493,3 +511,70 @@ WebI18n.onChange(() => {
   $("device-details").innerHTML = DevicePresentation.deviceRows(device).map(([key, value]) => `<dt>${escapeHTML(key)}</dt><dd>${escapeHTML(value)}</dd>`).join("");
   showMedia(document.querySelector("[data-scene][aria-selected=true]")?.dataset.scene || "stream");
 });
+
+$("name-modal").addEventListener("cancel", event => {event.preventDefault();closeNameModal();});
+$("reset-modal").addEventListener("cancel", event => {event.preventDefault();closeModal();});
+
+function deviceFeedback(message, listFailed = false) {
+  const modal = document.querySelector("dialog[open]");
+  let target = modal?.querySelector("[data-device-feedback]");
+  if (modal && !target) {target=document.createElement("p");target.dataset.deviceFeedback="";target.className="mt-3 text-sm text-red-700";target.setAttribute("role","alert");(modal.querySelector("form") || modal).append(target);}
+  target ||= $("devices-feedback");
+  target.replaceChildren(); target.hidden = false;
+  const text = document.createElement('p');
+  WebI18n.bindText(text,()=>WebI18n.t(message),'textContent'); target.append(text);
+  if (listFailed) {
+    const retry = document.createElement('button');retry.className='mt-2 underline';
+    WebI18n.bindText(retry,()=>WebI18n.t('重试'),'textContent');
+    retry.onclick = async()=>{retry.disabled=true;await loadDevices();retry.disabled=false;};target.append(retry);
+    if (!devices.length) $('device-grid').replaceChildren();
+  }
+}
+
+let deviceSnapshotKey = null;
+function saveDeviceSnapshot() {
+  if (!deviceSnapshotKey) return;
+  if (!devices.length) {try{sessionStorage.removeItem(deviceSnapshotKey);sessionStorage.removeItem(deviceSnapshotKey+':away');}catch{}return;}
+  const entries = devices.map(device => {
+    // Only presentation data is kept in this tab; no tokens or credentials.
+    const data = {};
+    for (const key of ['device_id','device_name','online','mac','hardware','firmware_version','bind_time','profiles']) data[key]=device[key];
+    const card = cardFor(device.device_id);
+    const summaries = {};
+    for (const key of ['role','room','recognition']) summaries[key]=summaryBusy ? '' : card?.querySelector('[data-'+key+']')?.textContent || '';
+    return {data,summaries};
+  });
+  try { sessionStorage.setItem(deviceSnapshotKey, JSON.stringify({entries,language:document.documentElement.lang,scroll:scrollY}));sessionStorage.setItem(deviceSnapshotKey+':away','1'); } catch {}
+}
+
+async function startDeviceList() {
+  let restored = false;
+  try {
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token));
+    deviceSnapshotKey = 'device-list-v1:' + [...new Uint8Array(digest)].map(byte=>byte.toString(16).padStart(2,'0')).join('');
+    const referrer = document.referrer ? new URL(document.referrer) : null;
+    const returning = sessionStorage.getItem(deviceSnapshotKey+':away') === '1' || (referrer?.origin === location.origin && !['/','/devices','/login','/register'].includes(referrer.pathname));
+    if (returning && performance.getEntriesByType('navigation')[0]?.type !== 'reload') {
+      const saved = JSON.parse(sessionStorage.getItem(deviceSnapshotKey) || 'null');
+      if (saved?.entries?.length && saved.entries.every(entry=>typeof entry.data?.device_id === 'string')) {
+        devices = saved.entries.map(entry=>entry.data);
+        renderCards();
+        WebI18n.bindText($('device-count'),()=>`(${devices.length})`,'textContent');
+        for (const entry of saved.entries) {
+          const card = cardFor(entry.data.device_id);
+          for (const key of ['role','room','recognition']) {
+            const text = saved.language === document.documentElement.lang ? entry.summaries[key] : '';
+            WebI18n.bindText(card.querySelector('[data-'+key+']'),()=>text || WebI18n.t('请点击刷新获取状态'),'textContent');
+          }
+        }
+        $('devices-snapshot-notice').hidden=false;
+        requestAnimationFrame(()=>scrollTo(0,Number(saved.scroll)||0));
+        sessionStorage.removeItem(deviceSnapshotKey+':away');
+        restored=true;
+      }
+    }
+  } catch { /* First entry still loads normally if browser storage is unavailable. */ }
+  if (!restored) await loadDevices();
+}
+
+startDeviceList();

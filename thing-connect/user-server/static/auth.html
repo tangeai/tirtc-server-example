@@ -4,9 +4,12 @@
   <script src="/v1/config/language.js"></script>
   <link rel="icon" href="/static/favicon.ico?v=3" type="image/x-icon">
   <meta charset="utf-8">
+  <!-- Local documents are served by the existing /static route. -->
+  <meta name="auth-user-agreement" content="/static/legal/terms.html">
+  <meta name="auth-privacy-policy" content="/static/legal/privacy.html">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="登录 TiRTC 体验平台，添加模拟器或真实设备，验证设备音视频能力。">
-  <title data-ui-i18n="注册/登录 — 探鸽 · 小钛">注册/登录 — 探鸽 · 小钛</title>
+  <meta name="description" content="登录 小钛控制台，添加模拟器或真实设备，验证设备音视频能力。">
+  <title data-ui-i18n="注册/登录 — 小钛控制台">注册/登录 — 小钛控制台</title>
   <style>
     :root {
       --ink: #172026;
@@ -84,6 +87,10 @@
       justify-content: space-between;
       gap: 24px;
     }
+
+    .back-home { order: -1; }
+    .nav .brand { margin-right: auto; }
+    .nav [data-language-toggle] { padding: 7px 11px; border: 1px solid #dfe4e2; border-radius: 9px; background: white; color: #66746e; font-size: 13px; flex-shrink: 0; }
 
     .brand {
       display: inline-flex;
@@ -443,21 +450,28 @@
         padding: 0 10px;
       }
     }
+
+    .legal-consent { display:flex;align-items:flex-start;gap:9px;margin:18px 0;color:#52616b;font-size:13px;line-height:1.7; }
+    .legal-consent[hidden], .legal-links[hidden] { display:none; }
+    .legal-consent input { flex:none;width:18px;height:18px;margin:3px 0 0;accent-color:#059669;cursor:pointer; }
+    .legal-consent label { cursor:pointer; }
+    .legal-consent a, .legal-links a { color:#047857;text-decoration:underline;text-underline-offset:3px; }
+    .legal-links { font-size:13px;text-align:center;line-height:1.7;margin-top:18px; }
   </style>
   <link rel="stylesheet" href="/static/css/brand.css?v=2">
 </head>
 <body>
   <header class="site-header">
     <nav class="nav shell" aria-label="登录页导航" data-ui-attrs="{&quot;aria-label&quot;:&quot;登录页导航&quot;}">
-      <a class="brand" href="/" aria-label="返回探鸽 · 小钛首页" data-ui-attrs="{&quot;aria-label&quot;:&quot;返回探鸽 · 小钛首页&quot;}">
+      <a class="brand" href="/" aria-label="返回小钛控制台首页" data-ui-attrs="{&quot;aria-label&quot;:&quot;返回小钛控制台首页&quot;}">
         <span class="brand-mark" aria-hidden="true"></span>
-        <span data-ui-i18n="探鸽 · 小钛">探鸽 · 小钛</span>
+        <span data-ui-i18n="小钛控制台">小钛控制台</span>
       </a>
-      <a class="back-home" href="/">
+      <a id="auth-back" class="back-home" href="/">
         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M16 10H4M9 5l-5 5 5 5"/>
         </svg>
-        <span data-ui-i18n="返回首页">返回首页</span>
+        <span id="auth-back-label">返回首页</span>
       </a>
     <button type="button" data-language-toggle class="text-xs text-gray-500 px-2 py-1.5 border border-gray-200 rounded-lg shrink-0">English</button></nav>
   </header>
@@ -465,15 +479,15 @@
   <main class="auth-main">
     <div class="auth-layout shell">
       <section class="auth-card" aria-labelledby="card-title">
-        <p class="mobile-brand" data-ui-i18n="探鸽 · 小钛">探鸽 · 小钛</p>
+        <p class="mobile-brand" data-ui-i18n="小钛控制台">小钛控制台</p>
         <div class="card-heading">
-          <h2 id="card-title" data-ui-i18n="登录体验平台">登录体验平台</h2>
-          <p id="card-sub" data-ui-i18n="继续管理和调试你的 TiRTC 设备">继续管理和调试你的 TiRTC 设备</p>
+          <h2 id="card-title" data-ui-i18n="登录账号">登录账号</h2>
+          <p id="card-sub" hidden></p>
         </div>
 
         <div class="auth-tabs" id="auth-tabs" role="tablist" aria-label="账号操作" data-ui-attrs="{&quot;aria-label&quot;:&quot;账号操作&quot;}">
           <button class="auth-tab active" id="tab-login" type="button" role="tab" aria-selected="true" onclick="switchTab('login')" data-ui-i18n="登录">登录</button>
-          <button class="auth-tab" id="tab-register" type="button" role="tab" aria-selected="false" onclick="switchTab('register')" data-ui-i18n="免费注册">免费注册</button>
+          <button class="auth-tab" id="tab-register" type="button" role="tab" aria-selected="false" onclick="switchTab('register')" data-ui-i18n="注册">注册</button>
         </div>
 
         <form id="form-login" onsubmit="doLogin(event)">
@@ -485,6 +499,7 @@
             <label for="login-password" data-ui-i18n="密码">密码</label>
             <input type="password" id="login-password" placeholder="请输入密码" required autocomplete="current-password" data-ui-attrs="{&quot;placeholder&quot;:&quot;请输入密码&quot;}">
           </div>
+          <div class="legal-consent" data-legal-consent hidden><input type="checkbox" id="login-legal-consent" aria-labelledby="login-legal-label"><div><label id="login-legal-label" for="login-legal-consent" data-ui-i18n="我已阅读并同意">我已阅读并同意</label> <a data-legal-link="agreement" target="_blank" rel="noopener noreferrer" data-ui-i18n="《用户协议》">《用户协议》</a> <span data-ui-i18n="和">和</span> <a data-legal-link="privacy" target="_blank" rel="noopener noreferrer" data-ui-i18n="《隐私政策》">《隐私政策》</a></div></div>
           <button class="primary-button" type="submit" id="btn-login-submit" data-ui-i18n="登录">登录</button>
           <p class="form-links"><button type="button" onclick="switchTab('reset')" data-ui-i18n="忘记密码？">忘记密码？</button></p>
         </form>
@@ -509,7 +524,8 @@
             <label for="reg-password2" data-ui-i18n="确认密码">确认密码</label>
             <input type="password" id="reg-password2" placeholder="再次输入密码" minlength="6" required autocomplete="new-password" data-ui-attrs="{&quot;placeholder&quot;:&quot;再次输入密码&quot;}">
           </div>
-          <button class="primary-button" type="submit" id="btn-register" data-ui-i18n="创建账号并进入平台">创建账号并进入平台</button>
+          <div class="legal-consent" data-legal-consent hidden><input type="checkbox" id="reg-legal-consent" aria-labelledby="reg-legal-label"><div><label id="reg-legal-label" for="reg-legal-consent" data-ui-i18n="我已阅读并同意">我已阅读并同意</label> <a data-legal-link="agreement" target="_blank" rel="noopener noreferrer" data-ui-i18n="《用户协议》">《用户协议》</a> <span data-ui-i18n="和">和</span> <a data-legal-link="privacy" target="_blank" rel="noopener noreferrer" data-ui-i18n="《隐私政策》">《隐私政策》</a></div></div>
+          <button class="primary-button" type="submit" id="btn-register" data-ui-i18n="注册">注册</button>
         </form>
 
         <form id="form-reset" class="hidden" onsubmit="doResetPassword(event)">
@@ -532,18 +548,40 @@
             <label for="reset-password2" data-ui-i18n="确认新密码">确认新密码</label>
             <input type="password" id="reset-password2" placeholder="再次输入新密码" minlength="6" required autocomplete="new-password" data-ui-attrs="{&quot;placeholder&quot;:&quot;再次输入新密码&quot;}">
           </div>
+          <p class="legal-links" data-legal-consent hidden><a data-legal-link="agreement" target="_blank" rel="noopener noreferrer" data-ui-i18n="《用户协议》">《用户协议》</a> <span data-ui-i18n="和">和</span> <a data-legal-link="privacy" target="_blank" rel="noopener noreferrer" data-ui-i18n="《隐私政策》">《隐私政策》</a></p>
           <button class="primary-button" type="submit" id="btn-reset-password" data-ui-i18n="重置密码">重置密码</button>
-          <p class="form-links"><button type="button" onclick="switchTab('login')" data-ui-i18n="返回登录">返回登录</button></p>
         </form>
 
         <p class="form-note" id="err-msg" role="alert" aria-live="polite"></p>
-        <p class="card-footnote" data-ui-i18n="账号用于登录 TiRTC 体验平台和管理测试设备">账号用于登录 TiRTC 体验平台和管理测试设备</p>
       </section>
     </div>
   </main>
 
 <script>
 const $ = id => document.getElementById(id);
+// Enable consent only when both document destinations are valid.
+function legalURL(name) {
+  const value = document.querySelector('meta[name="' + name + '"]')?.content || '';
+  if (!value.trim()) return '';
+  try {
+    const url = new URL(value, location.origin);
+    const local = value.startsWith('/') && !value.startsWith('//') && url.origin === location.origin;
+    return (local || url.protocol === 'https:') && !url.username && !url.password ? url.href : '';
+  } catch { return ''; }
+}
+const legalDocuments = {agreement: legalURL('auth-user-agreement'), privacy: legalURL('auth-privacy-policy')};
+const legalConsentEnabled = !!(legalDocuments.agreement && legalDocuments.privacy);
+if (legalConsentEnabled) {
+  document.querySelectorAll('[data-legal-link]').forEach(link => { link.href = legalDocuments[link.dataset.legalLink]; });
+  document.querySelectorAll('[data-legal-consent]').forEach(row => { row.hidden = false; });
+}
+function requireLegalConsent(kind) {
+  if (!legalConsentEnabled || $(kind + '-legal-consent').checked) return true;
+  showErr('请先阅读并同意用户协议和隐私政策');
+  $(kind + '-legal-consent').focus();
+  return false;
+}
+
 // ── Captcha provider adapters ─────────────────────────────────────────────
 // 公共标识由后端返回；所有服务端密钥只保存在 admin-server。
 let CAPTCHA_ID = '';
@@ -563,7 +601,7 @@ function loadScript(src) {
   script.dataset.captchaSrc = src;
   script._ready = new Promise((resolve, reject) => {
     script.onload = resolve;
-    script.onerror = () => reject(new Error('captcha script load failed'));
+    script.onerror = () => { script.remove(); reject(new Error('captcha script load failed')); };
   });
   document.head.appendChild(script);
   return script._ready;
@@ -590,7 +628,7 @@ async function initCaptchaId() {
     CAPTCHA_ID = (cfg.public_config && cfg.public_config.captcha_id) || cfg.captcha_id || '';
     CAPTCHA_PUBLIC_CONFIG = cfg.public_config || {};
     if (CAPTCHA_ENABLED && !['yidun', 'geetest', 'aliyun', 'tencent'].includes(CAPTCHA_PROVIDER)) throw new Error('unsupported captcha provider');
-    if (CAPTCHA_ENABLED && CAPTCHA_ID) setupCaptcha();
+    if (CAPTCHA_ENABLED && CAPTCHA_ID && !legalConsentEnabled) setupCaptcha();
     return true;
   } catch (_) {
     return false;
@@ -693,6 +731,24 @@ function setupCaptcha() {
   if (!$('form-register').classList.contains('hidden') || !$('form-reset').classList.contains('hidden')) setupRegCaptcha();
 }
 
+const pendingCaptchaOpen = new Map();
+async function openCaptcha(getInstance, setupInstance, isCurrent = () => true) {
+  const existing = pendingCaptchaOpen.get(setupInstance);
+  if (existing) {
+    existing.isCurrent = isCurrent;
+    return existing.promise;
+  }
+  const entry = {isCurrent};
+  entry.promise = (async () => {
+    const instance = await waitForCaptcha(getInstance, setupInstance);
+    if (entry.isCurrent()) instance.verify();
+  })();
+  pendingCaptchaOpen.set(setupInstance, entry);
+  try { await entry.promise; } finally {
+    if (pendingCaptchaOpen.get(setupInstance) === entry) pendingCaptchaOpen.delete(setupInstance);
+  }
+}
+
 async function waitForCaptcha(getInstance, setupInstance) {
   for (let i = 0; i < 80; i++) {
     setupInstance();
@@ -708,6 +764,11 @@ function switchTab(tab, updateUrl = true) {
   const isLogin = tab === 'login';
   const isRegister = tab === 'register';
   const isReset = tab === 'reset';
+  const backToDevices = isReset && !!localStorage.getItem('token');
+  $('auth-back').href = backToDevices ? '/devices' : (isReset ? '/login' : '/');
+  const backLabel = backToDevices ? '返回设备列表' : (isReset ? '返回登录' : '返回首页');
+  WebI18n.bindText($('auth-back-label'), () => WebI18n.t(backLabel), 'textContent');
+  WebI18n.bindText($('auth-back'), () => WebI18n.t(backLabel), 'aria-label');
   $('form-login').classList.toggle('hidden', !isLogin);
   $('form-register').classList.toggle('hidden', !isRegister);
   $('form-reset').classList.toggle('hidden', !isReset);
@@ -716,12 +777,13 @@ function switchTab(tab, updateUrl = true) {
   $('tab-register').classList.toggle('active', isRegister);
   $('tab-login').setAttribute('aria-selected', String(isLogin));
   $('tab-register').setAttribute('aria-selected', String(isRegister));
-  WebI18n.bindText($('card-title'), () => (isLogin ? WebI18n.t("登录体验平台") : (isRegister ? WebI18n.t("创建体验账号") : WebI18n.t("找回密码"))), "textContent");
-  WebI18n.bindText($('card-sub'), () => (isLogin ? WebI18n.t("继续管理和调试你的 TiRTC 设备") : (isRegister ? WebI18n.t("注册后即可添加模拟器或真实设备") : WebI18n.t("验证注册邮箱后即可设置新密码"))), "textContent");
-  WebI18n.bindText(document, () => (isLogin ? WebI18n.t("登录 · TiRTC 体验平台") : (isRegister ? WebI18n.t("注册 · TiRTC 体验平台") : WebI18n.t("找回密码 · TiRTC 体验平台"))), "title");
+  WebI18n.bindText($('card-title'), () => (isLogin ? WebI18n.t("登录账号") : (isRegister ? WebI18n.t("注册账号") : WebI18n.t("找回密码"))), "textContent");
+  $('card-sub').hidden = !isReset;
+  WebI18n.bindText($('card-sub'), () => isReset ? WebI18n.t("验证注册邮箱后即可设置新密码") : "", "textContent");
+  WebI18n.bindText(document, () => (isLogin ? WebI18n.t("登录 · 小钛控制台") : (isRegister ? WebI18n.t("注册 · 小钛控制台") : WebI18n.t("找回密码 · 小钛控制台"))), "title");
   if (updateUrl) history.replaceState(null, '', isLogin ? '/login' : (isRegister ? '/register' : '/forgot-password'));
   showErr('');
-  if ((isRegister || isReset) && CAPTCHA_ID) setupRegCaptcha();
+  if ((isReset || (isRegister && !legalConsentEnabled)) && CAPTCHA_ID) setupRegCaptcha();
 }
 
 function showErr(msg) {
@@ -741,6 +803,7 @@ function setBtn(id, text, disabled) {
 
 async function doLogin(e) {
   e.preventDefault();
+  if (!requireLegalConsent('login')) return;
   showErr('');
   if (captchaInitPromise && !(await captchaInitPromise)) {
     showErr("页面配置加载失败，请刷新后重试");
@@ -749,9 +812,7 @@ async function doLogin(e) {
   if (CAPTCHA_ID) {
     loginCaptchaToken = null;
     try {
-      const instance = await waitForCaptcha(() => loginCaptchaIns, setupLoginCaptcha);
-      instance.refresh();
-      instance.verify();
+      await openCaptcha(() => loginCaptchaIns, setupLoginCaptcha);
     } catch (_) {
       showErr("人机验证加载失败，请刷新页面重试");
     }
@@ -761,6 +822,7 @@ async function doLogin(e) {
 }
 
 async function _submitLoginWithToken(tok) {
+  if (!requireLegalConsent('login')) return;
   setBtn('btn-login-submit', "登录中…", true);
   try {
     const res = await fetch('/v1/user/login', {
@@ -787,12 +849,26 @@ async function _submitLoginWithToken(tok) {
     showErr("网络连接失败，请稍后重试");
   } finally {
     loginCaptchaToken = null;
+    if (tok && loginCaptchaIns) loginCaptchaIns.refresh();
     setBtn('btn-login-submit', "登录", false);
   }
 }
 
+const emailRevisions = {reg: 0, reset: 0};
+for (const kind of ['reg', 'reset']) {
+  $(kind + '-email').addEventListener('input', () => {
+    emailRevisions[kind]++;
+    $(kind + '-code').value = '';
+    regCaptchaToken = null;
+    _regSendAfterVerify = null;
+    showErr('');
+  });
+}
+
 // 点"获取验证码"：弹人机验证，通过后发送邮件验证码
 async function doSendCode() {
+  if (!requireLegalConsent('reg')) return;
+  const revision = emailRevisions.reg;
   const emailInput = $('reg-email');
   const email = emailInput.value.trim();
   if (!email) { showErr("请输入邮箱地址"); return; }
@@ -802,23 +878,24 @@ async function doSendCode() {
     showErr("页面配置加载失败，请刷新后重试");
     return;
   }
+  if (revision !== emailRevisions.reg) return;
   if (CAPTCHA_ID) {
     regCaptchaToken = null;
-    _regSendAfterVerify = (tok) => _submitSendCode(email, tok);
+    _regSendAfterVerify = (tok) => _submitSendCode(email, tok, revision);
     try {
-      const instance = await waitForCaptcha(() => regCaptchaIns, setupRegCaptcha);
-      instance.refresh();
-      instance.verify();
+      await openCaptcha(() => regCaptchaIns, setupRegCaptcha, () => revision === emailRevisions.reg);
     } catch (_) {
       _regSendAfterVerify = null;
       showErr("人机验证加载失败，请刷新页面重试");
     }
   } else {
-    await _submitSendCode(email, null);
+    await _submitSendCode(email, null, revision);
   }
 }
 
-async function _submitSendCode(email, tok) {
+async function _submitSendCode(email, tok, revision = emailRevisions.reg) {
+  if (!requireLegalConsent('reg')) return;
+  if (revision !== emailRevisions.reg) return;
   setBtn('btn-send-code', "发送中…", true);
   try {
     const res = await fetch('/v1/user/send-code', {
@@ -832,6 +909,7 @@ async function _submitSendCode(email, tok) {
       }),
     });
     const data = await res.json();
+    if (revision !== emailRevisions.reg) { setBtn('btn-send-code', '获取验证码', false); return; }
     if (data.code === 200) {
       showErr('');
       startSendCodeCooldown();
@@ -844,6 +922,7 @@ async function _submitSendCode(email, tok) {
     setBtn('btn-send-code', "获取验证码", false);
   } finally {
     regCaptchaToken = null;
+    if (tok && regCaptchaIns) regCaptchaIns.refresh();
   }
 }
 
@@ -865,6 +944,7 @@ function startSendCodeCooldown(buttonID = 'btn-send-code') {
 }
 
 async function doSendResetCode() {
+  const revision = emailRevisions.reset;
   const emailInput = $('reset-email');
   const email = emailInput.value.trim();
   if (!email) { showErr("请输入注册邮箱地址"); return; }
@@ -874,23 +954,23 @@ async function doSendResetCode() {
     showErr("页面配置加载失败，请刷新后重试");
     return;
   }
+  if (revision !== emailRevisions.reset) return;
   if (CAPTCHA_ID) {
     regCaptchaToken = null;
-    _regSendAfterVerify = tok => _submitResetCode(email, tok);
+    _regSendAfterVerify = tok => _submitResetCode(email, tok, revision);
     try {
-      const instance = await waitForCaptcha(() => regCaptchaIns, setupRegCaptcha);
-      instance.refresh();
-      instance.verify();
+      await openCaptcha(() => regCaptchaIns, setupRegCaptcha, () => revision === emailRevisions.reset);
     } catch (_) {
       _regSendAfterVerify = null;
       showErr("人机验证加载失败，请刷新页面重试");
     }
   } else {
-    await _submitResetCode(email, null);
+    await _submitResetCode(email, null, revision);
   }
 }
 
-async function _submitResetCode(email, tok) {
+async function _submitResetCode(email, tok, revision = emailRevisions.reset) {
+  if (revision !== emailRevisions.reset) return;
   setBtn('btn-send-reset-code', "发送中…", true);
   try {
     const res = await fetch('/v1/user/password-reset/send-code', {
@@ -904,6 +984,7 @@ async function _submitResetCode(email, tok) {
       }),
     });
     const data = await res.json();
+    if (revision !== emailRevisions.reset) { setBtn('btn-send-reset-code', '获取验证码', false); return; }
     if (data.code === 200) {
       showSuccess("如该邮箱已注册，验证码将发送至该邮箱");
       startSendCodeCooldown('btn-send-reset-code');
@@ -916,11 +997,13 @@ async function _submitResetCode(email, tok) {
     setBtn('btn-send-reset-code', "获取验证码", false);
   } finally {
     regCaptchaToken = null;
+    if (tok && regCaptchaIns) regCaptchaIns.refresh();
   }
 }
 
 async function doRegister(e) {
   if (e) e.preventDefault();
+  if (!requireLegalConsent('reg')) return;
   const email = $('reg-email').value.trim();
   const code  = $('reg-code').value.trim();
   const pwd   = $('reg-password').value;
@@ -941,7 +1024,7 @@ async function doRegister(e) {
     else showErr(data.code === 40013 ? WebI18n.t("验证码错误或已过期") : (WebI18n.errorMessage(data, WebI18n.t("注册失败"))));
   } catch (_) {
     showErr("网络连接失败，请稍后重试");
-  } finally { setBtn('btn-register', "创建账号并进入平台", false); }
+  } finally { setBtn('btn-register', "注册", false); }
 }
 
 async function doResetPassword(e) {

@@ -213,3 +213,84 @@ func TestResourceUpdateFailuresRemainFailures(t *testing.T) {
 		}
 	}
 }
+
+func TestMCPCreatePersistsExplicitDisabledState(t *testing.T) {
+	for _, mode := range []string{"disabled", "enabled", "default", "update-failure", "cancelled", "cleanup-failure", "delayed-read", "unconfirmed"} {
+		t.Run(mode, func(t *testing.T) {
+			enabled, deleted, updates := true, false, 0
+			reads := 0
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			client := contractClient(t, func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method {
+				case http.MethodPost:
+					// This cloud version defaults persistence to true even when the response
+					// echoes false. The returned DTO alone is not evidence of persistence.
+					_, _ = io.WriteString(w, `{"code":200,"data":{"id":"mcp-created","enabled":false}}`)
+				case http.MethodPut:
+					updates++
+					if mode == "cancelled" {
+						cancel()
+						return
+					}
+					if mode == "update-failure" || mode == "cleanup-failure" {
+						_, _ = io.WriteString(w, `{"code":500}`)
+						return
+					}
+					var req AppMCPToolUpdateRequest
+					if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+						t.Error(err)
+					}
+					if req.Enabled == nil || *req.Enabled {
+						t.Error("disabled create must persist false")
+					}
+					enabled = false
+					_, _ = io.WriteString(w, `{"code":200}`)
+				case http.MethodGet:
+					reads++
+					if mode == "unconfirmed" || (mode == "delayed-read" && reads < 3) {
+						_, _ = io.WriteString(w, `{"code":200,"data":{"id":"mcp-created","enabled":true}}`)
+						return
+					}
+					_, _ = fmt.Fprintf(w, `{"code":200,"data":{"id":"mcp-created","enabled":%t,"config":{"name":"test","url":"https://example.invalid"}}}`, enabled)
+				case http.MethodDelete:
+					deleted = true
+					if mode == "cleanup-failure" {
+						_, _ = io.WriteString(w, `{"code":500,"msg":"cleanup failed"}`)
+						return
+					}
+					_, _ = io.WriteString(w, `{"code":200}`)
+				default:
+					t.Errorf("unexpected method %s", r.Method)
+				}
+			})
+			disabled := false
+			req := AppMCPToolCreateRequest{Config: &MCPToolExternalRuntimeConfig{Name: "test", URL: "https://example.invalid"}, Enabled: &disabled}
+			if mode == "default" {
+				req.Enabled = nil
+			}
+			if mode == "enabled" {
+				yes := true
+				req.Enabled = &yes
+			}
+			item, err := client.CreateAppMCPTool(ctx, req)
+			switch mode {
+			case "disabled", "delayed-read":
+				if err != nil || item == nil || item.Enabled || enabled || updates != 1 || deleted {
+					t.Fatalf("not persisted: item=%+v enabled=%v updates=%d deleted=%v err=%v", item, enabled, updates, deleted, err)
+				}
+			case "default", "enabled":
+				if err != nil || updates != 0 || deleted {
+					t.Fatalf("unexpected extra writes: %d %v %v", updates, deleted, err)
+				}
+			default:
+				if err == nil || item != nil || !deleted {
+					t.Fatalf("failed provisioning not compensated: item=%+v deleted=%v err=%v", item, deleted, err)
+				}
+				if mode == "cleanup-failure" && !strings.Contains(err.Error(), "cleanup") {
+					t.Fatalf("cleanup failure was lost: %v", err)
+				}
+			}
+		})
+	}
+}

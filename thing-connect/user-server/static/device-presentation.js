@@ -82,8 +82,8 @@
             [
               WebI18n.t("下行视频方向"),
               ({ get 0() { return WebI18n.t("默认"); }, get 1() { return WebI18n.t("正向画面"); }, get 2() { return WebI18n.t("保留旋转画面"); } })[
-                Number(p.down_video_rotation ?? 0)
-              ] || WebI18n.t("默认"),
+                p.down_video_rotation == null ? NaN : Number(p.down_video_rotation)
+              ] || WebI18n.t("未上报"),
             ],
           ]
         : []),

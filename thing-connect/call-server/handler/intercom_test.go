@@ -125,7 +125,7 @@ func TestIntercomRoutesUseCallNamespace(t *testing.T) {
 	}
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest("GET", "/v1/call/group/page?device_id=test", nil))
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `id="home" href="/devices"`) {
-		t.Fatal("room page or home navigation missing")
+	if w.Code != http.StatusFound || w.Header().Get("Location") != "/room?device_id=test" {
+		t.Fatal("room page compatibility redirect missing")
 	}
 }

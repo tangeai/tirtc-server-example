@@ -28,8 +28,8 @@ var databaseNamePattern = regexp.MustCompile(`^[A-Za-z0-9_]{1,64}$`)
 
 var managedTableNames = []string{
 	"schema_migrations", "users", "device_pool", "device_bind", "device_bind_log",
-	"voip_device_profile", "voip_device_auth", "voip_user_profile", "ai_user_role",
-	"ai_device_role", "ai_user_resource", "call_contact", "cleanup_outbox",
+	"voip_device_profile", "voip_device_auth", "voip_user_profile", "voip_remark_outbox", "ai_user_role", "ai_cloud_role_ref",
+	"ai_device_role", "ai_cloud_role_target", "ai_user_resource", "call_contact", "cleanup_outbox",
 	"call_rooms", "call_room_codes", "call_assignments", "call_leases", "call_outbox",
 	"board_resources",
 	"device_profile", "ai_recognition_policy", "ai_recognition_request",

@@ -90,5 +90,10 @@
   "验证码已过期时，请按设备提示重新获取。": "If the code has expired, follow the device instructions to get a new one.",
   "验证码错误或已过期": "The verification code is incorrect or has expired",
   "验证码错误，请检查是否听清了设备播报的数字": "Incorrect code. Check the digits announced by the device.",
-  "麦克风失败": "Microphone unavailable"
+  "麦克风失败": "Microphone unavailable",
+  "角色正在使用或有未完成操作，请先解除设备关联": "The role is in use or has a pending operation. Remove device associations first.",
+  "设置已被其他页面修改，当前草稿已保留。": "Settings changed elsewhere. Your draft has been kept.",
+  "操作状态已变化，请检查后重试": "The operation state changed. Check and retry.",
+  "关闭弹窗": "Close dialog",
+  "返回设备列表": "Back to devices"
 }

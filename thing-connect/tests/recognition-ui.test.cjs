@@ -14,6 +14,9 @@ class Element {
   replaceChildren(...nodes) { this.children=[]; this.append(...nodes); }
   replaceWith(node) { const i=this.parent.children.indexOf(this); node.parent=this.parent; this.parent.children[i]=node; }
   setAttribute() {}
+  focus() {}
+  remove() { const i=this.parent?.children.indexOf(this);if(i>=0)this.parent.children.splice(i,1); }
+  querySelector(selector) { return all(this).find(n=>n.className===selector.slice(1)); }
   showModal() { this.open=true; }
   close() { this.open=false; }
 }
@@ -65,7 +68,7 @@ test('late save updates only its device and leaves a newer dialog usable',async(
   const ui=await setup(1,(url,options)=>options?.method==='PUT'&&url.includes('/device-1/')?pending.promise:undefined);
   await ui.click('＋ 添加音频类型');ui.select();
   const save=ui.click('保存设置');
-  await ui.click('关闭');await ui.open('device-2');
+  await ui.click('×');await ui.open('device-2');
   assert.equal(dialog(ui).open,true);
   pending.resolve({code:200,data:{policy:{enabled:true,revision:5}}});await save;
   assert.equal(ui.cards[0].label.textContent,'已开启 · 1项');
@@ -79,7 +82,7 @@ test('late save failure does not show an error in a newer dialog',async()=>{
   const pending=deferred();
   const ui=await setup(1,(_url,options)=>options?.method==='PUT'?pending.promise:undefined);
   await ui.click('＋ 添加音频类型');ui.select();const save=ui.click('保存设置');
-  await ui.click('关闭');await ui.open('device-2');
+  await ui.click('×');await ui.open('device-2');
   pending.reject(new Error('old save failed'));await save;
   assert.equal(dialog(ui).open,true);assert.deepEqual(ui.messages,[]);
 });
@@ -117,7 +120,7 @@ test('an older save response cannot overwrite a newer save on the same device',a
     if(submitted){const state=deviceState();state.data.policy.revision=5;return state;}
   });
   await ui.click('＋ 添加音频类型');ui.select();const firstSave=ui.click('保存设置');
-  await ui.click('关闭');await ui.open('device-1');
+  await ui.click('×');await ui.open('device-1');
   const toggle=all(ui.body).find(n=>n.tagName==='input');toggle.checked=false;toggle.onchange();
   await ui.click('保存设置');
   assert.equal(ui.writes[1].expected_revision,5);
@@ -161,4 +164,19 @@ test('picker translates output modes while retaining descriptions and checked se
   await p.click('保存设置');
   assert.equal(p.writes.length,1);
   assert.equal(p.writes[0].schemes[0].scheme_id,'type-0');
+});
+
+
+test('revision conflict and failed reload keep draft and original revision',async()=>{
+ let reloadFails=false;
+ const ui=await setup(1,(url,options)=>{
+   if(options?.method==='PUT')return {code:40901,msg:'conflict'};
+   if(reloadFails)return {code:50000,msg:'network'};
+ });
+ await ui.click('＋ 添加音频类型');ui.select();await ui.click('添加所选');await ui.click('保存设置');
+ assert.equal(dialog(ui).open,true);assert.equal(ui.writes[0].expected_revision,4);
+ reloadFails=true;await ui.click('放弃草稿并重新加载');await ui.click('继续编辑');await ui.click('保存设置');
+ assert.deepEqual(ui.writes[1],ui.writes[0]);
+ reloadFails=false;await ui.click('放弃草稿并重新加载');
+ assert.equal(all(ui.body).filter(n=>n.className==='recognition-row').length,0);
 });
