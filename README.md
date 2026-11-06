@@ -1,4 +1,12 @@
-# tirtc-server-example
+# 探鸽小钛 · tirtc-server-example
+
+**探鸽小钛把 AI 语音聊天、设备互呼与多人对讲、设备呼叫微信、远程实时音视频接入你的硬件。** 开发者可以通过小钛固件、设备示例和控制台验证这些能力，再适配自己的设备。
+
+![探鸽小钛功能示意：AI 聊天、微信通话、设备对讲和远程实时音视频](images/xiaotai.gif)
+
+[体验小钛控制台](https://xiaotai.chat) · [从设备模拟器开始](#首次体验跑通实时音视频)
+
+具体能力以设备型号、固件及服务配置为准。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?logo=go)](thing-connect/go.mod)
@@ -12,7 +20,7 @@
 [![Python](https://img.shields.io/badge/Device%20Simulator-Python-3776AB?logo=python&logoColor=white)](thing-connect/device-sim/device-sim-py/README.md)
 [![C](https://img.shields.io/badge/Linux%20Device%20Reference-C-A8B9CC?logo=c&logoColor=black)](thing-connect/device-sim/device-sim-c/README.md)
 
-面向 IoT 嵌入式开发者的开源示例合集，基于 [tange.ai TiRTC（IoT-RTC）](https://tange.ai) SDK，演示如何让设备快速具备**远程实时查看、AI 对讲、微信 VoIP 呼叫、设备间互呼**能力。
+本仓库面向 IoT 嵌入式开发者，提供基于 [tange.ai TiRTC（IoT-RTC）](https://tange.ai) SDK 的服务端、用户控制台、小程序及设备接入示例。
 
 ---
 
