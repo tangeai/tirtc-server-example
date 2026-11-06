@@ -2,6 +2,7 @@ const fs=require('node:fs'),path=require('node:path'),{spawnSync}=require('node:
 const root=path.resolve(__dirname,'../../../..'),out=path.join(root,'output/playwright');
 fs.mkdirSync(out,{recursive:true});
 const coverage={
+ 'captcha-lifecycle':'手机缓存恢复时清理验证遮罩、旧回调隔离、失败重试、带验证码连续三次换账号登录',
  'knowledge-sync':'知识库延迟确认、关联失败复用文件重试、手动刷新、切换后停止旧请求',
  'account-flow':'账号：注册校验、注册成功、退出、验证码、密码重置、登录、ID绑定失败重试',
  'auth-contacts':'人机验证异步初始化与首次点击、同意协议、数字输入、联系人迟到响应、弹窗键盘操作',

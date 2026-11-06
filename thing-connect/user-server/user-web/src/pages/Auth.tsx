@@ -37,11 +37,30 @@ function AuthForm({ mode, switchMode }: { mode: Mode; switchMode(mode: Mode): vo
   const [success, setSuccess] = useState(false), [phase, setPhase] = useState<'idle' | 'verifying' | 'submitting'>('idle');
   const [cooldown, setCooldown] = useState(0);
   const gate = useRef<CaptchaGate | null>(null), revision = useRef(0), submitting = useRef(false);
+  const pendingRequest = useRef<AbortController | null>(null);
   const emailRef = useRef<HTMLInputElement>(null), consentRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     gate.current = new CaptchaGate(() => setPhase('idle'));  sessionStorage.removeItem('login-notice');
-    return () => { revision.current++; gate.current?.dispose(); };
-  }, []);
+    const interrupt = () => {
+      revision.current++;
+      pendingRequest.current?.abort();
+      submitting.current = false;
+      gate.current?.cancel();
+      setPhase('idle');
+    };
+    const restore = (event: PageTransitionEvent) => {
+      if (!event.persisted) return;
+      interrupt();
+      setMessage('');
+      if (mode !== 'reset' && localStorage.getItem('token')) location.replace('/devices');
+    };
+    window.addEventListener('pagehide', interrupt);
+    window.addEventListener('pageshow', restore);
+    return () => {
+      revision.current++; pendingRequest.current?.abort(); gate.current?.dispose();
+      window.removeEventListener('pagehide', interrupt); window.removeEventListener('pageshow', restore);
+    };
+  }, [mode]);
   useEffect(() => { if (!cooldown) return; const timer = setTimeout(() => setCooldown(value => value - 1), 1000); return () => clearTimeout(timer); }, [cooldown]);
   function changed() { revision.current++; gate.current?.cancel(); setPhase('idle'); setMessage(''); setSuccess(false); }
   function agreed() {
@@ -50,16 +69,17 @@ function AuthForm({ mode, switchMode }: { mode: Mode; switchMode(mode: Mode): vo
   }
   async function perform(kind: 'login' | 'send' | 'submit', token: CaptchaToken | null, current: number) {
     if (current !== revision.current || submitting.current) return;
+    const controller = new AbortController(); pendingRequest.current = controller;
     submitting.current = true; setPhase('submitting'); setMessage(''); setSuccess(false);
     try {
       if (kind === 'send') {
-        await request(mode === 'reset' ? '/v1/user/password-reset/send-code' : '/v1/user/send-code', { method: 'POST', anonymous: true, body: { email: email.trim(), ...captchaFields(token) } });
+        await request(mode === 'reset' ? '/v1/user/password-reset/send-code' : '/v1/user/send-code', { method: 'POST', anonymous: true, signal: controller.signal, body: { email: email.trim(), ...captchaFields(token) } });
         if (current !== revision.current) return;
         setCooldown(60); setSuccess(true); setMessage(mode === 'reset' ? '如该邮箱已注册，验证码将发送至该邮箱' : '验证码已发送');
       } else {
         const path = kind === 'login' ? '/v1/user/login' : mode === 'reset' ? '/v1/user/password-reset' : '/v1/user/register';
         const body = kind === 'login' ? { email: email.trim(), password, ...captchaFields(token) } : { email: email.trim(), password, code };
-        const result = await request<{ token: string }>(path, { method: 'POST', anonymous: true, body });
+        const result = await request<{ token: string }>(path, { method: 'POST', anonymous: true, signal: controller.signal, body });
         if (current !== revision.current) return;
         clearSession();
         if (mode === 'reset') { setSuccess(true); setMessage('密码已重置，请使用新密码登录'); setPassword(''); setConfirm(''); }
@@ -67,7 +87,10 @@ function AuthForm({ mode, switchMode }: { mode: Mode; switchMode(mode: Mode): vo
       }
     } catch (error) {
       if (current === revision.current) setMessage(error instanceof ApiError && error.code === 401 && kind === 'login' ? '邮箱或密码错误' : errorText(error));
-    } finally { submitting.current = false; if (current === revision.current) setPhase('idle'); if (token) gate.current?.reset(); }
+    } finally {
+      if (pendingRequest.current === controller) pendingRequest.current = null;
+      if (current === revision.current) { submitting.current = false; setPhase('idle'); if (token) gate.current?.reset(); }
+    }
   }
   async function verify(kind: 'login' | 'send') {
     if (submitting.current || !agreed()) return;

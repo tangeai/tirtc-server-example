@@ -93,20 +93,48 @@ export class CaptchaGate {
   private instance?: Instance;
   private active?: (token: CaptchaToken | null) => void;
   private disposed = false;
+  private generation = 0;
   private readonly closed: () => void;
   constructor(closed: () => void = () => {}) { this.closed = closed; }
-  private intent = new LatestIntent(async () => {
-    this.config ??= await request<Config>('/v1/config/captcha', { anonymous: true });
-    if (!this.config.enabled) return null;
-    this.instance ??= await createInstance(this.config, '#captcha-mount', token => {
-      const action = this.active; this.active = undefined;
-      action?.(token);
-    }, () => { if (!this.disposed && this.active) { this.cancel(); this.closed(); } });
-    if (this.disposed) { this.instance.destroy?.(); return null; }
-    return this.instance;
-  });
-  cancel() { this.active = undefined; this.intent.cancel(); }
+  private intent = this.newIntent();
+  private newIntent() {
+    const generation = this.generation;
+    const current = () => !this.disposed && generation === this.generation;
+    return new LatestIntent(async () => {
+      this.config ??= await request<Config>('/v1/config/captcha', { anonymous: true });
+      if (!current() || !this.config.enabled) return null;
+      if (this.instance) return this.instance;
+      const instance = await createInstance(this.config, '#captcha-mount', token => {
+        if (!current()) return;
+        const action = this.active;
+        // A token belongs to exactly one attempt. Release the completed SDK
+        // after its callback unwinds, before the next attempt can reuse it.
+        this.invalidate(true);
+        action?.(token);
+      }, () => {
+        if (!current()) return;
+        const wasActive = !!this.active;
+        this.invalidate(true);
+        if (wasActive) this.closed();
+      });
+      if (!current()) { instance.destroy?.(); return null; }
+      this.instance = instance;
+      return instance;
+    });
+  }
+  private invalidate(deferDestroy = false) {
+    this.active = undefined;
+    this.generation++;
+    this.intent.cancel();
+    const instance = this.instance;
+    this.instance = undefined;
+    this.intent = this.newIntent();
+    if (deferDestroy) queueMicrotask(() => instance?.destroy?.());
+    else instance?.destroy?.();
+  }
+  cancel() { this.invalidate(); }
   async open(action: (token: CaptchaToken | null) => void) {
+    if (this.disposed) return;
     this.active = undefined;
     await this.intent.run(instance => {
       if (this.disposed) return;
@@ -114,8 +142,8 @@ export class CaptchaGate {
       else action(null);
     });
   }
-  reset() { this.instance?.refresh(); }
-  dispose() { this.disposed = true; this.cancel(); this.instance?.destroy?.(); }
+  reset() { this.cancel(); }
+  dispose() { this.disposed = true; this.cancel(); }
 }
 export function captchaFields(token: CaptchaToken | null) {
   return { captcha_id: token?.captcha_id ?? '', validate: token?.validate ?? '', user: '',
