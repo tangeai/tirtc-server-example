@@ -32,13 +32,15 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  // attached to that attempt or allow its old ticket to authenticate another user.
  await page.getByRole('button',{name:'登录',exact:true}).last().click();await page.getByText('验证面板',{exact:true}).waitFor();
  await email.evaluate(el=>Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,'changed@example.test'));
- await page.evaluate(()=>window.finishChallenge());await page.getByRole('alert').filter({hasText:'表单内容已变化'}).waitFor();assert.equal(writes.length,1);
- // Silent changes while the request is in flight cannot commit its token.
+ await page.evaluate(()=>window.finishChallenge());await page.getByRole('alert').filter({hasText:'测试错误'}).waitFor();assert.equal(writes.length,2);assert.equal(writes.at(-1).body.email,'new@example.test');assert.equal(await email.inputValue(),'new@example.test');
+ // Leaving/restoring the page cancels the attempt; its late response cannot
+ // commit a token after the user has selected a different account.
  loginResponse=new Promise(resolve=>releaseLogin=resolve);
  await page.getByRole('button',{name:'登录',exact:true}).last().click();await page.getByText('验证面板',{exact:true}).waitFor();await page.evaluate(()=>window.finishChallenge());
  await page.waitForFunction(()=>document.querySelector('fieldset').disabled);
- await email.evaluate(el=>Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,'latest@example.test'));
- releaseLogin();await page.getByRole('alert').filter({hasText:'表单内容已变化'}).waitFor();assert.equal(await page.evaluate(()=>localStorage.getItem('token')),null);assert(new URL(page.url()).pathname==='/login');loginResponse=undefined;
+ await page.evaluate(()=>{dispatchEvent(new PageTransitionEvent('pagehide',{persisted:true}));dispatchEvent(new PageTransitionEvent('pageshow',{persisted:true}));});
+ await email.fill('latest@example.test');
+ releaseLogin();await page.waitForTimeout(100);assert.equal(await page.evaluate(()=>localStorage.getItem('token')),null);assert(new URL(page.url()).pathname==='/login');loginResponse=undefined;
  // Retrying is still usable after cancelling the obsolete result.
  await page.getByRole('button',{name:'登录',exact:true}).last().click();await page.getByText('验证面板',{exact:true}).waitFor();await page.evaluate(()=>window.finishChallenge());await page.getByRole('alert').filter({hasText:'测试错误'}).waitFor();assert.equal(writes.at(-1).body.email,'latest@example.test');
  // Registration and password reset read native values too, including the OTP

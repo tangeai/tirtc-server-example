@@ -20,7 +20,8 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  window.captchas=[];
  window.initNECaptcha=(options,ready)=>{
   const popup=document.createElement('div');popup.className='yidun_popup';popup.style.display='none';
-  popup.innerHTML='<div class="yidun_popup__mask" style="background:#8888"></div><button style="position:relative" type="button">验证面板</button>';
+  popup.innerHTML='<div class="yidun_popup__mask" style="background:#8888"></div><button style="position:relative" type="button">验证面板</button><button type="button" style="position:relative" aria-label="关闭安全验证">×</button>';
+  popup.querySelector('[aria-label="关闭安全验证"]').onclick=()=>options.onClose();
   document.querySelector(options.element).append(popup);
   const state={options,popup,destroyed:false,complete(){options.onVerify(null,{validate:'synthetic-ticket'});}};window.captchas.push(state);
   ready({verify(){popup.style.display='block'},refresh(){},destroy(){state.destroyed=true;popup.remove()}});
@@ -38,7 +39,7 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  await page.evaluate(()=>window.captchas.at(-1).complete());await page.getByRole('alert').filter({hasText:'邮箱或密码错误'}).waitFor();
  assert.deepEqual(logins,['second@example.test']);assert.equal(await page.locator('.yidun_popup').count(),0,'completed verification must release its overlay even when login fails');
  await login.click();await page.getByRole('button',{name:'验证面板',exact:true}).waitFor();assert.equal(await page.evaluate(()=>window.captchas.length),3,'retry must create a fresh challenge');
- await page.getByLabel('邮箱',{exact:true}).fill('third@example.test');await login.click();await page.getByRole('button',{name:'验证面板',exact:true}).waitFor();
+ await page.getByRole('button',{name:'关闭安全验证',exact:true}).click();await page.getByLabel('邮箱',{exact:true}).fill('third@example.test');await login.click();await page.getByRole('button',{name:'验证面板',exact:true}).waitFor();
  await page.evaluate(()=>window.captchas[2].complete());await page.waitForTimeout(50);assert.deepEqual(logins,['second@example.test']);
  await page.evaluate(()=>window.captchas.at(-1).complete());await page.getByRole('alert').filter({hasText:'邮箱或密码错误'}).waitFor();assert.deepEqual(logins,['second@example.test','third@example.test']);
  // Exercise the complete success -> logout -> different account flow with

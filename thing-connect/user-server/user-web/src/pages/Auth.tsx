@@ -33,6 +33,7 @@ export default function Auth() {
 function AuthForm({ mode, switchMode }: { mode: Mode; switchMode(mode: Mode): void }) {
   const { t } = useLanguage();
   const formRef = useRef<HTMLFormElement>(null);
+  const attempt = useRef<AuthValues | null>(null);
   const [consent, setConsent] = useState(false);
   const [message, setMessage] = useState(() => mode === 'login' && sessionStorage.getItem('login-notice') ? '登录状态已失效，请重新登录' : '');
   const [success, setSuccess] = useState(false), [phase, setPhase] = useState<'idle' | 'verifying' | 'submitting'>('idle');
@@ -41,8 +42,9 @@ function AuthForm({ mode, switchMode }: { mode: Mode; switchMode(mode: Mode): vo
   const pendingRequest = useRef<AbortController | null>(null);
   const emailRef = useRef<HTMLInputElement>(null), consentRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
-    gate.current = new CaptchaGate(() => setPhase('idle'));  sessionStorage.removeItem('login-notice');
+    gate.current = new CaptchaGate(() => { attempt.current = null; setPhase('idle'); });  sessionStorage.removeItem('login-notice');
     const interrupt = () => {
+      attempt.current = null;
       revision.current++;
       pendingRequest.current?.abort();
       submitting.current = false;
@@ -74,12 +76,23 @@ function AuthForm({ mode, switchMode }: { mode: Mode; switchMode(mode: Mode): vo
     return { email: field('email')?.value || '', password: field('password')?.value || '',
       confirm: field('confirm')?.value || '', code: field('code')?.value || '' };
   }
-  function changed() {
+  function restoreValues(values: AuthValues) {
+    for (const name of ['email', 'password', 'confirm', 'code'] as const) { const input = field(name); if (input && input.value !== values[name]) input.value = values[name]; }
+  }
+  function cancelAttempt() {
+    attempt.current = null;
     revision.current++; pendingRequest.current?.abort(); submitting.current = false;
     gate.current?.cancel(); setPhase('idle'); setMessage(''); setSuccess(false);
   }
+  function changed() {
+    // Inputs are locked during verification/submission. Events in that interval
+    // can come from native autofill; they must not replace the submitted identity.
+    if (attempt.current) { restoreValues(attempt.current); return false; }
+    cancelAttempt(); return true;
+  }
   function isCurrent(current: number, values: AuthValues) {
     if (current !== revision.current) return false;
+    if (attempt.current === values) { restoreValues(values); return true; }
     const actual = readValues();
     if (Object.keys(values).some(key => actual[key as keyof AuthValues] !== values[key as keyof AuthValues])) {
       changed(); setMessage('表单内容已变化，请重新提交'); return false;
@@ -105,42 +118,44 @@ function AuthForm({ mode, switchMode }: { mode: Mode; switchMode(mode: Mode): vo
         const result = await request<{ token: string }>(path, { method: 'POST', anonymous: true, signal: controller.signal, body });
         if (!isCurrent(current, values)) return;
         clearSession();
-        if (mode === 'reset') { setSuccess(true); setMessage('密码已重置，请使用新密码登录'); for (const name of ['password', 'confirm'] as const) { const input = field(name); if (input) input.value = ''; } }
+        if (mode === 'reset') { attempt.current = null; setSuccess(true); setMessage('密码已重置，请使用新密码登录'); for (const name of ['password', 'confirm'] as const) { const input = field(name); if (input) input.value = ''; } }
         else { localStorage.setItem('token', result.token); location.assign('/devices'); }
       }
     } catch (error) {
       if (current === revision.current) setMessage(error instanceof ApiError && error.code === 401 && kind === 'login' ? '邮箱或密码错误' : errorText(error));
     } finally {
       if (pendingRequest.current === controller) pendingRequest.current = null;
-      if (current === revision.current) { submitting.current = false; setPhase('idle'); if (token) gate.current?.reset(); }
+      if (current === revision.current) { if (attempt.current) restoreValues(attempt.current); attempt.current = null; submitting.current = false; setPhase('idle'); if (token) gate.current?.reset(); }
     }
   }
   async function verify(kind: 'login' | 'send') {
-    if (submitting.current || !agreed()) return;
+    if (submitting.current || attempt.current || !agreed()) return;
     if (!emailRef.current?.reportValidity()) return;
     const current = revision.current, values = readValues();
+    attempt.current = values;
     setPhase('verifying'); setMessage('');
     try { await gate.current?.open(token => { void perform(kind, token, current, values); }); }
-    catch { if (current === revision.current) { setPhase('idle'); setMessage('人机验证加载失败，请重试'); } }
+    catch { if (current === revision.current) { attempt.current = null; gate.current?.cancel(); setPhase('idle'); setMessage('人机验证加载失败，请重试'); } }
   }
   function submit(event: FormEvent) {
     event.preventDefault();
-    if (submitting.current || !agreed()) return;
+    if (submitting.current || attempt.current || !agreed()) return;
     if (mode === 'login') { void verify('login'); return; }
     const values = readValues();
     if (values.password !== values.confirm) { setMessage('两次密码不一致'); return; }
+    attempt.current = values;
     void perform('submit', null, revision.current, values);
   }
   return <form ref={formRef} onSubmit={submit}>
-    <fieldset disabled={phase === 'submitting'}>
-      <label>{t(mode === 'reset' ? '注册邮箱' : '邮箱')}<input ref={emailRef} type="email" name="email" autoComplete={mode === 'reset' ? 'email' : 'username'} autoCapitalize="none" spellCheck={false} required defaultValue="" onInput={() => { changed(); const input = field('code'); if (input) input.value = ''; }} placeholder={t('请输入邮箱地址')}/></label>
+    <fieldset disabled={phase !== 'idle'}>
+      <label>{t(mode === 'reset' ? '注册邮箱' : '邮箱')}<input ref={emailRef} type="email" name="email" autoComplete={mode === 'reset' ? 'email' : 'username'} autoCapitalize="none" spellCheck={false} required defaultValue="" onInput={() => { if (!changed()) return; const input = field('code'); if (input) input.value = ''; }} placeholder={t('请输入邮箱地址')}/></label>
       {mode !== 'login' && <label>{t('邮箱验证码')}<div className="code-row"><input aria-label={t('邮箱验证码')} name="code" defaultValue="" onInput={event => { event.currentTarget.value = event.currentTarget.value.replace(/\D/g, '').slice(0, 6); changed(); }} inputMode="numeric" pattern="[0-9]{6}" autoComplete="one-time-code" required placeholder={t('6 位验证码')}/><button type="button" disabled={cooldown > 0} onClick={() => void verify('send')}>{cooldown ? t('{p0}s 后重新获取', { p0: cooldown }) : t('获取验证码')}</button></div></label>}
       <PasswordField label={mode === 'login' ? '密码' : mode === 'reset' ? '新密码' : '设置密码'} required minLength={mode === 'login' ? undefined : 6} name="password" defaultValue="" onInput={changed} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} placeholder={t(mode === 'login' ? '请输入密码' : '至少 6 位')}/>
       {mode !== 'login' && <PasswordField label={mode === 'reset' ? '确认新密码' : '确认密码'} autoComplete="new-password" minLength={6} required name="confirm" defaultValue="" onInput={changed} placeholder={t('再次输入密码')}/>}
-      {mode === 'reset' ? <p className="legal"><LegalLinks/></p> : <div className="legal consent"><input ref={consentRef} id="consent" type="checkbox" checked={consent} onChange={event => { changed(); setConsent(event.target.checked); }}/><div><label htmlFor="consent">{t('我已阅读并同意')}</label> <LegalLinks/></div></div>}
-      <button className="primary wide" type="submit">{t(phase === 'submitting' ? '提交中…' : mode === 'login' ? '登录' : mode === 'register' ? '注册' : '重置密码')}</button>
-      {mode === 'login' && <p className="right"><button className="link" type="button" onClick={() => switchMode('reset')}>{t('忘记密码？')}</button></p>}
+      {mode === 'reset' ? <p className="legal"><LegalLinks/></p> : <div className="legal consent"><input ref={consentRef} id="consent" type="checkbox" checked={consent} onChange={event => { if (changed()) setConsent(event.target.checked); }}/><div><label htmlFor="consent">{t('我已阅读并同意')}</label> <LegalLinks/></div></div>}
     </fieldset>
+    <button className="primary wide" disabled={phase === 'submitting'} type={phase === 'verifying' ? 'button' : 'submit'} onClick={phase === 'verifying' ? cancelAttempt : undefined}>{t(phase === 'submitting' ? '提交中…' : phase === 'verifying' ? '取消验证' : mode === 'login' ? '登录' : mode === 'register' ? '注册' : '重置密码')}</button>
+    {mode === 'login' && <p className="right"><button className="link" type="button" onClick={() => switchMode('reset')}>{t('忘记密码？')}</button></p>}
     {phase === 'verifying' && <p role="status" className="sr-only">{t('请完成人机验证')}</p>}
     {message && <p role={success ? 'status' : 'alert'} className={success ? 'success' : 'error'}>{t(message)}</p>}
     {mode === 'reset' && success && message === '密码已重置，请使用新密码登录' && <button type="button" className="wide" onClick={() => switchMode('login')}>{t('返回登录')}</button>}
