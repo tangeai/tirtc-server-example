@@ -6,6 +6,7 @@ import { CaptchaGate, captchaFields, type CaptchaToken } from '../lib/captcha';
 import { useLanguage } from '../lib/i18n';
 
 type Mode = 'login' | 'register' | 'reset';
+type AuthValues = { email: string; password: string; confirm: string; code: string };
 const pathFor = (mode: Mode) => mode === 'reset' ? '/forgot-password' : '/' + mode;
 function initialMode(): Mode {
   return location.pathname === '/forgot-password' ? 'reset' : location.pathname === '/register' || new URLSearchParams(location.search).get('tab') === 'register' ? 'register' : 'login';
@@ -31,7 +32,7 @@ export default function Auth() {
 }
 function AuthForm({ mode, switchMode }: { mode: Mode; switchMode(mode: Mode): void }) {
   const { t } = useLanguage();
-  const [email, setEmail] = useState(''), [password, setPassword] = useState(''), [confirm, setConfirm] = useState(''), [code, setCode] = useState('');
+  const formRef = useRef<HTMLFormElement>(null);
   const [consent, setConsent] = useState(false);
   const [message, setMessage] = useState(() => mode === 'login' && sessionStorage.getItem('login-notice') ? '登录状态已失效，请重新登录' : '');
   const [success, setSuccess] = useState(false), [phase, setPhase] = useState<'idle' | 'verifying' | 'submitting'>('idle');
@@ -62,27 +63,49 @@ function AuthForm({ mode, switchMode }: { mode: Mode; switchMode(mode: Mode): vo
     };
   }, [mode]);
   useEffect(() => { if (!cooldown) return; const timer = setTimeout(() => setCooldown(value => value - 1), 1000); return () => clearTimeout(timer); }, [cooldown]);
-  function changed() { revision.current++; gate.current?.cancel(); setPhase('idle'); setMessage(''); setSuccess(false); }
+  // Native inputs own their values: password managers and browser restoration
+  // do not always dispatch React change events. Rendering status must never
+  // overwrite the account visible to the user with an older state value.
+  function field(name: keyof AuthValues) {
+    const input = formRef.current?.elements.namedItem(name);
+    return input instanceof HTMLInputElement ? input : undefined;
+  }
+  function readValues(): AuthValues {
+    return { email: field('email')?.value || '', password: field('password')?.value || '',
+      confirm: field('confirm')?.value || '', code: field('code')?.value || '' };
+  }
+  function changed() {
+    revision.current++; pendingRequest.current?.abort(); submitting.current = false;
+    gate.current?.cancel(); setPhase('idle'); setMessage(''); setSuccess(false);
+  }
+  function isCurrent(current: number, values: AuthValues) {
+    if (current !== revision.current) return false;
+    const actual = readValues();
+    if (Object.keys(values).some(key => actual[key as keyof AuthValues] !== values[key as keyof AuthValues])) {
+      changed(); setMessage('表单内容已变化，请重新提交'); return false;
+    }
+    return true;
+  }
   function agreed() {
     if (mode === 'reset' || consent) return true;
     setMessage('请先阅读并同意用户协议和隐私政策'); consentRef.current?.focus(); return false;
   }
-  async function perform(kind: 'login' | 'send' | 'submit', token: CaptchaToken | null, current: number) {
-    if (current !== revision.current || submitting.current) return;
+  async function perform(kind: 'login' | 'send' | 'submit', token: CaptchaToken | null, current: number, values: AuthValues) {
+    if (submitting.current || !isCurrent(current, values)) return;
     const controller = new AbortController(); pendingRequest.current = controller;
     submitting.current = true; setPhase('submitting'); setMessage(''); setSuccess(false);
     try {
       if (kind === 'send') {
-        await request(mode === 'reset' ? '/v1/user/password-reset/send-code' : '/v1/user/send-code', { method: 'POST', anonymous: true, signal: controller.signal, body: { email: email.trim(), ...captchaFields(token) } });
-        if (current !== revision.current) return;
+        await request(mode === 'reset' ? '/v1/user/password-reset/send-code' : '/v1/user/send-code', { method: 'POST', anonymous: true, signal: controller.signal, body: { email: values.email.trim(), ...captchaFields(token) } });
+        if (!isCurrent(current, values)) return;
         setCooldown(60); setSuccess(true); setMessage(mode === 'reset' ? '如该邮箱已注册，验证码将发送至该邮箱' : '验证码已发送');
       } else {
         const path = kind === 'login' ? '/v1/user/login' : mode === 'reset' ? '/v1/user/password-reset' : '/v1/user/register';
-        const body = kind === 'login' ? { email: email.trim(), password, ...captchaFields(token) } : { email: email.trim(), password, code };
+        const body = kind === 'login' ? { email: values.email.trim(), password: values.password, ...captchaFields(token) } : { email: values.email.trim(), password: values.password, code: values.code };
         const result = await request<{ token: string }>(path, { method: 'POST', anonymous: true, signal: controller.signal, body });
-        if (current !== revision.current) return;
+        if (!isCurrent(current, values)) return;
         clearSession();
-        if (mode === 'reset') { setSuccess(true); setMessage('密码已重置，请使用新密码登录'); setPassword(''); setConfirm(''); }
+        if (mode === 'reset') { setSuccess(true); setMessage('密码已重置，请使用新密码登录'); for (const name of ['password', 'confirm'] as const) { const input = field(name); if (input) input.value = ''; } }
         else { localStorage.setItem('token', result.token); location.assign('/devices'); }
       }
     } catch (error) {
@@ -95,24 +118,25 @@ function AuthForm({ mode, switchMode }: { mode: Mode; switchMode(mode: Mode): vo
   async function verify(kind: 'login' | 'send') {
     if (submitting.current || !agreed()) return;
     if (!emailRef.current?.reportValidity()) return;
-    const current = revision.current;
+    const current = revision.current, values = readValues();
     setPhase('verifying'); setMessage('');
-    try { await gate.current?.open(token => { void perform(kind, token, current); }); }
+    try { await gate.current?.open(token => { void perform(kind, token, current, values); }); }
     catch { if (current === revision.current) { setPhase('idle'); setMessage('人机验证加载失败，请重试'); } }
   }
   function submit(event: FormEvent) {
     event.preventDefault();
     if (submitting.current || !agreed()) return;
     if (mode === 'login') { void verify('login'); return; }
-    if (password !== confirm) { setMessage('两次密码不一致'); return; }
-    void perform('submit', null, revision.current);
+    const values = readValues();
+    if (values.password !== values.confirm) { setMessage('两次密码不一致'); return; }
+    void perform('submit', null, revision.current, values);
   }
-  return <form onSubmit={submit}>
+  return <form ref={formRef} onSubmit={submit}>
     <fieldset disabled={phase === 'submitting'}>
-      <label>{t(mode === 'reset' ? '注册邮箱' : '邮箱')}<input ref={emailRef} type="email" autoComplete="email" required value={email} onChange={event => { changed(); setEmail(event.target.value); setCode(''); }} placeholder={t('请输入邮箱地址')}/></label>
-      {mode !== 'login' && <label>{t('邮箱验证码')}<div className="code-row"><input aria-label={t('邮箱验证码')} value={code} onChange={event => setCode(event.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" pattern="[0-9]{6}" autoComplete="one-time-code" required placeholder={t('6 位验证码')}/><button type="button" disabled={cooldown > 0} onClick={() => void verify('send')}>{cooldown ? t('{p0}s 后重新获取', { p0: cooldown }) : t('获取验证码')}</button></div></label>}
-      <PasswordField label={mode === 'login' ? '密码' : mode === 'reset' ? '新密码' : '设置密码'} required minLength={mode === 'login' ? undefined : 6} value={password} onChange={event => { changed(); setPassword(event.target.value); }} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} placeholder={t(mode === 'login' ? '请输入密码' : '至少 6 位')}/>
-      {mode !== 'login' && <PasswordField label={mode === 'reset' ? '确认新密码' : '确认密码'} autoComplete="new-password" minLength={6} required value={confirm} onChange={event => setConfirm(event.target.value)} placeholder={t('再次输入密码')}/>}
+      <label>{t(mode === 'reset' ? '注册邮箱' : '邮箱')}<input ref={emailRef} type="email" name="email" autoComplete={mode === 'reset' ? 'email' : 'username'} autoCapitalize="none" spellCheck={false} required defaultValue="" onInput={() => { changed(); const input = field('code'); if (input) input.value = ''; }} placeholder={t('请输入邮箱地址')}/></label>
+      {mode !== 'login' && <label>{t('邮箱验证码')}<div className="code-row"><input aria-label={t('邮箱验证码')} name="code" defaultValue="" onInput={event => { event.currentTarget.value = event.currentTarget.value.replace(/\D/g, '').slice(0, 6); changed(); }} inputMode="numeric" pattern="[0-9]{6}" autoComplete="one-time-code" required placeholder={t('6 位验证码')}/><button type="button" disabled={cooldown > 0} onClick={() => void verify('send')}>{cooldown ? t('{p0}s 后重新获取', { p0: cooldown }) : t('获取验证码')}</button></div></label>}
+      <PasswordField label={mode === 'login' ? '密码' : mode === 'reset' ? '新密码' : '设置密码'} required minLength={mode === 'login' ? undefined : 6} name="password" defaultValue="" onInput={changed} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} placeholder={t(mode === 'login' ? '请输入密码' : '至少 6 位')}/>
+      {mode !== 'login' && <PasswordField label={mode === 'reset' ? '确认新密码' : '确认密码'} autoComplete="new-password" minLength={6} required name="confirm" defaultValue="" onInput={changed} placeholder={t('再次输入密码')}/>}
       {mode === 'reset' ? <p className="legal"><LegalLinks/></p> : <div className="legal consent"><input ref={consentRef} id="consent" type="checkbox" checked={consent} onChange={event => { changed(); setConsent(event.target.checked); }}/><div><label htmlFor="consent">{t('我已阅读并同意')}</label> <LegalLinks/></div></div>}
       <button className="primary wide" type="submit">{t(phase === 'submitting' ? '提交中…' : mode === 'login' ? '登录' : mode === 'register' ? '注册' : '重置密码')}</button>
       {mode === 'login' && <p className="right"><button className="link" type="button" onClick={() => switchMode('reset')}>{t('忘记密码？')}</button></p>}
