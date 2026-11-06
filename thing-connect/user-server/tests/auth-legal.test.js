@@ -21,7 +21,10 @@ test('both configured legal documents exist and can be read without scripts',()=
   for(const url of urls){
     assert.match(url,/^\/static\/legal\/.+\.html$/);
     const document=fs.readFileSync(path.join(__dirname,'..',url),'utf8');
-    assert.match(document,/<h1>小钛控制台/);assert.match(document,/dpo@tange.ai/);
-    assert.doesNotMatch(document,/<script/);assert.match(document,/试行稿/);
+    assert.match(document,/<h1>[^<]*小钛/);
+    const contacts=[...document.matchAll(/mailto:([^"\s]+)/g)].map(match=>match[1]);
+    assert.ok(contacts.length>0);
+    assert.ok(contacts.every(email=>email==='openapi@tange.ai'));
+    assert.doesNotMatch(document,/<script/);assert.match(document,/文本更新日期/);
   }
 });

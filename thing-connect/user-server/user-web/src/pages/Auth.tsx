@@ -23,7 +23,7 @@ export default function Auth() {
   useEffect(() => { if (mode !== 'reset' && localStorage.getItem('token')) location.replace('/devices'); }, [mode]);
   const title = mode === 'login' ? '登录账号' : mode === 'register' ? '注册账号' : '找回密码';
   const backToDevices = mode === 'reset' && !!localStorage.getItem('token');
-  return <Shell title="小钛控制台" back={backToDevices ? '/devices' : mode === 'reset' ? '/login' : '/'} backLabel={backToDevices ? '返回设备列表' : mode === 'reset' ? '返回登录' : '返回首页'}>
+  return <Shell title="小钛控制台" back={mode !== 'reset' ? null : backToDevices ? '/devices' : '/login'} backLabel={backToDevices ? '返回设备列表' : '返回登录'}>
     <main className="auth-layout"><section className="card auth-card"><h1>{t(title)}</h1>
       {mode === 'reset' ? <p className="muted">{t('验证注册邮箱后即可设置新密码')}</p> : <nav className="tabs" aria-label={t('账号操作')}><button type="button" aria-pressed={mode === 'login'} onClick={() => switchMode('login')}>{t('登录')}</button><button type="button" aria-pressed={mode === 'register'} onClick={() => switchMode('register')}>{t('注册')}</button></nav>}
       <AuthForm key={mode} mode={mode} switchMode={switchMode}/>

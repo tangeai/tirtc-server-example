@@ -74,7 +74,7 @@ export default function Devices() {
   }
   const close = () => setModal(undefined);
   const href = (page: string, device: Device) => page + '?device_id=' + encodeURIComponent(device.device_id);
-  return <><header className="topbar"><a href="/" className="brand">◉ {t('小钛控制台')}</a><div className="header-actions"><NavigationLinks/><LanguageSwitcher/><Account/></div></header>
+  return <><header className="topbar"><span className="brand">◉ {t('小钛控制台')}</span><div className="header-actions"><NavigationLinks/><LanguageSwitcher/><Account/></div></header>
     <main className="device-layout"><div className="row"><h1>{t('我的设备')} <small>({data.devices.length})</small></h1><button className="device-refresh" disabled={loading} onClick={() => void refresh()}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-1l2 3M4 15l2 3a7 7 0 0 0 12-1"/></svg>{t('刷新')}</button></div>
       {loading && <p role="status" className="muted">{t('正在加载设备…')}</p>}{error && <p className="error" role="alert">{t(error)}</p>}{restored && <p className="muted">{t('显示上次查看的设备状态，点击刷新获取最新状态。')}</p>}
       <div className="device-grid">{data.devices.map(device => { const summary = data.summaries[device.device_id]; return <article className="card device-card" key={device.device_id} data-device-id={device.device_id}>
