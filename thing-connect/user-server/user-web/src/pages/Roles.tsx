@@ -66,7 +66,7 @@ export default function Roles() {
   }
   async function select(role: Entry, confirmed = false) {
     if (operation.current || role.unavailable || (!confirmed && !await discard())) return;
-    const rev = ++selection.current; setLoading(true); setError('');
+    const rev = ++selection.current; setLoading(true); setError(''); setNotice('');
     try {
       const full = role.id && !role.preset ? { ...role, ...await request<Role>('/v1/ai/roles/' + encodeURIComponent(role.id)) } : role;
       if (!mounted.current || rev !== selection.current) return;
@@ -80,7 +80,7 @@ export default function Roles() {
     let payload: Role;
     try { payload = rolePayload(selected, draft, voices.data?.items || []); }
     catch (e) { setError(e instanceof Error ? e.message : '保存失败'); return false; }
-    operation.current = true; setBusy(true); setError('');
+    operation.current = true; setBusy(true); setError(''); setNotice('');
     try {
       const result = await request<Role>('/v1/ai/roles' + (selected.id ? '/' + encodeURIComponent(selected.id) : ''), { method: selected.id ? 'PUT' : 'POST', body: payload });
       if (!mounted.current) return false;
@@ -100,7 +100,7 @@ export default function Roles() {
       if (answer === 'discard' && selected) setDraft(draftOf(selected));
     }
     let switched = false;
-    operation.current = true; setBusy(true); setError('');
+    operation.current = true; setBusy(true); setError(''); setNotice('');
     try {
       await request('/v1/ai/device/' + encodeURIComponent(device) + '/role', { method: role.preset ? 'DELETE' : 'PUT', body: role.preset ? undefined : { role_id: role.id } });
       if (mounted.current) { setBinding(value => ({ default_role_id: value?.default_role_id || '', role_id: role.preset ? '' : role.id })); setNotice(t('已切换到“{p0}”', { p0: role.name || role.id })); switched = true; }
@@ -111,7 +111,7 @@ export default function Roles() {
   async function remove() {
     if (resourceBlocked || !selected?.id || selected.preset || operation.current) return;
     if (await ask({ title: '操作确认', message: '确定删除该角色？', choices: [{ value: 'cancel', label: '取消' }, { value: 'delete', label: '确认删除' }] }) !== 'delete') return;
-    operation.current = true; setBusy(true); setError('');
+    operation.current = true; setBusy(true); setError(''); setNotice('');
     try {
       await request('/v1/ai/roles/' + encodeURIComponent(selected.id), { method: 'DELETE' });
       if (mounted.current) { setRoles(items => items.filter(item => item.id !== selected.id)); setSelected(undefined); setDraft(undefined); setMobileEditor(false); }
@@ -138,7 +138,7 @@ export default function Roles() {
       {error && !selected && <><p role="alert" className="error">{t(error)}</p><button onClick={() => void initialize()}>{t('重新加载')}</button></>}
     </aside><main className="role-editor"><button className="mobile-back" onClick={() => setMobileEditor(false)}>← {t('返回角色列表')}</button>
       {error && <p role="alert" className="error">{t(error)}</p>}{notice && <p role="status" className="success">{t(notice)}</p>}{loading && <p role="status">{t('正在加载角色详情…')}</p>}
-      {!loading && selected && draft ? <RoleEditor key={selected.id || 'new'} role={selected} draft={draft} setDraft={patch => setDraft(current => current ? { ...current, ...patch } : current)} voices={voices.data?.items || []} voiceLoading={voices.loading} voiceError={!!voices.error} retryVoices={voices.reload} busy={busy || loading} resourceBlocked={resourceBlocked} onResourceBlocked={setResourceBlocked} remove={remove}/> : !loading && <p className="muted">{t('选择或新建智能体')}</p>}
+      {!loading && selected && draft ? <RoleEditor key={selected.id || 'new'} role={selected} draft={draft} setDraft={patch => { setNotice(''); setDraft(current => current ? { ...current, ...patch } : current); }} voices={voices.data?.items || []} voiceLoading={voices.loading} voiceError={!!voices.error} retryVoices={voices.reload} busy={busy || loading} resourceBlocked={resourceBlocked} onResourceBlocked={setResourceBlocked} remove={remove}/> : !loading && <p className="muted">{t('选择或新建智能体')}</p>}
       {selected && !selected.preset && <div className="save-bar"><p>{t('保存角色会影响所有使用该角色的设备；应用到设备只切换当前设备。')}</p><div className="row"><button disabled={busy || resourceBlocked || loading} onClick={async () => { if (await discard() && selected) setDraft(draftOf(selected)); }}>{t('放弃修改')}</button><button className="primary" disabled={!dirty || busy || resourceBlocked || loading} onClick={() => void save()}>{t(busy ? '保存中…' : '保存角色')}</button></div></div>}
     </main></div>
   </Shell></div>;

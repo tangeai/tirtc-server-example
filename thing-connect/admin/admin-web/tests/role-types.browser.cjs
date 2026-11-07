@@ -60,6 +60,22 @@ const server = http.createServer((req, res) => {
       await dialog.waitFor({state:'hidden'});
     };
     await open();
+    const screenshots = path.resolve(__dirname, '../../../../output/playwright');
+    fs.mkdirSync(screenshots, {recursive:true});
+    for (const viewport of [{width:1366,height:768},{width:760,height:720},{width:390,height:844},{width:320,height:700}]) {
+      await page.setViewportSize(viewport);
+      await page.screenshot({path:path.join(screenshots,`admin-role-editor-${viewport.width}.png`), animations:'disabled'});
+      const bounds = await dialog.evaluate(el => {
+        const footer = el.querySelector('.ant-modal-footer').getBoundingClientRect();
+        const body = el.querySelector('.ant-modal-body');
+        return {bottom:footer.bottom, right:footer.right, left:footer.left, height:innerHeight, width:innerWidth, overflow:body.scrollWidth > body.clientWidth};
+      });
+      assert(bounds.bottom <= bounds.height && bounds.left >= 0 && bounds.right <= bounds.width, JSON.stringify(bounds));
+      assert.equal(bounds.overflow,false,'editor must not scroll horizontally');
+      await dialog.getByRole('button',{name:'保存类型',exact:true}).waitFor();
+
+    }
+    await page.setViewportSize({width:1280,height:800});
     assert.equal(await dialog.getByRole('button',{name:'试听所选音色'}).isEnabled(),true);
     await dialog.getByRole('button',{name:'试听所选音色'}).click();
     await dialog.getByRole('button',{name:'停止试听'}).waitFor({timeout:5000});

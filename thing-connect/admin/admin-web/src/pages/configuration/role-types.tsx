@@ -354,6 +354,7 @@ export function RoleTypesPage() {
         模板更新只影响后续选择；用户已保存的角色与设备绑定保持原样。
       </Typography.Paragraph>
       <Modal
+        className="role-type-editor-modal"
         open={!!editing}
         title={editing?.id ? '编辑角色类型' : '新增角色类型'}
         onCancel={() => void close()}
@@ -366,8 +367,9 @@ export function RoleTypesPage() {
         cancelText="取消"
         width={720}
       >
-        <Form form={form} layout="vertical" disabled={busy}>
+        <Form form={form} layout="vertical" disabled={busy} className="role-type-editor-form">
           <Form.Item
+            className="role-type-name"
             name="name"
             label="角色类型名称"
             rules={[
@@ -405,8 +407,9 @@ export function RoleTypesPage() {
               />
             )}
           <Form.Item
+            className="role-type-language"
             name="language"
-            label="角色语言"
+            label="语言"
             rules={[
               { required: true, message: '请输入语言代码' },
               { max: 16, message: '语言代码不能超过 16 字符' },
@@ -414,11 +417,7 @@ export function RoleTypesPage() {
           >
             <Input placeholder="zh / en / ja" />
           </Form.Item>
-          <Form.Item
-            name="voice_selection"
-            label="角色音色"
-            extra="只关联探鸽实际提供的对应音色；缺失时留空，不用相似音色代替。"
-          >
+          <Form.Item name="voice_selection" label="角色音色" extra="按音色及模型匹配，缺失时留空。">
             <Select
               allowClear
               showSearch
@@ -440,7 +439,7 @@ export function RoleTypesPage() {
           <Button
             disabled={busy || !voice?.sample_url}
             onClick={() => void preview()}
-            style={{ marginBottom: 16 }}
+            className="role-type-preview-button"
           >
             {playing ? '停止试听' : '试听所选音色'}
           </Button>
@@ -448,9 +447,9 @@ export function RoleTypesPage() {
             <Typography.Text type="secondary"> 暂无试听音频</Typography.Text>
           )}
           <Form.Item
+            className="role-type-prompt"
             name="prompt"
             label="默认提示词"
-            extra="用户选择类型时自动填入，用户可以自行编辑。"
             rules={[
               {
                 required: editing?.status === 'published',
@@ -460,30 +459,25 @@ export function RoleTypesPage() {
               { max: 12000, message: '提示词不能超过 12000 个字符' },
             ]}
           >
-            <Input.TextArea rows={12} showCount maxLength={12000} />
+            <Input.TextArea rows={8} showCount maxLength={12000} />
           </Form.Item>
           <Form.Item
+            className="role-type-order"
             name="sort_order"
-            label="排序（数值越小越靠前）"
+            label="排序"
+            tooltip="数值越小越靠前"
             rules={[{ required: true, message: '请输入排序值' }]}
           >
             <InputNumber min={0} max={99999} precision={0} />
           </Form.Item>
           <Form.Item
+            className="role-type-reason"
             name="reason"
             label="操作说明"
             rules={[{ required: true, whitespace: true, message: '请填写操作说明' }]}
           >
             <Input maxLength={150} />
           </Form.Item>
-          <Alert
-            type="info"
-            message={
-              editing?.status === 'published'
-                ? '保存后供用户后续选择，不覆盖已有角色。'
-                : '保存后可在列表中启用该类型。'
-            }
-          />
         </Form>
       </Modal>
       <Modal

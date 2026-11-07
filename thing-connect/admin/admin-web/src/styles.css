@@ -185,3 +185,72 @@ body,
     padding: 24px;
   }
 }
+
+/* Keep the editor actions visible in short and split-screen windows. */
+.role-type-editor-modal.ant-modal {
+  top: 16px;
+  padding-bottom: 16px;
+}
+.role-type-editor-modal .ant-modal-content {
+  max-height: calc(100dvh - 32px);
+  display: flex;
+  flex-direction: column;
+}
+.role-type-editor-modal .ant-modal-header,
+.role-type-editor-modal .ant-modal-footer {
+  flex-shrink: 0;
+}
+.role-type-editor-modal .ant-modal-body {
+  overflow-y: auto;
+  min-height: 0;
+  padding: 4px 4px 12px 0;
+  overscroll-behavior: contain;
+}
+.role-type-editor-modal .ant-modal-footer {
+  border-top: 1px solid #f0f0f0;
+  padding-top: 12px;
+  margin-top: 0;
+}
+.role-type-editor-form {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px 16px;
+}
+.role-type-editor-form > * {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+.role-type-editor-form .ant-form-item {
+  margin-bottom: 0;
+}
+.role-type-editor-form .ant-form-item-label {
+  padding-bottom: 4px;
+}
+.role-type-editor-form .role-type-name,
+.role-type-editor-form .role-type-reason {
+  grid-column: span 3;
+}
+.role-type-editor-form .role-type-language,
+.role-type-editor-form .role-type-order {
+  grid-column: span 1;
+}
+.role-type-editor-form .ant-input-number {
+  width: 100%;
+}
+.role-type-editor-form .role-type-preview-button {
+  width: fit-content;
+}
+.role-type-editor-form .role-type-prompt textarea {
+  height: clamp(140px, 26dvh, 240px);
+  resize: none;
+  font-size: 14px;
+  line-height: 1.65;
+}
+@media (max-width: 480px) {
+  .role-type-editor-form {
+    column-gap: 12px;
+  }
+  .role-type-editor-form .role-type-prompt textarea {
+    height: clamp(140px, 22dvh, 180px);
+  }
+}

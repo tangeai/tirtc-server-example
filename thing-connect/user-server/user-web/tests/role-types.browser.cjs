@@ -43,6 +43,17 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  const choose=async name=>{await page.getByRole('button',{name:/角色类型/}).click();await page.getByRole('button',{name:new RegExp(name+' ')}).click();};
  await page.getByRole('button',{name:/角色类型/}).click();
  assert.equal(await page.getByLabel('类型语言',{exact:true}).count(),0);assert.equal(await page.getByRole('button',{name:'试听：山行猴侠',exact:true}).count(),0);await page.locator('.role-type-option').filter({hasText:'山行猴侠'}).getByText('暂无试听',{exact:true}).waitFor();
+ const search=page.getByRole('searchbox',{name:'搜索角色类型',exact:true});
+ await search.fill('山行');
+ await search.press('ArrowDown');
+ assert.equal(await page.getByRole('button',{name:'山行猴侠 猴哥 2.0',exact:true}).evaluate(el=>el===document.activeElement),true);
+ await page.keyboard.press('Escape');
+ assert.equal(await page.getByRole('button',{name:/角色类型/}).evaluate(el=>el===document.activeElement),true);
+ await page.getByRole('button',{name:/角色类型/}).click();
+ assert.equal(await search.inputValue(),'','reopening should show the complete catalog');
+ await search.fill('不存在的类型');await page.getByText('没有匹配的角色类型',{exact:true}).waitFor();
+ await search.press('ArrowDown');await page.keyboard.press('Escape');
+ await page.getByRole('button',{name:/角色类型/}).click();
  const before=await prompt.inputValue();await page.getByRole('button',{name:'试听：温柔伙伴',exact:true}).click();assert.equal(await prompt.inputValue(),before);
  await page.getByRole('button',{name:/温柔伙伴 中文测试声音/}).click();
  // A new draft can inherit defaults from the system role; replacing is explicit.
@@ -88,7 +99,7 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  await page.getByText('语音设置',{exact:true}).click();
  assert.equal(await page.getByText('单独调整音色',{exact:true}).count(),0);assert.equal(await page.getByLabel('声音列表',{exact:true}).count(),0);
  const sliders=page.getByRole('slider');assert.equal(await sliders.nth(0).inputValue(),'1');assert.equal(await sliders.nth(1).inputValue(),'1');assert.equal(await sliders.nth(0).getAttribute('aria-valuetext'),'标准');
- await sliders.nth(0).fill('2');await sliders.nth(1).fill('0');await page.getByRole('button',{name:'保存角色',exact:true}).click();await page.getByText('保存成功',{exact:true}).waitFor();assert.equal(role.service_config.config.tts.provider_params.audio.speech_rate,20);assert.equal(role.service_config.config.tts.provider_params.audio.pitch_rate,-2);
+ await sliders.nth(0).fill('2');assert.equal(await page.getByText('保存成功',{exact:true}).count(),0,'editing must clear stale save confirmation');await sliders.nth(1).fill('0');await page.getByRole('button',{name:'保存角色',exact:true}).click();await page.getByText('保存成功',{exact:true}).waitFor();assert.equal(role.service_config.config.tts.provider_params.audio.speech_rate,20);assert.equal(role.service_config.config.tts.provider_params.audio.pitch_rate,-2);
  for(const width of [320,390,768,1440]){await page.setViewportSize({width,height:900});await page.getByRole('button',{name:/角色类型/}).click();assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await page.screenshot({path:root+'/../output/playwright/role-types-'+width+'.png',fullPage:true});await page.keyboard.press('Escape');}
  await page.getByRole('switch',{name:'自定义提示词'}).check();await prompt.fill('这是较长的角色设定，用于检查阅读区域。\n'.repeat(80));
  for(const viewport of [{width:1440,height:900},{width:1366,height:768},{width:390,height:844}]){
