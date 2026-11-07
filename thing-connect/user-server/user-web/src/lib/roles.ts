@@ -1,4 +1,4 @@
-import { configureVoice, supportedVoiceModel, voiceSettings } from './tts-config.ts';
+import { configureVoice, voiceSettings } from './tts-config.ts';
 export interface ComponentConfig { provider?: string; provider_params?: { model?: string; audio?: { voice_type?: string; speech_rate?: number; pitch_rate?: number; [key: string]: unknown }; voice?: string; rate?: number; pitch?: number; [key: string]: unknown }; [key: string]: unknown }
 export interface Role {
   id?: string; name?: string; avatar?: string; parent_role_id?: string;
@@ -49,11 +49,4 @@ export function rolePayload(previous: Role, draft: RoleDraft, voices: Voice[]): 
       ali_rag: draft.knowledge ? { ...previous.agent_config?.ali_rag, index_id: draft.knowledge } : null, mcp_tools: [...draft.mcp], device_plugins: [...draft.plugins] },
     service_config: edits.custom ? { ...previous.service_config, ...(previous.service_config ? {} : { name: 'default' }), type: 'custom-compose', config } : previous.service_config,
     user_params: { ...previous.user_params, description: draft.description.trim(), voice: draft.voice || undefined, role_type_id: draft.typeId || undefined, role_type_revision: draft.typeId ? draft.typeRevision : undefined, role_type_custom: draft.typeId ? draft.customPrompt : undefined } };
-}
-
-export function matchingVoices(voices: Voice[], language: string, search: string): Voice[] {
-  const query = search.trim().toLowerCase();
-  return voices.filter(voice => supportedVoiceModel(voice.model) &&
-    (!language || voice.languages?.some(value => value.toLowerCase().split(/[-_]/)[0] === language)) &&
-    (!query || [voice.id, voice.name].some(value => value.toLowerCase().includes(query))));
 }

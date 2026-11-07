@@ -18,6 +18,7 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  if(u.pathname==='/v1/user/device/list')data=[{device_id:'one',device_name:'设备一',status:1,online:true},{device_id:'two',device_name:'设备二',status:1}];
  else if(u.pathname==='/v1/user/me')data={email:'test@example.test'};
  else if(u.pathname==='/v1/user/device/name'){if(renameWait)await renameWait;}
+ else if(u.pathname==='/v1/ai/role-types')data={items:[{id:'type-zh',name:'中文伙伴',voice_id:'zh',voice_model:'cosyvoice-v3-flash',prompt:'默认设定',revision:1,sort_order:1}]};
  else if(u.pathname==='/v1/ai/roles')data={items:[role]};
  else if(u.pathname==='/v1/ai/roles/default')data={id:'preset',name:'预设角色',agent_config:{prompt:'只读'}};
  else if(u.pathname==='/v1/ai/roles/custom'){if(req.method()==='PUT')role={...role,...req.postDataJSON()};if(req.method()==='DELETE')return route.fulfill({status:409,json:{code:40900,msg:'角色正在使用，请先解除设备关联',data:{devices:[{device_id:'two',device_name:'设备二'}]}}});data=role;}
@@ -37,29 +38,35 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  await page.setViewportSize({width:1440,height:900});
  await page.goto(base+'/agent?device_id=one');await page.getByRole('button',{name:'我的角色',exact:true}).click();
  await page.getByLabel('智能体名称',{exact:true}).fill('新的名称');
+ await page.getByRole('button',{name:'扩展能力',exact:true}).click();
  await page.getByText('更多角色信息',{exact:true}).click();
- await page.getByLabel('智能体描述',{exact:true}).fill('角色说明');await page.getByLabel('角色设定',{exact:true}).fill('测试设定');await page.getByLabel('开场白',{exact:true}).fill('你好');
- await page.getByText('语音设置',{exact:true}).click();await page.getByText('单独调整音色',{exact:true}).click();
- assert.equal(await page.getByLabel('声音列表',{exact:true}).locator('option').count(),3);
- await page.getByLabel('声音列表',{exact:true}).selectOption('zh');
+ await page.getByLabel('智能体描述',{exact:true}).fill('角色说明');await page.getByLabel('开场白',{exact:true}).fill('你好');
+ await page.getByRole('button',{name:'角色',exact:true}).click();await page.getByLabel('角色设定',{exact:true}).fill('测试设定');
+ await page.getByRole('button',{name:/角色类型/}).click();
+ await page.getByRole('button',{name:'中文伙伴 中文测试声音',exact:true}).click();
+ await page.getByRole('button',{name:'保留我的设定',exact:true}).click();
+ await page.getByText('语音设置',{exact:true}).click();
+ assert.equal(await page.getByText('单独调整音色',{exact:true}).count(),0);
+ assert.equal(await page.getByLabel('声音列表',{exact:true}).count(),0);
  assert((await page.locator('audio').last().getAttribute('src')).endsWith('/preview.mp3'));
  await page.getByRole('button',{name:'试听',exact:true}).click();await page.getByRole('button',{name:'暂停',exact:true}).click();
  assert.equal(await page.getByLabel('角色设定',{exact:true}).inputValue(),'测试设定');
- const sliders=page.getByRole('slider');await sliders.nth(0).fill('1.5');await sliders.nth(1).fill('0.8');
+ const sliders=page.getByRole('slider');assert.equal(await sliders.count(),2);assert.equal(await page.getByText('识别速度',{exact:true}).count(),0);await sliders.nth(0).fill('2');await sliders.nth(1).fill('0');assert.equal(await sliders.nth(0).getAttribute('aria-valuetext'),'快');assert.equal(await sliders.nth(1).getAttribute('aria-valuetext'),'低');
  await page.getByRole('button',{name:'模型与记忆',exact:true}).click();
  await page.locator('.role-section select').first().selectOption('qwen3.7-plus');await page.getByLabel('长期记忆').check();await page.getByRole('button',{name:'角色',exact:true}).click();
  assert.equal(await page.getByLabel('智能体名称',{exact:true}).inputValue(),'新的名称');
  await page.getByRole('button',{name:'保存角色',exact:true}).click();await page.getByText('保存成功',{exact:true}).waitFor();
- assert.equal(role.service_config.config.tts.provider_params.voice,'zh');assert.equal(role.agent_config.ali_memory.enable,true);assert.equal(role.agent_config.prompt,'测试设定');assert.equal(role.agent_config.welcome_text,'你好');assert.equal(role.user_params.description,'角色说明');assert.equal(role.service_config.config.tts.provider_params.rate,1.5);assert.equal(role.service_config.config.tts.provider_params.pitch,0.8);assert.equal(role.service_config.config.llm.provider_params.model,'qwen3.7-plus');
+ assert.equal(role.service_config.config.tts.provider_params.voice,'zh');assert.equal(role.agent_config.ali_memory.enable,true);assert.equal(role.agent_config.prompt,'测试设定');assert.equal(role.agent_config.welcome_text,'你好');assert.equal(role.user_params.description,'角色说明');assert.equal(role.service_config.config.tts.provider_params.rate,1.2);assert.equal(role.service_config.config.tts.provider_params.pitch,0.8);assert.equal(role.service_config.config.llm.provider_params.model,'qwen3.7-plus');
  for(const width of [320,390,768,1440]){
   await page.setViewportSize({width,height:900});
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   await page.screenshot({path:root+'/../output/playwright/role-voice-'+width+'.png',fullPage:true});
  }
- voiceMode='error';await page.getByRole('button',{name:'重新加载',exact:true}).click();await page.getByText('音色列表暂不可用，请稍后重试',{exact:false}).waitFor();
- voiceMode='empty';await page.getByRole('button',{name:'重试',exact:true}).click();await page.waitForFunction(()=>document.querySelector('select[aria-label="声音列表"]').options.length===2);
- voiceMode='ok';await page.getByRole('button',{name:'重新加载',exact:true}).click();await page.waitForFunction(()=>document.querySelector('select[aria-label="声音列表"] option[value="en"]'));
+ voiceMode='error';await page.reload();await page.getByRole('button',{name:'新的名称',exact:true}).click();await page.getByText('语音设置',{exact:true}).click();await page.getByText('音色列表暂不可用，请稍后重试',{exact:false}).waitFor();
+ voiceMode='empty';await page.getByRole('button',{name:'重试',exact:true}).click();await page.getByText('暂无可用角色类型，可先编辑角色设定。',{exact:true}).waitFor();
+ assert.equal(await page.getByLabel('声音列表',{exact:true}).count(),0);
+ voiceMode='ok';await page.reload();await page.getByRole('button',{name:'新的名称',exact:true}).click();await page.getByText('语音设置',{exact:true}).click();
  assert((await page.locator('.voice-current').innerText()).includes('中文测试声音'));
- assert.deepEqual(errors,[]);console.log('PASS: voice catalog, unified persona and voice panel, draft preservation across sections, save payload, error/empty/retry, responsive layouts');
+ assert.deepEqual(errors,[]);console.log('PASS: type-only voice selection, unified persona and voice panel, draft preservation across sections, save payload, error/empty/retry, responsive layouts');
  }finally{await browser.close();server.close();}
 })().catch(e=>{console.error(e);server.close();process.exitCode=1;});

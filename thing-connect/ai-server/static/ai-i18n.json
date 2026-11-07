@@ -221,8 +221,6 @@
   "重试": "Retry",
   "正在加载角色详情…": "Loading role details…",
   "暂时无法删除角色": "Role cannot be deleted yet",
-  "角色类型与音色": "Role type and voice",
-  "类型语言": "Type language",
   "选择角色类型": "Choose a role type",
   "搜索角色类型": "Search role types",
   "没有匹配的角色类型": "No matching role types",
@@ -233,7 +231,6 @@
   "使用默认设定": "Use defaults",
   "角色类型暂不可用，仍可手动编辑。": "Role types are unavailable. You can still edit manually.",
   "正在加载角色类型…": "Loading role types…",
-  "暂无可用角色类型，可先手动编辑角色和声音。": "No role types are available. You can edit the role and voice manually.",
   "默认设定": "Default instructions",
   "自定义设定": "Custom instructions",
   "恢复默认设定": "Restore default instructions",
@@ -248,7 +245,10 @@
   "语音设置": "Voice settings",
   "自定义提示词": "Custom instructions",
   "自定义": "Custom",
-  "单独调整音色": "Change voice only",
-  "仅更换声音并保留当前提示词；使用预设请在上方选择角色类型。": "Change only the voice and keep your instructions. To apply a preset, choose a role type above.",
-  "自定义角色 · {p0}": "Custom role · {p0}"
+  "自定义角色 · {p0}": "Custom role · {p0}",
+  "暂无可用角色类型，可先编辑角色设定。": "No role types are available. You can edit the role instructions first.",
+  "角色类型": "Role type",
+  "暂无试听": "No preview",
+  "回复速度": "Speaking speed",
+  "回复音调": "Voice pitch"
 }

@@ -122,7 +122,7 @@ export default function Roles() {
       } else setError(errorText(e));
     } finally { operation.current = false; if (mounted.current) setBusy(false); }
   }
-  return <Shell title="AI 角色"><div className="role-context"><span>{name || t('未命名设备')} · {device}</span><span>{t('当前角色')} <strong>{current?.name || t(loading ? '正在加载…' : '角色不可用，请重新选择')}</strong></span></div>
+  return <div className="roles-page"><Shell title="AI 角色"><div className="role-context"><span>{name || t('未命名设备')} · {device}</span><span>{t('当前角色')} <strong>{current?.name || t(loading ? '正在加载…' : '角色不可用，请重新选择')}</strong></span></div>
     <div className={'roles-layout' + (mobileEditor ? ' show-editor' : '')}><aside className="role-list"><input type="search" value={search} onChange={e => setSearch(e.target.value)} placeholder={t('搜索智能体...')} aria-label={t('搜索智能体...')}/><p className="muted">{t('点击角色查看配置，切换仅影响当前设备。')}</p>
       {roles.filter(role => !search.trim() || [role.name, role.user_params?.description].some(value => value?.toLowerCase().includes(search.toLowerCase()))).map(role => <article key={role.id} className={'role-card' + (role.id === effective && !role.unavailable ? ' active-role' : selected?.id === role.id ? ' viewed-role' : '')}>
         <button className="role-preview" type="button" aria-label={role.name || role.id} aria-pressed={selected?.id === role.id} disabled={busy || resourceBlocked || role.unavailable} onClick={() => void select(role)}><span className="role-title" title={role.name || role.id}>{role.name || role.id}</span>
@@ -136,9 +136,9 @@ export default function Roles() {
     </aside><main className="role-editor"><button className="mobile-back" onClick={() => setMobileEditor(false)}>← {t('返回角色列表')}</button>
       {error && <p role="alert" className="error">{t(error)}</p>}{notice && <p role="status" className="success">{t(notice)}</p>}{loading && <p role="status">{t('正在加载角色详情…')}</p>}
       {!loading && selected && draft ? <RoleEditor key={selected.id || 'new'} role={selected} draft={draft} setDraft={patch => setDraft(current => current ? { ...current, ...patch } : current)} voices={voices.data?.items || []} voiceLoading={voices.loading} voiceError={!!voices.error} retryVoices={voices.reload} busy={busy || loading} resourceBlocked={resourceBlocked} onResourceBlocked={setResourceBlocked} remove={remove}/> : !loading && <p className="muted">{t('选择或新建智能体')}</p>}
-      {dirty && <div className="save-bar"><p>{t('保存角色会影响所有使用该角色的设备；应用到设备只切换当前设备。')}</p><div className="row"><button disabled={busy || resourceBlocked || loading} onClick={async () => { if (await discard() && selected) setDraft(draftOf(selected)); }}>{t('放弃修改')}</button><button className="primary" disabled={busy || resourceBlocked || loading} onClick={() => void save()}>{t(busy ? '保存中…' : '保存角色')}</button></div></div>}
+      {selected && !selected.preset && <div className="save-bar"><p>{t('保存角色会影响所有使用该角色的设备；应用到设备只切换当前设备。')}</p><div className="row"><button disabled={busy || resourceBlocked || loading} onClick={async () => { if (await discard() && selected) setDraft(draftOf(selected)); }}>{t('放弃修改')}</button><button className="primary" disabled={!dirty || busy || resourceBlocked || loading} onClick={() => void save()}>{t(busy ? '保存中…' : '保存角色')}</button></div></div>}
     </main></div>
-  </Shell>;
+  </Shell></div>;
 }
 
 function RoleEditor({ role, draft, setDraft, voices, voiceLoading, voiceError, retryVoices, busy, resourceBlocked, onResourceBlocked, remove }: { role: Entry; draft: RoleDraft; setDraft(patch: Partial<RoleDraft>): void; voices: Voice[]; voiceLoading: boolean; voiceError: boolean; retryVoices(): void; busy: boolean; resourceBlocked: boolean; onResourceBlocked(value: boolean): void; remove(): Promise<void> }) {
@@ -151,16 +151,17 @@ function RoleEditor({ role, draft, setDraft, voices, voiceLoading, voiceError, r
       {[['basic', '角色'], ['model', '模型与记忆'], ['advanced', '扩展能力']].map(([value, label]) => <button key={value} type="button" aria-pressed={section === value} onClick={() => setSection(value)}>{t(label)}</button>)}
     </nav>
     <fieldset disabled={busy}>
-      <div hidden={section !== 'basic'}>
+      <div className="role-basic" hidden={section !== 'basic'}>
         <label>{t('智能体名称')}<input required readOnly={readonly} value={draft.name} onChange={e => patch({ name: e.target.value })}/></label>
         <RoleVoicePanel role={role} draft={draft} patch={patch} voices={voices} voiceLoading={voiceLoading} voiceError={voiceError} retryVoices={retryVoices} busy={busy} active={section === 'basic'} readonly={readonly}/>
-        <details className="role-section"><summary>{t('更多角色信息')}</summary><label>{t('智能体描述')}<input readOnly={readonly} value={draft.description} onChange={e => patch({ description: e.target.value })}/></label><label>{t('开场白')}<input readOnly={readonly} value={draft.welcome} onChange={e => patch({ welcome: e.target.value })}/></label></details>
+
       </div>
       <div hidden={section !== 'model'}><section className="role-section"><h2>{t('模型与记忆')}</h2><label>{t('模型')}<select disabled={readonly || !providers.llm} value={draft.model} onChange={e => patch({ model: e.target.value })}><option value="">{t('沿用基础配置')}</option>{[...new Set(['qwen3.5-flash', 'qwen3.7-plus', draft.model])].filter(Boolean).map(model => <option key={model}>{model}</option>)}</select></label><label className="radio"><input type="checkbox" disabled={readonly} checked={draft.memory} onChange={e => patch({ memory: e.target.checked })}/>{t('长期记忆')}</label></section></div>
       <div hidden={section !== 'advanced'}>
+        <details className="role-section"><summary>{t('更多角色信息')}</summary><label>{t('智能体描述')}<input readOnly={readonly} value={draft.description} onChange={e => patch({ description: e.target.value })}/></label><label>{t('开场白')}<input readOnly={readonly} value={draft.welcome} onChange={e => patch({ welcome: e.target.value })}/></label></details>
       <details className="role-section"><summary>{t('知识库')}</summary><Knowledge value={draft.knowledge} onChange={knowledge => patch({ knowledge })} readonly={readonly} onBlocked={onResourceBlocked}/></details>
       <details className="role-section"><summary>{t('工具与插件')}</summary><ResourceSelection kind="mcp" selected={draft.mcp} onChange={mcp => patch({ mcp })} readonly={readonly}/><ResourceSelection kind="plugin" selected={draft.plugins} onChange={plugins => patch({ plugins })} readonly={readonly} names={role.device_plugin_refs}/></details>
-      </div><p className="muted role-edit-scope">{t('保存角色会影响所有使用该角色的设备；应用到设备只切换当前设备。')}</p>{role.id && !readonly && <button type="button" className="danger" disabled={resourceBlocked} onClick={() => void remove()}>{t('删除角色')}</button>}
+      {role.id && !readonly && <button type="button" className="danger" disabled={resourceBlocked} onClick={() => void remove()}>{t('删除角色')}</button>}</div>
     </fieldset>
   </section>;
 }

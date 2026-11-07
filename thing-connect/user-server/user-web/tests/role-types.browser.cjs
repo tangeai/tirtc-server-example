@@ -40,8 +40,9 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  await page.goto(base+'/agent?device_id=one');
  await page.getByRole('button',{name:'＋ 新建角色',exact:true}).click();
  const prompt=page.getByLabel('角色设定',{exact:true});
- const choose=async name=>{await page.getByRole('button',{name:/角色类型与音色/}).click();await page.getByRole('button',{name:new RegExp(name+' ')}).click();};
- await page.getByRole('button',{name:/角色类型与音色/}).click();
+ const choose=async name=>{await page.getByRole('button',{name:/角色类型/}).click();await page.getByRole('button',{name:new RegExp(name+' ')}).click();};
+ await page.getByRole('button',{name:/角色类型/}).click();
+ assert.equal(await page.getByLabel('类型语言',{exact:true}).count(),0);assert.equal(await page.getByRole('button',{name:'试听：山行猴侠',exact:true}).count(),0);await page.locator('.role-type-option').filter({hasText:'山行猴侠'}).getByText('暂无试听',{exact:true}).waitFor();
  const before=await prompt.inputValue();await page.getByRole('button',{name:'试听：温柔伙伴',exact:true}).click();assert.equal(await prompt.inputValue(),before);
  await page.getByRole('button',{name:/温柔伙伴 中文测试声音/}).click();
  // A new draft can inherit defaults from the system role; replacing is explicit.
@@ -56,7 +57,7 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  assert(!requests.some(r=>r.path==='/v1/ai/role-types'&&r.method!=='GET'));
  assert.equal(role.user_params.role_type_id,'one');
  await page.reload();await page.getByRole('button',{name:'新建联动角色',exact:true}).click();
- await page.getByRole('button',{name:'角色类型与音色 温柔伙伴',exact:true}).waitFor();
+ await page.getByRole('button',{name:'角色类型 温柔伙伴',exact:true}).waitFor();
  assert.equal(await prompt.inputValue(),'保存后的自定义设定');
  assert.equal(await page.getByRole('switch',{name:'自定义提示词'}).isChecked(),true);
  await choose('活力伙伴');await page.getByRole('button',{name:'使用默认设定',exact:true}).click();
@@ -70,11 +71,21 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  await page.getByRole('button',{name:'保存角色',exact:true}).click();await page.getByText('保存成功',{exact:true}).waitFor();
  assert.deepEqual(role.service_config.config.tts,{provider:'ve-seed-tts-2',provider_params:{model:'seed-tts-2.0',audio:{voice_type:'seed-voice',speech_rate:0,pitch_rate:0}}});
  await page.reload();await page.getByRole('button',{name:'新建联动角色',exact:true}).click();
- await page.getByRole('button',{name:'角色类型与音色 山行猴侠',exact:true}).waitFor();
+ await page.getByRole('button',{name:'角色类型 山行猴侠',exact:true}).waitFor();
  assert.equal(await prompt.inputValue(),'爽朗直接的同行伙伴。');
  await page.getByText('语音设置',{exact:true}).click();
- const sliders=page.getByRole('slider');assert.equal(await sliders.nth(0).inputValue(),'0');assert.equal(await sliders.nth(1).inputValue(),'0');
- for(const width of [320,390,768,1440]){await page.setViewportSize({width,height:900});await page.getByRole('button',{name:/角色类型与音色/}).click();assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await page.screenshot({path:root+'/../output/playwright/role-types-'+width+'.png',fullPage:true});await page.keyboard.press('Escape');}
+ assert.equal(await page.getByText('单独调整音色',{exact:true}).count(),0);assert.equal(await page.getByLabel('声音列表',{exact:true}).count(),0);
+ const sliders=page.getByRole('slider');assert.equal(await sliders.nth(0).inputValue(),'1');assert.equal(await sliders.nth(1).inputValue(),'1');assert.equal(await sliders.nth(0).getAttribute('aria-valuetext'),'标准');
+ await sliders.nth(0).fill('2');await sliders.nth(1).fill('0');await page.getByRole('button',{name:'保存角色',exact:true}).click();await page.getByText('保存成功',{exact:true}).waitFor();assert.equal(role.service_config.config.tts.provider_params.audio.speech_rate,20);assert.equal(role.service_config.config.tts.provider_params.audio.pitch_rate,-2);
+ for(const width of [320,390,768,1440]){await page.setViewportSize({width,height:900});await page.getByRole('button',{name:/角色类型/}).click();assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await page.screenshot({path:root+'/../output/playwright/role-types-'+width+'.png',fullPage:true});await page.keyboard.press('Escape');}
+ await page.getByRole('switch',{name:'自定义提示词'}).check();await prompt.fill('这是较长的角色设定，用于检查阅读区域。\n'.repeat(80));
+ for(const viewport of [{width:1440,height:900},{width:1366,height:768},{width:390,height:844}]){
+  await page.setViewportSize(viewport);
+  const bounds=await page.evaluate(()=>({page:document.documentElement.scrollHeight,height:innerHeight,prompt:document.querySelector('.role-prompt').getBoundingClientRect().height,save:document.querySelector('.save-bar').getBoundingClientRect().bottom,speech:document.querySelector('.role-speech').getBoundingClientRect().bottom}));
+  assert(await prompt.evaluate(el=>el.scrollHeight>el.clientHeight),'long prompt scrolls inside the textarea');
+  assert(bounds.page<=bounds.height,'role page must fit viewport: '+JSON.stringify(bounds));assert(bounds.prompt>=60,'prompt remains readable: '+JSON.stringify(bounds));assert(bounds.save<=bounds.height&&bounds.speech<=bounds.height,'controls remain visible');
+  await page.screenshot({path:root+'/../output/playwright/role-fit-'+viewport.width+'.png',fullPage:true});
+ }
  assert.deepEqual(errors,[]);console.log('PASS role type preview, voice/prompt selection, keep/replace/cancel, POST snapshot, responsive layouts');
  }finally{await browser.close();server.close();}
 })().catch(e=>{console.error(e);server.close();process.exitCode=1});

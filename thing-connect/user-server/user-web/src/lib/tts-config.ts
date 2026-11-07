@@ -24,3 +24,13 @@ export function configureVoice(old: ComponentConfig | undefined, voice: Voice, r
   if (!Number.isFinite(rate) || !Number.isFinite(pitch) || rate < 0.5 || rate > 2 || pitch < 0.5 || pitch > 2) throw new Error('语速和音调应为 0.5 至 2');
   return { ...(same ? old : {}), provider, provider_params: { ...previous, model: voice.model, voice: voice.id, rate, pitch } };
 }
+
+// UI levels use the provider's native units; opening an older role only selects
+// the nearest displayed level and never rewrites its saved numeric settings.
+export function speechLevelValues(model: string, setting: 'rate' | 'pitch'): readonly [number, number, number] {
+  if (model === 'seed-tts-2.0') return setting === 'rate' ? [-20, 0, 20] : [-2, 0, 2];
+  return [0.8, 1, 1.2];
+}
+export function speechLevelIndex(value: number, levels: readonly number[]): number {
+  return levels.reduce((closest, next, index) => Math.abs(next - value) < Math.abs(levels[closest] - value) ? index : closest, 1);
+}
