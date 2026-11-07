@@ -78,7 +78,7 @@ export default function Room({ deviceId, onClose, onUpdate }: { deviceId?: strin
       <Button className="danger wide" disabled={busy} onClick={() => setLeave(a)}>{t('退出房间')}</Button>
     </section> : <fieldset disabled={busy || loading}>
       {a?.state === 'room_closed' && <p className="muted">{t('房间已解散，可新建或加入其他房间')}</p>}
-      {onClose && <nav className="room-mode" aria-label={t('房间操作')}><Segmented block value={mode} disabled={busy || loading} onChange={setMode} options={[{ value: 'create', label: t('创建房间') }, { value: 'join', label: t('加入房间') }]}/></nav>}
+      {onClose && <nav className="room-mode" aria-label={t('房间操作')}><Segmented block value={mode} disabled={busy || loading} onChange={setMode} options={[{ value: 'create', label: t('创建房间'), title: '' }, { value: 'join', label: t('加入房间'), title: '' }]}/></nav>}
       <form hidden={!!onClose && mode !== 'create'} className="card" onSubmit={submit('create', { password: usePassword ? newPassword : '' })}>{!onClose && <h2>{t('创建房间')}</h2>}{!onClose && <p className="muted">{t('创建后，此设备自动加入房间。')}</p>}<Radio.Group className="room-password-mode" name="password-mode" value={usePassword} disabled={busy || loading} onChange={event => { setUsePassword(event.target.value); if (!event.target.value) setNewPassword(''); }}><Radio value={false}>{t('无密码')}</Radio><Radio value={true}>{t('设置密码')}</Radio></Radio.Group>
       {usePassword && <label>{t('4 位数字密码')}<Input type="password" inputMode="numeric" autoComplete="new-password" required pattern="[0-9]{4}" value={newPassword} onChange={event => setNewPassword(event.target.value.replace(/\D/g, '').slice(0, 4))}/></label>}
       <Button type="submit" className="primary wide" aria-busy={busy}>{t(busy ? '提交中…' : '创建房间')}</Button></form>

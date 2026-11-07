@@ -1,5 +1,5 @@
 import { Button } from '../components/Button';
-import { Input } from 'antd';
+import { Input, Segmented } from 'antd';
 import { useEffect, useRef, useState } from 'react';
 import { Conversations } from '../components/Conversations';
 import { Shell } from '../components/Shell';
@@ -158,9 +158,7 @@ function RoleEditor({ role, draft, setDraft, voices, voiceLoading, voiceError, r
   const readonly = !!role.preset, providers = editableProviders(role);
   const patch = (value: Partial<RoleDraft>) => setDraft(value);
   return <section className="card role-form"><div className="role-form-heading">{role.avatar && /^https?:\/\//.test(role.avatar) ? <img src={role.avatar} alt={t('角色头像')}/> : <span aria-hidden="true">{role.avatar || 'AI'}</span>}<h1>{role.id ? t('正在查看：{p0}', { p0: role.name || role.id }) : t('新建角色')}</h1></div>{readonly && <p className="preset-notice">{t('这是系统预设，只能查看。需要修改时请新建自己的角色。')}</p>}
-    <nav className="role-editor-nav" aria-label={t('角色设置')}>
-      {[['basic', '角色'], ['model', '模型与记忆'], ['advanced', '扩展能力']].map(([value, label]) => <Button key={value} type="button" aria-pressed={section === value} onClick={() => setSection(value)}>{t(label)}</Button>)}
-    </nav>
+    <nav className="role-editor-nav" aria-label={t('角色设置')}><Segmented block value={section} onChange={setSection} options={[['basic','角色'],['model','模型与记忆'],['advanced','扩展能力']].map(([value,label])=>({value,label:t(label),title:''}))}/></nav>
     <fieldset disabled={busy}>
       <div className="role-basic" hidden={section !== 'basic'}>
         <div className="role-identity"><label>{t('智能体名称')}<Input required readOnly={readonly} value={draft.name} onChange={e => patch({ name: e.target.value })}/></label><label>{t('地域')}<select aria-label={t('角色地域')} disabled={!!role.id || readonly} value={draft.region} onChange={e => patch({ region: e.target.value })} title={role.id ? t('地域创建后不可更改，其他地域请新建角色') : undefined}><option value="cn01">{t('国内')}</option><option value="sg01">{t('海外')}</option>{!['cn01', 'sg01'].includes(draft.region) && <option value={draft.region}>{t(roleRegionLabel(draft.region))}</option>}</select></label></div>{!!role.id && <p className="region-hint">{t('地域创建后不可更改，其他地域请新建角色')}</p>}

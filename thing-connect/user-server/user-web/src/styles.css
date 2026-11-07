@@ -4,17 +4,17 @@
 body{margin:0}
 a{color:var(--accent);text-decoration:none}
 :where(#root,.app-modal) :where(button,input,select,textarea){font:inherit}
-:where(#root,.app-modal) :where(button,.button){border:1px solid var(--line);border-radius:10px;min-height:44px;line-height:20px;padding:11px 16px;background:white;color:inherit;cursor:pointer;display:inline-block;text-align:center}
-:where(#root,.app-modal) button:disabled{cursor:not-allowed;opacity:.55}
-:where(#root,.app-modal) button:hover:not(:disabled){border-color:#7b9c91}
-button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+:where(#root,.app-modal) :where(button:not([class*="ant-"]),.button){border:1px solid var(--line);border-radius:10px;min-height:44px;line-height:20px;padding:11px 16px;background:white;color:inherit;cursor:pointer;display:inline-block;text-align:center}
+:where(#root,.app-modal) button:not([class*="ant-"]):disabled{cursor:not-allowed;opacity:.55}
+:where(#root,.app-modal) button:not([class*="ant-"]):hover:not(:disabled){border-color:#7b9c91}
+button:not([class*="ant-"]):focus-visible,a:focus-visible,input:not([class*="ant-"]):focus-visible,select:not([class*="ant-"]):focus-visible,textarea:not([class*="ant-"]):focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 :where(#root,.app-modal) h1{font-size:24px;line-height:1.35;margin:0 0 24px}
 :where(#root,.app-modal) h2{font-size:18px;line-height:1.4;margin:0 0 16px}
 :where(#root,.app-modal) p{line-height:1.65;overflow-wrap:anywhere}
 :where(#root,.app-modal) :where(label:not(.ant-radio-wrapper):not(.ant-checkbox-wrapper):not(.ant-segmented-item)){display:block;font-size:14px;font-weight:600;margin-bottom:20px}
-:where(#root,.app-modal) :where(input:not([type=checkbox]):not([type=radio]):not([type=range]),select,textarea){display:block;width:100%;min-width:0;border:1px solid #cfd8d4;border-radius:10px;background:white;height:44px;padding:10px 12px;line-height:22px;margin-top:8px;font-size:16px;font-weight:400;color:inherit}
-:where(#root,.app-modal) input::placeholder{color:#98a3a1}
-:where(#root,.app-modal) input:disabled{background:#f5f7f6}
+:where(#root,.app-modal) :where(input:not([class*="ant-"]):not([type=checkbox]):not([type=radio]):not([type=range]),select:not([class*="ant-"]),textarea:not([class*="ant-"])){display:block;width:100%;min-width:0;border:1px solid #cfd8d4;border-radius:10px;background:white;height:44px;padding:10px 12px;line-height:22px;margin-top:8px;font-size:16px;font-weight:400;color:inherit}
+:where(#root,.app-modal) input:not([class*="ant-"])::placeholder{color:#98a3a1}
+:where(#root,.app-modal) input:not([class*="ant-"]):disabled{background:#f5f7f6}
 :where(#root,.app-modal) fieldset{border:0;margin:0;padding:0;min-width:0}
 .topbar{height:64px;min-height:64px;padding:10px 24px;display:flex;align-items:center;justify-content:space-between;gap:14px;border-bottom:1px solid var(--line);background:white;position:sticky;top:0;z-index:20}
 .heading{display:flex;align-items:center;gap:16px;min-width:0}
@@ -29,9 +29,8 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .narrow{max-width:640px;margin:0 auto;padding:32px 20px 64px}
 .auth-layout{min-height:calc(100dvh - 64px);display:flex;align-items:center;justify-content:center;padding:32px 20px;background:radial-gradient(ellipse at 70% 0,#e8f5f1,transparent 40%)}
 .auth-card{width:440px;max-width:100%;padding:32px;box-shadow:0 24px 70px #15201f17}
-.tabs{display:flex;background:#eff2f0;border-radius:12px;padding:5px;gap:4px;margin-bottom:28px}
-.tabs button{flex:1;background:none;border:0;color:var(--muted);font-weight:600}
-.tabs [aria-pressed=true]{background:white;color:#172026;box-shadow:0 3px 12px #17202610}
+.tabs{margin-bottom:24px}
+.tabs button{flex:1}
 .code-row{display:flex;gap:10px;align-items:stretch;margin-top:9px}
 .code-row input{margin:0!important;flex:1;width:0!important}
 .code-row button{flex-shrink:0;color:var(--accent);font-size:14px;font-weight:600;padding:10px}
@@ -74,7 +73,6 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 
 .content{max-width:960px;margin:auto;padding:32px 20px 64px}
 .filter-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:18px 0}
-.filter-tabs [aria-pressed=true]{color:var(--accent);background:#eaf9f1;border-color:#6bd4ad}
 .badge{display:inline-block;font-size:12px;color:var(--muted);background:#f1f4f2;border-radius:20px;padding:3px 8px}
 .pending-row{border-top:1px solid var(--line);padding:12px 0}
 .content article strong{overflow-wrap:anywhere}
@@ -185,10 +183,10 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .mini-program .topbar .back,.mini-program .topbar .divider{display:none}
 
 
-/* Shared control sizes and spacing apply only to our app, not captcha SDK DOM. */
-:where(#root,.app-modal) textarea{height:auto;min-height:120px;resize:vertical}
+/* Native fallback controls only; library controls own their states and internal sizing. */
+:where(#root,.app-modal) textarea:not([class*="ant-"]){height:auto;min-height:120px;resize:vertical}
 
-:where(#root,.app-modal) input[type=checkbox],:where(#root,.app-modal) input[type=radio]{width:18px;height:18px;flex-shrink:0;accent-color:var(--accent)}
+:where(#root,.app-modal) input[type=checkbox]:not([class*="ant-"]),:where(#root,.app-modal) input[type=radio]:not([class*="ant-"]){width:18px;height:18px;flex-shrink:0;accent-color:var(--accent)}
 
 :where(#root,.app-modal) .primary{min-height:44px}
 
@@ -301,9 +299,8 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .role-form-heading{display:flex;align-items:center;gap:12px;margin-bottom:16px}
 .role-form-heading h1{margin:0;font-size:22px}
 .role-form-heading>img,.role-form-heading>span{width:40px;height:40px;flex-shrink:0;border-radius:10px;background:#e8faf1;display:flex;align-items:center;justify-content:center;font-size:18px;object-fit:cover}
-.role-editor-nav{display:flex;gap:4px;padding:4px;background:#f2f5f4;border-radius:10px;margin:20px 0}
-.role-editor-nav button{flex:1;border:0;background:transparent;padding:8px;white-space:nowrap}
-.role-editor-nav button[aria-pressed=true]{background:white;color:var(--accent);font-weight:600;box-shadow:0 1px 4px #0001}
+.role-editor-nav{margin:20px 0}
+.role-editor-nav button{flex:1;padding:8px;white-space:nowrap}
 .role-form h2{font-size:18px;margin:0 0 8px}
 .role-form [hidden]{display:none!important}
 .voice-current{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin:16px 0}
@@ -504,7 +501,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 
 .device-actions button{border:0;background:transparent;border-radius:8px;font-weight:inherit}
 
-.room-workspace label{margin-bottom:12px}.room-workspace input{margin-top:4px!important}.room-workspace .card>p:first-child{margin-top:0}
+.room-workspace form>label{margin-bottom:12px}.room-workspace form>label>input{margin-top:4px!important}.room-workspace .card>p:first-child{margin-top:0}
 @media(max-width:640px){.room-workspace .card{padding:12px}.room-workspace>p:last-of-type{font-size:12px}.room-workspace .filter-tabs{margin:8px 0}}
 .contacts-workspace .filter-tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
 .contacts-workspace .filter-tabs button{padding:8px 4px;font-size:13px;overflow-wrap:anywhere}
@@ -574,3 +571,6 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 :where(#root,.app-modal) .ant-btn>span{min-width:0}
 .device-summaries .ant-btn,.role-preview.ant-btn{display:block}
 @media(max-width:640px){:where(#root,.app-modal) .ant-btn{min-height:44px}}
+
+.contact-filter{flex-shrink:0}
+@media(max-width:640px){:where(#root,.app-modal) .ant-segmented.ant-segmented-block .ant-segmented-item-label{padding-inline:6px;font-size:13px;line-height:40px;min-height:40px}}

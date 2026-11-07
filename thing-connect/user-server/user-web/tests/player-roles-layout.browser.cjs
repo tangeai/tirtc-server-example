@@ -43,6 +43,7 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
   await page.route('**/v1/user/device/rtc-token?*',route=>route.fulfill({status:503,json:{code:50000,msg:'暂时无法连接，请确认设备在线后重试'}}));
   await page.goto(base+'/player?device_id=one');await page.getByRole('button',{name:'重新连接'}).waitFor();
   assert.equal(await page.locator('.player-card .player-connection button').count(),1);
+  assert.equal(await page.getByRole('button',{name:'按住说话',exact:true}).evaluate(el=>getComputedStyle(el).opacity),'1','disabled library buttons must not receive a second native opacity reduction');
   const card=await page.locator('.player-card').boundingBox();assert(card.y + card.height <= 900,'player fits viewport');
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   await page.screenshot({path:root+'/../output/playwright/player-compact-'+width+'.png',fullPage:true});

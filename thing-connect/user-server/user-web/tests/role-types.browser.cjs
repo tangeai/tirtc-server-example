@@ -121,6 +121,7 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  await page.getByRole('switch',{name:'自定义提示词'}).check();await prompt.fill('这是较长的角色设定，用于检查阅读区域。\n'.repeat(80));
  for(const viewport of [{width:1440,height:900},{width:1366,height:768},{width:390,height:844}]){
   await page.setViewportSize(viewport);
+  if(viewport.width<=640)await page.waitForFunction(()=>{const input=document.querySelector('.role-identity input');return input.getBoundingClientRect().width>=input.parentElement.clientWidth*.9;});
   const bounds=await page.evaluate(()=>({page:document.documentElement.scrollHeight,height:innerHeight,prompt:document.querySelector('.role-prompt').getBoundingClientRect().height,save:document.querySelector('.save-bar').getBoundingClientRect().bottom,speech:document.querySelector('.role-speech').getBoundingClientRect().bottom}));
   assert(await prompt.evaluate(el=>el.scrollHeight>el.clientHeight),'long prompt scrolls inside the textarea');
   assert(bounds.page<=bounds.height,'role page must fit viewport: '+JSON.stringify(bounds));assert(bounds.prompt>=60,'prompt remains readable: '+JSON.stringify(bounds));assert(bounds.save<=bounds.height&&bounds.speech<=bounds.height,'controls remain visible');

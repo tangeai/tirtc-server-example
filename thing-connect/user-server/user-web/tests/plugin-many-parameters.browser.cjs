@@ -68,7 +68,7 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  });
  resources.plugin[0].input_params=Array.from({length:20},(_,i)=>({name:'param_'+i,type:i===0?'number':'string',description:'参数说明 '+i,default_value:String(i),required:i%2===0,opaque:'preserve-'+i}));
  resources.plugin[0].return_params=Array.from({length:4},(_,i)=>({name:'result_'+i,type:'string',description:'返回值 '+i,default_value:'',required:false}));
- await page.goto(base+'/agent?device_id=one');await page.getByRole('button',{name:'我的角色',exact:true}).click();await page.getByRole('button',{name:'扩展能力',exact:true}).click();await page.locator('summary').filter({hasText:'工具与插件'}).click();
+ await page.goto(base+'/agent?device_id=one');await page.getByRole('button',{name:'我的角色',exact:true}).click();await page.getByRole('radio',{name:'扩展能力',exact:true}).locator('..').click();await page.locator('summary').filter({hasText:'工具与插件'}).click();
  const row=page.getByRole('checkbox',{name:'自有插件',exact:true}).locator('xpath=../..');await row.getByRole('button',{name:'编辑',exact:true}).click();const dialog=page.getByRole('dialog');await dialog.locator('.param-card').nth(23).waitFor();
  assert.equal(await dialog.locator('.param-card').count(),24);
  await dialog.locator('.param-card').nth(10).getByLabel('参数说明',{exact:true}).fill('已修改的参数说明');

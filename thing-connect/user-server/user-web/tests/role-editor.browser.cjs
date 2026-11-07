@@ -38,10 +38,10 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  await page.setViewportSize({width:1440,height:900});
  await page.goto(base+'/agent?device_id=one');await page.getByRole('button',{name:'我的角色',exact:true}).click();
  await page.getByLabel('智能体名称',{exact:true}).fill('新的名称');
- await page.getByRole('button',{name:'扩展能力',exact:true}).click();
+ await page.getByRole('radio',{name:'扩展能力',exact:true}).locator('..').click();
  await page.getByText('更多角色信息',{exact:true}).click();
  await page.getByLabel('智能体描述',{exact:true}).fill('角色说明');await page.getByLabel('开场白',{exact:true}).fill('你好');
- await page.getByRole('button',{name:'角色',exact:true}).click();await page.getByLabel('角色设定',{exact:true}).fill('测试设定');
+ await page.getByRole('radio',{name:'角色',exact:true}).locator('..').click();await page.getByLabel('角色设定',{exact:true}).fill('测试设定');
  await page.getByRole('button',{name:/角色类型/}).click();
  await page.getByRole('button',{name:'中文伙伴 中文测试声音',exact:true}).click();
  await page.getByRole('button',{name:'保留我的设定',exact:true}).click();
@@ -52,8 +52,8 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  await page.getByRole('button',{name:'试听',exact:true}).click();await page.getByRole('button',{name:'暂停',exact:true}).click();
  assert.equal(await page.getByLabel('角色设定',{exact:true}).inputValue(),'测试设定');
  const sliders=page.getByRole('slider');assert.equal(await sliders.count(),2);assert.equal(await page.getByText('识别速度',{exact:true}).count(),0);await sliders.nth(0).fill('2');await sliders.nth(1).fill('0');assert.equal(await sliders.nth(0).getAttribute('aria-valuetext'),'快');assert.equal(await sliders.nth(1).getAttribute('aria-valuetext'),'低');
- await page.getByRole('button',{name:'模型与记忆',exact:true}).click();
- await page.locator('.role-section select').first().selectOption('qwen3.7-plus');await page.getByLabel('长期记忆').check();await page.getByRole('button',{name:'角色',exact:true}).click();
+ await page.getByRole('radio',{name:'模型与记忆',exact:true}).locator('..').click();
+ await page.locator('.role-section select').first().selectOption('qwen3.7-plus');await page.getByLabel('长期记忆').check();await page.getByRole('radio',{name:'角色',exact:true}).locator('..').click();
  assert.equal(await page.getByLabel('智能体名称',{exact:true}).inputValue(),'新的名称');
  await page.getByRole('button',{name:'保存角色',exact:true}).click();await page.getByText('保存成功',{exact:true}).waitFor();
  assert.equal(role.service_config.config.tts.provider_params.voice,'zh');assert.equal(role.agent_config.ali_memory.enable,true);assert.equal(role.agent_config.prompt,'测试设定');assert.equal(role.agent_config.welcome_text,'你好');assert.equal(role.user_params.description,'角色说明');assert.equal(role.service_config.config.tts.provider_params.rate,1.2);assert.equal(role.service_config.config.tts.provider_params.pitch,0.8);assert.equal(role.service_config.config.llm.provider_params.model,'qwen3.7-plus');
@@ -69,11 +69,11 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  assert((await page.locator('.voice-current').innerText()).includes('中文测试声音'));
  const originalTTS=JSON.stringify(role.service_config.config.tts);
  for(const [model,provider] of [['qwen3.7-flash','ali-llm'],['doubao-seed-2-0-mini-260428','doubao'],['qwen3.7-plus','ali-llm']]){
-  await page.getByRole('button',{name:'模型与记忆',exact:true}).click();
+  await page.getByRole('radio',{name:'模型与记忆',exact:true}).locator('..').click();
   const picker=page.getByLabel('模型',{exact:true});assert.equal(await picker.isEnabled(),true);await picker.selectOption(model);
   await page.getByRole('button',{name:'保存角色',exact:true}).click();await page.getByText('保存成功',{exact:true}).waitFor();
   assert.equal(role.service_config.config.llm.provider,provider);assert.equal(role.service_config.config.llm.provider_params.model,model);assert.equal(JSON.stringify(role.service_config.config.tts),originalTTS);
-  await page.reload();await page.getByRole('button',{name:'新的名称',exact:true}).click();await page.getByRole('button',{name:'模型与记忆',exact:true}).click();assert.equal(await page.getByLabel('模型',{exact:true}).inputValue(),model);
+  await page.reload();await page.getByRole('button',{name:'新的名称',exact:true}).click();await page.getByRole('radio',{name:'模型与记忆',exact:true}).locator('..').click();assert.equal(await page.getByLabel('模型',{exact:true}).inputValue(),model);
  }
  assert.deepEqual(errors,[]);console.log('PASS: type-only voice selection, unified persona and voice panel, draft preservation across sections, save payload, error/empty/retry, responsive layouts');
  }finally{await browser.close();server.close();}

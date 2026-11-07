@@ -64,14 +64,14 @@ const results=[];
   for(const route of ['/register','/forgot-password']){await page.goto(base+route);const input=page.getByLabel('邮箱验证码',{exact:true});await input.fill('12 34 56');assert.equal(await input.inputValue(),'123456');}
  });
  await check('knowledge dirty Escape retains draft until confirmed',async page=>{
-  await signed(page,'/agent?device_id=one');await page.getByRole('button',{name:'扩展能力',exact:true}).click();await page.locator('summary').filter({hasText:'知识库'}).click();await page.getByRole('button',{name:'创建知识库',exact:true}).click();
+  await signed(page,'/agent?device_id=one');await page.getByRole('radio',{name:'扩展能力',exact:true}).locator('..').click();await page.locator('summary').filter({hasText:'知识库'}).click();await page.getByRole('button',{name:'创建知识库',exact:true}).click();
   await page.getByLabel('知识库名称',{exact:true}).fill('未保存草稿');await page.keyboard.press('Escape');const confirm=page.getByRole('dialog',{name:'修改尚未保存',exact:true});await confirm.waitFor();await confirm.getByRole('button',{name:'继续编辑',exact:true}).click();assert.equal(await page.getByLabel('知识库名称',{exact:true}).inputValue(),'未保存草稿');
   await page.keyboard.press('Escape');await confirm.getByRole('button',{name:'放弃修改',exact:true}).click();assert.equal(await page.getByRole('dialog').count(),0);
  });
  await check('knowledge slow save cannot be dismissed or submitted twice',async page=>{
   let release,started,posts=0;const blocked=new Promise(r=>release=r),seen=new Promise(r=>started=r);
   await page.route('**/v1/ai/knowledge/indexes',async route=>{if(route.request().method()!=='POST')return route.fallback();posts++;started();await blocked;await route.fulfill({json:{code:200,data:{index_id:'saved'}}});});
-  await signed(page,'/agent?device_id=one');await page.getByRole('button',{name:'扩展能力',exact:true}).click();await page.locator('summary').filter({hasText:'知识库'}).click();await page.getByRole('button',{name:'创建知识库',exact:true}).click();
+  await signed(page,'/agent?device_id=one');await page.getByRole('radio',{name:'扩展能力',exact:true}).locator('..').click();await page.locator('summary').filter({hasText:'知识库'}).click();await page.getByRole('button',{name:'创建知识库',exact:true}).click();
   await page.getByLabel('知识库名称',{exact:true}).fill('知识库');await page.getByLabel('知识库描述',{exact:true}).fill('描述');const dialog=page.getByRole('dialog');await dialog.getByRole('button',{name:'保存',exact:true}).click();await seen;
   try{assert(await dialog.getByRole('button',{name:'关闭弹窗',exact:true}).isDisabled());await page.keyboard.press('Escape');assert(await dialog.isVisible());assert.equal(posts,1);}finally{release();}
   await dialog.waitFor({state:'hidden'});

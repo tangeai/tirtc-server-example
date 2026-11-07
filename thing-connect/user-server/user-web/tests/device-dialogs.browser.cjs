@@ -45,10 +45,19 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  let dialog=page.getByRole('dialog',{name:'多人对讲',exact:true});
  await dialog.getByRole('button',{name:'创建房间',exact:true}).last().waitFor();
  assert.equal(new URL(page.url()).pathname,'/devices');
+ const segmentLayout=await dialog.locator('.ant-segmented').evaluate(el=>({height:el.getBoundingClientRect().height,items:[...el.querySelectorAll('.ant-segmented-item')].map(item=>({height:item.getBoundingClientRect().height,bottom:parseFloat(getComputedStyle(item).marginBottom)}))}));
+ assert.ok(segmentLayout.items.every(item=>item.bottom===0 && segmentLayout.height-item.height<=8),'room tabs must not inherit form-label spacing: '+JSON.stringify(segmentLayout));
+
  assert.equal(await dialog.locator('.ant-modal-title').count(),1,'uses the standard Ant Design title');
  for(const viewport of [{width:1366,height:768},{width:760,height:720},{width:390,height:844},{width:320,height:700}]){
   await page.setViewportSize(viewport);
   await dialog.getByRole('navigation',{name:'房间操作'}).getByText('加入房间',{exact:true}).click();
+  const createTab=dialog.locator('.ant-segmented-item').filter({hasText:'创建房间'});
+  await createTab.hover();
+  assert.equal(await dialog.getByRole('radio',{name:'加入房间',exact:true}).isChecked(),true,'hover must not change the active operation');
+  const tabColors=await dialog.locator('.ant-segmented-item-selected').evaluate(el=>({bg:getComputedStyle(el).backgroundColor,fg:getComputedStyle(el).color}));
+  assert.equal(tabColors.bg,'rgb(255, 255, 255)','selected operation keeps a white surface while the other operation is hovered');
+  assert.equal(await createTab.locator('[title]').getAttribute('title'),'','visible tab text should not repeat in a browser tooltip');
   const metrics=await dialog.evaluate(el=>({h:el.scrollHeight,c:el.clientHeight,w:el.scrollWidth,cw:el.clientWidth}));
   assert.ok(metrics.h<=metrics.c+1,'room must fit vertically '+JSON.stringify({viewport,metrics}));
   assert.ok(metrics.w<=metrics.cw+1,'room overflow');
@@ -75,10 +84,15 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  await card.getByRole('button',{name:'联系人',exact:true}).click();
  dialog=page.getByRole('dialog',{name:'联系人',exact:true});
  await dialog.getByRole('button',{name:'改备注'}).first().waitFor();
+ const filters=dialog.getByRole('navigation',{name:'联系人类型'});
+ await filters.getByRole('radio',{name:'我的设备',exact:true}).locator('..').hover();
+ assert.equal(await filters.getByRole('radio',{name:'全部',exact:true}).isChecked(),true);
+ assert.equal(await filters.getByRole('radio',{name:'全部',exact:true}).locator('..').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(255, 255, 255)','filter selection remains distinct from hover');
+
  for(const viewport of [{width:1366,height:768},{width:760,height:720},{width:390,height:844},{width:320,height:700}]){
   await page.setViewportSize(viewport);
   const metrics=await dialog.evaluate(el=>{const list=el.querySelector('.contact-scroll');return{h:el.scrollHeight,c:el.clientHeight,w:el.scrollWidth,cw:el.clientWidth,list:list.scrollHeight>list.clientHeight};});
-  assert.ok(metrics.h<=metrics.c+1,'contact dialog should not scroll '+JSON.stringify({viewport,metrics}));assert.ok(metrics.w<=metrics.cw+1,'contact horizontal overflow');assert.ok(metrics.list,'list scrolls internally');if(viewport.width>=640){const bounds=await dialog.boundingBox();assert.ok(bounds.width<=640&&bounds.height<=622,'compact contact footprint');}
+  assert.ok(metrics.h<=metrics.c+1,'contact dialog should not scroll '+JSON.stringify({viewport,metrics}));assert.ok(metrics.w<=metrics.cw+1,'contact horizontal overflow');assert.ok(metrics.list,'list scrolls internally');assert.ok(await filters.locator('.ant-segmented-item-label').evaluateAll(items=>items.every(el=>el.scrollWidth<=el.clientWidth)),'contact filters must remain fully readable');if(viewport.width>=640){const bounds=await dialog.boundingBox();assert.ok(bounds.width<=640&&bounds.height<=622,'compact contact footprint');}
   await page.screenshot({path:path.join(root,'../output/playwright/device-contacts-'+viewport.width+'.png')});
  }
  await page.setViewportSize({width:1366,height:768});

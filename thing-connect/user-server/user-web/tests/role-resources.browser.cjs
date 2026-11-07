@@ -67,7 +67,7 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
   await route.fulfill({json:{code:200,data}});
  });
  await page.goto(base+'/agent?device_id=one');await page.getByRole('button',{name:'我的角色',exact:true}).click();
- await page.getByRole('button',{name:'扩展能力',exact:true}).click();await page.locator('summary').filter({hasText:'知识库'}).click();
+ await page.getByRole('radio',{name:'扩展能力',exact:true}).locator('..').click();await page.locator('summary').filter({hasText:'知识库'}).click();
  const choice=page.locator('.role-section select').filter({has:page.locator('option[value="k1"]')});await choice.selectOption('k1');
  for(let i=0;i<3;i++){
   await page.getByRole('button',{name:'编辑知识库',exact:true}).click();await page.getByLabel('知识库名称',{exact:true}).waitFor();

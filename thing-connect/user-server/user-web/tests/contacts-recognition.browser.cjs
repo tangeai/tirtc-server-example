@@ -39,8 +39,8 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
   else data={contacts};await route.fulfill({json:{code:200,data}});
  });
  await page.goto(base+'/contacts?device_id=one');await page.getByRole('button',{name:'改备注',exact:true}).first().waitFor();
- await page.getByRole('button',{name:'微信授权',exact:true}).click();assert.equal(await page.getByRole('button',{name:'改备注',exact:true}).count(),1);assert.equal(await page.getByRole('button',{name:'删除',exact:true}).count(),0);
- await page.getByRole('button',{name:'我的设备',exact:true}).click();assert.equal(await page.getByRole('button',{name:'删除',exact:true}).count(),0);await page.getByRole('button',{name:'全部',exact:true}).click();
+ await page.getByRole('radio',{name:'微信授权',exact:true}).locator('..').click();assert.equal(await page.getByRole('button',{name:'改备注',exact:true}).count(),1);assert.equal(await page.getByRole('button',{name:'删除',exact:true}).count(),0);
+ await page.getByRole('radio',{name:'我的设备',exact:true}).locator('..').click();assert.equal(await page.getByRole('button',{name:'删除',exact:true}).count(),0);await page.getByRole('radio',{name:'全部',exact:true}).locator('..').click();
  await page.getByRole('searchbox').fill('不存在');await page.getByText('没有匹配的联系人',{exact:true}).waitFor();await page.getByRole('button',{name:'清除搜索和筛选',exact:true}).click();
  await page.getByRole('button',{name:'改备注',exact:true}).first().click();await page.getByLabel('联系人备注').fill('备注朋友');await page.getByRole('button',{name:'保存',exact:true}).click();await page.getByText('备注朋友',{exact:true}).waitFor();assert.equal(contacts[0].remark,'备注朋友');
  await page.getByRole('button',{name:'改备注',exact:true}).first().click();await page.getByLabel('联系人备注').fill('');await page.getByRole('button',{name:'保存',exact:true}).click();await page.getByText('朋友',{exact:true}).waitFor();

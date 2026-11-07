@@ -1,3 +1,4 @@
+import { Segmented } from 'antd';
 import { Button } from '../components/Button';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Shell } from '../components/Shell';
@@ -26,7 +27,7 @@ export default function Auth() {
   const backToDevices = mode === 'reset' && !!localStorage.getItem('token');
   return <Shell title="小钛控制台" back={mode !== 'reset' ? null : backToDevices ? '/devices' : '/login'} backLabel={backToDevices ? '返回设备列表' : '返回登录'}>
     <main className="auth-layout"><section className="card auth-card"><h1>{t(title)}</h1>
-      {mode === 'reset' ? <p className="muted">{t('验证注册邮箱后即可设置新密码')}</p> : <nav className="tabs" aria-label={t('账号操作')}><Button type="button" aria-pressed={mode === 'login'} onClick={() => switchMode('login')}>{t('登录')}</Button><Button type="button" aria-pressed={mode === 'register'} onClick={() => switchMode('register')}>{t('注册')}</Button></nav>}
+      {mode === 'reset' ? <p className="muted">{t('验证注册邮箱后即可设置新密码')}</p> : <nav className="tabs" aria-label={t('账号操作')}><Segmented block value={mode} onChange={switchMode} options={[{value:'login',label:t('登录'),title:''},{value:'register',label:t('注册'),title:''}]}/></nav>}
       <AuthForm key={mode} mode={mode} switchMode={switchMode}/>
     </section></main>
   </Shell>;

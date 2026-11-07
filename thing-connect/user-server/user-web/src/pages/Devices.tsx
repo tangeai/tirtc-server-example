@@ -1,4 +1,4 @@
-import { Input } from 'antd';
+import { Input, Segmented } from 'antd';
 import { Button } from '../components/Button';
 import Contacts from './Contacts';
 import Room from './Room';
@@ -126,5 +126,5 @@ function DeviceMutation({ modal, close, done }: { modal: Modal; close(): void; d
 function Rows({ rows }: { rows: [string, string][] }) { return <dl className="detail-list">{rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>; }
 function DeviceInfo({ device, close }: { device: Device; close(): void }) {
   const { t } = useLanguage(); const [scene, setScene] = useState('stream'); const rows = mediaRows(device, scene);
-  return <Dialog title="设备信息" onClose={close}><Rows rows={deviceRows(device)}/><h2>{t('媒体能力')}</h2><nav className="tabs" aria-label={t('媒体场景')}>{Object.entries({ stream: '实时查看', call: '设备通话', voip: '微信 VoIP' }).map(([key, label]) => <Button key={key} aria-pressed={scene === key} onClick={() => setScene(key)}>{t(label)}</Button>)}</nav>{rows ? <Rows rows={rows}/> : <p className="muted">{t('该场景能力未上报')}</p>}</Dialog>;
+  return <Dialog title="设备信息" onClose={close}><Rows rows={deviceRows(device)}/><h2>{t('媒体能力')}</h2><nav className="tabs" aria-label={t('媒体场景')}><Segmented block value={scene} onChange={setScene} options={Object.entries({ stream: '实时查看', call: '设备通话', voip: '微信 VoIP' }).map(([value,label])=>({value,label:t(label),title:''}))}/></nav>{rows ? <Rows rows={rows}/> : <p className="muted">{t('该场景能力未上报')}</p>}</Dialog>;
 }

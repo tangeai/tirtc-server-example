@@ -68,7 +68,7 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  });
  resources.plugin[0].input_params=[{name:'message',type:'string',default_value:'  keep spaces  ',required:false},{type:'integer',default_value:'3'}];
  delete resources.plugin[0].description;
- await page.goto(base+'/agent?device_id=one');await page.getByRole('button',{name:'我的角色',exact:true}).click();await page.getByRole('button',{name:'扩展能力',exact:true}).click();await page.locator('summary').filter({hasText:'工具与插件'}).click();
+ await page.goto(base+'/agent?device_id=one');await page.getByRole('button',{name:'我的角色',exact:true}).click();await page.getByRole('radio',{name:'扩展能力',exact:true}).locator('..').click();await page.locator('summary').filter({hasText:'工具与插件'}).click();
  const row=page.getByRole('checkbox',{name:'自有插件',exact:true}).locator('xpath=../..');await row.getByRole('button',{name:'编辑',exact:true}).click();const dialog=page.getByRole('dialog');await dialog.locator('.param-card').first().waitFor();
  await dialog.getByLabel('名称',{exact:true}).fill('改名');await dialog.getByRole('button',{name:'保存',exact:true}).click();await page.waitForTimeout(150);
  assert.deepEqual(errors,[],'omitted optional descriptions must not crash save');await dialog.waitFor({state:'hidden'});assert.equal(resources.plugin[0].input_params[0].default_value,'  keep spaces  ','preserve meaningful whitespace');assert.equal(resources.plugin[0].input_params.length,2,'preserve optional-name legacy parameters');
