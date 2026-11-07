@@ -86,6 +86,9 @@ func TestRoleTypePublicationRequiresSupportedModelPromptAndExactCatalogPair(t *t
 		want                       error
 	}{
 		{"seed", "seed-tts-2.0", "seed", "设定", nil},
+		{"v3", "cosyvoice-v3", "shared", "设定", nil},
+		{"flash same id", "cosyvoice-v3-flash", "shared", "设定", nil},
+		{"v3 cannot borrow flash voice", "cosyvoice-v3", "ali", "设定", roletypes.ErrInvalid},
 		{"wrong model", "seed-tts-2.0", "ali", "设定", roletypes.ErrInvalid},
 		{"undocumented model", "ve-bidirection", "ve", "设定", roletypes.ErrUnsupportedModel},
 		{"missing prompt", "seed-tts-2.0", "seed", "", roletypes.ErrInvalid},
@@ -93,7 +96,7 @@ func TestRoleTypePublicationRequiresSupportedModelPromptAndExactCatalogPair(t *t
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := &typeStoreStub{value: roletypes.Type{ID: "one", Name: "类型", VoiceModel: tc.model, VoiceID: tc.voice, Prompt: tc.prompt, Status: "draft", Revision: 1}}
-			svc := NewRoleTypeService(store, modelVoices{{ID: "seed", Model: "seed-tts-2.0"}, {ID: "ali", Model: roletypes.VoiceModel}, {ID: "ve", Model: "ve-bidirection"}})
+			svc := NewRoleTypeService(store, modelVoices{{ID: "shared", Model: "cosyvoice-v3"}, {ID: "shared", Model: "cosyvoice-v3-flash"}, {ID: "seed", Model: "seed-tts-2.0"}, {ID: "ali", Model: roletypes.VoiceModel}, {ID: "ve", Model: "ve-bidirection"}})
 			_, err := svc.Save(context.Background(), roletypes.Type{ID: "one", Status: "published"}, 1, "status", RoleTypeRequestMeta{Actor: AccessIdentity{UserID: 1}, Reason: "启用"})
 			if !errors.Is(err, tc.want) {
 				t.Fatalf("got %v want %v", err, tc.want)

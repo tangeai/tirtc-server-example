@@ -11,7 +11,7 @@ import (
 const VoiceModel = "cosyvoice-v3-flash"
 
 func SupportedModel(model string) bool {
-	return model == VoiceModel || model == "seed-tts-2.0"
+	return model == "cosyvoice-v3" || model == VoiceModel || model == "seed-tts-2.0"
 }
 
 var ErrInvalid = errors.New("invalid AI role type")

@@ -1,3 +1,4 @@
+import { findVoice } from '../../lib/roles.ts';
 import { useEffect, useRef, useState } from 'react';
 import { useConfirm } from '../../components/Confirm';
 import { useLanguage } from '../../lib/i18n';
@@ -17,7 +18,7 @@ export function RoleVoicePanel({ role, draft, patch, voices, voiceLoading, voice
   const [snapshot, setSnapshot] = useState<RoleType>(), [choosing, setChoosing] = useState(false);
   const [playing, setPlaying] = useState(false), [audioError, setAudioError] = useState(false);
   const live = useRef(true), selection = useRef(false), playIntent = useRef(0), audio = useRef<HTMLAudioElement>(null);
-  const provider = editableProviders(role).tts, voice = voices.find(item => item.id === draft.voice);
+  const provider = editableProviders(role).tts, voice = findVoice(voices, draft.voice, draft.voiceModel);
   const items = types.data?.items || [], available = availableRoleTypes(items, voices);
   const chosen = snapshot?.id === draft.typeId ? snapshot : selectedRoleType(draft, items);
   const voiceModel = draft.voiceModel || voice?.model || '';
@@ -28,7 +29,7 @@ export function RoleVoicePanel({ role, draft, patch, voices, voiceLoading, voice
   useEffect(() => { stop(); setAudioError(false); }, [draft.voice, active]);
   async function choose(item: RoleType) {
     if (selection.current || disabled || !provider) return;
-    if (chosen?.id === item.id && draft.voice === item.voice_id) return;
+    if (chosen?.id === item.id && draft.voice === item.voice_id && draft.voiceModel === item.voice_model) return;
     selection.current = true; setChoosing(true); stop();
     try {
       const edited = !!draft.prompt && (!chosen || custom);

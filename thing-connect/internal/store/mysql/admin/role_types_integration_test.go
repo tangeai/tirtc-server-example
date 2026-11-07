@@ -106,3 +106,44 @@ func TestRoleTypesSeedReplayConcurrentEditAndAudit(t *testing.T) {
 		t.Fatal("unaudited edit was committed")
 	}
 }
+
+func TestPublishedRoleTypesIncludesAllDocumentedTTSModels(t *testing.T) {
+	cfg := testenv.LoadConfigOrSkip(t, "../../../../tests/testdata/config.yaml")
+	db := testenv.OpenDBOrSkip(t, cfg)
+	defer db.Close()
+	if err := migrate.MigrateAdmin(db); err != nil {
+		t.Fatal(err)
+	}
+	store := NewRoleTypeStore(db)
+	ctx := context.Background()
+	for _, model := range []string{"cosyvoice-v3", "cosyvoice-v3-flash", "seed-tts-2.0", "ve-bidirection"} {
+		t.Run(model, func(t *testing.T) {
+			id := fmt.Sprintf("test-model-%d", time.Now().UnixNano())
+			defer func() {
+				_, _ = db.Exec("DELETE FROM admin_audit_log WHERE resource_type='ai_role_type' AND resource_id=?", id)
+				_, _ = db.Exec("DELETE FROM ai_role_types WHERE id=?", id)
+			}()
+			value := roletypes.Type{ID: id, Name: id, Language: "zh", MatchKind: "manual", VoiceID: "shared", VoiceModel: model, Prompt: "测试设定", Status: "published"}
+			audit := adminapp.AuditEvent{AdminUserID: 1, Action: "ai_role_type.create", Resource: "ai_role_type", ResourceID: id, Reason: "模型筛选测试", Success: true, HTTPStatus: 200}
+			if _, err := store.Save(ctx, adminapp.RoleTypeMutation{Type: value, Action: "create", Audit: audit}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := store.Save(ctx, adminapp.RoleTypeMutation{Type: value, Action: "status", ExpectedRevision: 1, Audit: audit}); err != nil {
+				t.Fatal(err)
+			}
+			items, err := store.List(ctx, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, item := range items {
+				if item.ID == id {
+					found = true
+				}
+			}
+			if found != (model != "ve-bidirection") {
+				t.Fatalf("model %s published=%v", model, found)
+			}
+		})
+	}
+}

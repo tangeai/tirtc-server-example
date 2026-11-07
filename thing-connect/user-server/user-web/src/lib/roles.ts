@@ -15,6 +15,10 @@ export interface Role {
   device_plugin_refs?: { id: string; name?: string }[];
 }
 export interface Voice { id: string; name: string; model: string; languages?: string[]; sample_url?: string }
+export function findVoice(voices: Voice[], id: string, model?: string): Voice | undefined {
+  const matches = voices.filter(voice => voice.id === id && (!model || voice.model === model));
+  return matches.length === 1 ? matches[0] : undefined;
+}
 export interface RoleDraft { typeId: string; typeRevision: number; voiceModel?: string; customPrompt: boolean | undefined; name: string; description: string; prompt: string; welcome: string; voice: string; model: string; rate: number; pitch: number; memory: boolean; knowledge: string; mcp: string[]; plugins: string[] }
 export function draftOf(role: Role): RoleDraft {
   const component = role.service_config?.config?.tts;
@@ -35,7 +39,7 @@ export function rolePayload(previous: Role, draft: RoleDraft, voices: Voice[]): 
   if (!name) throw new Error('请输入智能体名称');
   if (Array.from(name).length > 64) throw new Error('角色名称不能超过 64 个字符');
   const edits = editableProviders(previous), old = previous.service_config?.config || {};
-  const voice = voices.find(v => v.id === draft.voice);
+  const voice = findVoice(voices, draft.voice, draft.voiceModel || old.tts?.provider_params?.model);
   const previousVoice = voiceSettings(old.tts);
   const previousVoiceID = previousVoice.voice || previous.user_params?.voice || '';
   const config = { ...old };

@@ -32,8 +32,10 @@ type RoleType = {
   revision: number;
 };
 type Voice = { id: string; name: string; model: string; sample_url?: string; languages?: string[] };
-type Editor = RoleType & { reason: string };
-const supported = (model: string) => ['cosyvoice-v3-flash', 'seed-tts-2.0'].includes(model);
+type Editor = RoleType & { reason: string; voice_selection: string };
+const supported = (model: string) =>
+  ['cosyvoice-v3', 'cosyvoice-v3-flash', 'seed-tts-2.0'].includes(model);
+const voiceKey = (voice: Voice) => JSON.stringify([voice.model, voice.id]);
 const statuses = { draft: '草稿', published: '已启用', offline: '未启用' };
 
 export function RoleTypesPage() {
@@ -54,7 +56,7 @@ export function RoleTypesPage() {
     mounted = useRef(true),
     operation = useRef(false),
     playRevision = useRef(0);
-  const selectedVoice = Form.useWatch('voice_id', form);
+  const selectedVoice = Form.useWatch('voice_selection', form);
   const stop = () => {
     playRevision.current++;
     audio.current?.pause();
@@ -110,7 +112,11 @@ export function RoleTypesPage() {
       revision: 0,
     };
     form.resetFields();
-    form.setFieldsValue({ ...next, reason: '' });
+    form.setFieldsValue({
+      ...next,
+      reason: '',
+      voice_selection: next.voice_id ? JSON.stringify([next.voice_model, next.voice_id]) : '',
+    });
     setEditing(next);
   }
   async function close() {
@@ -138,6 +144,8 @@ export function RoleTypesPage() {
     } catch {
       return;
     }
+    const { voice_selection, reason: operationReason, ...fields } = value;
+    const selected = voices.find((v) => voiceKey(v) === voice_selection);
     operation.current = true;
     setBusy(true);
     try {
@@ -146,12 +154,12 @@ export function RoleTypesPage() {
         json(editing.id ? 'PUT' : 'POST', {
           role_type: {
             ...editing,
-            ...value,
-            voice_model:
-              voices.find((voice) => voice.id === value.voice_id)?.model || editing.voice_model,
+            ...fields,
+            voice_id: voice_selection ? selected?.id || editing.voice_id : '',
+            voice_model: selected?.model || editing.voice_model,
           },
           expected_revision: editing.revision,
-          reason: value.reason,
+          reason: operationReason,
         }),
       );
       if (mounted.current) {
@@ -198,7 +206,7 @@ export function RoleTypesPage() {
   }
   async function preview() {
     const player = audio.current,
-      voice = voices.find((v) => v.id === selectedVoice);
+      voice = voices.find((v) => voiceKey(v) === selectedVoice);
     if (!player || !voice?.sample_url) return;
     if (playing) {
       stop();
@@ -214,7 +222,7 @@ export function RoleTypesPage() {
       if (mounted.current && revision === playRevision.current) message.error('试听失败，请重试');
     }
   }
-  const voice = voices.find((v) => v.id === selectedVoice);
+  const voice = voices.find((v) => voiceKey(v) === selectedVoice);
   return (
     <>
       {pageTitle(
@@ -282,7 +290,9 @@ export function RoleTypesPage() {
               render: (id, item) =>
                 id ? (
                   <Space direction="vertical" size={2}>
-                    <span>{voices.find((v) => v.id === id)?.name || id}</span>
+                    <span>
+                      {voices.find((v) => v.id === id && v.model === item.voice_model)?.name || id}
+                    </span>
                     <Typography.Text type="secondary">{item.voice_model}</Typography.Text>
                     {item.match_kind === 'version' && <Tag>同系列版本</Tag>}
                     {item.match_kind === 'substitute' && (
@@ -384,7 +394,9 @@ export function RoleTypesPage() {
           )}
           {selectedVoice &&
             !supported(
-              voices.find((v) => v.id === selectedVoice)?.model || editing?.voice_model || '',
+              voices.find((v) => voiceKey(v) === selectedVoice)?.model ||
+                editing?.voice_model ||
+                '',
             ) && (
               <Alert
                 type="warning"
@@ -403,7 +415,7 @@ export function RoleTypesPage() {
             <Input placeholder="zh / en / ja" />
           </Form.Item>
           <Form.Item
-            name="voice_id"
+            name="voice_selection"
             label="角色音色"
             extra="只关联探鸽实际提供的对应音色；缺失时留空，不用相似音色代替。"
           >
@@ -411,12 +423,17 @@ export function RoleTypesPage() {
               allowClear
               showSearch
               optionFilterProp="label"
-              onClear={() => form.setFieldValue('voice_id', '')}
+              onClear={() => form.setFieldValue('voice_selection', '')}
               options={[
-                ...(selectedVoice && !voices.some((v) => v.id === selectedVoice)
-                  ? [{ value: selectedVoice, label: selectedVoice }]
+                ...(selectedVoice && !voices.some((v) => voiceKey(v) === selectedVoice)
+                  ? [
+                      {
+                        value: selectedVoice,
+                        label: `${editing?.voice_id} · ${editing?.voice_model}`,
+                      },
+                    ]
                   : []),
-                ...voices.map((v) => ({ value: v.id, label: `${v.name} · ${v.model}` })),
+                ...voices.map((v) => ({ value: voiceKey(v), label: `${v.name} · ${v.model}` })),
               ]}
             />
           </Form.Item>

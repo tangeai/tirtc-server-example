@@ -18,7 +18,7 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  if(u.pathname==='/v1/user/device/list')data=[{device_id:'one',device_name:'设备一',status:1,online:true},{device_id:'two',device_name:'设备二',status:1}];
  else if(u.pathname==='/v1/user/me')data={email:'test@example.test'};
  else if(u.pathname==='/v1/user/device/name'){if(renameWait)await renameWait;}
- else if(u.pathname==='/v1/ai/role-types')data={items:[{id:'one',name:'温柔伙伴',voice_id:'zh',voice_model:'cosyvoice-v3-flash',prompt:'温柔倾听，简洁回答。'},{id:'two',name:'活力伙伴',voice_id:'en',voice_model:'cosyvoice-v3-flash',prompt:'积极明快，一次只问一个问题。'},{id:'seed',name:'山行猴侠',voice_id:'seed-voice',voice_model:'seed-tts-2.0',prompt:'爽朗直接的同行伙伴。'}]};
+ else if(u.pathname==='/v1/ai/role-types')data={items:[{id:'v3',name:'V3伙伴',voice_id:'zh',voice_model:'cosyvoice-v3',prompt:'V3测试设定。'},{id:'one',name:'温柔伙伴',voice_id:'zh',voice_model:'cosyvoice-v3-flash',prompt:'温柔倾听，简洁回答。'},{id:'two',name:'活力伙伴',voice_id:'en',voice_model:'cosyvoice-v3-flash',prompt:'积极明快，一次只问一个问题。'},{id:'seed',name:'山行猴侠',voice_id:'seed-voice',voice_model:'seed-tts-2.0',prompt:'爽朗直接的同行伙伴。'}]};
  else if(u.pathname==='/v1/ai/roles'){if(req.method()==='POST'){role={...req.postDataJSON(),id:'created'};data=role;}else data={items:[role]};}
  else if(u.pathname==='/v1/ai/roles/default')data={id:'preset',name:'预设角色',agent_config:{prompt:'只读'}};
  else if(u.pathname==='/v1/ai/roles/custom'||u.pathname==='/v1/ai/roles/created'){if(req.method()==='PUT')role={...role,...req.postDataJSON()};if(req.method()==='DELETE')return route.fulfill({status:409,json:{code:40900,msg:'角色正在使用，请先解除设备关联',data:{devices:[{device_id:'two',device_name:'设备二'}]}}});data=role;}
@@ -27,7 +27,7 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  else if(u.pathname.includes('/v1/call/group/web/device/'))data={desired_state:'left',state:'left',online:true};
  else if(u.pathname==='/v1/ai/voices'){
  if(voiceMode==='error')return route.fulfill({status:503,json:{code:50000,msg:'声音暂不可用'}});
- data={items:voiceMode==='empty'?[]:[{id:'zh',name:'中文测试声音',languages:['zh-CN'],model:'cosyvoice-v3-flash',sample_url:'/preview.mp3'},{id:'en',name:'English Voice',languages:['en-US'],model:'cosyvoice-v3-flash'},{id:'seed-voice',name:'猴哥 2.0',languages:['zh'],model:'seed-tts-2.0'},{id:'other',name:'其他引擎',languages:['zh'],model:'other'}]};
+ data={items:voiceMode==='empty'?[]:[{id:'zh',name:'中文测试声音',languages:['zh-CN'],model:'cosyvoice-v3-flash',sample_url:'/preview.mp3'},{id:'zh',name:'V3专属声音',languages:['zh-CN'],model:'cosyvoice-v3'},{id:'en',name:'English Voice',languages:['en-US'],model:'cosyvoice-v3-flash'},{id:'seed-voice',name:'猴哥 2.0',languages:['zh'],model:'seed-tts-2.0'},{id:'other',name:'其他引擎',languages:['zh'],model:'other'}]};
  }
  else if(u.pathname.includes('/v1/ai/'))data={items:[]};
  await route.fulfill({json:{code:200,data}});
@@ -66,6 +66,18 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  assert(requests.some(r=>r.path==='/v1/ai/roles/created'&&r.method==='PUT'));
  assert.equal(role.user_params.role_type_id,'two');assert.equal(role.service_config.config.tts.provider_params.voice,'en');
 
+ const llmBefore=JSON.parse(JSON.stringify(role.service_config.config.llm));
+ await choose('V3伙伴');
+ assert.equal(await page.getByText('V3专属声音',{exact:true}).count(),1);
+ await page.getByRole('button',{name:'保存角色',exact:true}).click();await page.getByText('保存成功',{exact:true}).waitFor();
+ assert.equal(role.service_config.config.tts.provider_params.model,'cosyvoice-v3');
+ assert.equal(role.service_config.config.tts.provider_params.voice,'zh');
+ assert.deepEqual(role.service_config.config.llm,llmBefore);
+ await page.reload();await page.getByRole('button',{name:'新建联动角色',exact:true}).click();
+ await page.getByRole('button',{name:'角色类型 V3伙伴',exact:true}).waitFor();
+ await page.getByRole('button',{name:/角色类型/}).click();
+ assert.equal(await page.getByRole('button',{name:'试听：V3伙伴',exact:true}).count(),0);
+ await page.keyboard.press('Escape');
  await choose('山行猴侠');
  assert.equal(await prompt.inputValue(),'爽朗直接的同行伙伴。');
  await page.getByRole('button',{name:'保存角色',exact:true}).click();await page.getByText('保存成功',{exact:true}).waitFor();

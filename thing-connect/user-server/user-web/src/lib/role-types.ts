@@ -14,5 +14,6 @@ export function roleTypePatch(draft: RoleDraft, next: RoleType, previous: RoleTy
 // cannot identify a type, and catalog refreshes must not rewrite saved prompts.
 export function selectedRoleType(draft: RoleDraft, items: RoleType[]): RoleType | undefined {
   if (draft.typeId) return items.find(item => item.id === draft.typeId);
-  return items.find(item => item.voice_id === draft.voice && item.prompt === draft.prompt);
+  const matches = items.filter(item => item.voice_id === draft.voice && (!draft.voiceModel || item.voice_model === draft.voiceModel) && item.prompt === draft.prompt);
+  return matches.length === 1 ? matches[0] : undefined;
 }

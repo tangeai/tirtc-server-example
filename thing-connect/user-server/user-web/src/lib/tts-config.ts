@@ -1,7 +1,7 @@
 import type { ComponentConfig, Voice } from './roles.ts';
 
 export function supportedVoiceModel(model: string): boolean {
-  return model === 'cosyvoice-v3-flash' || model === 'seed-tts-2.0';
+  return model === 'cosyvoice-v3' || model === 'cosyvoice-v3-flash' || model === 'seed-tts-2.0';
 }
 export function seedTTS(tts?: ComponentConfig): boolean { return tts?.provider === 've-seed-tts-2'; }
 export function voiceSettings(tts?: ComponentConfig) {

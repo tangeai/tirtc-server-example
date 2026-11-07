@@ -33,3 +33,28 @@ test('saved type restores on edit without overwriting custom prompts; shared voi
  assert.equal(selectedRoleType({...legacy,prompt:first.prompt},[first,second])?.id,first.id);
  assert.equal(selectedRoleType(reopened,[])?.id,undefined);assert.equal(reopened.prompt,'用户修改');
 });
+
+test('all documented TTS models keep independently selected LLM and exact voice pairs across save and reopen', () => {
+ const models = ['cosyvoice-v3', 'cosyvoice-v3-flash', 'seed-tts-2.0'];
+ const voices = models.map(model => ({ id:'shared', name:model, model }));
+ let previous = {};
+ for (const model of models) {
+  const type = {...first, id:model, voice_id:'shared', voice_model:model};
+  const draft = {...draftOf(previous), name:'测试角色', model:'doubao-seed-2-0-mini-260428'};
+  const next = {...draft, ...roleTypePatch(draft, type, undefined, false)};
+  assert.equal(next.model, draft.model);
+  const saved = rolePayload(previous, next, voices);
+  assert.equal(saved.service_config?.config?.tts?.provider_params?.model, model);
+  assert.equal(saved.service_config?.config?.llm?.provider, 'doubao');
+  const reopened = draftOf(saved);
+  assert.equal(reopened.voiceModel, model);
+  assert.equal(reopened.voice, 'shared');
+  const llmChanged = rolePayload(saved, {...reopened, model:'qwen3.7-flash'}, voices);
+  assert.deepEqual(llmChanged.service_config?.config?.tts, saved.service_config?.config?.tts);
+  previous = saved;
+ }
+ const v3 = {...first, voice_model:'cosyvoice-v3'};
+ assert.deepEqual(availableRoleTypes([v3], [{id:'v1', name:'Flash', model:'cosyvoice-v3-flash'}]), []);
+ assert.equal(selectedRoleType({...draftOf({}),voice:'v1',prompt:first.prompt},[first,v3]),undefined);
+ assert.equal(selectedRoleType({...draftOf({}),voice:'v1',voiceModel:'cosyvoice-v3',prompt:first.prompt},[first,v3]),v3);
+});

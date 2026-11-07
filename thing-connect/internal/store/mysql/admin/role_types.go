@@ -22,7 +22,7 @@ func (s *RoleTypeStore) List(ctx context.Context, published bool) ([]roletypes.T
 	items := []roletypes.Type{}
 	query := "SELECT " + roleTypeColumns + " FROM ai_role_types"
 	if published {
-		query += " WHERE status='published' AND voice_id<>'' AND prompt<>'' AND voice_model IN ('cosyvoice-v3-flash','seed-tts-2.0')"
+		query += " WHERE status='published' AND voice_id<>'' AND prompt<>'' AND voice_model IN ('cosyvoice-v3','cosyvoice-v3-flash','seed-tts-2.0')"
 	}
 	query += " ORDER BY sort_order,name,id"
 	if err := s.db.SelectContext(ctx, &items, query); err != nil {
