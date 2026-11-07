@@ -396,5 +396,6 @@
   "删除已上传文件": "Delete uploaded file",
   "读取知识库文档失败，请重试": "Could not load knowledge base files. Please retry.",
   "表单内容已变化，请重新提交": "The form has changed. Please submit again.",
-  "取消验证": "Cancel verification"
+  "取消验证": "Cancel verification",
+  "暂无实时画面": "No live video available"
 }

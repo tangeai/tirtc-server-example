@@ -43,7 +43,7 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
   await page.route('**/v1/user/device/rtc-token?*',route=>route.fulfill({status:503,json:{code:50000,msg:'暂时无法连接，请确认设备在线后重试'}}));
   await page.goto(base+'/player?device_id=one');await page.getByRole('button',{name:'重新连接'}).waitFor();
   assert.equal(await page.locator('.player-card .player-connection button').count(),1);
-  const card=await page.locator('.player-card').boundingBox();assert(card.height<720,'player fits viewport');
+  const card=await page.locator('.player-card').boundingBox();assert(card.y + card.height <= 900,'player fits viewport');
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   await page.screenshot({path:root+'/../output/playwright/player-compact-'+width+'.png',fullPage:true});
   await page.goto(base+'/agent?device_id=one');await page.locator('.role-card').first().waitFor({state:'attached'});if(width<=640)await page.getByRole('button',{name:'返回角色列表'}).click();

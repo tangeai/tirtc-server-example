@@ -1,3 +1,5 @@
+import { Input } from 'antd';
+import { Button } from '../../components/Button';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Dialog } from '../../components/Dialog';
 import { useConfirm } from '../../components/Confirm';
@@ -34,10 +36,10 @@ export function ResourceSelection({ kind, selected, onChange, readonly, names = 
     finally { pendingDelete.current = false; if (alive.current) setDeleting(false); }
   }
   return <section className="resource-list"><h3>{t(kind === 'mcp' ? 'MCP 工具' : '设备插件')}</h3>
-    {(own.error || global.error || error) && <p role="alert" className="error">{error || t('资源列表加载失败，请重试')} <button type="button" onClick={() => { setError(''); own.reload(); global.reload(); }}>{t('重试')}</button></p>}
-    {ids.map(id => { const item = catalog.find(item => item.id === id), managed = own.data?.items?.some(item => item.id === id); return <div className="row" key={id}><label className="radio"><input type="checkbox" checked={selected.includes(id)} disabled={readonly || (!selected.includes(id) && item?.enabled === false)} onChange={e => onChange(e.target.checked ? [...selected, id] : selected.filter(value => value !== id))}/><span>{item?.name || id}</span></label>{managed && !readonly && <div className="row"><button type="button" onClick={() => setEditing({ id })}>{t('编辑')}</button><button type="button" className="danger" disabled={deleting} onClick={() => void remove(id)}>{t('删除')}</button></div>}</div>; })}
+    {(own.error || global.error || error) && <p role="alert" className="error">{error || t('资源列表加载失败，请重试')} <Button type="button" onClick={() => { setError(''); own.reload(); global.reload(); }}>{t('重试')}</Button></p>}
+    {ids.map(id => { const item = catalog.find(item => item.id === id), managed = own.data?.items?.some(item => item.id === id); return <div className="row" key={id}><label className="radio"><input type="checkbox" checked={selected.includes(id)} disabled={readonly || (!selected.includes(id) && item?.enabled === false)} onChange={e => onChange(e.target.checked ? [...selected, id] : selected.filter(value => value !== id))}/><span>{item?.name || id}</span></label>{managed && !readonly && <div className="row"><Button type="button" onClick={() => setEditing({ id })}>{t('编辑')}</Button><Button type="button" className="danger" disabled={deleting} onClick={() => void remove(id)}>{t('删除')}</Button></div>}</div>; })}
     {!ids.length && <p className="muted">{t(own.loading ? '正在加载…' : kind === 'mcp' ? '未关联 MCP 工具' : '未关联设备插件')}</p>}
-    {!readonly && <button type="button" onClick={() => setEditing({})}>{t(kind === 'mcp' ? '+ 新建 MCP 工具' : '+ 新建设备插件')}</button>}
+    {!readonly && <Button type="button" onClick={() => setEditing({})}>{t(kind === 'mcp' ? '+ 新建 MCP 工具' : '+ 新建设备插件')}</Button>}
     {editing && <ResourceEditor key={kind + (editing.id || 'new')} kind={kind} id={editing.id} close={() => setEditing(undefined)} saved={() => { own.reload(); setEditing(undefined); }}/>}
   </section>;
 }
@@ -85,11 +87,11 @@ function ResourceEditor({ kind, id, close, saved }: { kind: 'mcp' | 'plugin'; id
     finally { pending.current = false; if (alive.current) setBusy(false); }
   }
   return <Dialog title={kind === 'mcp' ? id ? '编辑 MCP 工具' : '新增 MCP 工具' : id ? '编辑设备端插件' : '新增设备端插件'} onClose={() => void dismiss()} closeDisabled={busy} size={kind === 'plugin' ? 'wide' : undefined}>
-    {remote.loading && <p role="status">{t('正在加载…')}</p>}{remote.error ? <p role="alert" className="error">{errorText(remote.error)} <button onClick={remote.reload}>{t('重试')}</button></p> : (!id || remote.data) && <form className={kind === 'plugin' ? 'plugin-editor' : undefined} onSubmit={e => void submit(e)}><fieldset disabled={busy}>
-      <label>{t('名称')}<input required value={kind === 'mcp' ? mcp.config.name : plugin.name} onChange={e => kind === 'mcp' ? mc({ name: e.target.value }) : setPlugin({ ...plugin, name: e.target.value })}/></label>
-      <label>{t('描述')}<textarea rows={2} value={kind === 'mcp' ? mcp.config.description : plugin.description} onChange={e => kind === 'mcp' ? mc({ description: e.target.value }) : setPlugin({ ...plugin, description: e.target.value })}/></label>
-      {kind === 'mcp' ? <><label>{t('MCP 服务 URL')}<input type="url" required value={mcp.config.url} onChange={e => mc({ url: e.target.value })}/></label><label>{t('认证方式')}<select value={mcp.config.authentication?.type || ''} onChange={e => mc({ authentication: e.target.value ? { type: e.target.value, bearer_token: '' } : null })}><option value="">{t('无')}</option><option value="bearer">Bearer Token</option>{mcp.config.authentication?.type && mcp.config.authentication.type !== 'bearer' && <option value={mcp.config.authentication.type}>{mcp.config.authentication.type}</option>}</select></label>{mcp.config.authentication?.type === 'bearer' && <label>Bearer Token<input type="password" autoComplete="off" value={mcp.config.authentication.bearer_token || ''} onChange={e => mc({ authentication: { ...mcp.config.authentication!, bearer_token: e.target.value } })}/></label>}<label className="radio"><input type="checkbox" checked={mcp.enabled} onChange={e => setMcp({ ...mcp, enabled: e.target.checked })}/>{t('启用')}</label></> : <><label>{t('功能标识（Action）')}<input required value={plugin.action} onChange={e => setPlugin({ ...plugin, action: e.target.value })}/></label><Params title="输入参数" rows={plugin.input_params} required onChange={rows => setPlugin({ ...plugin, input_params: rows })}/><Params title="返回参数" rows={plugin.return_params} onChange={rows => setPlugin({ ...plugin, return_params: rows })}/></>}
-      {error && <p role="alert" className="error">{error}</p>}<div className={kind === 'plugin' ? 'plugin-editor-footer' : undefined}>{kind === 'plugin' && <button type="button" onClick={() => void dismiss()}>{t('取消')}</button>}<button className={kind === 'plugin' ? 'primary' : 'primary wide'}>{t(busy ? '保存中…' : '保存')}</button></div>
+    {remote.loading && <p role="status">{t('正在加载…')}</p>}{remote.error ? <p role="alert" className="error">{errorText(remote.error)} <Button onClick={remote.reload}>{t('重试')}</Button></p> : (!id || remote.data) && <form className={kind === 'plugin' ? 'plugin-editor' : undefined} onSubmit={e => void submit(e)}><fieldset disabled={busy}>
+      <label>{t('名称')}<Input required value={kind === 'mcp' ? mcp.config.name : plugin.name} onChange={e => kind === 'mcp' ? mc({ name: e.target.value }) : setPlugin({ ...plugin, name: e.target.value })}/></label>
+      <label>{t('描述')}<Input.TextArea rows={2} value={kind === 'mcp' ? mcp.config.description : plugin.description} onChange={e => kind === 'mcp' ? mc({ description: e.target.value }) : setPlugin({ ...plugin, description: e.target.value })}/></label>
+      {kind === 'mcp' ? <><label>{t('MCP 服务 URL')}<Input type="url" required value={mcp.config.url} onChange={e => mc({ url: e.target.value })}/></label><label>{t('认证方式')}<select value={mcp.config.authentication?.type || ''} onChange={e => mc({ authentication: e.target.value ? { type: e.target.value, bearer_token: '' } : null })}><option value="">{t('无')}</option><option value="bearer">Bearer Token</option>{mcp.config.authentication?.type && mcp.config.authentication.type !== 'bearer' && <option value={mcp.config.authentication.type}>{mcp.config.authentication.type}</option>}</select></label>{mcp.config.authentication?.type === 'bearer' && <label>Bearer Token<Input type="password" autoComplete="off" value={mcp.config.authentication.bearer_token || ''} onChange={e => mc({ authentication: { ...mcp.config.authentication!, bearer_token: e.target.value } })}/></label>}<label className="radio"><input type="checkbox" checked={mcp.enabled} onChange={e => setMcp({ ...mcp, enabled: e.target.checked })}/>{t('启用')}</label></> : <><label>{t('功能标识（Action）')}<Input required value={plugin.action} onChange={e => setPlugin({ ...plugin, action: e.target.value })}/></label><Params title="输入参数" rows={plugin.input_params} required onChange={rows => setPlugin({ ...plugin, input_params: rows })}/><Params title="返回参数" rows={plugin.return_params} onChange={rows => setPlugin({ ...plugin, return_params: rows })}/></>}
+      {error && <p role="alert" className="error">{error}</p>}<div className={kind === 'plugin' ? 'plugin-editor-footer' : undefined}>{kind === 'plugin' && <Button type="button" onClick={() => void dismiss()}>{t('取消')}</Button>}<Button className={kind === 'plugin' ? 'primary' : 'primary wide'}>{t(busy ? '保存中…' : '保存')}</Button></div>
     </fieldset></form>}
   </Dialog>;
 }
@@ -105,7 +107,7 @@ function Params({ title, rows, required, onChange }: { title: string; rows: Para
   }, [rows.length]);
   const patch = (index: number, value: Partial<Param>) => onChange(rows.map((row, i) => i === index ? { ...row, ...value } : row));
   return <section ref={container} className={'parameter-table' + (required ? '' : ' return-parameters')}>
-    <div className="parameter-toolbar"><h3>{t(title)} <small>({rows.length})</small></h3><button type="button" onClick={() => { focusAdded.current = true; onChange([...rows, { name: '', type: 'string', description: '', default_value: '', required: false }]); }}>{t('添加参数')}</button></div>
+    <div className="parameter-toolbar"><h3>{t(title)} <small>({rows.length})</small></h3><Button type="button" onClick={() => { focusAdded.current = true; onChange([...rows, { name: '', type: 'string', description: '', default_value: '', required: false }]); }}>{t('添加参数')}</Button></div>
     {!rows.length ? <p className="muted parameter-empty">{t('暂无参数')}</p> : <div className="parameter-columns" aria-hidden="true"><span>{t('参数名称')}</span><span>{t('类型')}</span><span>{t('参数说明')}</span><span>{t('默认值')}</span>{required && <span>{t('必填')}</span>}<span/></div>}
     {rows.map((row, index) => <ParamRow key={keys.current[index]} row={row} required={required} position={index + 1} title={title} patch={value => patch(index, value)} remove={() => { keys.current.splice(index, 1); onChange(rows.filter((_, i) => i !== index)); }}/>) }
   </section>;
@@ -114,12 +116,12 @@ function ParamRow({ row, required, position, title, patch, remove }: { row: Para
   const { t } = useLanguage();
   const [expanded, setExpanded] = useState(false);
   return <fieldset className={'param-card' + (expanded ? ' expanded' : '')} aria-label={`${t(title)} ${position}`}>
-    <label className="param-name"><span>{t('参数名称')}</span><input aria-label={t('参数名称')} value={row.name ?? ''} pattern="[A-Za-z0-9_]+" placeholder="parameter_name" onChange={e => patch({ name: e.target.value })}/></label>
+    <label className="param-name"><span>{t('参数名称')}</span><Input aria-label={t('参数名称')} value={row.name ?? ''} pattern="[A-Za-z0-9_]+" placeholder="parameter_name" onChange={e => patch({ name: e.target.value })}/></label>
     <label className="param-type"><span>{t('类型')}</span><select aria-label={t('类型')} value={row.type} onChange={e => patch({ type: e.target.value })}>{[...new Set(['string', 'integer', 'boolean', 'array', 'object', row.type])].map(type => <option key={type}>{type}</option>)}</select></label>
-    <label className="param-description"><span>{t('参数说明')}</span><input aria-label={t('参数说明')} value={row.description ?? ''} onChange={e => patch({ description: e.target.value })}/></label>
-    <label className="param-default"><span>{t('默认值')}</span><input aria-label={t('默认值')} value={row.default_value ?? ''} onChange={e => patch({ default_value: e.target.value })}/></label>
+    <label className="param-description"><span>{t('参数说明')}</span><Input aria-label={t('参数说明')} value={row.description ?? ''} onChange={e => patch({ description: e.target.value })}/></label>
+    <label className="param-default"><span>{t('默认值')}</span><Input aria-label={t('默认值')} value={row.default_value ?? ''} onChange={e => patch({ default_value: e.target.value })}/></label>
     {required && <label className="radio param-required"><input aria-label={t('必填')} type="checkbox" checked={!!row.required} onChange={e => patch({ required: e.target.checked })}/><span>{t('必填')}</span></label>}
-    <button className="danger param-remove" aria-label={t('删除参数')} title={t('删除参数')} type="button" onClick={remove}>×</button>
-    <button className="param-expand" type="button" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>{t(expanded ? '收起详情' : '说明与默认值')}</button>
+    <Button className="danger param-remove" aria-label={t('删除参数')} title={t('删除参数')} type="button" onClick={remove}>×</Button>
+    <Button className="param-expand" type="button" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>{t(expanded ? '收起详情' : '说明与默认值')}</Button>
   </fieldset>;
 }

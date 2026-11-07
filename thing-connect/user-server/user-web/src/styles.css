@@ -3,19 +3,19 @@
 *{box-sizing:border-box}
 body{margin:0}
 a{color:var(--accent);text-decoration:none}
-:where(#root) :where(button,input,select,textarea){font:inherit}
-:where(#root) :where(button,.button){border:1px solid var(--line);border-radius:10px;min-height:44px;line-height:20px;padding:11px 16px;background:white;color:inherit;cursor:pointer;display:inline-block;text-align:center}
-:where(#root) button:disabled{cursor:not-allowed;opacity:.55}
-:where(#root) button:hover:not(:disabled){border-color:#7b9c91}
+:where(#root,.app-modal) :where(button,input,select,textarea){font:inherit}
+:where(#root,.app-modal) :where(button,.button){border:1px solid var(--line);border-radius:10px;min-height:44px;line-height:20px;padding:11px 16px;background:white;color:inherit;cursor:pointer;display:inline-block;text-align:center}
+:where(#root,.app-modal) button:disabled{cursor:not-allowed;opacity:.55}
+:where(#root,.app-modal) button:hover:not(:disabled){border-color:#7b9c91}
 button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
-:where(#root) h1{font-size:24px;line-height:1.35;margin:0 0 24px}
-:where(#root) h2{font-size:18px;line-height:1.4;margin:0 0 16px}
-:where(#root) p{line-height:1.65;overflow-wrap:anywhere}
-:where(#root) label{display:block;font-size:14px;font-weight:600;margin-bottom:20px}
-:where(#root) :where(input:not([type=checkbox]):not([type=radio]):not([type=range]),select,textarea){display:block;width:100%;min-width:0;border:1px solid #cfd8d4;border-radius:10px;background:white;height:44px;padding:10px 12px;line-height:22px;margin-top:8px;font-size:16px;font-weight:400;color:inherit}
-:where(#root) input::placeholder{color:#98a3a1}
-:where(#root) input:disabled{background:#f5f7f6}
-:where(#root) fieldset{border:0;margin:0;padding:0;min-width:0}
+:where(#root,.app-modal) h1{font-size:24px;line-height:1.35;margin:0 0 24px}
+:where(#root,.app-modal) h2{font-size:18px;line-height:1.4;margin:0 0 16px}
+:where(#root,.app-modal) p{line-height:1.65;overflow-wrap:anywhere}
+:where(#root,.app-modal) :where(label:not(.ant-radio-wrapper):not(.ant-checkbox-wrapper):not(.ant-segmented-item)){display:block;font-size:14px;font-weight:600;margin-bottom:20px}
+:where(#root,.app-modal) :where(input:not([type=checkbox]):not([type=radio]):not([type=range]),select,textarea){display:block;width:100%;min-width:0;border:1px solid #cfd8d4;border-radius:10px;background:white;height:44px;padding:10px 12px;line-height:22px;margin-top:8px;font-size:16px;font-weight:400;color:inherit}
+:where(#root,.app-modal) input::placeholder{color:#98a3a1}
+:where(#root,.app-modal) input:disabled{background:#f5f7f6}
+:where(#root,.app-modal) fieldset{border:0;margin:0;padding:0;min-width:0}
 .topbar{height:64px;min-height:64px;padding:10px 24px;display:flex;align-items:center;justify-content:space-between;gap:14px;border-bottom:1px solid var(--line);background:white;position:sticky;top:0;z-index:20}
 .heading{display:flex;align-items:center;gap:16px;min-width:0}
 .back{font-size:14px;color:var(--muted);white-space:nowrap}
@@ -45,12 +45,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .steps li{padding:8px 0 8px 8px}
 .steps li::marker{color:var(--accent);font-weight:700}
 .steps p{font-size:14px;color:var(--muted);margin:8px 0}
-.dialog-body{padding:24px;overflow-wrap:anywhere}
-.dialog-body header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:16px}
-.dialog-body h2{margin:0;line-height:36px}
 .close{font-size:26px;line-height:1;padding:3px;width:44px;height:44px;min-width:44px;min-height:44px;border:0;color:var(--muted)}
-dialog{padding:0;border:1px solid var(--line);border-radius:18px;width:min(560px,calc(100vw - 32px));max-height:calc(100dvh - 32px);overflow:auto;color:inherit}
-dialog::backdrop{background:#0007}
 
 @media(max-width:600px){.topbar{padding:10px 16px;gap:8px}
 .heading{gap:10px;flex-wrap:wrap}
@@ -59,7 +54,7 @@ dialog::backdrop{background:#0007}
 .back{font-size:13px}
 .auth-layout{padding:24px 16px;align-items:flex-start}
 .auth-card{padding:24px 20px}
-:where(#root) h1{font-size:22px}
+:where(#root,.app-modal) h1{font-size:22px}
 .card{padding:22px 20px}
 .narrow{padding:24px 16px 48px}
 .code-row{gap:8px}
@@ -191,35 +186,35 @@ dialog::backdrop{background:#0007}
 
 
 /* Shared control sizes and spacing apply only to our app, not captcha SDK DOM. */
-:where(#root) textarea{height:auto;min-height:120px;resize:vertical}
+:where(#root,.app-modal) textarea{height:auto;min-height:120px;resize:vertical}
 
-:where(#root) input[type=checkbox],:where(#root) input[type=radio]{width:18px;height:18px;flex-shrink:0;accent-color:var(--accent)}
+:where(#root,.app-modal) input[type=checkbox],:where(#root,.app-modal) input[type=radio]{width:18px;height:18px;flex-shrink:0;accent-color:var(--accent)}
 
-:where(#root) .primary{min-height:44px}
+:where(#root,.app-modal) .primary{min-height:44px}
 
-:where(#root) .auth-card>.tabs{margin-bottom:24px}
+:where(#root,.app-modal) .auth-card>.tabs{margin-bottom:24px}
 
-:where(#root) .auth-card{margin-bottom:0}
+:where(#root,.app-modal) .auth-card{margin-bottom:0}
 
-:where(#root) .auth-card h1{font-size:26px}
+:where(#root,.app-modal) .auth-card h1{font-size:26px}
 
-:where(#root) .link{min-height:44px}
+:where(#root,.app-modal) .link{min-height:44px}
 
-:where(#root) .tabs button{font-size:14px;line-height:20px;min-height:44px;padding:10px 12px}
+:where(#root,.app-modal) .tabs button{font-size:14px;line-height:20px;min-height:44px;padding:10px 12px}
 
-:where(#root) .code-row button{min-height:44px;font-size:14px}
+:where(#root,.app-modal) .code-row button{min-height:44px;font-size:14px}
 
-:where(#root) .device-selector label{margin-bottom:0}
+:where(#root,.app-modal) .device-selector label{margin-bottom:0}
 
-:where(#root) .radio-group{display:flex;flex-wrap:wrap;gap:24px;margin:16px 0 20px}
+:where(#root,.app-modal) .radio-group{display:flex;flex-wrap:wrap;gap:24px;margin:16px 0 20px}
 
-:where(#root) .radio-group label{margin:0;min-height:32px}
+:where(#root,.app-modal) .radio-group label{margin:0;min-height:32px}
 
-:where(#root) .role-title{min-height:0;font-size:14px;line-height:22px;padding:0;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+:where(#root,.app-modal) .role-title{min-height:0;font-size:14px;line-height:22px;padding:0;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
-:where(#root) .file-row button,:where(#root) .resource-list button,:where(#root) .scheme button{min-height:44px;font-size:13px}
+:where(#root,.app-modal) .file-row button,:where(#root,.app-modal) .resource-list button,:where(#root,.app-modal) .scheme button{min-height:44px;font-size:13px}
 
-:where(#root) .close{padding:0;line-height:1;font-size:26px}
+:where(#root,.app-modal) .close{padding:0;line-height:1;font-size:26px}
 
 .heading>strong{font-size:16px;line-height:24px}
 
@@ -227,15 +222,15 @@ dialog::backdrop{background:#0007}
 
 .language-switcher{position:relative;flex-shrink:0}
 
-:where(#root) .language-trigger{display:flex;align-items:center;justify-content:center;gap:8px;border-color:transparent;background:transparent;color:var(--muted);padding:10px;min-width:44px}
+:where(#root,.app-modal) .language-trigger{display:flex;align-items:center;justify-content:center;gap:8px;border-color:transparent;background:transparent;color:var(--muted);padding:10px;min-width:44px}
 
-:where(#root) .language-trigger:hover,:where(#root) .language-trigger[aria-expanded=true]{background:#f1f5f3}
+:where(#root,.app-modal) .language-trigger:hover,:where(#root,.app-modal) .language-trigger[aria-expanded=true]{background:#f1f5f3}
 
 .language-panel{position:absolute;right:0;top:calc(100% + 8px);z-index:30;width:176px;padding:6px;background:white;border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 30px #17202620}
 
-:where(#root) .language-panel button{display:flex;width:100%;align-items:center;justify-content:space-between;text-align:left;border:0;border-radius:8px}
+:where(#root,.app-modal) .language-panel button{display:flex;width:100%;align-items:center;justify-content:space-between;text-align:left;border:0;border-radius:8px}
 
-:where(#root) .language-panel button[aria-pressed=true]{background:#e8faf1;color:#087b56;font-weight:600}
+:where(#root,.app-modal) .language-panel button[aria-pressed=true]{background:#e8faf1;color:#087b56;font-weight:600}
 
 @media(max-width:600px){
   .topbar{padding:10px 16px}
@@ -251,13 +246,10 @@ dialog::backdrop{background:#0007}
 .auth-layout{padding:24px 16px}
 .auth-card{padding:24px}
 
-  :where(#root) .auth-card h1{font-size:24px}
+  :where(#root,.app-modal) .auth-card h1{font-size:24px}
 .player-layout h1{font-size:22px}
 
   .detail-list>div{grid-template-columns:minmax(100px,42%) minmax(0,1fr)}
-
-  .dialog-body{padding:20px}
-.dialog-body header{gap:8px}
 
   .topbar .dropdown>summary{font-size:13px;padding:11px 8px}
 
@@ -283,8 +275,6 @@ dialog::backdrop{background:#0007}
   .content article>.row>div:first-child{flex-basis:100%}
   .content article>.row>div.row{width:100%;justify-content:flex-end}
 }
-.dialog-body>header{position:sticky;top:0;z-index:2;background:white}
-.dialog-body>header>.close{font-size:26px;line-height:1;min-width:44px;min-height:44px;padding:0}
 
 /* Device list geometry follows the product prototype: three status tiles,
    four icon actions, and the add action below the grid. */
@@ -341,7 +331,6 @@ dialog::backdrop{background:#0007}
 .role-card-footer .active-badge{padding:2px 5px;line-height:20px}
 .role-card-footer .switch-role{width:auto;min-height:28px;padding:3px 8px;line-height:20px;font-size:12px;border-radius:6px}
 @media(max-width:640px){.role-card-footer .switch-role{min-height:36px;padding:7px 10px}}
-.dialog-wide{width:min(1000px,calc(100vw - 32px))}
 .plugin-editor>fieldset>label{margin-bottom:12px}
 .plugin-editor textarea{min-height:64px;resize:vertical}
 .plugin-editor-footer{position:sticky;bottom:0;z-index:3;display:flex;justify-content:flex-end;gap:8px;padding:12px 0;background:white;border-top:1px solid var(--line);margin-top:16px}
@@ -455,10 +444,6 @@ dialog::backdrop{background:#0007}
 .roles-page .role-context{align-items:center;gap:8px}
 .roles-page .role-context>span:nth-child(2){margin-left:auto}
 .roles-page .role-history{min-height:28px;padding:3px 10px;font-size:12px}
-.dialog-history{width:min(1080px,calc(100vw - 32px));height:min(760px,calc(100dvh - 32px));overflow:hidden}
-.dialog-history>.dialog-body{height:100%;display:flex;flex-direction:column;padding:20px 24px}
-.dialog-history>.dialog-body>header{flex-shrink:0;margin-bottom:12px}
-.dialog-history h2{font-size:18px}
 .history-layout{flex:1;min-height:0;display:grid;grid-template-columns:260px minmax(0,1fr);border:1px solid var(--line);border-radius:12px;overflow:hidden}
 .history-list,.history-detail{min-height:0;min-width:0;display:flex;flex-direction:column}
 .history-list{background:#f8faf9;border-right:1px solid var(--line)}
@@ -482,8 +467,6 @@ dialog::backdrop{background:#0007}
 .history-empty{text-align:center;margin:60px 0}
 .history-back{display:none!important}
 @media(max-width:640px){
- .dialog-history{width:calc(100vw - 16px);height:calc(100dvh - 16px);max-height:calc(100dvh - 16px)}
- .dialog-history>.dialog-body{padding:12px}
  .history-layout{display:flex;flex-direction:column}
  .history-list{flex:1;border-right:0}
  .history-detail{display:none}
@@ -506,11 +489,6 @@ dialog::backdrop{background:#0007}
 }
 
 /* Device tools stay over the list; long contact lists scroll inside the dialog. */
-.dialog-workspace{width:min(640px,calc(100vw - 32px));max-height:min(620px,calc(100dvh - 32px));overflow:hidden}
-.dialog-media{width:min(760px,calc(100vw - 32px));height:min(560px,calc(100dvh - 32px));overflow:hidden}
-.dialog-workspace>.dialog-body,.dialog-media>.dialog-body{display:flex;flex-direction:column;min-height:0;padding:16px;max-height:inherit}
-.dialog-media>.dialog-body{height:100%}
-.dialog-workspace>.dialog-body>header,.dialog-media>.dialog-body>header{flex-shrink:0;margin-bottom:12px}
 .contacts-workspace,.contact-list{display:flex;flex-direction:column;min-height:0;flex:0 1 auto;gap:8px}
 .contacts-workspace .device-selector{padding:0;border:0;box-shadow:none;margin:0;flex-shrink:0}
 .contacts-workspace h1{font-size:18px;margin:0}
@@ -522,14 +500,7 @@ dialog::backdrop{background:#0007}
 .room-workspace .card{padding:16px;margin:12px 0}
 .room-workspace p{margin:8px 0;font-size:14px;line-height:1.5}
 .room-workspace h2{font-size:18px}
-.room-workspace .filter-tabs{margin:12px 0}
-.dialog-media .player-layout{padding:0;min-height:0;flex:1;display:flex;flex-direction:column;overflow:auto}
-.dialog-media .player-layout h1{font-size:16px;margin:0 0 12px}
-.dialog-media .player-card{min-height:0;flex:1;display:flex;flex-direction:column}
-.dialog-media .player-stage{min-height:0;flex:1;overflow:hidden}
-.dialog-media .canvas-box{max-height:100%}
-.dialog-media .player-toolbar{flex-shrink:0}
-@media(max-width:640px){.dialog-workspace{width:calc(100vw - 24px);max-height:calc(100dvh - 24px)}.dialog-workspace>.dialog-body{padding:14px}.contacts-workspace .row{gap:8px;flex-wrap:wrap}.contacts-workspace .contact-list>.muted{font-size:12px}}
+@media(max-width:640px){.contacts-workspace .row{gap:8px;flex-wrap:wrap}.contacts-workspace .contact-list>.muted{font-size:12px}}
 
 .device-actions button{border:0;background:transparent;border-radius:8px;font-weight:inherit}
 
@@ -554,19 +525,9 @@ dialog::backdrop{background:#0007}
 .role-heading{display:flex;gap:8px;align-items:center}.role-heading .role-title{flex:1;min-width:0}.role-region-label{flex-shrink:0;max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* Compact tools use content height, with touch targets retained on small screens. */
-dialog:not(.dialog-wide):not(.dialog-history):not(.dialog-workspace):not(.dialog-media){width:min(480px,calc(100vw - 32px))}
-.dialog-body{padding:18px}
-.dialog-body>header{margin-bottom:10px;align-items:center}
-.dialog-body>header h2{font-size:17px;line-height:28px}
-.dialog-body>header>.close{width:36px;height:36px;min-width:36px;min-height:36px}
-.dialog-body label{margin-bottom:12px}
-.dialog-compact .dialog-body{padding:16px 18px}
 .room-workspace .room-online{margin-left:10px;font-size:12px}
 .room-workspace .room-device-id{margin:2px 0 0;font-size:12px}
 .room-workspace .card{padding:0;margin:12px 0;border:0;box-shadow:none;background:transparent}
-.room-workspace .filter-tabs{display:flex;padding:3px;background:#f2f5f4;border-radius:9px;gap:4px;margin:12px 0}
-.room-workspace .filter-tabs button{flex:1;background:transparent;border-color:transparent}
-.room-workspace .filter-tabs button[aria-pressed=true]{background:white;border-color:var(--line);box-shadow:0 1px 3px #0001}
 .room-workspace .room-join-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 12px}
 .room-workspace .room-join-form label{margin:0}
 .room-workspace .room-join-form button{grid-column:1/-1}
@@ -578,7 +539,38 @@ dialog:not(.dialog-wide):not(.dialog-history):not(.dialog-workspace):not(.dialog
 .contacts-workspace .device-selector select{flex:1;margin:0;font-size:14px}
 .contacts-workspace h1{font-size:16px}
 .contacts-workspace .contact-scroll .card{border-radius:10px;box-shadow:none;padding:10px;margin-bottom:6px}
-@media(min-width:641px){.dialog-body button:not(.close){min-height:36px;padding:7px 12px}.dialog-body :is(input:not([type=checkbox]):not([type=radio]):not([type=range]),select){height:36px;padding:6px 10px;font-size:14px}.contacts-workspace .filter-tabs button{padding:6px 4px}.dialog-body .room-workspace .radio{margin-bottom:8px}}
+@media(min-width:641px){.contacts-workspace .filter-tabs button{padding:6px 4px}}
 @media(max-width:360px){.room-workspace .room-join-form{grid-template-columns:minmax(0,1fr)}.contacts-workspace .device-selector label{display:block}.contacts-workspace .device-selector select{margin-top:4px}}
-.dialog-workspace>.dialog-body{max-height:min(618px,calc(100dvh - 34px))}
-@media(max-width:640px){.dialog-workspace>.dialog-body{max-height:calc(100dvh - 26px)}}
+
+/* Ant Design owns modal chrome and interactions; these rules constrain content. */
+.app-modal .ant-modal{max-width:calc(100vw - 24px);padding-bottom:0}
+.app-dialog .ant-modal-content{display:flex;flex-direction:column;max-height:calc(100dvh - 32px)}
+.app-dialog .ant-modal-body{min-height:0;overflow:auto;overscroll-behavior:contain}
+.app-dialog .ant-modal-title h2{font:inherit;margin:0;padding-right:24px}
+.app-dialog-workspace .ant-modal-content{max-height:min(620px,calc(100dvh - 32px))}
+.app-dialog-workspace .ant-modal-body{display:flex;flex-direction:column;overflow:hidden}
+.app-dialog-history .ant-modal-content{height:min(760px,calc(100dvh - 32px))}
+.app-dialog-history .ant-modal-body{flex:1;display:flex;flex-direction:column;overflow:hidden}
+@media(max-width:640px){.app-modal .ant-btn{min-height:44px}.app-dialog .ant-modal-content{padding:16px}.app-dialog-history .ant-modal-content{height:calc(100dvh - 24px);max-height:calc(100dvh - 24px)}}
+
+.player-layout{height:calc(100dvh - 64px);max-width:1100px;padding:16px;display:flex;flex-direction:column;gap:12px}
+.player-heading{display:flex;align-items:baseline;flex-wrap:wrap;gap:6px 14px;flex-shrink:0}
+.player-layout .player-heading h1{font-size:20px;margin:0}
+.player-heading .muted{font-size:12px;overflow-wrap:anywhere}
+.player-card{flex:1;min-height:0;display:flex;flex-direction:column}
+.player-stage{position:relative;flex:1;min-height:120px;overflow:hidden;align-items:center}
+.player-toolbar{flex-shrink:0;border-top:1px solid var(--line);gap:12px}
+.player-placeholder{position:absolute;inset:0;display:grid;place-items:center;color:#bdcbc5;z-index:1;pointer-events:none;font-size:14px}
+.player-controls .ant-btn{min-height:44px;min-width:120px;height:auto}
+@supports(width:1cqw){.player-stage{container-type:size}.player-stage .canvas-box{width:min(100cqw,calc(100cqh * var(--display-ratio,1.7778)));height:auto}}
+@media(max-width:640px){.player-layout{padding:12px 10px max(12px,env(safe-area-inset-bottom));gap:10px}.player-layout .player-heading h1{font-size:17px}.player-controls .ant-btn{min-height:48px;min-width:0}.player-connection{gap:8px}.player-connection p{flex:1}.player-connection .ant-btn{min-height:40px}}
+@media(max-height:500px) and (orientation:landscape){.player-layout{padding:8px 12px;gap:6px}.player-card{flex-direction:row}.player-stage{min-width:0}.player-toolbar{width:260px;border-top:0;border-left:1px solid var(--line);align-content:center;gap:12px;padding:12px}.player-controls{width:100%;flex-direction:column}.player-connection{flex-basis:100%}.player-layout .player-heading h1{font-size:16px}}
+
+.room-mode{margin:12px 0}.room-password-mode{margin:12px 0;display:flex;gap:16px}
+:where(#root,.app-modal) label>.ant-input{margin-top:6px}
+
+/* Keep touch targets and long translated labels within the business layout. */
+:where(#root,.app-modal) .ant-btn{white-space:normal;height:auto;min-height:36px}
+:where(#root,.app-modal) .ant-btn>span{min-width:0}
+.device-summaries .ant-btn,.role-preview.ant-btn{display:block}
+@media(max-width:640px){:where(#root,.app-modal) .ant-btn{min-height:44px}}

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { Dialog } from '../components/Dialog';
+import { Button } from '../components/Button';
 import { Shell } from '../components/Shell';
 import { request } from '../lib/api';
 import { useLanguage } from '../lib/i18n';
@@ -21,9 +21,9 @@ function presentation(profile?: StreamProfile): { box: CSSProperties; canvas: CS
   return { box: { aspectRatio: displayRatio, '--display-ratio': displayRatio } as CSSProperties, canvas: { width: swap ? `${100 / displayRatio}%` : '100%', height: swap ? `${100 * displayRatio}%` : '100%', objectFit: fit === 'fill' || fit === 'cover' ? fit : 'contain',
     transform: `translate(-50%, -50%) rotate(${rotation}deg) scaleX(${profile?.hor_mirror === true ? -1 : 1}) scaleY(${profile?.vert_mirror === true ? -1 : 1})` } };
 }
-export default function Player({ deviceId, onClose }: { deviceId?: string; onClose?: () => void } = {}) {
+export default function Player() {
   const { t } = useLanguage();
-  const device = deviceId ?? new URLSearchParams(location.search).get('device_id') ?? '';
+  const device = new URLSearchParams(location.search).get('device_id') ?? '';
   const devices = useRemote<{ device_id: string; device_name?: string }[]>('/v1/user/device/list');
   const [state, setState] = useState<PlayerState>({ connected: false, connecting: false, talking: false, muted: true, message: '正在连接设备…' });
   const session = useRef<MediaSession | undefined>(undefined);
@@ -41,10 +41,10 @@ export default function Player({ deviceId, onClose }: { deviceId?: string; onClo
     return () => { alive = false; media.close(); window.removeEventListener('pagehide', close); window.removeEventListener('blur', blur); document.removeEventListener('visibilitychange', visibility); };
   }, [device]);
   const style = presentation(state.profile), name = devices.data?.find(item => item.device_id === device)?.device_name;
-  const content = <main className="player-layout"><h1>{name || t('未命名设备')} · {device}</h1><section className="player-card" aria-label={t('实时查看')}><div className="player-stage"><div className="canvas-box" style={style.box}><canvas id="canvas" style={style.canvas}/></div></div>
-    <div className="player-toolbar"><div className="player-connection"><p role="status">{t(state.message)}</p>{!state.connected && !state.connecting && device && <button onClick={() => void session.current?.start()}>{t('重新连接')}</button>}</div>
-    <div className="player-controls"><button type="button" disabled={!state.connected} className={state.talking ? 'talking' : ''} onPointerDown={event => { if (event.button !== 0) return; event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); void session.current?.startTalk(); }} onPointerUp={() => session.current?.stopTalk()} onPointerCancel={() => session.current?.stopTalk()} onLostPointerCapture={() => session.current?.stopTalk()} onKeyDown={event => { if ([' ', 'Enter'].includes(event.key) && !event.repeat) { event.preventDefault(); void session.current?.startTalk(); } }} onKeyUp={event => { if ([' ', 'Enter'].includes(event.key)) { event.preventDefault(); session.current?.stopTalk(); } }} onContextMenu={event => event.preventDefault()}>{t(state.talking ? '说话中…' : '按住说话')}</button><button type="button" aria-pressed={!state.muted} onClick={() => session.current?.toggleMute()}>{t(state.muted ? '开启声音' : '关闭声音')}</button></div>
+  const content = <main className="player-layout"><div className="player-heading"><h1>{name || t('未命名设备')}</h1><span className="muted">{device}</span></div><section className="player-card" aria-label={t('实时查看')}><div className="player-stage">{!state.connected && <div className="player-placeholder" aria-hidden="true">{t(state.connecting ? '正在连接设备…' : '暂无实时画面')}</div>}<div className="canvas-box" style={style.box}><canvas id="canvas" style={style.canvas}/></div></div>
+    <div className="player-toolbar"><div className="player-connection"><p role="status">{t(state.message)}</p>{!state.connected && !state.connecting && device && <Button onClick={() => void session.current?.start()}>{t('重新连接')}</Button>}</div>
+    <div className="player-controls"><Button type="button" disabled={!state.connected} className={state.talking ? 'danger talking' : 'primary'} aria-pressed={state.talking} onPointerDown={event => { if (event.button !== 0) return; event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); void session.current?.startTalk(); }} onPointerUp={() => session.current?.stopTalk()} onPointerCancel={() => session.current?.stopTalk()} onLostPointerCapture={() => session.current?.stopTalk()} onKeyDown={event => { if ([' ', 'Enter'].includes(event.key) && !event.repeat) { event.preventDefault(); void session.current?.startTalk(); } }} onBlur={() => session.current?.stopTalk()} onKeyUp={event => { if ([' ', 'Enter'].includes(event.key)) { event.preventDefault(); session.current?.stopTalk(); } }} onContextMenu={event => event.preventDefault()}>{t(state.talking ? '说话中…' : '按住说话')}</Button><Button type="button" disabled={!state.connected} aria-pressed={!state.muted} onClick={() => session.current?.toggleMute()}>{t(state.muted ? '开启声音' : '关闭声音')}</Button></div>
     </div></section>
   </main>;
-  return onClose ? <Dialog title="实时查看" size="media" onClose={onClose}>{content}</Dialog> : <Shell title="实时查看">{content}</Shell>;
+  return <Shell title="实时查看">{content}</Shell>;
 }

@@ -1,3 +1,4 @@
+import { Button } from './Button';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { clearSession, request } from '../lib/api';
 import { useLanguage } from '../lib/i18n';
@@ -17,7 +18,7 @@ export function Account() {
     void request<{ email: string }>('/v1/user/me', { signal: controller.signal }).then(data => setEmail(data.email)).catch(() => { if (!controller.signal.aborted) setError(true); });
     return () => controller.abort();
   }, [retry]);
-  return <Dropdown label={t('账号菜单')} icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></svg>}><p className="muted">{t('当前账号')}</p><p>{email || t(error ? '账号信息加载失败' : '正在加载账号…')}</p>{error && <button onClick={() => setRetry(value => value + 1)}>{t('重试')}</button>}<a href="/forgot-password">{t('修改密码')}</a><button className="danger" onClick={() => { clearSession(); location.replace('/login'); }}>{t('退出登录')}</button></Dropdown>;
+  return <Dropdown label={t('账号菜单')} icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></svg>}><p className="muted">{t('当前账号')}</p><p>{email || t(error ? '账号信息加载失败' : '正在加载账号…')}</p>{error && <Button onClick={() => setRetry(value => value + 1)}>{t('重试')}</Button>}<a href="/forgot-password">{t('修改密码')}</a><Button className="danger" onClick={() => { clearSession(); location.replace('/login'); }}>{t('退出登录')}</Button></Dropdown>;
 }
 export function NavigationLinks() {
   const { t } = useLanguage();

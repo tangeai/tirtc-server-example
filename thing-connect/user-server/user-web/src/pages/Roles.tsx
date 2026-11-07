@@ -1,3 +1,5 @@
+import { Button } from '../components/Button';
+import { Input } from 'antd';
 import { useEffect, useRef, useState } from 'react';
 import { Conversations } from '../components/Conversations';
 import { Shell } from '../components/Shell';
@@ -129,23 +131,23 @@ export default function Roles() {
       } else setError(errorText(e));
     } finally { operation.current = false; if (mounted.current) setBusy(false); }
   }
-  return <div className="roles-page"><Shell title="AI 角色"><div className="role-context"><span>{name || t('未命名设备')} · {device}</span><span>{t('当前角色')} <strong>{current?.name || t(loading ? '正在加载…' : '角色不可用，请重新选择')}</strong></span><button className="role-history" disabled={!device || !binding} onClick={() => setHistory(true)}>{t('会话记录')}</button></div>
+  return <div className="roles-page"><Shell title="AI 角色"><div className="role-context"><span>{name || t('未命名设备')} · {device}</span><span>{t('当前角色')} <strong>{current?.name || t(loading ? '正在加载…' : '角色不可用，请重新选择')}</strong></span><Button className="role-history" disabled={!device || !binding} onClick={() => setHistory(true)}>{t('会话记录')}</Button></div>
     {history && <Conversations device={device} name={name || t('未命名设备')} close={() => setHistory(false)}/>}
-    <div className={'roles-layout' + (mobileEditor ? ' show-editor' : '')}><aside className="role-list"><input type="search" value={search} onChange={e => setSearch(e.target.value)} placeholder={t('搜索智能体...')} aria-label={t('搜索智能体...')}/><select className="role-region-filter" aria-label={t('按地域筛选角色')} value={region} onChange={e => setRegion(e.target.value)}><option value="">{t('全部地域')}</option><option value="cn01">{t('国内')}</option><option value="sg01">{t('海外')}</option></select><p className="muted">{t('点击角色查看配置，切换仅影响当前设备。')}</p>
+    <div className={'roles-layout' + (mobileEditor ? ' show-editor' : '')}><aside className="role-list"><Input type="search" value={search} onChange={e => setSearch(e.target.value)} placeholder={t('搜索智能体...')} aria-label={t('搜索智能体...')}/><select className="role-region-filter" aria-label={t('按地域筛选角色')} value={region} onChange={e => setRegion(e.target.value)}><option value="">{t('全部地域')}</option><option value="cn01">{t('国内')}</option><option value="sg01">{t('海外')}</option></select><p className="muted">{t('点击角色查看配置，切换仅影响当前设备。')}</p>
       {filteredRoles.map(role => <article key={role.id} className={'role-card' + (role.id === effective && !role.unavailable ? ' active-role' : selected?.id === role.id ? ' viewed-role' : '')}>
-        <button className="role-preview" type="button" aria-label={role.name || role.id} aria-pressed={selected?.id === role.id} disabled={busy || resourceBlocked || role.unavailable} onClick={() => void select(role)}><span className="role-heading"><span className="role-title" title={role.name || role.id}>{role.name || role.id}</span><span className="role-region-label" title={t(roleRegionLabel(role.region))}>{t(roleRegionLabel(role.region))}</span></span>
-        <span className="muted" title={role.user_params?.description || ''}>{role.user_params?.description?.trim() || t('暂无描述')}</span></button>
-        <div className="role-card-footer"><span className="badge">{t(role.preset ? '系统预设' : '我的角色')}</span>{role.id === effective && !role.unavailable ? <span className="active-badge">✓ {t('当前设备使用中')}</span> : !role.unavailable && <button className="switch-role" disabled={busy || resourceBlocked || loading} onClick={() => void switchTo(role)}>{t('切换到此角色')}</button>}</div>
+        <Button className="role-preview" type="button" aria-label={role.name || role.id} aria-pressed={selected?.id === role.id} disabled={busy || resourceBlocked || role.unavailable} onClick={() => void select(role)}><span className="role-heading"><span className="role-title" title={role.name || role.id}>{role.name || role.id}</span><span className="role-region-label" title={t(roleRegionLabel(role.region))}>{t(roleRegionLabel(role.region))}</span></span>
+        <span className="muted" title={role.user_params?.description || ''}>{role.user_params?.description?.trim() || t('暂无描述')}</span></Button>
+        <div className="role-card-footer"><span className="badge">{t(role.preset ? '系统预设' : '我的角色')}</span>{role.id === effective && !role.unavailable ? <span className="active-badge">✓ {t('当前设备使用中')}</span> : !role.unavailable && <Button className="switch-role" disabled={busy || resourceBlocked || loading} onClick={() => void switchTo(role)}>{t('切换到此角色')}</Button>}</div>
 
       </article>)}
       {!!roles.length && !filteredRoles.length && !loading && <p role="status" className="muted">{t('没有匹配的角色，请调整搜索或地域。')}</p>}
       {!roles.length && !loading && <p className="muted">{t('暂无角色，可新建自己的角色')}</p>}
-      <button className="wide" disabled={busy || resourceBlocked} onClick={async () => { if (await discard()) await select({ id: '' }, true); }}>＋ {t('新建角色')}</button>
-      {error && !selected && <><p role="alert" className="error">{t(error)}</p><button onClick={() => void initialize()}>{t('重新加载')}</button></>}
-    </aside><main className="role-editor"><button className="mobile-back" onClick={() => setMobileEditor(false)}>← {t('返回角色列表')}</button>
+      <Button className="wide" disabled={busy || resourceBlocked} onClick={async () => { if (await discard()) await select({ id: '' }, true); }}>＋ {t('新建角色')}</Button>
+      {error && !selected && <><p role="alert" className="error">{t(error)}</p><Button onClick={() => void initialize()}>{t('重新加载')}</Button></>}
+    </aside><main className="role-editor"><Button className="mobile-back" onClick={() => setMobileEditor(false)}>← {t('返回角色列表')}</Button>
       {error && <p role="alert" className="error">{t(error)}</p>}{notice && <p role="status" className="success">{t(notice)}</p>}{loading && <p role="status">{t('正在加载角色详情…')}</p>}
       {!loading && selected && draft ? <RoleEditor key={selected.id || 'new'} role={selected} draft={draft} setDraft={patch => { setNotice(''); setDraft(current => current ? { ...current, ...patch } : current); }} voices={voices.data?.items || []} voiceLoading={voices.loading} voiceError={!!voices.error} retryVoices={voices.reload} busy={busy || loading} resourceBlocked={resourceBlocked} onResourceBlocked={setResourceBlocked} remove={remove}/> : !loading && <p className="muted">{t('选择或新建智能体')}</p>}
-      {selected && !selected.preset && <div className="save-bar"><p>{t('保存会影响所有使用该角色的设备；“切换到此角色”只更换当前设备。')}</p><div className="row"><button disabled={!dirty || busy || resourceBlocked || loading} onClick={async () => { if (await discard() && selected) setDraft(draftOf(selected)); }}>{t('放弃修改')}</button><button className="primary" disabled={!dirty || busy || resourceBlocked || loading} onClick={() => void save()}>{t(busy ? '保存中…' : '保存角色')}</button></div></div>}
+      {selected && !selected.preset && <div className="save-bar"><p>{t('保存会影响所有使用该角色的设备；“切换到此角色”只更换当前设备。')}</p><div className="row"><Button disabled={!dirty || busy || resourceBlocked || loading} onClick={async () => { if (await discard() && selected) setDraft(draftOf(selected)); }}>{t('放弃修改')}</Button><Button className="primary" disabled={!dirty || busy || resourceBlocked || loading} onClick={() => void save()}>{t(busy ? '保存中…' : '保存角色')}</Button></div></div>}
     </main></div>
   </Shell></div>;
 }
@@ -157,20 +159,20 @@ function RoleEditor({ role, draft, setDraft, voices, voiceLoading, voiceError, r
   const patch = (value: Partial<RoleDraft>) => setDraft(value);
   return <section className="card role-form"><div className="role-form-heading">{role.avatar && /^https?:\/\//.test(role.avatar) ? <img src={role.avatar} alt={t('角色头像')}/> : <span aria-hidden="true">{role.avatar || 'AI'}</span>}<h1>{role.id ? t('正在查看：{p0}', { p0: role.name || role.id }) : t('新建角色')}</h1></div>{readonly && <p className="preset-notice">{t('这是系统预设，只能查看。需要修改时请新建自己的角色。')}</p>}
     <nav className="role-editor-nav" aria-label={t('角色设置')}>
-      {[['basic', '角色'], ['model', '模型与记忆'], ['advanced', '扩展能力']].map(([value, label]) => <button key={value} type="button" aria-pressed={section === value} onClick={() => setSection(value)}>{t(label)}</button>)}
+      {[['basic', '角色'], ['model', '模型与记忆'], ['advanced', '扩展能力']].map(([value, label]) => <Button key={value} type="button" aria-pressed={section === value} onClick={() => setSection(value)}>{t(label)}</Button>)}
     </nav>
     <fieldset disabled={busy}>
       <div className="role-basic" hidden={section !== 'basic'}>
-        <div className="role-identity"><label>{t('智能体名称')}<input required readOnly={readonly} value={draft.name} onChange={e => patch({ name: e.target.value })}/></label><label>{t('地域')}<select aria-label={t('角色地域')} disabled={!!role.id || readonly} value={draft.region} onChange={e => patch({ region: e.target.value })} title={role.id ? t('地域创建后不可更改，其他地域请新建角色') : undefined}><option value="cn01">{t('国内')}</option><option value="sg01">{t('海外')}</option>{!['cn01', 'sg01'].includes(draft.region) && <option value={draft.region}>{t(roleRegionLabel(draft.region))}</option>}</select></label></div>{!!role.id && <p className="region-hint">{t('地域创建后不可更改，其他地域请新建角色')}</p>}
+        <div className="role-identity"><label>{t('智能体名称')}<Input required readOnly={readonly} value={draft.name} onChange={e => patch({ name: e.target.value })}/></label><label>{t('地域')}<select aria-label={t('角色地域')} disabled={!!role.id || readonly} value={draft.region} onChange={e => patch({ region: e.target.value })} title={role.id ? t('地域创建后不可更改，其他地域请新建角色') : undefined}><option value="cn01">{t('国内')}</option><option value="sg01">{t('海外')}</option>{!['cn01', 'sg01'].includes(draft.region) && <option value={draft.region}>{t(roleRegionLabel(draft.region))}</option>}</select></label></div>{!!role.id && <p className="region-hint">{t('地域创建后不可更改，其他地域请新建角色')}</p>}
         <RoleVoicePanel role={role} draft={draft} patch={patch} voices={voices} voiceLoading={voiceLoading} voiceError={voiceError} retryVoices={retryVoices} busy={busy} active={section === 'basic'} readonly={readonly}/>
 
       </div>
       <div hidden={section !== 'model'}><section className="role-section"><h2>{t('模型与记忆')}</h2><label>{t('模型')}<select aria-label={t('模型')} disabled={readonly || !providers.llm} value={draft.model} onChange={e => patch({ model: e.target.value })}><option value="">{t('沿用基础配置')}</option>{[...new Set([...llmModels.map(model => model.id), draft.model])].filter(Boolean).map(model => <option key={model}>{model}</option>)}</select></label><label className="radio"><input type="checkbox" disabled={readonly} checked={draft.memory} onChange={e => patch({ memory: e.target.checked })}/>{t('长期记忆')}</label></section></div>
       <div hidden={section !== 'advanced'}>
-        <details className="role-section"><summary>{t('更多角色信息')}</summary><label>{t('智能体描述')}<input readOnly={readonly} value={draft.description} onChange={e => patch({ description: e.target.value })}/></label><label>{t('开场白')}<input readOnly={readonly} value={draft.welcome} onChange={e => patch({ welcome: e.target.value })}/></label></details>
+        <details className="role-section"><summary>{t('更多角色信息')}</summary><label>{t('智能体描述')}<Input readOnly={readonly} value={draft.description} onChange={e => patch({ description: e.target.value })}/></label><label>{t('开场白')}<Input readOnly={readonly} value={draft.welcome} onChange={e => patch({ welcome: e.target.value })}/></label></details>
       <details className="role-section"><summary>{t('知识库')}</summary><Knowledge value={draft.knowledge} onChange={knowledge => patch({ knowledge })} readonly={readonly} onBlocked={onResourceBlocked}/></details>
       <details className="role-section"><summary>{t('工具与插件')}</summary><ResourceSelection kind="mcp" selected={draft.mcp} onChange={mcp => patch({ mcp })} readonly={readonly}/><ResourceSelection kind="plugin" selected={draft.plugins} onChange={plugins => patch({ plugins })} readonly={readonly} names={role.device_plugin_refs}/></details>
-      {role.id && !readonly && <button type="button" className="danger" disabled={resourceBlocked} onClick={() => void remove()}>{t('删除角色')}</button>}</div>
+      {role.id && !readonly && <Button type="button" className="danger" disabled={resourceBlocked} onClick={() => void remove()}>{t('删除角色')}</Button>}</div>
     </fieldset>
   </section>;
 }

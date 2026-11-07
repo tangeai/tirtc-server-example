@@ -1,21 +1,21 @@
-import { useEffect, useId, useRef, type ReactNode } from 'react';
+import { Modal } from 'antd';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useLanguage } from '../lib/i18n';
 
-// Each open mounts a new dialog. A late request from an unmounted dialog cannot
-// change the state of another device's dialog.
-export function Dialog({ title, children, onClose, size, closeDisabled = false }: { title: string; children: ReactNode; onClose(): void; size?: 'wide' | 'history' | 'workspace' | 'media' | 'compact'; closeDisabled?: boolean }) {
-  const ref = useRef<HTMLDialogElement>(null);
-  const id = useId();
+export function Dialog({ title, children, onClose, size, closeDisabled = false }: { title: string; children: ReactNode; onClose(): void; size?: 'wide' | 'history' | 'workspace' | 'compact'; closeDisabled?: boolean }) {
   const { t } = useLanguage();
+  // Callers unmount completed forms immediately; restore their trigger even when
+  // there is no closing animation. Modal owns trapping, Escape and scroll lock.
+  const [trigger] = useState(() => document.activeElement);
   useEffect(() => {
-    const dialog = ref.current!;
-    const previous = document.activeElement;
-    const overflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    dialog.showModal();
-    return () => { dialog.close(); document.body.style.overflow = overflow; if (previous instanceof HTMLElement && previous.isConnected) previous.focus(); };
-  }, []);
-  return <dialog ref={ref} className={size ? 'dialog-' + size : undefined} aria-labelledby={id} onCancel={event => { event.preventDefault(); event.stopPropagation(); if (!closeDisabled) onClose(); }} onClick={event => { if (!closeDisabled && event.target === event.currentTarget) { const bounds = event.currentTarget.getBoundingClientRect(); if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) onClose(); } }}>
-    <div className="dialog-body"><header><h2 id={id}>{t(title)}</h2><button className="close" type="button" disabled={closeDisabled} aria-label={t('关闭弹窗')} onClick={onClose}>×</button></header>{children}</div>
-  </dialog>;
+    return () => { if (trigger instanceof HTMLElement && trigger.isConnected) trigger.focus(); };
+  }, [trigger]);
+  return <Modal open centered title={<h2>{t(title)}</h2>} footer={null}
+    width={size === 'wide' ? 960 : size === 'history' ? 1080 : size === 'workspace' ? 640 : 480}
+    transitionName="" maskTransitionName=""
+    rootClassName="app-modal" className={'app-dialog' + (size ? ' app-dialog-' + size : '')}
+    closable={{ disabled: closeDisabled, 'aria-label': t('关闭弹窗') }} keyboard={!closeDisabled} maskClosable={!closeDisabled}
+    onCancel={event => { event.stopPropagation(); if (!closeDisabled) onClose(); }} destroyOnHidden>
+    {children}
+  </Modal>;
 }

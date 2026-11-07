@@ -1,0 +1,11 @@
+import { ConfigProvider } from 'antd';
+import enUS from 'antd/locale/en_US';
+import zhCN from 'antd/locale/zh_CN';
+import type { ReactNode } from 'react';
+import { useLanguage } from '../lib/i18n';
+
+export function UIProvider({ children }: { children: ReactNode }) {
+  const { language } = useLanguage();
+  return <ConfigProvider locale={language === 'en' ? enUS : zhCN} button={{ autoInsertSpace: false }}
+    theme={{ token: { colorPrimary: '#07866f', borderRadius: 8, controlHeight: 36, fontFamily: 'inherit' } }}>{children}</ConfigProvider>;
+}

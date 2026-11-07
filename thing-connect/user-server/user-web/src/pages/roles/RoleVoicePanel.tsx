@@ -1,3 +1,5 @@
+import { Button } from '../../components/Button';
+import { Input } from 'antd';
 import { findVoice } from '../../lib/roles.ts';
 import { useEffect, useRef, useState } from 'react';
 import { useConfirm } from '../../components/Confirm';
@@ -53,20 +55,20 @@ export function RoleVoicePanel({ role, draft, patch, voices, voiceLoading, voice
   return <>
     <section className="role-persona">
       {!readonly && active && <>
-        {types.error ? <p className="error">{t('角色类型暂不可用，仍可手动编辑。')} <button type="button" onClick={types.reload}>{t('重试')}</button></p> : types.loading ? <p role="status">{t('正在加载角色类型…')}</p> : <RoleTypePicker items={available} voices={voices} selected={chosen} currentVoiceName={voice?.name || draft.voice} disabled={disabled || voiceLoading || !provider} onOpen={stop} onSelect={choose}/>}
+        {types.error ? <p className="error">{t('角色类型暂不可用，仍可手动编辑。')} <Button type="button" onClick={types.reload}>{t('重试')}</Button></p> : types.loading ? <p role="status">{t('正在加载角色类型…')}</p> : <RoleTypePicker items={available} voices={voices} selected={chosen} currentVoiceName={voice?.name || draft.voice} disabled={disabled || voiceLoading || !provider} onOpen={stop} onSelect={choose}/>}
         {!types.loading && !types.error && !available.length && <p className="muted">{t('暂无可用角色类型，可先编辑角色设定。')}</p>}
       </>}
       {!provider && <p className="preset-notice">{t('此角色使用其他语音服务，声音配置保持原样。')}</p>}
       <div className="role-prompt-heading"><label htmlFor="role-prompt">{t('角色设定')}</label><span className="badge">{t(custom ? '自定义设定' : '默认设定')}</span>
         {!readonly && chosen && <label className="radio"><input type="checkbox" role="switch" aria-label={t('自定义提示词')} disabled={disabled} checked={custom} onChange={e => { if (e.target.checked) patch({ customPrompt: true }); else void reset(); }}/>{t('自定义')}</label>}
 
-      {!readonly && chosen && custom && <button className="role-restore" type="button" disabled={disabled} onClick={() => void reset()}>{t('恢复默认')}</button>}
+      {!readonly && chosen && custom && <Button className="role-restore" type="button" disabled={disabled} onClick={() => void reset()}>{t('恢复默认')}</Button>}
       </div>
-      <textarea id="role-prompt" aria-label={t('角色设定')} className="role-prompt" rows={12} readOnly={readonly || !custom} disabled={busy || choosing} value={draft.prompt} onChange={e => patch({ prompt: e.target.value, customPrompt: true })}/>
+      <Input.TextArea id="role-prompt" aria-label={t('角色设定')} className="role-prompt" rows={12} readOnly={readonly || !custom} disabled={busy || choosing} value={draft.prompt} onChange={e => patch({ prompt: e.target.value, customPrompt: true })}/>
     </section>
     <details className="role-speech"><summary>{t('语音设置')}</summary>
-      <div className="voice-current"><span>{t('当前声音')}：<strong>{voice?.name || draft.voice || t('沿用基础配置')}</strong></span>{voice?.sample_url ? <button type="button" disabled={disabled} onClick={() => void preview()}>{t(playing ? '暂停' : '试听')}</button> : voice && <span className="muted">{t('暂无试听')}</span>}</div>
-      {voiceError && <p className="error">{t('音色列表暂不可用，请稍后重试')} <button type="button" onClick={retryVoices}>{t('重试')}</button></p>}
+      <div className="voice-current"><span>{t('当前声音')}：<strong>{voice?.name || draft.voice || t('沿用基础配置')}</strong></span>{voice?.sample_url ? <Button type="button" disabled={disabled} onClick={() => void preview()}>{t(playing ? '暂停' : '试听')}</Button> : voice && <span className="muted">{t('暂无试听')}</span>}</div>
+      {voiceError && <p className="error">{t('音色列表暂不可用，请稍后重试')} <Button type="button" onClick={retryVoices}>{t('重试')}</Button></p>}
       <div className="role-speech-controls">
         <SpeechLevel label={t('回复速度')} labels={[t('慢'), t('标准'), t('快')]} values={speechLevelValues(voiceModel, 'rate')} value={draft.rate} disabled={disabled || !provider} onChange={rate => patch({ rate })}/>
         <SpeechLevel label={t('回复音调')} labels={[t('低'), t('标准'), t('高')]} values={speechLevelValues(voiceModel, 'pitch')} value={draft.pitch} disabled={disabled || !provider} onChange={pitch => patch({ pitch })}/>

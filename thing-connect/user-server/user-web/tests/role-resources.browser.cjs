@@ -105,7 +105,7 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
    await dialog.getByRole('button',{name:'添加参数',exact:true}).first().click();await dialog.locator('.param-card').nth(1).getByRole('button',{name:'删除参数',exact:true}).click();
   }
   await dialog.getByRole('button',{name:'保存',exact:true}).click();await dialog.waitFor({state:'hidden'});
-  const checkbox=group.getByRole('checkbox',{name:kind+'新资源',exact:true});await checkbox.check();await page.getByRole('button',{name:'保存角色',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.save-bar .primary')?.disabled);const row=checkbox.locator('xpath=../..');
+  const checkbox=group.getByRole('checkbox',{name:kind+'新资源',exact:true});await checkbox.check();await page.getByRole('button',{name:'保存角色',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.save-bar .ant-btn-primary')?.disabled);const row=checkbox.locator('xpath=../..');
   await row.getByRole('button',{name:'编辑',exact:true}).click();await dialog.getByLabel('名称',{exact:true}).fill(kind+'已编辑');await dialog.getByRole('button',{name:'保存',exact:true}).click();await dialog.waitFor({state:'hidden'});
   const item=resources[kind].at(-1);assert.equal(item.name,kind+'已编辑');if(kind==='mcp')assert.equal(item.config.authentication.bearer_token,'synthetic-test-token');else {assert.equal(item.input_params.length,1);assert.equal(item.return_params.length,1);assert.equal(item.input_params[0].required,true);}
   await group.getByRole('checkbox',{name:kind+'已编辑',exact:true}).uncheck();

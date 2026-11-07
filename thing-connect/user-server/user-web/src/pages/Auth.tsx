@@ -1,3 +1,4 @@
+import { Button } from '../components/Button';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Shell } from '../components/Shell';
 import { PasswordField } from '../components/PasswordField';
@@ -25,7 +26,7 @@ export default function Auth() {
   const backToDevices = mode === 'reset' && !!localStorage.getItem('token');
   return <Shell title="小钛控制台" back={mode !== 'reset' ? null : backToDevices ? '/devices' : '/login'} backLabel={backToDevices ? '返回设备列表' : '返回登录'}>
     <main className="auth-layout"><section className="card auth-card"><h1>{t(title)}</h1>
-      {mode === 'reset' ? <p className="muted">{t('验证注册邮箱后即可设置新密码')}</p> : <nav className="tabs" aria-label={t('账号操作')}><button type="button" aria-pressed={mode === 'login'} onClick={() => switchMode('login')}>{t('登录')}</button><button type="button" aria-pressed={mode === 'register'} onClick={() => switchMode('register')}>{t('注册')}</button></nav>}
+      {mode === 'reset' ? <p className="muted">{t('验证注册邮箱后即可设置新密码')}</p> : <nav className="tabs" aria-label={t('账号操作')}><Button type="button" aria-pressed={mode === 'login'} onClick={() => switchMode('login')}>{t('登录')}</Button><Button type="button" aria-pressed={mode === 'register'} onClick={() => switchMode('register')}>{t('注册')}</Button></nav>}
       <AuthForm key={mode} mode={mode} switchMode={switchMode}/>
     </section></main>
   </Shell>;
@@ -149,15 +150,15 @@ function AuthForm({ mode, switchMode }: { mode: Mode; switchMode(mode: Mode): vo
   return <form ref={formRef} onSubmit={submit}>
     <fieldset disabled={phase !== 'idle'}>
       <label>{t(mode === 'reset' ? '注册邮箱' : '邮箱')}<input ref={emailRef} type="email" name="email" autoComplete={mode === 'reset' ? 'email' : 'username'} autoCapitalize="none" spellCheck={false} required defaultValue="" onInput={() => { if (!changed()) return; const input = field('code'); if (input) input.value = ''; }} placeholder={t('请输入邮箱地址')}/></label>
-      {mode !== 'login' && <label>{t('邮箱验证码')}<div className="code-row"><input aria-label={t('邮箱验证码')} name="code" defaultValue="" onInput={event => { event.currentTarget.value = event.currentTarget.value.replace(/\D/g, '').slice(0, 6); changed(); }} inputMode="numeric" pattern="[0-9]{6}" autoComplete="one-time-code" required placeholder={t('6 位验证码')}/><button type="button" disabled={cooldown > 0} onClick={() => void verify('send')}>{cooldown ? t('{p0}s 后重新获取', { p0: cooldown }) : t('获取验证码')}</button></div></label>}
+      {mode !== 'login' && <label>{t('邮箱验证码')}<div className="code-row"><input aria-label={t('邮箱验证码')} name="code" defaultValue="" onInput={event => { event.currentTarget.value = event.currentTarget.value.replace(/\D/g, '').slice(0, 6); changed(); }} inputMode="numeric" pattern="[0-9]{6}" autoComplete="one-time-code" required placeholder={t('6 位验证码')}/><Button type="button" disabled={cooldown > 0} onClick={() => void verify('send')}>{cooldown ? t('{p0}s 后重新获取', { p0: cooldown }) : t('获取验证码')}</Button></div></label>}
       <PasswordField label={mode === 'login' ? '密码' : mode === 'reset' ? '新密码' : '设置密码'} required minLength={mode === 'login' ? undefined : 6} name="password" defaultValue="" onInput={changed} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} placeholder={t(mode === 'login' ? '请输入密码' : '至少 6 位')}/>
       {mode !== 'login' && <PasswordField label={mode === 'reset' ? '确认新密码' : '确认密码'} autoComplete="new-password" minLength={6} required name="confirm" defaultValue="" onInput={changed} placeholder={t('再次输入密码')}/>}
       {mode === 'reset' ? <p className="legal"><LegalLinks/></p> : <div className="legal consent"><input ref={consentRef} id="consent" type="checkbox" checked={consent} onChange={event => { if (changed()) setConsent(event.target.checked); }}/><div><label htmlFor="consent">{t('我已阅读并同意')}</label> <LegalLinks/></div></div>}
     </fieldset>
-    <button className="primary wide" disabled={phase === 'submitting'} type={phase === 'verifying' ? 'button' : 'submit'} onClick={phase === 'verifying' ? cancelAttempt : undefined}>{t(phase === 'submitting' ? '提交中…' : phase === 'verifying' ? '取消验证' : mode === 'login' ? '登录' : mode === 'register' ? '注册' : '重置密码')}</button>
-    {mode === 'login' && <p className="right"><button className="link" type="button" onClick={() => switchMode('reset')}>{t('忘记密码？')}</button></p>}
+    <Button className="primary wide" disabled={phase === 'submitting'} type={phase === 'verifying' ? 'button' : 'submit'} onClick={phase === 'verifying' ? cancelAttempt : undefined}>{t(phase === 'submitting' ? '提交中…' : phase === 'verifying' ? '取消验证' : mode === 'login' ? '登录' : mode === 'register' ? '注册' : '重置密码')}</Button>
+    {mode === 'login' && <p className="right"><Button className="link" type="button" onClick={() => switchMode('reset')}>{t('忘记密码？')}</Button></p>}
     {phase === 'verifying' && <p role="status" className="sr-only">{t('请完成人机验证')}</p>}
     {message && <p role={success ? 'status' : 'alert'} className={success ? 'success' : 'error'}>{t(message)}</p>}
-    {mode === 'reset' && success && message === '密码已重置，请使用新密码登录' && <button type="button" className="wide" onClick={() => switchMode('login')}>{t('返回登录')}</button>}
+    {mode === 'reset' && success && message === '密码已重置，请使用新密码登录' && <Button type="button" className="wide" onClick={() => switchMode('login')}>{t('返回登录')}</Button>}
   </form>;
 }

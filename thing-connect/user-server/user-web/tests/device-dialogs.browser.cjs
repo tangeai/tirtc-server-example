@@ -45,12 +45,14 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  let dialog=page.getByRole('dialog',{name:'多人对讲',exact:true});
  await dialog.getByRole('button',{name:'创建房间',exact:true}).last().waitFor();
  assert.equal(new URL(page.url()).pathname,'/devices');
+ assert.equal(await dialog.locator('.ant-modal-title').count(),1,'uses the standard Ant Design title');
  for(const viewport of [{width:1366,height:768},{width:760,height:720},{width:390,height:844},{width:320,height:700}]){
   await page.setViewportSize(viewport);
-  await dialog.getByRole('navigation',{name:'房间操作'}).getByRole('button',{name:'加入房间',exact:true}).click();
+  await dialog.getByRole('navigation',{name:'房间操作'}).getByText('加入房间',{exact:true}).click();
   const metrics=await dialog.evaluate(el=>({h:el.scrollHeight,c:el.clientHeight,w:el.scrollWidth,cw:el.clientWidth}));
   assert.ok(metrics.h<=metrics.c+1,'room must fit vertically '+JSON.stringify({viewport,metrics}));
   assert.ok(metrics.w<=metrics.cw+1,'room overflow');
+  const primary=dialog.locator('form:not([hidden]) button[type=submit]');const colors=await primary.evaluate(el=>({fg:getComputedStyle(el).color,bg:getComputedStyle(el).backgroundColor}));assert.equal(colors.fg,'rgb(255, 255, 255)');assert.equal(colors.bg,'rgb(7, 134, 111)','main action uses the primary color');
   if(viewport.width>=640){const bounds=await dialog.boundingBox();assert.ok(bounds.width<=480&&bounds.height<=480,'compact room footprint');}
   await page.screenshot({path:path.join(root,'../output/playwright/device-room-'+viewport.width+'.png')});
  }
@@ -58,9 +60,9 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  assert.equal(await dialog.getByLabel('房间密码',{exact:true}).inputValue(),'');
  await dialog.getByLabel('6 位房间号').fill('001234');
  failChange=true;
- await dialog.getByRole('button',{name:'加入房间',exact:true}).last().click();
+ await dialog.locator('form:not([hidden]) button[type=submit]:not(.ant-btn-loading)').click();
  await dialog.getByRole('alert').waitFor();assert.equal(await dialog.getByLabel('6 位房间号').inputValue(),'001234');
- await dialog.getByRole('button',{name:'加入房间',exact:true}).last().click();
+ await dialog.locator('form:not([hidden]) button[type=submit]:not(.ant-btn-loading)').click();
  await dialog.getByText('001234',{exact:true}).waitFor();
  await dialog.getByRole('button',{name:'关闭弹窗'}).click();
  assert.ok((await card.innerText()).includes('001234'),'parent summary follows room action');
@@ -84,25 +86,28 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  assert.ok((await dialog.boundingBox()).height<500,'short contact results shrink the dialog');
  await dialog.getByRole('button',{name:'改备注'}).click();await dialog.getByLabel('联系人备注').fill('新备注');await dialog.getByRole('button',{name:'保存',exact:true}).click();await dialog.getByText('新备注',{exact:true}).waitFor();
  await dialog.getByRole('button',{name:'添加联系人'}).click();
- const child=page.getByRole('dialog',{name:'添加联系人',exact:true});await child.waitFor();await page.keyboard.press('Escape');await child.waitFor({state:'hidden'});assert.equal(await dialog.isVisible(),true);
- await page.keyboard.press('Escape');await dialog.waitFor({state:'hidden'});assert.equal(await page.evaluate(()=>document.body.style.overflow),'');
- await card.getByRole('button',{name:'联系人',exact:true}).click();await page.getByRole('dialog',{name:'联系人',exact:true}).getByRole('searchbox').waitFor();assert.equal(await page.getByRole('searchbox').inputValue(),'');await page.keyboard.press('Escape');
- // A media dialog must release audio/video resources before another device opens.
+ const child=page.getByRole('dialog',{name:'添加联系人',exact:true});await child.waitFor();await page.waitForFunction(() => [...document.querySelectorAll('[role=dialog]')].at(-1)?.contains(document.activeElement));await page.keyboard.press('Escape');await child.waitFor({state:'hidden'});assert.equal(await dialog.isVisible(),true);
+ await page.waitForFunction(() => [...document.querySelectorAll('[role=dialog]')].at(-1)?.contains(document.activeElement));await page.keyboard.press('Escape');await dialog.waitFor({state:'hidden'});assert.equal(await page.evaluate(()=>document.body.style.overflow),'');
+ await card.getByRole('button',{name:'联系人',exact:true}).click();await page.getByRole('dialog',{name:'联系人',exact:true}).getByRole('searchbox').waitFor();assert.equal(await page.getByRole('searchbox').inputValue(),'');await page.waitForFunction(() => [...document.querySelectorAll('[role=dialog]')].at(-1)?.contains(document.activeElement));await page.keyboard.press('Escape');
+ // Real-time viewing stays on a dedicated page and releases resources on exit.
  await page.route('**/static/js/tirtc.es.min.js',route=>route.fulfill({contentType:'text/javascript',body:`
- window.mediaCalls=[];
+ window.mediaCalls=[];function record(v){window.mediaCalls.push(v);sessionStorage.setItem('mediaCalls',JSON.stringify(window.mediaCalls));}
  export const TiRtc={initialize(){},async videoOutputReady(){}};
  export function TiRtcInitOptions(v){return v;}
- export class TiRtcConn{async connect(v){window.mediaCalls.push('connect:'+v.deviceId);} disconnect(){window.mediaCalls.push('disconnect');} subscribeAudio(){} unsubscribeAudio(){} subscribeVideo(){} unsubscribeVideo(){}}
- export function TiRtcAudioOutput(){return {attach(){},detach(){window.mediaCalls.push('detach-audio');}};}
- export function TiRtcVideoOutput(){return {attach(){},detach(){window.mediaCalls.push('detach-video');}};}
- export class TiRtcAudioInput{setOptions(){} attach(){} detach(){} async start(){window.mediaCalls.push('talk');} stop(){window.mediaCalls.push('stop-talk');}}
+ export class TiRtcConn{async connect(v){record('connect:'+v.deviceId);} disconnect(){record('disconnect');} subscribeAudio(){} unsubscribeAudio(){} subscribeVideo(){} unsubscribeVideo(){}}
+ export function TiRtcAudioOutput(){return {attach(){},detach(){record('detach-audio');}};}
+ export function TiRtcVideoOutput(){return {attach(){},detach(){record('detach-video');}};}
+ export class TiRtcAudioInput{setOptions(){} attach(){} detach(){} async start(){record('talk');} stop(){record('stop-talk');}}
  `}));
  await page.route('**/v1/user/device/rtc-token?*',route=>route.fulfill({json:{code:200,data:{token:'fixture',app_id:'fixture'}}}));
- await card.getByRole('button',{name:'实时',exact:true}).click();
- dialog=page.getByRole('dialog',{name:'实时查看',exact:true});await dialog.getByText('已连接 · 点击声音按钮开启或关闭声音',{exact:true}).waitFor();
- for(const viewport of [{width:1366,height:768},{width:390,height:844},{width:320,height:700}]){await page.setViewportSize(viewport);assert.ok(await dialog.evaluate(el=>el.scrollHeight<=el.clientHeight+1&&el.scrollWidth<=el.clientWidth+1),'player fits dialog');await page.screenshot({path:path.join(root,'../output/playwright/device-player-'+viewport.width+'.png')});}
- await dialog.getByRole('button',{name:'开启声音'}).click();await dialog.getByRole('button',{name:'按住说话'}).focus();await page.keyboard.down('Space');await dialog.getByRole('button',{name:'说话中…'}).waitFor();await page.keyboard.press('Escape');await page.keyboard.up('Space');await dialog.waitFor({state:'hidden'});
- const mediaCalls=await page.evaluate(()=>window.mediaCalls);assert.ok(mediaCalls.includes('disconnect'));assert.ok(mediaCalls.includes('detach-video'));assert.ok(mediaCalls.includes('detach-audio'));assert.ok(mediaCalls.includes('stop-talk'));
+ await card.getByRole('link',{name:'实时',exact:true}).click();
+ assert.equal(new URL(page.url()).pathname,'/player');assert.equal(await page.getByRole('dialog').count(),0);
+ await page.getByText('已连接 · 点击声音按钮开启或关闭声音',{exact:true}).waitFor();
+ for(const viewport of [{width:1366,height:768},{width:390,height:844},{width:320,height:700},{width:844,height:390}]){await page.setViewportSize(viewport);assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'player no horizontal overflow');const controls=await page.locator('.player-controls').boundingBox();assert.ok(controls.y+controls.height<=viewport.height,'controls visible on screen');await page.screenshot({path:path.join(root,'../output/playwright/device-player-'+viewport.width+'.png')});}
+ await page.getByRole('button',{name:'开启声音'}).click();const talk=page.getByRole('button',{name:'按住说话'});await talk.focus();await page.keyboard.down('Space');await page.getByRole('button',{name:'说话中…'}).waitFor();await page.keyboard.up('Space');await talk.waitFor();
+ await talk.focus();await page.keyboard.down('Space');await page.getByRole('button',{name:'说话中…'}).waitFor();await page.getByRole('button',{name:'关闭声音'}).focus();await talk.waitFor();await page.keyboard.up('Space');
+ await page.getByRole('link',{name:'返回设备列表',exact:false}).click();await card.waitFor();
+ const mediaCalls=await page.evaluate(()=>JSON.parse(sessionStorage.getItem('mediaCalls')));assert.ok(mediaCalls.includes('disconnect'));assert.ok(mediaCalls.includes('detach-video'));assert.ok(mediaCalls.includes('detach-audio'));assert.ok(mediaCalls.includes('stop-talk'));
  assert.equal(await card.getByRole('link',{name:'AI 角色',exact:true}).count(),1);
  assert.deepEqual(errors,[]);console.log('PASS device dialogs: one-screen room, internal contact scrolling at four sizes, failed join retry, summary update, focus restore, nested Escape, reopen, no automatic refresh');
  }finally{await browser.close();server.close();}
