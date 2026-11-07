@@ -101,12 +101,13 @@ func TestCompleteRoleCatalogPublicationAndReplay(t *testing.T) {
 		where string
 		want  int
 	}{
-		{"id LIKE 'preset-%' OR id LIKE 'catalog-%'", 188},
+		{"id LIKE 'preset-%' OR id LIKE 'catalog-%'", 58},
 		{"status='published' AND id LIKE 'preset-%'", 29},
 		{"status='published' AND voice_model='seed-tts-2.0'", 22},
 		{"status='published' AND voice_model='cosyvoice-v3-flash'", 7},
 		{"id LIKE 'catalog-%' AND status='published'", 0},
-		{"prompt=''", 27},
+		{"language<>'zh'", 0},
+		{"prompt=''", 2},
 		{"status='published' AND (voice_id='' OR prompt='' OR voice_model NOT IN ('cosyvoice-v3-flash','seed-tts-2.0'))", 0},
 	} {
 		var n int
@@ -131,12 +132,21 @@ func TestCompleteRoleCatalogPublicationAndReplay(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	removed, err := statementsFromFiles("migrations/admin/006_remove_beta_role_types.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range removed {
+		if _, err = tx.Exec(stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
 	var prompt string
 	if err = tx.Get(&prompt, "SELECT prompt FROM ai_role_types WHERE id='preset-002'"); err != nil || prompt != "本地定制" {
 		t.Fatalf("local edit lost: %q %v", prompt, err)
 	}
 	var n int
-	if err = tx.Get(&n, "SELECT COUNT(*) FROM ai_role_types"); err != nil || n != 188 {
+	if err = tx.Get(&n, "SELECT COUNT(*) FROM ai_role_types"); err != nil || n != 58 {
 		t.Fatalf("replay duplicate count=%d %v", n, err)
 	}
 }
