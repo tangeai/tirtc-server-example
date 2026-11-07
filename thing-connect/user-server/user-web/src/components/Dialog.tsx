@@ -12,6 +12,7 @@ export function Dialog({ title, children, onClose, size, closeDisabled = false }
   }, [trigger]);
   return <Modal open centered title={<h2>{t(title)}</h2>} footer={null}
     width={size === 'wide' ? 960 : size === 'history' ? 1080 : size === 'workspace' ? 640 : 480}
+    styles={{ header: { borderBottom: '1px solid #e8ecea', paddingBottom: 12, marginBottom: 16 } }}
     transitionName="" maskTransitionName=""
     rootClassName="app-modal" className={'app-dialog' + (size ? ' app-dialog-' + size : '')}
     closable={{ disabled: closeDisabled, 'aria-label': t('关闭弹窗') }} keyboard={!closeDisabled} maskClosable={!closeDisabled}

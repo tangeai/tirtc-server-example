@@ -7,5 +7,5 @@ import { useLanguage } from '../lib/i18n';
 export function UIProvider({ children }: { children: ReactNode }) {
   const { language } = useLanguage();
   return <ConfigProvider locale={language === 'en' ? enUS : zhCN} button={{ autoInsertSpace: false }}
-    theme={{ token: { colorPrimary: '#07866f', borderRadius: 8, controlHeight: 36, fontFamily: 'inherit' } }}>{children}</ConfigProvider>;
+    theme={{ token: { colorPrimary: '#07866f', borderRadius: 8, controlHeight: 36, fontFamily: 'inherit' }, components: { Modal: { titleFontSize: 20, titleLineHeight: 1.4, titleColor: '#172026' } } }}>{children}</ConfigProvider>;
 }
