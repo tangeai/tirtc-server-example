@@ -506,28 +506,30 @@ dialog::backdrop{background:#0007}
 }
 
 /* Device tools stay over the list; long contact lists scroll inside the dialog. */
-.dialog-workspace{width:min(900px,calc(100vw - 32px));height:min(720px,calc(100dvh - 32px));overflow:hidden}
-.dialog-workspace>.dialog-body{height:100%;display:flex;flex-direction:column;min-height:0;padding:20px 24px}
-.dialog-workspace>.dialog-body>header{flex-shrink:0;margin-bottom:12px}
-.contacts-workspace,.contact-list{display:flex;flex-direction:column;min-height:0;flex:1;gap:10px}
+.dialog-workspace{width:min(640px,calc(100vw - 32px));max-height:min(620px,calc(100dvh - 32px));overflow:hidden}
+.dialog-media{width:min(760px,calc(100vw - 32px));height:min(560px,calc(100dvh - 32px));overflow:hidden}
+.dialog-workspace>.dialog-body,.dialog-media>.dialog-body{display:flex;flex-direction:column;min-height:0;padding:16px;max-height:inherit}
+.dialog-media>.dialog-body{height:100%}
+.dialog-workspace>.dialog-body>header,.dialog-media>.dialog-body>header{flex-shrink:0;margin-bottom:12px}
+.contacts-workspace,.contact-list{display:flex;flex-direction:column;min-height:0;flex:0 1 auto;gap:8px}
 .contacts-workspace .device-selector{padding:0;border:0;box-shadow:none;margin:0;flex-shrink:0}
 .contacts-workspace h1{font-size:18px;margin:0}
 .contacts-workspace p{margin:0}
 .contacts-workspace .filter-tabs{margin:0;flex-shrink:0}
 .contact-scroll{min-height:0;overflow:auto;overscroll-behavior:contain}
-.contacts-workspace .contact-scroll{flex:1;padding-right:4px}
+.contacts-workspace .contact-scroll{flex:0 1 auto;padding-right:4px}
 .contacts-workspace .contact-scroll .card{padding:12px;margin-bottom:8px}
 .room-workspace .card{padding:16px;margin:12px 0}
 .room-workspace p{margin:8px 0;font-size:14px;line-height:1.5}
 .room-workspace h2{font-size:18px}
 .room-workspace .filter-tabs{margin:12px 0}
-.dialog-workspace .player-layout{padding:0;min-height:0;flex:1;display:flex;flex-direction:column;overflow:auto}
-.dialog-workspace .player-layout h1{font-size:16px;margin:0 0 12px}
-.dialog-workspace .player-card{min-height:0;flex:1;display:flex;flex-direction:column}
-.dialog-workspace .player-stage{min-height:0;flex:1;overflow:hidden}
-.dialog-workspace .canvas-box{max-height:100%}
-.dialog-workspace .player-toolbar{flex-shrink:0}
-@media(max-width:640px){.dialog-workspace{width:calc(100vw - 16px);height:calc(100dvh - 16px);max-height:calc(100dvh - 16px)}.dialog-workspace>.dialog-body{padding:14px}.contacts-workspace .row{gap:8px;flex-wrap:wrap}.contacts-workspace .contact-list>.muted{font-size:12px}}
+.dialog-media .player-layout{padding:0;min-height:0;flex:1;display:flex;flex-direction:column;overflow:auto}
+.dialog-media .player-layout h1{font-size:16px;margin:0 0 12px}
+.dialog-media .player-card{min-height:0;flex:1;display:flex;flex-direction:column}
+.dialog-media .player-stage{min-height:0;flex:1;overflow:hidden}
+.dialog-media .canvas-box{max-height:100%}
+.dialog-media .player-toolbar{flex-shrink:0}
+@media(max-width:640px){.dialog-workspace{width:calc(100vw - 24px);max-height:calc(100dvh - 24px)}.dialog-workspace>.dialog-body{padding:14px}.contacts-workspace .row{gap:8px;flex-wrap:wrap}.contacts-workspace .contact-list>.muted{font-size:12px}}
 
 .device-actions button{border:0;background:transparent;border-radius:8px;font-weight:inherit}
 
@@ -550,3 +552,33 @@ dialog::backdrop{background:#0007}
 @media(min-width:641px){.role-identity{grid-template-columns:minmax(0,1fr) 160px}.role-identity label{display:flex;align-items:center;gap:10px;white-space:nowrap}.roles-page .role-identity :is(input,select){margin-top:0;flex:1;width:0}.role-identity label:first-child input{min-width:0}}
 
 .role-heading{display:flex;gap:8px;align-items:center}.role-heading .role-title{flex:1;min-width:0}.role-region-label{flex-shrink:0;max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* Compact tools use content height, with touch targets retained on small screens. */
+dialog:not(.dialog-wide):not(.dialog-history):not(.dialog-workspace):not(.dialog-media){width:min(480px,calc(100vw - 32px))}
+.dialog-body{padding:18px}
+.dialog-body>header{margin-bottom:10px;align-items:center}
+.dialog-body>header h2{font-size:17px;line-height:28px}
+.dialog-body>header>.close{width:36px;height:36px;min-width:36px;min-height:36px}
+.dialog-body label{margin-bottom:12px}
+.dialog-compact .dialog-body{padding:16px 18px}
+.room-workspace .room-online{margin-left:10px;font-size:12px}
+.room-workspace .room-device-id{margin:2px 0 0;font-size:12px}
+.room-workspace .card{padding:0;margin:12px 0;border:0;box-shadow:none;background:transparent}
+.room-workspace .filter-tabs{display:flex;padding:3px;background:#f2f5f4;border-radius:9px;gap:4px;margin:12px 0}
+.room-workspace .filter-tabs button{flex:1;background:transparent;border-color:transparent}
+.room-workspace .filter-tabs button[aria-pressed=true]{background:white;border-color:var(--line);box-shadow:0 1px 3px #0001}
+.room-workspace .room-join-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 12px}
+.room-workspace .room-join-form label{margin:0}
+.room-workspace .room-join-form button{grid-column:1/-1}
+.room-workspace form[hidden]{display:none}
+.room-workspace>p:last-of-type{font-size:12px;color:var(--muted);margin:12px 0 0;line-height:1.6}
+.room-workspace .room-code{margin:10px 0;padding:12px}
+.room-workspace .room-code strong{margin:6px 0;font-size:30px}
+.contacts-workspace .device-selector label{display:flex;align-items:center;gap:10px;white-space:nowrap;margin:0;font-size:13px}
+.contacts-workspace .device-selector select{flex:1;margin:0;font-size:14px}
+.contacts-workspace h1{font-size:16px}
+.contacts-workspace .contact-scroll .card{border-radius:10px;box-shadow:none;padding:10px;margin-bottom:6px}
+@media(min-width:641px){.dialog-body button:not(.close){min-height:36px;padding:7px 12px}.dialog-body :is(input:not([type=checkbox]):not([type=radio]):not([type=range]),select){height:36px;padding:6px 10px;font-size:14px}.contacts-workspace .filter-tabs button{padding:6px 4px}.dialog-body .room-workspace .radio{margin-bottom:8px}}
+@media(max-width:360px){.room-workspace .room-join-form{grid-template-columns:minmax(0,1fr)}.contacts-workspace .device-selector label{display:block}.contacts-workspace .device-selector select{margin-top:4px}}
+.dialog-workspace>.dialog-body{max-height:min(618px,calc(100dvh - 34px))}
+@media(max-width:640px){.dialog-workspace>.dialog-body{max-height:calc(100dvh - 26px)}}

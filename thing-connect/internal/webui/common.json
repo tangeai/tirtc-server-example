@@ -106,5 +106,6 @@
   "地域未标注": "Region not provided",
   "地域创建后不可更改，其他地域请新建角色": "Region is fixed after creation. Create another role for a different region.",
   "没有匹配的角色，请调整搜索或地域。": "No matching roles. Change the search or region.",
-  "请选择国内或海外地域": "Select China or Overseas."
+  "请选择国内或海外地域": "Select China or Overseas.",
+  "无密码则留空": "Leave blank if not required"
 }

@@ -51,6 +51,7 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
   const metrics=await dialog.evaluate(el=>({h:el.scrollHeight,c:el.clientHeight,w:el.scrollWidth,cw:el.clientWidth}));
   assert.ok(metrics.h<=metrics.c+1,'room must fit vertically '+JSON.stringify({viewport,metrics}));
   assert.ok(metrics.w<=metrics.cw+1,'room overflow');
+  if(viewport.width>=640){const bounds=await dialog.boundingBox();assert.ok(bounds.width<=480&&bounds.height<=480,'compact room footprint');}
   await page.screenshot({path:path.join(root,'../output/playwright/device-room-'+viewport.width+'.png')});
  }
  await dialog.getByLabel('6 位房间号').fill('001234');
@@ -73,10 +74,12 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  for(const viewport of [{width:1366,height:768},{width:760,height:720},{width:390,height:844},{width:320,height:700}]){
   await page.setViewportSize(viewport);
   const metrics=await dialog.evaluate(el=>{const list=el.querySelector('.contact-scroll');return{h:el.scrollHeight,c:el.clientHeight,w:el.scrollWidth,cw:el.clientWidth,list:list.scrollHeight>list.clientHeight};});
-  assert.ok(metrics.h<=metrics.c+1,'contact dialog should not scroll '+JSON.stringify({viewport,metrics}));assert.ok(metrics.w<=metrics.cw+1,'contact horizontal overflow');assert.ok(metrics.list,'list scrolls internally');
+  assert.ok(metrics.h<=metrics.c+1,'contact dialog should not scroll '+JSON.stringify({viewport,metrics}));assert.ok(metrics.w<=metrics.cw+1,'contact horizontal overflow');assert.ok(metrics.list,'list scrolls internally');if(viewport.width>=640){const bounds=await dialog.boundingBox();assert.ok(bounds.width<=640&&bounds.height<=622,'compact contact footprint');}
   await page.screenshot({path:path.join(root,'../output/playwright/device-contacts-'+viewport.width+'.png')});
  }
+ await page.setViewportSize({width:1366,height:768});
  await dialog.getByRole('searchbox').fill('联系人0');
+ assert.ok((await dialog.boundingBox()).height<500,'short contact results shrink the dialog');
  await dialog.getByRole('button',{name:'改备注'}).click();await dialog.getByLabel('联系人备注').fill('新备注');await dialog.getByRole('button',{name:'保存',exact:true}).click();await dialog.getByText('新备注',{exact:true}).waitFor();
  await dialog.getByRole('button',{name:'添加联系人'}).click();
  const child=page.getByRole('dialog',{name:'添加联系人',exact:true});await child.waitFor();await page.keyboard.press('Escape');await child.waitFor({state:'hidden'});assert.equal(await dialog.isVisible(),true);

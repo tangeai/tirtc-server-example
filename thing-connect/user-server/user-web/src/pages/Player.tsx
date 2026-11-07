@@ -46,5 +46,5 @@ export default function Player({ deviceId, onClose }: { deviceId?: string; onClo
     <div className="player-controls"><button type="button" disabled={!state.connected} className={state.talking ? 'talking' : ''} onPointerDown={event => { if (event.button !== 0) return; event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); void session.current?.startTalk(); }} onPointerUp={() => session.current?.stopTalk()} onPointerCancel={() => session.current?.stopTalk()} onLostPointerCapture={() => session.current?.stopTalk()} onKeyDown={event => { if ([' ', 'Enter'].includes(event.key) && !event.repeat) { event.preventDefault(); void session.current?.startTalk(); } }} onKeyUp={event => { if ([' ', 'Enter'].includes(event.key)) { event.preventDefault(); session.current?.stopTalk(); } }} onContextMenu={event => event.preventDefault()}>{t(state.talking ? '说话中…' : '按住说话')}</button><button type="button" aria-pressed={!state.muted} onClick={() => session.current?.toggleMute()}>{t(state.muted ? '开启声音' : '关闭声音')}</button></div>
     </div></section>
   </main>;
-  return onClose ? <Dialog title="实时查看" size="workspace" onClose={onClose}>{content}</Dialog> : <Shell title="实时查看">{content}</Shell>;
+  return onClose ? <Dialog title="实时查看" size="media" onClose={onClose}>{content}</Dialog> : <Shell title="实时查看">{content}</Shell>;
 }
