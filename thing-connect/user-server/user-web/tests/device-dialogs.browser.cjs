@@ -54,6 +54,8 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
   if(viewport.width>=640){const bounds=await dialog.boundingBox();assert.ok(bounds.width<=480&&bounds.height<=480,'compact room footprint');}
   await page.screenshot({path:path.join(root,'../output/playwright/device-room-'+viewport.width+'.png')});
  }
+ assert.equal(await dialog.getByLabel('房间密码',{exact:true}).getAttribute('autocomplete'),'new-password','room passwords must not invite saved login credentials');
+ assert.equal(await dialog.getByLabel('房间密码',{exact:true}).inputValue(),'');
  await dialog.getByLabel('6 位房间号').fill('001234');
  failChange=true;
  await dialog.getByRole('button',{name:'加入房间',exact:true}).last().click();
