@@ -29,9 +29,9 @@ function expireSession(): never {
   throw new ApiError(401, '登录状态已失效，请重新登录');
 }
 export async function request<T>(path: string, options: {
-  method?: string; body?: unknown; form?: FormData; signal?: AbortSignal; anonymous?: boolean;
+  method?: string; headers?: Record<string, string>; body?: unknown; form?: FormData; signal?: AbortSignal; anonymous?: boolean;
 } = {}): Promise<T> {
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { ...options.headers };
   if (!options.anonymous) headers.Authorization = 'Bearer ' + (sessionToken() ?? '');
   if (options.body !== undefined) headers['Content-Type'] = 'application/json';
   const signal = options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(options.form ? 60000 : 15000)]) : AbortSignal.timeout(options.form ? 60000 : 15000);

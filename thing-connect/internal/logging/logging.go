@@ -281,6 +281,9 @@ func bodyForLog(path, raw string) string {
 }
 
 func sensitiveBodyPath(path string) bool {
+	if strings.HasPrefix(path, "/v1/ai/device/") && strings.Contains(path, "/conversations") {
+		return true
+	}
 	if strings.HasPrefix(path, "/v1/internal/configs/") || strings.HasPrefix(path, "/v1/admin/configs/") {
 		return true
 	}

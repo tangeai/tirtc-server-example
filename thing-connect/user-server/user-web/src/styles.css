@@ -451,3 +451,47 @@ dialog::backdrop{background:#0007}
 }
 .roles-page .voice-current>.muted{font-size:12px}
 @media(max-width:640px){.roles-page .role-prompt-heading>.badge{display:none}}
+
+.roles-page .role-context{align-items:center;gap:8px}
+.roles-page .role-context>span:nth-child(2){margin-left:auto}
+.roles-page .role-history{min-height:28px;padding:3px 10px;font-size:12px}
+.dialog-history{width:min(1080px,calc(100vw - 32px));height:min(760px,calc(100dvh - 32px));overflow:hidden}
+.dialog-history>.dialog-body{height:100%;display:flex;flex-direction:column;padding:20px 24px}
+.dialog-history>.dialog-body>header{flex-shrink:0;margin-bottom:12px}
+.dialog-history h2{font-size:18px}
+.history-layout{flex:1;min-height:0;display:grid;grid-template-columns:260px minmax(0,1fr);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.history-list,.history-detail{min-height:0;min-width:0;display:flex;flex-direction:column}
+.history-list{background:#f8faf9;border-right:1px solid var(--line)}
+.history-toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);flex-shrink:0}
+.history-toolbar button,.history-pages button{min-height:34px;padding:6px 10px;font-size:13px}
+.history-entries{flex:1;min-height:0;overflow:auto;padding:8px}
+.history-entry{display:block;width:100%;text-align:left;margin-bottom:6px;padding:12px;border:1px solid transparent;background:transparent}
+.history-entry>strong,.history-entry>span{display:block}
+.history-entry>strong{font-size:14px;font-weight:500}
+.history-entry>span{font-size:12px;color:var(--muted);margin-top:4px}
+.history-entry[aria-pressed=true]{background:#e8f5ef;border-color:#8abeb1}
+.history-pages{display:flex;align-items:center;justify-content:space-between;gap:4px;padding:10px 8px;border-top:1px solid var(--line);font-size:12px;flex-shrink:0}
+.history-messages{flex:1;min-height:0;overflow:auto;padding:20px;overscroll-behavior:contain}
+.history-message{margin-bottom:20px;display:flex;flex-direction:column;align-items:flex-start}
+.history-message-meta{display:flex;align-items:center;gap:10px;margin-bottom:6px;font-size:12px;color:var(--muted)}
+.history-message-meta strong{font-weight:500}
+.history-bubble{max-width:90%;padding:10px 14px;background:#f0f3f2;border-radius:4px 14px 14px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px;line-height:1.65}
+.history-user{align-items:flex-end}
+.history-user .history-bubble{background:#e2f3eb;border-radius:14px 4px 14px 14px}
+.history-error,.history-detail>.success{padding:0 14px;flex-shrink:0}
+.history-empty{text-align:center;margin:60px 0}
+.history-back{display:none!important}
+@media(max-width:640px){
+ .dialog-history{width:calc(100vw - 16px);height:calc(100dvh - 16px);max-height:calc(100dvh - 16px)}
+ .dialog-history>.dialog-body{padding:12px}
+ .history-layout{display:flex;flex-direction:column}
+ .history-list{flex:1;border-right:0}
+ .history-detail{display:none}
+ .history-show-detail .history-list{display:none}
+ .history-show-detail .history-detail{display:flex;flex:1}
+ .history-back{display:inline-block!important}
+ .history-toolbar{flex-wrap:wrap;padding:8px}
+ .history-toolbar>strong{font-size:13px}
+ .history-messages{padding:12px}
+ .history-bubble{max-width:95%}
+}

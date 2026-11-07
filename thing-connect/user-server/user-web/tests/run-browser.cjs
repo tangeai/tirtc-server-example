@@ -2,6 +2,7 @@ const fs=require('node:fs'),path=require('node:path'),{spawnSync}=require('node:
 const root=path.resolve(__dirname,'../../../..'),out=path.join(root,'output/playwright');
 fs.mkdirSync(out,{recursive:true});
 const coverage={
+ 'conversations':'会话记录入口、分页、权限凭证、删除确认与失败恢复、迟到响应、空态、移动端与桌面布局',
  'auth-refill':'验证码弹出后密码管理器再次回填旧账号：保持本次凭据、验证不中断、提交账号一致',
  'auth-autofill':'原生自动填充不被渲染覆盖、显示账号与提交一致、验证及请求中换账号隔离、注册/重置密码',
  'captcha-lifecycle':'手机缓存恢复时清理验证遮罩、旧回调隔离、失败重试、带验证码连续三次换账号登录',

@@ -69,3 +69,11 @@ func TestMaskHeaderHandlesShortBearerAndMAC(t *testing.T) {
 		t.Fatalf("MAC header was not masked: %q", got)
 	}
 }
+
+func TestConversationBodiesAreNotLogged(t *testing.T) {
+	for _, path := range []string{"/v1/ai/device/device/conversations", "/v1/ai/device/device/conversations/record"} {
+		if got := bodyForLog(path, `{"data":{"items":[{"content":"private conversation","reference":"signed receipt"}]}}`); got != "[REDACTED]" {
+			t.Fatalf("conversation leaked: %s", got)
+		}
+	}
+}

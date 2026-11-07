@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync/atomic"
 	"thing-connect/internal/ai"
+	"thing-connect/internal/ai/conversations"
 )
 
 type LifecycleAPI interface {
@@ -52,3 +53,8 @@ func NewRoleCloudProvider(api LifecycleAPI) *RoleCloudProvider {
 }
 func (p *RoleCloudProvider) SetAPI(api LifecycleAPI) { p.current.Store(&roleCloud{api: api}) }
 func (p *RoleCloudProvider) Snapshot() ai.RoleCloud  { return p.current.Load() }
+
+func (p *RoleCloudProvider) ConversationSnapshot() conversations.Cloud {
+	cloud, _ := p.current.Load().api.(conversations.Cloud)
+	return cloud
+}

@@ -17,6 +17,7 @@ import (
 	aihandler "thing-connect/ai-server/handler"
 	"thing-connect/internal/adminclient"
 	"thing-connect/internal/ai"
+	"thing-connect/internal/ai/conversations"
 	"thing-connect/internal/cache"
 	"thing-connect/internal/config"
 	"thing-connect/internal/db"
@@ -105,6 +106,7 @@ func main() {
 	}
 	agentHTTP.SetRoleTypes(roleTypes)
 	agentHTTP.Register(r, cfg.JWTSecret)
+	aihandler.RegisterConversations(r, cfg.JWTSecret, conversations.New(roleStore, roleCloud.ConversationSnapshot, cfg.JWTSecret))
 	dynamicClient, dynamicRefs, err := aiDynamicConfig(cfg, rdb, legacyAI, agentHTTP, roleCloud)
 	if err != nil {
 		log.Fatalf("dynamic config: %v", err)

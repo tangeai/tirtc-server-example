@@ -3,6 +3,7 @@ import { Account, Dropdown, NavigationLinks } from '../components/Account';
 import { DeviceIcon } from '../components/DeviceIcon';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { Dialog } from '../components/Dialog';
+import { Conversations } from '../components/Conversations';
 import { Recognition } from '../components/Recognition';
 import { ApiError, errorText, request } from '../lib/api';
 import { deviceRows, mediaRows, roleSummary, roomSummary, type Device, type RoleBinding, type RoomState, type Summary } from '../lib/devices';
@@ -10,7 +11,7 @@ import { useLanguage } from '../lib/i18n';
 import { markAway, restoreSnapshot, saveSnapshot, snapshotKey } from '../lib/snapshot';
 
 interface Snapshot { devices: Device[]; summaries: Record<string, Summary> }
-type Modal = { kind: 'rename' | 'info' | 'unbind' | 'recognition'; device: Device };
+type Modal = { kind: 'rename' | 'info' | 'unbind' | 'recognition' | 'history'; device: Device };
 export default function Devices() {
   const { t } = useLanguage();
   const [data, setData] = useState<Snapshot>({ devices: [], summaries: {} }), [loading, setLoading] = useState(true), [error, setError] = useState(''), [restored, setRestored] = useState(false);
@@ -78,7 +79,7 @@ export default function Devices() {
     <main className="device-layout"><div className="row"><h1>{t('我的设备')} <small>({data.devices.length})</small></h1><button className="device-refresh" disabled={loading} onClick={() => void refresh()}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-1l2 3M4 15l2 3a7 7 0 0 0 12-1"/></svg>{t('刷新')}</button></div>
       {loading && <p role="status" className="muted">{t('正在加载设备…')}</p>}{error && <p className="error" role="alert">{t(error)}</p>}{restored && <p className="muted">{t('显示上次查看的设备状态，点击刷新获取最新状态。')}</p>}
       <div className="device-grid">{data.devices.map(device => { const summary = data.summaries[device.device_id]; return <article className="card device-card" key={device.device_id} data-device-id={device.device_id}>
-        <div className="row"><div className="device-title"><span className="device-symbol"><DeviceIcon name="monitor"/></span><h2>{device.device_name || t('未命名设备')}</h2></div><Dropdown label={t('更多 ▾')}><button onClick={() => setModal({ kind: 'rename', device })}>{t('修改名称')}</button><button onClick={() => setModal({ kind: 'info', device })}>{t('设备信息')}</button><button className="danger" onClick={() => setModal({ kind: 'unbind', device })}>{t('解绑设备')}</button></Dropdown></div>
+        <div className="row"><div className="device-title"><span className="device-symbol"><DeviceIcon name="monitor"/></span><h2>{device.device_name || t('未命名设备')}</h2></div><Dropdown label={t('更多 ▾')}><button onClick={() => setModal({ kind: 'rename', device })}>{t('修改名称')}</button><button onClick={() => setModal({ kind: 'info', device })}>{t('设备信息')}</button><button onClick={() => setModal({ kind: 'history', device })}>{t('会话记录')}</button><button className="danger" onClick={() => setModal({ kind: 'unbind', device })}>{t('解绑设备')}</button></Dropdown></div>
         <div className="row device-meta"><p className="muted">ID: {device.device_id}</p><span className={device.online ? 'success' : 'muted'}>{t(device.online ? '● 在线' : '○ 离线')}</span></div>
         <div className="device-summaries"><a href={href('/agent', device)}><strong>{t('AI 角色')} <span>›</span></strong><p>{summary ? roleSummary(summary.role) : t('正在查询…')}</p></a><button onClick={() => setModal({ kind: 'recognition', device })}><strong>{t('AI识别')} <span>›</span></strong><p>{summary ? summary.recognition ? t(summary.recognition.enabled ? '已开启 · {p0}项' : '已关闭', { p0: summary.recognition.count }) : t('状态获取失败，请刷新') : t('正在查询…')}</p></button><a href={href('/room', device)}><strong>{t('多人对讲')} <span>›</span></strong><p>{summary ? roomSummary(summary.room) : t('正在查询…')}</p></a></div>
         <nav className="device-actions"><a href={href('/player', device)}><DeviceIcon name="monitor"/><span>{t('实时')}</span></a><a href={href('/contacts', device)}><DeviceIcon name="contacts"/><span>{t('联系人')}</span></a><a href={href('/agent', device)}><DeviceIcon name="role"/><span>{t('AI 角色')}</span></a><a href={href('/room', device)}><DeviceIcon name="room"/><span>{t('多人对讲')}</span>{summary?.room?.desired_state === 'joined' && <span aria-label={t('有对讲关系')}> ●</span>}</a></nav>
@@ -91,6 +92,7 @@ export default function Devices() {
       setModal(current => current === modal ? undefined : current);
       void refresh();
     }}/>}
+    {modal?.kind === 'history' && <Conversations key={modal.device.device_id} device={modal.device.device_id} name={modal.device.device_name || ''} close={close}/>}
     {modal?.kind === 'recognition' && <Recognition key={modal.device.device_id} device={modal.device.device_id} close={() => setModal(current => current === modal ? undefined : current)} saved={(enabled, count) => { update(state => ({ ...state, summaries: { ...state.summaries, [modal.device.device_id]: { ...state.summaries[modal.device.device_id], recognition: { enabled, count } } } })); void refresh(); }}/>}
   </>;
 }

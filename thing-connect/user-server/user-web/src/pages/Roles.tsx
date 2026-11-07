@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Conversations } from '../components/Conversations';
 import { Shell } from '../components/Shell';
 import { useConfirm } from '../components/Confirm';
 import { ApiError, errorText, request } from '../lib/api';
@@ -18,6 +19,7 @@ export default function Roles() {
   const [selected, setSelected] = useState<Entry>(), [draft, setDraft] = useState<RoleDraft>(), [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true), [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState(''), [mobileEditor, setMobileEditor] = useState(false);
   const [resourceBlocked, setResourceBlocked] = useState(false);
+  const [history, setHistory] = useState(false);
   const operation = useRef(false), selection = useRef(0), mounted = useRef(true), loadRevision = useRef(0);
   const voices = useRemote<{ items: Voice[] }>('/v1/ai/voices');
   const dirty = !!selected && !!draft && !selected.preset && JSON.stringify(draft) !== JSON.stringify(draftOf(selected));
@@ -122,7 +124,8 @@ export default function Roles() {
       } else setError(errorText(e));
     } finally { operation.current = false; if (mounted.current) setBusy(false); }
   }
-  return <div className="roles-page"><Shell title="AI 角色"><div className="role-context"><span>{name || t('未命名设备')} · {device}</span><span>{t('当前角色')} <strong>{current?.name || t(loading ? '正在加载…' : '角色不可用，请重新选择')}</strong></span></div>
+  return <div className="roles-page"><Shell title="AI 角色"><div className="role-context"><span>{name || t('未命名设备')} · {device}</span><span>{t('当前角色')} <strong>{current?.name || t(loading ? '正在加载…' : '角色不可用，请重新选择')}</strong></span><button className="role-history" disabled={!device || !name} onClick={() => setHistory(true)}>{t('会话记录')}</button></div>
+    {history && <Conversations device={device} name={name} close={() => setHistory(false)}/>}
     <div className={'roles-layout' + (mobileEditor ? ' show-editor' : '')}><aside className="role-list"><input type="search" value={search} onChange={e => setSearch(e.target.value)} placeholder={t('搜索智能体...')} aria-label={t('搜索智能体...')}/><p className="muted">{t('点击角色查看配置，切换仅影响当前设备。')}</p>
       {roles.filter(role => !search.trim() || [role.name, role.user_params?.description].some(value => value?.toLowerCase().includes(search.toLowerCase()))).map(role => <article key={role.id} className={'role-card' + (role.id === effective && !role.unavailable ? ' active-role' : selected?.id === role.id ? ' viewed-role' : '')}>
         <button className="role-preview" type="button" aria-label={role.name || role.id} aria-pressed={selected?.id === role.id} disabled={busy || resourceBlocked || role.unavailable} onClick={() => void select(role)}><span className="role-title" title={role.name || role.id}>{role.name || role.id}</span>

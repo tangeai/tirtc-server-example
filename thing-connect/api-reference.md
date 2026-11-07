@@ -3029,6 +3029,9 @@ H5 智能体管理页面由 user-server 的 `GET /agent?device_id=xxx` 提供。
 | [批量查询角色绑定](#post-v1aidevice-rolesquery) | Web（含小程序内嵌页面） | POST | `/v1/ai/device-roles/query` | 必需：用户 JWT（user_jwt） |
 | [批量删除角色绑定](#delete-v1aidevice-roles) | Web（含小程序内嵌页面） | DELETE | `/v1/ai/device-roles` | 必需：用户 JWT（user_jwt） |
 | [列出角色类型](#get-v1airole-types) | Web（含小程序内嵌页面） | GET | `/v1/ai/role-types` | 必需：用户 JWT（user_jwt） |
+| [查询会话记录](#get-v1aidevicedevice_idconversations) | Web（含小程序内嵌页面） | GET | `/v1/ai/device/:device_id/conversations` | 必需：用户 JWT（user_jwt） |
+| [查看会话详情](#get-v1aidevicedevice_idconversationsid) | Web（含小程序内嵌页面） | GET | `/v1/ai/device/:device_id/conversations/:id` | 必需：用户 JWT 与会话记录凭证 |
+| [删除会话记录](#delete-v1aidevicedevice_idconversationsid) | Web（含小程序内嵌页面） | DELETE | `/v1/ai/device/:device_id/conversations/:id` | 必需：用户 JWT 与会话记录凭证 |
 | [查询 TTS 音色](#get-v1aivoiceslanguagezh-cn) | Web（含小程序内嵌页面） | GET | `/v1/ai/voices` | 必需：用户 JWT（user_jwt） |
 | [列出全局 MCP 工具](#get-v1aimcptools) | Web（含小程序内嵌页面） | GET | `/v1/ai/mcp/tools` | 必需：用户 JWT（user_jwt） |
 | [查询全局 MCP 工具](#get-v1aimcptoolsid) | Web（含小程序内嵌页面） | GET | `/v1/ai/mcp/tools/:id` | 必需：用户 JWT（user_jwt） |
@@ -4042,6 +4045,101 @@ H5 智能体管理页面由 user-server 的 `GET /agent?device_id=xxx` 提供。
 | `data.items[].role_id` | string | 绑定的角色 ID |
 | `data.items[].created_at` | integer | 云端返回的创建时间戳 |
 | `data.items[].updated_at` | integer | 云端返回的更新时间戳 |
+
+### 会话记录
+
+设备卡片的“更多 → 会话记录”和 AI 角色页的“会话记录”打开同一历史对话窗口。桌面左侧选择会话、右侧阅读；手机先选择会话，再进入详情。打开窗口、翻页和点击“刷新”时请求数据，不定时轮询。记录按设备查询，包含该设备使用不同角色时的会话，不按当前正在编辑的角色筛选。
+
+<a id="get-v1aidevicedevice_idconversations"></a>
+
+#### 查询会话记录
+
+**接口**：`GET /v1/ai/device/:device_id/conversations`
+
+**调用方**：Web（含小程序内嵌页面）。鉴权：用户 JWT；设备必须属于当前用户。响应包含 `Cache-Control: no-store`。
+
+| 参数 | 位置 | 类型 | 说明 |
+|---|---|---|---|
+| device_id | 路径 | string | 本人绑定设备 ID |
+| page | 查询 | integer | 默认 1，范围 1–100000 |
+| page_size | 查询 | integer | 默认 10，范围 1–50 |
+
+成功响应（HTTP 200）：
+
+```json
+{
+  "code": 200,
+  "msg": "ok",
+  "data": {
+    "items": [{
+      "id": "conversation-001",
+      "device_id": "DEVICE001",
+      "assistant_id": "role-001",
+      "started_at": "2026-11-07T01:00:00Z",
+      "reference": "<服务端返回的会话记录凭证>"
+    }],
+    "page": 1,
+    "page_size": 10,
+    "has_more": false
+  }
+}
+```
+
+`started_at` 可能为 null。`has_more` 表示上游返回满页，继续查询可能为空；上游不提供总条数。`reference` 是一小时内有效的会话归属凭证，与用户、设备、会话和上游应用关联。客户端原样保存于当前窗口内存，详情和删除请求通过 `X-Conversation-Reference` 请求头携带；凭证不能替代用户 JWT，不能跨设备、跨用户使用。过期或上游应用配置变化后重新查询列表。
+
+<a id="get-v1aidevicedevice_idconversationsid"></a>
+
+#### 查看会话详情
+
+**接口**：`GET /v1/ai/device/:device_id/conversations/:id`
+
+**调用方**：Web（含小程序内嵌页面）。携带用户 JWT 和列表中该会话的 `X-Conversation-Reference`，服务端重新校验设备当前归属。路径 `id` 为会话 ID。
+
+| 路径参数 | 类型 | 说明 |
+|---|---|---|
+| device_id | string | 本人绑定设备 ID |
+| id | string | 列表返回的会话 ID |
+
+成功响应（HTTP 200）：
+
+```json
+{
+  "code": 200,
+  "msg": "ok",
+  "data": {
+    "items": [
+      {"role": "user", "content": "你好", "time": "2026-11-07T01:00:00Z"},
+      {"role": "assistant", "content": "你好，有什么可以帮你？", "time": "2026-11-07T01:00:01Z"}
+    ]
+  }
+}
+```
+
+`items` 保留上游消息顺序，可能为空。`role` 为说话角色，`content` 为纯文本，`time` 为时间字符串。接口只返回文字记录，不提供语音下载或播放地址。
+
+<a id="delete-v1aidevicedevice_idconversationsid"></a>
+
+#### 删除会话记录
+
+**接口**：`DELETE /v1/ai/device/:device_id/conversations/:id`
+
+**调用方**：Web（含小程序内嵌页面）。鉴权和路径参数同详情接口，无请求体。用户确认后删除，成功为 HTTP 200、`{"code":200,"msg":"ok"}`。上游已不存在的记录视为删除成功；网络失败时保留当前记录，允许重试。删除成功后刷新当前页，当前页只剩该条且不是第一页时返回上一页。
+
+| 路径参数 | 类型 | 说明 |
+|---|---|---|
+| device_id | string | 本人绑定设备 ID |
+| id | string | 列表返回的会话 ID |
+
+三个接口的错误处理：
+
+| HTTP / code | 含义与处理 |
+|---|---|
+| 400 / 40000 | 参数不正确，检查设备、分页参数 |
+| 401 / 401 | 用户 JWT 无效，重新登录 |
+| 403 / 40300 | 设备不属于当前用户，或会话凭证无效、过期；刷新列表，仍失败时停止访问 |
+| 404 / 40400 | 会话不存在，刷新列表 |
+| 502 / 50200 | 上游服务失败或超时，稍后手动重试 |
+| 500 / 50000 | 内部错误，稍后重试 |
 
 <a id="delete-v1aidevice-roles"></a>
 
