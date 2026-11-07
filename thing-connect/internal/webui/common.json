@@ -95,5 +95,16 @@
   "设置已被其他页面修改，当前草稿已保留。": "Settings changed elsewhere. Your draft has been kept.",
   "操作状态已变化，请检查后重试": "The operation state changed. Check and retry.",
   "关闭弹窗": "Close dialog",
-  "返回设备列表": "Back to devices"
+  "返回设备列表": "Back to devices",
+  "房间操作": "Room actions",
+  "按地域筛选角色": "Filter roles by region",
+  "全部地域": "All regions",
+  "国内": "China",
+  "海外": "Overseas",
+  "地域": "Region",
+  "角色地域": "Role region",
+  "地域未标注": "Region not provided",
+  "地域创建后不可更改，其他地域请新建角色": "Region is fixed after creation. Create another role for a different region.",
+  "没有匹配的角色，请调整搜索或地域。": "No matching roles. Change the search or region.",
+  "请选择国内或海外地域": "Select China or Overseas."
 }

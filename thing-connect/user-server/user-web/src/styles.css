@@ -540,3 +540,13 @@ dialog::backdrop{background:#0007}
 .contacts-workspace article>.row>div.row{flex-shrink:0;gap:6px}
 .contacts-workspace article>.row button{padding:8px;font-size:13px}
 @media(max-width:360px){.contacts-workspace article>.row>div.row{flex-direction:column}}
+
+.role-identity{display:grid;grid-template-columns:minmax(0,1fr) 120px;gap:12px;flex-shrink:0}
+.role-identity label{margin:0}.role-region-label{font-size:12px;color:var(--muted)}
+.roles-page .region-hint{font-size:12px;color:var(--muted);margin:0}
+.roles-page .role-region-filter{font-size:14px;height:36px;min-height:36px;padding:4px 10px;margin-top:8px}
+@media(max-width:640px){.role-identity{grid-template-columns:minmax(0,1fr) 100px;gap:8px}}
+.roles-page .role-identity :is(input,select){margin-top:4px;height:38px;font-size:14px;padding:7px 10px}
+@media(min-width:641px){.role-identity{grid-template-columns:minmax(0,1fr) 160px}.role-identity label{display:flex;align-items:center;gap:10px;white-space:nowrap}.roles-page .role-identity :is(input,select){margin-top:0;flex:1;width:0}.role-identity label:first-child input{min-width:0}}
+
+.role-heading{display:flex;gap:8px;align-items:center}.role-heading .role-title{flex:1;min-width:0}.role-region-label{flex-shrink:0;max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

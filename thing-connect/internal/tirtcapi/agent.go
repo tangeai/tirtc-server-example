@@ -45,6 +45,7 @@ func NewAgentAPIClient(cfg AgentAPIConfig, client *http.Client) *AgentAPIClient 
 // Role is the role-config response from GET /ai/aigcrtc/roles/{id}.
 // Matches the actual RoleConfig API structure (agent_config + service_config).
 type Role struct {
+	Region        string                 `json:"region,omitempty"`
 	ID            string                 `json:"id"`
 	Name          string                 `json:"name,omitempty"`
 	Avatar        string                 `json:"avatar,omitempty"`
@@ -313,6 +314,7 @@ type KnowledgeFileSimpleResponse struct {
 // RoleInput is the request body for create/update role (POST/PUT).
 // Matches the RoleConfig API input structure.
 type RoleInput struct {
+	Region        string                 `json:"region,omitempty"`
 	Name          string                 `json:"name,omitempty"`
 	Avatar        string                 `json:"avatar,omitempty"`
 	ParentRoleID  string                 `json:"parent_role_id,omitempty"`

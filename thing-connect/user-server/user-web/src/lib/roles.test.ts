@@ -112,3 +112,17 @@ test('all TTS provider transitions isolate credentials while preserving the inde
   assert.equal(oldTTS.provider_params?.model,from,'saving must not mutate the source role');
  }
 });
+
+
+test('region defaults only on creation and is immutable on edits', () => {
+ for (const region of ['cn01', 'sg01']) {
+  const draft = { ...draftOf({}), name: '地域测试', region };
+  assert.equal(rolePayload({}, draft, []).region, region);
+  const saved: Role = { ...rolePayload({}, draft, []), id: 'saved' };
+  assert.equal(draftOf(saved).region, region);
+  assert.equal(rolePayload(saved, { ...draftOf(saved), region: 'other', name: '改名' }, []).region, undefined);
+ }
+ assert.equal(draftOf({}).region, 'cn01');
+ assert.equal(draftOf({ id: 'legacy' }).region, '');
+ assert.throws(() => rolePayload({}, { ...draftOf({}), name: '地域测试', region: 'unsupported' }, []));
+});

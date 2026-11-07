@@ -332,6 +332,9 @@ func (h *AgentHandler) updateRole(c *gin.Context) {
 }
 
 func validateRoleInput(input tirtcapi.RoleInput) string {
+	if utf8.RuneCountInString(strings.TrimSpace(input.Region)) > 32 {
+		return "角色地域不能超过 32 个字符"
+	}
 	if strings.TrimSpace(input.Name) == "" {
 		return "缺少 name"
 	}

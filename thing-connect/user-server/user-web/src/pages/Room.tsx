@@ -67,7 +67,7 @@ export default function Room({ deviceId, onClose, onUpdate }: { deviceId?: strin
   const a = snapshot?.assignment;
   const submit = (kind: 'create' | 'join', body: object) => (event: FormEvent) => { event.preventDefault(); void change(kind, body); };
   const content = <main className={onClose ? "room-workspace" : "narrow"}>
-    <div className="row"><strong>{onClose ? snapshot?.name || t('未命名设备') : t('多人对讲')}</strong><button type="button" disabled={loading || busy || !device} onClick={() => void refresh()}>{t('刷新')}</button></div>
+    <div className="row">{onClose ? <strong>{snapshot?.name || t('未命名设备')}</strong> : <h1>{t('多人对讲')}</h1>}<button type="button" disabled={loading || busy || !device} onClick={() => void refresh()}>{t('刷新')}</button></div>
     <p className="muted">{!onClose && <>{snapshot?.name || t('未命名设备')} · </>}{device}</p>
     {loading && <p role="status">{t('正在加载房间信息…')}</p>}{message && <p role="alert" className="error">{t(message)}</p>}{notice && <p role="status" className="muted">{t(notice)}</p>}
     {snapshot && <><p className="muted">{t(snapshot.verified ? a?.online ? '● 在线' : '○ 离线' : '状态待更新')}</p>{a?.desired_state === 'joined' ? <section className="card"><div className="row"><h2>{t('当前房间')}</h2><span className="muted">{t(a.password_set ? '已设置房间密码' : '无密码房间')}</span></div>

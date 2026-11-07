@@ -3130,6 +3130,7 @@ H5 智能体管理页面由 user-server 的 `GET /agent?device_id=xxx` 提供。
 | 字段 | 类型 | 必填与说明 |
 |---|---|---|
 | `name` | string | 创建、更新均必填，非空且最多 64 个 Unicode 字符 |
+| `region` | string | 创建时可选，国内 `cn01`、海外 `sg01`；去除首尾空白后缺省 `cn01`，最多 32 个 Unicode 字符。更新已有角色不会迁移地域，跨地域使用须新建角色 |
 | `avatar` | string | 可选，头像地址 |
 | `parent_role_id` | string | 可选，继承的角色 ID；须属同一应用，不能指向自身，最多一级父子关系 |
 | `agent_config` | object | 可选，行为配置，子字段见下表 |
@@ -3224,6 +3225,7 @@ H5 智能体管理页面由 user-server 的 `GET /agent?device_id=xxx` 提供。
 | 字段 | 类型 | 返回条件与说明 |
 |---|---|---|
 | `id` | string | 角色 ID |
+| `region` | string | 可选，云端实际地域；旧数据或上游未返回时省略，不据此推断地域 |
 | `name` | string | 可选，角色名称 |
 | `avatar` | string | 可选，头像地址 |
 | `app_id` | string | 可选，云端应用 ID |

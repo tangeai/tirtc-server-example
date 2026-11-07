@@ -1775,3 +1775,17 @@ func TestQueryPagination_NegativePage(t *testing.T) {
 		t.Errorf("page = %d, want 1 (default for negative)", page)
 	}
 }
+
+func TestValidateRoleRegionLength(t *testing.T) {
+	input := tirtcapi.RoleInput{Name: "region test", ServiceConfig: &tirtcapi.ServiceConfig{Name: "default", Type: "custom-compose"}}
+	for _, region := range []string{"", "cn01", "sg01", strings.Repeat("地", 32), "  sg01  "} {
+		input.Region = region
+		if msg := validateRoleInput(input); msg != "" {
+			t.Errorf("valid region rejected: %s", msg)
+		}
+	}
+	input.Region = strings.Repeat("地", 33)
+	if msg := validateRoleInput(input); msg != "角色地域不能超过 32 个字符" {
+		t.Fatalf("unexpected error: %s", msg)
+	}
+}

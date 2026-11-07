@@ -294,3 +294,36 @@ func TestMCPCreatePersistsExplicitDisabledState(t *testing.T) {
 		})
 	}
 }
+
+func TestRoleRegionCreateAndRead(t *testing.T) {
+	for _, region := range []string{"", "cn01", "sg01"} {
+		t.Run(region, func(t *testing.T) {
+			client := contractClient(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodPost {
+					var body map[string]any
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						t.Fatal(err)
+					}
+					if region == "" {
+						if _, ok := body["region"]; ok {
+							t.Error("legacy creation should omit region")
+						}
+					} else if body["region"] != region {
+						t.Error("region lost in request")
+					}
+					_, _ = io.WriteString(w, `{"code":200,"data":{"id":"regional-role"}}`)
+					return
+				}
+				_, _ = fmt.Fprintf(w, `{"code":200,"data":{"id":"regional-role","region":%q}}`, region)
+			})
+			created, err := client.CreateRole(context.Background(), RoleInput{Name: "region test", Region: region})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := client.GetRole(context.Background(), created.ID)
+			if err != nil || got == nil || got.Region != region {
+				t.Fatalf("region response lost: role=%+v err=%v", got, err)
+			}
+		})
+	}
+}
