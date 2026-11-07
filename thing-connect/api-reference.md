@@ -3157,10 +3157,13 @@ H5 智能体管理页面由 user-server 的 `GET /agent?device_id=xxx` 提供。
 | `config.llm.provider` | string | LLM 提供方，使用 `ali-llm` |
 | `config.llm.provider_params.model` | string | 模型名称：`qwen3.5-flash` 或 `qwen3.7-plus` |
 | `config.tts` | object | `custom-compose` 的 TTS 组件 |
-| `config.tts.provider` | string | TTS 提供方标识，使用 `ali-tts` |
+| `config.tts.provider` | string | TTS 提供方标识，使用 `ali-tts` 或 `ve-seed-tts-2` |
 | `config.tts.provider_params` | object | TTS 参数 |
 | `config.tts.provider_params.model` | string | 配置 TTS 时必填，使用音色列表中对应的 `model`（如 `cosyvoice-v3-flash`） |
-| `config.tts.provider_params.voice` | string | 配置 TTS 时必填，音色 ID，通过音色列表获取；与 `model` 成对提交 |
+| `config.tts.provider_params.voice` | string | `ali-tts` 必填，音色 ID，通过音色列表获取；与 `model` 成对提交 |
+| `config.tts.provider_params.audio.voice_type` | string | `ve-seed-tts-2` 必填，选择 `seed-tts-2.0` 目录中的音色 ID |
+| `config.tts.provider_params.audio.speech_rate` | integer | Seed 语速，-50～100，默认 0 |
+| `config.tts.provider_params.audio.pitch_rate` | integer | Seed 音调，-12～12，默认 0 |
 | `config.tts.provider_params.volume` | integer | 音量，范围由 TTS 提供方定义 |
 | `config.tts.provider_params.rate` | number | 语速，范围由 TTS 提供方定义 |
 | `config.tts.provider_params.pitch` | number | 音调，范围由 TTS 提供方定义 |
@@ -3295,10 +3298,10 @@ H5 智能体管理页面由 user-server 的 `GET /agent?device_id=xxx` 提供。
 **成功响应**（HTTP 200）
 
 ```json
-{"code":200,"data":{"items":[{"id":"preset-001","name":"湾湾小何","voice_id":"longantai_v3","voice_model":"cosyvoice-v3-flash","prompt":"角色默认提示词","sort_order":10,"status":"published","revision":1}]}}
+{"code":200,"data":{"items":[{"id":"preset-022","name":"春溪知音","voice_id":"longxiaochun_v3","voice_model":"cosyvoice-v3-flash","prompt":"角色默认提示词","sort_order":10,"status":"published","revision":4}]}}
 ```
 
-使用 `/v1/ai/voices` 中匹配 `voice_id` 与 `voice_model` 的音色取得试听地址；试听不选中类型。选择类型后将 `prompt` 复制到角色的 `agent_config.prompt`，音色与模型复制到 `service_config.config.tts.provider_params`。用户可编辑提示词，再通过原有创建或更新角色接口保存。模板后续修改或停用不会覆盖用户已保存的角色。
+使用 `/v1/ai/voices` 中匹配 `voice_id` 与 `voice_model` 的音色取得试听地址；试听不选中类型。选择类型后将 `prompt` 复制到角色的 `agent_config.prompt`，音色与模型按所属提供方复制到 `service_config.config.tts.provider_params`：阿里使用 `provider=ali-tts`、`model=cosyvoice-v3-flash` 和 `voice`；Seed 使用 `provider=ve-seed-tts-2`、`model=seed-tts-2.0` 和 `audio.voice_type`。跨提供方切换时语速、音调恢复该模型的默认值，不复用原提供方的密钥和专有参数。用户可编辑提示词，再通过原有创建或更新角色接口保存。模板后续修改或停用不会覆盖用户已保存的角色。 用户端的新建与编辑共用“角色”面板，默认提示词可通过“自定义”开关编辑；“语音设置”位于同一面板下方。保存时可在 `user_params` 中记录 `role_type_id`、`role_type_revision` 和 `role_type_custom`，用于再次编辑时回显选择与自定义状态。这些可选字段不触发服务端模板同步；没有这些字段的旧角色保持原有音色和提示词。
 
 **错误响应**：目录不可用返回 HTTP 503 + `code=503`，用户端仍可手动编辑角色；JWT 无效按统一鉴权响应处理。
 
@@ -4100,7 +4103,7 @@ H5 智能体管理页面由 user-server 的 `GET /agent?device_id=xxx` 提供。
 
 **调用方**：Web（含小程序内嵌页面）。
 
-获取可用 TTS 音色列表。音色须与 `service_config.config.tts.provider` 对应的引擎匹配；不同引擎的音色 ID 不能混用。Web 角色编辑页创建的 `custom-compose` 配置使用 `ali-tts`，音色选项来自 `model=cosyvoice-v3-flash` 的目录项。已有其他服务商的配置在页面中保持只读并原样保存；仅修改角色名称时保留原有服务配置。修改阿里音色时须选择对应引擎的音色。
+获取可用 TTS 音色列表。音色须与 `service_config.config.tts.provider` 对应的引擎匹配；不同引擎的音色 ID 不能混用。Web 角色编辑页支持 `ali-tts/cosyvoice-v3-flash` 和 `ve-seed-tts-2/seed-tts-2.0`。音色目录可以返回其他模型，但未适配的模型不进入可选类型。已有其他服务商的配置在页面中保持只读并原样保存；仅修改角色名称时保留原有服务配置。没有 `sample_url` 的音色显示暂无试听音频。
 
 **鉴权**：`Authorization: Bearer <user_jwt>`（用户 JWT）
 

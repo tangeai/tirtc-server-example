@@ -76,3 +76,39 @@ func TestRoleTypeCreateDoesNotTrustClientIdentityOrStatus(t *testing.T) {
 		t.Fatal("missing actor accepted")
 	}
 }
+
+type modelVoices []roletypes.Voice
+
+func (v modelVoices) Voices(context.Context) ([]roletypes.Voice, error) { return v, nil }
+func TestRoleTypePublicationRequiresSupportedModelPromptAndExactCatalogPair(t *testing.T) {
+	for _, tc := range []struct {
+		name, model, voice, prompt string
+		want                       error
+	}{
+		{"seed", "seed-tts-2.0", "seed", "设定", nil},
+		{"wrong model", "seed-tts-2.0", "ali", "设定", roletypes.ErrInvalid},
+		{"undocumented model", "ve-bidirection", "ve", "设定", roletypes.ErrUnsupportedModel},
+		{"missing prompt", "seed-tts-2.0", "seed", "", roletypes.ErrInvalid},
+		{"missing voice", "seed-tts-2.0", "", "设定", roletypes.ErrInvalid},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &typeStoreStub{value: roletypes.Type{ID: "one", Name: "类型", VoiceModel: tc.model, VoiceID: tc.voice, Prompt: tc.prompt, Status: "draft", Revision: 1}}
+			svc := NewRoleTypeService(store, modelVoices{{ID: "seed", Model: "seed-tts-2.0"}, {ID: "ali", Model: roletypes.VoiceModel}, {ID: "ve", Model: "ve-bidirection"}})
+			_, err := svc.Save(context.Background(), roletypes.Type{ID: "one", Status: "published"}, 1, "status", RoleTypeRequestMeta{Actor: AccessIdentity{UserID: 1}, Reason: "启用"})
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("got %v want %v", err, tc.want)
+			}
+			if tc.want != nil && store.saves != 0 {
+				t.Fatal("invalid publication reached store")
+			}
+		})
+	}
+}
+func TestRoleTypeMissingPromptCanBeMaintainedAsDraft(t *testing.T) {
+	store := &typeStoreStub{}
+	svc := NewRoleTypeService(store, &voicesStub{})
+	got, err := svc.Save(context.Background(), roletypes.Type{Name: "外语预留", Language: "fr", VoiceModel: roletypes.VoiceModel}, 0, "create", RoleTypeRequestMeta{Actor: AccessIdentity{UserID: 1}, Reason: "保留目录"})
+	if err != nil || got.Status != "draft" || got.Language != "fr" || got.Prompt != "" {
+		t.Fatalf("draft=%+v err=%v", got, err)
+	}
+}

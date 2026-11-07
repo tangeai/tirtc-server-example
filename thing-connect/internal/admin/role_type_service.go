@@ -48,6 +48,8 @@ func (s *RoleTypeService) Save(ctx context.Context, v roletypes.Type, revision i
 	if action == "create" {
 		v.ID = uuid.NewString()
 		v.Status = "draft"
+		v.MatchKind = "manual"
+		v.SourceVoiceID = ""
 		revision = 0
 	} else {
 		if revision < 1 || v.ID == "" {
@@ -70,11 +72,22 @@ func (s *RoleTypeService) Save(ctx context.Context, v roletypes.Type, revision i
 			}
 		} else {
 			v.Status = before.Status
+			if strings.TrimSpace(v.Language) == "" {
+				v.Language = before.Language
+			}
+			v.SourceVoiceID = before.SourceVoiceID
+			v.MatchKind = before.MatchKind
+			if v.VoiceID != before.VoiceID || v.VoiceModel != before.VoiceModel {
+				v.MatchKind = "manual"
+			}
 		}
 	}
 	v = roletypes.Normalize(v)
 	if err := roletypes.Validate(v); err != nil {
 		return roletypes.Type{}, err
+	}
+	if v.Status == "published" && !roletypes.SupportedModel(v.VoiceModel) {
+		return roletypes.Type{}, roletypes.ErrUnsupportedModel
 	}
 	// Remote validation happens before the transaction. Disabling a type and
 	// editing its copy without changing the voice must work during an outage.

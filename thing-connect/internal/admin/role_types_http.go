@@ -57,6 +57,8 @@ func (s *HTTPServer) saveRoleType(c *gin.Context) {
 }
 func writeRoleTypeResult(c *gin.Context, value any, err error) {
 	switch {
+	case errors.Is(err, roletypes.ErrUnsupportedModel):
+		apiresp.BadParam(c, "探鸽存在该音色，但当前角色编辑器暂不支持此模型，请保留为草稿")
 	case errors.Is(err, roletypes.ErrInvalid):
 		apiresp.BadParam(c, "请检查类型名称、提示词、排序及所选音色，启用前需选择可用音色")
 	case errors.Is(err, ErrConflict):

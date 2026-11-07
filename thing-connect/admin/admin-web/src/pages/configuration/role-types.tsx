@@ -19,6 +19,9 @@ import { reportError } from '../../error-feedback';
 import { pageTitle } from '../../shared/admin-ui';
 
 type RoleType = {
+  language: string;
+  source_voice_id?: string;
+  match_kind?: string;
   id: string;
   name: string;
   voice_id: string;
@@ -30,6 +33,7 @@ type RoleType = {
 };
 type Voice = { id: string; name: string; model: string; sample_url?: string; languages?: string[] };
 type Editor = RoleType & { reason: string };
+const supported = (model: string) => ['cosyvoice-v3-flash', 'seed-tts-2.0'].includes(model);
 const statuses = { draft: '草稿', published: '已启用', offline: '已停用' };
 
 export function RoleTypesPage() {
@@ -41,6 +45,7 @@ export function RoleTypesPage() {
   const [editing, setEditing] = useState<RoleType>(),
     [busy, setBusy] = useState(false),
     [query, setQuery] = useState(''),
+    [language, setLanguage] = useState(''),
     [statusTarget, setStatusTarget] = useState<RoleType>(),
     [reason, setReason] = useState(''),
     [playing, setPlaying] = useState(false);
@@ -94,6 +99,7 @@ export function RoleTypesPage() {
   }, [selectedVoice, editing?.id]);
   function edit(item?: RoleType) {
     const next: RoleType = item || {
+      language: 'zh',
       id: '',
       name: '',
       voice_id: '',
@@ -138,7 +144,12 @@ export function RoleTypesPage() {
       const saved = await api<RoleType>(
         '/ai-role-types' + (editing.id ? '/' + encodeURIComponent(editing.id) : ''),
         json(editing.id ? 'PUT' : 'POST', {
-          role_type: { ...editing, ...value, voice_model: 'cosyvoice-v3-flash' },
+          role_type: {
+            ...editing,
+            ...value,
+            voice_model:
+              voices.find((voice) => voice.id === value.voice_id)?.model || editing.voice_model,
+          },
           expected_revision: editing.revision,
           reason: value.reason,
         }),
@@ -222,6 +233,24 @@ export function RoleTypesPage() {
         <Alert type="error" message="角色类型加载失败，请刷新重试" style={{ marginBottom: 16 }} />
       )}
       <Card>
+        <Typography.Paragraph>
+          共 {items.length} 个角色类型 · 已启用{' '}
+          {items.filter((item) => item.status === 'published').length} 个 · 未配置音色{' '}
+          {items.filter((item) => !item.voice_id).length} 个 · 缺少提示词{' '}
+          {items.filter((item) => !item.prompt.trim()).length} 个
+        </Typography.Paragraph>
+        <Select
+          aria-label="筛选语言"
+          value={language}
+          onChange={setLanguage}
+          style={{ width: 150, marginRight: 12 }}
+          options={[
+            { value: '', label: '全部语言' },
+            ...Array.from(new Set(items.map((item) => item.language)))
+              .sort()
+              .map((value) => ({ value, label: value === 'zh' ? '中文' : value })),
+          ]}
+        />
         <Input.Search
           aria-label="搜索角色类型"
           placeholder="搜索角色类型"
@@ -234,18 +263,42 @@ export function RoleTypesPage() {
           loading={loading}
           scroll={{ x: 900 }}
           dataSource={items
-            .filter((item) => item.name.toLowerCase().includes(query.toLowerCase()))
+            .filter(
+              (item) =>
+                (!language || item.language === language) &&
+                [item.name, item.voice_id, item.voice_model].some((value) =>
+                  value.toLowerCase().includes(query.toLowerCase()),
+                ),
+            )
             .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name))}
           pagination={{ pageSize: 20, showSizeChanger: false }}
           columns={[
             { title: '角色类型名称', dataIndex: 'name', width: 170 },
+            { title: '语言', dataIndex: 'language', width: 70 },
             {
               title: '角色音色',
               dataIndex: 'voice_id',
-              render: (id) =>
-                voices.find((v) => v.id === id)?.name || id || <Tag color="orange">待匹配音色</Tag>,
+              render: (id, item) =>
+                id ? (
+                  <Space direction="vertical" size={2}>
+                    <span>{voices.find((v) => v.id === id)?.name || id}</span>
+                    <Typography.Text type="secondary">{item.voice_model}</Typography.Text>
+                    {item.match_kind === 'version' && <Tag>同系列版本</Tag>}
+                    {!supported(item.voice_model) && (
+                      <Tag color="orange">音色存在，当前暂不支持此模型</Tag>
+                    )}
+                  </Space>
+                ) : (
+                  <Tag color="orange">暂无对应音色</Tag>
+                ),
             },
-            { title: '默认提示词', dataIndex: 'prompt', width: 280, ellipsis: true },
+            {
+              title: '默认提示词',
+              dataIndex: 'prompt',
+              width: 280,
+              ellipsis: true,
+              render: (value: string) => value || <Tag color="orange">来源未提供提示词</Tag>,
+            },
             { title: '排序', dataIndex: 'sort_order', width: 70 },
             {
               title: '状态',
@@ -263,7 +316,11 @@ export function RoleTypesPage() {
                     编辑
                   </Button>
                   <Button
-                    disabled={busy || (!item.voice_id && item.status !== 'published')}
+                    disabled={
+                      busy ||
+                      ((!item.voice_id || !item.prompt.trim() || !supported(item.voice_model)) &&
+                        item.status !== 'published')
+                    }
                     onClick={() => {
                       setReason('');
                       setStatusTarget(item);
@@ -312,10 +369,37 @@ export function RoleTypesPage() {
               style={{ marginBottom: 16 }}
             />
           )}
+          {!selectedVoice && (
+            <Alert
+              type="warning"
+              message="暂无对应音色。保留类型和提示词为草稿，不提供试听或用户选择。"
+              style={{ marginBottom: 16 }}
+            />
+          )}
+          {selectedVoice &&
+            !supported(
+              voices.find((v) => v.id === selectedVoice)?.model || editing?.voice_model || '',
+            ) && (
+              <Alert
+                type="warning"
+                message="探鸽存在此音色，当前角色编辑器暂不支持该模型。可以保存草稿，不能启用；不会自动换成其他音色。"
+                style={{ marginBottom: 16 }}
+              />
+            )}
+          <Form.Item
+            name="language"
+            label="角色语言"
+            rules={[
+              { required: true, message: '请输入语言代码' },
+              { max: 16, message: '语言代码不能超过 16 字符' },
+            ]}
+          >
+            <Input placeholder="zh / en / ja" />
+          </Form.Item>
           <Form.Item
             name="voice_id"
             label="角色音色"
-            extra="草稿可暂不选择音色，启用前需配置可用音色。"
+            extra="只关联探鸽实际提供的对应音色；缺失时留空，不用相似音色代替。"
           >
             <Select
               allowClear
@@ -326,7 +410,7 @@ export function RoleTypesPage() {
                 ...(selectedVoice && !voices.some((v) => v.id === selectedVoice)
                   ? [{ value: selectedVoice, label: selectedVoice }]
                   : []),
-                ...voices.map((v) => ({ value: v.id, label: v.name })),
+                ...voices.map((v) => ({ value: v.id, label: `${v.name} · ${v.model}` })),
               ]}
             />
           </Form.Item>
@@ -345,7 +429,11 @@ export function RoleTypesPage() {
             label="默认提示词"
             extra="用户选择类型时自动填入，用户可以自行编辑。"
             rules={[
-              { required: true, whitespace: true, message: '请输入默认提示词' },
+              {
+                required: editing?.status === 'published',
+                whitespace: true,
+                message: '启用的角色类型必须有默认提示词',
+              },
               { max: 12000, message: '提示词不能超过 12000 个字符' },
             ]}
           >

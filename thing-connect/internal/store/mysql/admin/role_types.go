@@ -13,7 +13,7 @@ import (
 	"thing-connect/internal/ai/roletypes"
 )
 
-const roleTypeColumns = "id,name,voice_id,voice_model,prompt,sort_order,status,revision"
+const roleTypeColumns = "id,name,voice_id,voice_model,prompt,sort_order,status,revision,language,source_voice_id,match_kind"
 
 type RoleTypeStore struct{ db *sqlx.DB }
 
@@ -22,7 +22,7 @@ func (s *RoleTypeStore) List(ctx context.Context, published bool) ([]roletypes.T
 	items := []roletypes.Type{}
 	query := "SELECT " + roleTypeColumns + " FROM ai_role_types"
 	if published {
-		query += " WHERE status='published' AND voice_id<>''"
+		query += " WHERE status='published' AND voice_id<>'' AND prompt<>'' AND voice_model IN ('cosyvoice-v3-flash','seed-tts-2.0')"
 	}
 	query += " ORDER BY sort_order,name,id"
 	if err := s.db.SelectContext(ctx, &items, query); err != nil {
@@ -53,7 +53,7 @@ func (s *RoleTypeStore) Save(ctx context.Context, m adminapp.RoleTypeMutation) (
 	defer tx.Rollback()
 	v := m.Type
 	if m.Action == "create" {
-		_, err = tx.ExecContext(ctx, `INSERT INTO ai_role_types (id,name,voice_id,voice_model,prompt,sort_order,status,revision,created_by,updated_by) VALUES (?,?,?,?,?,?,'draft',1,?,?)`, v.ID, v.Name, v.VoiceID, v.VoiceModel, v.Prompt, v.SortOrder, m.Audit.AdminUserID, m.Audit.AdminUserID)
+		_, err = tx.ExecContext(ctx, `INSERT INTO ai_role_types (id,name,voice_id,voice_model,prompt,sort_order,status,revision,created_by,updated_by,language,source_voice_id,match_kind) VALUES (?,?,?,?,?,?,'draft',1,?,?,?,?,?)`, v.ID, v.Name, v.VoiceID, v.VoiceModel, v.Prompt, v.SortOrder, m.Audit.AdminUserID, m.Audit.AdminUserID, v.Language, v.SourceVoiceID, v.MatchKind)
 	} else {
 		before, e := roleTypeByID(ctx, tx, v.ID, true)
 		if e != nil {
@@ -63,7 +63,7 @@ func (s *RoleTypeStore) Save(ctx context.Context, m adminapp.RoleTypeMutation) (
 			return roletypes.Type{}, adminapp.ErrConflict
 		}
 		m.Audit.Before = roleTypeJSON(before)
-		_, err = tx.ExecContext(ctx, `UPDATE ai_role_types SET name=?,voice_id=?,voice_model=?,prompt=?,sort_order=?,status=?,revision=revision+1,updated_by=? WHERE id=? AND revision=?`, v.Name, v.VoiceID, v.VoiceModel, v.Prompt, v.SortOrder, v.Status, m.Audit.AdminUserID, v.ID, m.ExpectedRevision)
+		_, err = tx.ExecContext(ctx, `UPDATE ai_role_types SET name=?,voice_id=?,voice_model=?,prompt=?,sort_order=?,status=?,revision=revision+1,updated_by=?,language=?,source_voice_id=?,match_kind=? WHERE id=? AND revision=?`, v.Name, v.VoiceID, v.VoiceModel, v.Prompt, v.SortOrder, v.Status, m.Audit.AdminUserID, v.Language, v.SourceVoiceID, v.MatchKind, v.ID, m.ExpectedRevision)
 	}
 	if err != nil {
 		var duplicate *mysql.MySQLError

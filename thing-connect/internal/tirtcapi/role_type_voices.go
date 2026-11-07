@@ -45,15 +45,13 @@ func (s *RoleTypeVoices) Voices(ctx context.Context) ([]roletypes.Voice, error) 
 		return nil, errors.New("role API URL unavailable")
 	}
 	api := NewAgentAPIClient(AgentAPIConfig{BaseURL: value.BaseURL, AppID: creds.AppID, AccessKeyID: creds.AccessKeyID, SecretKeyID: creds.SecretKeyID}, s.http)
-	voices, err := api.ListVoices(ctx, "", roletypes.VoiceModel)
+	voices, err := api.ListVoices(ctx, "", "")
 	if err != nil {
 		return nil, err
 	}
 	out := []roletypes.Voice{}
 	for _, voice := range voices {
-		if voice.Model == roletypes.VoiceModel {
-			out = append(out, roletypes.Voice{ID: voice.ID, Name: voice.Name, Model: voice.Model, Languages: voice.Languages, SampleURL: voice.SampleURL})
-		}
+		out = append(out, roletypes.Voice{ID: voice.ID, Name: voice.Name, Model: voice.Model, Languages: voice.Languages, SampleURL: voice.SampleURL})
 	}
 	return out, nil
 }

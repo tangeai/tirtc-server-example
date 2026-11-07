@@ -77,13 +77,13 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
   await page.goto(base+'/agent?device_id=one');await page.getByLabel('智能体名称',{exact:true}).waitFor();
   if(width<=640)await page.getByRole('button',{name:'返回角色列表',exact:false}).click();
   await page.getByRole('button',{name:'我的角色',exact:true}).click();await page.getByLabel('智能体名称',{exact:true}).waitFor();
-  await page.getByRole('button',{name:'高级配置',exact:true}).click();
+  await page.getByRole('button',{name:'扩展能力',exact:true}).click();
   await page.getByText('知识库',{exact:true}).filter({hasNot:page.locator('select')}).first().click();
   await page.getByRole('button',{name:'创建知识库',exact:true}).click();await captureDialog('创建知识库');
   await page.getByText('工具与插件',{exact:true}).click();
   await page.getByRole('button',{name:'+ 新建 MCP 工具',exact:true}).click();await captureDialog('新建MCP');
   await page.getByRole('button',{name:'+ 新建设备插件',exact:true}).click();await page.getByRole('button',{name:'添加参数',exact:true}).first().click();await captureDialog('新建插件参数');
-  await page.getByRole('button',{name:'基本信息',exact:true}).click();
+  await page.getByRole('button',{name:'角色',exact:true}).click();
   await page.getByLabel('智能体名称',{exact:true}).fill('这是一个比较长的角色名称-'.repeat(3));
   await page.screenshot({path:root+'/../output/playwright/state-role-dirty-'+width+'.png',fullPage:true});
   // Avoid the intentional unsaved-changes navigation prompt in the next viewport.

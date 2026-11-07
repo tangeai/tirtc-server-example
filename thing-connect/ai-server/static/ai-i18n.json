@@ -241,5 +241,14 @@
   "恢复默认": "Restore defaults",
   "试听：{p0}": "Preview: {p0}",
   "停止试听：{p0}": "Stop preview: {p0}",
-  "试听失败，请重试": "Preview failed. Try again."
+  "试听失败，请重试": "Preview failed. Try again.",
+  "角色": "Role",
+  "扩展能力": "Extensions",
+  "更多角色信息": "More role details",
+  "语音设置": "Voice settings",
+  "自定义提示词": "Custom instructions",
+  "自定义": "Custom",
+  "单独调整音色": "Change voice only",
+  "仅更换声音并保留当前提示词；使用预设请在上方选择角色类型。": "Change only the voice and keep your instructions. To apply a preset, choose a role type above.",
+  "自定义角色 · {p0}": "Custom role · {p0}"
 }

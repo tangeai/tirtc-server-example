@@ -31,6 +31,9 @@ func TestRoleTypesSeedReplayConcurrentEditAndAudit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if original.Name != "海风知己" || !strings.Contains(original.Prompt, "核心性格：感性、外向、心思细腻") {
+		t.Fatalf("unrefined default: %+v", original)
+	}
 	defer func() {
 		_, _ = db.Exec("UPDATE ai_role_types SET name=?,prompt=?,revision=? WHERE id='preset-001'", original.Name, original.Prompt, original.Revision)
 	}()
@@ -38,7 +41,7 @@ func TestRoleTypesSeedReplayConcurrentEditAndAudit(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Simulate a migration interrupted after data writes but before its ledger entry.
-	if _, err = db.Exec("DELETE FROM schema_migrations WHERE component='admin' AND version=2"); err != nil {
+	if _, err = db.Exec("DELETE FROM schema_migrations WHERE component='admin' AND version>=2"); err != nil {
 		t.Fatal(err)
 	}
 	if err = migrate.MigrateAdmin(db); err != nil {

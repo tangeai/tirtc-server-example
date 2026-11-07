@@ -345,9 +345,9 @@ X-Internal-Key: <shared-internal-key>
 {"role_type":{"name":"温暖伙伴","voice_id":"longantai_v3","voice_model":"cosyvoice-v3-flash","prompt":"用自然、简短的语言回答。","sort_order":10},"expected_revision":1,"reason":"调整默认设定"}
 ```
 
-创建忽略 `expected_revision`；修改和状态操作必须提交最近读取的修订号。状态请求为 `{"status":"published","expected_revision":1,"reason":"供用户选择"}`，`status` 只接受 `published` 和 `offline`。成功响应的 `data` 是完整条目，包含 `id/name/voice_id/voice_model/prompt/sort_order/status/revision`，每次写入修订号递增。每条记录独立保存，与审计日志在同一事务提交。
+创建忽略 `expected_revision`；修改和状态操作必须提交最近读取的修订号。状态请求为 `{"status":"published","expected_revision":1,"reason":"供用户选择"}`，`status` 只接受 `published` 和 `offline`。成功响应的 `data` 是完整条目，包含 `id/name/voice_id/voice_model/prompt/sort_order/status/revision/language/source_voice_id/match_kind`，每次写入修订号递增。每条记录独立保存，与审计日志在同一事务提交。
 
-名称为 1～64 个字符且唯一，提示词为 1～12000 个字符，排序为 0～99999，操作原因必填且不超过 500 字节。音色模型为 `cosyvoice-v3-flash`。草稿可暂不配置音色；更换音色及启用时校验云端音色目录。目录不可用时仍可停用类型，或只编辑已有类型的名称和提示词。
+名称为 1～64 个字符且唯一，提示词最多 12000 个字符（启用时不能为空），排序为 0～99999，操作原因必填且不超过 500 字节。`language` 为最长 16 字符的语言代码，新增默认 `zh`。`source_voice_id` 与 `match_kind` 是目录来源及关联依据；关联依据为 `exact/version/missing/manual`，手动更换音色时标记为 `manual`。启用支持 `cosyvoice-v3-flash` 和 `seed-tts-2.0`；其他模型可保留为草稿。草稿可暂不配置音色或提示词；更换音色及启用时校验云端音色 ID 与模型的完整组合。目录不可用时仍可停用类型，或只编辑已有类型的名称和提示词。
 
 参数错误返回 HTTP 400 + `40000`；名称重复或修订冲突为 409 + `40901`；记录不存在为 404 + `40400`；音色目录不可用为 502 + `50200`；存储失败为 500 + `50000`。冲突后读取最新记录再编辑。
 
