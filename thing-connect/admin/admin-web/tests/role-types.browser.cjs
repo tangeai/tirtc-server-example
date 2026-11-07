@@ -5,11 +5,14 @@ const fs = require('node:fs');
 const path = require('node:path');
 const http = require('node:http');
 const dist = path.resolve(__dirname, '../dist');
+const adminSource = fs.readFileSync(path.resolve(__dirname, '../../admin-server/main.go'), 'utf8');
+const csp = adminSource.match(/headers\.Set\("Content-Security-Policy", "([^"]+)"\)/)[1];
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
   const file = url.pathname.startsWith('/admin/assets/')
     ? path.join(dist, url.pathname.slice('/admin/'.length)) : path.join(dist, 'index.html');
   if (!fs.existsSync(file)) { res.writeHead(404).end(); return; }
+  res.setHeader('Content-Security-Policy', csp);
   res.setHeader('Content-Type', file.endsWith('.js') ? 'text/javascript' : file.endsWith('.css') ? 'text/css' : 'text/html');
   res.end(fs.readFileSync(file));
 });
@@ -18,6 +21,12 @@ const server = http.createServer((req, res) => {
   const browser = await chromium.launch({headless:true, executablePath:process.env.PLAYWRIGHT_CHROMIUM, args:['--no-sandbox']});
   try {
     const page = await browser.newPage();
+    const wav = Buffer.alloc(44 + 160000);
+    wav.write('RIFF'); wav.writeUInt32LE(wav.length - 8, 4); wav.write('WAVEfmt ', 8);
+    wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22);
+    wav.writeUInt32LE(8000, 24); wav.writeUInt32LE(16000, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34);
+    wav.write('data', 36); wav.writeUInt32LE(160000, 40);
+    await page.route('https://voice.example.test/flash.wav', route => route.fulfill({contentType:'audio/wav',body:wav}));
     const errors = [], mutations = [];
     let unavailable = false;
     let item = {id:'test',name:'后台测试类型',language:'zh',voice_id:'shared',voice_model:'cosyvoice-v3-flash',prompt:'原始设定',status:'published',revision:1,sort_order:0};
@@ -31,7 +40,7 @@ const server = http.createServer((req, res) => {
       else if (pathname.endsWith('/me')) data = {user:{id:1,email:'test@example.test',nick_name:'测试管理员',must_change_password:0}};
       else if (pathname.endsWith('/ai-role-types/voices')) {
         if (unavailable) return route.fulfill({status:503,json:{code:50300,msg:'音色列表暂不可用'}});
-        data = {items:[{id:'shared',name:'Flash声音',model:'cosyvoice-v3-flash',sample_url:'/flash.wav'},{id:'shared',name:'V3声音',model:'cosyvoice-v3'}]};
+        data = {items:[{id:'shared',name:'Flash声音',model:'cosyvoice-v3-flash',sample_url:'https://voice.example.test/flash.wav'},{id:'shared',name:'V3声音',model:'cosyvoice-v3'}]};
       } else if (pathname.endsWith('/ai-role-types/test') && req.method() === 'PUT') {
         const body = req.postDataJSON(); mutations.push(body);
         item = {...body.role_type,revision:item.revision+1}; data = item;
@@ -52,6 +61,10 @@ const server = http.createServer((req, res) => {
     };
     await open();
     assert.equal(await dialog.getByRole('button',{name:'试听所选音色'}).isEnabled(),true);
+    await dialog.getByRole('button',{name:'试听所选音色'}).click();
+    await dialog.getByRole('button',{name:'停止试听'}).waitFor({timeout:5000});
+    assert.equal(await page.locator('audio').evaluate(el => el.paused),false);
+    await dialog.getByRole('button',{name:'停止试听'}).click();
     await dialog.locator('.ant-select-selector').click();
     await page.getByText('V3声音 · cosyvoice-v3',{exact:true}).click();
     assert.equal(await dialog.getByRole('button',{name:'试听所选音色'}).isDisabled(),true);

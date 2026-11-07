@@ -32,6 +32,12 @@ func TestSecurityHeaders(t *testing.T) {
 			t.Errorf("%s = %q, want to contain %q", name, got, want)
 		}
 	}
+	csp := recorder.Header().Get("Content-Security-Policy")
+	for _, directive := range []string{"media-src 'self' https:", "connect-src 'self'", "object-src 'none'", "frame-ancestors 'none'"} {
+		if !strings.Contains(csp, directive) {
+			t.Errorf("missing CSP directive %q", directive)
+		}
+	}
 }
 
 func TestSetupErrorReportsDependencyWithoutLeakingRawCause(t *testing.T) {
