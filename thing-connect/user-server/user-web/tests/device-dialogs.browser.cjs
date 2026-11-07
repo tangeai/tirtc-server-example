@@ -79,7 +79,7 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  const readCount=requests.filter(x=>x.path==='/v1/user/device/list').length;
  await page.evaluate(()=>{window.dispatchEvent(new Event('focus'));document.dispatchEvent(new Event('visibilitychange'));});
  assert.equal(requests.filter(x=>x.path==='/v1/user/device/list').length,readCount);
- let contacts=Array.from({length:40},(_,i)=>({id:i+1,type:'device',source:'manual',device_id:'peer'+i,device_name:'联系人'+i}));
+ let contacts=Array.from({length:40},(_,i)=>({id:i+1,type:'device',source:i%2?'auto':'manual',device_id:'peer'+i,device_name:'联系人'+i}));
  await page.route('**/v1/call/user/contacts**',async route=>{const req=route.request(),url=new URL(req.url());let data={};if(url.pathname.endsWith('/pending'))data={pending:[]};else if(url.pathname.endsWith('/remark')){const body=req.postDataJSON();contacts=contacts.map(c=>c.device_id===body.peer_id?{...c,remark:body.remark}:c);}else data={contacts};await route.fulfill({json:{code:200,data}});});
  await card.getByRole('button',{name:'联系人',exact:true}).click();
  dialog=page.getByRole('dialog',{name:'联系人',exact:true});
@@ -98,11 +98,25 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  await page.setViewportSize({width:1366,height:768});
  await dialog.getByRole('searchbox').fill('联系人0');
  assert.ok((await dialog.boundingBox()).height<500,'short contact results shrink the dialog');
+ await dialog.getByRole('button',{name:'改备注'}).click();await dialog.getByLabel('联系人备注').fill('取消的备注');await page.keyboard.press('Escape');assert.equal(await dialog.isVisible(),true,'Escape cancels inline editing without closing contacts');assert.equal(await dialog.getByLabel('联系人备注').count(),0);assert.ok(await dialog.getByRole('button',{name:'改备注'}).evaluate(el=>el===document.activeElement),'inline editor returns focus to its action');
  await dialog.getByRole('button',{name:'改备注'}).click();await dialog.getByLabel('联系人备注').fill('新备注');await dialog.getByRole('button',{name:'保存',exact:true}).click();await dialog.getByText('新备注',{exact:true}).waitFor();
  await dialog.getByRole('button',{name:'添加联系人'}).click();
  const child=page.getByRole('dialog',{name:'添加联系人',exact:true});await child.waitFor();await page.waitForFunction(() => [...document.querySelectorAll('[role=dialog]')].at(-1)?.contains(document.activeElement));await page.keyboard.press('Escape');await child.waitFor({state:'hidden'});assert.equal(await dialog.isVisible(),true);
  await page.waitForFunction(() => [...document.querySelectorAll('[role=dialog]')].at(-1)?.contains(document.activeElement));await page.keyboard.press('Escape');await dialog.waitFor({state:'hidden'});assert.equal(await page.evaluate(()=>document.body.style.overflow),'');
  await card.getByRole('button',{name:'联系人',exact:true}).click();await page.getByRole('dialog',{name:'联系人',exact:true}).getByRole('searchbox').waitFor();assert.equal(await page.getByRole('searchbox').inputValue(),'');await page.waitForFunction(() => [...document.querySelectorAll('[role=dialog]')].at(-1)?.contains(document.activeElement));await page.keyboard.press('Escape');
+ contacts=contacts.slice(0,2).map(c=>({...c,source:'auto'}));
+ await card.getByRole('button',{name:'联系人',exact:true}).click();
+ dialog=page.getByRole('dialog',{name:'联系人',exact:true});
+ await dialog.getByRole('button',{name:'改备注'}).first().waitFor();
+ assert.equal(await dialog.getByRole('combobox').count(),0,'device context is fixed when opened from its card');
+ assert.equal(await dialog.getByRole('searchbox').count(),0,'small homogeneous lists need no search');
+ assert.equal(await dialog.getByRole('navigation',{name:'联系人类型'}).count(),0,'do not show empty categories');
+ assert.equal(await dialog.getByText('待审批 (0)',{exact:true}).count(),0,'no empty approval panel');
+ assert.ok((await dialog.boundingBox()).height<400,'two contacts should need a compact dialog');
+ await page.screenshot({path:root+'/../output/playwright/contacts-simple-desktop.png'});
+ await page.setViewportSize({width:390,height:844});
+ await page.screenshot({path:root+'/../output/playwright/contacts-simple-mobile.png'});
+ await dialog.getByRole('button',{name:'关闭弹窗'}).click();
  // Real-time viewing stays on a dedicated page and releases resources on exit.
  await page.route('**/static/js/tirtc.es.min.js',route=>route.fulfill({contentType:'text/javascript',body:`
  window.mediaCalls=[];function record(v){window.mediaCalls.push(v);sessionStorage.setItem('mediaCalls',JSON.stringify(window.mediaCalls));}

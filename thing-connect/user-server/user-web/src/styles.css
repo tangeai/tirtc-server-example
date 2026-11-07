@@ -574,3 +574,20 @@ button:not([class*="ant-"]):focus-visible,a:focus-visible,input:not([class*="ant
 
 .contact-filter{flex-shrink:0}
 @media(max-width:640px){:where(#root,.app-modal) .ant-segmented.ant-segmented-block .ant-segmented-item-label{padding-inline:6px;font-size:13px;line-height:40px;min-height:40px}}
+
+/* Contact management keeps the opened device as context and gives the list priority. */
+.contact-device-context{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 10px;flex-shrink:0}
+.contact-device-context .muted{font-size:12px;overflow-wrap:anywhere}
+.contact-toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-shrink:0}
+.contact-toolbar>.muted{font-size:12px}
+.contact-actions{display:flex;gap:8px;flex-shrink:0}
+.contact-entries .contact-entry{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center;padding:12px 0}
+.contact-entry-main{flex:1;min-width:0;overflow-wrap:anywhere}
+.contact-identity{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 8px}
+.contact-identity .muted,.contact-identity .success,.contact-peer-id{font-size:12px}
+.contact-entry-actions{display:flex;flex-shrink:0}
+.contact-remark{flex-basis:100%;padding-top:8px}
+.contact-remark label{margin-bottom:8px}
+.contact-requests{margin-bottom:12px}
+.contacts-workspace .contact-help{flex-shrink:0;font-size:12px;line-height:1.5;padding-top:8px;border-top:1px solid var(--line)}
+@media(max-width:360px){.contact-entry-actions{flex-direction:column}.contact-actions{gap:4px}.contact-actions .ant-btn{padding-inline:10px}}
