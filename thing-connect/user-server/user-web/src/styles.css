@@ -8,8 +8,8 @@ a{color:var(--accent);text-decoration:none}
 :where(#root,.app-modal) button:not([class*="ant-"]):disabled{cursor:not-allowed;opacity:.55}
 :where(#root,.app-modal) button:not([class*="ant-"]):hover:not(:disabled){border-color:#7b9c91}
 button:not([class*="ant-"]):focus-visible,a:focus-visible,input:not([class*="ant-"]):focus-visible,select:not([class*="ant-"]):focus-visible,textarea:not([class*="ant-"]):focus-visible{outline:2px solid var(--accent);outline-offset:3px}
-:where(#root,.app-modal) h1{font-size:24px;line-height:1.35;margin:0 0 24px}
-:where(#root,.app-modal) h2{font-size:18px;line-height:1.4;margin:0 0 16px}
+:where(#root,.app-modal) h1{font-size:20px;font-weight:600;line-height:1.4;margin:0 0 20px}
+:where(#root,.app-modal) h2{font-size:16px;font-weight:600;line-height:1.4;margin:0 0 12px}
 :where(#root,.app-modal) p{line-height:1.65;overflow-wrap:anywhere}
 :where(#root,.app-modal) :where(label:not(.ant-radio-wrapper):not(.ant-checkbox-wrapper):not(.ant-segmented-item)){display:block;font-size:14px;font-weight:600;margin-bottom:20px}
 :where(#root,.app-modal) :where(input:not([class*="ant-"]):not([type=checkbox]):not([type=radio]):not([type=range]),select:not([class*="ant-"]),textarea:not([class*="ant-"])){display:block;width:100%;min-width:0;border:1px solid #cfd8d4;border-radius:10px;background:white;height:44px;padding:10px 12px;line-height:22px;margin-top:8px;font-size:16px;font-weight:400;color:inherit}
@@ -53,7 +53,7 @@ button:not([class*="ant-"]):focus-visible,a:focus-visible,input:not([class*="ant
 .back{font-size:13px}
 .auth-layout{padding:24px 16px;align-items:flex-start}
 .auth-card{padding:24px 20px}
-:where(#root,.app-modal) h1{font-size:22px}
+:where(#root,.app-modal) h1{font-size:20px}
 .card{padding:22px 20px}
 .narrow{padding:24px 16px 48px}
 .code-row{gap:8px}
@@ -115,7 +115,7 @@ button:not([class*="ant-"]):focus-visible,a:focus-visible,input:not([class*="ant
 .add-device{bottom:18px;right:16px}
 .device-grid>.device-card{padding:16px 16px 0}
 .detail-list>div{gap:10px}
-.device-layout .row h1{font-size:22px}
+.device-layout .row h1{font-size:20px}
 }
 
 
@@ -496,7 +496,7 @@ button:not([class*="ant-"]):focus-visible,a:focus-visible,input:not([class*="ant
 .contacts-workspace .contact-scroll .card{padding:12px;margin-bottom:8px}
 .room-workspace .card{padding:16px;margin:12px 0}
 .room-workspace p{margin:8px 0;font-size:14px;line-height:1.5}
-.room-workspace h2{font-size:18px}
+.room-workspace h2{font-size:16px}
 @media(max-width:640px){.contacts-workspace .row{gap:8px;flex-wrap:wrap}.contacts-workspace .contact-list>.muted{font-size:12px}}
 
 .device-actions button{border:0;background:transparent;border-radius:8px;font-weight:inherit}
