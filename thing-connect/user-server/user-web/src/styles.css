@@ -564,7 +564,7 @@ button:not([class*="ant-"]):focus-visible,a:focus-visible,input:not([class*="ant
 @media(max-height:500px) and (orientation:landscape){.player-layout{padding:8px 12px;gap:6px}.player-card{flex-direction:row}.player-stage{min-width:0}.player-toolbar{width:260px;border-top:0;border-left:1px solid var(--line);align-content:center;gap:12px;padding:12px}.player-controls{width:100%;flex-direction:column}.player-connection{flex-basis:100%}.player-layout .player-heading h1{font-size:16px}}
 
 .room-mode{margin:12px 0}.room-password-mode{margin:12px 0;display:flex;gap:16px}
-:where(#root,.app-modal) label>.ant-input{margin-top:6px}
+:where(#root,.app-modal) label>.ant-input{margin-top:6px;font-weight:400}
 
 /* Keep touch targets and long translated labels within the business layout. */
 :where(#root,.app-modal) .ant-btn{white-space:normal;height:auto;min-height:36px}
