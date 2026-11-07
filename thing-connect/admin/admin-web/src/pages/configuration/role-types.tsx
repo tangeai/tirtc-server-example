@@ -34,7 +34,7 @@ type RoleType = {
 type Voice = { id: string; name: string; model: string; sample_url?: string; languages?: string[] };
 type Editor = RoleType & { reason: string };
 const supported = (model: string) => ['cosyvoice-v3-flash', 'seed-tts-2.0'].includes(model);
-const statuses = { draft: '草稿', published: '已启用', offline: '已停用' };
+const statuses = { draft: '草稿', published: '已启用', offline: '未启用' };
 
 export function RoleTypesPage() {
   const [items, setItems] = useState<RoleType[]>([]),
@@ -235,7 +235,8 @@ export function RoleTypesPage() {
       <Card>
         <Typography.Paragraph>
           共 {items.length} 个角色类型 · 已启用{' '}
-          {items.filter((item) => item.status === 'published').length} 个 · 未配置音色{' '}
+          {items.filter((item) => item.status === 'published').length} 个 · 未启用{' '}
+          {items.filter((item) => item.status !== 'published').length} 个 · 未配置音色{' '}
           {items.filter((item) => !item.voice_id).length} 个 · 缺少提示词{' '}
           {items.filter((item) => !item.prompt.trim()).length} 个
         </Typography.Paragraph>
@@ -284,6 +285,11 @@ export function RoleTypesPage() {
                     <span>{voices.find((v) => v.id === id)?.name || id}</span>
                     <Typography.Text type="secondary">{item.voice_model}</Typography.Text>
                     {item.match_kind === 'version' && <Tag>同系列版本</Tag>}
+                    {item.match_kind === 'substitute' && (
+                      <Tag color="gold" title="按角色风格选择的替代音色，不是原音色或同系列版本">
+                        风格替代
+                      </Tag>
+                    )}
                     {!supported(item.voice_model) && (
                       <Tag color="orange">音色存在，当前暂不支持此模型</Tag>
                     )}

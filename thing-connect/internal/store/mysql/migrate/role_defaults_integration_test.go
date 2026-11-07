@@ -102,11 +102,13 @@ func TestCompleteRoleCatalogPublicationAndReplay(t *testing.T) {
 		want  int
 	}{
 		{"id LIKE 'preset-%' OR id LIKE 'catalog-%'", 58},
-		{"status='published' AND id LIKE 'preset-%'", 29},
-		{"status='published' AND voice_model='seed-tts-2.0'", 22},
-		{"status='published' AND voice_model='cosyvoice-v3-flash'", 7},
-		{"id LIKE 'catalog-%' AND status='published'", 0},
+		{"status='published' AND id LIKE 'preset-%'", 43},
+		{"status='published' AND voice_model='seed-tts-2.0'", 30},
+		{"status='published' AND voice_model='cosyvoice-v3-flash'", 20},
+		{"id LIKE 'catalog-%' AND status='published'", 7},
 		{"language<>'zh'", 0},
+		{"status='offline'", 8},
+		{"status='published' AND match_kind='substitute'", 21},
 		{"prompt=''", 2},
 		{"status='published' AND (voice_id='' OR prompt='' OR voice_model NOT IN ('cosyvoice-v3-flash','seed-tts-2.0'))", 0},
 	} {
@@ -148,5 +150,59 @@ func TestCompleteRoleCatalogPublicationAndReplay(t *testing.T) {
 	var n int
 	if err = tx.Get(&n, "SELECT COUNT(*) FROM ai_role_types"); err != nil || n != 58 {
 		t.Fatalf("replay duplicate count=%d %v", n, err)
+	}
+}
+
+func TestSubstituteVoiceDefaultsPreservePromptAndAdministratorChanges(t *testing.T) {
+	cfg := testenv.LoadConfigOrSkip(t, "../../../../tests/testdata/config.yaml")
+	db := testenv.OpenDBOrSkip(t, cfg)
+	defer db.Close()
+	if err := MigrateAdmin(db); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := db.BeginTxx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	var originalPrompt string
+	if err = tx.Get(&originalPrompt, "SELECT prompt FROM ai_role_types WHERE id='preset-001'"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.Exec("UPDATE ai_role_types SET status='draft',voice_id='',voice_model='cosyvoice-v3-flash',match_kind='missing',revision=4,updated_by=0 WHERE id IN ('preset-001','preset-005','preset-006')"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.Exec("UPDATE ai_role_types SET prompt='管理员自定义内容' WHERE id='preset-005'"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.Exec("UPDATE ai_role_types SET updated_by=1 WHERE id='preset-006'"); err != nil {
+		t.Fatal(err)
+	}
+	statements, err := statementsFromFiles("migrations/admin/007_enable_substitute_role_voices.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for repeat := 0; repeat < 2; repeat++ {
+		for _, stmt := range statements {
+			if _, err = tx.Exec(stmt); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	var got struct {
+		Voice, Prompt, Status, Kind string
+		Revision                    int
+	}
+	if err = tx.Get(&got, "SELECT voice_id AS voice,prompt,status,match_kind AS kind,revision FROM ai_role_types WHERE id='preset-001'"); err != nil {
+		t.Fatal(err)
+	}
+	if got.Voice != "longantai_v3" || got.Status != "published" || got.Kind != "substitute" || got.Revision != 5 || got.Prompt != originalPrompt {
+		t.Fatalf("substitution or replay invalid: %+v", got)
+	}
+	for _, id := range []string{"preset-005", "preset-006"} {
+		var status string
+		if err = tx.Get(&status, "SELECT status FROM ai_role_types WHERE id=?", id); err != nil || status != "draft" {
+			t.Fatalf("administrator changes overwritten for %s: %s %v", id, status, err)
+		}
 	}
 }
