@@ -115,3 +115,39 @@ func TestRoleTypeMissingPromptCanBeMaintainedAsDraft(t *testing.T) {
 		t.Fatalf("draft=%+v err=%v", got, err)
 	}
 }
+
+func TestRoleTypeModelOnlyChangesValidateCatalogBeforePersistence(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		voices modelVoices
+		want   error
+	}{
+		{"exact pair", modelVoices{{ID: "shared", Model: "cosyvoice-v3"}, {ID: "shared", Model: "cosyvoice-v3-flash"}}, nil},
+		{"same id wrong model", modelVoices{{ID: "shared", Model: "cosyvoice-v3-flash"}}, roletypes.ErrInvalid},
+		{"empty catalog", nil, roletypes.ErrInvalid},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			before := roletypes.Type{ID: "type", Name: "测试类型", VoiceID: "shared", VoiceModel: "cosyvoice-v3-flash", Prompt: "保留的设定", Status: "published", Revision: 3, MatchKind: "exact"}
+			store := &typeStoreStub{value: before}
+			svc := NewRoleTypeService(store, tc.voices)
+			next := before
+			next.VoiceModel = "cosyvoice-v3"
+			got, err := svc.Save(context.Background(), next, 3, "update", RoleTypeRequestMeta{Actor: AccessIdentity{UserID: 1}, Reason: "更换模型"})
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("got %v want %v", err, tc.want)
+			}
+			if tc.want != nil {
+				if store.saves != 0 {
+					t.Fatal("invalid pair persisted")
+				}
+				return
+			}
+			if got.MatchKind != "manual" || got.Prompt != before.Prompt || got.Status != "published" || got.VoiceModel != "cosyvoice-v3" {
+				t.Fatalf("unexpected saved type: %+v", got)
+			}
+			if store.last.ExpectedRevision != 3 {
+				t.Fatal("revision not preserved")
+			}
+		})
+	}
+}

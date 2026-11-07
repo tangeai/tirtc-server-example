@@ -65,3 +65,50 @@ test('new roles can select either new LLM and unknown choices fail',()=>{
  }
  assert.throws(()=>rolePayload({},{...draftOf({}),name:'新角色',model:'unknown-model'},[]));
 });
+
+test('every LLM and TTS combination survives save, reopen and independent model changes', () => {
+ const llms = ['qwen3.5-flash', 'qwen3.7-flash', 'qwen3.7-plus', 'doubao-seed-2-0-mini-260428'];
+ const models = ['cosyvoice-v3', 'cosyvoice-v3-flash', 'seed-tts-2.0'];
+ const voices = models.map(model => ({id:'shared-id', name:model, model}));
+ for (const model of llms) for (const voiceModel of models) {
+  const seed = voiceModel === 'seed-tts-2.0';
+  const draft = {...draftOf({}), name:'组合测试', model, voiceModel, voice:'shared-id', rate:seed?0:1, pitch:seed?0:1, prompt:'手写设定'};
+  const saved = rolePayload({}, draft, voices);
+  assert.equal(saved.service_config?.config?.llm?.provider, model.startsWith('qwen')?'ali-llm':'doubao');
+  assert.equal(saved.service_config?.config?.tts?.provider, seed?'ve-seed-tts-2':'ali-tts');
+  assert.equal(saved.service_config?.config?.tts?.provider_params?.model, voiceModel);
+  const reopened = draftOf(saved);
+  assert.equal(reopened.model, model); assert.equal(reopened.voiceModel, voiceModel);
+  assert.equal(reopened.prompt, '手写设定');
+  for (const nextModel of llms) {
+   const next = rolePayload(saved, {...reopened, model:nextModel}, []);
+   assert.deepEqual(next.service_config?.config?.tts, saved.service_config?.config?.tts);
+   assert.equal(next.agent_config?.prompt, '手写设定');
+  }
+ }
+});
+
+test('ambiguous or missing model pairs cannot silently select another engine', () => {
+ const voices = ['cosyvoice-v3', 'cosyvoice-v3-flash'].map(model => ({id:'shared', name:model, model}));
+ const draft = {...draftOf({}), name:'歧义测试', voice:'shared'};
+ assert.throws(() => rolePayload({}, draft, voices), /音色信息暂不可用/);
+ assert.throws(() => rolePayload({}, {...draft, voiceModel:'seed-tts-2.0',rate:0,pitch:0}, voices), /音色信息暂不可用/);
+ const saved = rolePayload({}, {...draft, voiceModel:'cosyvoice-v3'}, voices);
+ assert.throws(() => rolePayload(saved, {...draftOf(saved), voiceModel:'cosyvoice-v3-flash'}, []), /音色信息暂不可用/);
+ assert.deepEqual(rolePayload(saved, {...draftOf(saved),name:'只改名称'}, []).service_config, saved.service_config);
+});
+
+test('all TTS provider transitions isolate credentials while preserving the independently configured LLM', () => {
+ const models = ['cosyvoice-v3', 'cosyvoice-v3-flash', 'seed-tts-2.0'];
+ const voices = models.map(model => ({id:'shared', name:model, model}));
+ for (const from of models) for (const to of models) {
+  const initial = rolePayload({}, {...draftOf({}),name:'凭据隔离测试',voice:'shared',voiceModel:from,rate:from==='seed-tts-2.0'?0:1,pitch:from==='seed-tts-2.0'?0:1,model:'doubao-seed-2-0-mini-260428'}, voices);
+  const oldTTS = initial.service_config!.config!.tts!;
+  oldTTS.provider_params!.api_key = 'synthetic-test-key';
+  const saved = rolePayload(initial, {...draftOf(initial),voiceModel:to,rate:to==='seed-tts-2.0'?0:1,pitch:to==='seed-tts-2.0'?0:1}, voices);
+  const sameProvider = (from==='seed-tts-2.0') === (to==='seed-tts-2.0');
+  assert.equal(saved.service_config?.config?.tts?.provider_params?.api_key,sameProvider?'synthetic-test-key':undefined);
+  assert.deepEqual(saved.service_config?.config?.llm,initial.service_config?.config?.llm);
+  assert.equal(oldTTS.provider_params?.model,from,'saving must not mutate the source role');
+ }
+});
