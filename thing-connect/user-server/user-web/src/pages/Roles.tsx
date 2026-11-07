@@ -4,7 +4,7 @@ import { Shell } from '../components/Shell';
 import { useConfirm } from '../components/Confirm';
 import { ApiError, errorText, request } from '../lib/api';
 import { useLanguage } from '../lib/i18n';
-import { draftOf, editableProviders, rolePayload, type Role, type RoleDraft, type Voice } from '../lib/roles';
+import { draftOf, editableProviders, llmModels, rolePayload, type Role, type RoleDraft, type Voice } from '../lib/roles';
 import { useRemote } from '../lib/use-remote';
 import { RoleVoicePanel } from './roles/RoleVoicePanel';
 import { Knowledge } from './roles/Knowledge';
@@ -159,7 +159,7 @@ function RoleEditor({ role, draft, setDraft, voices, voiceLoading, voiceError, r
         <RoleVoicePanel role={role} draft={draft} patch={patch} voices={voices} voiceLoading={voiceLoading} voiceError={voiceError} retryVoices={retryVoices} busy={busy} active={section === 'basic'} readonly={readonly}/>
 
       </div>
-      <div hidden={section !== 'model'}><section className="role-section"><h2>{t('模型与记忆')}</h2><label>{t('模型')}<select disabled={readonly || !providers.llm} value={draft.model} onChange={e => patch({ model: e.target.value })}><option value="">{t('沿用基础配置')}</option>{[...new Set(['qwen3.5-flash', 'qwen3.7-plus', draft.model])].filter(Boolean).map(model => <option key={model}>{model}</option>)}</select></label><label className="radio"><input type="checkbox" disabled={readonly} checked={draft.memory} onChange={e => patch({ memory: e.target.checked })}/>{t('长期记忆')}</label></section></div>
+      <div hidden={section !== 'model'}><section className="role-section"><h2>{t('模型与记忆')}</h2><label>{t('模型')}<select aria-label={t('模型')} disabled={readonly || !providers.llm} value={draft.model} onChange={e => patch({ model: e.target.value })}><option value="">{t('沿用基础配置')}</option>{[...new Set([...llmModels.map(model => model.id), draft.model])].filter(Boolean).map(model => <option key={model}>{model}</option>)}</select></label><label className="radio"><input type="checkbox" disabled={readonly} checked={draft.memory} onChange={e => patch({ memory: e.target.checked })}/>{t('长期记忆')}</label></section></div>
       <div hidden={section !== 'advanced'}>
         <details className="role-section"><summary>{t('更多角色信息')}</summary><label>{t('智能体描述')}<input readOnly={readonly} value={draft.description} onChange={e => patch({ description: e.target.value })}/></label><label>{t('开场白')}<input readOnly={readonly} value={draft.welcome} onChange={e => patch({ welcome: e.target.value })}/></label></details>
       <details className="role-section"><summary>{t('知识库')}</summary><Knowledge value={draft.knowledge} onChange={knowledge => patch({ knowledge })} readonly={readonly} onBlocked={onResourceBlocked}/></details>

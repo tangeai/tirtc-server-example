@@ -272,5 +272,6 @@
   "用户": "User",
   "AI 助手": "AI assistant",
   "系统": "System",
-  "工具": "Tool"
+  "工具": "Tool",
+  "当前模型暂不支持，请重新选择模型": "This model is not supported. Please select another model."
 }

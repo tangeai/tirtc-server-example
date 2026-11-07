@@ -67,6 +67,14 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  assert.equal(await page.getByLabel('声音列表',{exact:true}).count(),0);
  voiceMode='ok';await page.reload();await page.getByRole('button',{name:'新的名称',exact:true}).click();await page.getByText('语音设置',{exact:true}).click();
  assert((await page.locator('.voice-current').innerText()).includes('中文测试声音'));
+ const originalTTS=JSON.stringify(role.service_config.config.tts);
+ for(const [model,provider] of [['qwen3.7-flash','ali-llm'],['doubao-seed-2-0-mini-260428','doubao'],['qwen3.7-plus','ali-llm']]){
+  await page.getByRole('button',{name:'模型与记忆',exact:true}).click();
+  const picker=page.getByLabel('模型',{exact:true});assert.equal(await picker.isEnabled(),true);await picker.selectOption(model);
+  await page.getByRole('button',{name:'保存角色',exact:true}).click();await page.getByText('保存成功',{exact:true}).waitFor();
+  assert.equal(role.service_config.config.llm.provider,provider);assert.equal(role.service_config.config.llm.provider_params.model,model);assert.equal(JSON.stringify(role.service_config.config.tts),originalTTS);
+  await page.reload();await page.getByRole('button',{name:'新的名称',exact:true}).click();await page.getByRole('button',{name:'模型与记忆',exact:true}).click();assert.equal(await page.getByLabel('模型',{exact:true}).inputValue(),model);
+ }
  assert.deepEqual(errors,[]);console.log('PASS: type-only voice selection, unified persona and voice panel, draft preservation across sections, save payload, error/empty/retry, responsive layouts');
  }finally{await browser.close();server.close();}
 })().catch(e=>{console.error(e);server.close();process.exitCode=1;});

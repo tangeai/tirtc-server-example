@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { draftOf, rolePayload, type Role } from './roles.ts';
+import { draftOf, editableProviders, rolePayload, type Role } from './roles.ts';
 const role: Role = { id:'r', name:'原角色', parent_role_id:'parent', avatar:'icon', service_config:{name:'custom',type:'custom-compose',config:{llm:{provider:'ali-llm',provider_params:{model:'custom-model',temperature:0.7}},tts:{provider:'ali-tts',provider_params:{model:'old-model',voice:'unknown',rate:1.2,pitch:0.8,other:true}},asr:{provider:'other'}}},agent_config:{prompt:'hello',welcome_text:'',ali_memory:{enable:true,retention:20},ali_rag:{index_id:'missing-index',unknown:true},mcp_tools:['unavailable-tool'],device_plugins:['unavailable-plugin'],opaque:{keep:true}},user_params:{description:'d',custom:'keep'} };
 test('renaming preserves providers and unavailable resources without fetched option lists',()=>{const draft=draftOf(role);draft.name='新名称';const result=rolePayload(role,draft,[]);assert.deepEqual(result.service_config,role.service_config);assert.deepEqual(result.agent_config,role.agent_config);assert.equal(result.user_params?.custom,'keep');assert.equal(role.name,'原角色');});
 test('noncustom services remain opaque even if draft provider fields change',()=>{const original={...role,service_config:{type:'external',config:{llm:{provider:'other',provider_params:{secret:'opaque'}}}}};const draft=draftOf(original);draft.model='new';draft.voice='new';assert.deepEqual(rolePayload(original,draft,[]).service_config,original.service_config);});
@@ -38,4 +38,30 @@ test('Seed edits preserve audio extras and validate native ranges',()=>{
  const tts=rolePayload(source,draft,[]).service_config?.config?.tts;
  assert.equal(tts?.provider_params?.audio?.format,'pcm');assert.equal(tts?.provider_params?.audio?.speech_rate,20);
  assert.throws(()=>rolePayload(source,{...draft,pitch:13},[]));assert.throws(()=>rolePayload(source,{...draft,rate:0.5},[]));
+});
+
+
+test('Qwen Flash upgrade preserves same-provider credentials and settings',()=>{
+ const original:Role={name:'千问角色',service_config:{type:'custom-compose',config:{llm:{provider:'ali-llm',provider_params:{model:'qwen3.5-flash',api_key:'synthetic-ali-key',base_url:'https://ali.example.test',temperature:0.3}}}}};
+ const saved=rolePayload(original,{...draftOf(original),model:'qwen3.7-flash'},[]);
+ assert.deepEqual(saved.service_config?.config?.llm,{provider:'ali-llm',provider_params:{model:'qwen3.7-flash',api_key:'synthetic-ali-key',base_url:'https://ali.example.test',temperature:0.3}});
+});
+test('LLM provider changes drop provider credentials, preserve voice and survive reopen',()=>{
+ const original:Role={...role,service_config:{...role.service_config,config:{...role.service_config?.config,llm:{provider:'ali-llm',provider_params:{model:'qwen3.7-flash',api_key:'synthetic-ali-key',base_url:'https://ali.example.test',temperature:0.3},provider_extra:true}}}};
+ const saved=rolePayload(original,{...draftOf(original),model:'doubao-seed-2-0-mini-260428'},[]);
+ assert.deepEqual(saved.service_config?.config?.llm,{provider:'doubao',provider_params:{model:'doubao-seed-2-0-mini-260428'}});
+ assert.deepEqual(saved.service_config?.config?.tts,original.service_config?.config?.tts);
+ assert.deepEqual(saved.service_config?.config?.asr,original.service_config?.config?.asr);
+ assert.equal(editableProviders(saved).llm,true);
+ assert.deepEqual(rolePayload(saved,{...draftOf(saved),name:'改名'},[]).service_config,saved.service_config);
+ const withCredentials:Role={...saved,service_config:{...saved.service_config,config:{...saved.service_config?.config,llm:{provider:'doubao',provider_params:{model:'doubao-seed-2-0-mini-260428',api_key:'synthetic-doubao-key',base_url:'https://doubao.example.test'}}}}};
+ const back=rolePayload(withCredentials,{...draftOf(withCredentials),model:'qwen3.7-flash'},[]);
+ assert.deepEqual(back.service_config?.config?.llm,{provider:'ali-llm',provider_params:{model:'qwen3.7-flash'}});
+ const inherited=rolePayload(saved,{...draftOf(saved),model:''},[]);assert.equal(inherited.service_config?.config?.llm,undefined);
+});
+test('new roles can select either new LLM and unknown choices fail',()=>{
+ for(const [model,provider] of [['qwen3.7-flash','ali-llm'],['doubao-seed-2-0-mini-260428','doubao']]){
+  const saved=rolePayload({},{...draftOf({}),name:'新角色',model},[]);assert.deepEqual(saved.service_config?.config?.llm,{provider,provider_params:{model}});
+ }
+ assert.throws(()=>rolePayload({},{...draftOf({}),name:'新角色',model:'unknown-model'},[]));
 });

@@ -1,4 +1,11 @@
 import { configureVoice, voiceSettings } from './tts-config.ts';
+export const llmModels = [
+  { id: 'qwen3.5-flash', provider: 'ali-llm' },
+  { id: 'qwen3.7-flash', provider: 'ali-llm' },
+  { id: 'qwen3.7-plus', provider: 'ali-llm' },
+  { id: 'doubao-seed-2-0-mini-260428', provider: 'doubao' },
+] as const;
+
 export interface ComponentConfig { provider?: string; provider_params?: { model?: string; audio?: { voice_type?: string; speech_rate?: number; pitch_rate?: number; [key: string]: unknown }; voice?: string; rate?: number; pitch?: number; [key: string]: unknown }; [key: string]: unknown }
 export interface Role {
   id?: string; name?: string; avatar?: string; parent_role_id?: string;
@@ -19,7 +26,7 @@ export function draftOf(role: Role): RoleDraft {
 export function editableProviders(role: Role) {
   const custom = !role.service_config?.type || role.service_config.type === 'custom-compose';
   const config = role.service_config?.config;
-  return { custom, llm: custom && (!config?.llm?.provider || config.llm.provider === 'ali-llm'), tts: custom && (!config?.tts?.provider || config.tts.provider === 'ali-tts' || config.tts.provider === 've-seed-tts-2') };
+  return { custom, llm: custom && (!config?.llm?.provider || config.llm.provider === 'ali-llm' || config.llm.provider === 'doubao'), tts: custom && (!config?.tts?.provider || config.tts.provider === 'ali-tts' || config.tts.provider === 've-seed-tts-2') };
 }
 // Preserve fields this editor does not own, including service credentials and
 // inherited providers. Clearing an override is different from a blank provider.
@@ -34,7 +41,13 @@ export function rolePayload(previous: Role, draft: RoleDraft, voices: Voice[]): 
   const config = { ...old };
   if (edits.llm) {
     if (!draft.model) { if (old.llm?.provider_params?.model) delete config.llm; }
-    else if (!previous.service_config || draft.model !== (old.llm?.provider_params?.model || '')) config.llm = { ...old.llm, provider: 'ali-llm', provider_params: { ...old.llm?.provider_params, model: draft.model } };
+    else if (!previous.service_config || draft.model !== (old.llm?.provider_params?.model || '')) {
+      const target = llmModels.find(model => model.id === draft.model);
+      if (!target) throw new Error('当前模型暂不支持，请重新选择模型');
+      const previousProvider = old.llm?.provider || llmModels.find(model => model.id === old.llm?.provider_params?.model)?.provider || 'ali-llm';
+      const same = previousProvider === target.provider;
+      config.llm = { ...(same ? old.llm : {}), provider: target.provider, provider_params: { ...(same ? old.llm?.provider_params : {}), model: draft.model } };
+    }
   }
   if (edits.tts) {
     if (!draft.voice) { if (previousVoiceID) delete config.tts; }
