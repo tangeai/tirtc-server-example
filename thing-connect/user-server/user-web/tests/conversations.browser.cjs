@@ -10,11 +10,12 @@ const server=http.createServer((req,res)=>{
  const browser=await chromium.launch({headless:true,executablePath:process.env.PLAYWRIGHT_CHROMIUM||undefined,args:['--no-sandbox']});
  try{
   const context=await browser.newContext({viewport:{width:1366,height:768}}),page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
+  let deviceName='客厅小钛';
   let records=Array.from({length:11},(_,i)=>({id:'c'+i,device_id:'one',assistant_id:'role',started_at:`2026-11-${String(11-i).padStart(2,'0')}T09:00:00Z`,reference:'ref-c'+i}));
   let listCalls=0,detailCalls=0,deletes=0,failList=false,failDetail=false,failDelete=false,delayFirst=false,release;
   await page.route('**/v1/**',async route=>{
    const req=route.request(),u=new URL(req.url());if(u.pathname.endsWith('/language.js'))return route.continue();let data={};
-   if(u.pathname==='/v1/user/device/list')data=[{device_id:'one',device_name:'客厅小钛',online:true}];
+   if(u.pathname==='/v1/user/device/list')data=[{device_id:'one',device_name:deviceName,online:true}];
    else if(u.pathname==='/v1/user/me')data={email:'test@example.test'};
    else if(u.pathname==='/v1/ai/roles')data={items:[{id:'role',name:'我的角色',agent_config:{prompt:'原始设定'}}]};
    else if(u.pathname==='/v1/ai/roles/role')data={id:'role',name:'我的角色',agent_config:{prompt:'原始设定'}};
@@ -62,6 +63,10 @@ const server=http.createServer((req,res)=>{
   await dialog.getByRole('button',{name:'关闭弹窗',exact:true}).click();
   await page.getByRole('button',{name:'放弃修改',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'放弃修改',exact:true}).click();
   await page.goto(base+'/devices');await page.getByText('更多 ▾',{exact:true}).click();await page.getByRole('button',{name:'会话记录',exact:true}).click();await dialog.getByText('暂无会话记录',{exact:true}).waitFor();
+  await dialog.getByRole('button',{name:'关闭弹窗',exact:true}).click();
+  deviceName='';await page.goto(base+'/agent?device_id=one');
+  await page.getByRole('button',{name:'会话记录',exact:true}).click();
+  await page.getByRole('dialog',{name:'未命名设备 · 会话记录',exact:true}).getByText('暂无会话记录',{exact:true}).waitFor();
   assert.deepEqual(errors,[]);console.log('PASS history entry points, draft preservation, pagination, plain text, deletion cancel/failure/success, stale details, empty/error/retry, no automatic polling, desktop/mobile');
  }finally{await browser.close();server.close();}
 })().catch(e=>{console.error(e);server.close();process.exitCode=1});

@@ -495,3 +495,12 @@ dialog::backdrop{background:#0007}
  .history-messages{padding:12px}
  .history-bubble{max-width:95%}
 }
+
+@media (min-width:641px) and (max-width:1000px){
+ .roles-page .roles-layout{grid-template-columns:210px minmax(0,1fr)}
+ .roles-page .role-list{padding:10px}
+ .roles-page .role-editor{padding:10px 12px}
+ .roles-page .role-form{padding:14px}
+ .roles-page .save-bar{flex-wrap:wrap;gap:6px}
+ .roles-page .save-bar p{flex-basis:100%;max-width:none}
+}

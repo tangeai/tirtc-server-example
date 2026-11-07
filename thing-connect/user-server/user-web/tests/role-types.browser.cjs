@@ -71,6 +71,20 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  await page.getByRole('button',{name:'角色类型 温柔伙伴',exact:true}).waitFor();
  assert.equal(await prompt.inputValue(),'保存后的自定义设定');
  assert.equal(await page.getByRole('switch',{name:'自定义提示词'}).isChecked(),true);
+ await page.setViewportSize({width:390,height:844});
+ await page.getByLabel('智能体名称',{exact:true}).fill('手机未保存名称');
+ await page.getByRole('button',{name:/返回角色列表/}).click();
+ await page.getByRole('button',{name:'新建联动角色',exact:true}).click();
+ assert.equal(await page.getByRole('dialog').count(),0,'returning to the same role should resume the draft');
+ assert.equal(await page.getByLabel('智能体名称',{exact:true}).inputValue(),'手机未保存名称');
+ await page.getByLabel('智能体名称',{exact:true}).fill('新建联动角色');
+ await page.setViewportSize({width:1440,height:900});
+ await page.getByRole('searchbox',{name:'搜索智能体...'}).fill('不存在的角色');
+ await page.getByText('没有匹配的角色，请换个关键词。',{exact:true}).waitFor();
+ await page.getByRole('searchbox',{name:'搜索智能体...'}).fill('  新建联动角色  ');
+ await page.getByRole('button',{name:'新建联动角色',exact:true}).waitFor();
+ await page.getByRole('searchbox',{name:'搜索智能体...'}).fill('');
+
  await choose('活力伙伴');await page.getByRole('button',{name:'使用默认设定',exact:true}).click();
  assert.equal(await prompt.inputValue(),'积极明快，一次只问一个问题。');assert.equal(await prompt.getAttribute('readonly'),'');
  await page.getByRole('button',{name:'保存角色',exact:true}).click();await page.getByText('保存成功',{exact:true}).waitFor();
