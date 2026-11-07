@@ -1,3 +1,6 @@
+import Contacts from './Contacts';
+import Room from './Room';
+import Player from './Player';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Account, Dropdown, NavigationLinks } from '../components/Account';
 import { DeviceIcon } from '../components/DeviceIcon';
@@ -11,7 +14,7 @@ import { useLanguage } from '../lib/i18n';
 import { markAway, restoreSnapshot, saveSnapshot, snapshotKey } from '../lib/snapshot';
 
 interface Snapshot { devices: Device[]; summaries: Record<string, Summary> }
-type Modal = { kind: 'rename' | 'info' | 'unbind' | 'recognition' | 'history'; device: Device };
+type Modal = { kind: 'rename' | 'info' | 'unbind' | 'recognition' | 'history' | 'contacts' | 'room' | 'player'; device: Device };
 export default function Devices() {
   const { t } = useLanguage();
   const [data, setData] = useState<Snapshot>({ devices: [], summaries: {} }), [loading, setLoading] = useState(true), [error, setError] = useState(''), [restored, setRestored] = useState(false);
@@ -81,11 +84,14 @@ export default function Devices() {
       <div className="device-grid">{data.devices.map(device => { const summary = data.summaries[device.device_id]; return <article className="card device-card" key={device.device_id} data-device-id={device.device_id}>
         <div className="row"><div className="device-title"><span className="device-symbol"><DeviceIcon name="monitor"/></span><h2>{device.device_name || t('未命名设备')}</h2></div><Dropdown label={t('更多 ▾')}><button onClick={() => setModal({ kind: 'rename', device })}>{t('修改名称')}</button><button onClick={() => setModal({ kind: 'info', device })}>{t('设备信息')}</button><button onClick={() => setModal({ kind: 'history', device })}>{t('会话记录')}</button><button className="danger" onClick={() => setModal({ kind: 'unbind', device })}>{t('解绑设备')}</button></Dropdown></div>
         <div className="row device-meta"><p className="muted">ID: {device.device_id}</p><span className={device.online ? 'success' : 'muted'}>{t(device.online ? '● 在线' : '○ 离线')}</span></div>
-        <div className="device-summaries"><a href={href('/agent', device)}><strong>{t('AI 角色')} <span>›</span></strong><p>{summary ? roleSummary(summary.role) : t('正在查询…')}</p></a><button onClick={() => setModal({ kind: 'recognition', device })}><strong>{t('AI识别')} <span>›</span></strong><p>{summary ? summary.recognition ? t(summary.recognition.enabled ? '已开启 · {p0}项' : '已关闭', { p0: summary.recognition.count }) : t('状态获取失败，请刷新') : t('正在查询…')}</p></button><a href={href('/room', device)}><strong>{t('多人对讲')} <span>›</span></strong><p>{summary ? roomSummary(summary.room) : t('正在查询…')}</p></a></div>
-        <nav className="device-actions"><a href={href('/player', device)}><DeviceIcon name="monitor"/><span>{t('实时')}</span></a><a href={href('/contacts', device)}><DeviceIcon name="contacts"/><span>{t('联系人')}</span></a><a href={href('/agent', device)}><DeviceIcon name="role"/><span>{t('AI 角色')}</span></a><a href={href('/room', device)}><DeviceIcon name="room"/><span>{t('多人对讲')}</span>{summary?.room?.desired_state === 'joined' && <span aria-label={t('有对讲关系')}> ●</span>}</a></nav>
+        <div className="device-summaries"><a href={href('/agent', device)}><strong>{t('AI 角色')} <span>›</span></strong><p>{summary ? roleSummary(summary.role) : t('正在查询…')}</p></a><button onClick={() => setModal({ kind: 'recognition', device })}><strong>{t('AI识别')} <span>›</span></strong><p>{summary ? summary.recognition ? t(summary.recognition.enabled ? '已开启 · {p0}项' : '已关闭', { p0: summary.recognition.count }) : t('状态获取失败，请刷新') : t('正在查询…')}</p></button><button onClick={() => setModal({ kind: 'room', device })}><strong>{t('多人对讲')} <span>›</span></strong><p>{summary ? roomSummary(summary.room) : t('正在查询…')}</p></button></div>
+        <nav className="device-actions"><button onClick={() => setModal({ kind: 'player', device })}><DeviceIcon name="monitor"/><span>{t('实时')}</span></button><button onClick={() => setModal({ kind: 'contacts', device })}><DeviceIcon name="contacts"/><span>{t('联系人')}</span></button><a href={href('/agent', device)}><DeviceIcon name="role"/><span>{t('AI 角色')}</span></a><button aria-label={t('多人对讲')} onClick={() => setModal({ kind: 'room', device })}><DeviceIcon name="room"/><span>{t('多人对讲')}</span>{summary?.room?.desired_state === 'joined' && <span aria-label={t('有对讲关系')}> ●</span>}</button></nav>
       </article>; })}</div>
       {!loading && !data.devices.length && !error && <section className="card"><h2>{t('还没有设备')}</h2><p className="muted">{t('点击"添加设备"，输入验证码完成绑定')}</p></section>}
     <div className="device-list-footer"><button className="primary add-device" disabled={adding} onClick={() => void add()}>＋ {t('添加设备')}</button></div></main>
+    {modal?.kind === 'contacts' && <Contacts key={modal.device.device_id} deviceId={modal.device.device_id} onClose={close}/>}
+    {modal?.kind === 'player' && <Player key={modal.device.device_id} deviceId={modal.device.device_id} onClose={close}/>}
+    {modal?.kind === 'room' && <Room key={modal.device.device_id} deviceId={modal.device.device_id} onClose={close} onUpdate={room => update(state => ({ ...state, summaries: { ...state.summaries, [modal.device.device_id]: { ...state.summaries[modal.device.device_id], room } } }))}/>}
     {modal?.kind === 'info' && <DeviceInfo device={modal.device} close={close}/>}
     {modal && ['rename', 'unbind'].includes(modal.kind) && <DeviceMutation key={modal.kind + modal.device.device_id} modal={modal} close={close} done={(name?: string) => {
       update(state => ({ ...state, devices: name === undefined ? state.devices.filter(d => d.device_id !== modal.device.device_id) : state.devices.map(d => d.device_id === modal.device.device_id ? { ...d, device_name: name } : d) }));

@@ -102,7 +102,7 @@ dialog::backdrop{background:#0007}
 .device-summaries strong{font-size:14px}
 .device-summaries p{font-size:13px;margin:6px 0 0}
 .device-actions{display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--line);padding-top:16px;gap:4px}
-.device-actions a{display:flex;align-items:center;justify-content:center;min-height:44px;font-size:13px;text-align:center;color:#53615a;white-space:nowrap}
+.device-actions :is(a,button){display:flex;align-items:center;justify-content:center;min-height:44px;font-size:13px;text-align:center;color:#53615a;white-space:nowrap}
 .add-device{position:fixed;bottom:24px;right:24px;box-shadow:0 5px 15px #00987533}
 .detail-list>div{display:grid;grid-template-columns:minmax(100px,40%) minmax(0,1fr);gap:16px;margin:14px 0;font-size:14px}
 .detail-list dt{color:var(--muted)}
@@ -118,7 +118,7 @@ dialog::backdrop{background:#0007}
 @media(max-width:600px){.device-layout{padding:24px 16px 100px}
 .brand{font-size:14px}
 .topbar:has(.brand){flex-wrap:nowrap}
-.device-actions a{font-size:13px}
+.device-actions :is(a,button){font-size:13px}
 .add-device{bottom:18px;right:16px}
 .device-grid>.device-card{padding:16px 16px 0}
 .detail-list>div{gap:10px}
@@ -278,7 +278,7 @@ dialog::backdrop{background:#0007}
 .brand{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @media(max-width:600px){
   .device-actions{grid-template-columns:repeat(4,minmax(0,1fr))}
-  .device-actions a{white-space:normal}
+  .device-actions :is(a,button){white-space:normal}
   .content article>.row{align-items:flex-start}
   .content article>.row>div:first-child{flex-basis:100%}
   .content article>.row>div.row{width:100%;justify-content:flex-end}
@@ -298,7 +298,7 @@ dialog::backdrop{background:#0007}
 .device-summaries strong{display:flex;justify-content:space-between;gap:4px;font-size:12px;font-weight:500;overflow-wrap:anywhere}
 .device-summaries p{font-size:11px;line-height:1.5;margin:5px 0 0}
 .device-actions{grid-template-columns:repeat(4,minmax(0,1fr));gap:0;margin:0 -16px;padding:7px}
-.device-actions a{flex-direction:column;gap:6px;padding:7px 2px;min-width:0;font-size:12px;line-height:18px;white-space:normal;overflow-wrap:anywhere}
+.device-actions :is(a,button){flex-direction:column;gap:6px;padding:7px 2px;min-width:0;font-size:12px;line-height:18px;white-space:normal;overflow-wrap:anywhere}
 .device-actions svg{width:16px;height:16px;flex-shrink:0}
 .device-list-footer{display:flex;justify-content:flex-end;margin-top:28px}
 .add-device{position:static;box-shadow:none}
@@ -504,3 +504,39 @@ dialog::backdrop{background:#0007}
  .roles-page .save-bar{flex-wrap:wrap;gap:6px}
  .roles-page .save-bar p{flex-basis:100%;max-width:none}
 }
+
+/* Device tools stay over the list; long contact lists scroll inside the dialog. */
+.dialog-workspace{width:min(900px,calc(100vw - 32px));height:min(720px,calc(100dvh - 32px));overflow:hidden}
+.dialog-workspace>.dialog-body{height:100%;display:flex;flex-direction:column;min-height:0;padding:20px 24px}
+.dialog-workspace>.dialog-body>header{flex-shrink:0;margin-bottom:12px}
+.contacts-workspace,.contact-list{display:flex;flex-direction:column;min-height:0;flex:1;gap:10px}
+.contacts-workspace .device-selector{padding:0;border:0;box-shadow:none;margin:0;flex-shrink:0}
+.contacts-workspace h1{font-size:18px;margin:0}
+.contacts-workspace p{margin:0}
+.contacts-workspace .filter-tabs{margin:0;flex-shrink:0}
+.contact-scroll{min-height:0;overflow:auto;overscroll-behavior:contain}
+.contacts-workspace .contact-scroll{flex:1;padding-right:4px}
+.contacts-workspace .contact-scroll .card{padding:12px;margin-bottom:8px}
+.room-workspace .card{padding:16px;margin:12px 0}
+.room-workspace p{margin:8px 0;font-size:14px;line-height:1.5}
+.room-workspace h2{font-size:18px}
+.room-workspace .filter-tabs{margin:12px 0}
+.dialog-workspace .player-layout{padding:0;min-height:0;flex:1;display:flex;flex-direction:column;overflow:auto}
+.dialog-workspace .player-layout h1{font-size:16px;margin:0 0 12px}
+.dialog-workspace .player-card{min-height:0;flex:1;display:flex;flex-direction:column}
+.dialog-workspace .player-stage{min-height:0;flex:1;overflow:hidden}
+.dialog-workspace .canvas-box{max-height:100%}
+.dialog-workspace .player-toolbar{flex-shrink:0}
+@media(max-width:640px){.dialog-workspace{width:calc(100vw - 16px);height:calc(100dvh - 16px);max-height:calc(100dvh - 16px)}.dialog-workspace>.dialog-body{padding:14px}.contacts-workspace .row{gap:8px;flex-wrap:wrap}.contacts-workspace .contact-list>.muted{font-size:12px}}
+
+.device-actions button{border:0;background:transparent;border-radius:8px;font-weight:inherit}
+
+.room-workspace label{margin-bottom:12px}.room-workspace input{margin-top:4px!important}.room-workspace .card>p:first-child{margin-top:0}
+@media(max-width:640px){.room-workspace .card{padding:12px}.room-workspace>p:last-of-type{font-size:12px}.room-workspace .filter-tabs{margin:8px 0}}
+.contacts-workspace .filter-tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.contacts-workspace .filter-tabs button{padding:8px 4px;font-size:13px;overflow-wrap:anywhere}
+.contacts-workspace article>.row{flex-wrap:nowrap;align-items:center}
+.contacts-workspace article>.row>div:first-child{flex:1;min-width:0;overflow-wrap:anywhere}
+.contacts-workspace article>.row>div.row{flex-shrink:0;gap:6px}
+.contacts-workspace article>.row button{padding:8px;font-size:13px}
+@media(max-width:360px){.contacts-workspace article>.row>div.row{flex-direction:column}}

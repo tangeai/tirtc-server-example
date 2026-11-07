@@ -50,7 +50,7 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
    for(const card of await cards.all()){
     const tiles=await card.locator('.device-summaries>*').all();assert.equal(tiles.length,3);
     const boxes=await Promise.all(tiles.map(tile=>tile.boundingBox()));assert(boxes.every(box=>Math.abs(box.y-boxes[0].y)<1),'three summary tiles must share one row');
-    assert.equal(await card.locator('.device-actions>a').count(),4);assert.equal(await card.locator('.device-actions svg').count(),4);assert.equal(await card.locator('.device-symbol svg').count(),1);
+    assert.equal(await card.locator('.device-actions>:is(a,button)').count(),4);assert.equal(await card.locator('.device-actions svg').count(),4);assert.equal(await card.locator('.device-symbol svg').count(),1);
    }
    assert.equal(await page.locator('.add-device').evaluate(e=>getComputedStyle(e).position),'static');
    const grid=await page.locator('.device-grid').boundingBox(),add=await page.locator('.add-device').boundingBox();assert(add.y>=grid.y+grid.height,'add button follows list');

@@ -10,9 +10,9 @@ interface Pending { id: number; initiator_device: string; target_device: string 
 const name = (c: Contact) => c.remark?.trim() || fallback(c);
 const fallback = (c: Contact) => c.type === 'voip' ? t('微信用户') : c.device_name?.trim() || c.device_id;
 const key = (c: Contact) => JSON.stringify([c.type, c.id, c.device_id, c.wx_app_id]);
-export default function Contacts() {
+export default function Contacts({ deviceId, onClose }: { deviceId?: string; onClose?: () => void } = {}) {
   const { t } = useLanguage();
-  const [devices, setDevices] = useState<Device[]>(), [device, setDevice] = useState(new URLSearchParams(location.search).get('device_id') ?? '');
+  const [devices, setDevices] = useState<Device[]>(), [device, setDevice] = useState(deviceId ?? new URLSearchParams(location.search).get('device_id') ?? '');
   const [error, setError] = useState('');
   const [refresh, setRefresh] = useState(0);
   useEffect(() => {
@@ -23,12 +23,13 @@ export default function Contacts() {
     }).catch(e => { if (!controller.signal.aborted) setError(errorText(e)); });
     return () => controller.abort();
   }, [refresh]);
-  return <Shell title="联系人管理"><main className="content">
-    <section className="card device-selector"><label>{t('当前管理设备')}<select disabled={!devices?.length} value={device} onChange={event => { setDevice(event.target.value); const url = new URL(location.href); url.searchParams.set('device_id', event.target.value); history.replaceState(null, '', url); }}>
+  const content = <main className={onClose ? "contacts-workspace" : "content"}>
+    <section className="card device-selector"><label>{t('当前管理设备')}<select disabled={!devices?.length} value={device} onChange={event => { setDevice(event.target.value); if (onClose) return; const url = new URL(location.href); url.searchParams.set('device_id', event.target.value); history.replaceState(null, '', url); }}>
       {!devices?.length && <option>{t(devices ? '暂无已绑定设备' : '正在加载设备…')}</option>}{devices?.map(d => <option value={d.device_id} key={d.device_id}>{d.device_name || t('未命名设备')} · {d.device_id}</option>)}
     </select></label>{error && <p role="alert" className="error">{error} <button onClick={() => setRefresh(value => value + 1)}>{t('重试')}</button></p>}</section>
     {device && devices && <ContactList key={device} device={device} devices={devices}/>}
-  </main></Shell>;
+  </main>;
+  return onClose ? <Dialog title="联系人" size="workspace" onClose={onClose}>{content}</Dialog> : <Shell title="联系人管理">{content}</Shell>;
 }
 function ContactList({ device, devices }: { device: string; devices: Device[] }) {
   const { t } = useLanguage();
@@ -63,20 +64,20 @@ function ContactList({ device, devices }: { device: string; devices: Device[] })
     finally { responding.current.delete(item.id); if (alive.current) setHandling([...responding.current]); }
   }
   const filtered = rows.filter(c => (!search.trim() || [c.remark, c.device_name, c.device_id].some(v => v?.toLowerCase().includes(search.trim().toLowerCase()))) && (filter === 'all' || (filter === 'voip' ? c.type === 'voip' : c.type !== 'voip' && c.source === (filter === 'mine' ? 'auto' : 'manual'))));
-  return <><div className="row"><h1>{t('我的联系人')} <small>({rows.length})</small></h1><div className="row"><button disabled={loading} onClick={() => { void load(); void loadPending(); }}>{t('刷新')}</button><button className="primary" onClick={() => setAdd(true)}>{t('添加联系人')}</button></div></div>
+  return <div className="contact-list"><div className="row"><h1>{t('我的联系人')} <small>({rows.length})</small></h1><div className="row"><button disabled={loading} onClick={() => { void load(); void loadPending(); }}>{t('刷新')}</button><button className="primary" onClick={() => setAdd(true)}>{t('添加联系人')}</button></div></div>
     <p className="muted">{t('我的设备自动关联；手动添加需对方同意；微信联系人来自小程序授权。')}</p>
     <input type="search" aria-label={t('搜索名称或设备 ID')} placeholder={t('搜索名称或设备 ID')} value={search} onChange={e => setSearch(e.target.value)}/>
     <nav className="filter-tabs" aria-label={t('联系人类型')}>{Object.entries({ all: '全部', mine: '我的设备', manual: '手动添加', voip: '微信授权' }).map(([value, label]) => <button key={value} aria-pressed={filter === value} onClick={() => setFilter(value)}>{t(label)}</button>)}</nav>
-    {loading && <p role="status">{t('联系人加载中…')}</p>}{error && <p role="alert" className="error">{error}</p>}
+    <div className="contact-scroll">{loading && <p role="status">{t('联系人加载中…')}</p>}{error && <p role="alert" className="error">{error}</p>}
     {!loading && !filtered.length && <section className="card"><p>{t(rows.length ? '没有匹配的联系人' : '暂无联系人')}</p>{rows.length > 0 && <button onClick={() => { setSearch(''); setFilter('all'); }}>{t('清除搜索和筛选')}</button>}</section>}
     {filtered.map(c => <article className="card" key={key(c)}><div className="row"><div><strong>{name(c)}</strong> <span className="badge">{t(c.type === 'voip' ? '微信授权' : c.source === 'auto' ? '我的设备' : '手动添加')}</span>{c.type !== 'voip' && <><span className="muted"> · {t(c.online ? '在线' : '离线')}</span><p className="muted">{c.device_id}</p></>}</div><div className="row"><button onClick={() => setEditing(key(c))}>{t('改备注')}</button>{c.source === 'manual' && c.type !== 'voip' && <button className="danger" onClick={() => setRemove(c)}>{t('删除')}</button>}</div></div>
       {editing === key(c) && <Remark key={key(c)} contact={c} device={device} close={() => setEditing(undefined)} saved={remark => { updated(items => items.map(item => key(item) === key(c) ? { ...item, remark } : item)); setEditing(undefined); }}/>}</article>)}
     <details className="card" open={pending.length > 0 || !!pendingError}><summary>{t('待审批')} ({pending.length})</summary>{pendingError && <p className="error" role="alert">{pendingError} <button onClick={() => void loadPending()}>{t('重试')}</button></p>}{!pending.length && <p className="muted">{t('没有待审批的申请')}</p>}
       {pending.map(item => <div className="pending-row" key={item.id}><p>{item.initiator_device} → {devices.find(d => d.device_id === item.target_device)?.device_name || t('未命名设备')} · {item.target_device}</p><div className="row"><button disabled={handling.includes(item.id)} onClick={() => void respond(item, 'reject')}>{t('拒绝')}</button><button disabled={handling.includes(item.id)} onClick={() => void respond(item, 'accept')}>{t('同意')}</button></div></div>)}
     </details>
-    {add && <AddContact device={device} devices={devices} contacts={rows} close={() => setAdd(false)} accepted={() => { if (alive.current) void load(); }}/>}
+    </div>{add && <AddContact device={device} devices={devices} contacts={rows} close={() => setAdd(false)} accepted={() => { if (alive.current) void load(); }}/>}
     {remove && <RemoveContact contact={remove} close={() => setRemove(undefined)} removed={() => { if (alive.current) { updated(items => items.filter(item => key(item) !== key(remove))); setRemove(current => current === remove ? undefined : current); } }}/>}
-  </>;
+  </div>;
 }
 function Remark({ contact, device, close, saved }: { contact: Contact; device: string; close(): void; saved(value: string): void }) {
   const { t } = useLanguage();
