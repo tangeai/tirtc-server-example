@@ -3028,6 +3028,7 @@ H5 智能体管理页面由 user-server 的 `GET /agent?device_id=xxx` 提供。
 | [批量绑定角色](#post-v1aidevice-roles) | Web（含小程序内嵌页面） | POST | `/v1/ai/device-roles` | 必需：用户 JWT（user_jwt） |
 | [批量查询角色绑定](#post-v1aidevice-rolesquery) | Web（含小程序内嵌页面） | POST | `/v1/ai/device-roles/query` | 必需：用户 JWT（user_jwt） |
 | [批量删除角色绑定](#delete-v1aidevice-roles) | Web（含小程序内嵌页面） | DELETE | `/v1/ai/device-roles` | 必需：用户 JWT（user_jwt） |
+| [列出角色类型](#get-v1airole-types) | Web（含小程序内嵌页面） | GET | `/v1/ai/role-types` | 必需：用户 JWT（user_jwt） |
 | [查询 TTS 音色](#get-v1aivoiceslanguagezh-cn) | Web（含小程序内嵌页面） | GET | `/v1/ai/voices` | 必需：用户 JWT（user_jwt） |
 | [列出全局 MCP 工具](#get-v1aimcptools) | Web（含小程序内嵌页面） | GET | `/v1/ai/mcp/tools` | 必需：用户 JWT（user_jwt） |
 | [查询全局 MCP 工具](#get-v1aimcptoolsid) | Web（含小程序内嵌页面） | GET | `/v1/ai/mcp/tools/:id` | 必需：用户 JWT（user_jwt） |
@@ -3278,6 +3279,28 @@ H5 智能体管理页面由 user-server 的 `GET /agent?device_id=xxx` 提供。
 | `name` | string | 索引名称 |
 | `description` | string | 可选，索引描述 |
 | `document_ids` | string[] | 可选，关联文档 ID 列表 |
+
+<a id="get-v1airole-types"></a>
+
+#### 列出角色类型
+
+**接口**：`GET /v1/ai/role-types`
+
+**调用方**：Web（含小程序内嵌页面）。
+
+**鉴权**：`Authorization: Bearer <user_jwt>`（用户 JWT）。
+
+列出管理员启用的角色类型，按 `sort_order/name/id` 升序排列。
+
+**成功响应**（HTTP 200）
+
+```json
+{"code":200,"data":{"items":[{"id":"preset-001","name":"湾湾小何","voice_id":"longantai_v3","voice_model":"cosyvoice-v3-flash","prompt":"角色默认提示词","sort_order":10,"status":"published","revision":1}]}}
+```
+
+使用 `/v1/ai/voices` 中匹配 `voice_id` 与 `voice_model` 的音色取得试听地址；试听不选中类型。选择类型后将 `prompt` 复制到角色的 `agent_config.prompt`，音色与模型复制到 `service_config.config.tts.provider_params`。用户可编辑提示词，再通过原有创建或更新角色接口保存。模板后续修改或停用不会覆盖用户已保存的角色。
+
+**错误响应**：目录不可用返回 HTTP 503 + `code=503`，用户端仍可手动编辑角色；JWT 无效按统一鉴权响应处理。
 
 <a id="get-v1airoles"></a>
 

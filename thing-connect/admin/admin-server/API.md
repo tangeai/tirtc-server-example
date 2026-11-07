@@ -106,6 +106,7 @@ MFA 验证请求：
 | 微信 VoIP | 应用列表、应用详情、应用设备及设备上报属性 |
 | 任务 | 设备池导入、任务列表、任务结果下载和失败任务重试 |
 | 日志 | `GET /login-logs`、`GET /audit-logs` |
+| AI 角色类型 | `GET/POST /ai-role-types`、`GET /ai-role-types/voices`、`PUT /ai-role-types/:id`、`PUT /ai-role-types/:id/status` |
 | 开发板目录 | `GET/POST /boards`、`POST /boards/images`、`PUT/DELETE /boards/:id`、`PUT /boards/:id/status` |
 
 `GET /services/:service/status` 在实例状态外返回 `configuration_ready`、`required_configurations[]`、`start_command` 和 `restart_command`。`required_configurations[]` 列出未发布或无效的启动阻断项。命令仅用于管理员复制到部署服务器执行，Admin 不执行主机进程控制。
@@ -325,3 +326,29 @@ X-Internal-Key: <shared-internal-key>
 ```
 
 `default` 为 `auto`、`zh-CN` 或 `en`；`allow_switch` 为布尔值。两个字段均必填，未知字段、其他语言值和非布尔开关会被拒绝。注册表默认值为 `{"default":"auto","allow_switch":true}`，不含密钥，`reload=runtime`，每个定义的目标仅为本服务。revision 为 0 时，各服务使用本地 YAML 回退值；已发布值优先。配置运行时应用不改变已打开页面的语言，浏览器在下次打开页面时读取对应服务的有效版本。
+
+## AI 角色类型
+
+角色类型是用户新建或编辑 AI 角色时使用的默认模板，由名称、音色和提示词组成。接口路径统一带 `/v1/admin` 前缀，沿用管理员登录与 CSRF 校验。读取需要 `ai_role_type.read`，写入需要 `ai_role_type.write`。
+
+| 方法 | 路径 | 行为 |
+|---|---|---|
+| GET | `/ai-role-types` | 返回 `data.items`，包含草稿、启用和停用条目，按排序值、名称、ID 排序 |
+| GET | `/ai-role-types/voices` | 返回 `data.items`，每项包含 `id/name/model/languages/sample_url`；试听地址可省略 |
+| POST | `/ai-role-types` | 创建草稿，服务端分配 ID 与修订号 |
+| PUT | `/ai-role-types/:id` | 修改字段，保持当前启用状态 |
+| PUT | `/ai-role-types/:id/status` | 启用或停用，不修改内容 |
+
+创建和修改请求：
+
+```json
+{"role_type":{"name":"温暖伙伴","voice_id":"longantai_v3","voice_model":"cosyvoice-v3-flash","prompt":"用自然、简短的语言回答。","sort_order":10},"expected_revision":1,"reason":"调整默认设定"}
+```
+
+创建忽略 `expected_revision`；修改和状态操作必须提交最近读取的修订号。状态请求为 `{"status":"published","expected_revision":1,"reason":"供用户选择"}`，`status` 只接受 `published` 和 `offline`。成功响应的 `data` 是完整条目，包含 `id/name/voice_id/voice_model/prompt/sort_order/status/revision`，每次写入修订号递增。每条记录独立保存，与审计日志在同一事务提交。
+
+名称为 1～64 个字符且唯一，提示词为 1～12000 个字符，排序为 0～99999，操作原因必填且不超过 500 字节。音色模型为 `cosyvoice-v3-flash`。草稿可暂不配置音色；更换音色及启用时校验云端音色目录。目录不可用时仍可停用类型，或只编辑已有类型的名称和提示词。
+
+参数错误返回 HTTP 400 + `40000`；名称重复或修订冲突为 409 + `40901`；记录不存在为 404 + `40400`；音色目录不可用为 502 + `50200`；存储失败为 500 + `50000`。冲突后读取最新记录再编辑。
+
+`GET /v1/internal/ai-role-types` 供 AI 服务读取启用且已配置音色的条目，使用 `X-Internal-Key`，不经公网代理；无效凭证返回 403 + `40301`。返回形状与列表相同，响应不缓存。

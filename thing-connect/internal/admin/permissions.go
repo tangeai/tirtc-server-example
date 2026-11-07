@@ -27,6 +27,8 @@ type roleSeed struct {
 }
 
 var PermissionDefinitions = []PermissionDefinition{
+	{Code: "ai_role_type.read", Name: "查看 AI 角色类型", Group: "内容管理", Description: "查看角色类型、默认提示词和可用音色"},
+	{Code: "ai_role_type.write", Name: "管理 AI 角色类型", Group: "内容管理", Description: "新增、编辑、排序及启停角色类型"},
 	{Code: "recognition.read", Name: "查看AI识别", Group: "AI识别", Description: "查看识别类型、结果及逐次用量"},
 	{Code: "recognition.write", Name: "管理AI识别", Group: "AI识别", Description: "编辑、发布、停用识别类型"},
 	{Code: "device.recognition.write", Name: "配置设备 AI 识别", Group: "设备管理", Description: "管理设备识别可用性和每月额度"},

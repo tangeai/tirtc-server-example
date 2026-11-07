@@ -52,7 +52,7 @@ func TestEmbeddedMigrationFilesAreNonEmpty(t *testing.T) {
 }
 
 func TestCurrentMigrationCatalogVersions(t *testing.T) {
-	want := map[string]int{"core": 11, "admin": 1}
+	want := map[string]int{"core": 11, "admin": 2}
 	if got := CurrentMigrationVersions(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("versions=%v want=%v", got, want)
 	}

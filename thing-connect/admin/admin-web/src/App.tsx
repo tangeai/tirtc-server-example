@@ -54,6 +54,9 @@ const UsersPage = lazy(() =>
 const DevicesPage = lazy(() =>
   import('./pages/business/devices').then((module) => ({ default: module.DevicesPage })),
 );
+const AIServicePage = lazy(() =>
+  import('./pages/configuration/ai-service').then((module) => ({ default: module.AIServicePage })),
+);
 const BoardsPage = lazy(() =>
   import('./pages/business/boards').then((module) => ({ default: module.BoardsPage })),
 );
@@ -371,6 +374,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
     page = <RecognitionPage key="recognition-configuration" mode="configuration" />;
   else if (path === '/devices') page = <DevicesPage />;
   else if (path === '/boards') page = <BoardsPage />;
+  else if (path === '/configs/ai-server') page = <AIServicePage />;
   else if (path === '/configs/user-server') page = <UserServicePage />;
   else if (path === '/configs/voip-server') page = <VoIPPage />;
   else if (path.startsWith('/configs/')) page = <ConfigPage namespace={path.split('/')[2]} />;

@@ -33,6 +33,7 @@ import (
 	adminmysql "thing-connect/internal/store/mysql/admin"
 	installermysql "thing-connect/internal/store/mysql/installer"
 	mysqlmigrate "thing-connect/internal/store/mysql/migrate"
+	"thing-connect/internal/tirtcapi"
 )
 
 func main() {
@@ -266,6 +267,7 @@ func main() {
 	adminHTTP := adminapp.NewHTTPServer(store, authService, access, configService, configTester, servicestatus.NewAggregator(redisClient), redisClient, jobService, deviceService, cfg.Admin.CookieSecure)
 	adminHTTP.SetRecognitionService(adminapp.NewRecognitionService(adminmysql.NewRecognitionStore(sqlDB)))
 	adminHTTP.SetBoardService(boardService)
+	adminHTTP.SetRoleTypeService(adminapp.NewRoleTypeService(adminmysql.NewRoleTypeStore(sqlDB), tirtcapi.NewRoleTypeVoices(directConfigLoader{service: configService})))
 	adminHTTP.SetBoardImageService(boardImageService)
 	adminHTTP.SetServiceCommandRoot(root)
 	if value, _, _, loadErr := configService.Resolved(context.Background(), "system", "admin.session_policy", "global", ""); loadErr == nil {

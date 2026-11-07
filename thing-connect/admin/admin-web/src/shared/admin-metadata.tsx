@@ -65,6 +65,9 @@ export const auditActionNames: Record<string, string> = {
   'user.quota.write': '调整用户绑定额度',
   'user.password_reset': '发送密码重置邮件',
   'device.unbind': '强制解绑设备',
+  'ai_role_type.create': '新增 AI 角色类型',
+  'ai_role_type.update': '编辑 AI 角色类型',
+  'ai_role_type.status': '启停 AI 角色类型',
   'device.import': '导入设备池',
   'config.write': '发布配置',
   'config.test': '测试配置',
@@ -74,6 +77,7 @@ export const auditActionNames: Record<string, string> = {
   'job.retry': '重试任务',
 };
 export const resourceNames: Record<string, string> = {
+  ai_role_type: 'AI 角色类型',
   admin_user: '管理员',
   role: '角色',
   menu: '菜单',

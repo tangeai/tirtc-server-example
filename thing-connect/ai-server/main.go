@@ -15,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	aihandler "thing-connect/ai-server/handler"
+	"thing-connect/internal/adminclient"
 	"thing-connect/internal/ai"
 	"thing-connect/internal/cache"
 	"thing-connect/internal/config"
@@ -98,6 +99,11 @@ func main() {
 	roleCloud := tirtcapi.NewRoleCloudProvider(agentClient)
 	roleLifecycle := ai.NewRoles(mysqlstore.NewRoleLifecycleStore(sqlDB), roleCloud.Snapshot)
 	agentHTTP.SetRoles(roleLifecycle)
+	roleTypes, err := adminclient.NewRoleTypes(cfg.Admin.ServerURL, cfg.Internal.Key)
+	if err != nil {
+		log.Fatalf("role types: %v", err)
+	}
+	agentHTTP.SetRoleTypes(roleTypes)
 	agentHTTP.Register(r, cfg.JWTSecret)
 	dynamicClient, dynamicRefs, err := aiDynamicConfig(cfg, rdb, legacyAI, agentHTTP, roleCloud)
 	if err != nil {

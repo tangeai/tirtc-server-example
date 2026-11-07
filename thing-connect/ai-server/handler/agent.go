@@ -15,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"thing-connect/internal/ai"
+	"thing-connect/internal/ai/roletypes"
 	"thing-connect/internal/apiresp"
 	"thing-connect/internal/model"
 	"thing-connect/internal/store"
@@ -23,6 +24,7 @@ import (
 
 // AgentHandler handles role CRUD (proxied to tange cloud) and device-role binding.
 type AgentHandler struct {
+	roleTypes         roletypes.Reader
 	roles             ai.RoleOperations
 	agentAPI          agentAPI
 	roleStore         store.RoleBindingStore
@@ -152,6 +154,7 @@ func (h *AgentHandler) Register(r *gin.Engine, jwtSecret string) {
 
 	// Voices
 	auth.GET("/voices", h.listVoices)
+	auth.GET("/role-types", h.listRoleTypes)
 
 	// MCP tools — global
 	auth.GET("/mcp/tools", h.listGlobalMCPTools)

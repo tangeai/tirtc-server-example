@@ -35,6 +35,7 @@ type HTTPServer struct {
 	jobs             *JobService
 	devices          *DeviceService
 	recognition      *RecognitionService
+	roleTypes        *RoleTypeService
 	boards           *BoardService
 	boardImages      *BoardImageService
 	cookieSecure     bool
@@ -109,6 +110,11 @@ func (s *HTTPServer) Register(r *gin.Engine) {
 	protected.PUT("/devices/:device_id/recognition", s.Require("device.recognition.write"), s.putRecognition)
 	protected.GET("/devices/:device_id/bind-logs", s.Require("device.read"), s.deviceBindLogs)
 	protected.POST("/devices/:device_id/force-unbind", s.Require("device.unbind"), s.forceUnbind)
+	protected.GET("/ai-role-types", s.Require("ai_role_type.read"), s.listRoleTypes)
+	protected.GET("/ai-role-types/voices", s.Require("ai_role_type.read"), s.roleTypeVoices)
+	protected.POST("/ai-role-types", s.Require("ai_role_type.write"), s.saveRoleType)
+	protected.PUT("/ai-role-types/:id", s.Require("ai_role_type.write"), s.saveRoleType)
+	protected.PUT("/ai-role-types/:id/status", s.Require("ai_role_type.write"), s.saveRoleType)
 	protected.GET("/boards", s.Require("board.read"), s.listBoards)
 	protected.POST("/boards/images", s.Require("board.write"), s.uploadBoardImage)
 	protected.POST("/boards", s.Require("board.write"), s.createBoard)
@@ -153,6 +159,7 @@ func (s *HTTPServer) Register(r *gin.Engine) {
 }
 
 func (s *HTTPServer) RegisterInternal(r *gin.Engine, internalKey string) {
+	s.registerRoleTypesInternal(r, internalKey)
 	r.GET("/v1/internal/configs/:namespace/:config_key", func(c *gin.Context) {
 		provided := c.GetHeader("X-Internal-Key")
 		if internalKey == "" || subtle.ConstantTimeCompare([]byte(provided), []byte(internalKey)) != 1 {

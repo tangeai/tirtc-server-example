@@ -5,6 +5,8 @@ import { ApiError, errorText, request } from '../lib/api';
 import { useLanguage } from '../lib/i18n';
 import { draftOf, editableProviders, matchingVoices, rolePayload, type Role, type RoleDraft, type Voice } from '../lib/roles';
 import { useRemote } from '../lib/use-remote';
+import { RoleTypePicker } from './roles/RoleTypePicker';
+import { availableRoleTypes, roleTypePatch, type RoleType } from '../lib/role-types';
 import { Knowledge } from './roles/Knowledge';
 import { ResourceSelection } from './roles/Resources';
 
@@ -142,30 +144,59 @@ export default function Roles() {
 
 function RoleEditor({ role, draft, setDraft, voices, voiceLoading, voiceError, retryVoices, busy, resourceBlocked, onResourceBlocked, remove }: { role: Entry; draft: RoleDraft; setDraft(patch: Partial<RoleDraft>): void; voices: Voice[]; voiceLoading: boolean; voiceError: boolean; retryVoices(): void; busy: boolean; resourceBlocked: boolean; onResourceBlocked(value: boolean): void; remove(): Promise<void> }) {
   const { t } = useLanguage();
+  const ask = useConfirm();
+  const types = useRemote<{ items: RoleType[] }>('/v1/ai/role-types');
+  const [chosenType, setChosenType] = useState<RoleType>();
+  const [choosing, setChoosing] = useState(false);
+  const live = useRef(true);
+  useEffect(() => { live.current = true; return () => { live.current = false; }; }, []);
   const [section, setSection] = useState('basic');
   const [language, setLanguage] = useState(''), [playing, setPlaying] = useState(false), [audioError, setAudioError] = useState(false);
   const audio = useRef<HTMLAudioElement>(null), readonly = !!role.preset, providers = editableProviders(role);
   const patch = (value: Partial<RoleDraft>) => setDraft(value);
   const list = matchingVoices(voices, language, '');
   const voice = voices.find(v => v.id === draft.voice);
+  const availableTypes = availableRoleTypes(types.data?.items || [], voices);
+  const selectType = async (item: RoleType) => {
+    if (choosing || readonly || !providers.tts) return;
+    setChoosing(true);
+    try {
+      const edited = !!draft.prompt && draft.prompt !== chosenType?.prompt;
+      const decision = edited ? await ask({ title: '保留你写的角色设定？', message: '选择新类型会更换声音，你可以保留当前设定，也可以使用新类型的默认设定。', choices: [{ value: 'cancel', label: '取消' }, { value: 'keep', label: '保留我的设定' }, { value: 'replace', label: '使用默认设定' }] }) : 'replace';
+      if (!live.current || decision === 'cancel') return;
+      patch(roleTypePatch(draft, item, chosenType, decision === 'keep')); setChosenType(item);
+    } finally { if (live.current) setChoosing(false); }
+  };
+  const selectVoice = (id: string) => {
+    const template = availableTypes.find(item => item.voice_id === id);
+    if (template) void selectType(template);
+    else { setChosenType(undefined); patch({ voice: id }); }
+  };
+
   useEffect(() => { const player = audio.current; if (player) { player.pause(); player.currentTime = 0; } setPlaying(false); setAudioError(false); return () => player?.pause(); }, [draft.voice]);
   return <section className="card role-form"><div className="role-form-heading">{role.avatar && /^https?:\/\//.test(role.avatar) ? <img src={role.avatar} alt={t('角色头像')}/> : <span aria-hidden="true">{role.avatar || 'AI'}</span>}<h1>{role.id ? t('正在查看：{p0}', { p0: role.name || role.id }) : t('新建角色')}</h1></div>{readonly && <p className="preset-notice">{t('这是系统预设，只能查看。需要修改时请新建自己的角色。')}</p>}
     <nav className="role-editor-nav" aria-label={t('角色设置')}>
       {[['basic', '基本信息'], ['voice', '声音'], ['advanced', '高级配置']].map(([value, label]) => <button key={value} type="button" aria-pressed={section === value} onClick={() => { audio.current?.pause(); setPlaying(false); setSection(value); }}>{t(label)}</button>)}
     </nav>
-    <fieldset disabled={busy}>
+    <fieldset disabled={busy || choosing}>
       <div hidden={section !== 'basic'}>
+      {!readonly && providers.tts && section === 'basic' && <>
+        {types.error ? <p className="error">{t('角色类型暂不可用，仍可手动编辑。')} <button type="button" onClick={types.reload}>{t('重试')}</button></p> : types.loading ? <p role="status">{t('正在加载角色类型…')}</p> : <RoleTypePicker items={availableTypes} voices={voices} selected={chosenType} disabled={busy || choosing || voiceLoading} onSelect={selectType}/>}
+        {!types.loading && !types.error && !availableTypes.length && <p className="muted">{t('暂无可用角色类型，可先手动编辑角色和声音。')}</p>}
+        {chosenType && <div className="role-type-reset"><span className="badge">{t(draft.prompt === chosenType.prompt ? '默认设定' : '自定义设定')}</span><button type="button" disabled={draft.prompt === chosenType.prompt} onClick={async () => { if (await ask({ title: '恢复默认设定', message: '当前提示词将替换为所选类型的默认设定。', choices: [{ value: 'cancel', label: '取消' }, { value: 'restore', label: '恢复默认' }] }) === 'restore' && live.current) patch({ prompt: chosenType.prompt }); }}>{t('恢复默认')}</button></div>}
+      </>}
+
       <label>{t('智能体名称')}<input required readOnly={readonly} value={draft.name} onChange={e => patch({ name: e.target.value })}/></label><label>{t('智能体描述')}<input readOnly={readonly} value={draft.description} onChange={e => patch({ description: e.target.value })}/></label><label>{t('角色设定')}<textarea aria-label={t('角色设定')} rows={5} readOnly={readonly} value={draft.prompt} onChange={e => patch({ prompt: e.target.value })}/></label><label>{t('开场白')}<input readOnly={readonly} value={draft.welcome} onChange={e => patch({ welcome: e.target.value })}/></label>
       </div>
       <section hidden={section !== 'voice'}><h2>{t('声音')}</h2><p className="muted">{t('选择声音后可试听，保存角色后生效。')}</p>{voiceError && <p className="error">{t('音色列表暂不可用，请稍后重试')} <button type="button" onClick={retryVoices}>{t('重试')}</button></p>}
         {!readonly && providers.tts && <><nav className="filter-tabs">{Object.entries({ '': '全部', zh: '中文', en: '英文（试听同中文）', ja: '日文', ko: '韩文' }).map(([value, label]) => <button type="button" key={value} aria-pressed={language === value} onClick={() => setLanguage(value)}>{t(label)}</button>)}</nav></>}
         <div className="voice-current"><span>{t('当前声音')}：<strong>{voice?.name || draft.voice || t('沿用基础配置')}</strong></span>
-          {draft.voice && !readonly && providers.tts && <button type="button" onClick={() => patch({ voice: '' })}>{t('沿用基础配置')}</button>}
+          {draft.voice && !readonly && providers.tts && <button type="button" onClick={() => { setChosenType(undefined); patch({ voice: '' }); }}>{t('沿用基础配置')}</button>}
         </div>
         {voiceLoading && <p role="status">{t('正在加载声音列表…')}</p>}
         {!providers.tts && <p className="preset-notice">{t('此角色使用其他语音服务，声音配置保持原样。')}</p>}
         {!voiceLoading && !voiceError && !list.length && <p role="status" className="voice-empty">{t(voices.length ? '没有匹配的声音，当前选择保持不变' : '暂无可用声音，请稍后重试')} <button type="button" onClick={retryVoices}>{t('重新加载')}</button></p>}
-        <label>{t('声音列表')}<select aria-label={t('声音列表')} value={draft.voice} disabled={readonly || !providers.tts || voiceLoading} onChange={event => patch({ voice: event.target.value })}>
+        <label>{t('声音列表')}<select aria-label={t('声音列表')} value={draft.voice} disabled={readonly || !providers.tts || voiceLoading} onChange={event => selectVoice(event.target.value)}>
           <option value="">{t('沿用基础配置')}</option>
           {draft.voice && !list.some(item => item.id === draft.voice) && <option value={draft.voice}>{voice?.name || draft.voice}</option>}
           {list.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
