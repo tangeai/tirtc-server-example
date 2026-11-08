@@ -119,13 +119,23 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  const sliders=page.getByRole('slider');assert.equal(await sliders.nth(0).getAttribute('aria-valuenow'),'1');assert.equal(await sliders.nth(1).getAttribute('aria-valuenow'),'1');assert.equal(await sliders.nth(0).getAttribute('aria-valuetext'),'标准');
  await sliders.nth(0).press('End');assert.equal(await page.getByText('保存成功',{exact:true}).count(),0,'editing must clear stale save confirmation');await sliders.nth(1).press('Home');await page.getByRole('button',{name:'保存角色',exact:true}).click();await page.getByText('保存成功',{exact:true}).waitFor();assert.equal(role.service_config.config.tts.provider_params.audio.speech_rate,20);assert.equal(role.service_config.config.tts.provider_params.audio.pitch_rate,-2);
  for(const width of [320,390,768,1440]){await page.setViewportSize({width,height:900});await page.getByRole('button',{name:/角色类型/}).click();if(!await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)){console.log(await page.locator('*').evaluateAll(nodes=>nodes.filter(e=>e.getBoundingClientRect().right>innerWidth+1).map(e=>({tag:e.tagName,cls:e.className,right:e.getBoundingClientRect().right})).slice(-20)));await page.screenshot({path:'/tmp/unify-types-overflow.png'});throw Error('Type overflow '+width);}await page.screenshot({path:root+'/../output/playwright/role-types-'+width+'.png',fullPage:true});await page.keyboard.press('Escape');await page.locator('.role-type-picker .ant-popover:visible').waitFor({state:'hidden'});}
+ for(const viewport of [{width:390,height:740},{width:390,height:844},{width:320,height:568}]) {
+  await page.setViewportSize(viewport);
+  await page.waitForTimeout(250);
+  const boxes=await page.evaluate(()=>{
+   const rect=s=>{const r=document.querySelector(s).getBoundingClientRect();return {top:r.top,bottom:r.bottom,height:r.height};};
+   return {persona:rect('.role-persona'),prompt:rect('.role-prompt'),speech:rect('.role-speech'),form:rect('.role-form'),save:rect('.save-bar')};
+  });
+  assert(boxes.prompt.height>=100 && boxes.prompt.bottom<=boxes.persona.bottom+1 && boxes.persona.bottom<=boxes.speech.top+1 && boxes.speech.bottom<=boxes.form.bottom+1 && boxes.form.bottom<=boxes.save.top+1,'mobile sections overlap: '+JSON.stringify({viewport,boxes}));
+ }
  await page.getByRole('switch',{name:'自定义提示词'}).check();await prompt.fill('这是较长的角色设定，用于检查阅读区域。\n'.repeat(80));
  for(const viewport of [{width:1440,height:900},{width:1366,height:768},{width:390,height:844}]){
   await page.setViewportSize(viewport);
   if(viewport.width<=640)await page.waitForFunction(()=>{const input=document.querySelector('.role-identity input');return input.getBoundingClientRect().width>=input.parentElement.clientWidth*.9;});
   const bounds=await page.evaluate(()=>({page:document.documentElement.scrollHeight,height:innerHeight,prompt:document.querySelector('.role-prompt').getBoundingClientRect().height,save:document.querySelector('.save-bar').getBoundingClientRect().bottom,speech:document.querySelector('.role-speech').getBoundingClientRect().bottom}));
   assert(await prompt.evaluate(el=>el.scrollHeight>el.clientHeight),'long prompt scrolls inside the textarea');
-  assert(bounds.page<=bounds.height,'role page must fit viewport: '+JSON.stringify(bounds));assert(bounds.prompt>=60,'prompt remains readable: '+JSON.stringify(bounds));assert(bounds.save<=bounds.height&&bounds.speech<=bounds.height,'controls remain visible');
+  assert(bounds.page<=bounds.height,'role page must fit viewport: '+JSON.stringify(bounds));assert(bounds.prompt>=60,'prompt remains readable: '+JSON.stringify(bounds));if(viewport.width>640)assert(bounds.save<=bounds.height&&bounds.speech<=bounds.height,'desktop controls remain visible');
+  else {await page.getByRole('button',{name:'保存角色',exact:true}).scrollIntoViewIfNeeded();assert(await page.getByRole('button',{name:'保存角色',exact:true}).isVisible(),'mobile save remains reachable');}
   await page.screenshot({path:root+'/../output/playwright/role-fit-'+viewport.width+'.png',fullPage:true});
  }
  assert.deepEqual(errors,[]);console.log('PASS role type preview, voice/prompt selection, keep/replace/cancel, POST snapshot, responsive layouts');

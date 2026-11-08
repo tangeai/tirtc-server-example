@@ -15,7 +15,7 @@ export function roleSummary(role: Summary['role']) {
 }
 export function roomSummary(room?: RoomState) {
   if (!room) return t('状态获取失败，请刷新');
-  if (room.desired_state !== 'joined') return t(room.state === 'room_closed' ? '房间已解散，可重新建房或加入' : '当前未加入房间');
+  if (room.desired_state !== 'joined') return t(room.state === 'room_closed' ? '房间已解散' : '当前未加入房间');
   if (room.state === 'waiting_device') return room.room_code;
   if (room.state === 'joined') return t('{p0} · {p1} 人在线', { p0: room.room_code || '', p1: room.online_count ?? 0 });
   const states: Record<string, string> = { assigned: '已安排加入', suspended: '设备忙，空闲后加入', connecting: '正在加入', connect_failed: '加入失败，将重试' };

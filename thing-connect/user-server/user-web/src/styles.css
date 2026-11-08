@@ -530,6 +530,7 @@ a{color:var(--accent);text-decoration:none}
 :where(#root,.app-modal) .ant-btn{white-space:normal;height:auto;min-height:36px}
 :where(#root,.app-modal) .ant-btn>span{min-width:0}
 .device-summaries .ant-btn,.role-preview.ant-btn{display:block}
+.device-summaries>a,.device-summaries>button{display:flex;flex-direction:column;align-items:stretch;justify-content:flex-start;gap:0}
 @media(max-width:640px){:where(#root,.app-modal) .ant-btn{min-height:44px}}
 
 .contact-filter{flex-shrink:0}
@@ -658,3 +659,15 @@ a{color:var(--accent);text-decoration:none}
 .device-toolbar h1{margin:0;font-size:20px}
 .device-toolbar .add-device,.device-toolbar .device-refresh{min-height:40px}
 @media(max-width:600px){.device-toolbar{grid-template-columns:minmax(0,1fr) auto;gap:12px}.device-toolbar .add-device{grid-column:1 / -1;width:100%;min-height:44px}}
+
+/* Mobile editors scroll as one column; expanded controls must not compress the prompt. */
+@media(max-width:640px){
+ .roles-page .role-editor{overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch}
+ .roles-page .role-form{flex:0 0 auto;min-height:auto}
+ .roles-page .role-form>fieldset{flex:0 0 auto;min-width:0}
+ .roles-page .role-form>fieldset>.role-basic{flex:0 0 auto;overflow:visible}
+ .roles-page .role-persona{flex:0 0 auto;min-height:0}
+ .roles-page .role-persona textarea.role-prompt{flex:0 0 auto;height:200px;min-height:200px}
+ .roles-page .role-prompt-heading{flex-wrap:wrap}
+ .roles-page .save-bar{flex:0 0 auto;padding-bottom:max(12px,env(safe-area-inset-bottom))}
+}

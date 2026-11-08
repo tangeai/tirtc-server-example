@@ -14,7 +14,7 @@
   function roomSummary(room) {
     if (!room || room.desired_state !== "joined")
       return room?.state === "room_closed"
-        ? WebI18n.t("房间已解散，可重新建房或加入")
+        ? WebI18n.t("房间已解散")
         : WebI18n.t("当前未加入房间");
     const code = room.room_code || WebI18n.t("正在同步房间号");
     if (room.state === "waiting_device") return code;
