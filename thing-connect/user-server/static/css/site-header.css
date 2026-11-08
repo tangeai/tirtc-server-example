@@ -193,3 +193,7 @@ html {
     display: block;
   }
 }
+
+/* Keep navigation touch targets usable with the longer English brand. */
+.site-header .menu-button{flex-shrink:0;width:44px;height:44px}
+@media(max-width:620px){.site-header .nav{gap:12px}}

@@ -126,3 +126,11 @@ test('region defaults only on creation and is immutable on edits', () => {
  assert.equal(draftOf({ id: 'legacy' }).region, '');
  assert.throws(() => rolePayload({}, { ...draftOf({}), name: '地域测试', region: 'unsupported' }, []));
 });
+
+test('video settings preserve inheritance, explicit false and unrelated fields',()=>{
+ const unset=draftOf(role);assert.equal(unset.video,undefined);assert.equal(rolePayload(role,unset,[]).agent_config?.video,undefined);
+ unset.video=true;assert.deepEqual(rolePayload(role,unset,[]).agent_config?.video,{enable:true});
+ const enabled={...role,agent_config:{...role.agent_config,video:{enable:true,opaque:'keep'}}};const draft=draftOf(enabled);assert.equal(draft.video,true);draft.video=false;
+ assert.deepEqual(rolePayload(enabled,draft,[]).agent_config?.video,{enable:false,opaque:'keep'});
+ const external={...enabled,service_config:{type:'coze'}};assert.deepEqual(rolePayload(external,draft,[]).agent_config?.video,enabled.agent_config.video);
+});

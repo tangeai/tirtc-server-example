@@ -53,12 +53,12 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
     assert.equal(await card.locator('.device-actions>:is(a,button)').count(),4);assert.equal(await card.locator('.device-actions svg').count(),4);assert.equal(await card.locator('.device-symbol svg').count(),1);
    }
    assert.equal(await page.locator('.add-device').evaluate(e=>getComputedStyle(e).position),'static');
-   const grid=await page.locator('.device-grid').boundingBox(),add=await page.locator('.add-device').boundingBox();assert(add.y>=grid.y+grid.height,'add button follows list');
+   const grid=await page.locator('.device-grid').boundingBox(),add=await page.locator('.add-device').boundingBox();assert(add.y+add.height<=grid.y,'add button precedes list');assert(add.y>=0&&add.y+add.height<=900,'add button is visible in the first viewport');
    assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'no horizontal overflow');
    await page.locator('h1').click();
    await page.screenshot({path:root+'/../output/playwright/device-prototype-'+language+'-'+width+'.png',fullPage:true});
   }
  }
- assert.deepEqual(errors,[]);console.log('PASS: prototype geometry, icons, footer action and responsive Chinese/English at 5 widths.');
+ assert.deepEqual(errors,[]);console.log('PASS: prototype geometry, icons, top add-device action and responsive Chinese/English at 5 widths.');
  }finally{await browser.close();server.close();}
 })().catch(e=>{console.error(e);server.close();process.exitCode=1;});

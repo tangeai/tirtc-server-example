@@ -64,12 +64,18 @@ type Role struct {
 // null to clear a previously bound knowledge base, and omitempty would
 // silently drop that signal (indistinguishable from "field not provided").
 type AgentConfig struct {
+	Video         *RoleVideoConfig  `json:"video,omitempty"`
 	Prompt        string            `json:"prompt,omitempty"`
 	WelcomeText   string            `json:"welcome_text,omitempty"`
 	AliRAG        *RoleAliRAGConfig `json:"ali_rag"`
 	AliMemory     *AliMemoryCfg     `json:"ali_memory,omitempty"`
 	MCPTools      []string          `json:"mcp_tools,omitempty"`
 	DevicePlugins []string          `json:"device_plugins,omitempty"`
+}
+
+// RoleVideoConfig controls video understanding; false is an explicit override.
+type RoleVideoConfig struct {
+	Enable bool `json:"enable"`
 }
 
 // RoleAliRAGConfig is the knowledge base (RAG) configuration.

@@ -2,6 +2,8 @@ const fs=require('node:fs'),path=require('node:path'),{spawnSync}=require('node:
 const root=path.resolve(__dirname,'../../../..'),out=path.join(root,'output/playwright');
 fs.mkdirSync(out,{recursive:true});
 const coverage={
+ 'auth-english':'英文注册/登录/找回密码：五种宽度、漏译、切换语言保留输入、校验及成功流程',
+ 'public-pages':'首页与开发板：中英文五种宽度、手机导航键盘与外部关闭、型号能力、详情/缺失资源、加载重试、深链接',
  'conversations':'会话记录入口、分页、权限凭证、删除确认与失败恢复、迟到响应、空态、移动端与桌面布局',
  'auth-refill':'验证码弹出后密码管理器再次回填旧账号：保持本次凭据、验证不中断、提交账号一致',
  'auth-autofill':'原生自动填充不被渲染覆盖、显示账号与提交一致、验证及请求中换账号隔离、注册/重置密码',
@@ -21,7 +23,7 @@ const coverage={
  'role-editor':'基本字段、声音筛选/试听、语速音调、模型记忆、列表失败重试、保存载荷',
  'role-lifecycle':'角色新建/保存/放弃/切换/删除、保存失败阻止切换',
  'role-resources':'知识库及文件增删改、上传失败重试、移除与删除区别、单一上传入口、MCP/插件管理',
- 'role-selection':'点击预览与绑定分离、切换后详情同步、描述展示',
+ 'role-selection':'点击预览与绑定分离、切换后详情同步、角色类型展示',
  'room-flow':'6位数字房间号、4位数字密码、创建/加入/退出确认、失败恢复、状态更新失败、各设备状态'
 };
 const results=[],started=new Date().toISOString();

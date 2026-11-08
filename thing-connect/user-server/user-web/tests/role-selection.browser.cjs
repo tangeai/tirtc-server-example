@@ -38,7 +38,7 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  await page.waitForFunction(()=>document.querySelector('.role-editor h1')?.textContent.includes('预设角色'));
  assert.equal(await page.getByLabel('智能体名称',{exact:true}).inputValue(),'预设角色','card description selects editor');
  assert.equal(bound,'custom','preview does not switch device');
- assert.equal(await page.locator('.role-card').filter({hasText:'预设角色'}).locator('.muted').textContent(),'暂无描述','prompt is never shown as description');
+ assert.equal(await page.locator('.role-card').filter({hasText:'预设角色'}).locator('.muted').textContent(),'系统预设','preset fallback is shown instead of description or prompt');
  assert.deepEqual(errors,[]);console.log('PASS: switching synchronizes editor; card selection preserves binding; description does not expose prompt');
  }finally{await browser.close();server.close();}
 })().catch(e=>{console.error(e);server.close();process.exitCode=1;});

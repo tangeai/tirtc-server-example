@@ -46,6 +46,7 @@
     card.append(image(board));
     const identity = document.createElement('div');
     identity.append(text('small', '', board.vendor), text('h2', '', board.name), text('code', '', board.model));
+    if (board.capabilities?.length) identity.append(text('p', 'board-capabilities', board.capabilities.join(' · ')));
     card.append(identity, status(board), detailButton(board));
     return interactive(card, board);
   };
@@ -86,12 +87,15 @@
   }
   function render(data) {
     boards = data.boards || [];
-    document.querySelector('#board-count').textContent = i18n.t('boards.count', { count: boards.length });
+    document.querySelector('#board-count').textContent = i18n.t(boards.length === 1 ? 'boards.countOne' : 'boards.count', { count: boards.length });
     document.querySelector('#empty').hidden = boards.length !== 0;
     featured.replaceChildren(...boards.slice(0, 20).map(featuredCard));
     const more = boards.slice(20);
     document.querySelector('#more-section').hidden = more.length === 0;
     list.replaceChildren(...more.map(boardRow));
+    openRequestedDetail();
+  }
+  function openRequestedDetail() {
     let requested = '';
     try { requested = decodeURIComponent(location.hash.slice(1)); } catch (_) { /* Ignore malformed links. */ }
     const selected = boards.find((board) => board.detail_slug === requested);
@@ -112,6 +116,7 @@
   dialog.addEventListener('click', (event) => { if (event.target === dialog) dialog.close(); });
   dialog.addEventListener('close', () => history.replaceState(null, '', '/boards'));
   document.querySelector('#retry').addEventListener('click', load);
+  window.addEventListener('hashchange', openRequestedDetail);
   menuButton.addEventListener('click', () => {
     const open = nav.classList.toggle('menu-open');
     menuButton.setAttribute('aria-expanded', String(open));
@@ -122,12 +127,21 @@
     menuButton.setAttribute('aria-expanded', 'false');
     menuButton.setAttribute('aria-label', i18n.t('site.menuOpen'));
   }));
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && nav.classList.contains('menu-open')) {
+      menuButton.click();
+      menuButton.focus();
+    }
+  });
+  document.addEventListener('click', (event) => {
+    if (nav.classList.contains('menu-open') && !nav.contains(event.target)) menuButton.click();
+  });
   const loggedIn = Boolean(localStorage.getItem('token'));
   document.querySelectorAll('[data-auth-guest]').forEach((item) => { item.hidden = loggedIn; });
   document.querySelectorAll('[data-auth-user]').forEach((item) => { item.hidden = !loggedIn; });
   i18n.onChange(() => {
     menuButton.setAttribute('aria-label', i18n.t(nav.classList.contains('menu-open') ? 'site.menuClose' : 'site.menuOpen'));
-    document.querySelector('#board-count').textContent = i18n.t('boards.count', { count: boards.length });
+    document.querySelector('#board-count').textContent = i18n.t(boards.length === 1 ? 'boards.countOne' : 'boards.count', { count: boards.length });
     featured.replaceChildren(...boards.slice(0, 20).map(featuredCard));
     list.replaceChildren(...boards.slice(20).map(boardRow));
     const detailName = document.querySelector('#detail-name').textContent;

@@ -24,16 +24,21 @@ export function roomSummary(room?: RoomState) {
 export function deviceRows(device: Device): [string, string][] {
   return [['设备名称', device.device_name || t('未命名设备')], ['设备 ID', device.device_id], ['MAC', device.mac], ['芯片型号', device.hardware?.chip_model], ['开发板型号', device.hardware?.board_model], ['固件版本', device.firmware_version], ['绑定时间', device.bind_time]].map(([key, value]) => [t(key || ''), value || t('未上报')]);
 }
+function withRaw(value: unknown, label: string): string {
+  if (value === undefined) return label;
+  const raw = typeof value === 'string' ? value : JSON.stringify(value);
+  return raw === label ? label : `${label} (${raw})`;
+}
 function codecs(value: unknown) {
   if (value == null) return t('未上报');
   const names: Record<string, string> = { opus: 'Opus', aac: 'AAC', none: t('无'), amr: 'AMR', amr_nb: 'AMR-NB', amr_wb: 'AMR-WB', pcm: 'PCM', alaw: 'G.711 A-law', g711a: 'G.711 A-law', h264: 'H.264', h265: 'H.265', mjpeg: 'MJPEG' };
   const list: unknown[] = Array.isArray(value) ? value : String(value).split(/[,/;|\s]+/);
-  return list.filter(Boolean).map(v => names[String(v).toLowerCase()] || String(v)).join(' / ') || t('无');
+  return withRaw(value, list.filter(Boolean).map(v => names[String(v).toLowerCase()] || String(v)).join(' / ') || t('无'));
 }
 export function mediaRows(device: Device, scene: string): [string, string][] | undefined {
   const p = device.profiles?.[scene]; if (!p || !Object.keys(p).length) return;
-  const display = (key: string, format: (value: unknown) => string = String) => p[key] == null ? t('未上报') : format(p[key]);
-  const video = (key: string) => p.no_video === true ? t('无') : codecs(p[key]);
+  const display = (key: string, format: (value: unknown) => string = String) => p[key] == null ? t('未上报') : withRaw(p[key], format(p[key]));
+  const video = (key: string) => p.no_video === true ? withRaw(p[key], t('无') + ' (no_video=true)') : codecs(p[key]);
   return [['上行音频', codecs(p.up_audio_mt)], ['上行视频', video('up_video_mt')], ['下行音频（首选顺序）', codecs(p.down_audio_mt)], ['下行视频（首选顺序）', video('down_video_mt')],
     ...(scene === 'stream' ? [['上行音频 Stream ID', display('up_audio_streamid')], ['上行视频 Stream ID', display('up_video_streamid')], ['下行音频 Stream ID', display('down_audio_streamid')], ['下行视频 Stream ID', display('down_video_streamid')]] : []),
     ['音频采样率', display('audio_rate', v => `${v} Hz`)], ['音频声道数', display('audio_channels')], ['摄像头旋转', display('camera_rotation', v => t('{p0}°（顺时针）', { p0: String(v) }))],

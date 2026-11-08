@@ -9,7 +9,7 @@ export const llmModels = [
 export interface ComponentConfig { provider?: string; provider_params?: { model?: string; audio?: { voice_type?: string; speech_rate?: number; pitch_rate?: number; [key: string]: unknown }; voice?: string; rate?: number; pitch?: number; [key: string]: unknown }; [key: string]: unknown }
 export interface Role {
   id?: string; region?: string; name?: string; avatar?: string; parent_role_id?: string;
-  agent_config?: { prompt?: string; welcome_text?: string; ali_memory?: { enable?: boolean; [key: string]: unknown }; ali_rag?: { index_id?: string; [key: string]: unknown } | null; mcp_tools?: string[]; device_plugins?: string[]; [key: string]: unknown };
+  agent_config?: { video?: { enable: boolean; [key: string]: unknown }; prompt?: string; welcome_text?: string; ali_memory?: { enable?: boolean; [key: string]: unknown }; ali_rag?: { index_id?: string; [key: string]: unknown } | null; mcp_tools?: string[]; device_plugins?: string[]; [key: string]: unknown };
   service_config?: { name?: string; type?: string; config?: { llm?: ComponentConfig; tts?: ComponentConfig; [key: string]: unknown }; [key: string]: unknown };
   user_params?: { description?: string; voice?: string; role_type_id?: string; role_type_revision?: number; role_type_custom?: boolean; [key: string]: unknown };
   device_plugin_refs?: { id: string; name?: string }[];
@@ -19,11 +19,11 @@ export function findVoice(voices: Voice[], id: string, model?: string): Voice | 
   const matches = voices.filter(voice => voice.id === id && (!model || voice.model === model));
   return matches.length === 1 ? matches[0] : undefined;
 }
-export interface RoleDraft { region: string; typeId: string; typeRevision: number; voiceModel?: string; customPrompt: boolean | undefined; name: string; description: string; prompt: string; welcome: string; voice: string; model: string; rate: number; pitch: number; memory: boolean; knowledge: string; mcp: string[]; plugins: string[] }
+export interface RoleDraft { video: boolean | undefined; region: string; typeId: string; typeRevision: number; voiceModel?: string; customPrompt: boolean | undefined; name: string; description: string; prompt: string; welcome: string; voice: string; model: string; rate: number; pitch: number; memory: boolean; knowledge: string; mcp: string[]; plugins: string[] }
 export function draftOf(role: Role): RoleDraft {
   const component = role.service_config?.config?.tts;
   const tts = voiceSettings(component);
-  return { region: role.region || (role.id ? '' : 'cn01'), typeId: role.user_params?.role_type_id || '', typeRevision: role.user_params?.role_type_revision || 0, customPrompt: role.user_params?.role_type_custom, name: role.name || '', description: role.user_params?.description || '', prompt: role.agent_config?.prompt || '', welcome: role.agent_config?.welcome_text || '',
+  return { video: role.agent_config?.video?.enable, region: role.region || (role.id ? '' : 'cn01'), typeId: role.user_params?.role_type_id || '', typeRevision: role.user_params?.role_type_revision || 0, customPrompt: role.user_params?.role_type_custom, name: role.name || '', description: role.user_params?.description || '', prompt: role.agent_config?.prompt || '', welcome: role.agent_config?.welcome_text || '',
     voiceModel: component?.provider_params?.model || '', voice: tts?.voice || role.user_params?.voice || '', model: role.service_config?.config?.llm?.provider_params?.model || (role.id ? '' : 'qwen3.5-flash'), rate: tts?.rate ?? 1, pitch: tts?.pitch ?? 1,
     memory: role.agent_config?.ali_memory?.enable === true, knowledge: role.agent_config?.ali_rag?.index_id || '', mcp: [...(role.agent_config?.mcp_tools || [])], plugins: [...(role.agent_config?.device_plugins || [])] };
 }
@@ -63,7 +63,7 @@ export function rolePayload(previous: Role, draft: RoleDraft, voices: Voice[]): 
     }
   }
   return { name, ...(!previous.id ? { region: draft.region } : {}), avatar: previous.avatar || '', parent_role_id: previous.parent_role_id || '',
-    agent_config: { ...previous.agent_config, prompt: draft.prompt.trim(), welcome_text: draft.welcome.trim(), ali_memory: { ...previous.agent_config?.ali_memory, enable: draft.memory },
+    agent_config: { ...previous.agent_config, ...(edits.custom && draft.video !== undefined ? { video: { ...previous.agent_config?.video, enable: draft.video } } : {}), prompt: draft.prompt.trim(), welcome_text: draft.welcome.trim(), ali_memory: { ...previous.agent_config?.ali_memory, enable: draft.memory },
       ali_rag: draft.knowledge ? { ...previous.agent_config?.ali_rag, index_id: draft.knowledge } : null, mcp_tools: [...draft.mcp], device_plugins: [...draft.plugins] },
     service_config: edits.custom ? { ...previous.service_config, ...(previous.service_config ? {} : { name: 'default' }), type: 'custom-compose', config } : previous.service_config,
     user_params: { ...previous.user_params, description: draft.description.trim(), voice: draft.voice || undefined, role_type_id: draft.typeId || undefined, role_type_revision: draft.typeId ? draft.typeRevision : undefined, role_type_custom: draft.typeId ? draft.customPrompt : undefined } };

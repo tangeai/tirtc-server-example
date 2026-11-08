@@ -41,7 +41,7 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  await page.getByLabel('智能体名称',{exact:true}).fill('新的名称');
  await page.getByRole('radio',{name:'扩展能力',exact:true}).locator('..').click();
  await page.getByText('更多角色信息',{exact:true}).click();
- await page.getByLabel('智能体描述',{exact:true}).fill('角色说明');await page.getByLabel('开场白',{exact:true}).fill('你好');
+ assert.equal(await page.getByLabel('智能体描述',{exact:true}).count(),0);await page.getByLabel('开场白',{exact:true}).fill('你好');
  await page.getByRole('radio',{name:'角色',exact:true}).locator('..').click();await page.getByLabel('角色设定',{exact:true}).fill('测试设定');
  await page.getByRole('button',{name:/角色类型/}).click();
  await page.getByRole('button',{name:'中文伙伴 中文测试声音',exact:true}).click();
@@ -57,7 +57,7 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  await chooseSelect(page.getByRole('combobox',{name:'模型',exact:true}),'qwen3.7-plus');await page.getByLabel('长期记忆').check();await page.getByRole('radio',{name:'角色',exact:true}).locator('..').click();
  assert.equal(await page.getByLabel('智能体名称',{exact:true}).inputValue(),'新的名称');
  await page.getByRole('button',{name:'保存角色',exact:true}).click();await page.getByText('保存成功',{exact:true}).waitFor();
- assert.equal(role.service_config.config.tts.provider_params.voice,'zh');assert.equal(role.agent_config.ali_memory.enable,true);assert.equal(role.agent_config.prompt,'测试设定');assert.equal(role.agent_config.welcome_text,'你好');assert.equal(role.user_params.description,'角色说明');assert.equal(role.service_config.config.tts.provider_params.rate,1.2);assert.equal(role.service_config.config.tts.provider_params.pitch,0.8);assert.equal(role.service_config.config.llm.provider_params.model,'qwen3.7-plus');
+ assert.equal(role.service_config.config.tts.provider_params.voice,'zh');assert.equal(role.agent_config.ali_memory.enable,true);assert.equal(role.agent_config.prompt,'测试设定');assert.equal(role.agent_config.welcome_text,'你好');assert.equal(role.user_params.description,'测试描述');assert.equal(role.service_config.config.tts.provider_params.rate,1.2);assert.equal(role.service_config.config.tts.provider_params.pitch,0.8);assert.equal(role.service_config.config.llm.provider_params.model,'qwen3.7-plus');
  for(const width of [320,390,768,1440]){
   await page.setViewportSize({width,height:900});
   if(!await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)){console.log(await page.locator('*').evaluateAll(nodes=>nodes.filter(e=>e.getBoundingClientRect().right>innerWidth+1).map(e=>({tag:e.tagName,cls:e.className,right:e.getBoundingClientRect().right})).slice(-20)));await page.screenshot({path:'/tmp/unify-role-overflow.png'});throw Error('Role overflow '+width);}

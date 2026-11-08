@@ -83,7 +83,7 @@ function ContactList({ device, devices }: { device: string; devices: Device[] })
       {!loading && !filtered.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t(rows.length ? '没有匹配的联系人' : '暂无联系人')}>{rows.length > 0 && <Button onClick={() => { setSearch(''); setFilter('all'); }}>{t('清除搜索和筛选')}</Button>}</Empty>}
       <List className="contact-entries" dataSource={filtered} rowKey={key} locale={{ emptyText: null }} renderItem={c=><List.Item className="contact-entry">
         <div className="contact-entry-main"><div className="contact-identity"><strong>{name(c)}</strong>{categories.size > 1 && <span className="badge">{t(c.type === 'voip' ? '微信授权' : c.source === 'auto' ? '我的设备' : '手动添加')}</span>}{c.type !== 'voip' && <span className={c.online ? 'success' : 'muted'}>{t(c.online ? '在线' : '离线')}</span>}</div>{c.type !== 'voip' && <p className="muted contact-peer-id">{c.device_id}</p>}</div>
-        <div className="contact-entry-actions"><ActionButton type="text" onClick={() => setEditing(key(c))}>{t('改备注')}</ActionButton>{c.source === 'manual' && c.type !== 'voip' && <ActionButton type="text" danger onClick={() => setRemove(c)}>{t('删除')}</ActionButton>}</div>
+        <div className="contact-entry-actions" style={editing === key(c) ? {display:'none'} : undefined}><ActionButton type="text" onClick={() => setEditing(key(c))}>{t('改备注')}</ActionButton>{c.source === 'manual' && c.type !== 'voip' && <ActionButton type="text" danger onClick={() => setRemove(c)}>{t('删除')}</ActionButton>}</div>
         {editing === key(c) && <div className="contact-remark"><Remark key={key(c)} contact={c} device={device} close={() => setEditing(undefined)} saved={remark => { updated(items => items.map(item => key(item) === key(c) ? { ...item, remark } : item)); setEditing(undefined); }}/></div>}
       </List.Item>}/>
 
@@ -104,7 +104,10 @@ function Remark({ contact, device, close, saved }: { contact: Contact; device: s
     catch (e) { if (alive.current) setError(errorText(e)); }
     finally { pending.current = false; if (alive.current) setBusy(false); }
   }
-  return <form onSubmit={event => void submit(event)}><ConfigProvider componentDisabled={busy}><fieldset disabled={busy}><label>{t('联系人备注')}<Input autoFocus value={value} onChange={e => setValue(e.target.value)} onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); } }}/></label><p className="muted">{t('清空后显示“{name}”；仅对当前设备生效。最多 64 个字符。', { name: fallback(contact) })}</p>{error && <p className="error" role="alert">{t(error)}</p>}<div className="row"><Button className="primary" type="submit">{t(busy ? '保存中…' : '保存')}</Button><Button type="button" onClick={close}>{t('取消')}</Button></div></fieldset></ConfigProvider></form>;
+  return <form className="remark-form" onSubmit={event => void submit(event)}><ConfigProvider componentDisabled={busy}><fieldset disabled={busy}>
+    <div className="remark-edit-row"><Input aria-label={t('联系人备注')} placeholder={fallback(contact)} autoFocus value={value} onChange={e => {setValue(e.target.value);setError('');}} onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); if(!busy)close(); } }}/><div className="remark-actions"><Button type="button" onClick={close}>{t('取消')}</Button><Button className="primary" type="submit">{t(busy ? '保存中…' : '保存')}</Button></div></div>
+    <p className="remark-hint muted">{t('清空恢复原名，仅对当前设备生效，最多 64 个字符。')}</p>{error && <p className="error" role="alert">{t(error)}</p>}
+  </fieldset></ConfigProvider></form>;
 }
 function AddContact({ device, devices, contacts, close, accepted }: { device: string; devices: Device[]; contacts: Contact[]; close(): void; accepted(): void }) {
   const { t } = useLanguage();
@@ -134,5 +137,5 @@ function RemoveContact({ contact, close, removed }: { contact: Contact; close():
     catch (e) { if (alive.current) setError(errorText(e)); }
     finally { pending.current = false; if (alive.current) setBusy(false); }
   }
-  return <Dialog title="删除联系人？" onClose={close}><p>{name(contact)} · {contact.device_id}</p><p className="muted">{t('删除后双方都不再是好友，需要重新申请并同意后才能恢复联系。')}</p>{error && <p className="error" role="alert">{error}</p>}<div className="row"><Button onClick={close}>{t('取消')}</Button><Button className="danger" disabled={busy} onClick={() => void remove()}>{t('删除')}</Button></div></Dialog>;
+  return <Dialog title="删除联系人？" onClose={close}><p>{name(contact)} · {contact.device_id}</p><p className="muted">{t('删除后双方都不再是好友，需要重新申请并同意后才能恢复联系。')}</p>{error && <p className="error" role="alert">{error}</p>}<div className="dialog-actions"><Button onClick={close}>{t('取消')}</Button><Button className="danger" disabled={busy} onClick={() => void remove()}>{t('删除')}</Button></div></Dialog>;
 }

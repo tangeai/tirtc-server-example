@@ -29,3 +29,7 @@
 .detail-links a{min-height:44px;display:flex;align-items:center;justify-content:center}
 .merchant-note{font-size:13px!important}
 @media(max-width:560px){.detail-content{padding:20px}.detail-content h2{font-size:22px}.identity h2{font-size:16px}}
+
+.featured-card h2,.featured-card code{white-space:normal;overflow-wrap:anywhere}
+.board-capabilities{margin:8px 0 0;color:var(--muted);font-size:13px;line-height:1.6;overflow-wrap:anywhere}
+.featured-card:focus-visible,.board-row:focus-visible{outline:2px solid var(--accent);outline-offset:3px}

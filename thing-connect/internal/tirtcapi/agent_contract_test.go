@@ -327,3 +327,35 @@ func TestRoleRegionCreateAndRead(t *testing.T) {
 		})
 	}
 }
+
+func TestRoleVideoSettingForwarding(t *testing.T) {
+	for _, raw := range []string{`{}`, `{"video":{"enable":true}}`, `{"video":{"enable":false}}`} {
+		t.Run(raw, func(t *testing.T) {
+			var config AgentConfig
+			if err := json.Unmarshal([]byte(raw), &config); err != nil {
+				t.Fatal(err)
+			}
+			client := contractClient(t, func(w http.ResponseWriter, r *http.Request) {
+				var body struct {
+					AgentConfig map[string]json.RawMessage `json:"agent_config"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Fatal(err)
+				}
+				var expected map[string]json.RawMessage
+				_ = json.Unmarshal([]byte(raw), &expected)
+				if string(body.AgentConfig["video"]) != string(expected["video"]) {
+					t.Errorf("video changed: %s", body.AgentConfig["video"])
+				}
+				_, _ = fmt.Fprintf(w, `{"code":200,"data":{"id":"role-1","agent_config":%s}}`, raw)
+			})
+			role, err := client.UpdateRole(context.Background(), "role-1", RoleInput{Name: "测试", AgentConfig: &config})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(role.AgentConfig.Video, config.Video) {
+				t.Fatalf("video response changed: %+v", role.AgentConfig.Video)
+			}
+		})
+	}
+}

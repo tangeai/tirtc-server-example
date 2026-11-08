@@ -69,7 +69,7 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
   await page.goto(base+'/boards');await page.locator('.featured-card').first().click();await captureDialog('开发板详情');
   await page.evaluate(()=>{localStorage.setItem('token','test');sessionStorage.clear();});await page.goto(base+'/devices');await page.getByText('设备一',{exact:true}).waitFor();
   const first=page.locator('[data-device-id="one"]');
-  for(const label of ['设备信息','修改名称','解绑设备']){await first.getByText('更多 ▾').click();await page.getByRole('button',{name:label,exact:true}).click();await page.locator('.ant-popover:visible').waitFor({state:'hidden'});await captureDialog(label);}
+  for(const label of ['设备信息','修改名称','解绑设备']){await first.getByText('更多 ▾').click();await page.getByRole('menuitem',{name:label,exact:true}).click();await page.locator('.ant-dropdown:visible').waitFor({state:'hidden'});await captureDialog(label);}
   await first.getByRole('button',{name:/AI识别/}).click();await page.getByText('环境声音识别',{exact:false}).waitFor();await captureDialog('识别配置');
   await page.goto(base+'/contacts?device_id=one');await page.getByRole('button',{name:'添加联系人',exact:true}).click();await captureDialog('添加联系人');
   await page.getByRole('button',{name:'改备注',exact:true}).first().click();await page.getByLabel('联系人备注').fill('长名称测试-'.repeat(8));assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await page.getByRole('button',{name:'取消',exact:true}).click();

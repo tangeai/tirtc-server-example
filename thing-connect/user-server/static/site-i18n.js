@@ -112,6 +112,7 @@
     'boards.details': 'Details →',
     'boards.productImage': '{name} product image',
     'boards.count': '{count} boards',
+    'boards.countOne': '1 board',
   };
   const chineseDynamic = {
     'site.menuOpen': '打开导航',
@@ -126,6 +127,7 @@
     'boards.details': '详情 →',
     'boards.productImage': '{name} 产品图',
     'boards.count': '{count} 款',
+    'boards.countOne': '1 款',
   };
   const dictionaries = { 'zh-CN': chineseDynamic, en: english };
   const listeners = new Set();

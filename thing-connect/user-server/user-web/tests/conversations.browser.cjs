@@ -62,7 +62,7 @@ const server=http.createServer((req,res)=>{
   failList=true;await dialog.getByRole('button',{name:'刷新',exact:true}).click();await dialog.getByRole('alert').waitFor();failList=false;await dialog.getByRole('button',{name:'刷新',exact:true}).click();await dialog.getByText('暂无会话记录',{exact:true}).waitFor();
   await dialog.getByRole('button',{name:'关闭弹窗',exact:true}).click();
   await page.getByRole('button',{name:'放弃修改',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'放弃修改',exact:true}).click();
-  await page.goto(base+'/devices');await page.getByText('更多 ▾',{exact:true}).click();await page.getByRole('button',{name:'会话记录',exact:true}).click();await dialog.getByText('暂无会话记录',{exact:true}).waitFor();
+  await page.goto(base+'/devices');await page.getByText('更多 ▾',{exact:true}).click();await page.getByRole('menuitem',{name:'会话记录',exact:true}).click();await dialog.getByText('暂无会话记录',{exact:true}).waitFor();
   await dialog.getByRole('button',{name:'关闭弹窗',exact:true}).click();
   deviceName='';await page.goto(base+'/agent?device_id=one');
   await page.getByRole('button',{name:'会话记录',exact:true}).click();

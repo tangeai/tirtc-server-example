@@ -1,36 +1,10 @@
-/* Shared brand mark for the homepage, authentication and device list. */
+/* Shared transparent robot mark for public pages and legacy headers. */
 .brand-mark {
   display: inline-block;
-  position: relative;
-  width: 31px;
-  height: 31px;
+  width: 32px;
+  height: 32px;
   flex: 0 0 auto;
-  border-radius: 9px;
-  background: #172026;
-  overflow: hidden;
-}
-
-.brand-mark::before,
-.brand-mark::after {
-  box-sizing: border-box;
-  content: "";
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  border-radius: 50%;
-  border: 2px solid #79d2c4;
-}
-
-.brand-mark::before {
-  width: 16px;
-  height: 16px;
-}
-
-.brand-mark::after {
-  width: 4px;
-  height: 4px;
-  background: #79d2c4;
+  background: url('/static/xiaotai-logo-transparent.png') center / contain no-repeat;
 }
 
 .site-brand-name {

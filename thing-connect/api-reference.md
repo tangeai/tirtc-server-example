@@ -3147,6 +3147,7 @@ H5 智能体管理页面由 user-server 的 `GET /agent?device_id=xxx` 提供。
 | `ali_rag.index_id` | string | 设置知识库绑定时提供索引 ID |
 | `ali_memory` | object | 可选，记忆配置 |
 | `ali_memory.enable` | boolean | 记忆开关 |
+| `video.enable` | boolean | 视频识别开关；`custom-compose` 使用，`false` 明确关闭，未设置时沿用基础配置。抽帧间隔及图片数量由云端统一管理 |
 | `mcp_tools` | string[] | 可选，绑定的 MCP 工具 ID |
 | `device_plugins` | string[] | 可选，绑定的设备插件 ID |
 

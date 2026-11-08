@@ -1,10 +1,10 @@
 import Bind from './Bind';
-import { Input, Segmented } from 'antd';
+import { Collapse, Descriptions, Dropdown, Input, Segmented } from 'antd';
 import { Button } from '../components/Button';
 import Contacts from './Contacts';
 import Room from './Room';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { Account, Dropdown, NavigationLinks } from '../components/Account';
+import { Account, NavigationLinks } from '../components/Account';
 import { DeviceIcon } from '../components/DeviceIcon';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { Dialog } from '../components/Dialog';
@@ -83,17 +83,17 @@ export default function Devices() {
   }
   const close = () => setModal(undefined);
   const href = (page: string, device: Device) => page + '?device_id=' + encodeURIComponent(device.device_id);
-  return <><header className="topbar"><span className="brand">◉ {t('小钛控制台')}</span><div className="header-actions"><NavigationLinks/><LanguageSwitcher/><Account/></div></header>
-    <main className="device-layout"><div className="row"><h1>{t('我的设备')} <small>({data.devices.length})</small></h1><Button className="device-refresh" disabled={loading} onClick={() => void refresh()}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-1l2 3M4 15l2 3a7 7 0 0 0 12-1"/></svg>{t('刷新')}</Button></div>
+  return <><header className="topbar"><span className="brand"><img className="console-brand-icon" src="/static/xiaotai-logo-transparent.png" alt="" width="32" height="32"/>{t('小钛控制台')}</span><div className="header-actions"><NavigationLinks/><LanguageSwitcher/><Account/></div></header>
+    <main className="device-layout"><div className="device-toolbar"><h1>{t('我的设备')} <small>({data.devices.length})</small></h1><Button className="device-refresh" disabled={loading} onClick={() => void refresh()}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-1l2 3M4 15l2 3a7 7 0 0 0 12-1"/></svg>{t('刷新')}</Button><Button className="primary add-device" disabled={adding} onClick={() => void add()}>＋ {t('添加设备')}</Button></div>
       {loading && <p role="status" className="muted">{t('正在加载设备…')}</p>}{error && <p className="error" role="alert">{t(error)}</p>}{restored && <p className="muted">{t('显示上次查看的设备状态，点击刷新获取最新状态。')}</p>}
       <div className="device-grid">{data.devices.map(device => { const summary = data.summaries[device.device_id]; return <article className="card device-card" key={device.device_id} data-device-id={device.device_id}>
-        <div className="row"><div className="device-title"><span className="device-symbol"><DeviceIcon name="monitor"/></span><h2>{device.device_name || t('未命名设备')}</h2></div><Dropdown label={t('更多 ▾')}><Button onClick={() => setModal({ kind: 'rename', device })}>{t('修改名称')}</Button><Button onClick={() => setModal({ kind: 'info', device })}>{t('设备信息')}</Button><Button onClick={() => setModal({ kind: 'history', device })}>{t('会话记录')}</Button><Button className="danger" onClick={() => setModal({ kind: 'unbind', device })}>{t('解绑设备')}</Button></Dropdown></div>
+        <div className="row"><div className="device-title"><span className={'device-symbol' + (device.online ? ' device-symbol-online' : '')}><DeviceIcon name="monitor"/></span><h2>{device.device_name || t('未命名设备')}</h2></div><Dropdown trigger={['click']} placement="bottomRight" menu={{items:[{key:'rename',label:t('修改名称')},{key:'info',label:t('设备信息')},{key:'history',label:t('会话记录')},{type:'divider'},{key:'unbind',label:t('解绑设备'),danger:true}],onClick:({key})=>{if(key==='rename'||key==='info'||key==='history'||key==='unbind')setModal({kind:key,device});}}}><Button type="button">{t('更多 ▾')}</Button></Dropdown></div>
         <div className="row device-meta"><p className="muted">ID: {device.device_id}</p><span className={device.online ? 'success' : 'muted'}>{t(device.online ? '● 在线' : '○ 离线')}</span></div>
         <div className="device-summaries"><a href={href('/agent', device)}><strong>{t('AI 角色')} <span>›</span></strong><p>{summary ? roleSummary(summary.role) : t('正在查询…')}</p></a><Button onClick={() => setModal({ kind: 'recognition', device })}><strong>{t('AI识别')} <span>›</span></strong><p>{summary ? summary.recognition ? t(summary.recognition.enabled ? '已开启 · {p0}项' : '已关闭', { p0: summary.recognition.count }) : t('状态获取失败，请刷新') : t('正在查询…')}</p></Button><Button onClick={() => setModal({ kind: 'room', device })}><strong>{t('多人对讲')} <span>›</span></strong><p>{summary ? roomSummary(summary.room) : t('正在查询…')}</p></Button></div>
         <nav className="device-actions"><a href={href('/player', device)}><DeviceIcon name="monitor"/><span>{t('实时')}</span></a><Button onClick={() => setModal({ kind: 'contacts', device })}><DeviceIcon name="contacts"/><span>{t('联系人')}</span></Button><a href={href('/agent', device)}><DeviceIcon name="role"/><span>{t('AI 角色')}</span></a><Button aria-label={t('多人对讲')} onClick={() => setModal({ kind: 'room', device })}><DeviceIcon name="room"/><span>{t('多人对讲')}</span>{summary?.room?.desired_state === 'joined' && <span aria-label={t('有对讲关系')}> ●</span>}</Button></nav>
       </article>; })}</div>
-      {!loading && !data.devices.length && !error && <section className="card"><h2>{t('还没有设备')}</h2><p className="muted">{t('点击"添加设备"，输入验证码完成绑定')}</p></section>}
-    <div className="device-list-footer"><Button className="primary add-device" disabled={adding} onClick={() => void add()}>＋ {t('添加设备')}</Button></div></main>
+      {!loading && !data.devices.length && !error && <section className="card"><h2>{t('还没有设备')}</h2><p className="muted">{t('点击“添加设备”，输入设备绑定码完成绑定')}</p></section>}
+    </main>
     {binding && <Bind onClose={closeBinding} onBound={()=>{closeBinding();void refresh();}}/>}
     {modal?.kind === 'contacts' && <Contacts key={modal.device.device_id} deviceId={modal.device.device_id} onClose={close}/>}
     {modal?.kind === 'room' && <Room key={modal.device.device_id} deviceId={modal.device.device_id} onClose={close} onUpdate={room => update(state => ({ ...state, summaries: { ...state.summaries, [modal.device.device_id]: { ...state.summaries[modal.device.device_id], room } } }))}/>}
@@ -125,11 +125,11 @@ function DeviceMutation({ modal, close, done }: { modal: Modal; close(): void; d
   }
   return <Dialog title={rename ? '设置设备名称' : '确认解绑设备？'} onClose={close}><p className="muted">{modal.device.device_id}</p><form onSubmit={event => void submit(event)}>
     {rename ? <><label>{t('设备名称')}<Input autoFocus disabled={busy} value={value} onChange={e => setValue(e.target.value)}/></label><p className="muted">{Array.from(value).length} / 13</p><p className="muted">{t('最多 13 个字符，用于设备列表和微信设备来电显示。')}</p><p className="muted">{t('如果微信已保存旧的授权名称，需要清除原授权并重新授权后，新名称才会在微信端生效。')}</p></> : <p>{t('解绑后设备会退出当前房间，并从我的设备中移除。再次使用需要重新绑定。')}</p>}
-    {error && <p className="error" role="alert">{t(error)}</p>}<div className="row"><Button type="button" onClick={close}>{t('取消')}</Button><Button disabled={busy} className={rename ? 'primary' : 'danger'}>{t(busy ? '保存中…' : rename ? '保存名称' : '确认解绑')}</Button></div>
+    {error && <p className="error" role="alert">{t(error)}</p>}<div className="dialog-actions"><Button type="button" onClick={close}>{t('取消')}</Button><Button disabled={busy} className={rename ? 'primary' : 'danger'}>{t(busy ? '保存中…' : rename ? '保存名称' : '确认解绑')}</Button></div>
   </form></Dialog>;
 }
-function Rows({ rows }: { rows: [string, string][] }) { return <dl className="detail-list">{rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>; }
+function Rows({ rows }: { rows: [string, string][] }) { return <Descriptions size="small" bordered column={{ xs:1, sm:2, md:2, lg:2, xl:2, xxl:2 }} items={rows.map(([label,value])=>({key:label,label,children:value}))}/>; }
 function DeviceInfo({ device, close }: { device: Device; close(): void }) {
   const { t } = useLanguage(); const [scene, setScene] = useState('stream'); const rows = mediaRows(device, scene);
-  return <Dialog title="设备信息" onClose={close}><Rows rows={deviceRows(device)}/><h2>{t('媒体能力')}</h2><nav className="tabs" aria-label={t('媒体场景')}><Segmented block value={scene} onChange={setScene} options={Object.entries({ stream: '实时查看', call: '设备通话', voip: '微信 VoIP' }).map(([value,label])=>({value,label:t(label),title:''}))}/></nav>{rows ? <Rows rows={rows}/> : <p className="muted">{t('该场景能力未上报')}</p>}</Dialog>;
+  return <Dialog title="设备信息" onClose={close} size="info"><div className="device-info-details"><Rows rows={deviceRows(device)}/><h2>{t('媒体能力')}</h2><nav className="tabs" aria-label={t('媒体场景')}><Segmented block value={scene} onChange={setScene} options={Object.entries({ stream: '实时查看', call: '设备通话', voip: '微信 VoIP' }).map(([value,label])=>({value,label:t(label),title:''}))}/></nav>{rows ? <><Rows rows={rows}/><Collapse className="device-raw-profile" items={[{key:'raw',label:t('查看原始媒体参数'),children:<pre className="device-raw-json">{JSON.stringify(device.profiles?.[scene],null,2)}</pre>}]}/></> : <p className="muted">{t('该场景能力未上报')}</p>}</div></Dialog>;
 }
