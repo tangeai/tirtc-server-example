@@ -9,7 +9,7 @@
 启动配置示例位于 [config.yaml.example](config.yaml.example)，只包含进程启动必需项：
 
 - HTTP 端口和可信代理。
-- MySQL 运行账号 DSN。
+- MySQL 运行账号 DSN，以及可选的 `database.max_open_conns` / `database.max_idle_conns` 连接池限制；修改后重启，容量预算见部署指南。
 - Redis 地址、密码和 DB。
 - 所有已安装服务共享的 `internal.key`。
 - 独立的 `admin.jwt_secret`。

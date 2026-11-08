@@ -8,6 +8,9 @@ log:
   format: text
 
 database:
+  # Per-process pool limits; changes require a restart. Budget across all instances.
+  max_open_conns: 50
+  max_idle_conns: 10
   dsn: "root:password@tcp(127.0.0.1:3306)/thing_connect?parseTime=true&charset=utf8mb4&loc=Local"
 
 redis:

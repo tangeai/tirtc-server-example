@@ -40,3 +40,35 @@ func TestLoadAppConfigRejectsPlaceholderSecret(t *testing.T) {
 		t.Fatal("LoadAppConfig accepted a public placeholder secret")
 	}
 }
+
+func TestLoadAppConfigDatabasePool(t *testing.T) {
+	for _, invalid := range []bool{false, true} {
+		path := writeAdminConfig(t, "")
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fields := "  max_open_conns: 10\n  max_idle_conns: 2\n"
+		if invalid {
+			fields = "  max_open_conns: 1\n  max_idle_conns: 2\n"
+		}
+		raw = []byte(strings.Replace(string(raw), "database:\n", "database:\n"+fields, 1))
+		if err := os.WriteFile(path, raw, 0600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := LoadAppConfig(path)
+		if invalid {
+			if err == nil {
+				t.Fatal("invalid pool accepted")
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		open, idle, err := cfg.Database.ConnectionLimits()
+		if err != nil || open != 10 || idle != 2 {
+			t.Fatalf("pool = %d/%d, %v", open, idle, err)
+		}
+	}
+}

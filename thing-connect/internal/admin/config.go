@@ -82,6 +82,9 @@ func LoadAppConfig(path string) (*AppConfig, error) {
 	if cfg.Job.MaxBytes <= 0 {
 		cfg.Job.MaxBytes = 10 * 1024 * 1024
 	}
+	if _, _, err := cfg.Database.ConnectionLimits(); err != nil {
+		return nil, err
+	}
 	if cfg.Database.DSN == "" {
 		return nil, fmt.Errorf("database.dsn is required")
 	}

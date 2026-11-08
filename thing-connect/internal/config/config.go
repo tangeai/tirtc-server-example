@@ -31,7 +31,31 @@ type LogCfg struct {
 }
 
 type DatabaseCfg struct {
-	DSN string `yaml:"dsn"`
+	DSN          string `yaml:"dsn"`
+	MaxOpenConns int    `yaml:"max_open_conns"`
+	MaxIdleConns *int   `yaml:"max_idle_conns"`
+}
+
+// ConnectionLimits resolves startup-only pool settings without changing legacy defaults.
+func (c DatabaseCfg) ConnectionLimits() (int, int, error) {
+	open := c.MaxOpenConns
+	if open < 0 {
+		return 0, 0, fmt.Errorf("database.max_open_conns must be positive or omitted")
+	}
+	if open == 0 {
+		open = 50
+	}
+	idle := 10
+	if idle > open {
+		idle = open
+	}
+	if c.MaxIdleConns != nil {
+		idle = *c.MaxIdleConns
+	}
+	if idle < 0 || idle > open {
+		return 0, 0, fmt.Errorf("database.max_idle_conns must be between 0 and max_open_conns")
+	}
+	return open, idle, nil
 }
 
 type RedisCfg struct {
@@ -231,6 +255,9 @@ func LoadFile(path string) (*Config, error) {
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&cfg); err != nil {
 		return nil, fmt.Errorf("config: parse %s: %w", path, err)
+	}
+	if _, _, err := cfg.Database.ConnectionLimits(); err != nil {
+		return nil, err
 	}
 	if err := cfg.Recognition.Validate(); err != nil {
 		return nil, fmt.Errorf("config: recognition: %w", err)
