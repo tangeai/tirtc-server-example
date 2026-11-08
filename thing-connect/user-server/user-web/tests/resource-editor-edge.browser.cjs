@@ -1,3 +1,4 @@
+const {choose:chooseSelect,selectedLabel}=require('./controls.cjs');
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const fs=require('fs'),path=require('path'),http=require('http'),assert=require('assert/strict');
 const root=path.resolve(__dirname,'../../..');
@@ -68,12 +69,12 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  });
  resources.plugin[0].input_params=[{name:'message',type:'string',default_value:'  keep spaces  ',required:false},{type:'integer',default_value:'3'}];
  delete resources.plugin[0].description;
- await page.goto(base+'/agent?device_id=one');await page.getByRole('button',{name:'我的角色',exact:true}).click();await page.getByRole('radio',{name:'扩展能力',exact:true}).locator('..').click();await page.locator('summary').filter({hasText:'工具与插件'}).click();
- const row=page.getByRole('checkbox',{name:'自有插件',exact:true}).locator('xpath=../..');await row.getByRole('button',{name:'编辑',exact:true}).click();const dialog=page.getByRole('dialog');await dialog.locator('.param-card').first().waitFor();
+ await page.goto(base+'/agent?device_id=one');await page.getByRole('button',{name:'我的角色',exact:true}).click();await page.getByRole('radio',{name:'扩展能力',exact:true}).locator('..').click();await page.locator('.ant-collapse-header').filter({hasText:'工具与插件'}).click();
+ const row=page.getByRole('checkbox',{name:'自有插件',exact:true}).locator('xpath=ancestor::div[contains(concat(" ", normalize-space(@class), " "), " row ")][1]');await row.getByRole('button',{name:'编辑',exact:true}).click();const dialog=page.getByRole('dialog');await dialog.locator('.param-card').first().waitFor();
  await dialog.getByLabel('名称',{exact:true}).fill('改名');await dialog.getByRole('button',{name:'保存',exact:true}).click();await page.waitForTimeout(150);
  assert.deepEqual(errors,[],'omitted optional descriptions must not crash save');await dialog.waitFor({state:'hidden'});assert.equal(resources.plugin[0].input_params[0].default_value,'  keep spaces  ','preserve meaningful whitespace');assert.equal(resources.plugin[0].input_params.length,2,'preserve optional-name legacy parameters');
  // Close guards cover X, Escape and explicit cancel; a clean editor closes directly.
- const pluginRow=()=>page.getByRole('checkbox',{name:resources.plugin[0].name,exact:true}).locator('xpath=../..');
+ const pluginRow=()=>page.getByRole('checkbox',{name:resources.plugin[0].name,exact:true}).locator('xpath=ancestor::div[contains(concat(" ", normalize-space(@class), " "), " row ")][1]');
  await pluginRow().getByRole('button',{name:'编辑',exact:true}).click();const editor=page.getByRole('dialog',{name:'编辑设备端插件',exact:true});await editor.getByLabel('名称',{exact:true}).fill('未保存的名字');
  for(const action of ['x','escape','cancel']){
   if(action==='x')await editor.getByRole('button',{name:'关闭弹窗',exact:true}).click();else if(action==='escape')await page.keyboard.press('Escape');else await editor.getByRole('button',{name:'取消',exact:true}).click();
@@ -96,16 +97,16 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  await pluginRow().getByRole('button',{name:'删除',exact:true}).click();await page.getByRole('button',{name:'确认删除',exact:true}).click();await page.getByRole('checkbox',{name:'重试后保存',exact:true}).waitFor({state:'hidden'});
  assert.equal(await pluginSection.getByRole('alert').count(),0,'successful deletion must clear its previous error');
  // A delayed deletion of A must not clear a newer selection of B.
- await page.locator('summary').filter({hasText:'知识库'}).click();
- const knowledge=page.locator('.role-section select').filter({has:page.locator('option[value="k2"]')});await knowledge.selectOption('k1');
- const knowledgeSection=knowledge.locator('xpath=../..');
+ await page.locator('.ant-collapse-header').filter({hasText:'知识库'}).click();
+ const knowledge=page.getByRole('combobox',{name:'知识库',exact:true});await chooseSelect(knowledge,'知识库一');
+ const knowledgeSection=knowledge.locator('xpath=ancestor::section[1]');
  let releaseDelete;const deleteWait=new Promise(r=>releaseDelete=r);
  await page.route('**/v1/ai/knowledge/indexes/k1',async route=>{if(route.request().method()==='DELETE')await deleteWait;await route.fallback();});
  await knowledgeSection.getByRole('button',{name:'删除',exact:true}).click();await page.getByRole('button',{name:'确认删除',exact:true}).click();
  assert(await knowledgeSection.getByRole('button',{name:'删除',exact:true}).isDisabled());
- await knowledge.selectOption('k2');releaseDelete();
+ await chooseSelect(knowledge,'知识库二');releaseDelete();
  await page.waitForResponse(r=>r.url().endsWith('/indexes/k1')&&r.request().method()==='DELETE');await page.waitForTimeout(100);
- assert.equal(await knowledge.inputValue(),'k2','deleting previous index must preserve the current selection');
+ assert.equal(await selectedLabel(knowledge),'知识库二','deleting previous index must preserve the current selection');
  assert.deepEqual(errors,[]);console.log('PASS: optional descriptions, exact defaults, X/Escape/cancel draft guards, clean close, failed-save retry, busy close and duplicate-submit protection; deletion retry clears errors; delayed deletion preserves newer knowledge selection');
  }finally{await browser.close();server.close();}
 })().catch(e=>{console.error(e);server.close();process.exitCode=1;});

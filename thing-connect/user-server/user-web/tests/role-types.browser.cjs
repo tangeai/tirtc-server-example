@@ -1,3 +1,4 @@
+const {choose:chooseSelect,selectedLabel}=require('./controls.cjs');
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const fs=require('fs'),path=require('path'),http=require('http'),assert=require('assert/strict');
 const root=path.resolve(__dirname,'../../..');
@@ -39,8 +40,8 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  await page.setViewportSize({width:1440,height:900});
  await page.goto(base+'/agent?device_id=one');
  await page.getByRole('button',{name:'＋ 新建角色',exact:true}).click();
- assert.equal(await page.getByLabel('角色地域',{exact:true}).inputValue(),'cn01');
- await page.getByLabel('角色地域',{exact:true}).selectOption('sg01');
+ assert.equal(await selectedLabel(page.getByRole('combobox',{name:'角色地域',exact:true})),'国内');
+ await chooseSelect(page.getByRole('combobox',{name:'角色地域',exact:true}),'海外');
  const prompt=page.getByLabel('角色设定',{exact:true});
  const choose=async name=>{await page.getByRole('button',{name:/角色类型/}).click();await page.getByRole('button',{name:new RegExp(name+' ')}).click();};
  await page.getByRole('button',{name:/角色类型/}).click();
@@ -66,11 +67,11 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  await choose('温柔伙伴');await page.getByRole('button',{name:'使用默认设定',exact:true}).click();assert.equal(await prompt.inputValue(),'温柔倾听，简洁回答。');
  await page.getByRole('switch',{name:'自定义提示词'}).check(); await prompt.fill('保存后的自定义设定');await page.getByLabel('智能体名称',{exact:true}).fill('新建联动角色');
  await page.getByRole('button',{name:'保存角色',exact:true}).click();await page.getByText('保存成功',{exact:true}).waitFor();
- assert.equal(role.region,'sg01');assert.equal(await page.getByLabel('角色地域',{exact:true}).isDisabled(),true);
+ assert.equal(role.region,'sg01');assert.equal(await page.getByRole('combobox',{name:'角色地域',exact:true}).isDisabled(),true);
  assert.equal(role.agent_config.prompt,'保存后的自定义设定');assert.equal(role.service_config.config.tts.provider_params.voice,'zh');assert(requests.some(r=>r.path==='/v1/ai/roles'&&r.method==='POST'));
  assert(!requests.some(r=>r.path==='/v1/ai/role-types'&&r.method!=='GET'));
  assert.equal(role.user_params.role_type_id,'one');
- await page.reload();await page.getByLabel('按地域筛选角色').selectOption('cn01');await page.getByText('没有匹配的角色，请调整搜索或地域。',{exact:true}).waitFor();await page.getByLabel('按地域筛选角色').selectOption('sg01');await page.getByRole('button',{name:'新建联动角色',exact:true}).click();assert.equal(await page.getByLabel('角色地域',{exact:true}).inputValue(),'sg01');await page.getByLabel('按地域筛选角色').selectOption('');
+ await page.reload();await chooseSelect(page.getByRole('combobox',{name:'按地域筛选角色',exact:true}),'国内');await page.getByText('没有匹配的角色，请调整搜索或地域。',{exact:true}).waitFor();await chooseSelect(page.getByRole('combobox',{name:'按地域筛选角色',exact:true}),'海外');await page.getByRole('button',{name:'新建联动角色',exact:true}).click();assert.equal(await selectedLabel(page.getByRole('combobox',{name:'角色地域',exact:true})),'海外');await chooseSelect(page.getByRole('combobox',{name:'按地域筛选角色',exact:true}),'全部地域');
  await page.getByRole('button',{name:'角色类型 温柔伙伴',exact:true}).waitFor();
  assert.equal(await prompt.inputValue(),'保存后的自定义设定');
  assert.equal(await page.getByRole('switch',{name:'自定义提示词'}).isChecked(),true);
@@ -115,9 +116,9 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  assert.equal(await prompt.inputValue(),'爽朗直接的同行伙伴。');
  await page.getByText('语音设置',{exact:true}).click();
  assert.equal(await page.getByText('单独调整音色',{exact:true}).count(),0);assert.equal(await page.getByLabel('声音列表',{exact:true}).count(),0);
- const sliders=page.getByRole('slider');assert.equal(await sliders.nth(0).inputValue(),'1');assert.equal(await sliders.nth(1).inputValue(),'1');assert.equal(await sliders.nth(0).getAttribute('aria-valuetext'),'标准');
- await sliders.nth(0).fill('2');assert.equal(await page.getByText('保存成功',{exact:true}).count(),0,'editing must clear stale save confirmation');await sliders.nth(1).fill('0');await page.getByRole('button',{name:'保存角色',exact:true}).click();await page.getByText('保存成功',{exact:true}).waitFor();assert.equal(role.service_config.config.tts.provider_params.audio.speech_rate,20);assert.equal(role.service_config.config.tts.provider_params.audio.pitch_rate,-2);
- for(const width of [320,390,768,1440]){await page.setViewportSize({width,height:900});await page.getByRole('button',{name:/角色类型/}).click();assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await page.screenshot({path:root+'/../output/playwright/role-types-'+width+'.png',fullPage:true});await page.keyboard.press('Escape');}
+ const sliders=page.getByRole('slider');assert.equal(await sliders.nth(0).getAttribute('aria-valuenow'),'1');assert.equal(await sliders.nth(1).getAttribute('aria-valuenow'),'1');assert.equal(await sliders.nth(0).getAttribute('aria-valuetext'),'标准');
+ await sliders.nth(0).press('End');assert.equal(await page.getByText('保存成功',{exact:true}).count(),0,'editing must clear stale save confirmation');await sliders.nth(1).press('Home');await page.getByRole('button',{name:'保存角色',exact:true}).click();await page.getByText('保存成功',{exact:true}).waitFor();assert.equal(role.service_config.config.tts.provider_params.audio.speech_rate,20);assert.equal(role.service_config.config.tts.provider_params.audio.pitch_rate,-2);
+ for(const width of [320,390,768,1440]){await page.setViewportSize({width,height:900});await page.getByRole('button',{name:/角色类型/}).click();if(!await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)){console.log(await page.locator('*').evaluateAll(nodes=>nodes.filter(e=>e.getBoundingClientRect().right>innerWidth+1).map(e=>({tag:e.tagName,cls:e.className,right:e.getBoundingClientRect().right})).slice(-20)));await page.screenshot({path:'/tmp/unify-types-overflow.png'});throw Error('Type overflow '+width);}await page.screenshot({path:root+'/../output/playwright/role-types-'+width+'.png',fullPage:true});await page.keyboard.press('Escape');await page.locator('.role-type-picker .ant-popover:visible').waitFor({state:'hidden'});}
  await page.getByRole('switch',{name:'自定义提示词'}).check();await prompt.fill('这是较长的角色设定，用于检查阅读区域。\n'.repeat(80));
  for(const viewport of [{width:1440,height:900},{width:1366,height:768},{width:390,height:844}]){
   await page.setViewportSize(viewport);

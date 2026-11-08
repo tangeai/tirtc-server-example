@@ -1,4 +1,4 @@
-import { Input, Segmented, List, Empty, Collapse, Button as ActionButton } from 'antd';
+import { ConfigProvider, Select, Input, Segmented, List, Empty, Collapse, Button as ActionButton } from 'antd';
 import { Button } from '../components/Button';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Dialog } from '../components/Dialog';
@@ -29,9 +29,7 @@ export default function Contacts({ deviceId, onClose }: { deviceId?: string; onC
     return () => controller.abort();
   }, [refresh]);
   const content = <main className={onClose ? "contacts-workspace" : "content"}>
-    {onClose ? <div className="contact-device-context"><strong>{devices?.find(d => d.device_id === device)?.device_name || t(devices ? '未命名设备' : '正在加载设备…')}</strong><span className="muted">{device}</span>{error && <p role="alert" className="error">{t(error)} <Button onClick={() => setRefresh(value => value + 1)}>{t('重试')}</Button></p>}</div> : <section className="card device-selector"><label>{t('当前管理设备')}<select disabled={!devices?.length} value={device} onChange={event => { setDevice(event.target.value); if (onClose) return; const url = new URL(location.href); url.searchParams.set('device_id', event.target.value); history.replaceState(null, '', url); }}>
-      {!devices?.length && <option>{t(devices ? '暂无已绑定设备' : '正在加载设备…')}</option>}{devices?.map(d => <option value={d.device_id} key={d.device_id}>{d.device_name || t('未命名设备')} · {d.device_id}</option>)}
-    </select></label>{error && <p role="alert" className="error">{error} <Button onClick={() => setRefresh(value => value + 1)}>{t('重试')}</Button></p>}</section>}
+    {onClose ? <div className="contact-device-context"><strong>{devices?.find(d => d.device_id === device)?.device_name || t(devices ? '未命名设备' : '正在加载设备…')}</strong><span className="muted">{device}</span>{error && <p role="alert" className="error">{t(error)} <Button onClick={() => setRefresh(value => value + 1)}>{t('重试')}</Button></p>}</div> : <section className="card device-selector"><label>{t('当前管理设备')}<Select aria-label={t('当前管理设备')} disabled={!devices?.length} value={device || undefined} placeholder={t(devices ? '暂无已绑定设备' : '正在加载设备…')} options={devices?.map(d => ({value:d.device_id,label:(d.device_name || t('未命名设备')) + ' · ' + d.device_id}))} onChange={value => { setDevice(value); const url = new URL(location.href); url.searchParams.set('device_id', value); history.replaceState(null, '', url); }}/></label>{error && <p role="alert" className="error">{error} <Button onClick={() => setRefresh(value => value + 1)}>{t('重试')}</Button></p>}</section>}
     {device && devices && <ContactList key={device} device={device} devices={devices}/>}
   </main>;
   return onClose ? <Dialog title="联系人" size="workspace" onClose={onClose}>{content}</Dialog> : <Shell title="联系人管理">{content}</Shell>;
@@ -106,7 +104,7 @@ function Remark({ contact, device, close, saved }: { contact: Contact; device: s
     catch (e) { if (alive.current) setError(errorText(e)); }
     finally { pending.current = false; if (alive.current) setBusy(false); }
   }
-  return <form onSubmit={event => void submit(event)}><fieldset disabled={busy}><label>{t('联系人备注')}<Input autoFocus value={value} onChange={e => setValue(e.target.value)} onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); } }}/></label><p className="muted">{t('清空后显示“{name}”；仅对当前设备生效。最多 64 个字符。', { name: fallback(contact) })}</p>{error && <p className="error" role="alert">{t(error)}</p>}<div className="row"><Button className="primary" type="submit">{t(busy ? '保存中…' : '保存')}</Button><Button type="button" onClick={close}>{t('取消')}</Button></div></fieldset></form>;
+  return <form onSubmit={event => void submit(event)}><ConfigProvider componentDisabled={busy}><fieldset disabled={busy}><label>{t('联系人备注')}<Input autoFocus value={value} onChange={e => setValue(e.target.value)} onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); } }}/></label><p className="muted">{t('清空后显示“{name}”；仅对当前设备生效。最多 64 个字符。', { name: fallback(contact) })}</p>{error && <p className="error" role="alert">{t(error)}</p>}<div className="row"><Button className="primary" type="submit">{t(busy ? '保存中…' : '保存')}</Button><Button type="button" onClick={close}>{t('取消')}</Button></div></fieldset></ConfigProvider></form>;
 }
 function AddContact({ device, devices, contacts, close, accepted }: { device: string; devices: Device[]; contacts: Contact[]; close(): void; accepted(): void }) {
   const { t } = useLanguage();

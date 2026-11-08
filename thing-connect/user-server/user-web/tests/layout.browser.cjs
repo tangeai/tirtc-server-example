@@ -50,12 +50,12 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
 
    if(!['home','boards','terms','privacy'].includes(name)){
     const control=page.getByRole('button',{name:'语言 / Language',exact:true});await control.click();
-    const menu=page.locator('.language-panel');await menu.waitFor();const box=await menu.boundingBox();assert(box.x>=0&&box.x+box.width<=width);
-    await menu.getByRole('button',{name:'English',exact:true}).click();assert(await control.locator('svg').isVisible(),'language icon');assert.equal(await page.locator('.language-panel').count(),0);
+    const menu=page.locator('.ant-dropdown:visible');await menu.waitFor();const box=await menu.boundingBox();assert(box.x>=0&&box.x+box.width<=width);
+    await menu.getByRole('menuitem',{name:'English',exact:true}).click();assert(await control.locator('svg').isVisible(),'language icon');await page.locator('.ant-dropdown:visible').waitFor({state:'hidden'});
     if(!await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)){await page.screenshot({path:root+'/../output/playwright/overflow-'+name+'-'+width+'.png',fullPage:true});console.log(await page.locator('*').evaluateAll(nodes=>nodes.filter(e=>e.getBoundingClientRect().right>innerWidth+1).map(e=>({tag:e.tagName,cls:e.className,text:e.textContent.slice(0,70),right:e.getBoundingClientRect().right})).slice(-20)));throw Error('English overflow '+name+' '+width);}
     await page.screenshot({path:root+'/../output/playwright/layout-'+(process.env.STAGE||'before')+'-'+name+'-en-'+width+'.png',fullPage:true});
-    await control.click();await page.keyboard.press('Escape');assert.equal(await page.locator('.language-panel').count(),0);assert(await control.evaluate(e=>e===document.activeElement));
-    await control.click();await page.locator('.language-panel').getByRole('button',{name:'简体中文',exact:true}).click();
+    await control.click();await page.keyboard.press('Escape');await page.locator('.ant-dropdown:visible').waitFor({state:'hidden'});assert(await control.evaluate(e=>e===document.activeElement));
+    await control.click();await page.locator('.ant-dropdown:visible').getByRole('menuitem',{name:'简体中文',exact:true}).click();
    }
   }
   async function captureDialog(name){
@@ -69,7 +69,7 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
   await page.goto(base+'/boards');await page.locator('.featured-card').first().click();await captureDialog('开发板详情');
   await page.evaluate(()=>{localStorage.setItem('token','test');sessionStorage.clear();});await page.goto(base+'/devices');await page.getByText('设备一',{exact:true}).waitFor();
   const first=page.locator('[data-device-id="one"]');
-  for(const label of ['设备信息','修改名称','解绑设备']){await first.getByText('更多 ▾').click();await first.getByRole('button',{name:label,exact:true}).click();await captureDialog(label);}
+  for(const label of ['设备信息','修改名称','解绑设备']){await first.getByText('更多 ▾').click();await page.getByRole('button',{name:label,exact:true}).click();await page.locator('.ant-popover:visible').waitFor({state:'hidden'});await captureDialog(label);}
   await first.getByRole('button',{name:/AI识别/}).click();await page.getByText('环境声音识别',{exact:false}).waitFor();await captureDialog('识别配置');
   await page.goto(base+'/contacts?device_id=one');await page.getByRole('button',{name:'添加联系人',exact:true}).click();await captureDialog('添加联系人');
   await page.getByRole('button',{name:'改备注',exact:true}).first().click();await page.getByLabel('联系人备注').fill('长名称测试-'.repeat(8));assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await page.getByRole('button',{name:'取消',exact:true}).click();

@@ -1,4 +1,6 @@
-import { Segmented } from 'antd';
+import { ConfigProvider, Checkbox, Segmented } from 'antd';
+import { CredentialInput } from '../components/CredentialInput';
+import type { CheckboxRef } from 'antd/es/checkbox';
 import { Button } from '../components/Button';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Shell } from '../components/Shell';
@@ -42,7 +44,7 @@ function AuthForm({ mode, switchMode }: { mode: Mode; switchMode(mode: Mode): vo
   const [cooldown, setCooldown] = useState(0);
   const gate = useRef<CaptchaGate | null>(null), revision = useRef(0), submitting = useRef(false);
   const pendingRequest = useRef<AbortController | null>(null);
-  const emailRef = useRef<HTMLInputElement>(null), consentRef = useRef<HTMLInputElement>(null);
+  const emailRef = useRef<HTMLInputElement>(null), consentRef = useRef<CheckboxRef>(null);
   useEffect(() => {
     gate.current = new CaptchaGate(() => { attempt.current = null; setPhase('idle'); });  sessionStorage.removeItem('login-notice');
     const interrupt = () => {
@@ -149,13 +151,13 @@ function AuthForm({ mode, switchMode }: { mode: Mode; switchMode(mode: Mode): vo
     void perform('submit', null, revision.current, values);
   }
   return <form ref={formRef} onSubmit={submit}>
-    <fieldset disabled={phase !== 'idle'}>
-      <label>{t(mode === 'reset' ? '注册邮箱' : '邮箱')}<input ref={emailRef} type="email" name="email" autoComplete={mode === 'reset' ? 'email' : 'username'} autoCapitalize="none" spellCheck={false} required defaultValue="" onInput={() => { if (!changed()) return; const input = field('code'); if (input) input.value = ''; }} placeholder={t('请输入邮箱地址')}/></label>
-      {mode !== 'login' && <label>{t('邮箱验证码')}<div className="code-row"><input aria-label={t('邮箱验证码')} name="code" defaultValue="" onInput={event => { event.currentTarget.value = event.currentTarget.value.replace(/\D/g, '').slice(0, 6); changed(); }} inputMode="numeric" pattern="[0-9]{6}" autoComplete="one-time-code" required placeholder={t('6 位验证码')}/><Button type="button" disabled={cooldown > 0} onClick={() => void verify('send')}>{cooldown ? t('{p0}s 后重新获取', { p0: cooldown }) : t('获取验证码')}</Button></div></label>}
+    <ConfigProvider componentDisabled={phase !== 'idle'}><fieldset disabled={phase !== 'idle'}>
+      <label>{t(mode === 'reset' ? '注册邮箱' : '邮箱')}<CredentialInput nativeRef={emailRef} type="email" name="email" autoComplete={mode === 'reset' ? 'email' : 'username'} autoCapitalize="none" spellCheck={false} required defaultValue="" onInput={() => { if (!changed()) return; const input = field('code'); if (input) input.value = ''; }} placeholder={t('请输入邮箱地址')}/></label>
+      {mode !== 'login' && <label>{t('邮箱验证码')}<div className="code-row"><CredentialInput aria-label={t('邮箱验证码')} name="code" defaultValue="" onInput={event => { event.currentTarget.value = event.currentTarget.value.replace(/\D/g, '').slice(0, 6); changed(); }} inputMode="numeric" pattern="[0-9]{6}" autoComplete="one-time-code" required placeholder={t('6 位验证码')}/><Button type="button" disabled={cooldown > 0} onClick={() => void verify('send')}>{cooldown ? t('{p0}s 后重新获取', { p0: cooldown }) : t('获取验证码')}</Button></div></label>}
       <PasswordField label={mode === 'login' ? '密码' : mode === 'reset' ? '新密码' : '设置密码'} required minLength={mode === 'login' ? undefined : 6} name="password" defaultValue="" onInput={changed} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} placeholder={t(mode === 'login' ? '请输入密码' : '至少 6 位')}/>
       {mode !== 'login' && <PasswordField label={mode === 'reset' ? '确认新密码' : '确认密码'} autoComplete="new-password" minLength={6} required name="confirm" defaultValue="" onInput={changed} placeholder={t('再次输入密码')}/>}
-      {mode === 'reset' ? <p className="legal"><LegalLinks/></p> : <div className="legal consent"><input ref={consentRef} id="consent" type="checkbox" checked={consent} onChange={event => { if (changed()) setConsent(event.target.checked); }}/><div><label htmlFor="consent">{t('我已阅读并同意')}</label> <LegalLinks/></div></div>}
-    </fieldset>
+      {mode === 'reset' ? <p className="legal"><LegalLinks/></p> : <div className="legal consent"><Checkbox ref={consentRef} id="consent" aria-label={t('我已阅读并同意')} checked={consent} onChange={event => { if (changed()) setConsent(event.target.checked); }}/><div><label htmlFor="consent">{t('我已阅读并同意')}</label> <LegalLinks/></div></div>}
+    </fieldset></ConfigProvider>
     <Button className="primary wide" disabled={phase === 'submitting'} type={phase === 'verifying' ? 'button' : 'submit'} onClick={phase === 'verifying' ? cancelAttempt : undefined}>{t(phase === 'submitting' ? '提交中…' : phase === 'verifying' ? '取消验证' : mode === 'login' ? '登录' : mode === 'register' ? '注册' : '重置密码')}</Button>
     {mode === 'login' && <p className="right"><Button className="link" type="button" onClick={() => switchMode('reset')}>{t('忘记密码？')}</Button></p>}
     {phase === 'verifying' && <p role="status" className="sr-only">{t('请完成人机验证')}</p>}

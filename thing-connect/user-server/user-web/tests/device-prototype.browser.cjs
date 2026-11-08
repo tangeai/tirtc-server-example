@@ -43,7 +43,7 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
   await page.setViewportSize({width,height:900});await page.evaluate(()=>{sessionStorage.clear();window.WebI18n.setLanguage('zh-CN');});await page.goto(base+'/devices');await page.getByText('预设角色（默认）',{exact:true}).first().waitFor();
   for(const language of ['zh-CN','en']){
    await page.evaluate(value=>window.WebI18n.setLanguage(value),language);
-   const triggers=await page.locator('.header-actions summary,.header-actions .language-trigger').all();assert.equal(triggers.length,3);
+   const triggers=await page.locator('.header-actions .menu-trigger,.header-actions .language-trigger').all();assert.equal(triggers.length,3);
    const sizes=await Promise.all(triggers.map(item=>item.boundingBox()));assert(sizes.every(box=>box.height===44 && Math.abs(box.y-sizes[0].y)<1),'uniform header controls');
    await page.getByLabel(language==='en'?'Account menu':'账号菜单',{exact:true}).click();await page.getByRole('button',{name:language==='en'?'Log out':'退出登录',exact:true}).waitFor();await page.keyboard.press('Escape');
    const cards=page.locator('.device-card');

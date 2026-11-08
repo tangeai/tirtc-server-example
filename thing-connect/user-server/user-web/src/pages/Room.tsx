@@ -1,4 +1,4 @@
-import { Input, Radio, Segmented } from 'antd';
+import { ConfigProvider, Input, Radio, Segmented } from 'antd';
 import { Button } from '../components/Button';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Dialog } from '../components/Dialog';
@@ -76,14 +76,14 @@ export default function Room({ deviceId, onClose, onUpdate }: { deviceId?: strin
       <div className="room-code"><small>{t('房间号')}</small><strong>{a.room_code}</strong><p>{t('其他设备可通过此房间号加入')}</p></div>
       <div className="row"><strong className="success">{t(states[a.state] || '正在同步')}</strong><span className="muted">{t('在线设备：')}{snapshot.verified ? a.online_count ?? 0 : t('待更新')}</span></div><p className="muted">{t(help[a.state] || '正在同步设备状态，请稍候。')}</p>
       <Button className="danger wide" disabled={busy} onClick={() => setLeave(a)}>{t('退出房间')}</Button>
-    </section> : <fieldset disabled={busy || loading}>
+    </section> : <ConfigProvider componentDisabled={busy || loading}><fieldset disabled={busy || loading}>
       {a?.state === 'room_closed' && <p className="muted">{t('房间已解散，可新建或加入其他房间')}</p>}
       {onClose && <nav className="room-mode" aria-label={t('房间操作')}><Segmented block value={mode} disabled={busy || loading} onChange={setMode} options={[{ value: 'create', label: t('创建房间'), title: '' }, { value: 'join', label: t('加入房间'), title: '' }]}/></nav>}
       <form hidden={!!onClose && mode !== 'create'} className="card" onSubmit={submit('create', { password: usePassword ? newPassword : '' })}>{!onClose && <h2>{t('创建房间')}</h2>}{!onClose && <p className="muted">{t('创建后，此设备自动加入房间。')}</p>}<Radio.Group className="room-password-mode" name="password-mode" value={usePassword} disabled={busy || loading} onChange={event => { setUsePassword(event.target.value); if (!event.target.value) setNewPassword(''); }}><Radio value={false}>{t('无密码')}</Radio><Radio value={true}>{t('设置密码')}</Radio></Radio.Group>
       {usePassword && <label>{t('4 位数字密码')}<Input type="password" inputMode="numeric" autoComplete="new-password" required pattern="[0-9]{4}" value={newPassword} onChange={event => setNewPassword(event.target.value.replace(/\D/g, '').slice(0, 4))}/></label>}
       <Button type="submit" className="primary wide" aria-busy={busy}>{t(busy ? '提交中…' : '创建房间')}</Button></form>
       <form hidden={!!onClose && mode !== 'join'} className={onClose ? 'card room-join-form' : 'card'} onSubmit={submit('join', { room_code: code, password })}>{!onClose && <h2>{t('加入房间')}</h2>}{!onClose && <p className="muted">{t('输入已有房间的房间号，与其他设备对讲。')}</p>}<label>{t('6 位房间号')}<Input name="group-room-code" inputMode="numeric" autoComplete="off" pattern="[0-9]{6}" required value={code} onChange={event => setCode(event.target.value.replace(/\D/g, '').slice(0, 6))}/></label><label>{t('房间密码')}{!onClose && t('（无密码房间留空）')}<Input placeholder={onClose ? t('无密码则留空') : undefined} name="group-room-password" type="password" inputMode="numeric" autoComplete="new-password" pattern="[0-9]{4}" value={password} onChange={event => setPassword(event.target.value.replace(/\D/g, '').slice(0, 4))}/></label><Button type="submit" className="primary wide" aria-busy={busy}>{t(busy ? '提交中…' : '加入房间')}</Button></form>
-    </fieldset>}</>}
+    </fieldset></ConfigProvider>}</>}
     <p className="muted">{t('加入后默认收听，按住设备上的说话键发言。')}<br/>{t('离线设备上线后自动加入；房间连续无人在线 24 小时后自动解散。')}</p>
     {leave && <Dialog title="退出房间？" onClose={() => setLeave(undefined)}><p>{snapshot?.name || t('未命名设备')} · {leave.room_code}</p><p className="muted">{t('退出后可再次通过房间号加入。')}</p><div className="row"><Button onClick={() => setLeave(undefined)}>{t('取消')}</Button><Button className="danger" onClick={() => void change('leave', { room_id: leave.room_id, assignment_version: leave.assignment_version })}>{t('确认退出')}</Button></div></Dialog>}
   </main>;

@@ -1,14 +1,14 @@
+import { Popover, Button as AntButton } from 'antd';
 import { Button } from './Button';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { clearSession, request } from '../lib/api';
 import { useLanguage } from '../lib/i18n';
 export function Dropdown({ label, children, icon }: { label: string; children: ReactNode; icon?: ReactNode }) {
-  const ref = useRef<HTMLDetailsElement>(null);
-  useEffect(() => {
-    const close = (event: PointerEvent) => { if (event.target instanceof Node && !ref.current?.contains(event.target) && ref.current) ref.current.open = false; };
-    document.addEventListener('pointerdown', close); return () => document.removeEventListener('pointerdown', close);
-  }, []);
-  return <details ref={ref} className="dropdown" onKeyDown={event => { if (event.key === 'Escape') { event.currentTarget.open = false; event.currentTarget.querySelector('summary')?.focus(); } }}><summary aria-label={label}>{icon}<span className={icon ? 'menu-label' : undefined}>{label}</span>{icon && <span className="menu-chevron" aria-hidden="true">⌄</span>}</summary><div className="dropdown-panel" onClick={event => { if ((event.target as HTMLElement).closest('button,a') && ref.current) ref.current.open = false; }}>{children}</div></details>;
+  const [open, setOpen] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
+  return <Popover destroyOnHidden trigger="click" placement="bottomRight" open={open} onOpenChange={setOpen} content={<div className="account-menu" onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); setOpen(false); trigger.current?.focus(); } }} onClick={event => { if ((event.target as HTMLElement).closest('button,a')) setOpen(false); }}>{children}</div>}>
+    <AntButton ref={trigger} htmlType="button" type={icon ? 'text' : 'default'} className="menu-trigger" aria-label={label} aria-expanded={open} onKeyDown={event=>{if(event.key==='Escape'){setOpen(false);}}}>{icon}<span className={icon ? 'menu-label' : undefined}>{label}</span>{icon && <span className="menu-chevron" aria-hidden="true">⌄</span>}</AntButton>
+  </Popover>;
 }
 export function Account() {
   const { t } = useLanguage();

@@ -1,4 +1,4 @@
-import { Input } from 'antd';
+import { ConfigProvider, Select, Upload, Input } from 'antd';
 import { Button } from '../../components/Button';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { Dialog } from '../../components/Dialog';
@@ -31,7 +31,7 @@ export function Knowledge({ value, onChange, readonly, onBlocked }: { value: str
     } catch (e) { if (alive.current) setError(errorText(e)); }
     finally { pendingDelete.current = false; if (alive.current) setDeleting(false); }
   }
-  return <section><label>{t('知识库')}<select disabled={readonly || blocked} value={value} onChange={e => onChange(e.target.value)}><option value="">{t('未选择')}</option>{value && !catalog.data?.items?.some(i => i.id === value) && <option value={value}>{value}</option>}{catalog.data?.items?.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}</select></label>
+  return <section><label>{t('知识库')}<Select aria-label={t('知识库')} disabled={readonly || blocked} value={value} onChange={onChange} options={[{value:'',label:t('未选择')}, ...(value && !catalog.data?.items?.some(i => i.id === value) ? [{value,label:value}] : []), ...(catalog.data?.items || []).map(i=>({value:i.id,label:i.name}))]}/></label>
     {(catalog.error || error) && <p className="error" role="alert">{error || errorText(catalog.error)} <Button type="button" onClick={() => { setError(''); catalog.reload(); }}>{t('重试')}</Button></p>}
     {!readonly && <div className="knowledge-actions"><Button type="button" disabled={blocked} onClick={() => setEditing({})}>{t('创建知识库')}</Button><Button type="button" disabled={!value || blocked} onClick={() => setEditing({ id: value })}>{t('编辑知识库')}</Button><Button type="button" className="danger" disabled={!value || deleting || blocked} onClick={() => void remove()}>{t('删除')}</Button></div>}
     {value && <Documents key={'documents:' + value} index={value} readonly={readonly} onBlocked={setBlocked}/>}
@@ -72,13 +72,12 @@ function IndexEditor({ id, close, saved }: { id?: string; close(): void; saved(i
     catch (e) { if (alive.current) setError(errorText(e)); }
     finally { pending.current = false; if (alive.current) setBusy(false); }
   }
-  return <Dialog title={id ? '编辑知识库' : '创建知识库'} onClose={() => void dismiss()} closeDisabled={busy}>{remote.loading && <p role="status">{t('正在加载…')}</p>}{remote.error ? <p className="error" role="alert">{errorText(remote.error)} <Button onClick={remote.reload}>{t('重试')}</Button></p> : (!id || remote.data) && <form onSubmit={e => void submit(e)}><fieldset disabled={busy}><label>{t('知识库名称')}<Input required value={name} onChange={e => setName(e.target.value)}/></label><label>{t('知识库描述')}<Input.TextArea required value={description} onChange={e => setDescription(e.target.value)}/></label>{error && <p role="alert" className="error">{error}</p>}<Button className="primary wide">{t(busy ? '保存中…' : '保存')}</Button></fieldset></form>}</Dialog>;
+  return <Dialog title={id ? '编辑知识库' : '创建知识库'} onClose={() => void dismiss()} closeDisabled={busy}>{remote.loading && <p role="status">{t('正在加载…')}</p>}{remote.error ? <p className="error" role="alert">{errorText(remote.error)} <Button onClick={remote.reload}>{t('重试')}</Button></p> : (!id || remote.data) && <form onSubmit={e => void submit(e)}><ConfigProvider componentDisabled={busy}><fieldset disabled={busy}><label>{t('知识库名称')}<Input required value={name} onChange={e => setName(e.target.value)}/></label><label>{t('知识库描述')}<Input.TextArea required value={description} onChange={e => setDescription(e.target.value)}/></label>{error && <p role="alert" className="error">{error}</p>}<Button className="primary wide">{t(busy ? '保存中…' : '保存')}</Button></fieldset></ConfigProvider></form>}</Dialog>;
 }
 function Documents({ index, readonly, onBlocked }: { index: string; readonly: boolean; onBlocked(value: boolean): void }) {
   const { t } = useLanguage(), ask = useConfirm();
   const model = useMemo(() => new KnowledgeDocuments(index, request), [index]);
   const state = useSyncExternalStore(model.subscribe, model.snapshot);
-  const input = useRef<HTMLInputElement>(null);
   useEffect(() => { onBlocked(state.busy || state.pending); return () => onBlocked(false); }, [state.busy, state.pending, onBlocked]);
   useEffect(() => { void model.refresh(); return () => model.dispose(); }, [model]);
   useEffect(() => {
@@ -96,6 +95,6 @@ function Documents({ index, readonly, onBlocked }: { index: string; readonly: bo
     {state.retryAssociation && !state.busy && <><Button type="button" onClick={() => void model.retryAssociation()}>{t('重试关联')}</Button><Button type="button" onClick={async () => { if (await ask({ title: '操作确认', message: '确定删除该文件？', choices: [{ value: 'cancel', label: '取消' }, { value: 'delete', label: '确认删除' }] }) === 'delete') await model.discardUpload(); }}>{t('删除已上传文件')}</Button></>}
     {state.documents.map(document => <div className="file-row" key={document.document_id}><span>{document.name}</span><small>{Math.ceil(document.size / 1024)} KB</small>{!readonly && <div className="row"><Button type="button" disabled={state.busy || state.pending} onClick={() => void remove(document, false)}>{t('移除')}</Button><Button type="button" disabled={state.busy || state.pending} className="danger" onClick={() => void remove(document, true)}>{t('删除文件')}</Button></div>}</div>)}
     {!state.loading && !state.pending && !state.documents.length && <p className="muted">{t('暂无关联文件')}</p>}
-    {!readonly && <label>{t('上传文件')}<input ref={input} type="file" disabled={state.busy || state.pending} onChange={event => { const file = event.target.files?.[0]; if (file) void model.upload(file).then(() => { if (input.current) input.current.value = ''; }); }}/></label>}
+    {!readonly && <label>{t('上传文件')}<Upload disabled={state.busy || state.pending} showUploadList={false} beforeUpload={file => { void model.upload(file); return false; }}><Button type="button" disabled={state.busy || state.pending}>{t('上传文件')}</Button></Upload></label>}
   </section>;
 }

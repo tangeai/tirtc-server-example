@@ -1,5 +1,5 @@
+import { Collapse, Slider, Switch, Input } from 'antd';
 import { Button } from '../../components/Button';
-import { Input } from 'antd';
 import { findVoice } from '../../lib/roles.ts';
 import { useEffect, useRef, useState } from 'react';
 import { useConfirm } from '../../components/Confirm';
@@ -60,20 +60,20 @@ export function RoleVoicePanel({ role, draft, patch, voices, voiceLoading, voice
       </>}
       {!provider && <p className="preset-notice">{t('此角色使用其他语音服务，声音配置保持原样。')}</p>}
       <div className="role-prompt-heading"><label htmlFor="role-prompt">{t('角色设定')}</label><span className="badge">{t(custom ? '自定义设定' : '默认设定')}</span>
-        {!readonly && chosen && <label className="radio"><input type="checkbox" role="switch" aria-label={t('自定义提示词')} disabled={disabled} checked={custom} onChange={e => { if (e.target.checked) patch({ customPrompt: true }); else void reset(); }}/>{t('自定义')}</label>}
+        {!readonly && chosen && <span className="role-custom-switch">{t('自定义')} <Switch aria-label={t('自定义提示词')} disabled={disabled} checked={custom} onChange={checked => { if (checked) patch({customPrompt:true}); else void reset(); }}/></span>}
 
       {!readonly && chosen && custom && <Button className="role-restore" type="button" disabled={disabled} onClick={() => void reset()}>{t('恢复默认')}</Button>}
       </div>
       <Input.TextArea id="role-prompt" aria-label={t('角色设定')} className="role-prompt" rows={12} readOnly={readonly || !custom} disabled={busy || choosing} value={draft.prompt} onChange={e => patch({ prompt: e.target.value, customPrompt: true })}/>
     </section>
-    <details className="role-speech"><summary>{t('语音设置')}</summary>
+    <Collapse className="role-speech" items={[{key:"content",label:t('语音设置'),children:<>
       <div className="voice-current"><span>{t('当前声音')}：<strong>{voice?.name || draft.voice || t('沿用基础配置')}</strong></span>{voice?.sample_url ? <Button type="button" disabled={disabled} onClick={() => void preview()}>{t(playing ? '暂停' : '试听')}</Button> : voice && <span className="muted">{t('暂无试听')}</span>}</div>
       {voiceError && <p className="error">{t('音色列表暂不可用，请稍后重试')} <Button type="button" onClick={retryVoices}>{t('重试')}</Button></p>}
       <div className="role-speech-controls">
         <SpeechLevel label={t('回复速度')} labels={[t('慢'), t('标准'), t('快')]} values={speechLevelValues(voiceModel, 'rate')} value={draft.rate} disabled={disabled || !provider} onChange={rate => patch({ rate })}/>
         <SpeechLevel label={t('回复音调')} labels={[t('低'), t('标准'), t('高')]} values={speechLevelValues(voiceModel, 'pitch')} value={draft.pitch} disabled={disabled || !provider} onChange={pitch => patch({ pitch })}/>
       </div>
-    </details>
+     </>}]} />
     <audio ref={audio} preload="none" src={voice?.sample_url} onEnded={() => setPlaying(false)} onError={() => { setPlaying(false); setAudioError(true); }}/>{audioError && <p className="error">{t('试听失败，请重试')}</p>}
   </>;
 }
@@ -84,7 +84,7 @@ function SpeechLevel({ label, labels, values, value, disabled, onChange }: {
 }) {
   const level = speechLevelIndex(value, values);
   return <label className="role-speech-control"><span>{label}</span>
-    <input type="range" aria-label={label} aria-valuetext={labels[level]} min="0" max="2" step="1" value={level} disabled={disabled} onChange={event => onChange(values[Number(event.target.value)])}/>
+    <Slider ariaLabelForHandle={label} ariaValueTextFormatterForHandle={index=>labels[index]} min={0} max={2} step={1} value={level} disabled={disabled} tooltip={{open:false}} onChange={index=>onChange(values[index])}/>
     <span className="role-speech-scale" aria-hidden="true">{labels.map(text => <span key={text}>{text}</span>)}</span>
   </label>;
 }

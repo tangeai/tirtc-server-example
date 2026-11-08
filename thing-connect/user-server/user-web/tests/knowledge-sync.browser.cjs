@@ -1,3 +1,4 @@
+const {choose:chooseSelect,selectedLabel}=require('./controls.cjs');
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const fs=require('fs'),path=require('path'),http=require('http'),assert=require('assert/strict');
 const root=path.resolve(__dirname,'../../..');
@@ -43,12 +44,12 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
   else data={id:'k1',name:'测试库',description:'测试',document_ids:[]};
   await route.fulfill({json:{code:200,data}});
  });
- await page.goto(base+'/agent?device_id=one');await page.getByRole('button',{name:'我的角色',exact:true}).click();await page.getByRole('radio',{name:'扩展能力',exact:true}).locator('..').click();await page.locator('summary').filter({hasText:'知识库'}).click();const choice=page.locator('.role-section select').filter({has:page.locator('option[value="k1"]')});await choice.selectOption('k1');
+ await page.goto(base+'/agent?device_id=one');await page.getByRole('button',{name:'我的角色',exact:true}).click();await page.getByRole('radio',{name:'扩展能力',exact:true}).locator('..').click();await page.locator('.ant-collapse-header').filter({hasText:'知识库'}).click();const choice=page.getByRole('combobox',{name:'知识库',exact:true});await chooseSelect(choice,'测试库');
  const upload=()=>page.locator('input[type=file]').setInputFiles({name:'upload.txt',mimeType:'text/plain',buffer:Buffer.from('test')});
  await upload();await page.locator('.file-row').waitFor({timeout:7000});assert.equal(uploads,1);assert(reads>=3,'must confirm asynchronous document visibility');
  failLink=true;await upload();await page.getByRole('button',{name:'重试关联',exact:true}).waitFor();assert.equal(uploads,2);await page.getByRole('button',{name:'重试关联',exact:true}).click();await page.getByText('文件列表已更新',{exact:true}).waitFor();assert.equal(uploads,2,'retry association must not upload a duplicate');
  await page.getByRole('button',{name:'刷新文件列表',exact:true}).click();await page.getByRole('button',{name:'刷新文件列表',exact:true}).waitFor({state:'visible'});
- await choice.selectOption('k2');await page.waitForTimeout(100);const before=oldIndexReads;await page.waitForTimeout(1200);assert.equal(oldIndexReads,before,'old index must stop querying after switching');
+ await chooseSelect(choice,'其他库');await page.waitForTimeout(100);const before=oldIndexReads;await page.waitForTimeout(1200);assert.equal(oldIndexReads,before,'old index must stop querying after switching');
  assert.deepEqual(errors,[]);console.log('PASS: delayed file visibility, association retry without duplicate upload, manual refresh and index switch');
  }finally{await browser.close();server.close();}
 })().catch(e=>{console.error(e);server.close();process.exitCode=1;});

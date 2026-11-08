@@ -1,3 +1,4 @@
+import Bind from './Bind';
 import { Input, Segmented } from 'antd';
 import { Button } from '../components/Button';
 import Contacts from './Contacts';
@@ -18,6 +19,7 @@ interface Snapshot { devices: Device[]; summaries: Record<string, Summary> }
 type Modal = { kind: 'rename' | 'info' | 'unbind' | 'recognition' | 'history' | 'contacts' | 'room'; device: Device };
 export default function Devices() {
   const { t } = useLanguage();
+  const [binding, setBinding] = useState(false);
   const [data, setData] = useState<Snapshot>({ devices: [], summaries: {} }), [loading, setLoading] = useState(true), [error, setError] = useState(''), [restored, setRestored] = useState(false);
   const [modal, setModal] = useState<Modal>(), [adding, setAdding] = useState(false);
   const cache = useRef(''), sequence = useRef(0), current = useRef(data), addingRef = useRef(false);
@@ -72,9 +74,11 @@ export default function Devices() {
     })();
     return () => { alive = false; sequence.current++; window.removeEventListener('pagehide', away); };
   }, []);
+  const bindingTrigger = useRef<HTMLElement | null>(null);
+  const closeBinding = () => { setBinding(false); requestAnimationFrame(()=>bindingTrigger.current?.isConnected && bindingTrigger.current.focus()); };
   async function add() {
-    if (addingRef.current) return; addingRef.current = true; setAdding(true);
-    try { const quota = await request<{ quota: number }>('/v1/user/quota'); if (quota.quota <= 0) setError('设备额度已用尽，请联系管理员申请扩容'); else location.assign('/bind'); }
+    if (addingRef.current) return; bindingTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; addingRef.current = true; setAdding(true);
+    try { const quota = await request<{ quota: number }>('/v1/user/quota'); if (quota.quota <= 0) setError('设备额度已用尽，请联系管理员申请扩容'); else setBinding(true); }
     catch (e) { setError(errorText(e)); } finally { addingRef.current = false; setAdding(false); }
   }
   const close = () => setModal(undefined);
@@ -90,6 +94,7 @@ export default function Devices() {
       </article>; })}</div>
       {!loading && !data.devices.length && !error && <section className="card"><h2>{t('还没有设备')}</h2><p className="muted">{t('点击"添加设备"，输入验证码完成绑定')}</p></section>}
     <div className="device-list-footer"><Button className="primary add-device" disabled={adding} onClick={() => void add()}>＋ {t('添加设备')}</Button></div></main>
+    {binding && <Bind onClose={closeBinding} onBound={()=>{closeBinding();void refresh();}}/>}
     {modal?.kind === 'contacts' && <Contacts key={modal.device.device_id} deviceId={modal.device.device_id} onClose={close}/>}
     {modal?.kind === 'room' && <Room key={modal.device.device_id} deviceId={modal.device.device_id} onClose={close} onUpdate={room => update(state => ({ ...state, summaries: { ...state.summaries, [modal.device.device_id]: { ...state.summaries[modal.device.device_id], room } } }))}/>}
     {modal?.kind === 'info' && <DeviceInfo device={modal.device} close={close}/>}

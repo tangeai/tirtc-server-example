@@ -137,6 +137,19 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  await page.getByRole('link',{name:'返回设备列表',exact:false}).click();await card.waitFor();
  const mediaCalls=await page.evaluate(()=>JSON.parse(sessionStorage.getItem('mediaCalls')));assert.ok(mediaCalls.includes('disconnect'));assert.ok(mediaCalls.includes('detach-video'));assert.ok(mediaCalls.includes('detach-audio'));assert.ok(mediaCalls.includes('stop-talk'));
  assert.equal(await card.getByRole('link',{name:'AI 角色',exact:true}).count(),1);
+ // Binding stays in a compact dialog, locks its mode during submission and refreshes on success.
+ await page.route('**/v1/user/quota',route=>route.fulfill({json:{code:200,data:{quota:2}}}));
+ let bindRelease,bindWait,bindFail=true,bindWrites=[];
+ await page.route('**/v1/user/device/bind*',async route=>{bindWrites.push(route.request().postDataJSON());if(bindWait)await bindWait;if(bindFail){bindFail=false;return route.fulfill({status:400,json:{code:4004,msg:'验证码无效，请重试'}});}await route.fulfill({json:{code:200,data:{device_id:'NEWDEVICE001'}}});});
+ const addDevice=page.getByRole('button',{name:'＋ 添加设备',exact:true});
+ await addDevice.click();const binding=page.getByRole('dialog',{name:'添加设备',exact:true});await binding.waitFor();assert.equal(new URL(page.url()).pathname,'/devices');
+ for(const width of [1366,390,320]){await page.setViewportSize({width,height:768});const box=await binding.boundingBox();assert(box.y>=0&&box.y+box.height<=768);assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await page.screenshot({path:root+'/../output/playwright/bind-dialog-'+width+'.png'});}
+ await binding.getByLabel('6 位数字验证码').fill('12ab3456');assert.equal(await binding.getByLabel('6 位数字验证码').inputValue(),'123456');
+ await binding.getByRole('button',{name:'绑定设备',exact:true}).click();await binding.getByRole('alert').filter({hasText:'验证码无效'}).waitFor();
+ await binding.getByRole('radio',{name:'设备 ID 绑定',exact:true}).locator('..').click();await binding.getByLabel('设备 ID',{exact:true}).fill('newdevice001');
+ bindWait=new Promise(resolve=>bindRelease=resolve);await binding.getByRole('button',{name:'绑定设备',exact:true}).click();await binding.getByRole('button',{name:'绑定中…'}).waitFor();assert(await binding.getByRole('radio',{name:'验证码绑定',exact:true}).isDisabled());await page.keyboard.press('Escape');assert(await binding.isVisible());
+ const beforeBindRefresh=requests.filter(r=>r.path==='/v1/user/device/list').length;bindRelease();await binding.waitFor({state:'hidden'});await page.waitForFunction(()=>!document.querySelector('.ant-modal-wrap:not([style*="display: none"])'));
+ assert.equal(bindWrites.length,2);assert.equal(bindWrites[1].device_id,'NEWDEVICE001');assert(requests.filter(r=>r.path==='/v1/user/device/list').length>beforeBindRefresh);await addDevice.click();await binding.waitFor();await binding.getByLabel('6 位数字验证码').focus();await page.keyboard.press('Escape');await binding.waitFor({state:'hidden'});await page.waitForFunction(()=>document.activeElement?.classList.contains('add-device'));
  assert.deepEqual(errors,[]);console.log('PASS device dialogs: one-screen room, internal contact scrolling at four sizes, failed join retry, summary update, focus restore, nested Escape, reopen, no automatic refresh');
  }finally{await browser.close();server.close();}
 })().catch(e=>{console.error(e);server.close();process.exitCode=1;});

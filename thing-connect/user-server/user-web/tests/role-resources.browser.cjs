@@ -1,3 +1,4 @@
+const {choose:chooseSelect,selectedLabel}=require('./controls.cjs');
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const fs=require('fs'),path=require('path'),http=require('http'),assert=require('assert/strict');
 const root=path.resolve(__dirname,'../../..');
@@ -67,8 +68,8 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
   await route.fulfill({json:{code:200,data}});
  });
  await page.goto(base+'/agent?device_id=one');await page.getByRole('button',{name:'我的角色',exact:true}).click();
- await page.getByRole('radio',{name:'扩展能力',exact:true}).locator('..').click();await page.locator('summary').filter({hasText:'知识库'}).click();
- const choice=page.locator('.role-section select').filter({has:page.locator('option[value="k1"]')});await choice.selectOption('k1');
+ await page.getByRole('radio',{name:'扩展能力',exact:true}).locator('..').click();await page.locator('.ant-collapse-header').filter({hasText:'知识库'}).click();
+ const choice=page.getByRole('combobox',{name:'知识库',exact:true});await chooseSelect(choice,'知识库一');
  for(let i=0;i<3;i++){
   await page.getByRole('button',{name:'编辑知识库',exact:true}).click();await page.getByLabel('知识库名称',{exact:true}).waitFor();
   await page.getByRole('button',{name:'关闭弹窗',exact:true}).click();
@@ -79,40 +80,40 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  failIndex=true;await page.getByRole('dialog').getByRole('button',{name:'保存',exact:true}).click();await page.getByRole('dialog').getByRole('alert').waitFor();
  assert.equal(await page.getByLabel('知识库名称',{exact:true}).inputValue(),'更新知识库');
  await page.getByRole('dialog').getByRole('button',{name:'保存',exact:true}).click();await page.getByRole('dialog').waitFor({state:'hidden'});assert.equal(await page.locator('input[type=file]').count(),1);
- await choice.selectOption('k2');await choice.selectOption('k1');assert.equal(await page.locator('input[type=file]').count(),1);
+ await chooseSelect(choice,'知识库二');await chooseSelect(choice,'更新知识库');assert.equal(await page.locator('input[type=file]').count(),1);
  const upload=()=>page.locator('input[type=file]').setInputFiles({name:'test.txt',mimeType:'text/plain',buffer:Buffer.from('test data')});
  failUpload=true;await upload();await page.getByRole('alert').filter({hasText:'上传失败'}).waitFor();await upload();await page.locator('.file-row').waitFor();assert.equal(indexes[0].document_ids.length,1);
  await page.locator('.file-row').getByRole('button',{name:'移除',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'取消',exact:true}).click();assert.equal(indexes[0].document_ids.length,1);
  await page.locator('.file-row').getByRole('button',{name:'移除',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'移除',exact:true}).click();await page.locator('.file-row').waitFor({state:'hidden'});assert.equal(files.length,1,'unlink preserves pooled file');
  await upload();await page.locator('.file-row').waitFor();await page.locator('.file-row').getByRole('button',{name:'删除文件',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'确认删除',exact:true}).click();await page.locator('.file-row').waitFor({state:'hidden'});assert.equal(files.length,1);
- failDocs=true;await choice.selectOption('k2');await page.getByRole('alert').filter({hasText:'读取知识库文档失败'}).waitFor();await page.getByRole('alert').getByRole('button',{name:'重试',exact:true}).click();await page.getByRole('alert').waitFor({state:'hidden'});
+ failDocs=true;await chooseSelect(choice,'知识库二');await page.getByRole('alert').filter({hasText:'读取知识库文档失败'}).waitFor();await page.getByRole('alert').getByRole('button',{name:'重试',exact:true}).click();await page.getByRole('alert').waitFor({state:'hidden'});
  await page.getByRole('button',{name:'创建知识库',exact:true}).click();await page.getByLabel('知识库名称',{exact:true}).fill('新库');await page.getByLabel('知识库描述',{exact:true}).fill('新库描述');await page.getByRole('dialog').getByRole('button',{name:'保存',exact:true}).click();await page.getByRole('dialog').waitFor({state:'hidden'});assert.equal(await page.locator('input[type=file]').count(),1);
  await page.locator('.knowledge-actions').getByRole('button',{name:'删除',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'确认删除',exact:true}).click();await page.locator('input[type=file]').waitFor({state:'hidden'});
  // MCP and device-plugin create/edit/associate/delete, including parameter fields.
- await page.locator('summary').filter({hasText:'工具与插件'}).click();
+ await page.locator('.ant-collapse-header').filter({hasText:'工具与插件'}).click();
  for(const kind of ['mcp','plugin']){
   const group=page.locator('.resource-list').filter({has:page.getByRole('heading',{name:kind==='mcp'?'MCP 工具':'设备插件',exact:true})});
   await group.getByRole('button',{name:kind==='mcp'?'+ 新建 MCP 工具':'+ 新建设备插件',exact:true}).click();
   const dialog=page.getByRole('dialog');await dialog.getByLabel('名称',{exact:true}).fill(kind+'新资源');await dialog.getByLabel('描述',{exact:true}).fill('描述');
   if(kind==='mcp'){
-   await dialog.getByLabel('MCP 服务 URL').fill('https://example.test/tool');await dialog.getByLabel('认证方式').selectOption('bearer');await dialog.getByLabel('Bearer Token',{exact:true}).fill('synthetic-test-token');await dialog.getByLabel('启用',{exact:true}).uncheck();await dialog.getByLabel('启用',{exact:true}).check();
+   await dialog.getByLabel('MCP 服务 URL').fill('https://example.test/tool');await chooseSelect(dialog.getByRole('combobox',{name:'认证方式',exact:true}),'Bearer Token');await dialog.getByLabel('Bearer Token',{exact:true}).fill('synthetic-test-token');await dialog.getByLabel('启用',{exact:true}).uncheck();await dialog.getByLabel('启用',{exact:true}).check();
   }else{
    await dialog.getByLabel('功能标识（Action）').fill('demo_action');
    for(let i=0;i<2;i++){
     await dialog.getByRole('button',{name:'添加参数',exact:true}).nth(i).click();const card=dialog.locator('.param-card').nth(i);
-    await card.getByLabel('参数名称',{exact:true}).fill(i?'result':'count');await card.getByRole('combobox').selectOption('integer');await card.getByLabel('参数说明',{exact:true}).fill('说明');await card.getByLabel('默认值',{exact:true}).fill('1');if(!i)await card.getByLabel('必填',{exact:true}).check();
+    await card.getByLabel('参数名称',{exact:true}).fill(i?'result':'count');await chooseSelect(card.getByRole('combobox'),'integer');await card.getByLabel('参数说明',{exact:true}).fill('说明');await card.getByLabel('默认值',{exact:true}).fill('1');if(!i)await card.getByLabel('必填',{exact:true}).check();
    }
    await dialog.getByRole('button',{name:'添加参数',exact:true}).first().click();await dialog.locator('.param-card').nth(1).getByRole('button',{name:'删除参数',exact:true}).click();
   }
   await dialog.getByRole('button',{name:'保存',exact:true}).click();await dialog.waitFor({state:'hidden'});
-  const checkbox=group.getByRole('checkbox',{name:kind+'新资源',exact:true});await checkbox.check();await page.getByRole('button',{name:'保存角色',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.save-bar .ant-btn-primary')?.disabled);const row=checkbox.locator('xpath=../..');
+  const checkbox=group.getByRole('checkbox',{name:kind+'新资源',exact:true});await checkbox.check();await page.getByRole('button',{name:'保存角色',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.save-bar .ant-btn-primary')?.disabled);const row=checkbox.locator('xpath=ancestor::div[contains(concat(" ", normalize-space(@class), " "), " row ")][1]');
   await row.getByRole('button',{name:'编辑',exact:true}).click();await dialog.getByLabel('名称',{exact:true}).fill(kind+'已编辑');await dialog.getByRole('button',{name:'保存',exact:true}).click();await dialog.waitFor({state:'hidden'});
   const item=resources[kind].at(-1);assert.equal(item.name,kind+'已编辑');if(kind==='mcp')assert.equal(item.config.authentication.bearer_token,'synthetic-test-token');else {assert.equal(item.input_params.length,1);assert.equal(item.return_params.length,1);assert.equal(item.input_params[0].required,true);}
   await group.getByRole('checkbox',{name:kind+'已编辑',exact:true}).uncheck();
   await page.getByRole('button',{name:'保存角色',exact:true}).click();await page.getByText('保存成功',{exact:true}).waitFor();
-  const updated=group.getByRole('checkbox',{name:kind+'已编辑',exact:true}).locator('xpath=../..');await updated.getByRole('button',{name:'删除',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'确认删除',exact:true}).click();await group.getByRole('checkbox',{name:kind+'已编辑',exact:true}).waitFor({state:'hidden'});
+  const updated=group.getByRole('checkbox',{name:kind+'已编辑',exact:true}).locator('xpath=ancestor::div[contains(concat(" ", normalize-space(@class), " "), " row ")][1]');await updated.getByRole('button',{name:'删除',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'确认删除',exact:true}).click();await group.getByRole('checkbox',{name:kind+'已编辑',exact:true}).waitFor({state:'hidden'});
  }
- for(const width of [390,1440]){await page.setViewportSize({width,height:1000});await choice.selectOption('k1');assert.equal(await page.locator('input[type=file]').count(),1);assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await page.evaluate(()=>scrollTo(0,0));await page.waitForTimeout(100);await page.screenshot({path:root+'/../output/playwright/knowledge-verified-'+width+'.png',fullPage:true});}
+ for(const width of [390,1440]){await page.setViewportSize({width,height:1000});await chooseSelect(choice,'更新知识库');assert.equal(await page.locator('input[type=file]').count(),1);assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await page.evaluate(()=>scrollTo(0,0));await page.waitForTimeout(100);await page.screenshot({path:root+'/../output/playwright/knowledge-verified-'+width+'.png',fullPage:true});}
  assert.deepEqual(errors,[]);console.log('PASS: knowledge create/edit/retry/delete; single upload section; upload failure/retry, unlink vs delete; documents retry; MCP and plugin CRUD/parameters/associations; desktop/mobile');
  }finally{await browser.close();server.close();}
 })().catch(e=>{console.error(e);server.close();process.exitCode=1;});
