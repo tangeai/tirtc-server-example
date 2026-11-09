@@ -1,4 +1,4 @@
-import Taro, { useDidShow } from '@tarojs/taro';
+import Taro, { useDidShow, usePullDownRefresh } from '@tarojs/taro';
 import { Button, Text, View } from '@tarojs/components';
 import { useEffect, useRef, useState } from 'react';
 import { DeviceInfo } from '../../components/device-info';
@@ -33,6 +33,10 @@ export default function Devices() {
     if (!token()) { void Taro.reLaunch({ url: '/pages/login/index' }); return; }
     if (loadedRevision.current !== deviceRevision()) void load();
   });
+  usePullDownRefresh(() => {
+    if (writing.current || overlayOpen) { Taro.stopPullDownRefresh(); return; }
+    void load();
+  });
   async function load() {
     if (reading.current) return;
     reading.current = true; const rev = ++revision.current; const changed = deviceRevision();
@@ -45,7 +49,7 @@ export default function Devices() {
       const auth = await refreshAuthorizations(rows);
       if (alive.current && rev === revision.current) setAuthorizations(auth);
     } catch (e) { if (alive.current && rev === revision.current) setError(errorText(e)); }
-    finally { reading.current = false; if (alive.current && rev === revision.current) { setLoading(false); setInitialized(true); } }
+    finally { reading.current = false; if (alive.current) { Taro.stopPullDownRefresh(); if (rev === revision.current) { setLoading(false); setInitialized(true); } } }
   }
   async function mutate(operation: () => Promise<void>, inEditor = false) {
     if (writing.current) return;
@@ -89,9 +93,9 @@ export default function Devices() {
   const needsAuthorization = (device: Device) => ['missing', 'disabled'].includes(authorizations[device.device_id]?.state || 'unknown');
   const callLabel = (device: Device) => authorizations[device.device_id]?.state === 'missing' ? '授权微信通话' : authorizations[device.device_id]?.state === 'disabled' ? '开启通话提醒' : '微信通话';
   return <View className='page'>
-      <View className='row between' style={{ marginBottom: '24px' }}><Text className='title'>我的设备 <Text className='muted'>{devices.length}</Text></Text><View className='row'><Action disabled={loading || busy} onClick={() => void load()}>刷新</Action><Action primary onClick={() => void Taro.navigateTo({ url: '/pages/bind/index' })}>＋ 添加设备</Action></View></View>
+      <View className='row between' style={{ marginBottom: '24px' }}><Text className='title'>我的设备 <Text className='muted'>{devices.length}</Text></Text><View className='row'><Action primary onClick={() => void Taro.navigateTo({ url: '/pages/bind/index' })}>＋ 添加设备</Action></View></View>
       <Notice error>{error}</Notice>{loading && <Notice>正在更新设备…</Notice>}
-      {initialized && !devices.length && <View className='card empty'>{error ? '设备列表暂时无法加载，请刷新重试' : '添加第一台设备，开始使用小钛'}</View>}
+      {initialized && !devices.length && <View className='card empty'>{error ? '设备列表暂时无法加载，请下拉刷新重试' : '添加第一台设备，开始使用小钛'}</View>}
       {devices.map(device => <View className='card' key={device.device_id}><View className='device-head'><View className={'device-symbol ' + (device.online ? 'device-symbol-online' : 'device-symbol-offline')}><RobotIcon /><Text className='device-symbol-status'>{device.online ? '在线' : '离线'}</Text></View><View className='grow device-summary'><View className='device-title-row'><Text className='device-name'>{device.device_name || '未命名设备'}</Text></View><Text className='device-id'>ID: {device.device_id}</Text></View><Action disabled={busy} onClick={() => setMenu(device)}>⋯</Action></View>
         <View className='device-actions device-primary-actions'>{capabilities.platform === 'weapp' && <Action primary disabled={busy || loading || (!device.online && !needsAuthorization(device))} onClick={() => void media(needsAuthorization(device) ? 'authorize' : 'wechat-call', device)}><View className='device-primary-label'><View className={'device-action-icon ' + (needsAuthorization(device) ? 'device-action-shield' : 'device-action-phone')} ariaHidden />{callLabel(device)}</View></Action>}<Action disabled={busy || !device.online || !capabilities.playback} onClick={() => void media('playback', device)}><View className='device-primary-label'><View className='device-action-icon device-action-play' ariaHidden />实时查看</View></Action></View>
         <View className='device-feature-links'>{([['roles', 'AI 角色'], ['recognition', 'AI 识别'], ['contacts', '联系人']] as const).map(([page, title]) => <Action key={page} onClick={() => void Taro.navigateTo({ url: '/pages/' + page + '/index?device_id=' + encodeURIComponent(device.device_id) })}>{title}<Text className='device-link-arrow'>›</Text></Action>)}</View>

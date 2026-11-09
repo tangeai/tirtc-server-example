@@ -19,7 +19,7 @@ function render(state: string, online: boolean, menu = false) {
   const source = loadSource(fileURLToPath(new URL('../src/pages/devices/index.tsx', import.meta.url)), {
     'react/jsx-runtime': { jsx, jsxs: jsx },
     react: { useState: (initial: unknown) => [cursor < values.length ? values[cursor++] : (cursor++, initial), () => {}], useRef: (current: unknown) => ({ current }), useEffect: (fn: () => void | (() => void)) => { const cleanup = fn(); if (cleanup) cleanups.push(cleanup); } },
-    '@tarojs/taro': { __esModule: true, default: { hideTabBar: async () => { tabActions.push('hide'); }, showTabBar: async () => { tabActions.push('show'); }, navigateTo: ({ url }: { url: string }) => { navigation.push(url); } }, useDidShow() {} },
+    '@tarojs/taro': { __esModule: true, default: { hideTabBar: async () => { tabActions.push('hide'); }, showTabBar: async () => { tabActions.push('show'); }, navigateTo: ({ url }: { url: string }) => { navigation.push(url); } }, useDidShow() {}, usePullDownRefresh() {} },
     '@tarojs/components': { View: 'view', Text: 'text', Button: 'button' },
     '../../components/ui': { Action: 'action', Field: 'field', Notice: 'notice', Sheet: 'sheet' },
     '../../services/api': { token: () => 'fixture', errorText: () => '失败' },

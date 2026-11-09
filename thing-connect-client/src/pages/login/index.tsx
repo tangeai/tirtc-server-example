@@ -2,7 +2,7 @@ import Taro, { useLoad } from '@tarojs/taro';
 import { Button, Checkbox, Image, Input, Text, View } from '@tarojs/components';
 import { useEffect, useRef, useState } from 'react';
 import { Notice } from '../../components/ui';
-import { ApiError, errorText, request, signIn, signOut, token } from '../../services/api';
+import { ApiError, errorText, request, signIn, signOut, rememberedEmail, token } from '../../services/api';
 import { Captcha, type CaptchaConfig, type CaptchaHandle } from '../../platform/captcha';
 import eye from '../../assets/auth/eye.png';
 import eyeOff from '../../assets/auth/eye-off.png';
@@ -32,6 +32,7 @@ export default function Login() {
   useLoad(options => {
     if (options.mode === 'reset') setMode('reset');
     else if (token()) { void Taro.switchTab({ url: '/pages/devices/index' }); return; }
+    setEmail(rememberedEmail());
     if (options.expired) setNotice('登录状态已过期，请重新登录');
     void loadConfig();
   });
@@ -59,7 +60,7 @@ export default function Login() {
         const result = await request<{ token: string }>(path, 'POST', { ...payload, password, ...(mode !== 'login' ? { code } : {}) });
         if (!alive.current) return;
         if (mode === 'reset') { signOut(); setMode('login'); setPassword(''); setConfirm(''); setCode(''); setNotice('密码已重置，请使用新密码登录'); }
-        else { if (!result?.token) throw new ApiError(-1, '登录响应异常，请重试'); signIn(result.token); await Taro.reLaunch({ url: '/pages/devices/index' }); }
+        else { if (!result?.token) throw new ApiError(-1, '登录响应异常，请重试'); signIn(result.token, email); await Taro.reLaunch({ url: '/pages/devices/index' }); }
       }
     } catch (e) { if (alive.current) setError(errorText(e)); }
     finally { lock.current = false; if (alive.current) setBusy(false); }

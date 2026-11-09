@@ -5,7 +5,19 @@ export { ApiError, errorText } from '../domain/http';
 const publicPaths = new Set(['/v1/config/captcha', '/v1/config/navigation', '/v1/user/login', '/v1/user/register', '/v1/user/send-code', '/v1/user/password-reset', '/v1/user/password-reset/send-code']);
 let redirecting = false;
 export function token(): string { return Taro.getStorageSync('token') || ''; }
-export function signIn(value: string) { Taro.setStorageSync('token', value); }
+const rememberedEmailKey = 'last-successful-login-email';
+export function rememberedEmail(): string {
+  try {
+    const value = Taro.getStorageSync(rememberedEmailKey);
+    return typeof value === 'string' && value.length <= 254 ? value : '';
+  } catch { return ''; }
+}
+export function signIn(value: string, email?: string) {
+  Taro.setStorageSync('token', value);
+  if (email?.trim()) {
+    try { Taro.setStorageSync(rememberedEmailKey, email.trim()); } catch { /* Remembering an email must not prevent login. */ }
+  }
+}
 export function signOut() { Taro.removeStorageSync('token'); }
 export async function request<T>(path: string, method: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET', data?: object, headers?: Record<string, string>): Promise<T> {
   const requestToken = token();
