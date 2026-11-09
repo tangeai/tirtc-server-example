@@ -1,0 +1,43 @@
+{
+  "name": "thingconnect-client",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "prepare:assets": "node scripts/prepare-assets.cjs",
+    "predev:weapp": "npm run prepare:assets",
+    "prebuild:weapp": "npm run prepare:assets",
+    "prebuild:h5": "npm run prepare:assets",
+    "pretypecheck": "npm run prepare:assets",
+    "dev:weapp": "taro build --type weapp --watch",
+    "build:weapp": "taro build --type weapp",
+    "build:h5": "taro build --type h5",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "check": "npm run typecheck && npm test && npm run build:weapp",
+    "postbuild:weapp": "node scripts/check-build.cjs weapp",
+    "postbuild:h5": "node scripts/check-build.cjs h5"
+  },
+  "dependencies": {
+    "@tarojs/components": "4.3.2",
+    "@tarojs/react": "4.3.2",
+    "@tarojs/runtime": "4.3.2",
+    "@tarojs/shared": "4.3.2",
+    "@tarojs/taro": "4.3.2",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@babel/plugin-proposal-decorators": "^7.29.7",
+    "@tarojs/cli": "4.3.2",
+    "@tarojs/plugin-framework-react": "4.3.2",
+    "@tarojs/plugin-platform-h5": "4.3.2",
+    "@tarojs/plugin-platform-weapp": "4.3.2",
+    "@tarojs/vite-runner": "4.3.2",
+    "@types/node": "^22.0.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.7.0",
+    "typescript": "~5.8.3",
+    "vite": "^4.5.0"
+  }
+}

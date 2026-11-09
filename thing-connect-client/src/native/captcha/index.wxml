@@ -1,0 +1,1 @@
+<ne-captcha id="verification" captcha-id="{{captchaId}}" width="630rpx" bindverify="onVerify" bindclose="onClose" />

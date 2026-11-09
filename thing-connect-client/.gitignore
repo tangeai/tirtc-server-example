@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.taro/
+project.private.config.json
+.env.local
+src/generated/
+
+.swc/

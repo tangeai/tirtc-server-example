@@ -1,0 +1,8 @@
+{
+  "appid": "wx27d4b2d7eb37eb58",
+  "projectname": "thingconnect-taro",
+  "compileType": "miniprogram",
+  "miniprogramRoot": "dist/weapp/",
+  "libVersion": "3.0.2",
+  "setting": { "es6": false, "minified": true, "urlCheck": true }
+}
