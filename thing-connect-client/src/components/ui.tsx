@@ -1,8 +1,8 @@
 import { Button, Input, Text, View } from '@tarojs/components';
 import type { PropsWithChildren } from 'react';
 
-export function Action({ children, onClick, disabled, primary, danger }: PropsWithChildren<{ onClick(): void; disabled?: boolean; primary?: boolean; danger?: boolean }>) {
-  return <Button className={`action ${primary ? 'primary' : ''} ${danger ? 'danger' : ''}`} disabled={disabled} onClick={onClick}>{children}</Button>;
+export function Action({ children, onClick, disabled, primary, danger, muted }: PropsWithChildren<{ onClick(): void; disabled?: boolean; primary?: boolean; danger?: boolean; muted?: boolean }>) {
+  return <Button className={`action ${primary ? 'primary' : ''} ${danger ? 'danger' : ''} ${muted ? 'is-unavailable' : ''}`} disabled={disabled} onClick={onClick}>{children}</Button>;
 }
 export function Field({ label, value, onChange, password, numeric, disabled, placeholder }: { label: string; value: string; onChange(value: string): void; password?: boolean; numeric?: boolean; disabled?: boolean; placeholder?: string }) {
   return <View className='field'><Text className='label'>{label}</Text><Input className='input field-input' value={value} password={password} type={numeric ? 'number' : 'text'} disabled={disabled} placeholder={placeholder || label} onInput={e => onChange(e.detail.value)} /></View>;
