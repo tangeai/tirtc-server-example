@@ -17,7 +17,7 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  await page.route('**/v1/config/site',route=>route.fulfill({json:{code:200,data:{name:'自定义站点',name_en:'Custom site'}}}));
  const sampleBoard={name:'小钛开发板完整型号与名称检查',model:'ESP32-S3-DISPLAY-LONG-MODEL-NUMBER',vendor:'测试厂商',chip:'ESP32-S3',adaptation_status:'ready',summary:'用于浏览器交互验证的测试开发板。',detail_slug:'sample',capabilities:['AI 对话','实时音视频','设备对讲'],firmware_url:'https://example.test/firmware',flashing_guide_url:'https://example.test/guide'};
  await page.route('**/v1/boards',route=>{const home=new URL(route.request().headers().referer||base).pathname==='/';const boards=home?Array.from({length:4},(_,i)=>({...sampleBoard,name:sampleBoard.name+' '+(i+1),detail_slug:'sample-'+i})): [sampleBoard];return route.fulfill({json:failed?{code:50000,msg:'目录加载失败'}:{code:200,data:{boards}}});});
- for(const width of [320,390,768,1024,1280,1440,1920]){
+ for(const width of [320,390,768,1024,1100,1200,1280,1440,1920]){
   await page.setViewportSize({width,height:900});
   for(const url of ['/','/boards']){
    await page.goto(base+url);await page.waitForFunction(()=>window.SiteI18n);
@@ -33,8 +33,10 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
      assert(Math.abs(navBox.x-heroBox.x)<1&&Math.abs(navBox.width-heroBox.width)<1,'homepage header and content must align');
      const boardBox=await page.locator('.showcase .board').boundingBox(),captionBox=await page.locator('.device-caption').boundingBox();
      const showcaseBox=await page.locator('.showcase').boundingBox();
-     assert(boardBox.x>=showcaseBox.x-1&&boardBox.x+boardBox.width<=showcaseBox.x+showcaseBox.width+1,'board must not be clipped '+width+' '+language);
+     assert(boardBox.x>=showcaseBox.x-1&&boardBox.x+boardBox.width<=showcaseBox.x+showcaseBox.width+1,'board must not be clipped '+width+' '+language+' '+JSON.stringify({boardBox,showcaseBox}));
      assert(captionBox.y>=boardBox.y+boardBox.height+6,'board caption overlaps board '+width+' '+language+' '+JSON.stringify({boardBox,captionBox}));
+     const featureBox=await page.locator('.feature-tabs').boundingBox();
+     assert(width<=1250?featureBox.y+featureBox.height<boardBox.y:featureBox.x+featureBox.width<boardBox.x,'feature controls must not overlap board '+width+' '+language);
      assert.equal(await page.locator('.feature-tabs button>svg').count(),4);
      if(language==='zh-CN')assert(!(await page.locator('h1').innerText()).endsWith('。'));
      assert.equal(await page.locator('a[href^="mailto:"]').getAttribute('href'),'mailto:'+await page.locator('a[href^="mailto:"]').innerText());
@@ -60,6 +62,10 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
   assert.equal(await page.locator('.showcase .screen').getAttribute('data-scene'),String(scene));
   assert.equal(await page.locator('[data-feature="'+scene+'"]').getAttribute('aria-pressed'),'true');
   assert(await page.locator('#screen-title').innerText());
+  assert.equal(await page.locator('.connection-track').count(),2);
+  const routes=await page.locator('.connection-track').evaluateAll(nodes=>nodes.map(node=>node.getAttribute('d')));
+  assert.notEqual(routes[0],routes[1],'outbound and inbound routes stay separate');
+  assert(await page.locator('.connection-layer').evaluate(svg=>svg.animationsPaused()),'reduced motion pauses data packets');
  }
  assert(await page.locator('.camera-preview svg').isVisible());
  assert.equal(await page.locator('#toggle-animation').getAttribute('aria-pressed'),'true');
@@ -72,6 +78,20 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
   await primary.hover();await page.waitForTimeout(250);
   assert.equal(await primary.evaluate(e=>getComputedStyle(e).backgroundColor),'rgb(6, 108, 118)','primary links and buttons share hover styling');
  }
+ // The board changes pose without replacing the running data packet elements.
+ await page.locator('#toggle-animation').click();
+ await page.evaluate(()=>scrollTo({top:0,behavior:'instant'}));
+ const routeBefore=await page.locator('#flow-route-0').getAttribute('d');
+ await page.evaluate(()=>{window.packetBefore=document.querySelector('.connection-particle');});
+ await page.locator('.showcase .board').hover();
+ await page.waitForFunction(()=>document.querySelector('.board').classList.contains('is-facing'));
+ await page.waitForTimeout(650);
+ assert.notEqual(await page.locator('#flow-route-0').getAttribute('d'),routeBefore,'wires follow board rotation');
+ assert(await page.evaluate(()=>window.packetBefore===document.querySelector('.connection-particle')),'rotation preserves the packet animation');
+ await page.mouse.move(20,20);await page.waitForTimeout(650);
+ assert(!(await page.locator('.board').evaluate(el=>el.classList.contains('is-facing'))));
+ await page.locator('#toggle-animation').click();
+ assert(await page.locator('.connection-layer').evaluate(svg=>svg.animationsPaused()),'pause control stops data packets');
  const catalogRequests=[];page.on('request',r=>{if(r.url().endsWith('/v1/boards'))catalogRequests.push(r.url());});
  await page.route(base+'/',async route=>{const response=await route.fetch();const html=await response.text();await route.fulfill({response,body:html.replace('<!-- public:bootstrap -->','<script id="site-brand-data" type="application/json">{"name":"服务端站点","name_en":"SSR site","revision":7}</script><script id="public-catalog-data" type="application/json">{"status":"ready","boards":[{"name":"SSR board","capabilities":[],"chip":"TEST"}]}</script>')});});
  await page.goto(base+'/');await page.locator('.catalog-card').first().waitFor();
@@ -88,6 +108,6 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
   await page.evaluate(()=>SiteI18n.setBrand({name:'名称'.repeat(20),name_en:'Long brand '.repeat(3)}));
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'long configured brand overflow '+url);
  }
- assert.deepEqual(errors,[]);console.log('PASS public pages: 7 viewport widths, Chinese/English, mobile menu Escape/outside click, terminal keyboard tabs, email link, board capabilities/detail/resources, retry and deep link');
+ assert.deepEqual(errors,[]);console.log('PASS public pages: 9 viewport widths, Chinese/English, mobile menu Escape/outside click, terminal keyboard tabs, email link, board capabilities/detail/resources, retry and deep link');
  }finally{await browser.close();server.close();}
 })().catch(e=>{console.error(e);server.close();process.exitCode=1;});

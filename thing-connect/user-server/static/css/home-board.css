@@ -1,0 +1,308 @@
+.connection-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 4;
+}
+.connection-label {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+  background: #ffffffed;
+  color: var(--wire, #087d89);
+  border: 1px solid #dcecea;
+  border-radius: 20px;
+  padding: 5px 10px;
+  font-size: 10px;
+  white-space: nowrap;
+  box-shadow: 0 4px 18px #0c88790c;
+  transform: translate(-50%, -50%);
+}
+.connection-track {
+  fill: none;
+  stroke: var(--wire);
+  stroke-width: 1.4;
+  opacity: 0.3;
+}
+.connection-particle {
+  fill: var(--wire);
+  filter: none;
+}
+.connection-return {
+  fill: #fff;
+  stroke: var(--wire);
+  stroke-width: 1.4;
+}
+.connection-node {
+  fill: #fff;
+  stroke: var(--wire);
+  stroke-width: 1.4;
+}
+/* Cool graphite PCB, silver RF shield and warm plated contacts for a light page. */
+.home-page .showcase .board {
+  background:
+    radial-gradient(ellipse at 15% 6%, #476171 0, transparent 48%),
+    linear-gradient(125deg, #304957 0, #243b49 45%, #203643 80%, #354e5c);
+  border: 1px solid #8fa6b2;
+  box-shadow:
+    inset 1px 1px 1px #e1edf06b,
+    1px 2px 0 #8da7b0,
+    3px 5px 0 #345464,
+    6px 9px 0 #193544,
+    7px 10px 9px -3px #172c3d52,
+    17px 25px 24px -8px #29455840,
+    34px 42px 48px -10px #38566b30;
+  transform: perspective(1200px) rotateY(-13deg) rotateZ(7deg);
+}
+.board-ground-shadow {
+  position: absolute;
+  right: 8px;
+  bottom: 48px;
+  width: 260px;
+  height: 22px;
+  border-radius: 50%;
+  background: #26495d;
+  opacity: 0.2;
+  filter: blur(11px);
+  transform: rotate(-7deg);
+  z-index: -1;
+}
+.home-page .showcase .board .mount {
+  background: #1e3948;
+  border-color: #c4b58f;
+  box-shadow:
+    inset 1px 2px 3px #061924b3,
+    0 0 0 2px #869a9d;
+}
+.home-page .showcase .board .chip {
+  border-color: #b9c8ce;
+  background:
+    repeating-linear-gradient(0deg, #ffffff0a 0 1px, transparent 1px 3px),
+    linear-gradient(125deg, #eff0f2 0, #d4d8de 32%, #b6bdc7 62%, #e4e7eb 100%);
+  color: #435965;
+  box-shadow:
+    2px 3px 0 #1b3544,
+    inset 0 0 0 1px #f8fcfeaa;
+}
+.home-page .showcase .board .chip small {
+  color: #61737e;
+}
+.home-page .showcase .antenna {
+  background: linear-gradient(140deg, #293b44, #142a35);
+  border-color: #768a91;
+  box-shadow: 2px 3px 4px #0b233740;
+}
+.home-page .showcase .screen {
+  border-color: #a3b4bd;
+  box-shadow:
+    inset 0 0 0 3px #1a2b35,
+    inset 0 1px 0 #ffffff55,
+    3px 5px 0 #18313f,
+    7px 10px 12px #071f303b;
+}
+.home-page .showcase .screen:before,
+.home-page .showcase .screen:after {
+  background: #c5d1d6;
+}
+.home-page .showcase .board .pin-rail {
+  border-color: #1c3442;
+  background: repeating-linear-gradient(
+    to bottom,
+    #253a46 0 5px,
+    #c9bb98 5px 10px,
+    #8f856d 10px 12px,
+    #253a46 12px 18px
+  );
+  box-shadow: 2px 2px 3px #10283680;
+}
+.home-page .showcase .pcb-traces path {
+  stroke: #a4c2cc;
+}
+.home-page .showcase .port-labels {
+  color: #b7cbd2;
+}
+.home-page .showcase .board-bottom b {
+  border-color: #acbcc2;
+  background: #758b96;
+}
+.home-page .showcase .usb {
+  border-color: #bdccd3;
+}
+.home-page .showcase .orbit {
+  background: radial-gradient(ellipse at 68% 50%, #d8e9ee8c, transparent 66%);
+}
+.capability-tags {
+  gap: 8px 11px;
+  font-size: 12px;
+  color: #466d76;
+  align-items: center;
+}
+.capability-tags > span::before {
+  content: none;
+}
+.capability-tags i {
+  font-style: normal;
+  color: #9eb7bd;
+}
+@media (max-width: 1250px) {
+  .home-page .showcase .board {
+    transform: translateX(-50%) perspective(1200px) rotateY(-13deg)
+      rotateZ(7deg) scale(0.7);
+  }
+  .board-ground-shadow {
+    left: 50%;
+    right: auto;
+    bottom: 70px;
+    width: 200px;
+    transform: translateX(-50%) rotate(-7deg);
+  }
+}
+
+/* Restrained metal details and a clear distinction between hover and selection. */
+.home-page .showcase .antenna path {
+  stroke: #cbbb94;
+}
+.home-page .showcase .pcb-traces {
+  opacity: 0.36;
+}
+.home-page .showcase .chip-brands {
+  color: #4c5661;
+}
+.home-page .showcase .feature-tabs button:not(.active):hover {
+  background: #f0f5f6;
+  border-color: transparent;
+  color: #45616c;
+  box-shadow: none;
+}
+.home-page .showcase .feature-tabs button:not(.active):focus-visible {
+  outline: 2px solid #7aa6ae;
+  outline-offset: 3px;
+  background: #f0f5f6;
+  border-color: transparent;
+}
+.home-page .showcase .feature-tabs button.active {
+  background: #e7f6f7;
+  border-color: #69b8c0;
+  color: #087d89;
+  box-shadow: 0 5px 16px #087d890a;
+}
+.home-page .showcase .board .chip {
+  text-shadow: none;
+}
+
+/* Desktop inspection pose: the board straightens without zooming. */
+.home-page .showcase .board {
+  transition:
+    transform 0.55s cubic-bezier(0.22, 0.7, 0.25, 1),
+    box-shadow 0.55s ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .home-page .showcase .board.is-facing {
+    transform: perspective(1200px) rotateY(0deg) rotateZ(0deg);
+    box-shadow:
+      inset 1px 1px 1px #e1edf06b,
+      1px 2px 0 #8da7b0,
+      2px 4px 0 #193544,
+      0 8px 9px -3px #172c3d47,
+      0 19px 22px -7px #29455838,
+      0 32px 40px -9px #38566b26;
+  }
+}
+@media (max-width: 1250px) and (hover: hover) and (pointer: fine) {
+  .home-page .showcase .board.is-facing {
+    transform: translateX(-50%) perspective(1200px) rotateY(0deg) rotateZ(0deg)
+      scale(0.7);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .home-page .showcase .board {
+    transition: none;
+  }
+}
+
+/* A close contact shadow anchors the board; the wider cast shadow stays soft. */
+.home-page .board-ground-shadow {
+  height: 17px;
+  opacity: 0.24;
+  filter: blur(9px);
+  background: #304959;
+  transition:
+    transform 0.55s cubic-bezier(0.22, 0.7, 0.25, 1),
+    opacity 0.55s ease,
+    filter 0.55s ease;
+}
+.home-page .showcase.board-facing .board-ground-shadow {
+  transform: translateX(-8px) rotate(0deg) scaleX(0.86);
+  opacity: 0.19;
+  filter: blur(8px);
+}
+@media (max-width: 1250px) {
+  .home-page .showcase.board-facing .board-ground-shadow {
+    transform: translateX(-50%) rotate(0deg) scaleX(0.86);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .home-page .board-ground-shadow {
+    transition: none;
+  }
+}
+@media (max-width: 1250px) {
+  .connection-label {
+    font-size: 9px;
+    padding: 4px 7px;
+  }
+}
+@media (min-width: 1251px) {
+  .home-page .showcase .board {
+    margin-right: 32px;
+  }
+}
+@media (max-width: 1250px) {
+  .home-page .showcase {
+    overflow: visible;
+  }
+}
+
+@media (max-width: 1250px) {
+  .home-page .showcase .orbit {
+    width: 100%;
+    left: 0;
+    transform: none;
+  }
+}
+
+/* Give the board and feature controls separate rows on compact laptops. */
+@media (min-width: 1051px) and (max-width: 1250px) {
+  .home-page .showcase {
+    display: block;
+    height: 540px;
+    padding: 0;
+  }
+  .home-page .showcase .feature-tabs {
+    top: 0;
+    left: 0;
+    right: 0;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .home-page .showcase .feature-tabs button {
+    width: 100%;
+    min-height: 44px;
+    gap: 8px;
+    padding: 10px;
+  }
+  .home-page .showcase .board {
+    position: absolute;
+    top: 80px;
+    left: 50%;
+    margin: 0;
+  }
+  .home-page .showcase .device-caption {
+    left: 0;
+    right: 0;
+    justify-content: center;
+  }
+}

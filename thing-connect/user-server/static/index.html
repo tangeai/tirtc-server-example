@@ -12,6 +12,7 @@
       data-i18n-content="home.description"
     />
     <link rel="stylesheet" href="/static/css/home.css?v=1" />
+    <link rel="stylesheet" href="/static/css/home-board.css?v=1" />
     <link rel="stylesheet" href="/static/css/site-header.css?v=5" />
     <link rel="stylesheet" href="/static/css/brand.css" />
     <!-- public:metadata -->
@@ -157,7 +158,7 @@
         <div class="intro">
           <div class="eyebrow">
             <i></i>
-            <span data-i18n="landing.heroKicker">开源 AI 音视频方案</span>
+            <span data-i18n="landing.heroKicker">开源 AI 音视频固件</span>
           </div>
           <h1>
             <span data-i18n="landing.heroTitle">给你的硬件接入</span><br /><span
@@ -168,19 +169,23 @@
           </h1>
           <p class="lead">
             <span data-i18n="landing.heroCopy"
-              >AI 聊天、微信通话、设备对讲、实时音视频。</span
+              >一套固件搞定信令、编解码和服务端。</span
             ><br /><span data-i18n="landing.heroSteps"
-              >烧录固件，联网绑定，即可体验。</span
+              >烧录即用，代码全开源。</span
             >
           </p>
-          <div class="hero-points">
-            <span><span data-i18n="landing.readyFirmware">固件即用</span></span
-            ><span><span data-i18n="landing.fullStack">多端配套</span></span
-            ><span><span data-i18n="landing.openSource">开源可扩展</span></span>
+          <div class="hero-points capability-tags">
+            <span data-i18n="landing.chat">AI 聊天</span
+            ><i aria-hidden="true">·</i>
+            <span data-i18n="landing.wechat">微信通话</span
+            ><i aria-hidden="true">·</i>
+            <span data-i18n="landing.intercom">设备对讲</span
+            ><i aria-hidden="true">·</i>
+            <span data-i18n="landing.live">实时音视频</span>
           </div>
           <div class="actions">
             <button class="primary" data-browse>
-              <span data-i18n="landing.chooseBoard">选开发板 · 下载固件</span>
+              <span data-i18n="landing.chooseBoard">选择开发板 · 开始体验</span>
               <b>↗</b></button
             ><a class="secondary" href="#abilities"
               ><span data-i18n="landing.explore">看看能做什么 ↓</span></a
@@ -193,6 +198,12 @@
           >
         </div>
         <div class="showcase">
+          <svg
+            class="connection-layer"
+            aria-hidden="true"
+            focusable="false"
+          ></svg>
+          <div class="connection-label" aria-hidden="true"></div>
           <div class="orbit"></div>
           <div
             class="feature-tabs"
@@ -265,6 +276,7 @@
               <span><span data-i18n="landing.live">实时音视频</span></span>
             </button>
           </div>
+          <div class="board-ground-shadow" aria-hidden="true"></div>
           <div class="board">
             <svg
               class="pcb-traces"
@@ -920,9 +932,10 @@ python3 -m venv .venv
 
     <!-- public:bootstrap -->
     <script src="/v1/config/language.js"></script>
-    <script src="/static/site-i18n.js?v=7"></script>
+    <script src="/static/site-i18n.js?v=8"></script>
     <script src="/static/site-brand.js?v=1"></script>
     <script src="/static/home.js?v=1"></script>
     <script src="/static/home-animation.js?v=1"></script>
+    <script src="/static/home-connection.js?v=1"></script>
   </body>
 </html>
