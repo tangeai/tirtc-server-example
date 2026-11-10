@@ -2,6 +2,7 @@ package admin
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -43,5 +44,26 @@ func TestAdminDeviceProfileDataKeepsVoIPContractAndAddsMetadata(t *testing.T) {
 	hardware, err := json.Marshal(data["hardware"])
 	if err != nil || string(hardware) != `{"chip_model":"arm64","board_model":"board-a"}` || data["firmware_version"] != "1.1.1" {
 		t.Fatalf("hardware=%s firmware=%v err=%v", hardware, data["firmware_version"], err)
+	}
+}
+
+func TestManagedDeviceProjectsProfilesWithoutSecrets(t *testing.T) {
+	profile := `{"hardware":{"chip_model":"ESP32-S3"},"stream":{"audio_rate":16000,"up_video_mt":["h264","mjpeg"]},"call":{"audio_channels":1},"voip":{"audio_rate":8000,"device_key":"secret-value"},"credentials":{"token":"secret-value"}}`
+	device := managedDevice{Profile: &profile}
+	device.projectProfileMetadata()
+	for _, scene := range []string{"stream", "call", "voip"} {
+		if _, ok := device.Profiles[scene]; !ok {
+			t.Fatalf("missing %s profile", scene)
+		}
+	}
+	raw, err := json.Marshal(device)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "secret-value") || strings.Contains(string(raw), "credentials") {
+		t.Fatal("profile projection leaked private fields")
+	}
+	if string(device.Profiles["stream"]["up_video_mt"]) != `["h264","mjpeg"]` {
+		t.Fatal("codec list changed")
 	}
 }

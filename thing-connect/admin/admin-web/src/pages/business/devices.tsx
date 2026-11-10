@@ -21,6 +21,7 @@ import {
 } from 'antd';
 import { DownloadOutlined, UploadOutlined } from '@ant-design/icons';
 import { api, json } from '../../api';
+import { DeviceReportedProfiles, type ReportedProfiles } from './device-profile';
 import { reportError } from '../../error-feedback';
 import { formatTime, pageTitle as title, useLoad, type PageData } from '../../shared/admin-ui';
 import {
@@ -47,6 +48,7 @@ type ManagedDevice = {
     board_model?: string;
   };
   firmware_version?: string;
+  profiles?: ReportedProfiles;
 };
 
 type BindLog = {
@@ -371,7 +373,7 @@ function UserDevicesPanel() {
             render: (_, row) => (
               <Space>
                 <Button type="link" onClick={() => openDetail(row)}>
-                  详情与绑定历史
+                  详情与上报属性
                 </Button>
                 {row.user_id > 0 ? (
                   <Popconfirm
@@ -389,7 +391,7 @@ function UserDevicesPanel() {
         ]}
       />
       <Drawer
-        width={800}
+        width="min(800px, 100vw)"
         open={!!detail}
         title={`设备详情：${detail?.device.device_id || ''}`}
         onClose={() => setDetail(undefined)}
@@ -445,6 +447,12 @@ function UserDevicesPanel() {
                 },
               ]}
             />
+            <Typography.Title level={5}>设备上报属性</Typography.Title>
+            <DeviceReportedProfiles
+              key={detail.device.device_id}
+              profiles={detail.device.profiles}
+            />
+            <Typography.Title level={5}>绑定历史</Typography.Title>
             <Table<BindLog>
               className="job-items"
               rowKey="id"

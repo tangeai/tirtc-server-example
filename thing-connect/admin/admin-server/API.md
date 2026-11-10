@@ -123,7 +123,7 @@ MFA 验证请求：
 
 `online` 依据 Redis 中 150 秒有效期的 MQTT 在线记录判定；设备心跳或 Broker 连接事件会刷新记录。`presence_known=false` 表示 Admin Server 当时无法读取 Redis，不能按离线处理。兼容升级前值时设备仍可显示在线，但 `last_seen_at` 可能为空；设备产生下一次心跳后会写入最近观测时间。
 
-`GET /devices/:device_id` 还会在设备已经上报时返回可选的 `hardware.chip_model`、`hardware.board_model` 和 `firmware_version`。未上报这些字段的旧设备不返回对应字段。
+`GET /devices/:device_id` 还会在设备已经上报时返回可选的 `hardware.chip_model`、`hardware.board_model` 和 `firmware_version`。未上报这些字段的旧设备不返回对应字段。设备详情同时返回可选的 `profiles` 对象，包含已上报且通过校验的 `stream`（实时音视频）、`call`（设备通话）、`voip`（微信通话）能力字段；无可展示场景时省略。此字段沿用 `device.read` 权限，不依赖微信授权记录。敏感字段和未知场景不返回；VoIP 中的 `has_camera`、`has_screen`、`voip_room_type` 为根据上报值推导的能力。
 
 用户和设备列表的排序规则如下：
 
