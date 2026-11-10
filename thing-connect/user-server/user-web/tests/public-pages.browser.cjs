@@ -68,18 +68,19 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
   assert(await page.locator('.connection-layer').evaluate(svg=>svg.animationsPaused()),'reduced motion pauses data packets');
  }
  assert(await page.locator('.camera-preview svg').isVisible());
- assert.equal(await page.locator('#toggle-animation').getAttribute('aria-pressed'),'true');
+ assert.equal(await page.locator('#toggle-animation').count(),0);
  await page.emulateMedia({reducedMotion:'no-preference'});
  await page.locator('[data-feature="1"]').click();
  await page.waitForFunction(()=>document.querySelector('.screen').classList.contains('call-connected'));
- await page.locator('#toggle-animation').click();
- assert(await page.locator('.screen').evaluate(e=>e.classList.contains('animation-paused')));
+ await page.emulateMedia({reducedMotion:'reduce'});
+ await page.waitForFunction(()=>document.querySelector('.screen').classList.contains('animation-paused'));
  for(const primary of await page.locator('.intro .primary,.catalog-actions .primary').all()){
   await primary.hover();await page.waitForTimeout(250);
   assert.equal(await primary.evaluate(e=>getComputedStyle(e).backgroundColor),'rgb(6, 108, 118)','primary links and buttons share hover styling');
  }
  // The board changes pose without replacing the running data packet elements.
- await page.locator('#toggle-animation').click();
+ await page.emulateMedia({reducedMotion:'no-preference'});
+ await page.waitForFunction(()=>!document.querySelector('.connection-layer').animationsPaused());
  await page.evaluate(()=>scrollTo({top:0,behavior:'instant'}));
  const routeBefore=await page.locator('#flow-route-0').getAttribute('d');
  await page.evaluate(()=>{window.packetBefore=document.querySelector('.connection-particle');});
@@ -90,8 +91,9 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  assert(await page.evaluate(()=>window.packetBefore===document.querySelector('.connection-particle')),'rotation preserves the packet animation');
  await page.mouse.move(20,20);await page.waitForTimeout(650);
  assert(!(await page.locator('.board').evaluate(el=>el.classList.contains('is-facing'))));
- await page.locator('#toggle-animation').click();
- assert(await page.locator('.connection-layer').evaluate(svg=>svg.animationsPaused()),'pause control stops data packets');
+ await page.emulateMedia({reducedMotion:'reduce'});
+ await page.waitForFunction(()=>document.querySelector('.connection-layer').animationsPaused());
+ assert(await page.locator('.screen').evaluate(el=>el.classList.contains('animation-paused')),'reduced motion stops screen animation');
  const catalogRequests=[];page.on('request',r=>{if(r.url().endsWith('/v1/boards'))catalogRequests.push(r.url());});
  await page.route(base+'/',async route=>{const response=await route.fetch();const html=await response.text();await route.fulfill({response,body:html.replace('<!-- public:bootstrap -->','<script id="site-brand-data" type="application/json">{"name":"服务端站点","name_en":"SSR site","revision":7}</script><script id="public-catalog-data" type="application/json">{"status":"ready","boards":[{"name":"SSR board","capabilities":[],"chip":"TEST"}]}</script>')});});
  await page.goto(base+'/');await page.locator('.catalog-card').first().waitFor();

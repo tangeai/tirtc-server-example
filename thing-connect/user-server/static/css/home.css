@@ -1991,15 +1991,6 @@ nav {
 .device-caption span:last-of-type {
   margin-left: 0;
 }
-.device-caption button {
-  background: white;
-  border: 1px solid #c8dfe0;
-  color: #087d89;
-  border-radius: 4px;
-  padding: 3px 5px;
-  font-size: 9px;
-  margin-left: 4px;
-}
 .screen.animation-paused * {
   animation-play-state: paused !important;
 }
@@ -2146,10 +2137,6 @@ nav {
   .device-caption {
     font-size: 8px;
     gap: 3px;
-  }
-  .device-caption button {
-    font-size: 8px;
-    padding: 3px;
   }
   .screen-status #screen-copy {
     font-size: 8px;
@@ -2431,11 +2418,6 @@ html[lang="en"] .chat-line {
 .device-caption {
   font-size: 11px;
 }
-.device-caption button {
-  min-height: 28px;
-  min-width: 56px;
-  font-size: 10px;
-}
 @media (max-width: 1050px) {
   .home-page .showcase {
     display: block;
@@ -2486,8 +2468,7 @@ html[lang="en"] .chat-line {
   text-underline-offset: 4px;
 }
 .sim-tabs button[aria-selected="false"]:is(:hover, :focus-visible),
-.command-heading button:is(:hover, :focus-visible),
-#toggle-animation:is(:hover, :focus-visible) {
+.command-heading button:is(:hover, :focus-visible) {
   background: #e8f7f9;
 }
 

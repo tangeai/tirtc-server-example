@@ -4,7 +4,6 @@
   const screen = document.querySelector(".showcase .screen");
   const visual = document.querySelector("#screen-visual");
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
-  let animationPaused = reducedMotion.matches;
   let callTimer;
   let currentFeature = 1;
   const bars =
@@ -27,11 +26,8 @@
   function updateAnimationState() {
     screen.classList.toggle(
       "animation-paused",
-      animationPaused || document.hidden,
+      reducedMotion.matches || document.hidden,
     );
-    const button = document.querySelector("#toggle-animation");
-    button.textContent = t(animationPaused ? "play" : "pause");
-    button.setAttribute("aria-pressed", String(animationPaused));
   }
   function feature(i) {
     clearTimeout(callTimer);
@@ -57,19 +53,14 @@
         document.querySelector("#screen-title").textContent = t("connected");
         document.querySelector("#screen-copy").textContent = t("twoWay");
       };
-      if (animationPaused) connect();
+      if (reducedMotion.matches) connect();
       else callTimer = setTimeout(connect, 1800);
     }
   }
   document
     .querySelectorAll("[data-feature]")
     .forEach((b) => (b.onclick = () => feature(+b.dataset.feature)));
-  document.querySelector("#toggle-animation").onclick = () => {
-    animationPaused = !animationPaused;
-    feature(currentFeature);
-  };
-  reducedMotion.addEventListener("change", (event) => {
-    animationPaused = event.matches;
+  reducedMotion.addEventListener("change", () => {
     feature(currentFeature);
   });
   window.SiteI18n.onChange(() => feature(currentFeature));
