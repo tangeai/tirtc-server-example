@@ -327,6 +327,12 @@ X-Internal-Key: <shared-internal-key>
 
 `default` 为 `auto`、`zh-CN` 或 `en`；`allow_switch` 为布尔值。两个字段均必填，未知字段、其他语言值和非布尔开关会被拒绝。注册表默认值为 `{"default":"auto","allow_switch":true}`，不含密钥，`reload=runtime`，每个定义的目标仅为本服务。revision 为 0 时，各服务使用本地 YAML 回退值；已发布值优先。配置运行时应用不改变已打开页面的语言，浏览器在下次打开页面时读取对应服务的有效版本。
 
+### 官网名称与公开网址
+
+`user-server/web.site` 使用现有配置读取、保存和发布接口，作用域为全局，`reload=runtime`，目标仅为 user-server，无密钥字段。默认值为 `{"name":"探鸽 · 小钛","name_en":"Tange · Xiaotai","public_url":""}`。
+
+`name` 必填，`name_en` 必须为字符串且允许为空；两者最多 40 个字符，不含控制字符或首尾空白。`public_url` 可省略或为空，非空时必须是 HTTPS 根地址，不包含账号、子路径、查询参数或片段。未知字段和非法值拒绝发布。revision 为 0 时使用 YAML 回退值；有效发布在下一次页面请求时反映到官网标题、品牌及搜索元数据。
+
 ## AI 角色类型
 
 角色类型是用户新建或编辑 AI 角色时使用的默认模板，由名称、音色和提示词组成。接口路径统一带 `/v1/admin` 前缀，沿用管理员登录与 CSRF 校验。读取需要 `ai_role_type.read`，写入需要 `ai_role_type.write`。

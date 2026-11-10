@@ -393,6 +393,8 @@ TiRTC 配置只检查字段完整性和格式，业务服务启动预检会再�
 
 未发布后台语言配置时，各服务使用自身 YAML 的 `web.language.default` 和 `web.language.allow_switch`；省略时为 `auto` 和 `true`。语言配置不改变启动时对 Admin 的依赖。英文页面翻译界面和操作提示；邮件模板、AI 对话语言以及云端资源描述需要单独配置。
 
+官网上线时，在 Admin 的用户服务配置中设置 `web.site.public_url` 为正式 HTTPS 根地址，并填写站点名称。反向代理将 `/`、`/boards`、`/robots.txt`、`/sitemap.xml` 交给 user-server，避免以静态 `index.html` 替代服务端页面。首页 HTML 包含核心能力、体验步骤和前三块已上架开发板；开发板页包含无脚本目录。标题、描述、Open Graph 和 JSON-LD 随站名配置生成；正式网址用于 canonical 和站点地图，避免使用请求 Host 推断网址。未配置网址时 `/sitemap.xml` 返回 404。登录及设备等用户页面发送 `X-Robots-Tag: noindex, nofollow`。搜索收录和 AI 引用由相应平台决定。
+
 ### 4.2 在服务器预检并启动业务服务
 
 首次安装的 `/opt/thing-connect/enabled-services` 只启用 Admin、Device、User。VoIP、AI、Call、Recognition 的配置文件可以存在，但需要先在 Admin 发布该业务的必需配置，再显式启用。例如启用 AI：
@@ -523,7 +525,7 @@ sudo /opt/thing-connect/service-local.sh restart thing-connect:admin-server
 | 其他路径 | User H5 |
 | 所有内部接口 | 明确拒绝，不向公网代理 |
 
-用户控制台使用 React、TypeScript 和 Vite，源码位于 `user-server/user-web`，构建产物位于 `user-server/static/app`，由 user-server 提供。登录、设备、联系人、角色、多人对讲和实时查看使用同一个应用入口；首页、开发板目录和协议政策为 user-server 的静态内容页。AI、通话等业务服务提供 API，用户页面使用同源 `/v1/*` 地址调用；Admin Web 保持独立的管理入口和权限体系。
+用户控制台使用 React、TypeScript 和 Vite，源码位于 `user-server/user-web`，构建产物位于 `user-server/static/app`，由 user-server 提供。登录、设备、联系人、角色、多人对讲和实时查看使用同一个应用入口；首页和开发板目录由 user-server 服务端渲染，协议政策为静态内容页。AI、通话等业务服务提供 API，用户页面使用同源 `/v1/*` 地址调用；Admin Web 保持独立的管理入口和权限体系。
 
 `./build.sh user-server` 包含用户前端构建。单独开发前端可执行 `npm --prefix user-server/user-web ci`、`npm --prefix user-server/user-web run dev`，浏览器打开 `http://localhost:5174/login`。Vite 开发代理连接本机默认业务端口，生产环境使用上述 Nginx 分发；不能只启动 user-server 就访问其他服务的业务 API。
 

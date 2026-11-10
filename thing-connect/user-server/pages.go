@@ -17,6 +17,7 @@ func registerUserPages(r *gin.Engine, staticDir string) error {
 		return err
 	}
 	legacy := map[string]string{
+		"/static/index.html": "/", "/static/boards.html": "/boards",
 		"/static/auth.html": "/login", "/static/devices.html": "/devices",
 		"/static/bind.html": "/bind", "/static/player.html": "/player",
 		"/static/contacts.html": "/contacts", "/static/agent.html": "/agent",
@@ -35,11 +36,10 @@ func registerUserPages(r *gin.Engine, staticDir string) error {
 		c.Next()
 	})
 	r.Static("/static", staticDir)
-	r.StaticFile("/", filepath.Join(staticDir, "index.html"))
-	r.StaticFile("/boards", filepath.Join(staticDir, "boards.html"))
 	for _, path := range []string{"/login", "/register", "/forgot-password", "/devices", "/bind", "/player", "/contacts", "/agent", "/room"} {
 		r.GET(path, func(c *gin.Context) {
 			c.Header("Cache-Control", "no-cache")
+			c.Header("X-Robots-Tag", "noindex, nofollow")
 			c.File(entry)
 		})
 	}

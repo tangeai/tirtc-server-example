@@ -412,7 +412,7 @@ a{color:var(--accent);text-decoration:none}
 .history-entry>strong,.history-entry>span{display:block}
 .history-entry>strong{font-size:14px;font-weight:500}
 .history-entry>span{font-size:12px;color:var(--muted);margin-top:4px}
-.history-entry[aria-pressed=true]{background:#e8f5ef;border-color:#8abeb1}
+.history-entry[aria-pressed=true],.app-modal .history-entry[aria-pressed=true]:not(:disabled):is(:hover,:focus-visible){background:#e8f5ef;border-color:#8abeb1}
 .history-pages{display:flex;align-items:center;justify-content:space-between;gap:4px;padding:10px 8px;border-top:1px solid var(--line);font-size:12px;flex-shrink:0}
 .history-messages{flex:1;min-height:0;overflow:auto;padding:20px;overscroll-behavior:contain}
 .history-message{margin-bottom:20px;display:flex;flex-direction:column;align-items:flex-start}
@@ -461,6 +461,13 @@ a{color:var(--accent);text-decoration:none}
 @media(max-width:640px){.contacts-workspace .row{gap:8px;flex-wrap:wrap}.contacts-workspace .contact-list>.muted{font-size:12px}}
 
 .device-actions button{border:0;background:transparent;border-radius:8px;font-weight:inherit}
+
+/* Navigation links and dialog buttons share the same card interaction feedback. */
+.device-card :is(.device-summaries,.device-actions)>:is(a,button){transition:background-color .2s,color .2s}
+.device-card .device-actions>a{border-radius:8px}
+.device-card :is(.device-summaries,.device-actions)>:is(a,button):not(:disabled):not([aria-disabled=true]):is(:hover,:focus-visible){background:#fff;color:var(--accent)}
+.device-card :is(.device-summaries,.device-actions)>:is(a,button):focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
 
 .room-workspace form>label{margin-bottom:12px}.room-workspace form>label>input{margin-top:4px!important}.room-workspace .card>p:first-child{margin-top:0}
 @media(max-width:640px){.room-workspace .card{padding:12px}.room-workspace>p:last-of-type{font-size:12px}.room-workspace .filter-tabs{margin:8px 0}}
@@ -624,7 +631,7 @@ a{color:var(--accent);text-decoration:none}
 .device-info-details .tabs{margin:0 0 10px}
 
 .account-menu>a{padding:8px 12px;border-radius:6px;color:inherit;line-height:20px}
-.account-menu>a:hover{background:#f5f5f5}
+.account-menu>a:is(:hover,:focus-visible){background:#f5f5f5;color:var(--accent)}
 .account-menu>.ant-btn{width:100%;text-align:left;justify-content:flex-start}
 .account-menu>p{padding:0 12px}
 
@@ -671,3 +678,8 @@ a{color:var(--accent);text-decoration:none}
  .roles-page .role-prompt-heading{flex-wrap:wrap}
  .roles-page .save-bar{flex:0 0 auto;padding-bottom:max(12px,env(safe-area-inset-bottom))}
 }
+
+/* Link navigation has visible pointer and keyboard feedback like button actions. */
+:where(#root,.app-modal) a:focus-visible,.account-menu>a:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:4px}
+.back:is(:hover,:focus-visible){color:var(--accent);text-decoration:underline;text-underline-offset:3px}
+:where(#root,.app-modal) .legal a:is(:hover,:focus-visible){text-decoration:underline;text-underline-offset:3px}

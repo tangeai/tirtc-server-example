@@ -15,6 +15,7 @@ import (
 	"thing-connect/internal/model"
 	"thing-connect/internal/recognition"
 	"thing-connect/internal/room"
+	"thing-connect/internal/sitebrand"
 	"thing-connect/internal/weblanguage"
 	"thing-connect/internal/webnav"
 )
@@ -203,6 +204,7 @@ type WechatCfg struct {
 }
 
 type WebCfg struct {
+	Site     sitebrand.Config   `yaml:"site"`
 	Language weblanguage.Config `yaml:"language"`
 }
 
@@ -250,7 +252,7 @@ func LoadFile(path string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("config: read %s: %w", path, err)
 	}
-	cfg := Config{Web: WebCfg{Language: weblanguage.DefaultConfig()}, Room: room.DefaultConfig(), Recognition: recognition.DefaultConfig()}
+	cfg := Config{Web: WebCfg{Language: weblanguage.DefaultConfig(), Site: sitebrand.DefaultConfig()}, Room: room.DefaultConfig(), Recognition: recognition.DefaultConfig()}
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&cfg); err != nil {
@@ -318,6 +320,9 @@ func LoadFile(path string) (*Config, error) {
 	}
 	if cfg.Service.MQTTACKTimeout == 0 {
 		cfg.Service.MQTTACKTimeout = 5 * time.Second
+	}
+	if err := cfg.Web.Site.Validate(); err != nil {
+		return nil, fmt.Errorf("config: web.site: %w", err)
 	}
 	if err := cfg.Web.Language.Validate(); err != nil {
 		return nil, fmt.Errorf("config: web.language: %w", err)

@@ -10,6 +10,11 @@ func defaultConfigFields(namespace, key string) []ConfigFieldDefinition {
 		}
 	}
 	fields := map[string][]ConfigFieldDefinition{
+		definitionID("user-server", "web.site"): {
+			textConfigField("name", "站点名称", "最多 40 个字符，用于首页与开发板页面的品牌名称。"),
+			optionalConfigField(textConfigField("name_en", "英文站点名称", "留空时沿用站点名称；发布后在下次打开页面时生效。")),
+			optionalConfigField(textConfigField("public_url", "站点网址", "HTTPS 根地址，用于规范链接、分享信息与站点地图；留空时不生成绝对链接。")),
+		},
 		definitionID("user-server", "web.navigation"): {{Path: []string{"links"}, Label: "顶部导航链接", Description: "最多 3 个；按列表顺序展示，统一在新标签页打开。未配置或全部停用时隐藏。", Kind: "navigation_links"}},
 		definitionID("device-server", "device.code_policy"): {
 			textConfigField("code_ttl", "设备验证码有效期", "例如 190s 表示 190 秒"),

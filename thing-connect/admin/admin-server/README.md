@@ -38,7 +38,7 @@
 Admin 配置中心管理 `device-server`、`user-server`、`voip-server`、`ai-server`、`call-server`、`recognition-server`、`common` 和 `system` 命名空间。
 
 - 数据库没有发布值时使用后端注册表默认值。
-- 普通业务配置不读取服务 YAML 中的同名旧业务值；`web.language` 的本地回退规则见下方“用户页面语言”。
+- 普通业务配置不读取服务 YAML 中的同名旧业务值；`web.language`、`web.site` 的本地回退规则分别见下方“用户页面语言”和“官网名称与开发板”。
 - TiRTC App ID、Access Key ID 和 Secret Key ID 没有可运行默认值，后台将其标记为必填阻塞项。
 - User、VoIP、Call 的 `mqtt.connection` 没有可运行默认值，三个服务分别发布独立账号。Admin、Device 和 AI 不连接 MQTT。
 - MQTT 表单可以先用尚未发布的值测试 Broker 网络、TLS 和账号认证；发布接口也会自动复检，失败时保持原配置不变。固定 ClientID 测试使用临时连接 ID，不会断开同名业务客户端；服务器启动预检再使用正式 ClientID 做最终检查。
@@ -87,6 +87,14 @@ TC-DEVICE-000001,replace-with-device-secret
 - 动态配置未生效：检查配置是否已经发布、目标实例是否在线及其配置 revision。
 
 接口契约见 [Admin API](API.md)，业务接口见 [API Reference](../../api-reference.md)。
+
+## 官网名称与开发板
+
+在“服务配置 → 用户服务 → 站点名称”发布 `web.site`。`name` 为站点名称，`name_en` 为英文名称（留空沿用站点名称），最多各 40 个字符；`public_url` 填写正式站点的 HTTPS 根地址，例如 `https://example.com`。首页和开发板页的导航、标题、分享信息与结构化数据使用此配置，下次打开页面生效。配置不含密钥，沿用配置发布权限、审计和实例 revision。
+
+未发布（revision 为 0）时使用 user-server YAML 的 `web.site`，省略时使用“探鸽 · 小钛”。Admin 暂时不可达时保留最后有效配置，启动依赖保持不变。未填写正式网址时不输出 canonical，`/sitemap.xml` 返回 404；填写后可提交该站点地图到搜索平台。
+
+首页按后台排序显示前三块已上架开发板，固件和烧录指南直接使用各条目中的链接；无资源链接时不显示对应按钮。更多条目在 `/boards` 查看。产品图片、能力标签、适配状态和资源链接在“开发板目录”维护。
 
 ## 用户页面语言
 

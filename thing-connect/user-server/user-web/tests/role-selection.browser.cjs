@@ -31,6 +31,8 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  await page.goto(base+'/login');await page.evaluate(()=>localStorage.setItem('token','test'));
  await page.setViewportSize({width:1440,height:900});
  await page.goto(base+'/agent?device_id=one');await page.getByLabel('智能体名称',{exact:true}).waitFor();
+ const back=page.locator('.back');await back.hover();
+ assert.equal(await back.evaluate(e=>getComputedStyle(e).color),'rgb(7, 134, 111)','back navigation hover feedback');
  await page.getByRole('button',{name:'切换到此角色',exact:true}).click();
  await page.waitForFunction(()=>document.querySelector('.active-role')?.textContent.includes('我的角色'));
  assert.equal(await page.getByLabel('智能体名称',{exact:true}).inputValue(),'我的角色','switch updates editor');

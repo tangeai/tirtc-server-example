@@ -11,6 +11,7 @@ import (
 	"strings"
 	"thing-connect/internal/recognition"
 	"thing-connect/internal/room"
+	"thing-connect/internal/sitebrand"
 	"thing-connect/internal/weblanguage"
 	"thing-connect/internal/webnav"
 	"time"
@@ -65,6 +66,7 @@ type ConfigRegistry struct{ definitions map[string]ConfigDefinition }
 
 func DefaultConfigRegistry() *ConfigRegistry {
 	definitions := []ConfigDefinition{
+		def("user-server", "web.site", "web", "站点名称", sitebrand.DefaultJSON, nil, []string{"user-server"}, func(raw json.RawMessage) error { _, err := sitebrand.Parse(raw); return err }),
 		def("user-server", "web.language", "web", "站点语言", weblanguage.DefaultJSON, nil, []string{"user-server"}, func(raw json.RawMessage) error { _, err := weblanguage.Parse(raw); return err }),
 		def("ai-server", "web.language", "web", "站点语言", weblanguage.DefaultJSON, nil, []string{"ai-server"}, func(raw json.RawMessage) error { _, err := weblanguage.Parse(raw); return err }),
 		def("call-server", "web.language", "web", "站点语言", weblanguage.DefaultJSON, nil, []string{"call-server"}, func(raw json.RawMessage) error { _, err := weblanguage.Parse(raw); return err }),

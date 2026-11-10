@@ -147,5 +147,14 @@
     const detailName = document.querySelector('#detail-name').textContent;
     if (detailName) document.querySelector('#detail-image').alt = i18n.t('boards.productImage', { name: detailName });
   });
+  const initial = document.getElementById('public-catalog-data');
+  if (initial) {
+    try {
+      const value = JSON.parse(initial.textContent);
+      if (value.status === 'error') document.querySelector('#catalog-error').hidden = false;
+      else render(value);
+      return;
+    } catch (_) { /* Fetch fallback. */ }
+  }
   load();
 })();

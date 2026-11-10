@@ -40,6 +40,11 @@ const server=http.createServer((req,res)=>{
   await page.getByRole('button',{name:'会话记录',exact:true}).click();
   const dialog=page.getByRole('dialog',{name:'客厅小钛 · 会话记录',exact:true});
   await dialog.getByText(/回答 c0/).waitFor();assert.equal(await dialog.locator('.history-bubble img').count(),0);
+  const selectedEntry=dialog.locator('.history-entry[aria-pressed="true"]');
+  await page.mouse.move(0,0);
+  const selectedBackground=await selectedEntry.evaluate(e=>getComputedStyle(e).backgroundColor);
+  await selectedEntry.hover();await page.waitForTimeout(250);
+  assert.equal(await selectedEntry.evaluate(e=>getComputedStyle(e).backgroundColor),selectedBackground,'hover must preserve the selected conversation background');
   const calls=listCalls;await page.evaluate(()=>{window.dispatchEvent(new Event('focus'));document.dispatchEvent(new Event('visibilitychange'));});await page.waitForTimeout(250);assert.equal(listCalls,calls);
   await dialog.getByRole('button',{name:'下一页',exact:true}).click();await dialog.getByText(/回答 c10/).waitFor();
   await dialog.getByRole('button',{name:'删除会话',exact:true}).click();await page.getByRole('dialog',{name:'删除会话',exact:true}).getByRole('button',{name:'取消',exact:true}).click();assert.equal(deletes,0);

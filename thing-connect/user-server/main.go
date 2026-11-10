@@ -29,6 +29,7 @@ import (
 	"thing-connect/internal/mqttc"
 	"thing-connect/internal/service"
 	"thing-connect/internal/servicestatus"
+	"thing-connect/internal/sitebrand"
 	mysqlstore "thing-connect/internal/store/mysql"
 	mysqlmigrate "thing-connect/internal/store/mysql/migrate"
 	"thing-connect/internal/weblanguage"
@@ -113,6 +114,11 @@ func main() {
 		log.Fatalf("web language: %v", err)
 	}
 	dynamicRefs = append(dynamicRefs, dynamicconfig.Ref{Namespace: "user-server", Key: "web.language", Apply: func(snapshot dynamicconfig.Snapshot) error { return language.Apply(snapshot.Value, snapshot.Revision) }})
+	site, err := sitebrand.New(cfg.Web.Site)
+	if err != nil {
+		log.Fatalf("site config: %v", err)
+	}
+	dynamicRefs = append(dynamicRefs, dynamicconfig.Ref{Namespace: "user-server", Key: "web.site", Apply: func(snapshot dynamicconfig.Snapshot) error { return site.Apply(snapshot.Value, snapshot.Revision) }})
 	configCtx, cancelConfig := context.WithTimeout(context.Background(), 10*time.Second)
 	if err := dynamicClient.ApplyInitial(configCtx, dynamicRefs); err != nil {
 		cancelConfig()
@@ -132,7 +138,12 @@ func main() {
 	servicestatus.RegisterHealth(r, probes)
 	webui.Register(r, "/v1", language, languageMessages)
 	usrhandler.RegisterNavigation(r, navigation)
-	usrhandler.RegisterBoards(r, boardcatalog.New(mysqlstore.NewBoardCatalogStore(sqlDB)))
+	usrhandler.RegisterSite(r, site)
+	catalog := boardcatalog.New(mysqlstore.NewBoardCatalogStore(sqlDB))
+	usrhandler.RegisterBoards(r, catalog)
+	if err := usrhandler.RegisterPublicPages(r, staticDir, site, catalog); err != nil {
+		log.Fatalf("public pages: %v", err)
+	}
 	usrhandler.RegisterBoardImages(r, filepath.Join(filepath.Dir(filepath.Dir(staticDir)), "var", "board-images"))
 	usrhandler.RegisterAccount(r, usrhandler.JWTAuth(cfg.JWTSecret, rdb, sqlDB), service.NewAccountService(mysqlstore.NewAccountReader(sqlDB)))
 	if err := registerServiceDiscovery(r, cfg.Discovery); err != nil {

@@ -168,6 +168,16 @@ HTTPS 接入使用 HTTPS 入口，返回 HTTPS 业务服务地址和 MQTT TLS �
 
 脚本包含本服务的有效 `default`、`allow_switch`、`revision` 和页面翻译字典，不包含服务凭证；`revision=0` 表示使用本服务 YAML 回退配置。页面使用共享的语言运行时代码，各服务独立提供配置及字典。脚本是 Web 页面的初始化资源，业务 API 仍保持原来的数值业务码和中文 `msg`；英文 Web 按业务码和操作场景展示本地化提示，不依赖中文文本判断业务。
 
+### 官网公开配置
+
+`GET /v1/config/site` 由 user-server 提供，无需鉴权，返回 HTTP 200、`application/json`，使用 `Cache-Control: no-store`：
+
+```json
+{"code":200,"msg":"ok","data":{"name":"探鸽 · 小钛","name_en":"Tange · Xiaotai","public_url":"https://example.com","revision":3}}
+```
+
+`name` 为站点名称，`name_en` 为空时英文界面沿用 `name`；`public_url` 为正式站点 HTTPS 根地址，未配置时为空。`revision=0` 表示 YAML 回退值。响应不包含服务凭证。首页和开发板页直接内嵌有效配置及已上架目录，浏览器复用这份数据；静态预览或内嵌数据不可用时调用此接口和 `/v1/boards`。
+
 ### 鉴权与业务错误
 
 JWT 缺失、无效、过期或缺少必要 claim 时返回 HTTP 401 + `code=401`。JWT

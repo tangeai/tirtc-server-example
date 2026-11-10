@@ -39,6 +39,30 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
 
 
  await page.goto(base+'/login');await page.evaluate(()=>localStorage.setItem('token','test'));
+ await page.setViewportSize({width:1440,height:900});await page.goto(base+'/devices');
+ await page.getByText('预设角色（默认）',{exact:true}).first().waitFor();
+ const hoverResults=[];
+ for(const device of ['one','two']){
+  const card=page.locator('[data-device-id="'+device+'"]');
+  for(const entry of await card.locator('.device-summaries>:is(a,button),.device-actions>:is(a,button)').all()){
+   await entry.hover();
+   await page.waitForTimeout(250);
+   const actual=await entry.evaluate(e=>({label:e.textContent,summary:e.parentElement.classList.contains('device-summaries'),background:getComputedStyle(e).backgroundColor,color:getComputedStyle(e).color}));
+   hoverResults.push({device,...actual});
+  }
+ }
+ assert(hoverResults.every(r=>r.color==='rgb(7, 134, 111)'&&(!r.summary||r.background==='rgb(255, 255, 255)')),JSON.stringify(hoverResults));
+ await page.mouse.move(0,0);await page.keyboard.press('Tab');
+ for(const entry of await page.locator('[data-device-id="one"] .device-summaries>:is(a,button),[data-device-id="one"] .device-actions>:is(a,button)').all()){
+  await entry.focus();await page.waitForTimeout(250);
+  const style=await entry.evaluate(e=>({color:getComputedStyle(e).color,outline:getComputedStyle(e).outlineStyle}));
+  assert.equal(style.color,'rgb(7, 134, 111)');assert.equal(style.outline,'solid');
+ }
+ await page.getByLabel('账号菜单',{exact:true}).click();
+ const accountLink=page.getByRole('link',{name:'修改密码',exact:true});
+ await page.keyboard.press('Tab');await accountLink.focus();
+ assert.equal(await accountLink.evaluate(e=>getComputedStyle(e).outlineColor),'rgb(7, 134, 111)');
+ await page.keyboard.press('Escape');
  for(const width of [320,390,768,1440,1920]){
   await page.setViewportSize({width,height:900});await page.evaluate(()=>{sessionStorage.clear();window.WebI18n.setLanguage('zh-CN');});await page.goto(base+'/devices');await page.getByText('预设角色（默认）',{exact:true}).first().waitFor();
   for(const language of ['zh-CN','en']){

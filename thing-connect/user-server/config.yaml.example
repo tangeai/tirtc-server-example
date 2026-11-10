@@ -63,6 +63,11 @@ navigation:
 
 # 未发布 Admin 语言配置时使用；各服务独立配置。
 web:
+  # 未发布 Admin web.site 时的本地回退；英文名留空时沿用 name。
+  site:
+    name: "探鸽 · 小钛"
+    name_en: "Tange · Xiaotai"
+    public_url: ""  # 正式 HTTPS 根地址；用于 canonical、分享与站点地图
   language:
     default: auto  # auto | zh-CN | en；海外站选择 en
     allow_switch: true
