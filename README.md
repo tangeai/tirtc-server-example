@@ -15,7 +15,7 @@
 [![Redis](https://img.shields.io/badge/Redis-7+-DC382D?logo=redis&logoColor=white)](https://redis.io/)
 [![MQTT](https://img.shields.io/badge/MQTT-Broker-660066?logo=mqtt&logoColor=white)](https://mqtt.org/)
 [![Platform](https://img.shields.io/badge/Platform-WeChat%20IoT%20VoIP-07C160?logo=wechat)](https://developers.weixin.qq.com/miniprogram/dev/platform-capabilities/hardware-frame/IoT/voip.html)
-[![WeChat Mini Program](https://img.shields.io/badge/Frontend-WeChat%20Mini%20Program-07C160?logo=wechat&logoColor=white)](thing-connect/weixin-mini-program/README.md)
+[![WeChat Mini Program](https://img.shields.io/badge/Frontend-WeChat%20Mini%20Program-07C160?logo=wechat&logoColor=white)](thing-connect-client/README.md)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind%20CSS-3.4-06B6D4?logo=tailwindcss&logoColor=white)](thing-connect/package.json)
 [![Python](https://img.shields.io/badge/Device%20Simulator-Python-3776AB?logo=python&logoColor=white)](thing-connect/device-sim/device-sim-py/README.md)
 [![C](https://img.shields.io/badge/Linux%20Device%20Reference-C-A8B9CC?logo=c&logoColor=black)](thing-connect/device-sim/device-sim-c/README.md)

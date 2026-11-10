@@ -15,9 +15,9 @@ function harness(platform = 'ios') {
       navigateTo: async ({ url }: { url: string }) => { if (failNavigation) throw new Error('navigation failed'); navigations.push(url); }, showToast({ title }: { title: string }) { toasts.push(title); }, openSetting: async () => {},
     } },
     '../services/api': { ApiError, token: () => 'fixture-session', request: async (path: string, _method: string, body: unknown) => { requests.push({ path, body }); if (failCancel && path.endsWith('/cancel')) throw new Error('cancel failed'); return /wechat-mini-login/.test(path) ? { wx_user_openid: 'fixture-openid' } : {}; } },
-    '../generated/voip-video-profile': { buildVideoUIConfig: () => ({}), cachedProfile() {}, incomingDeviceID() {}, updateDeviceVideoProfileCache() {}, downVideoRotationOption: () => ({}) },
-    '../generated/voip-ui-config': { buildVoipUIConfig: () => ({}), CALL_DIRECTION: {}, phoneDisplaySnapshot: () => ({}) },
-    '../generated/voip-incoming-query': { parseIncomingQuery: () => ({}) },
+    './voip/voip-video-profile': { buildVideoUIConfig: () => ({}), cachedProfile() {}, incomingDeviceID() {}, updateDeviceVideoProfileCache() {}, downVideoRotationOption: () => ({}) },
+    './voip/voip-ui-config': { buildVoipUIConfig: () => ({}), CALL_DIRECTION: {}, phoneDisplaySnapshot: () => ({}) },
+    './voip/voip-incoming-query': { parseIncomingQuery: () => ({}) },
   }, { requirePlugin: () => ({ default: plugin }), wx: { getDeviceVoIPList() {}, requestDeviceVoIP() {} }, WX_MODEL_ID: 'fixture-model' });
   api.initializeMedia();
   return { api, requests, navigations, options, hangups, toasts, failHangup: () => { failHangup = true; }, failCancel: () => { failCancel = true; }, emit: (value: object) => event(value), failNavigation: () => { failNavigation = true; } };

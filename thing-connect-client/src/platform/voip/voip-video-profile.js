@@ -115,7 +115,7 @@ function updateDeviceVideoProfileCache(devices) {
   return profiles
 }
 
-module.exports = {
+export {
   DEVICE_VIDEO_PROFILE_CACHE_KEY,
   buildVideoUIConfig,
   cachedProfile,

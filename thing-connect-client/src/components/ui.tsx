@@ -4,8 +4,8 @@ import type { PropsWithChildren } from 'react';
 export function Action({ children, onClick, disabled, primary, danger, muted }: PropsWithChildren<{ onClick(): void; disabled?: boolean; primary?: boolean; danger?: boolean; muted?: boolean }>) {
   return <Button className={`action ${primary ? 'primary' : ''} ${danger ? 'danger' : ''} ${muted ? 'is-unavailable' : ''}`} disabled={disabled} onClick={onClick}>{children}</Button>;
 }
-export function Field({ label, value, onChange, password, numeric, disabled, placeholder }: { label: string; value: string; onChange(value: string): void; password?: boolean; numeric?: boolean; disabled?: boolean; placeholder?: string }) {
-  return <View className='field'><Text className='label'>{label}</Text><Input className='input field-input' value={value} password={password} type={numeric ? 'number' : 'text'} disabled={disabled} placeholder={placeholder || label} onInput={e => onChange(e.detail.value)} /></View>;
+export function Field({ label, value, onChange, password, numeric, disabled, placeholder, focus = false }: { label: string; value: string; onChange(value: string): void; password?: boolean; numeric?: boolean; disabled?: boolean; placeholder?: string; focus?: boolean }) {
+  return <View className='field'><Text className='label'>{label}</Text><Input className='input field-input' value={value} password={password} type={numeric ? 'number' : 'text'} disabled={disabled} focus={focus} placeholder={placeholder || label} onInput={e => onChange(e.detail.value)} /></View>;
 }
 export function Notice({ children, error }: PropsWithChildren<{ error?: boolean }>) { return children ? <View className={error ? 'notice error' : 'notice'}>{children}</View> : null; }
 export function Sheet({ title, onClose, children, busy }: PropsWithChildren<{ title: string; onClose(): void; busy?: boolean }>) {

@@ -26,7 +26,6 @@ linters:
     generated: lax
     paths:
       - device-sim
-      - weixin-mini-program
       - node_modules
       - vendor
     rules:

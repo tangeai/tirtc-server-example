@@ -81,7 +81,7 @@ function buildVoipUIConfig(direction, deviceUI, phoneAspectRatio) {
   throw new Error('不支持的 VoIP 呼叫方向: ' + String(direction))
 }
 
-module.exports = {
+export {
   CALL_DIRECTION,
   buildVoipUIConfig,
   phoneDisplaySnapshot,

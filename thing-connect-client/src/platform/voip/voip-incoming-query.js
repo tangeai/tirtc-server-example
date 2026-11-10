@@ -69,6 +69,6 @@ function parseIncomingQuery(options, source, trace) {
   return parsed
 }
 
-module.exports = {
+export {
   parseIncomingQuery,
 }

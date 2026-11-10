@@ -3,9 +3,9 @@ import { withDeadline } from '../domain/deadline';
 import { decideMedia, type Device, type MediaIntent, type PlatformCapabilities } from '../domain/devices';
 import { request, token, ApiError } from '../services/api';
 import type { DeviceAuthorization } from './media';
-import { buildVideoUIConfig, cachedProfile, incomingDeviceID, updateDeviceVideoProfileCache, downVideoRotationOption } from '../generated/voip-video-profile';
-import { buildVoipUIConfig, CALL_DIRECTION, phoneDisplaySnapshot } from '../generated/voip-ui-config';
-import { parseIncomingQuery } from '../generated/voip-incoming-query';
+import { buildVideoUIConfig, cachedProfile, incomingDeviceID, updateDeviceVideoProfileCache, downVideoRotationOption } from './voip/voip-video-profile';
+import { buildVoipUIConfig, CALL_DIRECTION, phoneDisplaySnapshot } from './voip/voip-ui-config';
+import { parseIncomingQuery } from './voip/voip-incoming-query';
 export type { DeviceAuthorization } from './media';
 
 interface VoipPlugin {

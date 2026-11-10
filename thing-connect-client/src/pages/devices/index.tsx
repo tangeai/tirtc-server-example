@@ -89,6 +89,10 @@ export default function Devices() {
       }
     });
   }
+  function openRename(device: Device) {
+    if (writing.current) return;
+    setMenu(undefined); setEditing(device); setName(device.device_name || ''); setEditError('');
+  }
   async function rename() {
     if (!editing) return;
     const value = name.trim();
@@ -119,7 +123,7 @@ export default function Devices() {
       <View className='row between' style={{ marginBottom: '24px' }}><Text className='title'>我的设备 <Text className='muted'>{devices.length}</Text></Text><View className='row'><Action primary onClick={() => void Taro.navigateTo({ url: '/pages/bind/index' })}>＋ 添加设备</Action></View></View>
       <Notice error>{error}</Notice>{loading && <Notice>正在更新设备…</Notice>}
       {initialized && !devices.length && <View className='card empty'>{error ? '设备列表暂时无法加载，请下拉刷新重试' : '添加第一台设备，开始使用小钛'}</View>}
-      {devices.map(device => <View className='card' key={device.device_id}><View className='device-head'><View className={'device-symbol ' + (device.online ? 'device-symbol-online' : 'device-symbol-offline')}><RobotIcon /><Text className='device-symbol-status'>{device.online ? '在线' : '离线'}</Text></View><View className='grow device-summary'><View className='device-title-row'><Text className='device-name'>{device.device_name || '未命名设备'}</Text></View><Text className='device-id'>ID: {device.device_id}</Text></View><Action disabled={busy} onClick={() => setMenu(device)}>⋯</Action></View>
+      {devices.map(device => <View className='card' key={device.device_id}><View className='device-head'><View className={'device-symbol ' + (device.online ? 'device-symbol-online' : 'device-symbol-offline')}><RobotIcon /><Text className='device-symbol-status'>{device.online ? '在线' : '离线'}</Text></View><View className='grow device-summary'><View className='device-title-row'>{device.device_name?.trim() ? <Text className='device-name'>{device.device_name}</Text> : <Button className='device-name-setup' disabled={busy} ariaLabel={'设置设备名称：' + device.device_id} onClick={() => openRename(device)}><Text>设置名称</Text><View className='device-name-edit-icon' ariaHidden /></Button>}</View><Text className='device-id'>ID: {device.device_id}</Text></View><Action disabled={busy} onClick={() => setMenu(device)}>⋯</Action></View>
         <View className='device-actions device-primary-actions'>{capabilities.platform === 'weapp' && <Action primary muted={!device.online && !needsAuthorization(device)} disabled={busy || loading} onClick={() => void media(needsAuthorization(device) ? 'authorize' : 'wechat-call', device)}><View className='device-primary-label'><View className={'device-action-icon ' + (needsAuthorization(device) ? 'device-action-shield' : 'device-action-phone')} ariaHidden />{callLabel(device)}</View></Action>}<Action muted={!device.online} disabled={busy || !capabilities.playback} onClick={() => void media('playback', device)}><View className='device-primary-label'><View className='device-action-icon device-action-play' ariaHidden />实时查看</View></Action></View>
         <View className='device-feature-links'>{([['roles', 'AI 角色'], ['recognition', 'AI 识别'], ['contacts', '联系人']] as const).map(([page, title]) => <Action key={page} onClick={() => void Taro.navigateTo({ url: '/pages/' + page + '/index?device_id=' + encodeURIComponent(device.device_id) })}>{title}<Text className='device-link-arrow'>›</Text></Action>)}</View>
       </View>)}
@@ -128,7 +132,7 @@ export default function Devices() {
         {capabilities.platform === 'weapp' && <DeviceMenuItem icon='auth' title='微信通话授权' badge={authLabel(menu)} description='管理微信与设备的音视频通话授权' onClick={() => { const device = menu; setMenu(undefined); void media('authorize', device); }} />}
         <DeviceMenuItem icon='group' title='多人对讲' description='创建或加入房间，与多台设备语音对讲' onClick={() => { const device = menu; setMenu(undefined); void Taro.navigateTo({ url: '/pages/room/index?device_id=' + encodeURIComponent(device.device_id) }); }} />
         <DeviceMenuItem icon='history' title='AI 对话记录' description='查看设备与 AI 的历史文字对话' onClick={() => { const device = menu; setMenu(undefined); void Taro.navigateTo({ url: '/pages/history/index?device_id=' + encodeURIComponent(device.device_id) }); }} />
-        <DeviceMenuItem icon='edit' title='修改设备名称' description='为设备设置方便辨认的名称' onClick={() => { setEditing(menu); setName(menu.device_name); setEditError(''); setMenu(undefined); }} />
+        <DeviceMenuItem icon='edit' title='修改设备名称' description='为设备设置方便辨认的名称' onClick={() => openRename(menu)} />
         <DeviceMenuItem icon='info' title='设备信息' description='查看设备 ID 及播放、通话能力' onClick={() => { setInfo(menu); setMenu(undefined); }} />
       </View>
       <View className='device-menu-danger'><DeviceMenuItem icon='remove' danger title='解绑设备' description='移除设备，同时清除微信通话授权' onClick={() => { const device = menu; setMenu(undefined); void unbind(device); }} /></View>

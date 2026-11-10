@@ -5,13 +5,6 @@ const source = path.resolve(root, '../thing-connect');
 const out = path.join(root, 'src/generated');
 fs.mkdirSync(out, { recursive: true });
 
-// Reuse the verified native video mapping without modifying the original client.
-// Generated ESM is build-only; the native source remains the single source of truth.
-for (const name of ['voip-ui-config', 'voip-video-profile', 'voip-incoming-query']) {
-  const original = fs.readFileSync(path.join(source, 'weixin-mini-program/utils', name + '.js'), 'utf8');
-  if (!original.includes('module.exports = {') || /\brequire\(/.test(original)) throw new Error('Native helper requires an explicit adapter: ' + name);
-  fs.writeFileSync(path.join(out, name + '.js'), original.replace('module.exports = {', 'export {'));
-}
 for (const name of ['terms', 'privacy']) {
   const html = fs.readFileSync(path.join(source, 'user-server/static/legal', name + '.html'), 'utf8');
   const body = html.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i)?.[1];

@@ -13,7 +13,7 @@ function deferred() {
 const tick = () => new Promise(resolve => setImmediate(resolve))
 
 function player(options = {}) {
-  const html = fs.readFileSync(path.join(__dirname, '../../user-server/static/player.html'), 'utf8')
+  const html = fs.readFileSync(path.join(__dirname, '../static/player.html'), 'utf8')
   const script = html.match(/<script type="module">([\s\S]*?)<\/script>/)[1].replace(/^import .*;$/m, '')
   const elements = new Map()
   const listeners = {}

@@ -4,7 +4,7 @@ ThingConnect 提供设备接入示例，覆盖 **H5 实时预览与对讲、AI �
 
 第一次使用时，建议先按[项目快速体验](../README.md)跑通设备上线、绑定和 H5 出图，再根据产品需要接入其他对讲能力。下面给出最短接入路径和 TiRTC SDK 调用骨架；完整字段、错误码和排查方法可从各节进入对应专题文档查看。
 
-设备端使用 **TiRTC C SDK**（[SDK 头文件](device-sim/sdk/linux-x86_64/2.5.0/include/tirtc/tiRTC.h)），H5 使用 [TiRTC Web SDK](device-h5-live.md#h5-端接入)，微信小程序使用[微信 IoT VoIP](weixin-mini-program/README.md#微信-voip-开发)。设备协议顺序和会话控制可参考 [Linux C 参考实现](device-sim/device-sim-c/README.md)。
+设备端使用 **TiRTC C SDK**（[SDK 头文件](device-sim/sdk/linux-x86_64/2.5.0/include/tirtc/tiRTC.h)），H5 使用 [TiRTC Web SDK](device-h5-live.md#h5-端接入)，微信小程序使用[微信 IoT VoIP](../thing-connect-client/voip.md)。设备协议顺序和会话控制可参考 [Linux C 参考实现](device-sim/device-sim-c/README.md)。
 
 接入真实产品时，还需要完成[十项二次开发 TODO](device-porting.md#二次开发-todo)，不能只替换几个系统库。
 
@@ -583,7 +583,7 @@ void on_call_connected(int err, tirtc_conn_t hconn, void *user) {
 
 > **H5：** 使用 TiRTC Web SDK，通过 [`TiRtcConn`](device-h5-live.md#h5-端接入) 直连设备。
 >
-> **微信小程序：** 使用[微信 IoT VoIP](weixin-mini-program/README.md#微信-voip-开发) 与设备对讲，不使用 `TiRtcConn`。
+> **微信小程序：** 使用[微信 IoT VoIP](../thing-connect-client/voip.md) 与设备对讲，不使用 `TiRtcConn`。
 
 ### H5 开发
 
@@ -627,39 +627,16 @@ conn.subscribeAudio({ streamId: 10 });
 
 ### 微信小程序开发
 
-小程序负责用户账户、设备绑定和微信 VoIP 授权；设备侧来电仍由 C 固件处理。工程位于 [weixin-mini-program](weixin-mini-program)，可以直接用微信开发者工具打开。
+微信小程序工程位于仓库根目录的 [thing-connect-client](../thing-connect-client/README.md)，使用 Taro、React 和 TypeScript。它提供账户、设备、联系人、AI 配置及微信通话入口；设备侧媒体和会话由设备固件管理。
 
-接入步骤如下：
+在仓库根目录执行：
 
-1. 导入 `thing-connect/weixin-mini-program`，AppID 用已开通 IoT VoIP 的正式 AppID（不要用测试号）
-2. 编辑 [app.js](weixin-mini-program/app.js) 的 `globalData`：
-
-```js
-globalData: {
-  userServerBaseUrl: 'https://api.example.com',   // 登录、注册、绑定、设备列表
-  voipServerBaseUrl: 'https://api.example.com',   // 微信登录、授权、取消呼叫
-  modelId: '微信 IoT 平台分配的 ModelID',
-  wxAppId: '你的正式小程序 AppID',
-}
+```bash
+npm --prefix thing-connect-client ci
+npm --prefix thing-connect-client run check
 ```
 
-3. 跑通账户与设备：登录 → 绑定（6 位验证码或 device_id）→ 设备列表 → `wx.login()` + [`POST /v1/voip/user/wechat-mini-login`](api-reference.md#post-v1voipuserwechat-mini-login)
-4. 接入 VoIP（**不能只调插件，须先建授权关系**）：
-
-```js
-const ticket = await POST('/v1/voip/user/sn-ticket');          // 1. 取授权票据（见下方链接）
-await wx.requestDeviceVoIP({ /* modelId / ticket / sn */ });    // 2. 微信侧授权
-await POST('/v1/voip/user/report-auth', { /* 微信返回结果 */ }); // 3. 回写 voip-server（见下方链接）
-// 4. 用户在插件通话 UI 发起呼叫 → 微信回调 voip-server → MQTT call_incoming 下发设备
-```
-
-调用顺序与字段说明：[`POST /v1/voip/user/sn-ticket`](api-reference.md#post-v1voipusersn-ticket) → [`POST /v1/voip/user/report-auth`](api-reference.md#post-v1voipuserreport-auth)。
-微信授权函数的参数和限制见
-[`wx.requestDeviceVoIP`](https://developers.weixin.qq.com/miniprogram/dev/framework/device/voip/auth.html)。
-
-跑通后，小程序应能完成登录、绑定和授权，并成功发起 VoIP 呼叫。
-
-更多说明见 [weixin-mini-program/README.md](weixin-mini-program/README.md)。
+在微信开发者工具中导入 `thing-connect-client/`，工程配置会定位到 `dist/weapp/`。正式 AppID、微信插件权限、HTTPS 域名和构建环境变量的配置见[小程序快速开始](../thing-connect-client/README.md#快速开始)。双向呼叫、授权和视频画面规则见[微信 VoIP 接入](../thing-connect-client/voip.md)。
 
 ---
 
@@ -711,7 +688,7 @@ HTTP 接口的请求和返回字段、成功码、业务错误码及微信回调
 | [设备统一状态机](device-session-model.md) | 一台设备承载多类业务时 |
 | [设备会话竞态仲裁](device-session-arbiter.md) | 待处理来电、会话代次、迟到回调与事件队列 |
 | [从 Linux C 参考实现进行二次开发](device-porting.md) | Linux 交叉编译 / 十项产品 TODO 与验收 |
-| [微信小程序开发](weixin-mini-program/README.md) | 做小程序 |
+| [微信小程序开发](../thing-connect-client/README.md) | 做小程序 |
 | [部署与运维](deployment.md) | 上生产 / 二次开发服务端 |
 | [API Reference](api-reference.md) | 联调字段、排错 |
 | [API 错误响应规范](error-response-policy.md) | 错误码兼容、`msg` 使用和安全边界 |
@@ -728,7 +705,6 @@ thing-connect/
 ├── voip-server/              # 微信 IoT VoIP
 ├── ai-server/                # AI 对话和角色管理
 ├── call-server/              # 设备联系人和设备互呼
-├── weixin-mini-program/      # 微信小程序
 ├── internal/                 # Go 服务共享能力
 ├── scripts/                  # 数据库与迁移脚本
 └── tests/                    # 集成测试

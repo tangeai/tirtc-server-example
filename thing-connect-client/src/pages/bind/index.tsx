@@ -32,6 +32,6 @@ export default function Bind() {
     } catch { /* User cancellation leaves the input unchanged. */ }
   }
   return <View className='page content-page'><View className='tabs'>{[['code', '验证码绑定'], ['id', '设备 ID 绑定']].map(([key, label]) => <Action key={key} primary={mode === key} disabled={busy} onClick={() => { setMode(key); setValue(''); setError(''); }}>{label}</Action>)}</View>
-    <View className='card'><Text className='title'>绑定你的设备</Text><Text className='muted'>{mode === 'code' ? '设备开机联网后，输入屏幕显示或语音播报的 6 位验证码。' : '输入设备 ID，或扫描设备二维码。'}</Text>{mode === 'code' ? <View className='field'><Text className='label'>6 位验证码</Text><CodeInput value={value} disabled={busy} onChange={setValue} label='6 位设备绑定码' /></View> : <Field label='设备 ID' value={value} disabled={busy} onChange={v => setValue(v.toUpperCase())} />}
+    <View className='card'><Text className='title'>绑定你的设备</Text><Text className='muted'>{mode === 'code' ? '设备开机联网后，输入屏幕显示或语音播报的 6 位验证码。' : '输入设备 ID，或扫描设备二维码。'}</Text>{mode === 'code' ? <View className='field'><Text className='label'>6 位验证码</Text><CodeInput focus value={value} disabled={busy} onChange={setValue} label='6 位设备绑定码' /></View> : <Field focus label='设备 ID' value={value} disabled={busy} onChange={v => setValue(v.toUpperCase())} />}
     {mode === 'id' && process.env.TARO_ENV === 'weapp' && <Action disabled={busy} onClick={() => void scan()}>扫码识别</Action>}<Notice error>{error}</Notice><View className='wide'><Action primary disabled={busy} onClick={() => void submit()}>{busy ? '绑定中…' : '绑定设备'}</Action></View></View></View>;
 }

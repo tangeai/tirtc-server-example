@@ -66,7 +66,7 @@ Go 服务向以下目标依赖方向收敛：
 | Go 组合根、依赖或构建 | 上述检查，加 `./build.sh <受影响服务>`；跨服务或发布级改动运行完整 `./build.sh` |
 | Admin Web | `npm --prefix admin/admin-web run check` |
 | 用户 H5 / Tailwind | `npm run build:css`，并检查生成 CSS 只有预期差异 |
-| 微信小程序工具逻辑 | `node --test weixin-mini-program/tests/*.test.js`；页面生命周期变化再用微信开发者工具验收 |
+| 微信小程序 | 在仓库根目录运行 `npm --prefix thing-connect-client run check`；页面生命周期变化再用微信开发者工具验收，授权、通话和媒体变化需真机验收 |
 | Python 模拟器 | 在 `device-sim/device-sim-py/` 运行 `python -m unittest discover -p 'test_*.py'`；SDK、硬件和媒体场景单独说明 |
 | Linux C 参考实现 | 在 `device-sim/device-sim-c/` 运行 `make WERROR=1 test`；适配接口变化再运行 `make WERROR=1 framework adapter-template-check`，生命周期风险按该目录 README 运行 sanitizer |
 

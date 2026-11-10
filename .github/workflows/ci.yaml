@@ -77,7 +77,7 @@ jobs:
         working-directory: thing-connect
         run: |
           npm ci
-          node --test weixin-mini-program/tests/*.test.js ai-server/tests/*.test.js call-server/tests/*.test.js user-server/tests/*.test.js tests/recognition-ui.test.cjs
+          node --test ai-server/tests/*.test.js call-server/tests/*.test.js user-server/tests/*.test.js tests/recognition-ui.test.cjs
           npm run build:css
           npm --prefix user-server/user-web ci
           npm --prefix user-server/user-web run check
@@ -96,6 +96,22 @@ jobs:
           name: user-browser-acceptance
           path: output/playwright/
           if-no-files-found: ignore
+
+  mini-program:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: thing-connect-client
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: thing-connect-client/package-lock.json
+      - run: npm ci
+      - run: npm run check
 
   device-sim:
     runs-on: ubuntu-latest

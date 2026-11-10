@@ -151,7 +151,7 @@ JSON 代码块保持可直接复制，因此不在其中写注释。示例里的
 
 小程序通过 [`setUIConfig`](https://developers.weixin.qq.com/miniprogram/dev/framework/device/voip-plugin/api/setUIConfig.html)
 应用这些参数。`callerUI`、`listenerUI` 的对应关系见
-[小程序 VoIP 页面参数](weixin-mini-program/README.md#5-callerui-和-listenerui)。
+[小程序 VoIP 页面参数](../thing-connect-client/voip.md#视频画面配置)。
 
 `camera_rotation` 控制通话页怎样显示设备画面；`down_video_rotation` 控制微信发送给
 设备的视频编码方向。两者用途不同。后者设为 `1` 或 `2` 时，同时用于小程序呼设备、
@@ -185,9 +185,9 @@ VoIP 相关下行消息有三类：
 
 可参考以下实现：
 
-- 小程序总体说明：[weixin-mini-program/README.md](weixin-mini-program/README.md)
-- 设备列表页实现：[weixin-mini-program/pages/devices/index.js](weixin-mini-program/pages/devices/index.js)
-- 小程序全局 VoIP 取消回调：[weixin-mini-program/app.js](weixin-mini-program/app.js)
+- 小程序总体说明：[../thing-connect-client/README.md](../thing-connect-client/README.md)
+- 设备列表页实现：[../thing-connect-client/src/pages/devices/index.tsx](../thing-connect-client/src/pages/devices/index.tsx)
+- 小程序全局 VoIP 取消回调：[../thing-connect-client/src/platform/media.weapp.ts](../thing-connect-client/src/platform/media.weapp.ts)
 
 ### 1. 前置条件
 

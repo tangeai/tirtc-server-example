@@ -1,5 +1,0 @@
-/* thing-connect/weixin-mini-program/app.wxss */
-page {
-  background-color: #EDEDED;
-  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Helvetica Neue', sans-serif;
-}

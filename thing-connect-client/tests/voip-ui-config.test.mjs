@@ -1,19 +1,19 @@
-const assert = require('node:assert/strict')
-const test = require('node:test')
+import assert from 'node:assert/strict'
+import test from 'node:test'
 
-const {
+import {
   CALL_DIRECTION,
   buildVoipUIConfig,
   phoneDisplaySnapshot,
-} = require('../utils/voip-ui-config')
-const {
+} from '../src/platform/voip/voip-ui-config.js'
+import {
   buildVideoUIConfig,
   downVideoRotationOption,
   incomingDeviceID,
   normalizeDownVideoRotation,
   updateDeviceVideoProfileCache,
-} = require('../utils/voip-video-profile')
-const { parseIncomingQuery } = require('../utils/voip-incoming-query')
+} from '../src/platform/voip/voip-video-profile.js'
+import { parseIncomingQuery } from '../src/platform/voip/voip-incoming-query.js'
 
 test('设备呼小程序：设备配置用于 caller，手机 listener 保持 0 度', () => {
   const deviceUI = buildVideoUIConfig({
