@@ -5,38 +5,67 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="设备音视频接入指南">
   <title>设备音视频接入指南</title>
-  <link rel="icon" href="/static/xiaotai-icon.jpg" type="image/jpeg">
-  <link rel="stylesheet" href="/static/css/public-guide.css?v=1">
+  <link rel="icon" href="/static/favicon.svg?v=20261110" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/css/site-header.css?v=5">
+  <link rel="stylesheet" href="/static/css/brand.css">
+  <link rel="stylesheet" href="/static/css/public-guide.css?v=2">
   <!-- public:metadata -->
 </head>
 <body>
-  <header><nav aria-label="主导航"><a href="/">{{.Site.Name}}</a><a href="/boards">开发板</a><a href="/getting-started">接入指南</a><a href="/faq">常见问题</a><a href="/login">登录控制台</a></nav></header>
-  <main>
-    <nav class="breadcrumb" aria-label="面包屑"><a href="/">首页</a> / {{if .Board}}<a href="/boards">开发板</a> / {{end}}{{.Heading}}</nav>
-    <h1>{{.Heading}}</h1>
-    <p class="lead">{{.Description}}</p>
+  <header class="site-header">
+    <nav class="nav shell" aria-label="主导航">
+      <a class="brand" href="/" aria-label="{{.Site.Name}}首页"><span class="brand-mark" aria-hidden="true"></span><span class="guide-brand-name">{{.Site.Name}}</span></a>
+      <div class="nav-links">
+        <a href="/#routes">快速体验</a><a href="/boards" {{if .Board}}aria-current="page"{{end}}>开发板</a>
+        <a href="/getting-started" {{if eq .Kind "/getting-started"}}aria-current="page"{{end}}>接入指南</a>
+        <a href="/faq" {{if eq .Kind "/faq"}}aria-current="page"{{end}}>常见问题</a>
+      </div>
+      <div class="nav-actions"><a class="nav-login" href="/login">登录</a><a class="console-link" href="/register">免费注册 <span aria-hidden="true">↗</span></a></div>
+      <details class="guide-mobile"><summary aria-label="展开导航"><span></span><span></span></summary><div><a href="/">首页</a><a href="/boards">开发板</a><a href="/getting-started">接入指南</a><a href="/faq">常见问题</a><a href="/login">登录控制台</a></div></details>
+    </nav>
+  </header>
+  <main class="shell">
+    <nav class="breadcrumb" aria-label="面包屑"><a href="/">首页</a><span aria-hidden="true">/</span>{{if .Board}}<a href="/boards">开发板</a><span aria-hidden="true">/</span><span>{{.Board.Name}}</span>{{else}}<span>{{if eq .Kind "/faq"}}常见问题{{else}}接入指南{{end}}</span>{{end}}</nav>
     {{if .Board}}{{with .Board}}
-    <article>
-      {{if .ImageURL}}<img class="board-image" src="{{.ImageURL}}" alt="{{.Name}} 产品图" width="640" height="400">{{end}}
-      <h2>型号与适配信息</h2>
-      <dl><dt>完整型号</dt><dd>{{.Model}}</dd><dt>芯片</dt><dd>{{.Chip}}</dd><dt>厂商</dt><dd>{{.Vendor}}</dd><dt>适配状态</dt><dd>{{if eq .AdaptationStatus "ready"}}已适配{{else if eq .AdaptationStatus "adapting"}}适配中{{else}}计划中{{end}}</dd></dl>
-      {{if .Capabilities}}<h2>核心能力</h2><ul>{{range .Capabilities}}<li>{{.}}</li>{{end}}</ul>{{end}}
-      <h2>固件与接入资源</h2>
-      <p>请核对完整型号，按对应烧录指南操作。实际能力以固件和服务配置为准；未提供的资源请通过开放社区咨询。</p>
-      <ul class="resources">
-        {{if .FirmwareURL}}<li><a href="{{.FirmwareURL}}">下载固件</a></li>{{end}}
-        {{if .FlashingGuideURL}}<li><a href="{{.FlashingGuideURL}}">烧录指南</a></li>{{end}}
-        {{if .RepositoryURL}}<li><a href="{{.RepositoryURL}}">设备源码</a></li>{{end}}
-        {{if .EffectVideoURL}}<li><a href="{{.EffectVideoURL}}">效果视频</a></li>{{end}}
-        {{if .PurchaseURL}}<li><a href="{{.PurchaseURL}}" rel="nofollow">第三方购买链接</a>（商品、订单及售后请联系商家，小钛仅提供信息指引。）</li>{{end}}
-      </ul>
+    <article class="product-hero">
+      <div class="product-gallery"><span class="gallery-label">{{.Vendor}} · {{.Chip}}</span>{{if .ImageURL}}<img src="{{.ImageURL}}" alt="{{.Name}} 产品图" width="640" height="480">{{else}}<span class="product-placeholder">{{.Chip}}</span>{{end}}<span class="gallery-caption">开发板 / {{.Model}}</span></div>
+      <div class="product-intro">
+        <span class="eyebrow"><i></i> 开发板与固件</span>
+        <h1>{{.Name}}</h1><p class="lead">{{.Summary}}</p>
+        <span class="status {{.AdaptationStatus}}"><i></i>{{if eq .AdaptationStatus "ready"}}已适配{{else if eq .AdaptationStatus "adapting"}}适配中{{else}}计划中{{end}}</span>
+        {{if .Capabilities}}<ul class="capability-tags" aria-label="核心能力">{{range .Capabilities}}<li>{{.}}</li>{{end}}</ul>{{end}}
+        <dl class="product-specs"><div><dt>完整型号</dt><dd>{{.Model}}</dd></div><div><dt>芯片平台</dt><dd>{{.Chip}}</dd></div><div><dt>厂商</dt><dd>{{.Vendor}}</dd></div></dl>
+        <div class="product-actions">{{if .FirmwareURL}}<a class="button primary" href="{{.FirmwareURL}}">下载固件 <span aria-hidden="true">↓</span></a>{{end}}{{if .FlashingGuideURL}}<a class="button secondary" href="{{.FlashingGuideURL}}">查看烧录指南 <span aria-hidden="true">↗</span></a>{{end}}</div>
+        <p class="fine-print">请核对完整型号后烧录，实际能力以固件与服务配置为准。</p>
+      </div>
     </article>
+    <section class="board-resources" aria-labelledby="resources-title">
+      <div class="section-heading"><div><span class="eyebrow">下一步</span><h2 id="resources-title">让设备真正跑起来</h2></div><p>从接入资料，到你的第一个应用。</p></div>
+      <div class="resource-grid">
+        <a class="resource-card" href="/getting-started"><span class="resource-icon" aria-hidden="true">01</span><h3>接入与验证</h3><p>了解联网、绑定与音视频验证流程。</p><span class="text-link">阅读接入指南 →</span></a>
+        {{if .RepositoryURL}}<a class="resource-card" href="{{.RepositoryURL}}"><span class="resource-icon" aria-hidden="true">02</span><h3>从源码开始</h3><p>查看设备实现，按你的硬件与业务需求继续开发。</p><span class="text-link">查看设备源码 ↗</span></a>{{else}}<a class="resource-card" href="/faq"><span class="resource-icon" aria-hidden="true">02</span><h3>先解答几个问题</h3><p>核对固件选择、能力前提与产品适配边界。</p><span class="text-link">查看常见问题 →</span></a>{{end}}
+        {{if .EffectVideoURL}}<a class="resource-card" href="{{.EffectVideoURL}}"><span class="resource-icon" aria-hidden="true">03</span><h3>看看实际效果</h3><p>通过演示视频了解设备的使用方式。</p><span class="text-link">观看效果视频 ↗</span></a>{{else}}<a class="resource-card" href="https://community.tange-ai.com"><span class="resource-icon" aria-hidden="true">03</span><h3>和开发者交流</h3><p>补充完整型号与使用场景，交流接入问题。</p><span class="text-link">前往开放社区 ↗</span></a>{{end}}
+      </div>
+      {{if .PurchaseURL}}<p class="merchant-note"><a href="{{.PurchaseURL}}" rel="nofollow">查看第三方购买信息 ↗</a><span>商品、订单及售后请联系商家，小钛仅提供信息指引。</span></p>{{end}}
+    </section>
+    {{end}}{{else}}
+    <section class="guide-hero">
+      <div><span class="eyebrow"><i></i>{{if eq .Kind "/faq"}}开发者支持{{else}}从想法到第一台设备{{end}}</span><h1>{{.Heading}}</h1><p class="lead">{{.Description}}</p>
+        <div class="hero-actions">{{if eq .Kind "/faq"}}<a class="text-link" href="/getting-started">第一次接入？从这里开始 <span aria-hidden="true">→</span></a>{{else}}<a class="button primary" href="#simulator">先用电脑体验 <span aria-hidden="true">→</span></a><a class="text-link" href="/boards">我有开发板，查看固件 ↗</a>{{end}}</div>
+      </div>
+      <aside class="hero-note"><span class="note-mark" aria-hidden="true">{{if eq .Kind "/faq"}}?{{else}}↗{{end}}</span><strong>{{if eq .Kind "/faq"}}接入之前，先了解清楚{{else}}不必一步到位{{end}}</strong><p>{{if eq .Kind "/faq"}}从模拟器体验到产品适配，把常见的前提和边界说明白。{{else}}先跑通音视频，再接真实硬件。每个阶段都有对应的资料与验证路径。{{end}}</p></aside>
+    </section>
+    {{if eq .Kind "/faq"}}
+    <div class="faq-layout"><aside class="faq-sidebar"><span class="eyebrow">快速查找</span><nav aria-label="本页目录">{{range .Sections}}<a href="#{{.ID}}">{{.Heading}}</a>{{end}}</nav><div class="sidebar-note"><strong>没有找到答案？</strong><p>带上设备型号和问题描述，与开发者一起交流。</p><a class="text-link" href="https://community.tange-ai.com">前往开放社区 ↗</a></div></aside>
+      <div class="faq-list">{{range $index, $section := .Sections}}<details class="faq-item" id="{{.ID}}" {{if eq $index 0}}open{{end}}><summary><span>{{.Heading}}</span><span class="faq-toggle" aria-hidden="true"></span></summary><div class="faq-answer"><p>{{.Text}}</p><a class="text-link" href="{{.Link}}">{{.LinkText}} →</a></div></details>{{end}}</div>
+    </div>
+    {{else}}
+    <div class="journey-heading"><span class="eyebrow">接入路径</span><p>选择适合你的起点，按自己的节奏继续。</p></div>
+    <div class="journey-grid">{{range $index, $section := .Sections}}<section class="journey-card" id="{{.ID}}"><span class="step-number" aria-hidden="true">0{{$index}}</span><div class="journey-copy"><h2>{{.Heading}}</h2><p>{{.Text}}</p><a class="text-link" href="{{.Link}}">{{.LinkText}} <span aria-hidden="true">→</span></a></div></section>{{end}}</div>
     {{end}}{{end}}
-    {{if .Sections}}
-    <nav class="toc" aria-label="本页目录"><ul>{{range .Sections}}<li><a href="#{{.ID}}">{{.Heading}}</a></li>{{end}}</ul></nav>
-    {{range .Sections}}<section id="{{.ID}}"><h2>{{.Heading}}</h2><p>{{.Text}}</p><a href="{{.Link}}">{{.LinkText}} →</a></section>{{end}}
-    {{end}}
+    <section class="help-banner"><div><span class="eyebrow">一起把设备接起来</span><h2>下一步，从你的开发板开始。</h2><p>查看适配型号、固件和烧录资料，找到适合你的起点。</p></div><a class="button primary" href="/boards">浏览开发板 <span aria-hidden="true">↗</span></a></section>
   </main>
-  <footer><nav aria-label="相关资源"><a href="/getting-started">接入指南</a><a href="/faq">常见问题</a><a href="/boards">开发板与固件</a><a href="https://community.tange-ai.com">开放社区</a></nav><p>{{.Site.Name}} · 具体能力以设备型号、固件与服务配置为准。</p></footer>
+  <footer class="guide-footer"><div class="shell footer-main"><div class="footer-identity"><a class="brand" href="/"><span class="brand-mark" aria-hidden="true"></span><span>{{.Site.Name}}</span></a><p>让硬件连接 AI 与实时音视频。</p><a href="mailto:openapi@tange.ai">openapi@tange.ai</a></div><nav aria-label="相关资源"><a href="/getting-started">接入指南</a><a href="/faq">常见问题</a><a href="/boards">开发板与固件</a><a href="https://github.com/tangeai/tirtc-server-example">开源代码 ↗</a><a href="https://community.tange-ai.com">开放社区 ↗</a></nav><div class="footer-support"><img src="/static/images/wecom-support.png" width="88" height="88" alt="企业客服二维码" loading="lazy"><div><strong>商务合作与技术咨询</strong><p>微信扫码添加企业客服</p></div></div></div><div class="shell footer-bottom"><span>© {{.Site.Name}}</span><span>具体能力以设备型号、固件与服务配置为准。</span><a href="https://beian.miit.gov.cn/" rel="noopener noreferrer" target="_blank">粤ICP备19005025号-19</a></div></footer>
+  <script src="/static/public-guide.js?v=1" defer></script>
 </body>
 </html>

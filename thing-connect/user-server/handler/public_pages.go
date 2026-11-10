@@ -197,13 +197,13 @@ func RegisterPublicPages(r *gin.Engine, staticDir string, site *sitebrand.State,
 			data := struct {
 				Site                                 sitebrand.Public
 				Title, Description, Canonical, Image string
-				Heading                              string
+				Heading, Kind                        string
 				Sections                             []publicSection
 				Board                                *boardcatalog.Board
 				Boards                               []boardcatalog.Board
 				CatalogError                         bool
 				Structured, SiteJSON, CatalogJSON    template.JS
-			}{Site: current, Title: title, Description: description, Canonical: canonical, Image: image, Heading: heading, Sections: sections, Board: board, Boards: boards, CatalogError: err != nil, Structured: template.JS(structured), SiteJSON: template.JS(siteJSON), CatalogJSON: template.JS(catalogJSON)} // #nosec: json.Marshal escapes HTML/script delimiters; never raw input.
+			}{Site: current, Title: title, Description: description, Canonical: canonical, Image: image, Heading: heading, Kind: route, Sections: sections, Board: board, Boards: boards, CatalogError: err != nil, Structured: template.JS(structured), SiteJSON: template.JS(siteJSON), CatalogJSON: template.JS(catalogJSON)} // #nosec: json.Marshal escapes HTML/script delimiters; never raw input.
 			var out bytes.Buffer
 			if err := view.Execute(&out, data); err != nil {
 				c.Status(http.StatusInternalServerError)
