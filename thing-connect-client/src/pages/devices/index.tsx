@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from 'react';
 import { DeviceInfo } from '../../components/device-info';
 import { Action, Field, Notice, RobotIcon, Sheet } from '../../components/ui';
 import { request, token, errorText } from '../../services/api';
-import { deviceRevision } from '../../services/device-events';
+import { readDevices } from '../../services/device-directory';
+import { deviceRevision, devicesChanged } from '../../services/device-events';
 import type { Device, MediaIntent } from '../../domain/devices';
 import { cacheDeviceMedia, mediaCapabilities, performMedia, refreshAuthorizations, type DeviceAuthorization } from '../../platform/media';
 
@@ -17,6 +18,7 @@ export default function Devices() {
   const [authorizations, setAuthorizations] = useState<Record<string, DeviceAuthorization>>({});
   const [menu, setMenu] = useState<Device>(), [editing, setEditing] = useState<Device>(), [name, setName] = useState(''), [info, setInfo] = useState<Device>();
   const [busy, setBusy] = useState(false), [editError, setEditError] = useState('');
+  const authRevision = useRef(0), authActions = useRef<Record<string, number>>({});
   const alive = useRef(true), reading = useRef(false), writing = useRef(false), revision = useRef(0), loadedRevision = useRef(-1);
   const capabilities = mediaCapabilities();
   const overlayOpen = !!(menu || editing || info);
@@ -28,7 +30,7 @@ export default function Devices() {
     }).catch(() => {});
     return () => { closed = true; void Taro.showTabBar({ animation: false }).catch(() => {}); };
   }, [overlayOpen]);
-  useEffect(() => { alive.current = true; return () => { alive.current = false; revision.current++; }; }, []);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; revision.current++; authRevision.current++; }; }, []);
   useDidShow(() => {
     if (!token()) { void Taro.reLaunch({ url: '/pages/login/index' }); return; }
     if (loadedRevision.current !== deviceRevision()) void load();
@@ -43,13 +45,26 @@ export default function Devices() {
     loadedRevision.current = changed;
     setLoading(true); setError('');
     try {
-      const rows = (await request<Device[]>('/v1/user/device/list')).filter(d => d.status === 1).sort((a, b) => (b.bind_time || '').localeCompare(a.bind_time || ''));
+      const rows = [...await readDevices(true)].sort((a, b) => (b.bind_time || '').localeCompare(a.bind_time || ''));
       if (!alive.current || rev !== revision.current) return;
       setDevices(rows); cacheDeviceMedia(rows);
-      const auth = await refreshAuthorizations(rows);
-      if (alive.current && rev === revision.current) setAuthorizations(auth);
+      void loadAuthorizations(rows);
     } catch (e) { if (alive.current && rev === revision.current) setError(errorText(e)); }
     finally { reading.current = false; if (alive.current) { Taro.stopPullDownRefresh(); if (rev === revision.current) { setLoading(false); setInitialized(true); } } }
+  }
+  async function loadAuthorizations(rows: Device[]) {
+    const rev = ++authRevision.current, session = token(), actions = { ...authActions.current };
+    // Unknown stays unknown on read failure; never infer revocation from a timeout.
+    setAuthorizations({});
+    try {
+      const auth = await refreshAuthorizations(rows);
+      if (alive.current && rev === authRevision.current && session === token()) {
+        setAuthorizations(current => Object.fromEntries(rows.map(device => {
+          const id = device.device_id;
+          return [id, actions[id] === authActions.current[id] ? auth[id] || unknownAuth : current[id] || unknownAuth];
+        })));
+      }
+    } catch { /* Individual actions can retry authorization checks. */ }
   }
   async function mutate(operation: () => Promise<void>, inEditor = false) {
     if (writing.current) return;
@@ -64,11 +79,13 @@ export default function Devices() {
       void Taro.showToast({ title: '设备已离线，请检查电源和网络', icon: 'none', duration: 2500 });
       return;
     }
+    const authRev = authRevision.current, session = token(), id = device.device_id;
+    const action = intent === 'playback' ? authActions.current[id] : (authActions.current[id] = (authActions.current[id] || 0) + 1);
     await mutate(async () => {
       await performMedia(intent, device, authorizations[device.device_id] || unknownAuth);
       if (intent === 'authorize' && alive.current) {
         const auth = await refreshAuthorizations([device]);
-        if (alive.current) setAuthorizations(current => ({ ...current, ...auth }));
+        if (alive.current && authRev === authRevision.current && action === authActions.current[id] && session === token()) setAuthorizations(current => ({ ...current, ...auth }));
       }
     });
   }
@@ -79,8 +96,9 @@ export default function Devices() {
     const device = editing;
     await mutate(async () => {
       await request('/v1/user/device/name', 'PUT', { device_id: device.device_id, device_name: value });
+      devicesChanged();
       if (!alive.current) return;
-      revision.current++; setLoading(false);
+      revision.current++; authRevision.current++; loadedRevision.current = deviceRevision(); setLoading(false);
       setDevices(rows => rows.map(row => row.device_id === device.device_id ? { ...row, device_name: value } : row)); setEditing(undefined);
       const snapshot = authorizations[device.device_id]?.authorizedName;
       if (snapshot && snapshot !== value) await Taro.showModal({ title: '名称已保存', content: '微信来电名称仍使用上次授权时的名称。请在微信中清理本小程序的授权记录后重新授权，更新来电名称。', showCancel: false });
@@ -89,14 +107,14 @@ export default function Devices() {
   async function unbind(device: Device) {
     const result = await Taro.showModal({ title: '解绑设备', content: `解绑后无法查看或呼叫“${device.device_name || device.device_id}”，微信通话授权也会清除。是否继续？`, confirmText: '解绑', confirmColor: '#fa5151' });
     if (!result.confirm || !alive.current) return;
-    await mutate(async () => { await request('/v1/user/device/reset', 'DELETE', { device_id: device.device_id }); if (alive.current) { revision.current++; setLoading(false); setDevices(rows => rows.filter(row => row.device_id !== device.device_id)); } });
+    await mutate(async () => { await request('/v1/user/device/reset', 'DELETE', { device_id: device.device_id }); devicesChanged(); if (alive.current) { revision.current++; authRevision.current++; loadedRevision.current = deviceRevision(); setLoading(false); setDevices(rows => rows.filter(row => row.device_id !== device.device_id)); } });
   }
   const authLabel = (device: Device) => {
     const auth = authorizations[device.device_id] || unknownAuth;
     return auth.state === 'authorized' ? auth.serverSynced ? '已授权' : '待同步' : auth.state === 'disabled' ? '提醒已关闭' : auth.state === 'missing' ? '待授权' : '待确认';
   };
   const needsAuthorization = (device: Device) => ['missing', 'disabled'].includes(authorizations[device.device_id]?.state || 'unknown');
-  const callLabel = (device: Device) => authorizations[device.device_id]?.state === 'missing' ? '授权微信通话' : authorizations[device.device_id]?.state === 'disabled' ? '开启通话提醒' : '微信通话';
+  const callLabel = (device: Device) => authorizations[device.device_id]?.state === 'missing' ? '授权微信通话' : authorizations[device.device_id]?.state === 'disabled' ? '开启通话提醒' : (authorizations[device.device_id]?.state === 'authorized' ? '微信通话' : '确认通话授权');
   return <View className='page'>
       <View className='row between' style={{ marginBottom: '24px' }}><Text className='title'>我的设备 <Text className='muted'>{devices.length}</Text></Text><View className='row'><Action primary onClick={() => void Taro.navigateTo({ url: '/pages/bind/index' })}>＋ 添加设备</Action></View></View>
       <Notice error>{error}</Notice>{loading && <Notice>正在更新设备…</Notice>}

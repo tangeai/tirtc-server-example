@@ -12,6 +12,7 @@ interface VoipPlugin {
   CALL_PAGE_PATH: string;
   callDevice(options: object): Promise<{ roomId: string }>;
   setUIConfig(config: object): void;
+  forceHangUpVoip(roomId: string): void;
   getPluginEnterOptions?(): object;
   getPluginOnloadOptions?(): object;
   onVoipEvent(callback: (event: { eventName: string; roomId?: string }) => void): void;
@@ -47,10 +48,13 @@ export function initializeMedia() {
         return;
       }
       const localEnd = ['cancelVoip', 'abortVoip', 'hangUpVoip', 'joinFailCaller'].includes(event.eventName);
-      if (!localEnd && !['rejectVoip', 'busyVoip', 'endVoip', 'finishVoip'].includes(event.eventName)) return;
+      if (!localEnd && !['rejectVoip', 'busy', 'timeout', 'endVoip', 'finishVoip'].includes(event.eventName)) return;
       clearTimeout(incomingTimer);
       if (!currentCall || event.roomId !== currentCall.roomId) return;
       const call = currentCall; currentCall = undefined;
+      if (call.session === token() && ['busy', 'timeout'].includes(event.eventName)) {
+        void Taro.showToast({ title: event.eventName === 'busy' ? '设备正在通话，请稍后重试' : '设备无人接听，请稍后重试', icon: 'none' });
+      }
       if (localEnd && call.session === token()) {
         void request('/v1/voip/user/cancel', 'POST', { device_id: call.deviceId, wx_room_id: call.roomId })
           .catch(() => Taro.showToast({ title: '结束通话通知未送达，请检查设备状态', icon: 'none' }));
@@ -138,6 +142,14 @@ export async function performMedia(intent: MediaIntent, device: Device, authoriz
     if (!roomId) throw new ApiError(-1, '创建通话失败，请重试');
     currentCall = { deviceId: device.device_id, roomId, session };
     try { await Taro.navigateTo({ url: plugin.CALL_PAGE_PATH }); }
-    catch { currentCall = undefined; await request('/v1/voip/user/cancel', 'POST', { device_id: device.device_id, wx_room_id: roomId }); throw new ApiError(-1, '通话页面打开失败，请重试'); }
+    catch {
+      // Clear first: forceHangUpVoip may synchronously emit a terminal event.
+      currentCall = undefined;
+      let cleanupFailed = false;
+      try { plugin.forceHangUpVoip(roomId); } catch { cleanupFailed = true; }
+      try { await request('/v1/voip/user/cancel', 'POST', { device_id: device.device_id, wx_room_id: roomId }); }
+      catch { cleanupFailed = true; }
+      throw new ApiError(-1, cleanupFailed ? '通话页面打开失败，结束通话未完全确认，请检查设备状态' : '通话页面打开失败，请重试');
+    }
   } finally { calling = false; }
 }

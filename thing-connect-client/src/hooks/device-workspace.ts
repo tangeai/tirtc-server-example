@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLoad } from '@tarojs/taro';
-import { ApiError, errorText, request } from '../services/api';
+import { ApiError, errorText } from '../services/api';
+import { readDevices } from '../services/device-directory';
 import type { Device } from '../domain/devices';
 
 // A page owns its requests: no onShow refresh, no overlap, no late UI writes.
@@ -18,10 +19,10 @@ export function useDeviceWorkspace<T>(read: (device: string) => Promise<T>) {
     finally { locked.current = false; if (alive.current) setBusy(false); }
   }
   function commit(result: T) { if (alive.current) setValue(result); }
-  async function refresh() {
+  async function refresh(fresh = true) {
     await run(async () => {
       if (!id.current) throw new ApiError(-1, '请从设备列表打开此页面');
-      const rows = await request<Device[]>('/v1/user/device/list');
+      const rows = await readDevices(fresh);
       const owned = rows.find(row => row.device_id === id.current && row.status === 1);
       if (!owned) {
         if (alive.current) { setDevice(undefined); setValue(undefined); }
@@ -32,6 +33,6 @@ export function useDeviceWorkspace<T>(read: (device: string) => Promise<T>) {
       commit(await read(id.current));
     });
   }
-  useLoad(options => { id.current = options.device_id || ''; void refresh(); });
+  useLoad(options => { id.current = options.device_id || ''; void refresh(false); });
   return { device, value, busy, error, setError, refresh, run, commit, alive };
 }

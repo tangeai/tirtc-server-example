@@ -23,6 +23,7 @@ function render(state: string, online: boolean, menu = false) {
     '@tarojs/components': { View: 'view', Text: 'text', Button: 'button' },
     '../../components/ui': { Action: 'action', Field: 'field', Notice: 'notice', Sheet: 'sheet' },
     '../../services/api': { token: () => 'fixture', errorText: () => '失败' },
+    '../../services/device-directory': { readDevices: async () => [] },
     '../../services/device-events': { deviceRevision: () => 0 },
     '../../platform/media': { mediaCapabilities: () => ({ platform: 'weapp', playback: true }), performMedia: async (intent: string) => { intents.push(intent); }, refreshAuthorizations: async () => ({}) },
   });
@@ -44,6 +45,7 @@ test('主按钮区分授权和呼叫；离线允许授权但不允许呼叫', as
     ['missing', false, '授权微信通话', false, 'authorize'],
     ['disabled', true, '开启通话提醒', false, 'authorize'],
     ['authorized', true, '微信通话', false, 'wechat-call'],
+    ['unknown', true, '确认通话授权', false, 'wechat-call'],
 
   ] as const) {
     const { tree, intents } = render(state, online);

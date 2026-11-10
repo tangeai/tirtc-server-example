@@ -13,7 +13,8 @@ test('设备页失败后返回不自动重试；手动刷新和绑定事件可�
     '@tarojs/taro': { __esModule: true, default: { stopPullDownRefresh: async () => { stopped++; } }, useDidShow: (fn: typeof show) => { show = fn; }, usePullDownRefresh: (fn: typeof pull) => { pull = fn; } },
     '@tarojs/components': { View: 'view', Text: 'text' },
     '../../components/ui': { Action: 'action', Field: 'field', Notice: 'notice', Sheet: 'sheet' },
-    '../../services/api': { token: () => 'fixture', errorText: () => '网络失败', request: () => {
+    '../../services/api': { token: () => 'fixture', errorText: () => '网络失败' },
+    '../../services/device-directory': { readDevices: () => {
       requests++; return fail ? Promise.reject(new Error('offline')) : new Promise(r => { resolve = r; });
     } },
     '../../services/device-events': { deviceRevision: () => revision },

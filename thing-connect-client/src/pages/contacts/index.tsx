@@ -3,6 +3,7 @@ import { Text, View } from '@tarojs/components';
 import { useEffect, useRef, useState } from 'react';
 import { Action, Field, Notice, SearchField, Sheet } from '../../components/ui';
 import { ApiError, errorText, request } from '../../services/api';
+import { readDevices } from '../../services/device-directory';
 import type { Device } from '../../domain/devices';
 import { canRemove, contactKey, contactName, filterContacts, validateContactTarget, type Contact, type PendingContact } from '../../domain/contacts';
 
@@ -15,13 +16,13 @@ export default function Contacts() {
   const [busy, setBusy] = useState(false);
   const alive = useRef(true), revision = useRef(0), writing = useRef(false), currentId = useRef('');
   useEffect(() => () => { alive.current = false; revision.current++; }, []);
-  useLoad(options => { currentId.current = options.device_id || ''; setDeviceId(currentId.current); void load(); });
-  async function load() {
+  useLoad(options => { currentId.current = options.device_id || ''; setDeviceId(currentId.current); void load(false); });
+  async function load(fresh = true) {
     const rev = ++revision.current, id = currentId.current;
     const current = () => alive.current && rev === revision.current;
     setLoading(true); setError(''); setPendingError('');
     try {
-      const list = (await request<Device[]>('/v1/user/device/list')).filter(d => d.status === 1);
+      const list = await readDevices(fresh);
       if (!current()) return;
       if (!id || !list.some(d => d.device_id === id)) throw new ApiError(40300, '设备不属于当前账号，请返回设备列表');
       setDevices(list);
