@@ -112,6 +112,12 @@
       img.src = imageURL;
       art.append(img);
     }
+    const heading = element("h3", "", board.name);
+    if (board.detail_slug) {
+      const link = element("a", "", board.name);
+      link.href = `/boards/${encodeURIComponent(board.detail_slug)}`;
+      heading.replaceChildren(link);
+    }
     const info = element("div", "catalog-info");
     info.append(
       element(
@@ -119,7 +125,7 @@
         "",
         [board.vendor, board.chip].filter(Boolean).join(" · "),
       ),
-      element("h3", "", board.name),
+      heading,
     );
     const actions = element("div", "catalog-actions");
     for (const [field, label, className] of [

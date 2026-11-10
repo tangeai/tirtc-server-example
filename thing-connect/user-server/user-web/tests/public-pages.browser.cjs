@@ -29,6 +29,7 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
     if(url==='/'){
      assert.equal(await page.locator('.catalog-card .board-status,.catalog-card .board-capabilities').count(),0,'homepage cards omit repeated status and capabilities');
      assert.equal(await page.locator('.catalog-card').count(),3,'homepage shows three boards from a larger catalog');
+     assert.equal(await page.locator('.catalog-card h3 a').first().getAttribute('href'),'/boards/sample-0','hydration and language switching preserve permanent detail links');
      const navBox=await page.locator('.site-header .nav').boundingBox(),heroBox=await page.locator('.hero').boundingBox();
      const footerBox=await page.locator('.footer-contact').boundingBox();assert(Math.abs(footerBox.x-heroBox.x)<1&&Math.abs(footerBox.width-heroBox.width)<1,'footer aligns with content');
      assert(Math.abs(navBox.x-heroBox.x)<1&&Math.abs(navBox.width-heroBox.width)<1,'homepage header and content must align');
@@ -45,6 +46,7 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
     }else{
      assert.match(await page.locator('.board-capabilities').innerText(),/实时音视频/);
      await page.locator('.featured-card .detail').click();await page.getByRole('dialog',{name:'小钛开发板完整型号与名称检查'}).waitFor();
+     assert.equal(await page.locator('.featured-card h2 a').getAttribute('href'),'/boards/sample');assert.equal(await page.locator('#detail-page').getAttribute('href'),'/boards/sample');
      assert(await page.locator('#detail-guide').isVisible());assert(await page.locator('#detail-buy').isHidden());
      const box=await page.locator('#detail-dialog').boundingBox();assert(box.x>=0&&box.x+box.width<=width);
      await page.keyboard.press('Escape');assert(await page.locator('#detail-dialog').isHidden());
@@ -96,9 +98,10 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  await page.waitForFunction(()=>document.querySelector('.connection-layer').animationsPaused());
  assert(await page.locator('.screen').evaluate(el=>el.classList.contains('animation-paused')),'reduced motion stops screen animation');
  const catalogRequests=[];page.on('request',r=>{if(r.url().endsWith('/v1/boards'))catalogRequests.push(r.url());});
- await page.route(base+'/',async route=>{const response=await route.fetch();const html=await response.text();await route.fulfill({response,body:html.replace('<!-- public:bootstrap -->','<script id="site-brand-data" type="application/json">{"name":"服务端站点","name_en":"SSR site","revision":7}</script><script id="public-catalog-data" type="application/json">{"status":"ready","boards":[{"name":"SSR board","capabilities":[],"chip":"TEST"}]}</script>')});});
+ await page.route(base+'/',async route=>{const response=await route.fetch();const html=await response.text();await route.fulfill({response,body:html.replace('<!-- public:bootstrap -->','<script id="site-brand-data" type="application/json">{"name":"服务端站点","name_en":"SSR site","revision":7}</script><script id="public-catalog-data" type="application/json">{"status":"ready","boards":[{"name":"SSR board","detail_slug":"ssr-board","capabilities":[],"chip":"TEST"}]}</script>')});});
  await page.goto(base+'/');await page.locator('.catalog-card').first().waitFor();
  assert.equal(await page.locator('.catalog-card h3').innerText(),'SSR board');
+ assert.equal(await page.locator('.catalog-card h3 a').getAttribute('href'),'/boards/ssr-board','server bootstrapped catalog retains detail links');
  assert.equal(await page.locator('.brand [data-i18n="site.brand"]').innerText(),'SSR site');
  assert.equal(catalogRequests.length,0);
  await page.unroute(base+'/');

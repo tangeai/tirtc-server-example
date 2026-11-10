@@ -30,7 +30,7 @@ func TestUserPagesServeOneApplicationWithoutAPIFallback(t *testing.T) {
 			t.Fatalf("%s: %d %s", path, w.Code, w.Body.String())
 		}
 	}
-	for old, target := range map[string]string{"/static/auth.html": "/login", "/static/agent.html": "/agent", "/static/room.html": "/room", "/static/player.html": "/player"} {
+	for old, target := range map[string]string{"/static/public-guide.html": "/getting-started", "/static/auth.html": "/login", "/static/agent.html": "/agent", "/static/room.html": "/room", "/static/player.html": "/player"} {
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, httptest.NewRequest("GET", old+"?device_id=A%2FB", nil))
 		if w.Code != 302 || w.Header().Get("Location") != target+"?device_id=A%2FB" {

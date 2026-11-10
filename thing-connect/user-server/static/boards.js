@@ -31,12 +31,21 @@
     button.addEventListener('click', () => openDetail(board));
     return button;
   };
+  const detailHeading = (board) => {
+    const heading = text('h2', '', board.name);
+    if (board.detail_slug) {
+      const link = text('a', '', board.name);
+      link.href = `/boards/${encodeURIComponent(board.detail_slug)}`;
+      heading.replaceChildren(link);
+    }
+    return heading;
+  };
   const interactive = (element, board) => {
     element.tabIndex = 0;
     element.setAttribute('role', 'button');
-    element.addEventListener('click', (event) => { if (event.target.tagName !== 'BUTTON') openDetail(board); });
+    element.addEventListener('click', (event) => { if (!event.target.closest('a,button')) openDetail(board); });
     element.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openDetail(board); }
+      if (event.target === element && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); openDetail(board); }
     });
     return element;
   };
@@ -45,7 +54,7 @@
     card.className = 'featured-card';
     card.append(image(board));
     const identity = document.createElement('div');
-    identity.append(text('small', '', board.vendor), text('h2', '', board.name), text('code', '', board.model));
+    identity.append(text('small', '', board.vendor), detailHeading(board), text('code', '', board.model));
     if (board.capabilities?.length) identity.append(text('p', 'board-capabilities', board.capabilities.join(' · ')));
     card.append(identity, status(board), detailButton(board));
     return interactive(card, board);
@@ -55,7 +64,7 @@
     row.className = 'board-row';
     const identity = document.createElement('div');
     identity.className = 'identity';
-    identity.append(text('small', '', board.vendor), text('h2', '', board.name));
+    identity.append(text('small', '', board.vendor), detailHeading(board));
     row.append(identity, text('code', 'model', board.model), text('b', 'chip', board.chip), text('span', 'capabilities', (board.capabilities || []).join(' · ')), status(board), detailButton(board));
     return interactive(row, board);
   };
@@ -76,6 +85,7 @@
     document.querySelector('#detail-chip').textContent = board.chip;
     document.querySelector('#detail-maker').textContent = board.vendor;
     document.querySelector('#detail-caps').textContent = (board.capabilities || []).join(' · ');
+    setLink('#detail-page', board.detail_slug ? `/boards/${encodeURIComponent(board.detail_slug)}` : '');
     setLink('#detail-video', board.effect_video_url);
     setLink('#detail-buy', board.purchase_url);
     setLink('#detail-repo', board.repository_url);

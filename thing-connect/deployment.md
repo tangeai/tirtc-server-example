@@ -393,7 +393,9 @@ TiRTC 配置只检查字段完整性和格式，业务服务启动预检会再�
 
 未发布后台语言配置时，各服务使用自身 YAML 的 `web.language.default` 和 `web.language.allow_switch`；省略时为 `auto` 和 `true`。语言配置不改变启动时对 Admin 的依赖。英文页面翻译界面和操作提示；邮件模板、AI 对话语言以及云端资源描述需要单独配置。
 
-官网上线时，在 Admin 的用户服务配置中设置 `web.site.public_url` 为正式 HTTPS 根地址，并填写站点名称。反向代理将 `/`、`/boards`、`/robots.txt`、`/sitemap.xml` 交给 user-server，避免以静态 `index.html` 替代服务端页面。首页 HTML 包含核心能力、体验步骤和前三块已上架开发板；开发板页包含无脚本目录。标题、描述、Open Graph 和 JSON-LD 随站名配置生成；正式网址用于 canonical 和站点地图，避免使用请求 Host 推断网址。未配置网址时 `/sitemap.xml` 返回 404。登录及设备等用户页面发送 `X-Robots-Tag: noindex, nofollow`。搜索收录和 AI 引用由相应平台决定。
+官网上线时，在 Admin 的用户服务配置中设置 `web.site.public_url` 为正式 HTTPS 根地址，并填写站点名称。反向代理将 `/`、`/boards`、`/boards/<detail_slug>`、`/getting-started`、`/faq`、`/robots.txt`、`/sitemap.xml` 交给 user-server，避免以静态 `index.html` 替代服务端页面。首页 HTML 包含核心能力、体验步骤和前三块已上架开发板；开发板页包含无脚本目录，独立详情页使用后台配置的详情标识作为地址，展示已上架型号的适配状态和接入资源。接入指南与常见问题可在无 JavaScript 环境阅读；常见问题的结构化数据与页面答案一致。站点地图包含公开内容页和已上架开发板；下架详情返回 404，目录依赖暂时不可用时站点地图返回 503 并提示稍后重试。标题、描述、Open Graph 和 JSON-LD 随站名配置生成；正式网址用于 canonical 和站点地图，避免使用请求 Host 推断网址。未配置网址时 `/sitemap.xml` 返回 404。登录及设备等用户页面发送 `X-Robots-Tag: noindex, nofollow`。搜索收录和 AI 引用由相应平台决定。
+
+上线验收时，直接获取上述地址的 HTML，确认正文、canonical 正式域名与 JSON-LD 无需运行 JavaScript 即可读取；检查站点地图中的每个地址返回 200，已下架型号返回 404。使用手机和桌面浏览器验证接入指南、常见问题及开发板详情入口，保留原有 `/boards#<detail_slug>` 弹窗链接的可用性。在搜索平台站长工具中提交正式站点地图并检查收录；抓取、索引与 AI 引用结果需通过平台数据持续观察，不能仅凭页面标签判断。
 
 ### 4.2 在服务器预检并启动业务服务
 

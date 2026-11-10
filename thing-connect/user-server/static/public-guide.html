@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="设备音视频接入指南">
+  <title>设备音视频接入指南</title>
+  <link rel="icon" href="/static/xiaotai-icon.jpg" type="image/jpeg">
+  <link rel="stylesheet" href="/static/css/public-guide.css?v=1">
+  <!-- public:metadata -->
+</head>
+<body>
+  <header><nav aria-label="主导航"><a href="/">{{.Site.Name}}</a><a href="/boards">开发板</a><a href="/getting-started">接入指南</a><a href="/faq">常见问题</a><a href="/login">登录控制台</a></nav></header>
+  <main>
+    <nav class="breadcrumb" aria-label="面包屑"><a href="/">首页</a> / {{if .Board}}<a href="/boards">开发板</a> / {{end}}{{.Heading}}</nav>
+    <h1>{{.Heading}}</h1>
+    <p class="lead">{{.Description}}</p>
+    {{if .Board}}{{with .Board}}
+    <article>
+      {{if .ImageURL}}<img class="board-image" src="{{.ImageURL}}" alt="{{.Name}} 产品图" width="640" height="400">{{end}}
+      <h2>型号与适配信息</h2>
+      <dl><dt>完整型号</dt><dd>{{.Model}}</dd><dt>芯片</dt><dd>{{.Chip}}</dd><dt>厂商</dt><dd>{{.Vendor}}</dd><dt>适配状态</dt><dd>{{if eq .AdaptationStatus "ready"}}已适配{{else if eq .AdaptationStatus "adapting"}}适配中{{else}}计划中{{end}}</dd></dl>
+      {{if .Capabilities}}<h2>核心能力</h2><ul>{{range .Capabilities}}<li>{{.}}</li>{{end}}</ul>{{end}}
+      <h2>固件与接入资源</h2>
+      <p>请核对完整型号，按对应烧录指南操作。实际能力以固件和服务配置为准；未提供的资源请通过开放社区咨询。</p>
+      <ul class="resources">
+        {{if .FirmwareURL}}<li><a href="{{.FirmwareURL}}">下载固件</a></li>{{end}}
+        {{if .FlashingGuideURL}}<li><a href="{{.FlashingGuideURL}}">烧录指南</a></li>{{end}}
+        {{if .RepositoryURL}}<li><a href="{{.RepositoryURL}}">设备源码</a></li>{{end}}
+        {{if .EffectVideoURL}}<li><a href="{{.EffectVideoURL}}">效果视频</a></li>{{end}}
+        {{if .PurchaseURL}}<li><a href="{{.PurchaseURL}}" rel="nofollow">第三方购买链接</a>（商品、订单及售后请联系商家，小钛仅提供信息指引。）</li>{{end}}
+      </ul>
+    </article>
+    {{end}}{{end}}
+    {{if .Sections}}
+    <nav class="toc" aria-label="本页目录"><ul>{{range .Sections}}<li><a href="#{{.ID}}">{{.Heading}}</a></li>{{end}}</ul></nav>
+    {{range .Sections}}<section id="{{.ID}}"><h2>{{.Heading}}</h2><p>{{.Text}}</p><a href="{{.Link}}">{{.LinkText}} →</a></section>{{end}}
+    {{end}}
+  </main>
+  <footer><nav aria-label="相关资源"><a href="/getting-started">接入指南</a><a href="/faq">常见问题</a><a href="/boards">开发板与固件</a><a href="https://community.tange-ai.com">开放社区</a></nav><p>{{.Site.Name}} · 具体能力以设备型号、固件与服务配置为准。</p></footer>
+</body>
+</html>
