@@ -60,6 +60,7 @@ jobs:
         run: |
           python3 scripts/check-api-docs.py
           python3 -m unittest discover -s scripts -p 'test_check_api_docs.py'
+          python3 -m unittest discover -s scripts -p 'test_check_public_site.py'
       - name: Go tests
         working-directory: thing-connect
         env:

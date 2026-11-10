@@ -106,3 +106,32 @@ h1 { font-size: clamp(30px,3.5vw,44px); font-weight: 750; letter-spacing: -.045e
 @media(max-width:760px) { .guide-hero { grid-template-columns: 1fr; padding: 34px 0; gap: 24px; }.hero-note { display: none; }.journey-grid { grid-template-columns: 1fr; }.journey-card { padding: 24px; }.journey-card:first-child { flex-direction: column; gap: 0; }.faq-layout { grid-template-columns: 1fr; margin-top: 26px; }.faq-sidebar { position: static; }.faq-sidebar nav { display: none; }.sidebar-note { margin: 0; padding: 0; border: 0; }.faq-sidebar > .eyebrow { display: none; }.sidebar-note p { margin: 5px 0; }.product-hero { grid-template-columns: 1fr; gap: 26px; }.product-gallery img { height: 280px; }.product-placeholder { min-height: 280px; }.product-intro { padding: 0; }.resource-grid { grid-template-columns: 1fr; }.resource-card { padding: 24px; }.resource-card p { margin-bottom: 16px; }.section-heading { align-items: start; flex-direction: column; gap: 10px; }.help-banner { align-items: start; flex-direction: column; padding: 28px; }.footer-main { gap: 28px; }.footer-main nav { grid-template-columns: 1fr; }.footer-support { flex-wrap: wrap; } }
 @media(max-width:620px) { .shell { width: calc(100% - 32px); }.breadcrumb { margin-top: 20px; }.guide-brand-name { max-width: 210px; }.lead { font-size: 15px; }.hero-actions { gap: 18px; }.journey-heading { align-items: start; flex-direction: column; gap: 5px; }.faq-item summary { font-size: 15px; padding: 20px; gap: 14px; }.faq-answer { padding: 0 20px 22px; }.product-gallery { padding: 20px; }.product-gallery img { height: 240px; }.product-actions .button { flex: 1; white-space: nowrap; padding-inline: 14px; gap: 12px; }.help-banner { margin-block: 40px; }.help-banner h2 { font-size: 21px; }.footer-main { grid-template-columns: 1fr; }.footer-main nav { grid-template-columns: 1fr 1fr; }.footer-support { grid-column: auto; }.footer-bottom { flex-direction: column; }.board-resources { margin-top: 42px; } }
 @media(prefers-reduced-motion:reduce) { * { transition: none !important; } }
+
+/* Scenario tutorials share the public page shell and use a focused reading column. */
+.tutorial-index { margin-top: 36px; }
+.tutorial-index .resource-card h3 { margin-top: 0; }
+.tutorial-hero { padding: 44px 0 36px; border-bottom: 1px solid var(--line); }
+.tutorial-hero h1 { max-width: 920px; }
+.tutorial-audience { margin-top: 18px; color: var(--muted); font-size: 13px; }
+.tutorial-layout { display: grid; grid-template-columns: 240px minmax(0,1fr); gap: 56px; margin-top: 34px; align-items: start; }
+.tutorial-nav { position: sticky; top: 104px; }
+.tutorial-nav nav { display: grid; gap: 10px; margin-top: 16px; font-size: 13px; color: var(--muted); }
+.tutorial-nav a { padding: 5px 0; }
+.tutorial-body { min-width: 0; }
+.tutorial-body section { scroll-margin-top: 100px; padding-bottom: 30px; margin-bottom: 30px; border-bottom: 1px solid var(--line); }
+.tutorial-body h2 { font-size: 22px; margin-bottom: 16px; line-height: 1.5; }
+.tutorial-body p,.tutorial-body li { color: #52666d; font-size: 15px; line-height: 1.95; }
+.tutorial-body li { margin-bottom: 10px; }
+.tutorial-body ul { padding-left: 22px; }
+.tutorial-body pre { margin: 22px 0; padding: 22px; border: 1px solid #d3e4e6; border-radius: 12px; background: #f1f7f8; overflow-x: auto; max-width: 100%; color: #243b43; font-size: 13px; line-height: 1.85; tab-size: 2; }
+.tutorial-body pre:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.tutorial-body code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+.article-check { padding: 18px 22px; border-left: 3px solid #68b3b8; border-radius: 0 10px 10px 0; background: #eff7f7; margin-top: 20px; }
+.article-check strong { display: block; font-size: 13px; color: var(--accent); margin-bottom: 6px; }
+.article-check p { font-size: 14px; }
+.tutorial-body .article-boundary { margin-top: 20px; padding: 18px 22px; border: 1px solid var(--line); border-radius: 10px; font-size: 13px; }
+.tutorial-problems { display: grid; gap: 18px; }
+.tutorial-problems h3 { font-size: 16px; margin-bottom: 6px; }
+.tutorial-sources { margin-bottom: 24px; }
+@media(max-width:900px) { .tutorial-layout { grid-template-columns: 1fr; gap: 28px; }.tutorial-nav { position: static; padding: 20px; border: 1px solid var(--line); border-radius: 12px; }.tutorial-nav nav { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px 20px; } }
+@media(max-width:620px) { .tutorial-hero { padding: 30px 0; }.tutorial-nav nav { grid-template-columns: 1fr; }.tutorial-body pre { padding: 16px; }.tutorial-body h2 { font-size: 20px; }.tutorial-body p,.tutorial-body li { font-size: 14px; } }

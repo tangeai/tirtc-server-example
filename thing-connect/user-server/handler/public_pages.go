@@ -34,7 +34,7 @@ const publicMetadata = `
 {{if .Canonical}}<link rel="canonical" href="{{.Canonical}}">
 <meta property="og:url" content="{{.Canonical}}">
 <meta property="og:image" content="{{.Image}}">
-<meta property="og:image:alt" content="{{.Site.Name}}">
+<meta property="og:image:alt" content="{{.ImageAlt}}">
 <meta name="twitter:image" content="{{.Image}}">{{end}}
 <script type="application/ld+json">{{.Structured}}</script>`
 
@@ -48,7 +48,14 @@ func RegisterPublicPages(r *gin.Engine, staticDir string, site *sitebrand.State,
 	descriptionRE := regexp.MustCompile(`(?s)<meta\s+name="description"[^>]*>`)
 	brandRE := regexp.MustCompile(`(?s)(<span[^>]*data-i18n="site.brand"[^>]*>).*?(</span>)`)
 	homeGridRE := regexp.MustCompile(`(?s)(<div[^>]*id="home-boards"[^>]*>).*?(</div>)`)
-	for route, file := range map[string]string{"/": "index.html", "/boards": "boards.html", "/getting-started": "public-guide.html", "/faq": "public-guide.html", "/boards/:slug": "public-guide.html"} {
+	routes := map[string]string{"/": "index.html", "/boards": "boards.html", "/getting-started": "public-guide.html", "/faq": "public-guide.html", "/boards/:slug": "public-guide.html"}
+	tutorials := make(map[string]*publicTutorial, len(publicTutorials))
+	for i := range publicTutorials {
+		tutorial := &publicTutorials[i]
+		routes[tutorial.Path] = "public-guide.html"
+		tutorials[tutorial.Path] = tutorial
+	}
+	for route, file := range routes {
 		raw, err := os.ReadFile(filepath.Join(staticDir, file))
 		if err != nil {
 			return err
@@ -116,6 +123,7 @@ func RegisterPublicPages(r *gin.Engine, staticDir string, site *sitebrand.State,
 			}
 			title := "开源 AI 音视频方案 | " + current.Name
 			description := current.Name + "提供 AI 语音对话、设备与微信通话、设备互呼及多人对讲、远程实时音视频。选择开发板下载固件，联网绑定即可体验；提供服务端、Web 与微信小程序源码。"
+			websiteDescription := description
 			if route == "/boards" {
 				title = "开发板与固件 | " + current.Name
 				description = "查看" + current.Name + "已上架开发板的型号、适配状态、固件下载与烧录指南。"
@@ -135,6 +143,10 @@ func RegisterPublicPages(r *gin.Engine, staticDir string, site *sitebrand.State,
 				heading = board.Name + " · 固件与接入资源"
 				description = board.Summary
 			}
+			tutorial := tutorials[route]
+			if tutorial != nil {
+				heading, description = tutorial.Title, tutorial.Description
+			}
 			if heading != "" {
 				title = heading + " | " + current.Name
 			}
@@ -142,12 +154,22 @@ func RegisterPublicPages(r *gin.Engine, staticDir string, site *sitebrand.State,
 			if board != nil {
 				pagePath = "/boards/" + board.DetailSlug
 			}
-			canonical, image := "", ""
+			canonical, image, imageAlt := "", "", current.Name
+			boardUpdated := ""
+			if board != nil && !board.UpdatedAt.IsZero() {
+				boardUpdated = board.UpdatedAt.UTC().Format(time.RFC3339)
+			}
 			if current.PublicURL != "" {
 				canonical = strings.TrimRight(current.PublicURL, "/") + pagePath
 				image = strings.TrimRight(current.PublicURL, "/") + "/static/xiaotai-logo-transparent.png"
+				if board != nil && board.ImageURL != "" {
+					image, imageAlt = board.ImageURL, board.Name+" 产品图"
+					if strings.HasPrefix(image, "/") {
+						image = strings.TrimRight(current.PublicURL, "/") + image
+					}
+				}
 			}
-			graph := []any{map[string]any{"@type": "WebSite", "name": current.Name, "description": description, "inLanguage": "zh-CN"}}
+			graph := []any{map[string]any{"@type": "WebSite", "name": current.Name, "description": websiteDescription, "inLanguage": "zh-CN"}}
 			if canonical != "" {
 				graph[0].(map[string]any)["url"] = strings.TrimRight(current.PublicURL, "/") + "/"
 			}
@@ -157,6 +179,13 @@ func RegisterPublicPages(r *gin.Engine, staticDir string, site *sitebrand.State,
 			page := map[string]any{"@type": "WebPage", "name": title, "description": description, "inLanguage": "zh-CN"}
 			if canonical != "" {
 				page["url"] = canonical
+			}
+			if boardUpdated != "" {
+				page["dateModified"] = boardUpdated
+			}
+			if tutorial != nil {
+				page["@type"] = "TechArticle"
+				page["about"] = tutorial.Audience
 			}
 			if route == "/faq" {
 				page["@type"] = "FAQPage"
@@ -173,6 +202,9 @@ func RegisterPublicPages(r *gin.Engine, staticDir string, site *sitebrand.State,
 				graph[0].(map[string]any)["@id"] = base + "/#website"
 				if route != "/" {
 					crumbs := []any{map[string]any{"@type": "ListItem", "position": 1, "name": "首页", "item": base + "/"}}
+					if tutorial != nil {
+						crumbs = append(crumbs, map[string]any{"@type": "ListItem", "position": 2, "name": "接入指南", "item": base + "/getting-started"})
+					}
 					if board != nil {
 						crumbs = append(crumbs, map[string]any{"@type": "ListItem", "position": 2, "name": "开发板", "item": base + "/boards"})
 					}
@@ -195,15 +227,17 @@ func RegisterPublicPages(r *gin.Engine, staticDir string, site *sitebrand.State,
 			}
 			catalogJSON, _ := json.Marshal(map[string]any{"boards": boards, "status": status})
 			data := struct {
-				Site                                 sitebrand.Public
-				Title, Description, Canonical, Image string
-				Heading, Kind                        string
-				Sections                             []publicSection
-				Board                                *boardcatalog.Board
-				Boards                               []boardcatalog.Board
-				CatalogError                         bool
-				Structured, SiteJSON, CatalogJSON    template.JS
-			}{Site: current, Title: title, Description: description, Canonical: canonical, Image: image, Heading: heading, Kind: route, Sections: sections, Board: board, Boards: boards, CatalogError: err != nil, Structured: template.JS(structured), SiteJSON: template.JS(siteJSON), CatalogJSON: template.JS(catalogJSON)} // #nosec: json.Marshal escapes HTML/script delimiters; never raw input.
+				Site                                  sitebrand.Public
+				Title, Description, Canonical, Image  string
+				Heading, Kind, ImageAlt, BoardUpdated string
+				Tutorial                              *publicTutorial
+				Tutorials                             []publicTutorial
+				Sections                              []publicSection
+				Board                                 *boardcatalog.Board
+				Boards                                []boardcatalog.Board
+				CatalogError                          bool
+				Structured, SiteJSON, CatalogJSON     template.JS
+			}{Site: current, Title: title, Description: description, Canonical: canonical, Image: image, Heading: heading, Kind: route, ImageAlt: imageAlt, BoardUpdated: boardUpdated, Tutorial: tutorial, Tutorials: publicTutorials, Sections: sections, Board: board, Boards: boards, CatalogError: err != nil, Structured: template.JS(structured), SiteJSON: template.JS(siteJSON), CatalogJSON: template.JS(catalogJSON)} // #nosec: json.Marshal escapes HTML/script delimiters; never raw input.
 			var out bytes.Buffer
 			if err := view.Execute(&out, data); err != nil {
 				c.Status(http.StatusInternalServerError)
@@ -250,16 +284,24 @@ func RegisterPublicPages(r *gin.Engine, staticDir string, site *sitebrand.State,
 			return
 		}
 		type location struct {
-			Loc string `xml:"loc"`
+			Loc     string `xml:"loc"`
+			LastMod string `xml:"lastmod,omitempty"`
 		}
 		payload := struct {
 			XMLName xml.Name   `xml:"urlset"`
 			NS      string     `xml:"xmlns,attr"`
 			URLs    []location `xml:"url"`
-		}{NS: "http://www.sitemaps.org/schemas/sitemap/0.9", URLs: []location{{base + "/"}, {base + "/boards"}, {base + "/getting-started"}, {base + "/faq"}}}
+		}{NS: "http://www.sitemaps.org/schemas/sitemap/0.9", URLs: []location{{Loc: base + "/"}, {Loc: base + "/boards"}, {Loc: base + "/getting-started"}, {Loc: base + "/faq"}}}
+		for _, tutorial := range publicTutorials {
+			payload.URLs = append(payload.URLs, location{Loc: base + tutorial.Path})
+		}
 		for _, board := range boards {
 			if board.DetailSlug != "" {
-				payload.URLs = append(payload.URLs, location{base + "/boards/" + board.DetailSlug})
+				entry := location{Loc: base + "/boards/" + board.DetailSlug}
+				if !board.UpdatedAt.IsZero() {
+					entry.LastMod = board.UpdatedAt.UTC().Format(time.RFC3339)
+				}
+				payload.URLs = append(payload.URLs, entry)
 			}
 		}
 		raw, err := xml.Marshal(payload)

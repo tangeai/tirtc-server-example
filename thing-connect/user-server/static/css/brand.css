@@ -4,7 +4,7 @@
   width: 32px;
   height: 32px;
   flex: 0 0 auto;
-  background: url('/static/xiaotai-logo-transparent.png') center / contain no-repeat;
+  background: url('/static/favicon.png?v=20261110') center / contain no-repeat;
 }
 
 .site-brand-name {

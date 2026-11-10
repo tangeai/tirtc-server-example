@@ -393,9 +393,30 @@ TiRTC 配置只检查字段完整性和格式，业务服务启动预检会再�
 
 未发布后台语言配置时，各服务使用自身 YAML 的 `web.language.default` 和 `web.language.allow_switch`；省略时为 `auto` 和 `true`。语言配置不改变启动时对 Admin 的依赖。英文页面翻译界面和操作提示；邮件模板、AI 对话语言以及云端资源描述需要单独配置。
 
-官网上线时，在 Admin 的用户服务配置中设置 `web.site.public_url` 为正式 HTTPS 根地址，并填写站点名称。反向代理将 `/`、`/boards`、`/boards/<detail_slug>`、`/getting-started`、`/faq`、`/robots.txt`、`/sitemap.xml` 交给 user-server，避免以静态 `index.html` 替代服务端页面。首页 HTML 包含核心能力、体验步骤和前三块已上架开发板；开发板页包含无脚本目录，独立详情页使用后台配置的详情标识作为地址，展示已上架型号的适配状态和接入资源。接入指南与常见问题可在无 JavaScript 环境阅读；常见问题的结构化数据与页面答案一致。站点地图包含公开内容页和已上架开发板；下架详情返回 404，目录依赖暂时不可用时站点地图返回 503 并提示稍后重试。标题、描述、Open Graph 和 JSON-LD 随站名配置生成；正式网址用于 canonical 和站点地图，避免使用请求 Host 推断网址。未配置网址时 `/sitemap.xml` 返回 404。登录及设备等用户页面发送 `X-Robots-Tag: noindex, nofollow`。搜索收录和 AI 引用由相应平台决定。
+官网上线时，在 Admin 的用户服务配置中设置 `web.site.public_url` 为正式 HTTPS 根地址，并填写站点名称。反向代理将 `/`、`/boards`、`/boards/<detail_slug>`、`/getting-started`、`/faq`、`/guides/simulator`、`/guides/wechat-voip`、`/guides/linux-device`、`/robots.txt`、`/sitemap.xml` 交给 user-server，避免以静态 `index.html` 替代服务端页面。首页 HTML 包含核心能力、体验步骤和前三块已上架开发板；开发板页包含无脚本目录，独立详情页使用后台配置的详情标识作为地址，展示已上架型号的适配状态和接入资源。接入指南与常见问题可在无 JavaScript 环境阅读；常见问题的结构化数据与页面答案一致。站点地图包含公开内容页和已上架开发板；下架详情返回 404，目录依赖暂时不可用时站点地图返回 503 并提示稍后重试。标题、描述、Open Graph 和 JSON-LD 随站名配置生成；正式网址用于 canonical 和站点地图，避免使用请求 Host 推断网址。未配置网址时 `/sitemap.xml` 返回 404。登录及设备等用户页面发送 `X-Robots-Tag: noindex, nofollow`。搜索收录和 AI 引用由相应平台决定。
 
 上线验收时，直接获取上述地址的 HTML，确认正文、canonical 正式域名与 JSON-LD 无需运行 JavaScript 即可读取；检查站点地图中的每个地址返回 200，已下架型号返回 404。使用手机和桌面浏览器验证接入指南、常见问题及开发板详情入口，保留原有 `/boards#<detail_slug>` 弹窗链接的可用性。在搜索平台站长工具中提交正式站点地图并检查收录；抓取、索引与 AI 引用结果需通过平台数据持续观察，不能仅凭页面标签判断。
+
+#### 公开页面验收与效果观察
+
+部署后从仓库的 `thing-connect/` 目录运行只读验收：
+
+```bash
+python3 scripts/check-public-site.py --base-url https://你的正式域名 --json-output /tmp/public-site-check.json
+```
+
+脚本检查 robots、站点地图、所有地图地址的 HTTP 状态、canonical、标题与描述、原始 HTML 正文、JSON-LD、分享元数据，以及登录和设备页面的 noindex。失败时返回非零退出码；可以接入部署后的验收任务。响应时间和字节数仅用于定位单次请求，不代表 Core Web Vitals 或搜索排名。
+
+- `/robots.txt` 返回 404：当前代码始终提供该路由，应检查正在运行的 user-server 版本、反向代理和 CDN 规则。
+- `/sitemap.xml` 返回 404、页面缺少 canonical：检查公开接口 `/v1/config/site` 的 `public_url`，再到 Admin 配置 `web.site.public_url`。不要使用请求 Host 或猜测的域名生成正式地址。
+- 站点地图返回 503：先恢复目录依赖，再重新验收；不要把临时失败的空目录当作已下架内容。
+- `/guides/*` 返回 404：检查已部署版本和根路径到 user-server 的转发。三个教程使用服务端 HTML，页面内容、来源链接和命令无需 JavaScript 即可读取。教程目前提供简体中文内容。
+
+开发板详情的“资料更新”与站点地图 lastmod 使用目录记录的真实更新时间，不能作为固件发布日期或实机验证日期。版本、已知限制和测试结论应在对应的固件说明、源码或烧录指南中记录，并标明型号、版本、环境、步骤和结果；没有测试证据时不填写延迟、稳定性或量产结论。
+
+完成 HTTP 验收后，在有权限的 Google Search Console、Bing Webmaster Tools 等站长工具中验证域名并提交 `/sitemap.xml`。分别观察收录页面、非品牌查询的曝光与点击，以及平台提供的 AI 引用报告；某个平台的引用数据不代表其他平台。站点未接入第三方访问统计时，不能从页面代码推断访问量或用户转化。
+
+需要评估内容价值时，可在选定的统计系统中关联教程访问、固件下载、开始体验与设备绑定成功等事件。下载点击与绑定成功应分别统计；报表只保留所需的汇总信息，不采集验证码、设备凭证、token 或原始请求体。先建立数据基线，再决定英文独立内容、更多教程或性能专项的投入范围。
 
 ### 4.2 在服务器预检并启动业务服务
 

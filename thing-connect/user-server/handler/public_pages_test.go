@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"thing-connect/internal/boardcatalog"
@@ -74,7 +75,7 @@ func TestPublicPagesRenderCatalogAndMetadata(t *testing.T) {
 			Loc string `xml:"loc"`
 		} `xml:"url"`
 	}
-	if err := xml.Unmarshal(response.Body.Bytes(), &sitemap); err != nil || len(sitemap.URLs) != 5 {
+	if err := xml.Unmarshal(response.Body.Bytes(), &sitemap); err != nil || len(sitemap.URLs) != 8 {
 		t.Fatalf("invalid sitemap: %s", response.Body.String())
 	}
 	if !strings.Contains(request("/robots.txt").Body.String(), "Sitemap: https://public.example/sitemap.xml") {
@@ -117,7 +118,7 @@ func TestPublicContentDiscoveryAndStructuredAnswers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reader := &publicCatalogStub{boards: []boardcatalog.Board{{Name: "测试开发板", DetailSlug: "test-board", Model: "Test-1", Chip: "ESP32-S3", Vendor: "测试厂商", Summary: "开发板的真实说明", AdaptationStatus: "adapting", Capabilities: []string{"音视频"}, FirmwareURL: "https://files.example/test.bin"}}}
+	reader := &publicCatalogStub{boards: []boardcatalog.Board{{Name: "测试开发板", DetailSlug: "test-board", Model: "Test-1", Chip: "ESP32-S3", Vendor: "测试厂商", Summary: "开发板的真实说明", ImageURL: "/v1/board-images/" + strings.Repeat("a", 64) + ".png", UpdatedAt: time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC), AdaptationStatus: "adapting", Capabilities: []string{"音视频"}, FirmwareURL: "https://files.example/test.bin"}}}
 	router := gin.New()
 	if err := RegisterPublicPages(router, "../static", state, boardcatalog.New(reader)); err != nil {
 		t.Fatal(err)
@@ -136,7 +137,7 @@ func TestPublicContentDiscoveryAndStructuredAnswers(t *testing.T) {
 	if err := xml.Unmarshal(get("/sitemap.xml").Body.Bytes(), &sitemap); err != nil {
 		t.Fatal(err)
 	}
-	if len(sitemap.URLs) != 5 {
+	if len(sitemap.URLs) != 8 {
 		t.Fatalf("incomplete sitemap: %+v", sitemap)
 	}
 	for _, entry := range sitemap.URLs {
@@ -185,8 +186,15 @@ func TestPublicContentDiscoveryAndStructuredAnswers(t *testing.T) {
 				t.Fatal("FAQ structured data missing")
 			}
 		}
+		if strings.HasPrefix(path, "/guides/") {
+			for _, expected := range []string{`id="prerequisites"`, `id="troubleshooting"`, `id="sources"`, "如何确认这一步完成", `"@type":"TechArticle"`, `href="/getting-started"`} {
+				if !strings.Contains(html, expected) {
+					t.Errorf("tutorial %s missing %s", path, expected)
+				}
+			}
+		}
 		if path == "/boards/test-board" {
-			for _, expected := range []string{"Test-1", "ESP32-S3", "适配中", "开发板的真实说明", `href="https://files.example/test.bin"`} {
+			for _, expected := range []string{"Test-1", "ESP32-S3", "适配中", "开发板的真实说明", `datetime="2026-10-01T12:00:00Z"`, `content="https://public.example/v1/board-images/` + strings.Repeat("a", 64) + `.png"`, `href="https://files.example/test.bin"`} {
 				if !strings.Contains(html, expected) {
 					t.Errorf("detail missing %s", expected)
 				}
@@ -208,6 +216,12 @@ func TestPublicContentDiscoveryAndStructuredAnswers(t *testing.T) {
 			t.Errorf("missing board indexed: %s", path)
 		}
 	}
+	if response := get("/guides/not-a-guide"); response.Code != 404 {
+		t.Fatal("unknown tutorial must not become a soft 404")
+	}
+	if !strings.Contains(get("/sitemap.xml").Body.String(), "<lastmod>2026-10-01T12:00:00Z</lastmod>") {
+		t.Fatal("board update missing from sitemap")
+	}
 	reader.boards = nil // Unpublishing removes both the detail page and sitemap entry.
 	if get("/boards/test-board").Code != 404 || strings.Contains(get("/sitemap.xml").Body.String(), "test-board") {
 		t.Fatal("unpublished board remains discoverable")
@@ -219,7 +233,7 @@ func TestPublicContentDiscoveryAndStructuredAnswers(t *testing.T) {
 			t.Errorf("incorrect transient failure at %s: %d", path, response.Code)
 		}
 	}
-	for _, path := range []string{"/getting-started", "/faq"} {
+	for _, path := range []string{"/getting-started", "/faq", "/guides/simulator", "/guides/wechat-voip", "/guides/linux-device"} {
 		if get(path).Code != 200 {
 			t.Errorf("static content depends on catalog: %s", path)
 		}
