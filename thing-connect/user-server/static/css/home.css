@@ -2262,14 +2262,6 @@ nav {
   position: relative;
   background: #eff7f7;
 }
-.board-status {
-  display: inline-block;
-  font-size: 10px;
-  color: #087d89;
-  background: #e8f7f9;
-  padding: 3px 6px;
-  border-radius: 4px;
-}
 .board-pending {
   font-size: 12px;
   color: #69747a;
@@ -2288,9 +2280,6 @@ nav {
 }
 .catalog-info {
   flex: 1;
-}
-.board-capabilities {
-  line-height: 1.8;
 }
 .catalog-actions {
   flex-wrap: wrap;

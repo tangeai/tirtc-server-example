@@ -37,7 +37,7 @@ const publicMetadata = `
 <meta name="twitter:image" content="{{.Image}}">{{end}}
 <script type="application/ld+json">{{.Structured}}</script>`
 
-const homeBoardCards = `{{range .Boards}}<article class="catalog-card"><div class="product-art">{{if .ImageURL}}<img src="{{.ImageURL}}" alt="{{.Name}} 产品图" loading="lazy">{{else}}<span class="board-image-fallback">{{.Chip}}</span>{{end}}</div><div class="catalog-info"><small>{{.Vendor}} · {{.Chip}}</small><h3>{{.Name}}</h3><p class="board-capabilities">{{range $index,$value := .Capabilities}}{{if $index}} · {{end}}{{$value}}{{end}}</p><div class="catalog-actions">{{if .FirmwareURL}}<a class="primary" href="{{.FirmwareURL}}" target="_blank" rel="noopener noreferrer">下载固件 ↓</a>{{end}}{{if .FlashingGuideURL}}<a class="guide-link" href="{{.FlashingGuideURL}}" target="_blank" rel="noopener noreferrer">烧录指南 ↗</a>{{end}}</div></div></article>{{end}}`
+const homeBoardCards = `{{range .Boards}}<article class="catalog-card"><div class="product-art">{{if .ImageURL}}<img src="{{.ImageURL}}" alt="{{.Name}} 产品图" loading="lazy">{{else}}<span class="board-image-fallback">{{.Chip}}</span>{{end}}</div><div class="catalog-info"><small>{{.Vendor}} · {{.Chip}}</small><h3>{{.Name}}</h3><div class="catalog-actions">{{if .FirmwareURL}}<a class="primary" href="{{.FirmwareURL}}" target="_blank" rel="noopener noreferrer">下载固件 ↓</a>{{end}}{{if .FlashingGuideURL}}<a class="guide-link" href="{{.FlashingGuideURL}}" target="_blank" rel="noopener noreferrer">烧录指南 ↗</a>{{end}}</div></div></article>{{end}}`
 
 // Public pages render the same catalog to people and crawlers. Only presentation
 // belongs here; publication/filtering stays in the catalog business module.

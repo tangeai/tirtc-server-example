@@ -21,7 +21,7 @@ func TestPublicPagesRenderCatalogAndMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	router := gin.New()
-	boards := []boardcatalog.Board{{Name: "第一块开发板", Chip: "ESP32", FirmwareURL: "https://files.example/firmware", FlashingGuideURL: "https://docs.example/flash"}, {Name: "第二块"}, {Name: "第三块"}, {Name: "第四块"}}
+	boards := []boardcatalog.Board{{Name: "第一块开发板", Chip: "ESP32", Capabilities: []string{"实时音视频"}, FirmwareURL: "https://files.example/firmware", FlashingGuideURL: "https://docs.example/flash"}, {Name: "第二块"}, {Name: "第三块"}, {Name: "第四块"}}
 	if err := RegisterPublicPages(router, "../static", state, boardcatalog.New(boardReaderStub{boards: boards})); err != nil {
 		t.Fatal(err)
 	}
@@ -55,6 +55,9 @@ func TestPublicPagesRenderCatalogAndMetadata(t *testing.T) {
 			if !json.Valid([]byte(script[1])) {
 				t.Errorf("invalid JSON script: %s", script[1])
 			}
+		}
+		if path == "/" && strings.Contains(html, `class="board-capabilities"`) {
+			t.Fatal("homepage cards must omit repeated capabilities")
 		}
 		if path == "/" && strings.Contains(html, "第四块") {
 			t.Fatal("homepage exceeds three boards")

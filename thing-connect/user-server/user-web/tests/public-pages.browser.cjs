@@ -27,6 +27,7 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
     assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),url+' overflow '+width+' '+language+' '+JSON.stringify(await page.evaluate(()=>[...document.querySelectorAll('body *')].map(e=>({tag:e.tagName,cls:e.className,x:e.getBoundingClientRect().x,right:e.getBoundingClientRect().right})).filter(e=>e.right>innerWidth+1||e.x< -1).slice(0,12))));
     if(width<=768){const menu=page.locator('.menu-button');const menuBox=await menu.boundingBox();assert(menuBox.width>=43.99&&menuBox.height>=43.99,JSON.stringify({url,width,language,menuBox}));await menu.click();await page.keyboard.press('Escape');assert.equal(await menu.getAttribute('aria-expanded'),'false');assert(await menu.evaluate(e=>e===document.activeElement));await menu.click();await page.mouse.click(2,850);assert.equal(await menu.getAttribute('aria-expanded'),'false');}
     if(url==='/'){
+     assert.equal(await page.locator('.catalog-card .board-status,.catalog-card .board-capabilities').count(),0,'homepage cards omit repeated status and capabilities');
      assert.equal(await page.locator('.catalog-card').count(),3,'homepage shows three boards from a larger catalog');
      const navBox=await page.locator('.site-header .nav').boundingBox(),heroBox=await page.locator('.hero').boundingBox();
      const footerBox=await page.locator('.footer-contact').boundingBox();assert(Math.abs(footerBox.x-heroBox.x)<1&&Math.abs(footerBox.width-heroBox.width)<1,'footer aligns with content');

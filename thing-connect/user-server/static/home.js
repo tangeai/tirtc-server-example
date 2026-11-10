@@ -121,17 +121,6 @@
       ),
       element("h3", "", board.name),
     );
-    const statusKey = {
-      ready: "boards.ready",
-      adapting: "boards.adapting",
-      planned: "boards.planned",
-    }[board.adaptation_status];
-    if (statusKey) info.append(element("span", "board-status", t(statusKey)));
-    const capabilities = Array.isArray(board.capabilities)
-      ? board.capabilities.filter((value) => typeof value === "string")
-      : [];
-    if (capabilities.length)
-      info.append(element("p", "board-capabilities", capabilities.join(" · ")));
     const actions = element("div", "catalog-actions");
     for (const [field, label, className] of [
       ["firmware_url", "landing.firmware", "primary"],
