@@ -13,6 +13,7 @@ rtc_call_session.py — 设备间通话（call-server）状态机
 """
 
 import threading
+import time
 
 import requests
 import rtc_call
@@ -117,7 +118,8 @@ class CallState:
         with self._lock:
             if self._room_id != room_id:
                 return
-        self._cancel_ring_timer()
+        # Keep the call's deadline until P2P really connects. Duplicate answer
+        # notifications must not extend the deadline indefinitely.
         self._before_continue(lambda: None)
         _ok(f"对方正在连接中 callee={callee_id} room={room_id}（等待 P2P 建连）")
 
@@ -262,55 +264,92 @@ class CallState:
         if not pc:
             _warn("当前没有待接听的来电")
             return
-        try:
-            r = http_trace.request(
-                "POST", f"{self._call_server}/v1/call/device/info",
-                json={"device_id": pc["caller_id"], "room_id": pc["room_id"], "purpose": "call"},
-                headers=self._headers(), timeout=10)
-            resp = r.json()
-        except requests.RequestException as e:
-            _warn(f"接听异常: {e}")
-            return
-        if resp.get("code") != 200:
-            _warn(f"接听失败（code={resp.get('code')}）: {resp.get('msg')}")
-            return
-        token = (resp.get("data") or {}).get("token", "")
-        if not token:
-            _warn("接听失败：响应缺少 token")
-            return
-        with self._lock:
-            current = self._pending_call
-            if (not current
-                    or current.get("room_id") != pc["room_id"]
-                    or current.get("generation") != pc.get("generation")):
-                _warn(f"来电已在获取 token 期间取消 room_id={pc['room_id']}")
-                return
-            self._pending_call = None
-            self._room_id = pc["room_id"]
-            self._role    = "callee"
-            accepted_call_type = (
-                "audio" if pc.get("call_type") == "audio" else "video")
-            self._call_type = accepted_call_type
-        _ok(f"接听成功，正在建立 P2P 连接 room_id={pc['room_id']}")
-        try:
-            action = lambda: rtc_call.connect_to(
-                pc["caller_id"], token, pc["room_id"],
-                call_type=accepted_call_type)
-            if self._before_accept_ticket:
-                self._before_accept_ticket(action, pc["room_id"])
-            else:
-                self._before_accept(action)
-        except BaseException:
+        attempted = False
+        released = False
+
+        def release_remote():
+            nonlocal released
+            if attempted and not released:
+                released = True
+                self._release_answered_room(pc["room_id"])
+
+        def accept_and_connect():
+            nonlocal attempted
+            # Claim local RTC before the HTTP request: device/info marks the
+            # remote room answered, so every subsequent failure needs hangup.
             with self._lock:
-                if self._room_id == pc["room_id"]:
-                    self._room_id = None
-                    self._role = None
-                    self._call_type = None
-                    if (self._incoming_generation == pc.get("generation")
-                            and self._pending_call is None):
-                        self._pending_call = pc
-            rtc_call.clear_call_type()
+                if self._pending_call != pc:
+                    self._after_stop()
+                    return
+                self._pending_call = None
+                self._room_id = pc["room_id"]
+                self._role = "callee"
+                self._call_type = pc["call_type"]
+            completed = False
+            try:
+                attempted = True
+                response = http_trace.request(
+                    "POST", f"{self._call_server}/v1/call/device/info",
+                    json={"device_id": pc["caller_id"],
+                          "room_id": pc["room_id"], "purpose": "call"},
+                    headers=self._headers(), timeout=10).json()
+                data = response.get("data") if isinstance(response, dict) else None
+                token = data.get("token") if isinstance(data, dict) else None
+                if (not isinstance(response, dict) or response.get("code") != 200
+                        or not isinstance(token, str) or not token):
+                    _warn("接听失败：服务端未返回有效连接凭证")
+                    return
+                with self._lock:
+                    if (self._room_id != pc["room_id"]
+                            or self._incoming_generation != pc.get("generation")):
+                        return
+                rtc_call.connect_to(pc["caller_id"], token, pc["room_id"],
+                                    call_type=pc["call_type"])
+                completed = True
+            except Exception:
+                _warn("接听或建连失败，释放该房间")
+            finally:
+                if not completed:
+                    with self._lock:
+                        owns_room = (self._room_id == pc["room_id"]
+                                     and self._incoming_generation == pc.get("generation"))
+                        if owns_room:
+                            self._room_id = self._role = self._call_type = None
+                    try:
+                        if owns_room:
+                            try:
+                                rtc_call.hangup()
+                            finally:
+                                self._after_stop()
+                    finally:
+                        release_remote()
+
+        try:
+            if self._before_accept_ticket:
+                self._before_accept_ticket(accept_and_connect, pc["room_id"])
+            else:
+                self._before_accept(accept_and_connect)
+        except BaseException:
+            # Includes cancellation detected by the arbiter after the action.
+            release_remote()
             raise
+
+    def _release_answered_room(self, room_id: str) -> None:
+        """Bounded, exact-room compensation; repeated hangup is safe."""
+        for attempt in range(3):
+            try:
+                response = http_trace.request(
+                    "POST", f"{self._call_server}/v1/call/hangup",
+                    json={"room_id": room_id, "reason": "connect_failed"},
+                    headers=self._headers(), timeout=10).json()
+                # Already gone, or another callee answered: no owned room remains.
+                if isinstance(response, dict) and response.get("code") in (200, 40400, 40300):
+                    return
+            except (requests.RequestException, ValueError):
+                pass
+            if attempt < 2:
+                time.sleep(0.2 * (2 ** attempt))
+        _warn(f"房间释放未确认 room_id={room_id}，网络恢复后请执行 room 查询并挂断")
 
     def reject_incoming(self, payload: dict, reason: str = "busy") -> None:
         """拒绝未登记到本地状态机的后来来电，不覆盖首个待接来电。"""
@@ -326,15 +365,16 @@ class CallState:
         except requests.RequestException as e:
             _warn(f"忙线拒接异常: {e}")
 
-    def do_reject(self, reason: str = "decline") -> None:
+    def do_reject(self, reason: str = "decline", on_rejected=None) -> None:
         with self._lock:
-            pc = dict(self._pending_call) if self._pending_call else None
-        if not pc:
-            _warn("当前没有待接听的来电")
-            return
-        with self._lock:
+            pc = self._pending_call
+            if not pc:
+                _warn("当前没有待接听的来电")
+                return
             self._pending_call = None
             self._incoming_generation += 1
+            if on_rejected:
+                on_rejected(pc["room_id"])
         try:
             http_trace.request(
                 "POST", f"{self._call_server}/v1/call/reject",
@@ -371,8 +411,16 @@ class CallState:
         self._cancel_ring_timer()
         def _timeout():
             with self._lock:
-                if self._room_id != room_id:
+                if self._room_id != room_id or self._cancel_timer is not timer:
                     return
+                # Detach local state before remote I/O. A late response cannot
+                # clear a newer call, and P2P completion loses this race.
+                self._cancel_timer = None
+                self._room_id = self._role = self._call_type = None
+            rtc_call.hangup()
+            rtc_call.clear_expected_room()
+            rtc_call.clear_call_type()
+            self._after_stop()
             _warn(f"等待超时（30s），自动取消呼叫 room_id={room_id}")
             try:
                 http_trace.request(
@@ -381,22 +429,11 @@ class CallState:
                     headers=self._headers(), timeout=10)
             except requests.RequestException as e:
                 _warn(f"超时取消异常: {e}")
-            rtc_call.clear_expected_room()
-            with self._lock:
-                if self._room_id == room_id:
-                    self._room_id = None
-                    self._role    = None
-                    self._call_type = None
-                    ended = True
-                else:
-                    ended = False
-            if ended:
-                rtc_call.clear_call_type()
-                self._after_stop()
+        timer = threading.Timer(30.0, _timeout)
+        timer.daemon = True
         with self._lock:
-            self._cancel_timer = threading.Timer(30.0, _timeout)
-            self._cancel_timer.daemon = True
-            self._cancel_timer.start()
+            self._cancel_timer = timer
+        timer.start()
 
     def _cancel_ring_timer(self) -> None:
         with self._lock:
@@ -406,14 +443,32 @@ class CallState:
             t.cancel()
 
     def _on_p2p_connected(self, room_id: str) -> None:
-        self._cancel_ring_timer()
+        with self._lock:
+            if self._room_id != room_id:
+                return
+            timer = self._cancel_timer
+            self._cancel_timer = None
+        if timer:
+            timer.cancel()
         _ok(f"P2P 建连成功 room_id={room_id}，通话中")
 
     def _on_connect_failed(self) -> None:
         with self._lock:
             room_id = self._room_id
-        _warn(f"连接主叫全部失败，调用挂断 room_id={room_id}")
-        self.do_hangup()
+            if not room_id:
+                return
+            self._room_id = self._role = self._call_type = None
+        self._cancel_ring_timer()
+        _warn(f"连接主叫全部失败，释放房间 room_id={room_id}")
+        try:
+            rtc_call.hangup()
+            rtc_call.clear_expected_room()
+            rtc_call.clear_call_type()
+        finally:
+            try:
+                self._after_stop()
+            finally:
+                self._release_answered_room(room_id)
 
     def do_cancel(self) -> None:
         with self._lock:

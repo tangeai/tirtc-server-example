@@ -684,7 +684,7 @@ class TerminalControllerTests(unittest.TestCase):
         call.has_pending.return_value = False
         terminal = TerminalController(coordinator, voip, ai, call)
         terminal.execute("r", mock.Mock())
-        voip.reject.assert_called_once_with()
+        voip.reject.assert_called_once()
         call.do_reject.assert_not_called()
 
     def test_hangup_alias_targets_only_active_session(self):

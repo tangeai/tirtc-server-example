@@ -32,6 +32,7 @@ from media_file_reader import AudioFileReader
 from media_formats import (
     AUDIO_FORMATS,
     ai_audio_descriptor,
+    validate_ai_audio_response,
     normalize_audio_format,
 )
 from sdk_callback_guard import SdkCallbackGuard, join_worker_before_uninit
@@ -59,6 +60,7 @@ AI_CONNECT_TIMEOUT_SEC = 10.0
 AI_START_RESPONSE_TIMEOUT_SEC = 10.0
 
 _LOG_LEVEL = 10
+_start_request_id = ""
 _up_audio_format = "alaw_8khz"
 _down_audio_format = "alaw_8khz"
 _default_receive_dir = os.path.join(
@@ -74,8 +76,11 @@ def configure_receive_dir(recv_dir: str = "") -> None:
 def configure_audio_formats(up_format: str = "alaw_8khz",
                             down_format: str = "alaw_8khz") -> None:
     global _up_audio_format, _down_audio_format
-    _up_audio_format = normalize_audio_format(up_format)
-    _down_audio_format = normalize_audio_format(down_format)
+    up = normalize_audio_format(up_format)
+    down = normalize_audio_format(down_format)
+    ai_audio_descriptor(up)
+    ai_audio_descriptor(down)
+    _up_audio_format, _down_audio_format = up, down
 
 def set_log_level(level: str) -> None:
     global _LOG_LEVEL
@@ -434,33 +439,34 @@ def _handle_ai_message(hconn_val: int, msg: dict) -> None:
     is_resp  = ("result" in msg or "error" in msg) and "method" not in msg
 
     if is_resp:
+        with _state_lock:
+            if (_session_state != "CONNECTING" or not _start_request_id
+                    or msg_id != _start_request_id):
+                return
+            generation = _session_generation
         if "error" in msg:
-            with _state_lock:
-                generation = _session_generation
-                if _start_response_timer is not None:
-                    _start_response_timer.cancel()
             _err(f"start_session 失败: {msg['error']}")
             _fail_after_callback(
                 generation, "AI start_session 被服务端拒绝，已结束会话")
             return
         result = msg.get("result", {})
         if not isinstance(result, dict):
-            with _state_lock:
-                generation = _session_generation
-                if _start_response_timer is not None:
-                    _start_response_timer.cancel()
             _err("start_session 响应 result 不是对象")
             _fail_after_callback(
                 generation, "AI start_session 响应无效，已结束会话")
+            return
+        try:
+            validate_ai_audio_response(result, _up_audio_format, _down_audio_format)
+        except ValueError as exc:
+            _fail_after_callback(generation, str(exc))
             return
         session_id = result.get("session_id", "")
         _info(f"start_session 成功 session_id={session_id}")
         _info(f"  服务端确认 input_audio={result.get('input_audio')} output_audio={result.get('output_audio')}")
         with _state_lock:
-            if (_active_hconn != hconn_val
+            if (_session_generation != generation or _active_hconn != hconn_val
                     or _session_state != "CONNECTING"):
                 return
-            generation = _session_generation
             if _start_response_timer is not None:
                 _start_response_timer.cancel()
         _callback_guard.defer(
@@ -641,6 +647,8 @@ def start_session(peer_id: str, token: str, audio_file: str, device_id: str = ""
     global _recv_recorder, _connect_cb_ref, _stream_stop, _stream_thread
     global _session_generation
 
+    global _start_request_id
+
     with _state_lock:
         if _session_state != "IDLE":
             _err(f"start_session: 当前状态 {_session_state}，不能发起新会话")
@@ -648,6 +656,8 @@ def start_session(peer_id: str, token: str, audio_file: str, device_id: str = ""
         _cancel_session_timers_locked()
         _session_generation += 1
         generation = _session_generation
+        _start_request_id = uuid.uuid4().hex
+        request_id = _start_request_id
         _session_state   = "CONNECTING"
         _audio_file_path = audio_file
 
@@ -739,7 +749,7 @@ def start_session(peer_id: str, token: str, audio_file: str, device_id: str = ""
             }
             envelope = {
                 "jsonrpc": "2.0",
-                "id": uuid.uuid4().hex,
+                "id": request_id,
                 "method": "start_session",
                 "params": params,
             }

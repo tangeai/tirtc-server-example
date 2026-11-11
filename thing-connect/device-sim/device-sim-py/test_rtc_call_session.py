@@ -287,7 +287,7 @@ class CallLifecycleRaceTests(unittest.TestCase):
             rtc_call._LOG_LEVEL = 40
             state = CallState(
                 "https://call.example", "dev-1", "mqtt-token",
-                before_accept_ticket=mock.Mock(),
+                before_accept_ticket=mock.Mock(side_effect=lambda action, room: action()),
             )
             state._after_stop = mock.Mock()
             state.on_device_call_incoming({
@@ -312,7 +312,7 @@ class CallLifecycleRaceTests(unittest.TestCase):
 
             self.assertFalse(state.has_pending())
             self.assertIsNone(state._room_id)
-            state._before_accept_ticket.assert_not_called()
+            state._before_accept_ticket.assert_called_once()
             rtc_call.connect_to.assert_not_called()
 
     def test_accept_audio_call_passes_type_to_media_connection(self):

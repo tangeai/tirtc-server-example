@@ -5,6 +5,8 @@
 
 from dataclasses import dataclass
 
+from opus_recording import opus_packet_duration_ms
+
 from media_formats import AUDIO_FORMATS, VIDEO_FORMATS
 
 
@@ -212,39 +214,11 @@ def _parse_ogg_packets(data: bytes) -> list[AudioPacket]:
                 packet = bytes(current)
                 current.clear()
                 if not packet.startswith((b"OpusHead", b"OpusTags")):
-                    packets.append(AudioPacket(packet, _opus_packet_duration_ms(packet)))
+                    packets.append(AudioPacket(packet, opus_packet_duration_ms(packet)))
         pos = payload_end
     if current:
         raise ValueError("Ogg 文件末尾存在未完成 packet")
     return packets
-
-
-def _opus_packet_duration_ms(packet: bytes) -> float:
-    if not packet:
-        raise ValueError("Opus packet 为空")
-    toc = packet[0]
-    config = toc >> 3
-    code = toc & 0x03
-    frame_duration_ms = _opus_frame_duration_ms(config)
-    if code == 0:
-        frame_count = 1
-    elif code in (1, 2):
-        frame_count = 2
-    else:
-        if len(packet) < 2:
-            raise ValueError("Opus packet 缺少帧数头")
-        frame_count = packet[1] & 0x3F
-        if frame_count <= 0:
-            raise ValueError("Opus packet 帧数无效")
-    return frame_duration_ms * frame_count
-
-
-def _opus_frame_duration_ms(config: int) -> float:
-    if config < 12:
-        return (10.0, 20.0, 40.0, 60.0)[config & 0x03]
-    if config < 16:
-        return (10.0, 20.0)[config & 0x01]
-    return (2.5, 5.0, 10.0, 20.0)[config & 0x03]
 
 
 def _parse_annexb_access_units(data: bytes, codec: str) -> list[tuple[bytes, bool]]:

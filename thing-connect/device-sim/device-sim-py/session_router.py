@@ -190,8 +190,11 @@ class SessionMessageRouter:
         if not room_id:
             self._submit_device_reject(payload, "invalid")
             return
-        if not self.arbiter.offer_pending(
-                SessionKind.CALL, room_id, PENDING_CALL_TTL_SEC):
+        decision = self.arbiter.admit_incoming(
+            SessionKind.CALL, room_id, PENDING_CALL_TTL_SEC)
+        if decision == IncomingDecision.DUPLICATE:
+            return
+        if decision != IncomingDecision.PENDING:
             self._submit_device_reject(payload, "busy")
             return
         try:
@@ -643,12 +646,12 @@ class TerminalController:
 
     def _reject(self, reason: str) -> None:
         if self.arbiter.has_pending(SessionKind.CALL):
-            self.call.do_reject(reason)
-            self.arbiter.clear_pending(SessionKind.CALL)
+            self.call.do_reject(reason, on_rejected=lambda room_id:
+                                self.arbiter.clear_pending(SessionKind.CALL, room_id))
             return
         if self.arbiter.has_pending(SessionKind.VOIP):
-            self.voip.reject()
-            self.arbiter.clear_pending(SessionKind.VOIP)
+            self.voip.reject(on_rejected=lambda room_id:
+                             self.arbiter.clear_pending(SessionKind.VOIP, room_id))
             return
         print("[terminal] 当前没有待拒接的来电", flush=True)
 

@@ -535,12 +535,14 @@ class VoipCallState:
                         and not self._active_room_id):
                     self._pending_call.update(pending)
 
-    def reject(self) -> None:
+    def reject(self, on_rejected=None) -> None:
         with self._lock:
             pending = dict(self._pending_call)
             self._pending_call.clear()
             if pending:
                 self._incoming_generation += 1
+                if on_rejected:
+                    on_rejected(pending["wx_room_id"])
         if not pending:
             _warn("当前没有待确认的来电")
             return

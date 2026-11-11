@@ -2,6 +2,7 @@
 # Target: Linux user space. Other operating systems require a separate port.
 
 TARGET  := device-sim
+.DEFAULT_GOAL := all
 TARGET_RUN = $(if $(findstring /,$(TARGET)),$(TARGET),./$(TARGET))
 PRODUCT_TARGET := device-sim-product
 FRAMEWORK_TARGET := libdevice-reference.a
@@ -182,10 +183,22 @@ $(ROOM_TEST_TARGET): tests/test_room.c $(SRCDIR)/tirtc_room.c $(FRAMEWORK_TARGET
 	@echo "  CC    $@"
 	@$(CC) $(CFLAGS) -I$(SRCDIR) -o $@ $< $(FRAMEWORK_TARGET) $(LDFLAGS)
 
-test: check-sdk $(TEST_TARGET) $(ROOM_TEST_TARGET) $(SDK_ABI_TEST_TARGET) $(TARGET)
+BUSINESS_TEST_TARGETS := $(OBJDIR)/test-call-session $(OBJDIR)/test-binding $(OBJDIR)/test-session-router
+$(OBJDIR)/test-call-session: tests/test_call_session.c $(SRCDIR)/call_session.c $(FRAMEWORK_TARGET) $(BUILD_CONFIG)
+	@$(CC) $(CFLAGS) -I$(SRCDIR) -o $@ $< $(FRAMEWORK_TARGET) $(LDFLAGS)
+$(OBJDIR)/test-binding: tests/test_binding.c $(SRCDIR)/device_flow.c $(FRAMEWORK_TARGET) $(BUILD_CONFIG)
+	@$(CC) $(CFLAGS) -I$(SRCDIR) -o $@ $< $(FRAMEWORK_TARGET) $(LDFLAGS)
+
+$(OBJDIR)/test-session-router: tests/test_session_router.c $(SRCDIR)/main.c $(FRAMEWORK_TARGET) $(BUILD_CONFIG)
+	@$(CC) $(CFLAGS) -I$(SRCDIR) -o $@ $< $(FRAMEWORK_TARGET) $(LDFLAGS)
+
+test: check-sdk $(BUSINESS_TEST_TARGETS) $(TEST_TARGET) $(ROOM_TEST_TARGET) $(SDK_ABI_TEST_TARGET) $(TARGET)
 	@LD_LIBRARY_PATH="$(SDK_DIR)/lib:$${LD_LIBRARY_PATH}" $(SDK_ABI_TEST_TARGET)
 	@LD_LIBRARY_PATH="$(SDK_DIR)/lib:$${LD_LIBRARY_PATH}" $(TEST_TARGET)
 	@LD_LIBRARY_PATH="$(SDK_DIR)/lib:$${LD_LIBRARY_PATH}" $(ROOM_TEST_TARGET)
+	@LD_LIBRARY_PATH="$(SDK_DIR)/lib:$${LD_LIBRARY_PATH}" $(OBJDIR)/test-call-session
+	@LD_LIBRARY_PATH="$(SDK_DIR)/lib:$${LD_LIBRARY_PATH}" $(OBJDIR)/test-binding
+	@LD_LIBRARY_PATH="$(SDK_DIR)/lib:$${LD_LIBRARY_PATH}" $(OBJDIR)/test-session-router
 	@LD_LIBRARY_PATH="$(SDK_DIR)/lib:$${LD_LIBRARY_PATH}" $(TARGET_RUN) --help >/dev/null
 
 run: $(TARGET)

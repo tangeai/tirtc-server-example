@@ -143,11 +143,17 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: thing-connect/device-sim/device-sim-py/requirements.txt
+          cache-dependency-path: thing-connect/device-sim/device-sim-py/requirements*.txt
       - name: Install Python simulator dependencies
-        run: python -m pip install --requirement thing-connect/device-sim/device-sim-py/requirements.txt
+        run: python -m pip install --requirement thing-connect/device-sim/device-sim-py/requirements-audio.txt
+      - name: Install native AI audio codecs (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libopus0 libopencore-amrnb0 libopencore-amrwb0 libvo-amrwbenc0
       - name: Python simulator tests
         working-directory: thing-connect/device-sim/device-sim-py
         env:
           TIRTC_SDK_VERSION: 2.5.0
+          REQUIRE_AI_CODECS: ${{ runner.os == 'Linux' && '1' || '0' }}
         run: python -m unittest discover -p 'test_*.py'

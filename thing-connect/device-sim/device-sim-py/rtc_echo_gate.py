@@ -13,6 +13,9 @@ from __future__ import annotations
     cleaned = gate.process(mic_pcm)
 """
 
+import threading
+import time
+
 import numpy as np
 
 
@@ -32,13 +35,15 @@ class EchoGate:
         self._attenuation_mult = 10.0 ** (-attenuation_db / 20.0)
 
         # 平滑系数：每帧更新一次
-        fps = 1000.0 / 20.0  # frames per second (20ms frames)
+        fps = sample_rate / self._frame_samples
         self._attack_coeff = np.exp(-1.0 / (attack_ms / 1000.0 * fps))
         self._release_coeff = np.exp(-1.0 / (release_ms / 1000.0 * fps))
 
         # 状态
         self._far_energy = 0.0       # 远端能量（平滑后）
         self._gate = 1.0             # 当前门控增益（1.0=透传, mult=衰减）
+        self._lock = threading.Lock()
+        self._far_valid_until = 0.0
 
         # 远端重采样（延迟创建，按需）
         self._far_resampler = None
@@ -55,41 +60,44 @@ class EchoGate:
 
     def feed_far_end(self, pcm: bytes, source_rate: int = 0) -> None:
         """喂入远端参考信号，检测远端是否在说话。"""
-        if source_rate > 0 and source_rate != self.sample_rate:
-            pcm = self._resample_far(pcm, source_rate, self.sample_rate)
+        with self._lock:
+            if source_rate > 0 and source_rate != self.sample_rate:
+                pcm = self._resample_far(pcm, source_rate, self.sample_rate)
 
-        pcm = pcm[:self.frame_bytes]
-        if len(pcm) < self.frame_bytes:
-            pcm = pcm + b'\x00' * (self.frame_bytes - len(pcm))
+            duration = len(pcm) / (2 * self.sample_rate)
+            self._far_valid_until = time.monotonic() + duration + 0.04
+            pcm = pcm[:self.frame_bytes]
+            if len(pcm) < self.frame_bytes:
+                pcm = pcm + b'\x00' * (self.frame_bytes - len(pcm))
 
-        samples = np.frombuffer(pcm, dtype=np.int16)
-        if len(samples) == 0:
-            return
+            samples = np.frombuffer(pcm, dtype=np.int16)
+            if len(samples) == 0:
+                return
 
-        energy = float(np.sqrt(np.mean(samples.astype(np.float64) ** 2)))
+            energy = float(np.sqrt(np.mean(samples.astype(np.float64) ** 2)))
 
-        # 指数平滑远端能量
-        self._far_energy = (self._attack_coeff * self._far_energy +
-                            (1.0 - self._attack_coeff) * energy)
+            # 指数平滑远端能量
+            self._far_energy = (self._attack_coeff * self._far_energy +
+                                (1.0 - self._attack_coeff) * energy)
 
-        # 滞回阈值：避免边缘抖动
-        # 远端 RMS > 500 → 有人在说话，衰减近端
-        # 远端 RMS < 200 → 远端静音，透传近端
-        gate_active = self._gate < 0.5  # 当前是否已在衰减状态
-        if gate_active:
-            threshold = 200.0   # 退出衰减需要更低能量
-        else:
-            threshold = 500.0   # 进入衰减需要更高能量
+            # 滞回阈值：避免边缘抖动
+            # 远端 RMS > 500 → 有人在说话，衰减近端
+            # 远端 RMS < 200 → 远端静音，透传近端
+            gate_active = self._gate < 0.5  # 当前是否已在衰减状态
+            if gate_active:
+                threshold = 200.0   # 退出衰减需要更低能量
+            else:
+                threshold = 500.0   # 进入衰减需要更高能量
 
-        if self._far_energy > threshold:
-            target = self._attenuation_mult
-        else:
-            target = 1.0
+            if self._far_energy > threshold:
+                target = self._attenuation_mult
+            else:
+                target = 1.0
 
-        # 攻击快、释放慢
-        coeff = (self._attack_coeff if target < self._gate
-                 else self._release_coeff)
-        self._gate = coeff * self._gate + (1.0 - coeff) * target
+            # 攻击快、释放慢
+            coeff = (self._attack_coeff if target < self._gate
+                     else self._release_coeff)
+            self._gate = coeff * self._gate + (1.0 - coeff) * target
 
     def process(self, near_pcm: bytes) -> bytes:
         """处理近端信号。远端活跃时施加衰减，远端安静时透传。"""
@@ -97,16 +105,28 @@ class EchoGate:
         if len(pcm) < self.frame_bytes:
             pcm = pcm + b'\x00' * (self.frame_bytes - len(pcm))
 
-        if self._gate >= 0.999:
+        with self._lock:
+            # A remote sender may stop without sending a final silent frame.
+            # Expire its reference using elapsed time, then release smoothly.
+            if time.monotonic() >= self._far_valid_until:
+                self._far_energy = 0.0
+                self._gate = self._release_coeff * self._gate + (1 - self._release_coeff)
+            gain = self._gate
+
+        if gain >= 0.999:
             return pcm
 
         samples = np.frombuffer(pcm, dtype=np.int16)
-        attenuated = (samples.astype(np.float64) * self._gate)
+        attenuated = (samples.astype(np.float64) * gain)
         return attenuated.astype(np.int16).tobytes()
 
     def close(self) -> None:
-        self._far_resampler = None
-        self._far_resampler_rates = None
+        with self._lock:
+            self._far_resampler = None
+            self._far_resampler_rates = None
+            self._far_valid_until = 0.0
+            self._far_energy = 0.0
+            self._gate = 1.0
 
     # ── 内部 ────────────────────────────────────────────────────────────
 

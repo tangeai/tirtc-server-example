@@ -311,8 +311,10 @@ static void _mqtt_call_incoming(void *ctx, const cJSON *p) {
         LOG_W("忽略缺少 room_id 的设备来电");
         return;
     }
-    if (session_arbiter_offer_pending_id(
-            &rt->arbiter, SESSION_CALL, room_id, 45000) != 0) {
+    SessionIncomingDecision decision = session_arbiter_admit_incoming_id(
+        &rt->arbiter, SESSION_CALL, room_id, 45000);
+    if (decision == SESSION_INCOMING_DUPLICATE) return;
+    if (decision != SESSION_INCOMING_PENDING) {
         LOG_W("当前会话忙，直接拒绝设备来电");
         call_session_reject_incoming_payload_async(rt->call, p, "busy");
         return;
@@ -966,20 +968,11 @@ int device_reference_run(int argc, char *argv[]) {
         LOG_I("注册/登录入口: %s", EXPERIENCE_PLATFORM_URL);
         PROMPT_BOX("进入设备绑定并输入验证码: \033[1m%s\033[0m", rep.code);
 
-        if (connect_temp_mqtt(svc.mqtt_host, svc.mqtt_port,
+        if (connect_temp_mqtt_with_identity(svc.mqtt_host, svc.mqtt_port,
                               rep.temp_client_id, rep.temp_token,
                               timeout, svc.mqtt_tls,
-                              did, sizeof(did), dkey, sizeof(dkey)) != 0) {
-            /* Pre-burned device: empty auth_grant payload -> use local credentials */
-            if (did[0] || dkey[0]) {
-                /* got credentials from auth_grant */
-            } else {
-                /* Pre-burned: use existing creds */
-                if (!did[0] || !dkey[0]) {
-                    LOG_E("auth_grant 后未获取到凭证");
-                    return 1;
-                }
-            }
+                              did, sizeof(did), dkey, sizeof(dkey), creds_file) != 0) {
+            return 1;
         }
         if (did[0] && dkey[0]) {
             SEP_LINE();
@@ -988,17 +981,13 @@ int device_reference_run(int argc, char *argv[]) {
             PROMPT_KV("  device_key = <hidden>");
             PROMPT_KV("  (来源: auth_grant 下发)");
             SEP_LINE();
-            if (device_identity_save(creds_file, did, dkey) != 0) {
-                LOG_E("身份适配器无法持久化新凭证");
-                device_recovery_report(DEVICE_RECOVERY_IDENTITY, -1,
-                                       "save granted credentials failed");
-                return 1;
-            }
         }
     } else {
         LOG_I("使用预存凭证 device_id=%s，直接进入阶段二", did);
-        if (device_identity_save(creds_file, did, dkey) != 0)
-            LOG_W("身份适配器未保存显式提供的凭证");
+        if (device_identity_save(creds_file, did, dkey) != 0) {
+            LOG_E("身份适配器未保存显式提供的凭证");
+            return 1;
+        }
     }
 
     /* ── Phase 2: Get mqtt_token ───────────────────────────────────────── */
@@ -1013,20 +1002,14 @@ int device_reference_run(int argc, char *argv[]) {
         ReportResult rep;
         if (report_device(svc.device_server, mac, did, dkey, &rep) != 0)
             return 1;
-        if (connect_temp_mqtt(svc.mqtt_host, svc.mqtt_port,
+        if (connect_temp_mqtt_with_identity(svc.mqtt_host, svc.mqtt_port,
                               rep.temp_client_id, rep.temp_token,
                               timeout, svc.mqtt_tls,
-                              did, sizeof(did), dkey, sizeof(dkey)) != 0)
+                              did, sizeof(did), dkey, sizeof(dkey), creds_file) != 0)
             return 1;
         if (get_mqtt_token(svc.device_server, did, dkey, mac,
                            mqtt_token, sizeof(mqtt_token)) != 0)
             return 1;
-        if (device_identity_save(creds_file, did, dkey) != 0) {
-            LOG_E("重新绑定后无法持久化凭证");
-            device_recovery_report(DEVICE_RECOVERY_IDENTITY, -1,
-                                   "save rebound credentials failed");
-            return 1;
-        }
     } else if (tok_ret != 0) {
         return 1;
     }

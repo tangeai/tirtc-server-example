@@ -2,3 +2,6 @@
 
 # Optional Windows microphone/speaker support for --with-mic and recognition recording/playback.
 sounddevice>=0.5.5; sys_platform == "win32"
+
+# Windows x64 Opus DLL for AI microphone/speaker audio; no separate MSYS2 install.
+opuslib-next-bundled==0.1.1; sys_platform == "win32"

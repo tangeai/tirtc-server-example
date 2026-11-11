@@ -103,6 +103,27 @@ def _mqtt_reason_value(reason_code):
     return getattr(reason_code, "value", reason_code)
 
 
+def _decode_mqtt_message(raw: bytes) -> dict | None:
+    """Validate the shared envelope before either MQTT client dispatches it.
+
+    Do not log remote values: binding messages can contain device credentials.
+    Missing/null payloads remain compatible with empty auth_grant messages.
+    """
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError, RecursionError):
+        _warn("MQTT 消息编码或 JSON 无效，已忽略")
+        return None
+    if (not isinstance(data, dict)
+            or not isinstance(data.get("type", ""), str)
+            or not isinstance(data.get("channel", ""), str)
+            or (data.get("payload") is not None
+                and not isinstance(data["payload"], dict))):
+        _warn("MQTT 消息结构无效，已忽略")
+        return None
+    return data
+
+
 def fetch_services(base_url: str = "") -> dict:
     """GET {base_url}/services → 标准化地址字典。
 
@@ -303,7 +324,8 @@ def get_mqtt_token(server: str, device_id: str, device_key: str, mac: str = "") 
 
 def connect_temp_mqtt(broker_host: str, broker_port: int,
                       temp_client_id: str, temp_token: str, timeout_sec: int,
-                      use_tls: bool = True) -> dict:
+                      use_tls: bool = True, *, persist_credentials=None,
+                      existing_credentials=("", "")) -> dict:
     """临时身份连接，等待服务端下发 auth_grant。
 
     MQTT 连接参数：
@@ -316,6 +338,7 @@ def connect_temp_mqtt(broker_host: str, broker_port: int,
     down_topic = f"device/{client_id}/cmd"
     ack_topic  = f"device/{client_id}/ack"
     received      = threading.Event()
+    grant_lock = threading.Lock()
     result        = {}
     connect_error = []
     countdown_active = False
@@ -339,11 +362,8 @@ def connect_temp_mqtt(broker_host: str, broker_port: int,
             received.set()
 
     def on_message(client, userdata, msg):
-        raw = msg.payload.decode()
-        try:
-            data = json.loads(raw)
-        except json.JSONDecodeError:
-            _err(f"MQTT JSON 解析失败 [{msg.topic}]：响应体已省略（{len(msg.payload)} bytes）")
+        data = _decode_mqtt_message(msg.payload)
+        if data is None:
             return
         _log(f"MQTT 收到 [{msg.topic}] type={data.get('type', '')} bytes={len(msg.payload)}")
         if data.get("type") == "auth_grant":
@@ -353,21 +373,19 @@ def connect_temp_mqtt(broker_host: str, broker_port: int,
             return
         device_id  = data.get("device_id")
         device_key = data.get("device_key")
-        if not device_id or not device_key:
-            # Pre-burned device: auth_grant with empty payload.
-            # Device already has credentials in Flash.
-            _ok("收到 auth_grant（预烧设备），使用本地预存凭证上线")
-            _log(f"MQTT 发送 {ack_topic}: {{\"ack\":true}}")
-            client.publish(ack_topic, json.dumps({"ack": True}), qos=1)
-            time.sleep(0.3)
-            received.set()
+        if ((device_id is not None and not isinstance(device_id, str))
+                or (device_key is not None and not isinstance(device_key, str))
+                or bool(device_id) != bool(device_key)):
+            _warn("绑定凭证结构无效，已忽略")
             return
-        result["device_id"]  = device_id
-        result["device_key"] = device_key
-        _log(f"MQTT 发送 {ack_topic}: {{\"ack\":true}}")
-        client.publish(ack_topic, json.dumps({"ack": True}), qos=1)
-        time.sleep(0.3)
-        received.set()
+        # Callback only hands off a single immutable grant. Persistence and
+        # QoS1 completion run on the calling thread, never the MQTT loop.
+        with grant_lock:
+            if received.is_set():
+                return
+            if device_id and device_key:
+                result.update(device_id=device_id, device_key=device_key)
+            received.set()
 
     client = _new_mqtt_client(client_id, temp_client_id, temp_token, use_tls)
     _log_mqtt_connection_details(
@@ -394,23 +412,28 @@ def connect_temp_mqtt(broker_host: str, broker_port: int,
                 countdown_active = True
                 last_remaining = remaining
             time.sleep(0.2)
-        ok_flag = received.is_set()
-    except KeyboardInterrupt:
+        if not received.is_set():
+            sys.exit("等待绑定凭证超时")
+        if connect_error:
+            sys.exit(1)
+        credentials = (result["device_id"], result["device_key"]) if result else existing_credentials
+        if not all(credentials):
+            raise RuntimeError("空绑定确认需要有效的本地预存凭证")
+        if persist_credentials is None:
+            from device_credentials import save_creds
+            persist_credentials = save_creds
+        if not persist_credentials(*credentials):
+            raise RuntimeError("绑定凭证保存失败，未发送确认")
+        receipt = client.publish(ack_topic, json.dumps({"ack": True}), qos=1)
+        receipt.wait_for_publish(timeout=max(0.001, min(10, deadline - time.monotonic())))
+        if not receipt.is_published():
+            raise RuntimeError("绑定确认发送超时，凭证已保存在本地")
+        return result
+    finally:
         if countdown_active:
             print(flush=True)
-        client.loop_stop()
         client.disconnect()
-        raise
-    if countdown_active:
-        print(flush=True)
-    client.loop_stop()
-    client.disconnect()
-    if not ok_flag:
-        _err(f"等待超时（{timeout_sec}s），未收到下发消息")
-        sys.exit(1)
-    if connect_error:
-        sys.exit(1)
-    return result
+        client.loop_stop()
 
 
 def connect_mqtt_blocking(broker_host: str, broker_port: int,
@@ -467,15 +490,13 @@ def connect_mqtt_blocking(broker_host: str, broker_port: int,
             _warn(f"连接断开 rc={rc}，将自动重连…")
 
     def on_message(client, userdata, msg):
-        raw = msg.payload.decode()
+        # ACK receipt independently of whether the business envelope is valid.
         if msg.topic.endswith("/cmd"):
             ack_t = msg.topic.replace("/cmd", "/ack")
             _log(f"发送 ACK [{ack_t}]: {{\"ack\":true}}")
             client.publish(ack_t, json.dumps({"ack": True}), qos=1)
-        try:
-            data = json.loads(raw)
-        except json.JSONDecodeError:
-            _err(f"MQTT JSON 解析失败 [{msg.topic}]：响应体已省略（{len(msg.payload)} bytes）")
+        data = _decode_mqtt_message(msg.payload)
+        if data is None:
             return
         msg_type = data.get("type", "")
         channel  = data.get("channel", "")

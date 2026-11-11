@@ -74,9 +74,18 @@ static int _http_get(const char *url, const char *bearer,
     return 0;
 }
 
+#ifdef DEVICE_SIM_TESTING
+static int (*http_post_test_hook)(const char *, const char *, const char *,
+                                  char *, size_t, long *);
+#endif
+
 static int _http_post(const char *url, const char *bearer,
                       const char *json_body,
                       char *body_buf, size_t body_cap, long *http_code) {
+#ifdef DEVICE_SIM_TESTING
+    if (http_post_test_hook)
+        return http_post_test_hook(url, bearer, json_body, body_buf, body_cap, http_code);
+#endif
     CURL *curl = curl_easy_init();
     if (!curl) return -1;
 
@@ -413,58 +422,17 @@ typedef struct {
     char room_id[128];
     char call_type[16];
     char token[512];
+    int remote_attempted;
+    int compensated;
 } AcceptConnectAction;
 
-static int _accept_connect_action(void *opaque) {
-    AcceptConnectAction *action = opaque;
+static int _accept_token(AcceptConnectAction *action) {
     CallState *cs = action->cs;
-    pthread_mutex_lock(&cs->lock);
-    int still_pending =
-        cs->pending_call &&
-        cs->pending_generation == action->ticket_generation &&
-        strcmp(cs->pending_room_id, action->room_id) == 0;
-    if (!still_pending) {
-        pthread_mutex_unlock(&cs->lock);
-        LOG_W("来电在启动期间已取消 room_id=%s", action->room_id);
-        return -1;
-    }
-    cs->active = 1;
-    cs->pending_call = 0;
-    cs->pending_deadline_ms = 0;
-    cs->active_generation = action->ticket_generation;
-    STR_COPY(cs->room_id, action->room_id);
-    STR_COPY(cs->role, "callee");
-    STR_COPY(cs->active_call_type,
-             strcmp(action->call_type, "audio") == 0 ? "audio" : "video");
-    pthread_mutex_unlock(&cs->lock);
-
-    LOG_I("接听成功，正在建立 P2P 连接 room_id=%s", action->room_id);
-    call_register_p2p_connected_cb(call_session_on_p2p_connected, cs);
-    call_register_connect_failed_cb(call_session_on_connect_failed, cs);
-    return call_connect_to(action->caller_id, action->token,
-                           action->room_id, 3, 10);
-}
-
-int call_session_do_accept(CallState *cs) {
-    if (!cs) return -1;
-
-    pthread_mutex_lock(&cs->lock);
-    if (!cs->pending_call) {
-        LOG_W("当前没有待接听的来电");
-        pthread_mutex_unlock(&cs->lock);
-        return -1;
-    }
-    char caller_id[64], room_id[128], call_type[16];
-    uint64_t ticket_generation = cs->pending_generation;
-    STR_COPY(caller_id, cs->pending_caller_id); STR_COPY(room_id, cs->pending_room_id);
-    STR_COPY(call_type, cs->pending_call_type);
-    pthread_mutex_unlock(&cs->lock);
-
     /* POST /v1/call/device/info */
     cJSON *root = cJSON_CreateObject();
     if (!root) return -1;
-    if (!cJSON_AddStringToObject(root, "device_id", caller_id) ||
-        !cJSON_AddStringToObject(root, "room_id", room_id) ||
+    if (!cJSON_AddStringToObject(root, "device_id", action->caller_id) ||
+        !cJSON_AddStringToObject(root, "room_id", action->room_id) ||
         !cJSON_AddStringToObject(root, "purpose", "call")) {
         cJSON_Delete(root);
         return -1;
@@ -499,22 +467,122 @@ int call_session_do_accept(CallState *cs) {
         return -1;
     }
 
-    char token[512];
-    STR_COPY(token, token_json->valuestring);
+    if (!token_json->valuestring[0] ||
+        strlen(token_json->valuestring) >= sizeof(action->token)) {
+        cJSON_Delete(resp);
+        return -1;
+    }
+    STR_COPY(action->token, token_json->valuestring);
     cJSON_Delete(resp);
 
-    /* The token request may take seconds.  Revalidate the exact ticket before
-     * claiming RTC so a concurrent room_cancel cannot be resurrected. */
+    return 0;
+}
+
+/* The HTTP answer may have committed even when its response was lost. */
+static void _abort_accept(AcceptConnectAction *action) {
+    if (!action->remote_attempted || action->compensated) return;
+    action->compensated = 1;
+    CallState *cs = action->cs;
+    pthread_mutex_lock(&cs->lock);
+    if (cs->pending_call && cs->pending_generation == action->ticket_generation &&
+        strcmp(cs->pending_room_id, action->room_id) == 0) {
+        cs->pending_call = 0;
+        cs->pending_deadline_ms = 0;
+        cs->incoming_generation++;
+    }
+    if (cs->active_generation == action->ticket_generation &&
+        strcmp(cs->room_id, action->room_id) == 0) {
+        cs->active = 0;
+        cs->room_id[0] = cs->role[0] = cs->active_call_type[0] = '\0';
+    }
+    pthread_mutex_unlock(&cs->lock);
+    cJSON *body = cJSON_CreateObject();
+    if (!body) return;
+    if (!cJSON_AddStringToObject(body, "room_id", action->room_id) ||
+        !cJSON_AddStringToObject(body, "reason", "connect_failed")) {
+        cJSON_Delete(body);
+        return;
+    }
+    char *json = cJSON_PrintUnformatted(body);
+    cJSON_Delete(body);
+    if (!json) return;
+    char url[512], response[4096];
+    long status = 0;
+    snprintf(url, sizeof(url), "%s/v1/call/hangup", cs->call_server);
+    int released = 0;
+    for (int attempt = 0; attempt < 3; attempt++) {
+        if (_http_post(url, cs->mqtt_token, json, response, sizeof(response), &status) == 0) {
+            int code = _json_resp_code(response);
+            if (code == 200 || code == 40400 || code == 40300) {
+                released = 1;
+                break;
+            }
+        }
+        if (attempt < 2) sleep_ms(200 << attempt);
+    }
+    if (!released)
+        LOG_W("房间释放未确认 room_id=%s，网络恢复后请执行 room 查询并挂断", action->room_id);
+    free(json);
+}
+
+static int _accept_connect_action(void *opaque) {
+    AcceptConnectAction *action = opaque;
+    CallState *cs = action->cs;
+    pthread_mutex_lock(&cs->lock);
+    int valid = cs->pending_call &&
+                cs->pending_generation == action->ticket_generation &&
+                strcmp(cs->pending_room_id, action->room_id) == 0;
+    pthread_mutex_unlock(&cs->lock);
+    if (!valid) return -1;
+    action->remote_attempted = 1;
+    if (_accept_token(action) != 0) {
+        _abort_accept(action);
+        return -1;
+    }
     pthread_mutex_lock(&cs->lock);
     int still_pending =
         cs->pending_call &&
-        cs->pending_generation == ticket_generation &&
-        strcmp(cs->pending_room_id, room_id) == 0;
-    pthread_mutex_unlock(&cs->lock);
+        cs->pending_generation == action->ticket_generation &&
+        strcmp(cs->pending_room_id, action->room_id) == 0;
     if (!still_pending) {
-        LOG_W("来电已在获取 token 期间取消 room_id=%s", room_id);
+        pthread_mutex_unlock(&cs->lock);
+        LOG_W("来电在启动期间已取消 room_id=%s", action->room_id);
+        _abort_accept(action);
         return -1;
     }
+    cs->active = 1;
+    cs->pending_call = 0;
+    cs->pending_deadline_ms = 0;
+    cs->active_generation = action->ticket_generation;
+    STR_COPY(cs->room_id, action->room_id);
+    STR_COPY(cs->role, "callee");
+    STR_COPY(cs->active_call_type,
+             strcmp(action->call_type, "audio") == 0 ? "audio" : "video");
+    pthread_mutex_unlock(&cs->lock);
+
+    LOG_I("接听成功，正在建立 P2P 连接 room_id=%s", action->room_id);
+    call_register_p2p_connected_cb(call_session_on_p2p_connected, cs);
+    call_register_connect_failed_cb(call_session_on_connect_failed, cs);
+    int rc = call_connect_to(action->caller_id, action->token,
+                              action->room_id, 3, 10);
+    if (rc != 0) _abort_accept(action);
+    return rc;
+}
+
+int call_session_do_accept(CallState *cs) {
+    if (!cs) return -1;
+
+    pthread_mutex_lock(&cs->lock);
+    if (!cs->pending_call) {
+        LOG_W("当前没有待接听的来电");
+        pthread_mutex_unlock(&cs->lock);
+        return -1;
+    }
+    char caller_id[64], room_id[128], call_type[16];
+    uint64_t ticket_generation = cs->pending_generation;
+    STR_COPY(caller_id, cs->pending_caller_id); STR_COPY(room_id, cs->pending_room_id);
+    STR_COPY(call_type, cs->pending_call_type);
+    pthread_mutex_unlock(&cs->lock);
 
     if (_before_call_start(cs, 1) != 0)
         return -1;
@@ -526,11 +594,15 @@ int call_session_do_accept(CallState *cs) {
     STR_COPY(action.caller_id, caller_id);
     STR_COPY(action.room_id, room_id);
     STR_COPY(action.call_type, call_type);
-    STR_COPY(action.token, token);
-    if (cs->run_action)
-        return cs->run_action(cs->runtime_user, room_id,
-                              _accept_connect_action, &action);
-    return _accept_connect_action(&action);
+    int rc = cs->run_action
+        ? cs->run_action(cs->runtime_user, room_id, _accept_connect_action, &action)
+        : _accept_connect_action(&action);
+    if (rc != 0) {
+        _abort_accept(&action);
+        if (!cs->run_action && cs->on_session_end)
+            cs->on_session_end(cs->runtime_user);
+    }
+    return rc;
 }
 
 int call_session_do_reject(CallState *cs, const char *reason) {

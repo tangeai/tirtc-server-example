@@ -52,6 +52,12 @@ def save_creds(device_id: str, device_key: str, creds_file: str = "") -> bool:
             os.fsync(f.fileno())
         os.replace(tmp_path, path)
         os.chmod(path, 0o600)
+        if os.name == "posix":
+            directory_fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
         print(f"\033[0;32m[device]\033[0m 凭证已保存到 {path}")
         return True
     except OSError as e:

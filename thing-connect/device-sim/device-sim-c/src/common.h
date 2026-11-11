@@ -177,6 +177,10 @@ static inline const char *sess_state_str(SessionState s) {
 /** Monotonic process clock in milliseconds. */
 int64_t now_ms(void);
 
+/* POSIX condition deadlines use the host monotonic clock, not adapter time.
+ * Initialize before publishing the condition; returns a pthread error code. */
+int monotonic_cond_init(pthread_cond_t *condition);
+
 /** Sleep for at least `ms` milliseconds. */
 void sleep_ms(int ms);
 

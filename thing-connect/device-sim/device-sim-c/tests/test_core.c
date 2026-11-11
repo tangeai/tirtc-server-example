@@ -1725,8 +1725,37 @@ static void test_process_runtime_generation_dispatch(void) {
     }
 }
 
+static void test_monotonic_condition_timeout(void) {
+    pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+    pthread_cond_t condition;
+    assert(monotonic_cond_init(&condition) == 0);
+    struct timespec start, deadline, end;
+    assert(clock_gettime(CLOCK_MONOTONIC, &start) == 0);
+    deadline = start;
+    deadline.tv_nsec += 20000000;
+    if (deadline.tv_nsec >= 1000000000) {
+        deadline.tv_nsec -= 1000000000;
+        deadline.tv_sec++;
+    }
+    pthread_mutex_lock(&lock);
+    int rc;
+    do {
+        rc = pthread_cond_timedwait(&condition, &lock, &deadline);
+    } while (rc == 0);
+    pthread_mutex_unlock(&lock);
+    assert(rc == ETIMEDOUT);
+    assert(clock_gettime(CLOCK_MONOTONIC, &end) == 0);
+    /* A REALTIME condition would interpret this deadline as already expired. */
+    int64_t elapsed = (end.tv_sec - start.tv_sec) * 1000000000LL +
+                      end.tv_nsec - start.tv_nsec;
+    assert(elapsed >= 20000000);
+    pthread_cond_destroy(&condition);
+    pthread_mutex_destroy(&lock);
+}
+
 int main(void) {
     g_log_level = 100;
+    test_monotonic_condition_timeout();
     test_hmac_sha256_b64();
     assert(linux_device_adapter_install_default() == 0);
     test_device_adapter_contract();

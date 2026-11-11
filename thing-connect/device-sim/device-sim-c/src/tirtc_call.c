@@ -70,7 +70,12 @@ static void                  *s_connect_failed_user = NULL;
 
 /* Connect callback context (synchronous wait via condvar) */
 static pthread_mutex_t  s_connect_mtx   = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t   s_connect_cond  = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t s_connect_cond;
+static pthread_once_t s_connect_cond_once = PTHREAD_ONCE_INIT;
+static int s_connect_cond_error;
+static void _init_connect_condition(void) {
+    s_connect_cond_error = monotonic_cond_init(&s_connect_cond);
+}
 static int              s_connect_done  = 0;
 static int              s_connect_error = 0;
 static tirtc_conn_t     s_connect_hconn = NULL;
@@ -437,6 +442,8 @@ static void _call_on_unsubscribe_audio(tirtc_conn_t hconn, uint8_t stream_id) {
 /* ── Process-runtime integration ─────────────────────────────────────────── */
 
 int call_service_register(void) {
+    pthread_once(&s_connect_cond_once, _init_connect_condition);
+    if (s_connect_cond_error != 0) return -1;
     TIRTCCALLBACKS cbs;
     memset(&cbs, 0, sizeof(cbs));
     cbs.on_conn_accepted     = _call_on_conn_accepted;
@@ -736,6 +743,8 @@ static void _connect_cb(int error, tirtc_conn_t hconn, void *user_data) {
 
 int call_connect_to(const char *remote_device_id, const char *token,
                      const char *room_id, int max_retries, int timeout_s) {
+    pthread_once(&s_connect_cond_once, _init_connect_condition);
+    if (s_connect_cond_error != 0) return -1;
     _prepare_media_policy();
     pthread_mutex_lock(&s_conn_mtx);
     if (s_session_state != SESS_IDLE && s_session_state != SESS_CONNECTING) {
@@ -778,7 +787,7 @@ int call_connect_to(const char *remote_device_id, const char *token,
 
         /* Wait for callback (sync) */
         struct timespec deadline;
-        clock_gettime(CLOCK_REALTIME, &deadline);
+        clock_gettime(CLOCK_MONOTONIC, &deadline);
         deadline.tv_sec += timeout_s;
 
         pthread_mutex_lock(&s_connect_mtx);
@@ -880,6 +889,7 @@ int call_connect_to(const char *remote_device_id, const char *token,
 }
 
 void call_hangup(void) {
+    pthread_once(&s_connect_cond_once, _init_connect_condition);
     pthread_mutex_lock(&s_call_control_mtx);
     _stop_media_stream();
 
@@ -898,7 +908,7 @@ void call_hangup(void) {
     pthread_mutex_unlock(&s_conn_mtx);
     pthread_mutex_lock(&s_connect_mtx);
     s_connect_generation++;
-    pthread_cond_broadcast(&s_connect_cond);
+    if (s_connect_cond_error == 0) pthread_cond_broadcast(&s_connect_cond);
     pthread_mutex_unlock(&s_connect_mtx);
 
     if (conn) {

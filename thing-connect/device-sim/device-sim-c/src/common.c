@@ -13,6 +13,16 @@ static pthread_mutex_t s_log_lock = PTHREAD_MUTEX_INITIALIZER;
 static log_sink_fn s_log_sink = NULL;
 static void *s_log_sink_user = NULL;
 
+int monotonic_cond_init(pthread_cond_t *condition) {
+    pthread_condattr_t attributes;
+    int rc = pthread_condattr_init(&attributes);
+    if (rc != 0) return rc;
+    rc = pthread_condattr_setclock(&attributes, CLOCK_MONOTONIC);
+    if (rc == 0) rc = pthread_cond_init(condition, &attributes);
+    pthread_condattr_destroy(&attributes);
+    return rc;
+}
+
 int64_t now_ms(void) {
     return device_platform_monotonic_ms();
 }

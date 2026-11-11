@@ -161,7 +161,7 @@ python device_sim_main.py --device-id DEV000001 --device-key your-key --with-cam
 `requirements-audio.txt` 和 `requirements-camera.txt` 均包含基础 `requirements.txt`。
 只使用一种 PC 硬件时，安装对应的依赖文件即可；同时使用摄像头和麦克风时，两份都要安装。
 
-Windows 也可使用文件模式；只有显式传入 `--with-mic` 时，Web 对讲下行、VoIP、AI 或设备间通话才使用 PC 扬声器，后三种通话同时使用 PC 麦克风。此模式线上上下行必须同时使用 `alaw_8khz` 或同时使用 `alaw_16khz`（G.711 A-law、单声道）；PCM/AMR/Opus 只能去掉 `--with-mic` 后使用预编码文件测试。
+Windows 也可使用文件模式；只有显式传入 `--with-mic` 时，Web 对讲下行、VoIP、AI 或设备间通话才使用 PC 扬声器，后三种通话同时使用 PC 麦克风。通用音频参数在此模式下要求上下行同时为 `alaw_8khz` 或同时为 `alaw_16khz`（G.711 A-law、单声道）。AI 可通过专用参数独立选择 PCM、A-law、AMR 或 Opus，见 [AI 独立音频配置](#ai-独立音频配置)。
 
 使用 `--with-mic` 时，启动时选择 Windows 默认输入和输出设备，并打印麦克风、扬声器的编号、名称与音频接口。USB 麦克风可作为默认输入设备，也可按编号指定：
 
@@ -276,7 +276,11 @@ python3 device_sim_main.py --device-id DEV000001 --device-key your-key \
 | `--list-audio-devices` | — | 列出设备编号、名称、方向及默认设备后退出 |
 | `--mic-device` | 系统默认 | 配合 `--with-mic` 指定输入设备编号 |
 | `--speaker-device` | 系统默认 | 配合 `--with-mic` 指定输出设备编号 |
-| `--with-mic` | — | Windows 下使用 PC 麦克风/扬声器；上下行须同时为 `alaw_8khz` 或 `alaw_16khz` |
+| `--with-mic` | — | Windows 下使用 PC 麦克风/扬声器；通用参数使用一致的 A-law，AI 可独立覆盖 |
+| `--ai-up-audio-format` | 沿用 `--up-audio-format` | AI 上行编码与采样率；环境变量 `AI_UP_AUDIO_FORMAT` |
+| `--ai-down-audio-format` | 沿用 `--down-audio-format` | AI 下行编码与采样率；环境变量 `AI_DOWN_AUDIO_FORMAT` |
+| `--ai-up-audio-file` | 沿用 `--up-audio-file` | AI 文件模式上行素材；环境变量 `AI_UP_AUDIO_FILE`，麦克风模式忽略 |
+| `AI_CODEC_LIBRARY_DIR`（环境变量） | 系统库搜索路径 | AI 硬件编解码原生库目录 |
 | `--with-camera` | — | Windows 下使用 PC 摄像头替代上行视频文件；输出固定为 720P、15fps、H.264 Annex-B |
 | `--camera-index` | `0` | `--with-camera` 使用的摄像头编号 |
 | `--up-audio-format` | `alaw_8khz` | 上行音频格式 |
@@ -311,7 +315,7 @@ VOIP_SCREEN_WIDTH=640 VOIP_SCREEN_HEIGHT=480 VOIP_VIDEO_RES_MODE=fit_screen \
 
 `--down-audio-format` 同时用于微信 VoIP profile，因此文件模式只允许云端支持的
 `alaw/amr/opus`。使用 `--with-mic` 时，上下行必须同时为 `alaw_8khz` 或同时为
-`alaw_16khz`；PCM/AMR/Opus 只能去掉 `--with-mic` 后使用预编码文件测试。
+`alaw_16khz`。这些限制属于通用参数；AI 使用 `--ai-up-audio-format` / `--ai-down-audio-format` 独立覆盖。
 
 程序启动后进入实时流监听。每个 H5/App 使用独立连接，模拟器最多同时保留 4 个实时查看连接，共享一份媒体源，并把每帧发送给所有已订阅对应 stream 的连接。连接建立时，模拟器分别为该连接订阅下行音频 14 和下行视频 15，单路订阅失败不终止实时查看；只有收到该连接对上行音频 10 或视频 11 的订阅回调后，才向该连接发送对应媒体。紧随建连到达的订阅会由有界待激活记录保存，并在媒体任务就绪后继续生效；单端取消订阅或断开不影响其他观看端。`--up-video-file` 为空或设为 `audio-only` 时，只提供音频。
 
@@ -325,6 +329,8 @@ Python 与 C 模拟器统一通过 `SessionArbiter` 仲裁 MQTT、终端和 SDK 
 - 全局只有一个待接槽位，VoIP/设备来电 first-wins；后来来电直接 busy 拒绝，不能覆盖先到来电。
 - 待接槽位绑定 `room_id` 和票据代次，并有 45 秒 TTL；迟到取消只能作用于同一房间。
 - 外呼、AI 对讲和接听来电取得唯一 RTC 所有权后，其他业务不能启动；不做自动抢占。
+- 同一房间的重复设备来电不会重新登记或忙线拒接。设备外呼从发起成功起最多等待 30 秒，收到“对方已接听”仍保留超时保护，直到 P2P 建连成功。
+- 接听先取得本地 RTC，再请求服务端接听。请求或建连失败时按原房间补偿挂断，最多尝试 3 次；若提示“房间释放未确认”，网络恢复后执行 `room`，按查询结果执行 `hangup`。
 - VoIP 回铃和新来电在同一把锁内分类；接听按 `PENDING → STARTING → ACTIVE` 提交，token 请求或启动期间取消不会复活旧来电。
 - 失败、拒接、取消、超时及远端挂断都归还所有权并恢复 H5；生命周期结束使用常驻队列，H5 恢复失败会限次重试。
 - 每次所有权都有递增代次，迟到的旧结束事件不能终止后来启动的同类会话；设备忙线拒接 HTTP 不在 MQTT 回调线程执行。
@@ -562,7 +568,7 @@ python3 device_sim_main.py --device-id DEV_B --device-key key-b \
 
 ## 凭证持久化
 
-首次绑定成功后，`device_id` 和 `device_key` 自动保存到 `device_creds.json`（与 `device_sim_main.py` 同目录）。下次启动无需再传 `--device-id` / `--device-key`，程序自动加载。
+收到绑定凭证后，程序先将 `device_id` 和 `device_key` 原子保存到 `device_creds.json`（与 `device_sim_main.py` 同目录），再发送 ACK 并等待 MQTT QoS 1 确认。保存失败时不确认绑定；空 `auth_grant` 需要完整的本地预存凭证。下次启动无需再传 `--device-id` / `--device-key`，程序自动加载。
 
 **凭证优先级：** CLI 参数 → 环境变量 → `device_creds.json` → 扫码绑定。
 
@@ -572,7 +578,7 @@ python3 device_sim_main.py --device-id DEV_B --device-key key-b \
 
 **保存时机：**
 - 扫码绑定成功（`auth_grant` 收到凭证）
-- 每次用已有凭证成功启动（刷新时间戳）
+- 使用已有凭证启动、换取 token 之前
 - 解绑重绑后（6006 恢复流程）
 
 **自动加载**：程序启动时，如果未通过 CLI 或环境变量提供凭证，自动从 `device_creds.json` 读取。加载失败不报错，走未绑定流程。
@@ -633,11 +639,14 @@ svc = fetch_services(base_url="http://ep-open.tangeopen.com")
 
 # 2. 未绑定：上报指纹 → 临时 MQTT → 等 auth_grant
 result = report_device(svc["device_server"], mac="AA:BB:CC:DD:EE:FF")
-device_id, device_key = connect_temp_mqtt(
+credentials = connect_temp_mqtt(
     svc["mqtt_host"], svc["mqtt_port"],
     result["temp_client_id"], result["temp_token"],
     timeout_sec=190, use_tls=svc["mqtt_tls"],
 )
+device_id, device_key = credentials["device_id"], credentials["device_key"]
+# 自定义存储：传 persist_credentials(device_id, device_key)，仅在持久化成功时返回 True。
+# 预烧凭证重绑：同时传 existing_credentials=(device_id, device_key)；空通知返回 {}。
 
 # 3. 已绑定：HMAC 签名换取 token
 try:
@@ -859,13 +868,81 @@ resp = requests.post(f"{server}/v1/device/token", headers=headers)
 
 文件模式下，音频文件必须已经是目标编码格式：`aac` 需 ADTS，`opus` 需 Ogg/Opus，`amr` 需标准 `#!AMR`/`#!AMR-WB` 文件头；视频文件需分别提供 `h264/h265 Annex-B` 或 `mjpeg` 裸流。
 
-Windows `--with-mic` 在线上使用上下行一致的 `alaw_8khz` 或 `alaw_16khz`，默认
-`alaw_8khz`。麦克风 PCM 16k 在发送前按目标采样率重采样并编码为 G.711 A-law；
-收到的 G.711 A-law 解码后再交给扬声器。AI `start_session` 会显式协商
-`codec=alaw`、对应采样率及单声道。视频来源由 `--with-camera` 或
-`--up-video-file` 决定。
+Windows `--with-mic` 的通用参数使用上下行一致的 A-law，默认 `alaw_8khz`。
+AI 专用参数可独立设置上下行编码和采样率；声卡与回声门控使用 PCM 16k，发送前按
+AI 上行配置重采样、编码，下行按协商格式解码后交给扬声器。视频来源由
+`--with-camera` 或 `--up-video-file` 决定。
+
+### AI 独立音频配置
+
+上下行分别选择下表中的格式，均为单声道；不传 AI 专用参数时沿用通用参数，默认上下行都是 `alaw_8khz`。
+AI 参数只影响 AI 会话，实时流、微信 VoIP、设备通话和多人对讲继续使用通用参数。
+
+| 编码 | 8K 参数 | 16K 参数 | 硬件模式依赖 |
+|---|---|---|---|
+| A-law | `alaw_8khz` | `alaw_16khz` | 基础 Python 音频依赖 |
+| PCM S16LE | `pcm_s16le_8khz` | `pcm_s16le_16khz` | 基础 Python 音频依赖 |
+| AMR | `amr_nb` | `amr_wb` | NB 编解码：OpenCORE AMR-NB；WB 编码：VisualOn AMR-WB，解码：OpenCORE AMR-WB |
+| Opus | 不支持 | `opus_16khz` | libopus |
+
+AI 对讲按平台约束只接受 Opus 16K；上行、下行、环境变量及从通用参数继承的 Opus 8K 配置都会在启动时被拒绝。A-law、PCM 和 AMR 支持 8K/16K。程序校验 `start_session` 响应的上下行编码、采样率和声道，缺字段或与配置不一致时结束会话。`g711a` 响应与 `alaw` 等价。
+
+Windows 麦克风示例（启动后输入 `aicall`）：
+
+```powershell
+python device_sim_main.py --with-mic --ai-up-audio-format opus_16khz --ai-down-audio-format pcm_s16le_8khz
+python device_sim_main.py --with-mic --ai-up-audio-format amr_nb --ai-down-audio-format amr_wb
+```
+
+文件模式示例：
+
+```bash
+python3 device_sim_main.py --ai-up-audio-format pcm_s16le_16khz --ai-up-audio-file ./speech-16k.pcm --ai-down-audio-format alaw_8khz
+```
+
+文件模式不进行实时编码，素材必须匹配指定格式。PCM 为无头 S16LE，A-law 为裸数据，AMR 为带标准文件头的 `.amr`/`.awb`，Opus 为 Ogg/Opus。AI 上行格式与通用格式不同时必须显式提供 `--ai-up-audio-file`，防止将默认 A-law 文件当作其他编码发送。文件模式无需安装本节的原生 codec 库；下行录音转换仍使用 FFmpeg。
+
+硬件模式按需加载原生库，仅 PCM/A-law 不需要额外 codec 库。Windows x64 的 Opus 依赖包含在 `requirements-audio.txt` 中，通过 [opuslib-next-bundled](https://pypi.org/project/opuslib-next-bundled/) 的 wheel 提供 DLL。使用启动模拟器的同一个 Python 安装，程序自动加载包内 DLL，无需安装 MSYS2 或配置库路径：
+
+```powershell
+python -m pip install -r requirements-audio.txt
+python -c "from ai_audio_codec import validate_live_codecs; validate_live_codecs('opus_16khz', 'opus_16khz')"
+python device_sim_main.py --with-mic --ai-up-audio-format opus_16khz --ai-down-audio-format opus_16khz
+```
+
+`AI_CODEC_LIBRARY_DIR` 显式设置时优先使用该目录，不回退到包内 DLL；仅使用包内 Opus 时请移除旧的目录设置。缺库提示中的安装命令应在本示例目录执行。
+
+Windows 上使用 AMR 或自行管理原生库时，可在 MSYS2 UCRT64 终端安装以下包（[Opus](https://packages.msys2.org/packages/mingw-w64-ucrt-x86_64-opus)、[OpenCORE AMR](https://packages.msys2.org/packages/mingw-w64-ucrt-x86_64-opencore-amr)、[VisualOn AMR-WB](https://packages.msys2.org/packages/mingw-w64-ucrt-x86_64-vo-amrwbenc)）：
+
+```bash
+pacman -S mingw-w64-ucrt-x86_64-opus mingw-w64-ucrt-x86_64-opencore-amr mingw-w64-ucrt-x86_64-vo-amrwbenc
+```
+
+然后在运行模拟器的 PowerShell 中设置库目录，路径按 MSYS2 安装位置调整：
+
+```powershell
+$env:AI_CODEC_LIBRARY_DIR = "C:\msys64\ucrt64\bin"
+python -c "from ai_audio_codec import validate_live_codecs; validate_live_codecs('opus_16khz', 'amr_wb')"
+```
+
+自管 DLL 必须与 Python 进程架构一致。目录内的文件名为 `libopus-0.dll`、`libopencore-amrnb-0.dll`、`libopencore-amrwb-0.dll`、`libvo-amrwbenc-0.dll`；按选用的方向安装所需库。模拟器运行期间不会自动下载二进制，缺库或初始化失败会在联网前报错。
+
+Linux 本地编解码测试依赖可用 `apt-get install libopus0 libopencore-amrnb0 libopencore-amrwb0 libvo-amrwbenc0` 安装。验证命令：
+
+```bash
+REQUIRE_AI_CODECS=1 python3 -m unittest test_ai_audio_codec test_rtc_ai_hw
+```
+
+二次开发时，通过 `ai_audio_codec.AudioCodec` 管理一个方向的 codec 状态；实例仅归属一个媒体线程，并在该线程退出时关闭。上行每包 20ms，AMR 线上包为 TOC 加编码帧（无文件头），Opus 为裸 packet（无 Ogg 封装）。下行支持至多 120ms 的完整包，按解码后的实际样本数播放，不将每包补成固定 40ms。MQTT/SDK 回调不做编解码或声卡 I/O。
 
 ### 接收媒体与音频格式检测
+
+AI 文件模式和 `--with-mic` 麦克风模式均将下行音频保存到 `--down-media-dir/<device_id>/`。
+麦克风模式在收到首帧有效音频后创建 `ai_<时间戳>_<会话代次>.raw`，同时播放音频。
+Opus 下行另存同名 `.opus` 文件；挂断或断开后写入 `.fmt.json`，并在 FFmpeg 可用时生成 `.wav`。
+启动日志中的“AI 下行录音”显示实际路径；尚未收到音频时目录可能为空。
+录音属于接入排查用途：播放队列过载时丢弃的帧不进入录音，文件不保留网络等待期间的静音间隔。
+磁盘写入失败会提示警告并停止本次录音，音频播放继续。录音包含对话内容，请按需清理。
 
 VoIP 收到的媒体写入 `--down-media-dir/<device_id>/`：
 
@@ -887,7 +964,18 @@ Call/Stream 模式会根据首帧生成 `received_audio.fmt.json`，用于记录
 | `TIRTC_AUDIO_PCM` | `s16le` | `s16le` |
 | `TIRTC_AUDIO_ALAW` | `alaw` | `alaw` |
 | `TIRTC_AUDIO_AAC` | `aac` | `aac` |
-| `TIRTC_AUDIO_OPUS` | `opus` | `opus` |
+| `TIRTC_AUDIO_OPUS` | `opus` | `ogg`（使用同名 `.opus` 文件） |
+
+Opus 下行录音同时保存 `.raw` 原始 packet 数据和同名 `.opus`（Ogg/Opus）文件。
+播放或转换时使用 `.opus`，它保存了包边界、时长和校验信息；`.raw` 用于协议排查。
+安装 ffmpeg 后，录音结束时会生成单声道 WAV，采样率与接收格式一致。
+只有 `.raw` 的历史 Opus 录音缺少包边界，不能通过改后缀或指定 `-f opus` 恢复。
+
+```bash
+ffmpeg -i received_audio.opus -ar 16000 -ac 1 received_audio.wav
+```
+
+自动媒体转换最多等待 60 秒；超时或未安装 ffmpeg 时保留录音文件，可手动转换。
 
 ### 媒体文件准备
 

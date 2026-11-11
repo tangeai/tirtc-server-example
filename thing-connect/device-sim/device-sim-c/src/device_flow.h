@@ -122,10 +122,16 @@ int get_mqtt_token(const char *server,
 
 /* ── Temporary MQTT (wait for auth_grant) ──────────────────────────────── */
 
-/** Connect with temp credentials, wait for auth_grant.
- *  If device_id_out is filled, credentials came from auth_grant payload.
- *  If device_id_out stays empty after success, it's a pre-burned device.
- *  Returns 0 on auth_grant received, -1 on timeout/error. */
+/** Wait for auth_grant, persist through the identity adapter, then ACK.
+ * Empty grants require paired existing credentials in the output buffers.
+ * The compatibility entry point uses device_creds.json; the extended entry
+ * point accepts an explicit adapter storage location. Returns 0 on success. */
+int connect_temp_mqtt_with_identity(const char *host, int port,
+                      const char *temp_client_id, const char *temp_token,
+                      int timeout_sec, int use_tls,
+                      char *device_id_out, size_t id_size,
+                      char *device_key_out, size_t key_size,
+                      const char *creds_file);
 int connect_temp_mqtt(const char *host, int port,
                       const char *temp_client_id, const char *temp_token,
                       int timeout_sec, int use_tls,

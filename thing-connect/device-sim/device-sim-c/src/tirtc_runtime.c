@@ -45,11 +45,20 @@ typedef struct {
 
 static TirtcRuntime s_runtime = {
     .lock = PTHREAD_MUTEX_INITIALIZER,
-    .started_cond = PTHREAD_COND_INITIALIZER,
-    .stopped_cond = PTHREAD_COND_INITIALIZER,
     .callback_guard = SDK_CALLBACK_GUARD_INITIALIZER,
     .sdk_log_guard = SDK_CALLBACK_GUARD_INITIALIZER,
 };
+
+/* Process lifetime, just like the SDK callback table. */
+static pthread_once_t s_conditions_once = PTHREAD_ONCE_INIT;
+static int s_conditions_error;
+static void _init_conditions(void) {
+    s_conditions_error = monotonic_cond_init(&s_runtime.started_cond);
+    if (s_conditions_error != 0) return;
+    s_conditions_error = monotonic_cond_init(&s_runtime.stopped_cond);
+    if (s_conditions_error != 0)
+        pthread_cond_destroy(&s_runtime.started_cond);
+}
 
 #ifdef DEVICE_SIM_TESTING
 typedef struct {
@@ -465,7 +474,7 @@ static void _build_sdk_callbacks(void) {
 
 static int _wait_started(void) {
     struct timespec deadline;
-    clock_gettime(CLOCK_REALTIME, &deadline);
+    clock_gettime(CLOCK_MONOTONIC, &deadline);
     deadline.tv_sec += RUNTIME_START_TIMEOUT_SEC;
     pthread_mutex_lock(&s_runtime.lock);
     while (!s_runtime.started && !g_stop) {
@@ -480,7 +489,7 @@ static int _wait_started(void) {
 
 static int _wait_stopped(void) {
     struct timespec deadline;
-    clock_gettime(CLOCK_REALTIME, &deadline);
+    clock_gettime(CLOCK_MONOTONIC, &deadline);
     deadline.tv_sec += RUNTIME_STOP_TIMEOUT_SEC;
     pthread_mutex_lock(&s_runtime.lock);
     while (!s_runtime.stopped) {
@@ -498,6 +507,9 @@ int tirtc_runtime_start(const char *device_id, const char *secret_key,
     if (!device_id || !device_id[0] || !secret_key || !secret_key[0] ||
         !client_id || !client_id[0])
         return -1;
+
+    pthread_once(&s_conditions_once, _init_conditions);
+    if (s_conditions_error != 0) return -1;
 
     pthread_mutex_lock(&s_runtime.lock);
     if (s_runtime.started || s_runtime.start_submitted) {

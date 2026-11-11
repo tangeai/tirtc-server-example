@@ -49,8 +49,13 @@ def convert_audio_to_wav(raw_path: str, fmt_info: dict | None,
             command = ["ffmpeg", "-y", "-i", temp_input,
                        "-acodec", "pcm_s16le", wav_path]
         elif encoding == "opus":
-            command = ["ffmpeg", "-y", "-f", "opus", "-ar", str(sample_rate), "-ac", "1",
-                       "-i", raw_path, "-acodec", "pcm_s16le", wav_path]
+            opus_path = os.path.splitext(raw_path)[0] + ".opus"
+            if not os.path.exists(opus_path):
+                warn("Opus 原始录音缺少包边界，需使用录制时生成的 .opus 文件")
+                return None
+            command = ["ffmpeg", "-y", "-f", "ogg", "-i", opus_path,
+                       "-ar", str(sample_rate), "-ac", "1",
+                       "-acodec", "pcm_s16le", wav_path]
         else:
             warn(f"接收音频编码 {encoding or '?'} 暂不支持自动转 WAV")
             return None
@@ -94,7 +99,10 @@ def convert_video_to_mp4(video_path: str, video_format: str,
 
 def _run_ffmpeg(command: list[str], out_path: str, info, warn, success_msg: str) -> str | None:
     try:
-        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        result = subprocess.run(command, capture_output=True, text=True, check=False, timeout=60)
+    except subprocess.TimeoutExpired:
+        warn("媒体转换超过 60 秒，请手动使用 ffmpeg 转换原始文件")
+        return None
     except OSError as exc:
         warn(f"执行 ffmpeg 失败: {exc}")
         return None

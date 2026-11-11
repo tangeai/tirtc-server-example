@@ -584,6 +584,8 @@ typedef struct {
     pthread_mutex_t mtx;
     pthread_cond_t  cond;
     int             done;
+    int             grant_ready;
+    int             grant_processed;
     int             connect_rc;
     int             ack_mid;      /* mid of the in-flight ack publish, -1 if none */
 } TempMqttCtx;
@@ -624,6 +626,7 @@ static void _temp_on_publish(struct mosquitto *mq, void *obj, int mid) {
 
 static void _temp_on_message(struct mosquitto *mq, void *obj,
                              const struct mosquitto_message *msg) {
+    (void)mq;
     TempMqttCtx *ctx = (TempMqttCtx *)obj;
     const char *raw = (const char *)msg->payload;
     cJSON *root = cJSON_ParseWithLength(raw, (size_t)msg->payloadlen);
@@ -643,61 +646,72 @@ static void _temp_on_message(struct mosquitto *mq, void *obj,
 
     if (strcmp(type->valuestring, "auth_grant") == 0) {
         cJSON *payload = cJSON_GetObjectItem(root, "payload");
-        if (payload && cJSON_IsObject(payload)) {
-            cJSON *did = cJSON_GetObjectItem(payload, "device_id");
-            cJSON *dkey = cJSON_GetObjectItem(payload, "device_key");
-            if (did && cJSON_IsString(did) && dkey && cJSON_IsString(dkey)) {
-                STR_COPY(ctx->device_id, did->valuestring);
-                STR_COPY(ctx->device_key, dkey->valuestring);
-                LOG_I("auth_grant 已收到: device_id=%s", ctx->device_id);
-            } else {
-                /* Pre-burned device: empty payload -> use local credentials */
-                LOG_I("auth_grant 已收到 (预烧凭证设备)，使用本地凭证");
-                ctx->device_id[0]  = '\0';
-                ctx->device_key[0] = '\0';
-            }
-        } else {
-            /* Pre-burned device: no payload field at all */
-            LOG_I("auth_grant 已收到 (预烧凭证设备)，使用本地凭证");
-            ctx->device_id[0]  = '\0';
-            ctx->device_key[0] = '\0';
+        cJSON *did = cJSON_GetObjectItem(payload, "device_id");
+        cJSON *key = cJSON_GetObjectItem(payload, "device_key");
+        const char *id_value = cJSON_IsString(did) ? did->valuestring : "";
+        const char *key_value = cJSON_IsString(key) ? key->valuestring : "";
+        if ((payload && !cJSON_IsNull(payload) && !cJSON_IsObject(payload)) ||
+            (did && !cJSON_IsNull(did) && !cJSON_IsString(did)) ||
+            (key && !cJSON_IsNull(key) && !cJSON_IsString(key)) ||
+            (!!id_value[0] != !!key_value[0]) ||
+            strlen(id_value) >= sizeof(ctx->device_id) ||
+            strlen(key_value) >= sizeof(ctx->device_key)) {
+            LOG_W("绑定凭证结构无效，已忽略");
+            cJSON_Delete(root);
+            return;
         }
-
-        /* Send ACK. Completion is signaled from _temp_on_publish once the
-         * broker has actually PUBACK'd this message (QoS1) — publishing only
-         * queues the send; disconnecting right after mosquitto_publish()
-         * races the network thread and can tear down the connection before
-         * the ACK ever reaches the wire. */
-        char ack_topic[128];
-        int  ack_mid = 0;
-        const char *ack = "{\"ack\":true}";
-        snprintf(ack_topic, sizeof(ack_topic), "device/%s/ack", ctx->client_id);
         pthread_mutex_lock(&ctx->mtx);
-        int publish_rc = mosquitto_publish(
-            mq, &ack_mid, ack_topic, (int)strlen(ack), ack, 1, 0);
-        if (publish_rc == MOSQ_ERR_SUCCESS) {
-            ctx->ack_mid = ack_mid;
-        } else {
-            ctx->connect_rc = publish_rc;
-            ctx->done = 1;
+        if (!ctx->grant_ready) {
+            STR_COPY(ctx->device_id, id_value);
+            STR_COPY(ctx->device_key, key_value);
+            ctx->grant_ready = 1;
             pthread_cond_signal(&ctx->cond);
         }
         pthread_mutex_unlock(&ctx->mtx);
-        if (publish_rc == MOSQ_ERR_SUCCESS)
-            LOG_D("MQTT sent [%s]: %s", ack_topic, ack);
-        else
-            LOG_E("MQTT ACK 发布失败: %s", mosquitto_strerror(publish_rc));
     } else {
         LOG_E("未知消息类型: %s", type->valuestring);
     }
     cJSON_Delete(root);
 }
 
-int connect_temp_mqtt(const char *host, int port,
+/* Called with mtx held; filesystem work deliberately releases it so MQTT
+ * callbacks remain responsive. The first grant is immutable until teardown. */
+static void _temp_save_and_ack(TempMqttCtx *ctx, struct mosquitto *mq,
+                               const char *creds_file,
+                               const char *device_id_out, size_t id_size,
+                               const char *device_key_out, size_t key_size) {
+    if (!ctx->grant_ready || ctx->grant_processed) return;
+    ctx->grant_processed = 1;
+    const char *did = ctx->device_id[0] ? ctx->device_id : device_id_out;
+    const char *key = ctx->device_key[0] ? ctx->device_key : device_key_out;
+    pthread_mutex_unlock(&ctx->mtx);
+    int saved = did && key && did[0] && key[0] &&
+            strlen(did) < id_size && strlen(key) < key_size &&
+            device_identity_save(creds_file, did, key) == 0;
+    pthread_mutex_lock(&ctx->mtx);
+    if (!saved) {
+        LOG_E("绑定凭证保存失败，未发送确认");
+        ctx->connect_rc = -1;
+        ctx->done = 1;
+        return;
+    }
+    char topic[128];
+    snprintf(topic, sizeof(topic), "device/%s/ack", ctx->client_id);
+    const char *ack = "{\"ack\":true}";
+    int publish_rc = mosquitto_publish(mq, &ctx->ack_mid, topic,
+                               (int)strlen(ack), ack, 1, false);
+    if (publish_rc != MOSQ_ERR_SUCCESS) {
+        ctx->connect_rc = publish_rc;
+        ctx->done = 1;
+    }
+}
+
+int connect_temp_mqtt_with_identity(const char *host, int port,
                       const char *temp_client_id, const char *temp_token,
                       int timeout_sec, int use_tls,
                       char *device_id_out, size_t id_size,
-                      char *device_key_out, size_t key_size) {
+                      char *device_key_out, size_t key_size,
+                      const char *creds_file) {
     TempMqttCtx ctx;
     memset(&ctx, 0, sizeof(ctx));
     STR_COPY(ctx.client_id, temp_client_id);
@@ -707,7 +721,10 @@ int connect_temp_mqtt(const char *host, int port,
     ctx.connect_rc    = 0;
     ctx.ack_mid       = -1;  /* no ack published yet; mosquitto mids start at 1 */
     pthread_mutex_init(&ctx.mtx, NULL);
-    pthread_cond_init(&ctx.cond, NULL);
+    if (monotonic_cond_init(&ctx.cond) != 0) {
+        pthread_mutex_destroy(&ctx.mtx);
+        return -1;
+    }
 
     mosquitto_lib_init();
 
@@ -759,18 +776,21 @@ int connect_temp_mqtt(const char *host, int port,
 
     /* Wait for auth_grant */
     struct timespec deadline;
-    clock_gettime(CLOCK_REALTIME, &deadline);
+    clock_gettime(CLOCK_MONOTONIC, &deadline);
     deadline.tv_sec += timeout_sec;
 
     pthread_mutex_lock(&ctx.mtx);
     int timed_out = 0;
     while (!ctx.done && !timed_out && !g_stop) {
+        _temp_save_and_ack(&ctx, mq, creds_file, device_id_out, id_size,
+                            device_key_out, key_size);
+        if (ctx.done) break;
         struct timespec ts;
-        clock_gettime(CLOCK_REALTIME, &ts);
+        clock_gettime(CLOCK_MONOTONIC, &ts);
         ts.tv_sec += 1;
         if (pthread_cond_timedwait(&ctx.cond, &ctx.mtx, &ts) == ETIMEDOUT) {
             struct timespec now;
-            clock_gettime(CLOCK_REALTIME, &now);
+            clock_gettime(CLOCK_MONOTONIC, &now);
             if (now.tv_sec >= deadline.tv_sec) timed_out = 1;
         }
     }
@@ -801,6 +821,16 @@ int connect_temp_mqtt(const char *host, int port,
     if (device_key_out && ctx.device_key[0])
         str_copy(device_key_out, key_size, ctx.device_key);
     return 0;
+}
+
+int connect_temp_mqtt(const char *host, int port,
+                      const char *temp_client_id, const char *temp_token,
+                      int timeout_sec, int use_tls,
+                      char *device_id_out, size_t id_size,
+                      char *device_key_out, size_t key_size) {
+    return connect_temp_mqtt_with_identity(host, port, temp_client_id, temp_token,
+        timeout_sec, use_tls, device_id_out, id_size, device_key_out, key_size,
+        "device_creds.json");
 }
 
 /* =========================================================================

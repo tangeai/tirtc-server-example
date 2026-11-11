@@ -147,59 +147,61 @@ class RtcVoipTests(unittest.TestCase):
         self.assertNotIn("down_video_rotation", profile)
 
     def test_start_session_waits_for_0x2000_before_starting_audio_and_video_threads(self):
-        with tempfile.TemporaryDirectory() as root:
-            audio_path = os.path.join(root, "audio.g711a")
-            video_path = os.path.join(root, "video.h264")
-            with open(audio_path, "wb") as f:
-                f.write(b"\xd5" * 320)
-            with open(video_path, "wb") as f:
-                f.write(b"\x00\x00\x00\x01\x67\x00\x00\x00\x01\x68\x00\x00\x00\x01\x65")
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)  # After tearDown closes receive files on Windows.
+        root = temporary.name
+        audio_path = os.path.join(root, "audio.g711a")
+        video_path = os.path.join(root, "video.h264")
+        with open(audio_path, "wb") as f:
+            f.write(b"\xd5" * 320)
+        with open(video_path, "wb") as f:
+            f.write(b"\x00\x00\x00\x01\x67\x00\x00\x00\x01\x68\x00\x00\x00\x01\x65")
 
-            rtc_voip._session_state = "IDLE"
-            rtc_voip._active_hconn = None
-            rtc_voip._audio_file_path = None
-            rtc_voip._recv_root = root
-            rtc_voip._stream_thread = None
-            rtc_voip._video_thread = None
-            rtc_voip._video_file_path = video_path
-            rtc_voip._session_video_file = ""
-            rtc_voip._session_role = "unknown"
-            rtc_voip._device_id = "DEV000001"
+        rtc_voip._session_state = "IDLE"
+        rtc_voip._active_hconn = None
+        rtc_voip._audio_file_path = None
+        rtc_voip._recv_root = root
+        rtc_voip._stream_thread = None
+        rtc_voip._video_thread = None
+        rtc_voip._video_file_path = video_path
+        rtc_voip._session_video_file = ""
+        rtc_voip._session_role = "unknown"
+        rtc_voip._device_id = "DEV000001"
 
-            def whip_connect(_peer_id, _token, callback, _user_data):
-                callback(0, ctypes.c_void_p(0x1234), None)
-                return 0
+        def whip_connect(_peer_id, _token, callback, _user_data):
+            callback(0, ctypes.c_void_p(0x1234), None)
+            return 0
 
-            with mock.patch.object(rtc_voip, "_log_whip_connect_params"), \
-                    mock.patch.object(rtc_voip, "convert_audio_to_wav"), \
-                    mock.patch.object(rtc_voip, "convert_video_to_mp4"), \
-                    mock.patch.object(rtc_voip.sdk, "TiRtcWhipConnect", side_effect=whip_connect), \
-                    mock.patch.object(rtc_voip.threading, "Timer", side_effect=_FakeTimer), \
-                    mock.patch.object(rtc_voip.threading, "Thread", side_effect=_FakeThread) as thread_ctor:
-                rtc_voip.start_session(
-                    "whips://peer",
-                    "token",
-                    audio_path,
-                    with_video=True,
-                    session_role="wx_caller",
-                )
-                self.assertEqual(rtc_voip._session_state, "CONNECTING")
-                self.assertEqual(rtc_voip._active_hconn, 0x1234)
-                self.assertIsNone(rtc_voip._stream_thread)
-                self.assertIsNone(rtc_voip._video_thread)
-                self.assertIsNotNone(rtc_voip._connect_timer)
-                self.assertEqual(thread_ctor.call_count, 0)
+        with mock.patch.object(rtc_voip, "_log_whip_connect_params"), \
+                mock.patch.object(rtc_voip, "convert_audio_to_wav"), \
+                mock.patch.object(rtc_voip, "convert_video_to_mp4"), \
+                mock.patch.object(rtc_voip.sdk, "TiRtcWhipConnect", side_effect=whip_connect), \
+                mock.patch.object(rtc_voip.threading, "Timer", side_effect=_FakeTimer), \
+                mock.patch.object(rtc_voip.threading, "Thread", side_effect=_FakeThread) as thread_ctor:
+            rtc_voip.start_session(
+                "whips://peer",
+                "token",
+                audio_path,
+                with_video=True,
+                session_role="wx_caller",
+            )
+            self.assertEqual(rtc_voip._session_state, "CONNECTING")
+            self.assertEqual(rtc_voip._active_hconn, 0x1234)
+            self.assertIsNone(rtc_voip._stream_thread)
+            self.assertIsNone(rtc_voip._video_thread)
+            self.assertIsNotNone(rtc_voip._connect_timer)
+            self.assertEqual(thread_ctor.call_count, 0)
 
-                rtc_voip._start_media_threads(0x1234)
-                self.assertEqual(rtc_voip._session_state, "IN_CALL")
-                self.assertIsNotNone(rtc_voip._stream_thread)
-                self.assertTrue(rtc_voip._stream_thread.started)
-                self.assertIsNotNone(rtc_voip._video_thread)
-                self.assertTrue(rtc_voip._video_thread.started)
-                self.assertEqual(thread_ctor.call_count, 2)
+            rtc_voip._start_media_threads(0x1234)
+            self.assertEqual(rtc_voip._session_state, "IN_CALL")
+            self.assertIsNotNone(rtc_voip._stream_thread)
+            self.assertTrue(rtc_voip._stream_thread.started)
+            self.assertIsNotNone(rtc_voip._video_thread)
+            self.assertTrue(rtc_voip._video_thread.started)
+            self.assertEqual(thread_ctor.call_count, 2)
 
-                rtc_voip._start_media_threads(0x1234)
-                self.assertEqual(thread_ctor.call_count, 2)
+            rtc_voip._start_media_threads(0x1234)
+            self.assertEqual(thread_ctor.call_count, 2)
 
     def test_connect_ack_timeout_disconnects_and_recovers(self):
         with tempfile.TemporaryDirectory() as root:

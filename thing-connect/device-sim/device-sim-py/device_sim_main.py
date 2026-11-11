@@ -111,6 +111,8 @@ from media_formats import (
     AUDIO_FORMAT_CHOICES,
     VIDEO_FORMAT_CHOICES,
     normalize_audio_format,
+    AI_AUDIO_FORMAT_CHOICES,
+    ai_audio_descriptor,
     validate_with_mic_audio_formats,
 )
 from device_credentials import load_saved_creds as _load_saved_creds
@@ -218,6 +220,8 @@ def _bind_via_scan(args, server: str, broker_host: str, broker_port: int, broker
         temp_token=temp_token,
         timeout_sec=args.timeout,
         use_tls=broker_tls,
+        existing_credentials=(report_device_id, report_device_key),
+        persist_credentials=lambda did, key: _save_creds(did, key, args.creds_file),
     )
     # bind_ok means we already have credentials (pre-burned path);
     # auth_grant means we got new credentials (scan-code path).
@@ -300,6 +304,15 @@ def main():
     media.add_argument("--down-media-dir", default=os.getenv("DOWN_MEDIA_DIR",
                        os.path.join(os.path.dirname(__file__), "received")),
                        help="下行音视频保存目录（默认 ./received）")
+    ai_audio = parser.add_argument_group("AI 对讲音频参数（独立于其他业务）")
+    ai_audio.add_argument("--ai-up-audio-format", default=os.getenv("AI_UP_AUDIO_FORMAT") or None,
+                          type=normalize_audio_format, choices=AI_AUDIO_FORMAT_CHOICES,
+                          help="AI 上行格式，默认沿用 --up-audio-format")
+    ai_audio.add_argument("--ai-down-audio-format", default=os.getenv("AI_DOWN_AUDIO_FORMAT") or None,
+                          type=normalize_audio_format, choices=AI_AUDIO_FORMAT_CHOICES,
+                          help="AI 下行格式，默认沿用 --down-audio-format")
+    ai_audio.add_argument("--ai-up-audio-file", default=os.getenv("AI_UP_AUDIO_FILE", ""),
+                          help="AI 上行预编码文件，默认沿用 --up-audio-file；麦克风模式忽略")
     parser.add_argument("--recognition-server", default=os.getenv("RECOGNITION_SERVER", ""),
                         help="AI识别服务根地址；默认使用发现的 recognition-srv")
     parser.add_argument("--endpoint",   default=os.getenv("SERVICES_BASE_URL", "http://ep-open.tangeopen.com"),
@@ -330,6 +343,19 @@ def main():
         parser.error("--camera-index 不能小于 0")
     if args.with_camera and args.up_video_format != "h264":
         parser.error("--with-camera 要求 --up-video-format=h264")
+    ai_up = args.ai_up_audio_format or args.up_audio_format
+    ai_down = args.ai_down_audio_format or args.down_audio_format
+    if (not args.with_mic and ai_up != args.up_audio_format
+            and not args.ai_up_audio_file):
+        parser.error("AI 上行格式与通用格式不同时，需要提供匹配的 --ai-up-audio-file")
+    try:
+        ai_audio_descriptor(ai_up)
+        ai_audio_descriptor(ai_down)
+        if args.with_mic:
+            from ai_audio_codec import validate_live_codecs
+            validate_live_codecs(ai_up, ai_down)
+    except (ValueError, RuntimeError, OSError, AttributeError) as exc:
+        parser.error(f"AI 音频配置失败：{exc}")
     if args.with_mic:
         try:
             validate_with_mic_audio_formats(
@@ -384,7 +410,8 @@ def main():
     if not credentials_are_paired(args.device_id, args.device_key):
         parser.error("--device-id 和 --device-key 必须成对提供（环境变量 DEVICE_ID/DEVICE_KEY 同样如此）")
 
-    for label, path in (("上行音频", args.up_audio_file), ("上行视频", args.up_video_file)):
+    for label, path in (("上行音频", args.up_audio_file), ("上行视频", args.up_video_file),
+                        ("AI 上行音频", "" if args.with_mic else args.ai_up_audio_file)):
         if (path and not is_camera_source(path)
                 and (not os.path.isfile(path) or os.path.getsize(path) == 0)):
             parser.error(
@@ -435,10 +462,10 @@ def main():
             args, _server, _broker_host, _broker_port, _broker_tls,
             device_id=device_id, device_key=device_key, homepage_url=_homepage_url,
         )
-        _save_creds(device_id, device_key, args.creds_file)
     else:
         print(f"\033[0;32m[device]\033[0m 使用预存凭证 device_id={device_id}，直接进入阶段二")
-        _save_creds(device_id, device_key, args.creds_file)
+        if not _save_creds(device_id, device_key, args.creds_file):
+            raise RuntimeError("无法保存设备凭证")
 
     # ── 阶段二：换取 mqtt_token ────────────────────────────────────────────
     print(f"\n\033[1m{'─'*50}\033[0m\n 阶段二：已绑定上线\n\033[1m{'─'*50}\033[0m")
@@ -454,7 +481,6 @@ def main():
             args, _server, _broker_host, _broker_port, _broker_tls,
             device_id=device_id, device_key=device_key, homepage_url=_homepage_url,
         )
-        _save_creds(device_id, device_key, args.creds_file)
         mqtt_token = get_mqtt_token(_server, device_id, device_key, args.mac)
 
     # 主干：创建统一 RTC 运行时并启动实时流。通话切换由运行时内部协调。
@@ -470,6 +496,8 @@ def main():
             recognition_server=args.recognition_server or svc.get("recognition_server", ""),
             up_audio_file=args.up_audio_file, up_video_file=args.up_video_file,
             down_media_dir=args.down_media_dir,
+            ai_up_audio_format=ai_up, ai_down_audio_format=ai_down,
+            ai_up_audio_file=args.ai_up_audio_file,
             up_audio_format=args.up_audio_format,
             down_audio_format=args.down_audio_format,
             up_video_format=args.up_video_format,

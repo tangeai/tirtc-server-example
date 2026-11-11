@@ -8,6 +8,7 @@ import json
 import os
 
 from media_postprocess import convert_audio_to_wav
+from opus_recording import OpusRecording
 
 # TiRTC 媒体类型 → ffmpeg -f 参数名
 MEDIA_TO_FFMPEG_FMT = {
@@ -39,11 +40,14 @@ class AudioRecorder:
         self._path = ""
         self._fmt_info = None
         self._frame_count = 0
+        self._opus = None
+        self._opus_failed = False
 
     # ── 生命周期 ──────────────────────────────────────────────────────────
 
     def open(self) -> str:
         """创建输出目录和文件，返回完整路径。"""
+        self.close()
         out_dir = os.path.join(self._dir, self._device_id) if self._device_id else self._dir
         os.makedirs(out_dir, exist_ok=True)
         path = os.path.join(out_dir, self._filename)
@@ -51,14 +55,25 @@ class AudioRecorder:
         self._path = path
         self._fmt_info = None
         self._frame_count = 0
+        self._opus_failed = False
         return path
 
     def close(self) -> None:
         """关闭文件并写入 fmt.json。"""
         if self._file is None:
             return
-        self._file.close()
-        self._file = None
+        try:
+            self._file.close()
+        finally:
+            self._file = None
+            if self._opus is not None:
+                try:
+                    self._opus.close()
+                except OSError:
+                    self._opus_failed = True
+                    self._warn("Opus 录音写入失败，请检查磁盘空间和目录权限")
+                finally:
+                    self._opus = None
 
         if self._fmt_info:
             out_dir = os.path.join(self._dir, self._device_id) if self._device_id else self._dir
@@ -69,7 +84,8 @@ class AudioRecorder:
                     json.dump(self._fmt_info, f)
             except OSError:
                 pass
-            convert_audio_to_wav(self._path, self._fmt_info, self._info, self._warn)
+            if not self._opus_failed:
+                convert_audio_to_wav(self._path, self._fmt_info, self._info, self._warn)
 
     # ── 写入 ──────────────────────────────────────────────────────────────
 
@@ -94,6 +110,16 @@ class AudioRecorder:
                 "encoding": enc,
                 "sample_rate": rate,
             }
+        if fi.media == 4 and not self._opus_failed:
+            try:
+                if self._opus is None:
+                    self._opus = OpusRecording(
+                        os.path.splitext(self._path)[0] + ".opus",
+                        self._fmt_info["sample_rate"])
+                self._opus.write_packet(buf)
+            except (OSError, ValueError):
+                self._opus_failed = True
+                self._warn("Opus 封装失败，请检查音频格式和磁盘；原始数据仍保留")
 
     # ── 查询 ──────────────────────────────────────────────────────────────
 

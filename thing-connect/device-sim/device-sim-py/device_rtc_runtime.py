@@ -52,6 +52,9 @@ class RuntimeConfig:
     log_level: str = "debug"
     device_server: str = ""
     recognition_server: str = ""
+    ai_up_audio_format: str = ""
+    ai_down_audio_format: str = ""
+    ai_up_audio_file: str = ""
 
 
 def _device_report_metadata() -> dict:
@@ -391,6 +394,8 @@ class DeviceRtcRuntime:
                 f"线上 {c.up_audio_format}/{c.down_audio_format}）",
                 flush=True,
             )
+            print(f"[device] AI 对讲: 上行={self._ai_up_audio_format}，"
+                  f"下行={self._ai_down_audio_format}", flush=True)
             return
 
         print("[device] 媒体配置:", flush=True)
@@ -402,7 +407,7 @@ class DeviceRtcRuntime:
         )
         print(
             f"[device]   AI 对讲: 音频={self._ai_audio_file} "
-            f"({self._ai_up_audio_format})",
+            f"上行={self._ai_up_audio_format}，下行={self._ai_down_audio_format}",
             flush=True,
         )
 
@@ -550,5 +555,7 @@ class DeviceRtcRuntime:
 
     @staticmethod
     def _resolve_ai_defaults(config: RuntimeConfig) -> tuple[str, str, str]:
-        """Keep AI, VoIP, live streaming, and device calls on one wire format."""
-        return config.up_audio_file, config.up_audio_format, config.down_audio_format
+        """AI overrides are independent; omitted values retain shared defaults."""
+        return (config.ai_up_audio_file or config.up_audio_file,
+                config.ai_up_audio_format or config.up_audio_format,
+                config.ai_down_audio_format or config.down_audio_format)

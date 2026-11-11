@@ -129,6 +129,18 @@ class DeviceRtcRuntimeTests(unittest.TestCase):
             ("audio.g711a", "alaw_8khz", "alaw_8khz"),
         )
 
+    def test_ai_overrides_leave_other_business_formats_unchanged(self):
+        config = RuntimeConfig(
+            device_id="dev", device_key="key", client_id="client", mqtt_token="test",
+            tirtc_endpoint="rtc", voip_server="voip", ai_server="ai", call_server="call",
+            up_audio_file="shared.g711a", up_video_file="", down_media_dir="received",
+            ai_up_audio_format="amr_wb", ai_down_audio_format="pcm_s16le_8khz",
+            ai_up_audio_file="speech.awb")
+        self.assertEqual(DeviceRtcRuntime._resolve_ai_defaults(config),
+                         ("speech.awb", "amr_wb", "pcm_s16le_8khz"))
+        self.assertEqual((config.up_audio_format, config.down_audio_format),
+                         ("alaw_8khz", "alaw_8khz"))
+
     def test_start_primes_voip_profile_before_stream(self):
         stream = _module_mock()
         voip_module = _module_mock()

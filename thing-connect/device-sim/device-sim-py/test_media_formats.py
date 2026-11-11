@@ -7,6 +7,7 @@ os.environ.setdefault("TIRTC_SDK_VERSION", "2.5.0")
 
 from media_formats import (
     AUDIO_FORMATS,
+    AI_AUDIO_FORMAT_CHOICES,
     VIDEO_FORMATS,
     ai_audio_descriptor,
     validate_with_mic_audio_formats,
@@ -41,6 +42,15 @@ class MediaFormatsTests(unittest.TestCase):
             with self.subTest(name=name):
                 spec = VIDEO_FORMATS[name]
                 self.assertEqual(spec.codec, codec)
+
+    def test_ai_opus_only_accepts_16k(self):
+        self.assertNotIn("opus_8khz", AI_AUDIO_FORMAT_CHOICES)
+        self.assertIn("opus_16khz", AI_AUDIO_FORMAT_CHOICES)
+        for name in ("opus_8khz", "opus_8k"):
+            with self.assertRaisesRegex(ValueError, "Opus.*16K"):
+                ai_audio_descriptor(name)
+        self.assertEqual(ai_audio_descriptor("opus_16k"),
+                         {"codec": "opus", "sample_rate": 16000, "channels": 1})
 
     def test_ai_alaw_descriptor_uses_public_codec_name(self):
         self.assertEqual(

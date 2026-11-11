@@ -4,7 +4,7 @@ from __future__ import annotations
 
 接口与 rtc_ai.py 一致，区别：
   - 上行音频：sounddevice 麦克风采集（替代读文件）
-  - 下行音频：sounddevice 扬声器播放（替代写文件）
+  - 下行音频：sounddevice 扬声器播放，同时保存接收录音
   - 跨平台：Windows / macOS / Linux 通用
 
 start_session() 的 audio_file 参数保留但忽略。
@@ -23,10 +23,12 @@ import uuid
 
 import requests
 import http_trace
-from alaw import alaw_decode, alaw_encode
+from ai_audio_codec import AudioCodec, validate_live_codecs
+from audio_recorder import AudioRecorder
 from media_formats import (
     AUDIO_FORMATS,
     ai_audio_descriptor,
+    validate_ai_audio_response,
     normalize_audio_format,
 )
 from sdk_callback_guard import SdkCallbackGuard, join_worker_before_uninit
@@ -91,8 +93,17 @@ _round_end_ts: "float | None" = None
 _round_first_frame = False   # 每轮 round_end 后重置，收到首帧时打印延迟
 
 _LOG_LEVEL = 10
+_start_request_id = ""
 _up_audio_format = "alaw_8khz"
 _down_audio_format = "alaw_8khz"
+_default_receive_dir = os.path.join(os.path.dirname(__file__), "received")
+_receive_dir = _default_receive_dir
+_device_id = ""
+
+
+def configure_receive_dir(recv_dir: str = "") -> None:
+    global _receive_dir
+    _receive_dir = recv_dir or _default_receive_dir
 
 
 def configure_audio_formats(up_format: str = "alaw_8khz",
@@ -101,9 +112,7 @@ def configure_audio_formats(up_format: str = "alaw_8khz",
     global _up_audio_format, _down_audio_format
     up = normalize_audio_format(up_format)
     down = normalize_audio_format(down_format)
-    for direction, name in (("上行", up), ("下行", down)):
-        if AUDIO_FORMATS[name].codec not in ("pcm", "alaw"):
-            raise ValueError(f"AI 硬件音频{direction}仅支持 pcm/alaw: {name}")
+    validate_live_codecs(up, down)
     _up_audio_format = up
     _down_audio_format = down
 
@@ -363,6 +372,8 @@ def _build_callbacks() -> TIRTCCALLBACKS:
         fi = ctypes.cast(pFi, ctypes.POINTER(TIRTCFRAMEINFO)).contents
         if fi.stream_id != AI_AUDIO_STREAM_ID:
             return
+        if not 0 < fi.length <= 61440:
+            return
         raw = ctypes.string_at(data, fi.length)
         source_rate = 16000 if fi.flags == TIRTC_AUDIOSAMPLE_16K16B1C else 8000
         _handle_audio(raw, fi.media, source_rate, fi.flags)
@@ -427,12 +438,13 @@ def _start_media_after_callback(generation: int, hconn_val: int) -> None:
                 break
         stream_thread = threading.Thread(
             target=_mic_stream_worker,
-            args=(hconn_val,),
+            args=(hconn_val, generation),
             daemon=True,
             name="ai-mic-stream",
         )
         play_thread = threading.Thread(
             target=_speaker_play_worker,
+            args=(generation,),
             daemon=True,
             name="ai-speaker-play",
         )
@@ -476,34 +488,35 @@ def _handle_ai_message(hconn_val: int, msg: dict) -> None:
     is_resp = ("result" in msg or "error" in msg) and "method" not in msg
 
     if is_resp:
+        with _state_lock:
+            if (_session_state != "CONNECTING" or not _start_request_id
+                    or msg_id != _start_request_id):
+                return
+            generation = _session_generation
         if "error" in msg:
             _err(f"start_session 失败: {msg['error']}")
-            with _state_lock:
-                generation = _session_generation
-                if _start_response_timer is not None:
-                    _start_response_timer.cancel()
             _fail_after_callback(
                 generation, "AI start_session 被服务端拒绝，已结束会话")
             return
         result = msg.get("result", {})
         if not isinstance(result, dict):
-            with _state_lock:
-                generation = _session_generation
-                if _start_response_timer is not None:
-                    _start_response_timer.cancel()
             _fail_after_callback(
                 generation, "AI start_session 响应无效，已结束会话")
+            return
+        try:
+            validate_ai_audio_response(result, _up_audio_format, _down_audio_format)
+        except ValueError as exc:
+            _fail_after_callback(generation, str(exc))
             return
         session_id = result.get("session_id", "")
         _info(f"start_session 成功 session_id={session_id}")
         _info(f"  服务端确认 input_audio={result.get('input_audio')} output_audio={result.get('output_audio')}")
         with _state_lock:
             if (
-                _active_hconn != hconn_val
+                _session_generation != generation or _active_hconn != hconn_val
                 or _session_state != "CONNECTING"
             ):
                 return
-            generation = _session_generation
             if _start_response_timer is not None:
                 _start_response_timer.cancel()
         _callback_guard.defer(
@@ -577,9 +590,6 @@ def _handle_disconnect(hconn_val: int) -> None:
         t_stream, _stream_thread = _stream_thread, None
         t_play, _play_thread = _play_thread, None
     _stream_stop.set()
-    if _echo_gate is not None:
-        _echo_gate.close()
-        _echo_gate = None
     _round_first_frame = False
     # 发送哨兵让播放线程退出
     try:
@@ -588,6 +598,9 @@ def _handle_disconnect(hconn_val: int) -> None:
         pass
     join_worker_before_uninit(t_stream, _warn, "AI 麦克风采集")
     join_worker_before_uninit(t_play, _warn, "AI 扬声器播放")
+    if _echo_gate is not None:
+        _echo_gate.close()
+        _echo_gate = None
     with _state_lock:
         if _session_state == "DISCONNECTING":
             _session_state = "IDLE"
@@ -598,12 +611,27 @@ def _handle_disconnect(hconn_val: int) -> None:
 # _open_input / _open_output 已收敛到 audio_device.open_input_stream / open_output_stream
 
 
-def _mic_stream_worker(hconn_val: int) -> None:
+def _media_failed(generation: int, reason: str) -> None:
+    """Stop both media directions; the control worker owns session teardown.
+
+    A media worker must not join its peer: simultaneous capture/playback failures
+    would deadlock. The generation also prevents late failures ending a new call.
+    """
+    with _state_lock:
+        if generation != _session_generation or _session_state != "IN_CALL":
+            return
+        _stream_stop.set()
+    _fail_after_callback(generation, reason)
+
+
+def _mic_stream_worker(hconn_val: int, generation: int) -> None:
     """Capture local PCM 16k, then transcode to the negotiated AI wire format."""
     hconn  = ctypes.c_void_p(hconn_val)
     device = _mic_device if _mic_device is not None else sd.default.device[0]
 
+    encoder = None
     try:
+        encoder = AudioCodec(_up_audio_format, encode=True)
         from audio_device import open_input_stream
         mic, actual = open_input_stream(device, SAMPLE_RATE, CHANNELS, AUDIO_PKT_MS)
         rate_note = f"{actual}Hz" if actual == SAMPLE_RATE else f"{actual}Hz → 重采样到 {SAMPLE_RATE}Hz"
@@ -617,6 +645,7 @@ def _mic_stream_worker(hconn_val: int) -> None:
         capture_resample_state = None
         wire_resample_state = None
         audio_ts_ms = 0
+        pending_pcm = bytearray()
         with mic:
             frames = actual * AUDIO_PKT_MS // 1000
             while not _stream_stop.is_set():
@@ -631,19 +660,13 @@ def _mic_stream_worker(hconn_val: int) -> None:
                         capture_resample_state,
                     )
 
-                # 回声门控（替代 AEC）
+                pending_pcm.extend(raw)
+                if len(pending_pcm) < AUDIO_PKT_SIZE:
+                    continue
+                raw = bytes(pending_pcm[:AUDIO_PKT_SIZE])
+                del pending_pcm[:AUDIO_PKT_SIZE]
                 if _echo_gate is not None:
-                    fb = _echo_gate.frame_bytes
-                    if len(raw) < fb:
-                        raw = raw + b'\x00' * (fb - len(raw))
-                    elif len(raw) > fb:
-                        raw = raw[:fb]
                     raw = _echo_gate.process(raw)
-                # 对齐至 AUDIO_PKT_SIZE
-                if len(raw) < AUDIO_PKT_SIZE:
-                    raw = raw + b'\x00' * (AUDIO_PKT_SIZE - len(raw))
-                elif len(raw) > AUDIO_PKT_SIZE:
-                    raw = raw[:AUDIO_PKT_SIZE]
 
                 wire_data = raw
                 if wire.sample_rate != SAMPLE_RATE:
@@ -651,8 +674,7 @@ def _mic_stream_worker(hconn_val: int) -> None:
                         wire_data, 2, CHANNELS, SAMPLE_RATE,
                         wire.sample_rate, wire_resample_state,
                     )
-                if wire.codec == "alaw":
-                    wire_data = alaw_encode(wire_data)
+                wire_data = encoder.encode(wire_data)
 
                 fi = TIRTCFRAMEINFO()
                 fi.stream_id = AI_AUDIO_STREAM_ID
@@ -665,22 +687,29 @@ def _mic_stream_worker(hconn_val: int) -> None:
                 buf = (ctypes.c_uint8 * len(wire_data)).from_buffer_copy(wire_data)
                 rc = sdk.TiRtcSendAudioStream(hconn, ctypes.byref(fi), buf)
                 if rc in CONN_FATAL_ERRORS:
-                    _log("连接已关闭，退出麦克风采集")
+                    _media_failed(generation, "AI 音频连接已关闭，请重新发起对话")
                     break
                 audio_ts_ms += AUDIO_PKT_MS
 
-    except sd.PortAudioError as e:
-        _err(f"麦克风打开失败: {e}")
+    except Exception:
+        _media_failed(generation, "AI 麦克风采集失败，请检查设备后重新发起对话")
     finally:
+        if encoder is not None:
+            encoder.close()
         _log("麦克风采集线程退出")
 
 
-def _speaker_play_worker() -> None:
-    """Decode and play each 40 ms AI downlink frame without truncation."""
+def _speaker_play_worker(generation: int) -> None:
+    """Own downlink recording, decoding and playback outside SDK callbacks."""
     global _audio_recv_count, _round_first_frame
     device = _spk_device if _spk_device is not None else sd.default.device[1]
 
+    decoder = None
+    recorder = None
+    recording_failed = False
+    receive_dir, device_id = _receive_dir, _device_id
     try:
+        decoder = AudioCodec(_down_audio_format, encode=False)
         from audio_device import open_output_stream
         spk, actual = open_output_stream(
             device, SAMPLE_RATE, CHANNELS, AI_PLAYBACK_PKT_MS,
@@ -731,11 +760,25 @@ def _speaker_play_worker() -> None:
                     )
                 elif count % 50 == 0:
                     _log(f"下行 AI 音频累计 {count} 帧")
-                if media == TIRTC_AUDIO_ALAW:
-                    data = alaw_decode(data)
-                elif media != TIRTC_AUDIO_PCM:
-                    _warn(f"AI 下行音频编码暂不支持播放 media={media}")
-                    continue
+                if (media != decoder.spec.media or source_rate != decoder.spec.sample_rate
+                        or flags != decoder.spec.flags):
+                    raise ValueError("AI 下行帧与协商的编码或采样率不一致")
+                if not recording_failed:
+                    try:
+                        if recorder is None:
+                            recorder = AudioRecorder(
+                                receive_dir, device_id,
+                                f"ai_{time.time_ns()}_{generation}.raw", _info, _warn)
+                            path = recorder.open()
+                            _info(f"AI 下行录音: {path}")
+                        fi = TIRTCFRAMEINFO()
+                        fi.media, fi.flags = media, flags
+                        fi.stream_id, fi.length = AI_AUDIO_STREAM_ID, len(data)
+                        recorder.write_frame(fi, data)
+                    except (OSError, ValueError):
+                        recording_failed = True
+                        _warn("AI 下行录音失败，请检查磁盘空间和目录权限；继续播放")
+                data = decoder.decode(data)
 
                 if _echo_gate is not None:
                     _echo_gate.feed_far_end(data, source_rate=source_rate)
@@ -752,12 +795,18 @@ def _speaker_play_worker() -> None:
                 else:
                     playback_resample_state = None
                     playback_resample_rates = None
-                if len(data) < target_bytes:
-                    data += b'\x00' * (target_bytes - len(data))
-                spk.write(data)
-    except sd.PortAudioError as e:
-        _err(f"扬声器打开失败: {e}")
+                if data:
+                    spk.write(data)
+    except Exception:
+        _media_failed(generation, "AI 扬声器播放失败，请检查设备后重新发起对话")
     finally:
+        if decoder is not None:
+            decoder.close()
+        if recorder is not None:
+            try:
+                recorder.close()
+            except Exception:
+                _warn("AI 下行录音收尾失败，请检查磁盘和录音文件")
         _log("扬声器播放线程退出")
 
 
@@ -807,8 +856,11 @@ def start_session(peer_id: str, token: str, audio_file: str = "", device_id: str
     global _session_state, _active_hconn
     global _connect_cb_ref, _stream_stop, _stream_thread, _play_thread
     global _audio_recv_count, _session_generation
+    global _device_id
 
     _audio_recv_count = 0
+
+    global _start_request_id
 
     with _state_lock:
         if _session_state != "IDLE":
@@ -817,7 +869,10 @@ def start_session(peer_id: str, token: str, audio_file: str = "", device_id: str
         _cancel_session_timers_locked()
         _session_generation += 1
         generation = _session_generation
+        _start_request_id = uuid.uuid4().hex
+        request_id = _start_request_id
         _session_state = "CONNECTING"
+        _device_id = device_id
 
     _stream_stop.clear()
 
@@ -894,7 +949,7 @@ def start_session(peer_id: str, token: str, audio_file: str = "", device_id: str
             }
             envelope = {
                 "jsonrpc": "2.0",
-                "id": uuid.uuid4().hex,
+                "id": request_id,
                 "method": "start_session",
                 "params": params,
             }
@@ -959,9 +1014,6 @@ def stop_session() -> None:
 
     global _round_first_frame, _echo_gate
     _stream_stop.set()
-    if _echo_gate is not None:
-        _echo_gate.close()
-        _echo_gate = None
     _round_first_frame = False
 
     # 发送哨兵让播放线程退出
@@ -973,6 +1025,9 @@ def stop_session() -> None:
     # 先等采集线程退出，再断开连接（避免 TiRtcSendAudioStream 访问已释放的 handle）
     join_worker_before_uninit(t_stream, _warn, "AI 麦克风采集")
     join_worker_before_uninit(t_play, _warn, "AI 扬声器播放")
+    if _echo_gate is not None:
+        _echo_gate.close()
+        _echo_gate = None
 
     if hconn_val is not None:
         _log(f"发送 end_session hconn={hconn_val:#x}")

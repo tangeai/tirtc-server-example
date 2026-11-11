@@ -99,6 +99,28 @@ class RtcAiLifecycleTests(unittest.TestCase):
         for patcher in reversed(self.patches):
             patcher.stop()
 
+    def test_file_mode_negotiation_uses_both_independent_formats(self):
+        send = mock.patch.object(rtc_ai.sdk, "TiRtcSendCommand", return_value=0)
+        send.start()
+        self.addCleanup(send.stop)
+        rtc_ai.configure_audio_formats("amr_wb", "pcm_8k")
+        self.addCleanup(rtc_ai.configure_audio_formats)
+        rtc_ai._active_hconn = 123
+        rtc_ai._session_state = "CONNECTING"
+        rtc_ai._start_request_id = "request"
+        good = {"input_audio": {"codec": "amr", "sample_rate": 16000, "channels": 1},
+                "output_audio": {"codec": "pcm", "sample_rate": 8000, "channels": 1}}
+        with mock.patch.object(rtc_ai._callback_guard, "defer") as defer, \
+                mock.patch.object(rtc_ai, "_fail_after_callback") as fail:
+            rtc_ai._handle_ai_message(123, {"id": "request", "result": good})
+            defer.assert_called_once()
+            fail.assert_not_called()
+            defer.reset_mock()
+            good["output_audio"]["sample_rate"] = 16000
+            rtc_ai._handle_ai_message(123, {"id": "request", "result": good})
+            fail.assert_called_once()
+            defer.assert_not_called()
+
     def test_immediate_connect_failure_notifies_terminal_once(self):
         with mock.patch.object(
                 rtc_ai.sdk, "TiRtcWhipConnect", return_value=-123):

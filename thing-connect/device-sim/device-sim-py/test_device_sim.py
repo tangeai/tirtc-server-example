@@ -34,6 +34,46 @@ class JsonResponse:
 
 
 class DeviceSimulatorTests(unittest.TestCase):
+    def test_ai_rejects_opus_8k_from_cli_environment_and_shared_defaults(self):
+        cases = [
+            (["--ai-up-audio-format", "opus_8khz"], {}),
+            (["--ai-down-audio-format", "opus_8k"], {}),
+            ([], {"AI_UP_AUDIO_FORMAT": "opus_8k"}),
+            ([], {"AI_DOWN_AUDIO_FORMAT": "opus_8khz"}),
+            (["--up-audio-format", "opus_8khz"], {}),
+            (["--down-audio-format", "opus_8khz"], {}),
+        ]
+        for args, env in cases:
+            with self.subTest(args=args, env=env), \
+                    mock.patch.dict(os.environ, env, clear=True), \
+                    mock.patch.object(device_sim_main.sys, "argv", ["device_sim_main.py"] + args), \
+                    mock.patch.object(device_sim_main, "fetch_services") as discovery, \
+                    redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:
+                device_sim_main.main()
+            self.assertEqual(raised.exception.code, 2)
+            discovery.assert_not_called()
+
+    def test_ai_file_format_override_requires_matching_file(self):
+        with mock.patch.object(device_sim_main.sys, "argv", [
+                "device_sim_main.py", "--ai-up-audio-format", "pcm_16k"]), \
+                redirect_stderr(io.StringIO()) as error, self.assertRaises(SystemExit):
+            device_sim_main.main()
+        self.assertIn("--ai-up-audio-file", error.getvalue())
+
+    def test_ai_pcm_downlink_is_allowed_without_changing_voip(self):
+        # Stop at discovery; no network, SDK, or credentials are needed.
+        with tempfile.TemporaryDirectory() as root:
+            audio = os.path.join(root, "audio.g711a")
+            with open(audio, "wb") as target:
+                target.write(bytes(160))
+            with mock.patch.object(device_sim_main.sys, "argv", [
+                    "device_sim_main.py", "--ai-down-audio-format", "pcm_8k",
+                    "--up-audio-file", audio, "--up-video-file", "",
+                    "--down-media-dir", root]), \
+                    mock.patch.object(device_sim_main, "fetch_services", side_effect=RuntimeError("discovery reached")):
+                with self.assertRaisesRegex(RuntimeError, "discovery reached"):
+                    device_sim_main.main()
+
     def test_audio_list_exits_without_discovery(self):
         with mock.patch("audio_device.print_audio_devices") as listing, \
                 mock.patch.object(device_sim_main, "fetch_services") as discovery, \
@@ -173,7 +213,8 @@ class DeviceSimulatorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             path = os.path.join(root, "nested", "creds.json")
             self.assertTrue(device_credentials.save_creds("dev1", "key1", path))
-            self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600)
+            if os.name == 'posix':
+                self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600)
             self.assertEqual(device_credentials.load_saved_creds(path), ("dev1", "key1"))
             with open(path) as f:
                 self.assertEqual(json.load(f), {"device_id": "dev1", "device_key": "key1"})

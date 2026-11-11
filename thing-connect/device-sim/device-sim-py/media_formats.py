@@ -78,6 +78,9 @@ _AI_CODEC_NAMES = {
 
 CANONICAL_AUDIO_FORMAT_CHOICES = tuple(_CANONICAL_AUDIO_FORMATS)
 AUDIO_FORMAT_CHOICES = CANONICAL_AUDIO_FORMAT_CHOICES
+AI_AUDIO_FORMAT_CHOICES = tuple(name for name, spec in _CANONICAL_AUDIO_FORMATS.items()
+                                if spec.codec in _AI_CODEC_NAMES
+                                and (spec.codec != "opus" or spec.sample_rate == 16000))
 VIDEO_FORMAT_CHOICES = tuple(VIDEO_FORMATS)
 WITH_MIC_AUDIO_FORMATS = ("alaw_8khz", "alaw_16khz")
 
@@ -112,7 +115,7 @@ def validate_with_mic_audio_formats(up_format: str, down_format: str) -> None:
     if up != down or up not in WITH_MIC_AUDIO_FORMATS:
         raise ValueError(
             "--with-mic 上下行必须使用相同的 alaw_8khz 或 alaw_16khz"
-            "（G.711 A-law、单声道）；PCM/AMR/Opus 请去掉 --with-mic 后使用预编码文件模式"
+            "（G.711 A-law、单声道）；AI 独立格式请使用 --ai-up-audio-format / --ai-down-audio-format"
         )
 
 
@@ -122,6 +125,8 @@ def ai_audio_descriptor(spec_or_name: "AudioFormat | str") -> dict:
     codec = _AI_CODEC_NAMES.get(spec.codec)
     if codec is None:
         raise ValueError(f"AI 对讲不支持音频编码: {spec.codec}")
+    if codec == "opus" and spec.sample_rate != 16000:
+        raise ValueError("AI 对讲 Opus 仅支持 16K（16000Hz）")
     return {
         "codec": codec,
         "sample_rate": spec.sample_rate,
@@ -136,3 +141,21 @@ def video_file_extension(spec_or_name: "VideoFormat | str") -> str:
         "h265": "h265",
         "mjpeg": "mjpeg",
     }[spec.name]
+
+
+def validate_ai_audio_response(result: dict, up_format: str, down_format: str) -> None:
+    """Do not send a configured file/codec under a different negotiated format."""
+    for field, name in (("input_audio", up_format), ("output_audio", down_format)):
+        actual = result.get(field)
+        expected = ai_audio_descriptor(name)
+        if not isinstance(actual, dict):
+            raise ValueError(f"AI 响应缺少 {field}")
+        codec = actual.get("codec")
+        if codec == "g711a":
+            codec = "alaw"
+        if (codec != expected["codec"]
+                or type(actual.get("sample_rate")) is not int
+                or actual["sample_rate"] != expected["sample_rate"]
+                or type(actual.get("channels")) is not int
+                or actual["channels"] != 1):
+            raise ValueError(f"AI 响应 {field} 与配置的 {name} 不一致")

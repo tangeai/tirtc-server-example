@@ -125,8 +125,17 @@ static int _linux_identity_save(void *context, const char *path,
     int saved_errno = errno;
     if (close(fd) != 0) ok = 0;
     if (ok && rename(temp_path, path) == 0) {
+        char parent[1024];
+        str_copy(parent, sizeof(parent), path);
+        char *slash = strrchr(parent, '/');
+        if (slash == parent) slash[1] = '\0';
+        else if (slash) *slash = '\0';
+        else str_copy(parent, sizeof(parent), ".");
+        int directory = open(parent, O_RDONLY | O_DIRECTORY);
+        int synced = directory >= 0 && fsync(directory) == 0;
+        if (directory >= 0) close(directory);
         free(json);
-        return 0;
+        return synced ? 0 : -1;
     }
     if (!ok) errno = saved_errno;
     unlink(temp_path);
