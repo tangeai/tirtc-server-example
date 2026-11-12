@@ -3152,7 +3152,8 @@ H5 智能体管理页面由 user-server 的 `GET /agent?device_id=xxx` 提供。
 | 字段 | 类型 | 必填与说明 |
 |---|---|---|
 | `prompt` | string | 可选，角色提示词 |
-| `welcome_text` | string | 可选，开场白 |
+| `welcome_text` | string | 可选，静态欢迎语；使用 AI 欢迎语时传空字符串 |
+| `welcome_prompt` | string | 可选，AI 欢迎语提示词；非空时每次新会话由当前大模型生成欢迎语。切回静态欢迎语时传空字符串清除 |
 | `ali_rag` | object / null | 知识库绑定；显式传 `null` 清除绑定 |
 | `ali_rag.index_id` | string | 设置知识库绑定时提供索引 ID |
 | `ali_memory` | object | 可选，记忆配置 |

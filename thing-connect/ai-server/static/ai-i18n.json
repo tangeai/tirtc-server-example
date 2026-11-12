@@ -1,4 +1,10 @@
 {
+  "AI 随机欢迎语": "AI-generated welcome",
+  "勾选后，输入内容作为 AI 提示词；不勾选时，直接使用输入的文字。勾选或取消勾选都会重置为默认内容。": "When checked, the text is an AI prompt; otherwise it is spoken directly. Checking or unchecking resets the text to its default.",
+  "提示词必填，每次新会话由 AI 生成欢迎语，内容可能重复。": "A prompt is required. AI generates a welcome for each new session; results may repeat.",
+  "留空并保存会清除本角色的欢迎语设置。": "Saving this empty clears the welcome settings for this role.",
+  "AI 欢迎语提示词": "AI welcome prompt",
+  "请输入 AI 欢迎语提示词": "Enter an AI welcome prompt",
   "+ 新建": "+ New",
   "+ 新建 MCP 工具": "+ New MCP tool",
   "+ 新建设备插件": "+ New device plugin",

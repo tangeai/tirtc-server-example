@@ -58,6 +58,25 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  assert.equal(await page.getByLabel('智能体名称',{exact:true}).inputValue(),'新的名称');
  await page.getByRole('button',{name:'保存角色',exact:true}).click();await page.getByText('保存成功',{exact:true}).waitFor();
  assert.equal(role.service_config.config.tts.provider_params.voice,'zh');assert.equal(role.agent_config.ali_memory.enable,true);assert.equal(role.agent_config.prompt,'测试设定');assert.equal(role.agent_config.welcome_text,'你好');assert.equal(role.user_params.description,'测试描述');assert.equal(role.service_config.config.tts.provider_params.rate,1.2);assert.equal(role.service_config.config.tts.provider_params.pitch,0.8);assert.equal(role.service_config.config.llm.provider_params.model,'qwen3.7-plus');
+ await page.getByRole('radio',{name:'扩展能力',exact:true}).locator('..').click();
+ if(!await page.getByRole('checkbox',{name:'AI 随机欢迎语',exact:true}).isVisible()) await page.getByText('更多角色信息',{exact:true}).click();
+ await page.getByRole('checkbox',{name:'AI 随机欢迎语',exact:true}).check();
+ assert.equal(await page.getByLabel('AI 欢迎语提示词',{exact:true}).inputValue(),'请用温暖自然的语气向用户打招呼，控制在20字以内，每次尽量换一种表达。');
+ await page.getByLabel('AI 欢迎语提示词',{exact:true}).fill('用温暖自然的语气打招呼，每次尽量换一种表达。');
+ await page.getByRole('button',{name:'保存角色',exact:true}).click();await page.getByText('保存成功',{exact:true}).waitFor();
+ assert.equal(role.agent_config.welcome_text,'');assert.equal(role.agent_config.welcome_prompt,'用温暖自然的语气打招呼，每次尽量换一种表达。');
+ await page.reload();await page.getByRole('button',{name:'新的名称',exact:true}).click();
+ await page.getByRole('radio',{name:'扩展能力',exact:true}).locator('..').click();await page.getByText('更多角色信息',{exact:true}).click();
+ assert.equal(await page.getByRole('checkbox',{name:'AI 随机欢迎语',exact:true}).isChecked(),true);
+ assert.equal(await page.getByLabel('AI 欢迎语提示词',{exact:true}).inputValue(),role.agent_config.welcome_prompt);
+ await page.getByLabel('AI 欢迎语提示词',{exact:true}).waitFor({state:'visible'});
+ await page.waitForTimeout(500); // Let the collapse transition finish before capturing the preview.
+ await page.screenshot({path:root+'/../output/playwright/role-ai-welcome.png',fullPage:true});
+ await page.getByRole('checkbox',{name:'AI 随机欢迎语',exact:true}).uncheck();
+ assert.equal(await page.getByLabel('开场白',{exact:true}).inputValue(),'你好呀，今天过得怎么样？');
+ await page.getByLabel('开场白',{exact:true}).fill('欢迎回来');
+ await page.getByRole('button',{name:'保存角色',exact:true}).click();await page.getByText('保存成功',{exact:true}).waitFor();
+ assert.equal(role.agent_config.welcome_text,'欢迎回来');assert.equal(role.agent_config.welcome_prompt,'');
  for(const width of [320,390,768,1440]){
   await page.setViewportSize({width,height:900});
   if(!await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)){console.log(await page.locator('*').evaluateAll(nodes=>nodes.filter(e=>e.getBoundingClientRect().right>innerWidth+1).map(e=>({tag:e.tagName,cls:e.className,right:e.getBoundingClientRect().right})).slice(-20)));await page.screenshot({path:'/tmp/unify-role-overflow.png'});throw Error('Role overflow '+width);}

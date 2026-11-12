@@ -6,7 +6,7 @@ import { Shell } from '../components/Shell';
 import { useConfirm } from '../components/Confirm';
 import { ApiError, errorText, request } from '../lib/api';
 import { useLanguage } from '../lib/i18n';
-import { draftOf, editableProviders, llmModels, rolePayload, roleRegionLabel, type Role, type RoleDraft, type Voice } from '../lib/roles';
+import { draftOf, resetWelcomeMode, editableProviders, llmModels, rolePayload, roleRegionLabel, type Role, type RoleDraft, type Voice } from '../lib/roles';
 import { selectedRoleType, type RoleType } from '../lib/role-types';
 import { useRemote } from '../lib/use-remote';
 import { RoleVoicePanel } from './roles/RoleVoicePanel';
@@ -171,7 +171,12 @@ function RoleEditor({ role, draft, setDraft, voices, voiceLoading, voiceError, r
       </div>
       <div hidden={section !== 'model'}><section className="role-section"><h2>{t('模型与记忆')}</h2><label>{t('模型')}<Select aria-label={t('模型')} disabled={busy || readonly || !providers.llm} value={draft.model} onChange={model => patch({model})} options={[{value:'',label:t('沿用基础配置')}, ...[...new Set([...llmModels.map(model=>model.id),draft.model])].filter(Boolean).map(value=>({value,label:value}))]}/></label><Checkbox className="radio"  disabled={busy || readonly} checked={draft.memory} onChange={e => patch({ memory: e.target.checked })}>{t('长期记忆')}</Checkbox></section></div>
       <div hidden={section !== 'advanced'}><section className="role-video-setting"><div className="row"><label htmlFor="role-video">{t('视频识别')}</label><Switch id="role-video" aria-label={t('视频识别')} checked={draft.video === true} disabled={busy || readonly || !providers.custom} onChange={video=>patch({video})}/></div><p className="muted">{t('允许 AI 理解设备上传的视频画面。')}{draft.video === undefined && ' ' + t('未单独设置，沿用基础配置。')}</p></section>
-        <Collapse className="role-section" items={[{key:"content",label:t('更多角色信息'),children:<> <label>{t('开场白')}<Input readOnly={readonly} value={draft.welcome} onChange={e => patch({ welcome: e.target.value })}/></label> </>}]} />
+        <Collapse className="role-section" items={[{key:"content",label:t('更多角色信息'),children:<>
+          <label>{t(draft.welcomeMode === 'ai' ? 'AI 欢迎语提示词' : '开场白')}<Input.TextArea aria-label={t(draft.welcomeMode === 'ai' ? 'AI 欢迎语提示词' : '开场白')} required={draft.welcomeMode === 'ai'} readOnly={readonly} value={draft.welcomeMode === 'ai' ? draft.welcomePrompt : draft.welcome} autoSize={{minRows:2,maxRows:8}} onChange={e => patch(draft.welcomeMode === 'ai' ? { welcomePrompt: e.target.value } : { welcome: e.target.value })}/></label>
+          <Checkbox disabled={busy || readonly} checked={draft.welcomeMode === 'ai'} onChange={e => patch(resetWelcomeMode(e.target.checked))}>{t('AI 随机欢迎语')}</Checkbox>
+          <p className="muted">{t('勾选后，输入内容作为 AI 提示词；不勾选时，直接使用输入的文字。勾选或取消勾选都会重置为默认内容。')}</p>
+          <p className="muted">{t(draft.welcomeMode === 'ai' ? '提示词必填，每次新会话由 AI 生成欢迎语，内容可能重复。' : '留空并保存会清除本角色的欢迎语设置。')}</p>
+        </>}]} />
       <Collapse className="role-section" items={[{key:"content",label:t('知识库'),children:<> <Knowledge value={draft.knowledge} onChange={knowledge => patch({ knowledge })} readonly={readonly || busy} onBlocked={onResourceBlocked}/> </>}]} />
       <Collapse className="role-section" items={[{key:"content",label:t('工具与插件'),children:<> <ResourceSelection kind="mcp" selected={draft.mcp} onChange={mcp => patch({ mcp })} readonly={readonly || busy}/><ResourceSelection kind="plugin" selected={draft.plugins} onChange={plugins => patch({ plugins })} readonly={readonly || busy} names={role.device_plugin_refs}/> </>}]} />
       </div>

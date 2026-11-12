@@ -60,13 +60,16 @@ type Role struct {
 }
 
 // AgentConfig holds the AI agent behaviour configuration.
+// Welcome pointers preserve explicit empty values when switching welcome modes,
+// while omitted fields from older clients remain omitted.
 // AliRAG intentionally lacks omitempty: the frontend sends an explicit
 // null to clear a previously bound knowledge base, and omitempty would
 // silently drop that signal (indistinguishable from "field not provided").
 type AgentConfig struct {
 	Video         *RoleVideoConfig  `json:"video,omitempty"`
 	Prompt        string            `json:"prompt,omitempty"`
-	WelcomeText   string            `json:"welcome_text,omitempty"`
+	WelcomeText   *string           `json:"welcome_text,omitempty"`
+	WelcomePrompt *string           `json:"welcome_prompt,omitempty"`
 	AliRAG        *RoleAliRAGConfig `json:"ali_rag"`
 	AliMemory     *AliMemoryCfg     `json:"ali_memory,omitempty"`
 	MCPTools      []string          `json:"mcp_tools,omitempty"`

@@ -359,3 +359,37 @@ func TestRoleVideoSettingForwarding(t *testing.T) {
 		})
 	}
 }
+
+func TestRoleWelcomeSettingForwarding(t *testing.T) {
+	for _, raw := range []string{`{}`, `{"welcome_text":"你好","welcome_prompt":""}`, `{"welcome_text":"","welcome_prompt":"自然地打招呼"}`, `{"welcome_text":"","welcome_prompt":""}`} {
+		t.Run(raw, func(t *testing.T) {
+			var config AgentConfig
+			if err := json.Unmarshal([]byte(raw), &config); err != nil {
+				t.Fatal(err)
+			}
+			client := contractClient(t, func(w http.ResponseWriter, r *http.Request) {
+				var body struct {
+					AgentConfig map[string]json.RawMessage `json:"agent_config"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Fatal(err)
+				}
+				var expected map[string]json.RawMessage
+				_ = json.Unmarshal([]byte(raw), &expected)
+				for _, key := range []string{"welcome_text", "welcome_prompt"} {
+					if string(body.AgentConfig[key]) != string(expected[key]) {
+						t.Errorf("%s changed: %s", key, body.AgentConfig[key])
+					}
+				}
+				_, _ = fmt.Fprintf(w, `{"code":200,"data":{"id":"role-1","agent_config":%s}}`, raw)
+			})
+			role, err := client.UpdateRole(context.Background(), "role-1", RoleInput{Name: "测试", AgentConfig: &config})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(role.AgentConfig, &config) {
+				t.Fatalf("welcome response changed: %+v", role.AgentConfig)
+			}
+		})
+	}
+}

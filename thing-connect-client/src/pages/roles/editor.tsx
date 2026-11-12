@@ -1,9 +1,9 @@
 import Taro, { useDidHide } from '@tarojs/taro';
-import { Button, Picker, Slider, Switch, Text, Textarea, View } from '@tarojs/components';
+import { Button, Checkbox, CheckboxGroup, Picker, Slider, Switch, Text, Textarea, View } from '@tarojs/components';
 import { useEffect, useRef, useState } from 'react';
 import { Action, Field, Notice, SearchField, Sheet } from '../../components/ui';
 import { request, errorText } from '../../services/api';
-import { editableProviders, findVoice, llmModels, roleRegionLabel, type Role, type RoleDraft, type Voice } from '../../domain/roles';
+import { resetWelcomeMode, editableProviders, findVoice, llmModels, roleRegionLabel, type Role, type RoleDraft, type Voice } from '../../domain/roles';
 import { availableRoleTypes, roleTypePatch, selectedRoleType, type RoleType } from '../../domain/role-types';
 import { speechLevelIndex, speechLevelValues } from '../../domain/tts-config';
 
@@ -85,7 +85,9 @@ export function RoleEditor({ role, draft, voices, busy, patch }: {
       })}</>}
     </View>}
     {section === 'model' && <View className='card'><Text className='title'>模型与记忆</Text><Picker range={['沿用基础配置', ...llmModels.map(m => m.id)]} value={Math.max(0, llmModels.findIndex(m => m.id === draft.model) + 1)} disabled={disabled || !providers.llm} onChange={e => patch({ model: Number(e.detail.value) ? llmModels[Number(e.detail.value) - 1].id : '' })}><View className='input role-select'><Text className='role-select-value'>{draft.model || '沿用基础配置'}</Text>{!disabled && providers.llm && <View className='role-select-arrow' />}</View></Picker><View className='row between'><Text>长期记忆</Text><Switch color={readonly ? '#b8bfbb' : '#07c160'} checked={draft.memory} disabled={disabled} onChange={e => patch({ memory: e.detail.value })} /></View></View>}
-    {section === 'advanced' && <View className='card'><View className='row between'><Text>视频识别</Text><Switch color={readonly ? '#b8bfbb' : '#07c160'} checked={draft.video === true} disabled={disabled || !providers.custom} onChange={e => patch({ video: e.detail.value })} /></View><Text className='muted'>允许 AI 理解设备上传的视频画面。{draft.video === undefined ? '未单独设置，沿用基础配置。' : ''}</Text><Field label='开场白' value={draft.welcome} disabled={disabled} onChange={welcome => patch({ welcome })} /><Text className='muted'>知识库、MCP 和设备插件的管理入口暂在 Web；已有配置会保留。</Text></View>}
+    {section === 'advanced' && <View className='card'><View className='row between'><Text>视频识别</Text><Switch color={readonly ? '#b8bfbb' : '#07c160'} checked={draft.video === true} disabled={disabled || !providers.custom} onChange={e => patch({ video: e.detail.value })} /></View><Text className='muted'>允许 AI 理解设备上传的视频画面。{draft.video === undefined ? '未单独设置，沿用基础配置。' : ''}</Text><View className='field'><Text className='label'>{draft.welcomeMode === 'ai' ? 'AI 欢迎语提示词' : '开场白'}</Text><Textarea className='textarea' maxlength={-1} value={draft.welcomeMode === 'ai' ? draft.welcomePrompt : draft.welcome} disabled={disabled} onInput={e => patch(draft.welcomeMode === 'ai' ? { welcomePrompt: e.detail.value } : { welcome: e.detail.value })} />
+      <CheckboxGroup onChange={e => patch(resetWelcomeMode(e.detail.value.includes('ai')))}><Checkbox value='ai' checked={draft.welcomeMode === 'ai'} disabled={disabled} color='#07c160'>AI 随机欢迎语</Checkbox></CheckboxGroup>
+      <Text className='muted'>勾选后，输入内容作为 AI 提示词；不勾选时，直接使用输入的文字。勾选或取消勾选都会重置为默认内容。</Text><Text className='muted'>{draft.welcomeMode === 'ai' ? '提示词必填，每次新会话由 AI 生成欢迎语，内容可能重复。' : '留空并保存会清除本角色的欢迎语设置。'}</Text></View><Text className='muted'>知识库、MCP 和设备插件的管理入口暂在 Web；已有配置会保留。</Text></View>}
     {picker && <Sheet title='选择角色类型' busy={busy} onClose={() => { stop(); setPreviewError(''); setPicker(false); }}><SearchField placeholder='搜索角色类型或声音' value={query} onChange={value => { stop(); setQuery(value); }} /><Notice error>{previewError}</Notice>{available.map(item => {
       const sample = findVoice(voices, item.voice_id, item.voice_model);
       return <View className='role-type-option' key={item.id}><Button className={'action role-type-name' + (chosen?.id === item.id ? ' role-type-selected' : '')} disabled={disabled} onClick={() => void choose(item)}>{item.name}</Button><Button className='action role-type-preview' disabled={busy || !sample?.sample_url} onClick={() => preview(sample, item.id)}>{!sample?.sample_url ? '暂无试听' : playing === item.id ? '停止' : '试听'}</Button></View>;
