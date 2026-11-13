@@ -1,8 +1,20 @@
-import { Button, Card, Col, Row, Space, Statistic, Table } from 'antd';
+import {
+  Button,
+  Card,
+  Col,
+  Collapse,
+  Descriptions,
+  Empty,
+  Row,
+  Space,
+  Statistic,
+  Table,
+} from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { api } from '../api';
 import {
   formatTime,
+  ServiceVersion,
   pageTitle as title,
   serviceStatusTag as statusTag,
   useLoad,
@@ -20,7 +32,7 @@ export function OverviewPage() {
     <>
       {title(
         '数据概览',
-        '业务指标与五个服务的跨主机实例状态',
+        '业务指标与各服务的跨主机实例状态',
         <Button icon={<ReloadOutlined />} onClick={reload}>
           刷新
         </Button>,
@@ -35,13 +47,14 @@ export function OverviewPage() {
           ['待清理任务', metrics.cleanup_pending],
           ['异常任务', metrics.failed_admin_jobs],
         ].map(([label, value]) => (
-          <Col xs={12} md={6} xl={3} key={String(label)}>
+          <Col xs={12} md={6} xl={6} key={String(label)}>
             <Card loading={loading}>
-              <Statistic title={label} value={value ?? 0} />
+              <Statistic title={label} value={value ?? '—'} />
             </Card>
           </Col>
         ))}
       </Row>
+      {!loading && !data && <Empty description="概览数据暂不可用，请刷新重试" />}
       <Row gutter={[16, 16]}>
         {(data?.services || []).map((service) => (
           <Col xs={24} md={12} xl={8} key={service.service}>
@@ -54,27 +67,46 @@ export function OverviewPage() {
                 <Statistic title="实例数" value={service.instance_count} />
                 <Statistic title="健康实例" value={service.healthy_count} />
               </Space>
-              <div className="instances">
-                {service.instances?.map((x: AnyRow) => (
-                  <div key={x.instance_id}>
-                    <b title="实例标识">{x.instance_id}</b>
-                    <span>
-                      {x.node}
-                      {x.zone ? ` / ${x.zone}` : ''}
-                    </span>
-                    <span>
-                      {x.version || '版本未知'} · 配置版本 r
-                      {Math.max(0, ...Object.values(x.config_revision || {}).map(Number))}
-                    </span>
-                  </div>
-                ))}
-              </div>
+              <Collapse
+                ghost
+                items={(service.instances || []).map((x: AnyRow) => ({
+                  key: x.instance_id,
+                  label: x.instance_id,
+                  children: (
+                    <Descriptions
+                      size="small"
+                      column={1}
+                      items={[
+                        {
+                          key: 'node',
+                          label: '节点 / 区域',
+                          children: [x.node, x.zone].filter(Boolean).join(' / ') || '—',
+                        },
+                        {
+                          key: 'version',
+                          label: '程序版本',
+                          children: <ServiceVersion version={x.version} commit={x.commit} />,
+                        },
+                        {
+                          key: 'revision',
+                          label: '各项配置版本',
+                          children:
+                            Object.entries(x.config_revision || {})
+                              .map(([key, value]) => `${key}: r${value}`)
+                              .join('；') || '未上报',
+                        },
+                      ]}
+                    />
+                  ),
+                }))}
+              />
             </Card>
           </Col>
         ))}
       </Row>
       <Card title="最近管理操作" className="recent-audits">
         <Table
+          scroll={{ x: 900 }}
           rowKey="id"
           size="small"
           pagination={false}

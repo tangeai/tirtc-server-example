@@ -5,6 +5,7 @@ import {
   Card,
   Col,
   Form,
+  Grid,
   Image,
   Input,
   InputNumber,
@@ -17,7 +18,7 @@ import {
   Tag,
   Typography,
   Upload,
-  message,
+  App as AntApp,
 } from 'antd';
 import {
   CopyOutlined,
@@ -81,6 +82,8 @@ const slug = (value: string) => {
 };
 
 export function BoardsPage() {
+  const { message } = AntApp.useApp();
+  const screens = Grid.useBreakpoint();
   const [data, loading, reload] = useLoad(() => api<CatalogResponse>('/boards'), []);
   const [editing, setEditing] = useState<Board>();
   const [form] = Form.useForm<BoardForm>();
@@ -211,7 +214,7 @@ export function BoardsPage() {
       {pageTitle(
         '开发板管理',
         '配置官网开发板目录、详情及固件等相关资源',
-        <Space>
+        <Space wrap>
           <Button icon={<ReloadOutlined />} onClick={reload}>
             刷新
           </Button>
@@ -226,14 +229,20 @@ export function BoardsPage() {
             已上架 {boards.filter((x) => x.publish_status === 'published').length}
           </Tag>
           <Tag>草稿 {boards.filter((x) => x.publish_status === 'draft').length}</Tag>
-          <Typography.Text type="secondary">按展示顺序排列，前 20 款显示图片卡片。</Typography.Text>
+          <Typography.Text type="secondary">
+            按展示顺序排列；上架内容显示在官网开发板目录。
+          </Typography.Text>
         </Space>
         <Table
           rowKey="id"
           loading={loading || saving}
           dataSource={[...boards].sort((a, b) => a.sort_order - b.sort_order)}
           scroll={{ x: 1050 }}
-          pagination={false}
+          pagination={{
+            defaultPageSize: 20,
+            showSizeChanger: true,
+            showTotal: (total) => `共 ${total} 款开发板`,
+          }}
           columns={[
             {
               title: '名称',
@@ -275,10 +284,10 @@ export function BoardsPage() {
             { title: '更新时间', dataIndex: 'updated_at', width: 170, render: formatTime },
             {
               title: '操作',
-              fixed: 'right',
+              fixed: screens.md ? 'right' : undefined,
               width: 260,
               render: (_, row) => (
-                <Space size="small">
+                <Space size="small" wrap>
                   <Button size="small" icon={<EditOutlined />} onClick={() => openEditor(row)}>
                     编辑
                   </Button>
@@ -324,10 +333,10 @@ export function BoardsPage() {
         open={!!editing}
         title={editing?.id ? '编辑开发板' : '新增开发板'}
         footer={null}
-        destroyOnClose
+        destroyOnHidden
         onCancel={() => setEditing(undefined)}
       >
-        <Form form={form} layout="vertical" onFinish={saveEditor}>
+        <Form name="boards-1" form={form} layout="vertical" onFinish={saveEditor}>
           <Row gutter={16}>
             <Col xs={24} md={12}>
               <Form.Item name="name" label="开发板名称" rules={[{ required: true }]}>
@@ -461,7 +470,7 @@ export function BoardsPage() {
               </Form.Item>
             </Col>
           </Row>
-          <Space>
+          <Space wrap>
             <Button type="primary" htmlType="submit" loading={saving}>
               保存
             </Button>

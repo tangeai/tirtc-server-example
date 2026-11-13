@@ -6,11 +6,12 @@ import {
   Descriptions,
   Drawer,
   Popconfirm,
+  Select,
   Space,
   Table,
   Tag,
   Typography,
-  message,
+  App as AntApp,
 } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { api, download, json } from '../../api';
@@ -25,17 +26,26 @@ import {
 import { jobTypeNames } from '../../shared/admin-metadata';
 
 export function JobsPage() {
+  const { message } = AntApp.useApp();
+  const [page, setPage] = useState(1);
+  const [status, setStatus] = useState<number>();
+  const [jobID, setJobID] = useState<number>();
+  const [itemPage, setItemPage] = useState(1);
   const [data, loading, reload] = useLoad(
-    () => api<{ jobs: PageData; related_queues: AnyRow }>('/jobs?page=1&page_size=50'),
-    [],
+    () =>
+      api<{ jobs: PageData; related_queues: AnyRow }>(
+        `/jobs?page=${page}&page_size=20&status=${status ?? ''}`,
+      ),
+    [page, status],
   );
-  const [detail, setDetail] = useState<AnyRow>();
-  const open = async (row: AnyRow) => {
-    try {
-      setDetail(await api(`/jobs/${row.id}?page=1&page_size=100`));
-    } catch (e) {
-      reportError(e);
-    }
+  const [detail, detailLoading] = useLoad<AnyRow | undefined>(
+    () =>
+      jobID ? api(`/jobs/${jobID}?page=${itemPage}&page_size=20`) : Promise.resolve(undefined),
+    [jobID, itemPage],
+  );
+  const open = (row: AnyRow) => {
+    setItemPage(1);
+    setJobID(row.id);
   };
   const retry = async (row: AnyRow) => {
     try {
@@ -71,10 +81,44 @@ export function JobsPage() {
         />
       )}
       <Card>
+        <Space className="toolbar">
+          <Select
+            aria-label="任务状态"
+            placeholder="全部任务状态"
+            allowClear
+            style={{ width: 180 }}
+            value={status}
+            options={['待执行', '执行中', '成功', '部分成功', '失败'].map((label, value) => ({
+              label,
+              value,
+            }))}
+            onChange={(value) => {
+              setStatus(value);
+              setPage(1);
+            }}
+          />
+          <Button
+            onClick={() => {
+              setStatus(undefined);
+              setPage(1);
+            }}
+          >
+            重置
+          </Button>
+        </Space>
         <Table
+          scroll={{ x: 900 }}
           rowKey="id"
           loading={loading}
           dataSource={data?.jobs.items}
+          pagination={{
+            current: page,
+            pageSize: 20,
+            total: data?.jobs.total || 0,
+            showSizeChanger: false,
+            showTotal: (total) => `共 ${total} 个任务`,
+            onChange: setPage,
+          }}
           columns={[
             {
               title: '任务',
@@ -92,7 +136,11 @@ export function JobsPage() {
               title: '状态',
               dataIndex: 'status',
               render: (v) => (
-                <Tag color={v === 2 ? 'success' : v >= 3 ? 'warning' : 'processing'}>
+                <Tag
+                  color={
+                    v === 2 ? 'success' : v === 4 ? 'error' : v === 3 ? 'warning' : 'processing'
+                  }
+                >
                   {jobStatus(v)}
                 </Tag>
               ),
@@ -107,7 +155,7 @@ export function JobsPage() {
             {
               title: '操作',
               render: (_, r) => (
-                <Space>
+                <Space wrap>
                   <Button type="link" onClick={() => open(r)}>
                     详情
                   </Button>
@@ -128,10 +176,11 @@ export function JobsPage() {
         />
       </Card>
       <Drawer
-        width={760}
-        open={!!detail}
-        title={`任务详情 #${detail?.job?.id || ''}`}
-        onClose={() => setDetail(undefined)}
+        width="min(760px, 100vw)"
+        open={!!jobID}
+        loading={detailLoading}
+        title={`任务详情 #${jobID || ''}`}
+        onClose={() => setJobID(undefined)}
       >
         {detail && (
           <>
@@ -143,7 +192,7 @@ export function JobsPage() {
             <Descriptions
               bordered
               size="small"
-              column={2}
+              column={{ xs: 1, sm: 2 }}
               items={[
                 {
                   key: 'type',
@@ -162,15 +211,25 @@ export function JobsPage() {
                   key: 'error',
                   label: '最后错误',
                   children: detail.job.last_error || '—',
-                  span: 2,
+                  span: 'filled',
                 },
               ]}
             />
             <Table<AnyRow>
+              scroll={{ x: 900 }}
               className="job-items"
               rowKey="id"
               size="small"
-              pagination={false}
+              pagination={{
+                current: itemPage,
+                pageSize: 20,
+                total: Math.max(
+                  detail.job.total_count || 0,
+                  (itemPage - 1) * 20 + (detail.items?.length || 0),
+                ),
+                showSizeChanger: false,
+                onChange: setItemPage,
+              }}
               dataSource={detail.items}
               columns={[
                 { title: 'CSV 行号', dataIndex: 'row_no' },

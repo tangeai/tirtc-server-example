@@ -85,6 +85,7 @@ var defaultMenus = []menuSeed{
 	{Code: "boards", Name: "开发板管理", Path: "/boards", Permission: "board.read", Sort: 30, ParentCode: "business", MenuType: 2},
 	{Code: "device-config", Name: "设备服务", Path: "/configs/device-server", Permission: "config.read", Sort: 10, ParentCode: "service-config", MenuType: 2},
 	{Code: "user-config", Name: "用户服务", Path: "/configs/user-server", Permission: "config.read", Sort: 20, ParentCode: "service-config", MenuType: 2},
+	{Code: "voip-devices", Name: "VoIP 授权设备", Path: "/voip-devices", Permission: "voip.app.read", Sort: 35, ParentCode: "business", MenuType: 2},
 	{Code: "voip-config", Name: "VoIP 服务", Path: "/configs/voip-server", Permission: "voip.app.read", Sort: 30, ParentCode: "service-config", MenuType: 2},
 	{Code: "ai-config", Name: "AI 服务", Path: "/configs/ai-server", Permission: "config.read", Sort: 40, ParentCode: "service-config", MenuType: 2},
 	{Code: "recognition", Name: "AI识别", Path: "/recognition", Permission: "recognition.read", Sort: 40, ParentCode: "business", MenuType: 2},

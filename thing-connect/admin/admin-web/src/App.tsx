@@ -1,20 +1,16 @@
+import { ProLayout, type MenuDataItem } from '@ant-design/pro-components';
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import {
   App as AntApp,
-  Avatar,
   Button,
-  Drawer,
   Form,
   Input,
-  Layout,
-  Menu,
   Modal,
   QRCode,
   Result,
   Space,
   Spin,
   Typography,
-  message,
 } from 'antd';
 import {
   ApiOutlined,
@@ -23,7 +19,6 @@ import {
   DatabaseOutlined,
   LogoutOutlined,
   MailOutlined,
-  MenuOutlined,
   PhoneOutlined,
   RobotOutlined,
   SafetyOutlined,
@@ -68,6 +63,9 @@ const UserServicePage = lazy(() =>
     default: module.UserServicePage,
   })),
 );
+const VoIPDevicesPage = lazy(() =>
+  import('./pages/business/voip-devices').then((module) => ({ default: module.VoIPDevicesPage })),
+);
 const VoIPPage = lazy(() =>
   import('./pages/configuration/voip').then((module) => ({ default: module.VoIPPage })),
 );
@@ -109,7 +107,7 @@ type AnyPasswordForm = {
   current_mfa_code?: string;
   current_recovery_code?: string;
 };
-type NavItem = { key: string; label: string; icon?: React.ReactNode; children?: NavItem[] };
+
 const icons: Record<string, React.ReactNode> = {
   overview: <DashboardOutlined />,
   users: <TeamOutlined />,
@@ -122,6 +120,7 @@ const icons: Record<string, React.ReactNode> = {
   'device-config': <SettingOutlined />,
   'user-config': <MailOutlined />,
   'voip-config': <PhoneOutlined />,
+  'voip-devices': <PhoneOutlined />,
   'ai-config': <RobotOutlined />,
   'call-config': <PhoneOutlined />,
   'common-config': <DatabaseOutlined />,
@@ -140,8 +139,8 @@ const registeredIcons: Record<string, React.ReactNode> = {
   RobotOutlined: <RobotOutlined />,
   DatabaseOutlined: <DatabaseOutlined />,
 };
-function navigationItems(menus: MenuRow[], parentID = 0): NavItem[] {
-  const result: NavItem[] = [];
+function navigationItems(menus: MenuRow[], parentID = 0): MenuDataItem[] {
+  const result: MenuDataItem[] = [];
   for (const menu of menus
     .filter((item) => item.parent_id === parentID)
     .sort((a, b) => a.sort_no - b.sort_no || a.id - b.id)) {
@@ -149,13 +148,14 @@ function navigationItems(menus: MenuRow[], parentID = 0): NavItem[] {
     const icon = registeredIcons[menu.icon] || icons[menu.menu_code];
     if (menu.menu_type === 1 || children.length) {
       if (children.length)
-        result.push({ key: `directory:${menu.id}`, label: menu.name, icon, children });
+        result.push({ key: `directory:${menu.id}`, name: menu.name, icon, children });
     } else if (menu.path)
-      result.push({ key: menu.path, label: menu.name, icon: icon || <UnorderedListOutlined /> });
+      result.push({ path: menu.path, name: menu.name, icon: icon || <UnorderedListOutlined /> });
   }
   return result;
 }
 function Login({ onDone }: { onDone: () => void }) {
+  const [submitting, setSubmitting] = useState(false);
   const [stage, setStage] = useState<AuthResult>();
   const [setup, setSetup] = useState<{ secret: string; otpauth_uri: string }>();
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
@@ -165,6 +165,8 @@ function Login({ onDone }: { onDone: () => void }) {
     code?: string;
     recovery_code?: string;
   }) => {
+    if (submitting) return;
+    setSubmitting(true);
     try {
       let result: AuthResult;
       if (!stage) result = await api('/auth/login', json('POST', v));
@@ -210,6 +212,8 @@ function Login({ onDone }: { onDone: () => void }) {
       } else setStage(result);
     } catch (e) {
       reportError(e);
+    } finally {
+      setSubmitting(false);
     }
   };
   return (
@@ -250,7 +254,7 @@ function Login({ onDone }: { onDone: () => void }) {
                 </Typography.Paragraph>
               </div>
             )}
-            <Form layout="vertical" onFinish={submit}>
+            <Form name="App-1" layout="vertical" onFinish={submit}>
               {!stage && (
                 <>
                   <Form.Item
@@ -288,7 +292,7 @@ function Login({ onDone }: { onDone: () => void }) {
                   )}
                 </>
               )}
-              <Button block type="primary" htmlType="submit">
+              <Button block type="primary" htmlType="submit" loading={submitting}>
                 {!stage
                   ? '登录'
                   : stage.stage === 'mfa_required'
@@ -305,13 +309,14 @@ function Login({ onDone }: { onDone: () => void }) {
   );
 }
 function Shell({ onLogout }: { onLogout: () => void }) {
+  const { message } = AntApp.useApp();
   const nav = useNavigate(),
     location = useLocation();
   const [ready, setReady] = useState(false);
   const [menus, setMenus] = useState<MenuRow[]>([]);
   const [currentUser, setCurrentUser] = useState<AdminProfile>();
   const [mustChangePassword, setMustChangePassword] = useState(false);
-  const [navigationOpen, setNavigationOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   useEffect(() => {
     api<{ user: AdminProfile }>('/me')
       .then((result) => {
@@ -350,7 +355,12 @@ function Shell({ onLogout }: { onLogout: () => void }) {
   };
   if (!ready) return <Spin fullscreen />;
   let page: React.ReactNode;
-  if (path === '/') page = <Spin size="large" />;
+  if (path === '/')
+    page = pagePaths.length ? (
+      <Spin size="large" />
+    ) : (
+      <Result status="403" title="暂无可用菜单" subTitle="请联系管理员分配角色权限和菜单。" />
+    );
   else if (!pagePaths.includes(path))
     page = (
       <Result
@@ -372,6 +382,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
     page = <RecognitionPage key="recognition-business" mode="business" />;
   else if (path === '/configs/recognition-server')
     page = <RecognitionPage key="recognition-configuration" mode="configuration" />;
+  else if (path === '/voip-devices') page = <VoIPDevicesPage />;
   else if (path === '/devices') page = <DevicesPage />;
   else if (path === '/boards') page = <BoardsPage />;
   else if (path === '/configs/ai-server') page = <AIServicePage />;
@@ -385,75 +396,66 @@ function Shell({ onLogout }: { onLogout: () => void }) {
   else if (path === '/login-logs') page = <LogsPage kind="login" />;
   else if (path === '/audit-logs') page = <LogsPage kind="audit" />;
   else page = <Result status="404" title="页面未注册" subTitle="请检查后台菜单的组件路径。" />;
-  const menu = (
-    <Menu
-      theme="dark"
-      mode="inline"
-      selectedKeys={[path]}
-      items={items}
-      onClick={({ key }) => {
-        if (!key.startsWith('directory:')) {
-          nav(key);
-          setNavigationOpen(false);
-        }
-      }}
-    />
-  );
   return (
     <>
-      <Layout className="shell">
-        <Layout.Sider width={238} theme="dark" className="desktop-navigation">
-          <div className="brand">
-            TC <span>ThingConnect</span>
-          </div>
-          {menu}
-        </Layout.Sider>
-        <Layout className="shell-main">
-          <Layout.Header className="top">
-            <Space>
-              <Button
-                className="mobile-navigation-button"
-                type="text"
-                aria-label="打开导航菜单"
-                icon={<MenuOutlined />}
-                onClick={() => setNavigationOpen(true)}
-              />
-              <Typography.Text strong>
-                {menus.find((x) => x.path === path)?.name || '管理后台'}
-              </Typography.Text>
-            </Space>
-            <Space>
-              <Avatar icon={<UserOutlined />} />
-              <span>{currentUser?.nick_name || currentUser?.email}</span>
-              <Button
-                type="text"
-                icon={<LogoutOutlined />}
-                onClick={async () => {
-                  await api('/auth/logout', { method: 'POST' }).catch(() => {});
-                  setAccessToken('');
-                  onLogout();
-                }}
-              >
-                退出
-              </Button>
-            </Space>
-          </Layout.Header>
-          <Layout.Content className="content">
-            <Suspense fallback={<Spin size="large" />}>{page}</Suspense>
-          </Layout.Content>
-        </Layout>
-      </Layout>
-      <Drawer
-        className="mobile-navigation"
-        width={280}
-        placement="left"
-        open={navigationOpen}
+      <ProLayout
         title="ThingConnect"
-        styles={{ body: { padding: 0, background: '#001529' } }}
-        onClose={() => setNavigationOpen(false)}
+        logo={<ApiOutlined />}
+        layout="side"
+        navTheme="light"
+        fixedHeader
+        fixSiderbar
+        siderWidth={224}
+        collapsed={collapsed}
+        onCollapse={setCollapsed}
+        location={{ pathname: path }}
+        menuDataRender={() => items}
+        menu={{ locale: false }}
+        menuItemRender={(item, dom) => (
+          <a
+            href={`/admin${item.path || '/'}`}
+            onClick={(event) => {
+              if (
+                event.button === 0 &&
+                !event.ctrlKey &&
+                !event.metaKey &&
+                !event.shiftKey &&
+                !event.altKey
+              ) {
+                event.preventDefault();
+                if (item.path) nav(item.path);
+              }
+            }}
+          >
+            {dom}
+          </a>
+        )}
+        avatarProps={{
+          icon: <UserOutlined />,
+          title: currentUser?.nick_name || currentUser?.email,
+        }}
+        actionsRender={() => [
+          <Button
+            key="logout"
+            type="text"
+            icon={<LogoutOutlined />}
+            onClick={async () => {
+              await api('/auth/logout', { method: 'POST' }).catch(() => {});
+              setAccessToken('');
+              onLogout();
+            }}
+          >
+            退出
+          </Button>,
+        ]}
+        contentStyle={{ padding: 16, minWidth: 0 }}
       >
-        {menu}
-      </Drawer>
+        <Suspense fallback={<Spin size="large" />}>
+          <div className="admin-page" key={path}>
+            {page}
+          </div>
+        </Suspense>
+      </ProLayout>
       <Modal
         open={mustChangePassword}
         title="首次登录请修改初始密码"
@@ -461,7 +463,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         closable={false}
         maskClosable={false}
       >
-        <Form layout="vertical" onFinish={changePassword}>
+        <Form name="App-2" layout="vertical" onFinish={changePassword}>
           <Form.Item name="current_password" label="当前密码" rules={[{ required: true }]}>
             <Input.Password autoComplete="current-password" />
           </Form.Item>

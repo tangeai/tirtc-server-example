@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   Alert,
   Button,
@@ -12,7 +12,7 @@ import {
   Switch,
   Table,
   Tag,
-  message,
+  App as AntApp,
 } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { api, json } from '../../api';
@@ -28,9 +28,13 @@ import {
 } from '../../shared/admin-ui';
 
 export function AdminUsersPage() {
+  const { message } = AntApp.useApp();
+  const [saving, setSaving] = useState(false);
+  const [page, setPage] = useState(1);
+  const sessionRequest = useRef(0);
   const [data, loading, reload] = useLoad(
-    () => api<PageData>('/admin-users?page=1&page_size=100'),
-    [],
+    () => api<PageData>(`/admin-users?page=${page}&page_size=20`),
+    [page],
   );
   const [roleData] = useLoad(() => api<{ items: AnyRow[] }>('/roles'), []);
   const [editing, setEditing] = useState<AnyRow | null>(null);
@@ -45,6 +49,8 @@ export function AdminUsersPage() {
   const roleName = (code: string) =>
     roleData?.items.find((role) => role.code === code)?.name || code;
   const save = async (v: AnyRow) => {
+    if (saving) return;
+    setSaving(true);
     try {
       const body = {
         email: v.email,
@@ -65,10 +71,14 @@ export function AdminUsersPage() {
       reload();
     } catch (e) {
       reportError(e);
+    } finally {
+      setSaving(false);
     }
   };
   const runSensitive = async (v: AnyRow) => {
     if (!sensitive) return;
+    if (saving) return;
+    setSaving(true);
     try {
       const path =
         sensitive.type === 'sessions'
@@ -87,18 +97,22 @@ export function AdminUsersPage() {
       reload();
     } catch (e) {
       reportError(e);
+    } finally {
+      setSaving(false);
     }
   };
   const openSessions = async (row: AnyRow) => {
+    const request = ++sessionRequest.current;
+    setSessions([]);
     setSessionOwner(row);
     setSessionsLoading(true);
     try {
       const result = await api<{ items: AnyRow[] }>(`/admin-users/${row.id}/sessions`);
-      setSessions(result.items);
+      if (request === sessionRequest.current) setSessions(result.items);
     } catch (e) {
       reportError(e);
     } finally {
-      setSessionsLoading(false);
+      if (request === sessionRequest.current) setSessionsLoading(false);
     }
   };
   return (
@@ -112,9 +126,18 @@ export function AdminUsersPage() {
       )}
       <Card>
         <Table
+          scroll={{ x: 900 }}
           rowKey="id"
           loading={loading}
           dataSource={data?.items}
+          pagination={{
+            current: page,
+            pageSize: 20,
+            total: data?.total || 0,
+            showSizeChanger: false,
+            showTotal: (total) => `共 ${total} 位管理员`,
+            onChange: setPage,
+          }}
           columns={[
             {
               title: '管理员',
@@ -151,7 +174,7 @@ export function AdminUsersPage() {
             {
               title: '操作',
               render: (_, r) => (
-                <Space>
+                <Space wrap>
                   <Button type="link" onClick={() => setEditing(r)}>
                     编辑
                   </Button>
@@ -180,11 +203,12 @@ export function AdminUsersPage() {
         open={editing !== null}
         title={editing?.id ? '编辑管理员' : '新增管理员'}
         footer={null}
-        destroyOnClose
+        destroyOnHidden
         onCancel={() => setEditing(null)}
       >
         {editing !== null && (
           <Form
+            name="admin-users-1"
             layout="vertical"
             onFinish={save}
             initialValues={{
@@ -249,7 +273,7 @@ export function AdminUsersPage() {
             <Form.Item name="reason" label="操作原因" rules={[{ required: true }]}>
               <Input placeholder="说明新增或修改原因" />
             </Form.Item>
-            <Button type="primary" htmlType="submit">
+            <Button type="primary" htmlType="submit" loading={saving}>
               保存
             </Button>
           </Form>
@@ -259,28 +283,32 @@ export function AdminUsersPage() {
         open={!!sensitive}
         title={sensitive?.type === 'sessions' ? '撤销全部会话' : '重置管理员双重验证'}
         footer={null}
-        destroyOnClose
+        destroyOnHidden
         onCancel={() => setSensitive(null)}
       >
         {sensitive && (
-          <Form layout="vertical" onFinish={runSensitive}>
+          <Form name="admin-users-2" layout="vertical" onFinish={runSensitive}>
             <StepUpFields alert />
             <Form.Item name="reason" label="操作原因" rules={[{ required: true }]}>
               <Input placeholder="说明执行原因" />
             </Form.Item>
-            <Button danger type="primary" htmlType="submit">
+            <Button danger type="primary" htmlType="submit" loading={saving}>
               确认执行
             </Button>
           </Form>
         )}
       </Modal>
       <Drawer
-        width={760}
+        width="min(760px, 100vw)"
         open={!!sessionOwner}
         title={`管理员会话：${sessionOwner?.email || ''}`}
-        onClose={() => setSessionOwner(undefined)}
+        onClose={() => {
+          sessionRequest.current++;
+          setSessionOwner(undefined);
+        }}
       >
         <Table
+          scroll={{ x: 900 }}
           rowKey="id"
           loading={sessionsLoading}
           dataSource={sessions}

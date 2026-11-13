@@ -49,16 +49,32 @@ func (s *Store) SeedDefaults(ctx context.Context) error {
 		}
 	}
 	menuIDs := make(map[string]int64, len(defaultMenus))
+	createdVoIPDevices := false
 	for _, menu := range defaultMenus {
 		parentID := menuIDs[menu.ParentCode]
-		if _, err := tx.ExecContext(ctx, `INSERT IGNORE INTO admin_menus (parent_id,menu_code,name,path,permission_code,menu_type,sort_no) VALUES (?,?,?,?,?,?,?)`, parentID, menu.Code, menu.Name, menu.Path, menu.Permission, menu.MenuType, menu.Sort); err != nil {
+		result, err := tx.ExecContext(ctx, `INSERT IGNORE INTO admin_menus (parent_id,menu_code,name,path,permission_code,menu_type,sort_no) VALUES (?,?,?,?,?,?,?)`, parentID, menu.Code, menu.Name, menu.Path, menu.Permission, menu.MenuType, menu.Sort)
+		if err != nil {
 			return fmt.Errorf("seed menu %s: %w", menu.Code, err)
+		}
+		if menu.Code == "voip-devices" {
+			rows, err := result.RowsAffected()
+			if err != nil {
+				return err
+			}
+			createdVoIPDevices = rows > 0
 		}
 		var menuID int64
 		if err := tx.GetContext(ctx, &menuID, `SELECT id FROM admin_menus WHERE menu_code=?`, menu.Code); err != nil {
 			return fmt.Errorf("load seeded menu %s: %w", menu.Code, err)
 		}
 		menuIDs[menu.Code] = menuID
+	}
+	// Split the original combined VoIP page without losing existing menu grants.
+	// Copy only on first creation so later explicit revocations stay revoked.
+	if createdVoIPDevices {
+		if _, err := tx.ExecContext(ctx, `INSERT IGNORE INTO admin_role_menus(role_id,menu_id) SELECT rm.role_id,? FROM admin_role_menus rm JOIN admin_menus m ON m.id=rm.menu_id WHERE m.menu_code='voip-config' AND m.path='/configs/voip-server'`, menuIDs["voip-devices"]); err != nil {
+			return err
+		}
 	}
 	// Preserve access to types for roles assigned the old combined page. This
 	// runs only while that built-in entry still has its previous parent.

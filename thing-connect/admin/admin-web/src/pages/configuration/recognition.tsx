@@ -1,10 +1,14 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   Alert,
   Button,
   Card,
   Checkbox,
   Drawer,
+  Descriptions,
+  Collapse,
+  Empty,
+  App as AntApp,
   Form,
   Input,
   InputNumber,
@@ -18,7 +22,7 @@ import {
 } from 'antd';
 import { api, json } from '../../api';
 import { reportError } from '../../error-feedback';
-import { useLoad } from '../../shared/admin-ui';
+import { pageTitle, useLoad } from '../../shared/admin-ui';
 import { ConfigPage } from './config-page';
 
 type Scheme = {
@@ -53,17 +57,35 @@ type DeviceState = {
     tts_characters: number;
   };
 };
+type RecognitionResult = {
+  item_id: string;
+  scheme_id: string;
+  status: string;
+  result?: { summary?: string };
+  error?: { msg?: string };
+};
 type RecordRow = {
-  task: { request_id: string; device_id: string; status: string; results: unknown[] };
+  task: { request_id: string; device_id: string; status: string; results: RecognitionResult[] };
   calls: unknown[];
 };
+const recognitionStatus = (value: string) =>
+  ({
+    queued: '待执行',
+    processing: '处理中',
+    succeeded: '成功',
+    partial_failed: '部分失败',
+    failed: '失败',
+    unknown: '结果待确认',
+    cancelled: '已取消',
+  })[value] || '未知状态';
 const outputs: Record<string, string> = { text: '文字', audio: '语音', text_audio: '文字＋语音' };
 export function RecognitionPage({ mode = 'business' }: { mode?: 'business' | 'configuration' }) {
+  const { message } = AntApp.useApp();
   const [access] = useLoad<{ permissions: string[] }>(() => api('/permissions'));
   const can = (permission: string) =>
     !!access?.permissions.some((p) => p === '*' || p === permission);
   const canReadTypes = can('recognition.read');
-  const [data, , reload] = useLoad<Scheme[]>(
+  const [data, typesLoading, reload] = useLoad<Scheme[]>(
     () =>
       mode === 'configuration' && canReadTypes
         ? api<Scheme[]>('/recognition/schemes')
@@ -74,6 +96,23 @@ export function RecognitionPage({ mode = 'business' }: { mode?: 'business' | 'co
   const [form] = Form.useForm();
   const [busy, setBusy] = useState(false);
   const [device, setDevice] = useState('');
+  const [loadedDevice, setLoadedDevice] = useState('');
+  const [deviceLoading, setDeviceLoading] = useState(false);
+  const [recordsLoading, setRecordsLoading] = useState(false);
+  const [recordsLoaded, setRecordsLoaded] = useState(false);
+  const deviceRequest = useRef(0);
+  const recordRequest = useRef(0);
+  const changeDevice = (value: string) => {
+    deviceRequest.current++;
+    recordRequest.current++;
+    setDevice(value);
+    setState(undefined);
+    setRecords([]);
+    setLoadedDevice('');
+    setDeviceLoading(false);
+    setRecordsLoading(false);
+    setRecordsLoaded(false);
+  };
   const [state, setState] = useState<DeviceState>();
   const [records, setRecords] = useState<RecordRow[]>([]);
   const [selected, setSelected] = useState<RecordRow>();
@@ -117,48 +156,81 @@ export function RecognitionPage({ mode = 'business' }: { mode?: 'business' | 'co
     }
   };
   const loadDevice = async () => {
+    const id = device.trim(),
+      request = ++deviceRequest.current;
+    if (!id) return;
+    setState(undefined);
+    setLoadedDevice('');
+    setDeviceLoading(true);
     try {
-      setState(await api<DeviceState>(`/devices/${encodeURIComponent(device)}/recognition`));
+      const result = await api<DeviceState>(`/devices/${encodeURIComponent(id)}/recognition`);
+      if (request === deviceRequest.current) {
+        setState(result);
+        setLoadedDevice(id);
+      }
     } catch (e) {
-      setState(undefined);
-      reportError(e);
+      if (request === deviceRequest.current) reportError(e);
+    } finally {
+      if (request === deviceRequest.current) setDeviceLoading(false);
     }
   };
   const loadRecords = async () => {
+    const request = ++recordRequest.current;
+    setRecords([]);
+    setRecordsLoading(true);
+    setRecordsLoaded(false);
     try {
-      setRecords(
-        await api<RecordRow[]>(`/recognition/requests?device_id=${encodeURIComponent(device)}`),
+      const result = await api<RecordRow[]>(
+        `/recognition/requests?device_id=${encodeURIComponent(device.trim())}`,
       );
+      if (request === recordRequest.current) {
+        setRecords(result);
+        setRecordsLoaded(true);
+      }
     } catch (e) {
-      reportError(e);
+      if (request === recordRequest.current) reportError(e);
+    } finally {
+      if (request === recordRequest.current) setRecordsLoading(false);
     }
   };
   return (
     <>
-      <Typography.Title level={3}>AI识别</Typography.Title>
+      {pageTitle(
+        'AI识别',
+        mode === 'configuration'
+          ? '识别类型、发布版本与服务连接配置'
+          : '按设备查询识别额度、执行结果与模型用量',
+      )}
       <Tabs
         items={[
           {
             key: 'types',
             label: '识别类型',
             children: (
-              <Card>
-                <Space className="toolbar">
-                  <Button
-                    type="primary"
-                    disabled={!can('recognition.write')}
-                    onClick={() => open()}
-                  >
-                    新增类型
-                  </Button>
-                  <Button onClick={() => reload()}>刷新</Button>
-                  <Typography.Text type="secondary">
-                    音频分析 · 名称和提示词由管理员定义
-                  </Typography.Text>
-                </Space>
+              <Card
+                title="识别类型"
+                extra={
+                  <Space wrap>
+                    <Button loading={typesLoading} onClick={reload}>
+                      刷新
+                    </Button>
+                    <Button
+                      type="primary"
+                      disabled={!can('recognition.write')}
+                      onClick={() => open()}
+                    >
+                      新增类型
+                    </Button>
+                  </Space>
+                }
+              >
+                <Typography.Paragraph type="secondary">
+                  音频分析 · 名称和提示词由管理员定义
+                </Typography.Paragraph>
                 <Table
                   rowKey="scheme_id"
                   dataSource={data || []}
+                  loading={typesLoading}
                   scroll={{ x: 1000 }}
                   columns={[
                     { title: '名称', dataIndex: 'name' },
@@ -174,13 +246,13 @@ export function RecognitionPage({ mode = 'business' }: { mode?: 'business' | 'co
                     {
                       title: '操作',
                       render: (_, s: Scheme) => (
-                        <Space>
+                        <Space wrap>
                           <Button type="link" onClick={() => open(s)}>
                             编辑 / 发布
                           </Button>
                           <Button
                             type="link"
-                            disabled={!s.scheme_version || busy}
+                            disabled={!s.scheme_version || busy || !can('recognition.write')}
                             onClick={() =>
                               mutate(
                                 { ...s, enabled: !s.enabled },
@@ -208,12 +280,20 @@ export function RecognitionPage({ mode = 'business' }: { mode?: 'business' | 'co
                   <Input
                     placeholder="设备 ID"
                     value={device}
-                    onChange={(e) => setDevice(e.target.value)}
+                    onChange={(e) => changeDevice(e.target.value)}
                   />
-                  <Button disabled={!device} onClick={loadDevice}>
+                  <Button
+                    type="primary"
+                    disabled={!device.trim()}
+                    loading={deviceLoading}
+                    onClick={loadDevice}
+                  >
                     查询设备
                   </Button>
                 </Space>
+                {!state && !deviceLoading && (
+                  <Empty description="输入设备 ID 并查询，查看该设备的用量与额度" />
+                )}
                 {state && (
                   <>
                     <Alert
@@ -225,13 +305,18 @@ export function RecognitionPage({ mode = 'business' }: { mode?: 'business' | 'co
                       {state.schemes.map((s) => s.name).join(' → ') || '未选择'}
                     </Typography.Paragraph>
                     <Form
-                      key={`${device}:${state.policy.revision}`}
+                      name="recognition-1"
+                      key={`${loadedDevice}:${state.policy.revision}`}
+                      disabled={!can('recognition.write') || busy}
                       layout="vertical"
                       initialValues={state.policy}
                       onFinish={async (v) => {
+                        if (!loadedDevice || busy) return;
+                        const request = deviceRequest.current;
+                        setBusy(true);
                         try {
                           const next = await api<DeviceState>(
-                            `/devices/${encodeURIComponent(device)}/recognition`,
+                            `/devices/${encodeURIComponent(loadedDevice)}/recognition`,
                             json('PUT', {
                               allowed: v.allowed,
                               monthly_limit: v.monthly_limit,
@@ -239,9 +324,12 @@ export function RecognitionPage({ mode = 'business' }: { mode?: 'business' | 'co
                               reason: v.reason,
                             }),
                           );
-                          setState(next);
+                          if (request === deviceRequest.current) setState(next);
+                          message.success(`设备 ${loadedDevice} 的额度已保存`);
                         } catch (e) {
                           reportError(e);
+                        } finally {
+                          setBusy(false);
                         }
                       }}
                     >
@@ -262,7 +350,7 @@ export function RecognitionPage({ mode = 'business' }: { mode?: 'business' | 'co
                       >
                         <Input />
                       </Form.Item>
-                      <Button htmlType="submit" type="primary">
+                      <Button htmlType="submit" type="primary" loading={busy}>
                         保存上限
                       </Button>
                     </Form>
@@ -280,17 +368,29 @@ export function RecognitionPage({ mode = 'business' }: { mode?: 'business' | 'co
                   <Input
                     placeholder="设备 ID（留空查询全部）"
                     value={device}
-                    onChange={(e) => setDevice(e.target.value)}
+                    onChange={(e) => changeDevice(e.target.value)}
                   />
-                  <Button onClick={loadRecords}>查询最近50条</Button>
+                  <Button type="primary" loading={recordsLoading} onClick={loadRecords}>
+                    查询最近 50 条
+                  </Button>
                 </Space>
                 <Table
+                  scroll={{ x: 900 }}
                   rowKey={(v) => v.task.device_id + v.task.request_id}
                   dataSource={records}
+                  loading={recordsLoading}
+                  locale={{
+                    emptyText: recordsLoaded
+                      ? '没有匹配的识别记录'
+                      : '点击查询，读取最近 50 条识别记录',
+                  }}
                   columns={[
                     { title: '设备', render: (_, v: RecordRow) => v.task.device_id },
                     { title: '任务', render: (_, v: RecordRow) => v.task.request_id },
-                    { title: '状态', render: (_, v: RecordRow) => v.task.status },
+                    {
+                      title: '状态',
+                      render: (_, v: RecordRow) => recognitionStatus(v.task.status),
+                    },
                     {
                       title: '结果与逐次用量',
                       render: (_, v: RecordRow) => (
@@ -314,9 +414,16 @@ export function RecognitionPage({ mode = 'business' }: { mode?: 'business' | 'co
             : item.key === 'device' || item.key === 'records',
         )}
       />
-      <Drawer width={680} open={!!edit} title="AI识别类型" onClose={() => setEdit(undefined)}>
+      <Drawer
+        width="min(680px, 100vw)"
+        open={!!edit}
+        title="AI识别类型"
+        onClose={() => setEdit(undefined)}
+      >
         <Form
+          name="recognition-2"
           form={form}
+          disabled={!can('recognition.write')}
           layout="vertical"
           onFinish={(v) => {
             if (!edit) return;
@@ -382,7 +489,7 @@ export function RecognitionPage({ mode = 'business' }: { mode?: 'business' | 'co
           <Form.Item name="reason" label="修改原因" rules={[{ required: true, whitespace: true }]}>
             <Input />
           </Form.Item>
-          <Space>
+          <Space wrap>
             <Button type="primary" htmlType="submit" loading={busy}>
               保存草稿
             </Button>
@@ -408,12 +515,49 @@ export function RecognitionPage({ mode = 'business' }: { mode?: 'business' | 'co
         </Form>
       </Drawer>
       <Drawer
-        width={700}
+        width="min(700px, 100vw)"
         open={!!selected}
         title="结果与逐次模型消耗"
         onClose={() => setSelected(undefined)}
       >
-        <pre className="profile-json">{JSON.stringify(selected, null, 2)}</pre>
+        {selected && (
+          <>
+            <Descriptions
+              bordered
+              column={1}
+              items={[
+                { key: 'device', label: '设备 ID', children: selected.task.device_id },
+                { key: 'request', label: '任务编号', children: selected.task.request_id },
+                { key: 'status', label: '状态', children: recognitionStatus(selected.task.status) },
+                { key: 'calls', label: '模型调用次数', children: selected.calls.length },
+              ]}
+            />
+            <Typography.Title level={5}>识别结果</Typography.Title>
+            <Table
+              rowKey={(_, index) => String(index)}
+              pagination={false}
+              scroll={{ x: 600 }}
+              dataSource={selected.task.results}
+              columns={[
+                { title: '类型', render: (_, row) => row.scheme_id || row.item_id || '—' },
+                { title: '状态', render: (_, row) => recognitionStatus(row.status) },
+                {
+                  title: '内容',
+                  render: (_, row) => row.result?.summary || row.error?.msg || '暂无文字结果',
+                },
+              ]}
+            />
+            <Collapse
+              items={[
+                {
+                  key: 'raw',
+                  label: '查看完整结果与逐次调用数据',
+                  children: <pre className="profile-json">{JSON.stringify(selected, null, 2)}</pre>,
+                },
+              ]}
+            />
+          </>
+        )}
       </Drawer>
     </>
   );

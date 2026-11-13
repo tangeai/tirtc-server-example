@@ -14,7 +14,7 @@ import {
   Tabs,
   Tag,
   Typography,
-  message,
+  App as AntApp,
 } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { api, json } from '../../api';
@@ -29,6 +29,8 @@ import {
 import { iconOptions, nameWithCode, routeNames } from '../../shared/admin-metadata';
 
 export function RolesPage() {
+  const { message } = AntApp.useApp();
+  const [saving, setSaving] = useState(false);
   const [roles, loading, reload] = useLoad(
     () =>
       api<{
@@ -45,6 +47,8 @@ export function RolesPage() {
   const [menuEdit, setMenuEdit] = useState<AnyRow | null>(null);
   const [grantedMenuIDs, setGrantedMenuIDs] = useState<number[]>([]);
   const saveRole = async (v: AnyRow) => {
+    if (saving) return;
+    setSaving(true);
     try {
       const body = {
         code: v.code,
@@ -66,9 +70,13 @@ export function RolesPage() {
       reload();
     } catch (e) {
       reportError(e);
+    } finally {
+      setSaving(false);
     }
   };
   const savePermissions = async (v: AnyRow) => {
+    if (saving) return;
+    setSaving(true);
     try {
       await api(
         `/roles/${permissionEdit!.id}/permissions`,
@@ -84,6 +92,8 @@ export function RolesPage() {
       reload();
     } catch (e) {
       reportError(e);
+    } finally {
+      setSaving(false);
     }
   };
   const openMenus = async (row: AnyRow) => {
@@ -96,6 +106,8 @@ export function RolesPage() {
     }
   };
   const saveMenus = async (v: AnyRow) => {
+    if (saving) return;
+    setSaving(true);
     try {
       await api(
         `/roles/${menuGrant!.id}/menus`,
@@ -105,9 +117,13 @@ export function RolesPage() {
       setMenuGrant(null);
     } catch (e) {
       reportError(e);
+    } finally {
+      setSaving(false);
     }
   };
   const saveMenu = async (v: AnyRow) => {
+    if (saving) return;
+    setSaving(true);
     try {
       const body = {
         parent_id: v.parent_id || 0,
@@ -131,6 +147,8 @@ export function RolesPage() {
       reloadMenus();
     } catch (e) {
       reportError(e);
+    } finally {
+      setSaving(false);
     }
   };
   const permissionDefinitions = roles?.permission_definitions || [];
@@ -159,7 +177,7 @@ export function RolesPage() {
       {title(
         '权限与菜单',
         '按业务模块配置角色权限、继承关系与可见菜单',
-        <Space>
+        <Space wrap>
           <Button
             icon={<ReloadOutlined />}
             onClick={() => {
@@ -182,6 +200,7 @@ export function RolesPage() {
             children: (
               <Card>
                 <Table
+                  scroll={{ x: 900 }}
                   rowKey="id"
                   loading={loading}
                   dataSource={roles?.items}
@@ -226,7 +245,7 @@ export function RolesPage() {
                     {
                       title: '操作',
                       render: (_, r) => (
-                        <Space>
+                        <Space wrap>
                           <Button type="link" onClick={() => setRoleEdit(r)}>
                             编辑
                           </Button>
@@ -264,6 +283,7 @@ export function RolesPage() {
                   }
                 >
                   <Table
+                    scroll={{ x: 900 }}
                     rowKey="id"
                     dataSource={menus?.items}
                     columns={[
@@ -316,11 +336,12 @@ export function RolesPage() {
         open={roleEdit !== null}
         title={roleEdit?.id ? '编辑角色' : '新增角色'}
         footer={null}
-        destroyOnClose
+        destroyOnHidden
         onCancel={() => setRoleEdit(null)}
       >
         {roleEdit !== null && (
           <Form
+            name="roles-1"
             layout="vertical"
             onFinish={saveRole}
             initialValues={{
@@ -366,7 +387,7 @@ export function RolesPage() {
             <Form.Item name="reason" label="操作原因" rules={[{ required: true }]}>
               <Input placeholder="说明新增或调整原因" />
             </Form.Item>
-            <Button type="primary" htmlType="submit">
+            <Button type="primary" htmlType="submit" loading={saving}>
               保存
             </Button>
           </Form>
@@ -377,11 +398,12 @@ export function RolesPage() {
         open={!!permissionEdit}
         title={`配置权限：${permissionEdit?.name || ''}`}
         footer={null}
-        destroyOnClose
+        destroyOnHidden
         onCancel={() => setPermissionEdit(null)}
       >
         {permissionEdit && (
           <Form
+            name="roles-2"
             layout="vertical"
             onFinish={savePermissions}
             initialValues={{ permissions: permissionEdit.permissions }}
@@ -405,7 +427,7 @@ export function RolesPage() {
             <Form.Item name="reason" label="操作原因" rules={[{ required: true }]}>
               <Input placeholder="说明权限调整原因" />
             </Form.Item>
-            <Button type="primary" htmlType="submit">
+            <Button type="primary" htmlType="submit" loading={saving}>
               保存权限
             </Button>
           </Form>
@@ -415,11 +437,16 @@ export function RolesPage() {
         open={!!menuGrant}
         title={`配置菜单：${menuGrant?.name || ''}`}
         footer={null}
-        destroyOnClose
+        destroyOnHidden
         onCancel={() => setMenuGrant(null)}
       >
         {menuGrant && (
-          <Form layout="vertical" onFinish={saveMenus} initialValues={{ menu_ids: grantedMenuIDs }}>
+          <Form
+            name="roles-3"
+            layout="vertical"
+            onFinish={saveMenus}
+            initialValues={{ menu_ids: grantedMenuIDs }}
+          >
             <Form.Item name="menu_ids" label="可见菜单">
               <Select
                 mode="multiple"
@@ -429,7 +456,7 @@ export function RolesPage() {
             <Form.Item name="reason" label="操作原因" rules={[{ required: true }]}>
               <Input />
             </Form.Item>
-            <Button type="primary" htmlType="submit">
+            <Button type="primary" htmlType="submit" loading={saving}>
               保存菜单授权
             </Button>
           </Form>
@@ -439,11 +466,12 @@ export function RolesPage() {
         open={menuEdit !== null}
         title={menuEdit?.id ? '编辑菜单' : '新增菜单'}
         footer={null}
-        destroyOnClose
+        destroyOnHidden
         onCancel={() => setMenuEdit(null)}
       >
         {menuEdit !== null && (
           <Form
+            name="roles-4"
             layout="vertical"
             onFinish={saveMenu}
             initialValues={{
@@ -515,7 +543,7 @@ export function RolesPage() {
             <Form.Item name="reason" label="操作原因" rules={[{ required: true }]}>
               <Input placeholder="说明菜单调整原因" />
             </Form.Item>
-            <Button type="primary" htmlType="submit">
+            <Button type="primary" htmlType="submit" loading={saving}>
               保存菜单
             </Button>
           </Form>

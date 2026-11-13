@@ -12,7 +12,7 @@ import {
   Table,
   Tag,
   Typography,
-  message,
+  App as AntApp,
 } from 'antd';
 import { api, json } from '../../api';
 import { reportError } from '../../error-feedback';
@@ -39,6 +39,7 @@ const voiceKey = (voice: Voice) => JSON.stringify([voice.model, voice.id]);
 const statuses = { draft: '草稿', published: '已启用', offline: '未启用' };
 
 export function RoleTypesPage() {
+  const { message } = AntApp.useApp();
   const [items, setItems] = useState<RoleType[]>([]),
     [voices, setVoices] = useState<Voice[]>([]),
     [loading, setLoading] = useState(true),
@@ -228,7 +229,7 @@ export function RoleTypesPage() {
       {pageTitle(
         'AI 角色类型',
         '维护用户创建角色时使用的类型名称、音色和默认提示词。',
-        <Space>
+        <Space wrap>
           <Button onClick={() => void load()} disabled={busy || loading}>
             刷新
           </Button>
@@ -327,7 +328,7 @@ export function RoleTypesPage() {
               title: '操作',
               width: 170,
               render: (_, item) => (
-                <Space>
+                <Space wrap>
                   <Button disabled={busy} onClick={() => edit(item)}>
                     编辑
                   </Button>
@@ -367,7 +368,13 @@ export function RoleTypesPage() {
         cancelText="取消"
         width={720}
       >
-        <Form form={form} layout="vertical" disabled={busy} className="role-type-editor-form">
+        <Form
+          name="role-types-1"
+          form={form}
+          layout="vertical"
+          disabled={busy}
+          className="role-type-editor-form"
+        >
           <Form.Item
             className="role-type-name"
             name="name"

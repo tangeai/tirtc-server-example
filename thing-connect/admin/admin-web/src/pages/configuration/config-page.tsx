@@ -10,13 +10,14 @@ import {
   Table,
   Tag,
   Typography,
-  message,
+  App as AntApp,
 } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { api, json } from '../../api';
 import { reportError } from '../../error-feedback';
 import {
   StepUpFields,
+  ServiceVersion,
   formatTime,
   pageTitle as title,
   serviceStatusTag as statusTag,
@@ -91,6 +92,7 @@ export function ConfigPage({
   embedded?: boolean;
   excludeGroups?: string[];
 }) {
+  const { message } = AntApp.useApp();
   const [defs, , loadDefs] = useLoad(
     () => api<{ items: Definition[] }>(`/config-definitions?namespace=${namespace}`),
     [namespace],
@@ -193,7 +195,7 @@ export function ConfigPage({
     }
   };
   const actions = (
-    <Space>
+    <Space wrap>
       <Button href="/admin/audit-logs">操作日志</Button>
       <Button
         icon={<ReloadOutlined />}
@@ -220,6 +222,7 @@ export function ConfigPage({
       )}
       <Card title={embedded ? '配置项' : undefined} extra={embedded ? actions : undefined}>
         <Table
+          scroll={{ x: 900 }}
           rowKey={(r) => r.definition.config_key}
           loading={loading}
           dataSource={rows}
@@ -310,6 +313,7 @@ export function ConfigPage({
       >
         {editing && (
           <Form
+            name="config-page-1"
             form={form}
             clearOnDestroy
             layout="vertical"
@@ -378,7 +382,7 @@ export function ConfigPage({
                 description={connectionFeedback.message}
               />
             )}
-            <Space>
+            <Space wrap>
               {editing.definition.test_kind && (
                 <Button loading={testingConnection} disabled={publishing} onClick={testConnection}>
                   测试连接
@@ -423,7 +427,12 @@ const instanceColumns = [
     title: '所在节点',
     render: (_: unknown, r: AnyRow) => `${r.node}${r.zone ? ` / ${r.zone}` : ''}`,
   },
-  { title: '程序版本', dataIndex: 'version', render: (v: string) => v || '—' },
+  {
+    title: '程序版本',
+    render: (_: unknown, row: AnyRow) => (
+      <ServiceVersion version={row.version} commit={row.commit} />
+    ),
+  },
   { title: '依赖状态', render: (_: unknown, r: AnyRow) => dependencyText(r.dependencies) },
   { title: '已应用配置', render: (_: unknown, r: AnyRow) => revisionText(r.config_revision) },
   { title: '启动时间', dataIndex: 'started_at', render: formatTime },
@@ -439,7 +448,9 @@ export function ServicePanel({ service }: { service: string }) {
       className="service-card"
       loading={loading}
       title={`${serviceName(service)}状态`}
-      extra={<Button type="text" icon={<ReloadOutlined />} onClick={reload} />}
+      extra={
+        <Button type="text" aria-label="刷新服务状态" icon={<ReloadOutlined />} onClick={reload} />
+      }
     >
       {data && (
         <>
@@ -515,7 +526,9 @@ function CommonServicePanel() {
       className="service-card"
       loading={loading}
       title="通用配置生效服务"
-      extra={<Button type="text" icon={<ReloadOutlined />} onClick={reload} />}
+      extra={
+        <Button type="text" aria-label="刷新服务状态" icon={<ReloadOutlined />} onClick={reload} />
+      }
     >
       {data && (
         <Table<AnyRow>

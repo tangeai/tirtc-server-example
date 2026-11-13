@@ -13,7 +13,7 @@ import {
   Table,
   Tag,
   Typography,
-  message,
+  App as AntApp,
 } from 'antd';
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { api, json } from '../../api';
@@ -21,17 +21,23 @@ import { reportError } from '../../error-feedback';
 import { pageTitle as title, useLoad, type AnyRow } from '../../shared/admin-ui';
 
 export function DictionariesPage() {
+  const { message } = AntApp.useApp();
+  const [saving, setSaving] = useState(false);
   const [types, loading, reload] = useLoad(() => api<{ items: AnyRow[] }>('/dict-types'), []);
   const [selected, setSelected] = useState<AnyRow>();
-  const [items, setItems] = useState<AnyRow[]>([]);
   const [typeEdit, setTypeEdit] = useState<AnyRow | null>(null);
   const [itemEdit, setItemEdit] = useState<AnyRow | null>(null);
-  const loadItems = async (row: AnyRow) => {
-    setSelected(row);
-    const result = await api<{ items: AnyRow[] }>(`/dict-types/${row.code}/items`);
-    setItems(result.items);
-  };
+  const [itemData, itemsLoading, reloadItems] = useLoad<{ items: AnyRow[] }>(
+    () =>
+      selected
+        ? api(`/dict-types/${encodeURIComponent(selected.code)}/items`)
+        : Promise.resolve({ items: [] }),
+    [selected?.code],
+  );
+  const loadItems = (row: AnyRow) => setSelected(row);
   const saveType = async (v: AnyRow) => {
+    if (saving) return;
+    setSaving(true);
     try {
       const body = {
         code: v.code,
@@ -49,10 +55,14 @@ export function DictionariesPage() {
       reload();
     } catch (e) {
       reportError(e);
+    } finally {
+      setSaving(false);
     }
   };
   const saveItem = async (v: AnyRow) => {
     if (!selected) return;
+    if (saving) return;
+    setSaving(true);
     try {
       let extra = {};
       if (v.extra?.trim()) extra = JSON.parse(v.extra);
@@ -72,9 +82,11 @@ export function DictionariesPage() {
       );
       message.success('字典项已保存');
       setItemEdit(null);
-      loadItems(selected);
+      reloadItems();
     } catch (e) {
       reportError(e);
+    } finally {
+      setSaving(false);
     }
   };
   return (
@@ -86,13 +98,19 @@ export function DictionariesPage() {
           新增字典类型
         </Button>,
       )}
-      <Row gutter={16}>
-        <Col span={9}>
+      <Row gutter={[16, 16]}>
+        <Col xs={24} xl={9}>
           <Card>
             <Table
+              scroll={{ x: 400 }}
               rowKey="id"
               loading={loading}
               dataSource={types?.items}
+              rowSelection={{
+                type: 'radio',
+                selectedRowKeys: selected ? [selected.id] : [],
+                onChange: (_, rows) => loadItems(rows[0]),
+              }}
               onRow={(r) => ({ onClick: () => loadItems(r) })}
               columns={[
                 {
@@ -130,12 +148,12 @@ export function DictionariesPage() {
             />
           </Card>
         </Col>
-        <Col span={15}>
+        <Col xs={24} xl={15}>
           <Card
             title={selected ? `${selected.name} 字典项` : '请选择左侧字典'}
             extra={
-              <Space>
-                <Button icon={<ReloadOutlined />} onClick={() => selected && loadItems(selected)}>
+              <Space wrap>
+                <Button icon={<ReloadOutlined />} disabled={!selected} onClick={reloadItems}>
                   刷新
                 </Button>
                 <Button type="primary" disabled={!selected} onClick={() => setItemEdit({})}>
@@ -145,8 +163,10 @@ export function DictionariesPage() {
             }
           >
             <Table
+              scroll={{ x: 900 }}
               rowKey="id"
-              dataSource={items}
+              dataSource={itemData?.items}
+              loading={itemsLoading}
               columns={[
                 { title: '显示名称', dataIndex: 'label' },
                 { title: '接口取值', dataIndex: 'value' },
@@ -178,11 +198,12 @@ export function DictionariesPage() {
         open={typeEdit !== null}
         title={typeEdit?.id ? '编辑字典类型' : '新增字典类型'}
         footer={null}
-        destroyOnClose
+        destroyOnHidden
         onCancel={() => setTypeEdit(null)}
       >
         {typeEdit !== null && (
           <Form
+            name="dictionaries-1"
             layout="vertical"
             onFinish={saveType}
             initialValues={{
@@ -212,7 +233,7 @@ export function DictionariesPage() {
             <Form.Item name="reason" label="操作原因" rules={[{ required: true }]}>
               <Input placeholder="说明新增或调整原因" />
             </Form.Item>
-            <Button type="primary" htmlType="submit">
+            <Button type="primary" htmlType="submit" loading={saving}>
               保存
             </Button>
           </Form>
@@ -222,11 +243,12 @@ export function DictionariesPage() {
         open={itemEdit !== null}
         title={itemEdit?.id ? '编辑字典项' : '新增字典项'}
         footer={null}
-        destroyOnClose
+        destroyOnHidden
         onCancel={() => setItemEdit(null)}
       >
         {itemEdit !== null && (
           <Form
+            name="dictionaries-2"
             layout="vertical"
             onFinish={saveItem}
             initialValues={{
@@ -272,7 +294,7 @@ export function DictionariesPage() {
             <Form.Item name="reason" label="操作原因" rules={[{ required: true }]}>
               <Input placeholder="说明新增或调整原因" />
             </Form.Item>
-            <Button type="primary" htmlType="submit">
+            <Button type="primary" htmlType="submit" loading={saving}>
               保存
             </Button>
           </Form>

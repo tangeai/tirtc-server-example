@@ -1,3 +1,4 @@
+import { PageContainer } from '@ant-design/pro-components';
 import {
   useCallback,
   useEffect,
@@ -24,7 +25,7 @@ export function useLoad<T>(
   deps: DependencyList = [],
 ): [T | undefined, boolean, () => void] {
   const [data, setData] = useState<T>();
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const generation = useRef(0);
   const mounted = useRef(true);
   useEffect(() => {
@@ -37,6 +38,7 @@ export function useLoad<T>(
   const load = useCallback(() => {
     const current = ++generation.current;
     setLoading(true);
+    setData(undefined);
     loader()
       .then((value) => {
         if (mounted.current && generation.current === current) setData(value);
@@ -55,13 +57,13 @@ export function useLoad<T>(
 }
 
 export const pageTitle = (name: string, description: string, action?: ReactNode) => (
-  <div className="page-title">
-    <div>
-      <Typography.Title level={3}>{name}</Typography.Title>
-      <Typography.Text type="secondary">{description}</Typography.Text>
-    </div>
-    {action}
-  </div>
+  <PageContainer
+    className="admin-page-header"
+    ghost
+    title={name}
+    content={description}
+    extra={action}
+  />
 );
 
 export const serviceStatusTag = (value: string) =>
@@ -69,8 +71,10 @@ export const serviceStatusTag = (value: string) =>
     <Tag color="success">健康</Tag>
   ) : value === 'degraded' ? (
     <Tag color="warning">降级</Tag>
-  ) : (
+  ) : value === 'offline' ? (
     <Tag>离线</Tag>
+  ) : (
+    <Tag>状态未知</Tag>
   );
 
 export const formatTime = (value: unknown) => {
@@ -110,5 +114,28 @@ export function StepUpFields({
         <Input autoComplete="one-time-code" />
       </Form.Item>
     </>
+  );
+}
+
+export function ServiceVersion({ version, commit }: { version?: string; commit?: string }) {
+  const legacyCommit = /^[a-f0-9]{7,40}(?:-dirty)?$/i.test(version || '');
+  const dated =
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(version || '') && dayjs(version).isValid();
+  const sourceCommit = commit || (legacyCommit ? version : '');
+  return (
+    <div>
+      <div>
+        {dated
+          ? `${formatTime(version)}（构建）`
+          : legacyCommit
+            ? '历史构建（未记录时间）'
+            : version || '未上报'}
+      </div>
+      {sourceCommit && (
+        <Typography.Text type="secondary" title={sourceCommit}>
+          提交：{sourceCommit}
+        </Typography.Text>
+      )}
+    </div>
   );
 }

@@ -14,7 +14,7 @@ import {
   Tabs,
   Tag,
   Typography,
-  message,
+  App as AntApp,
 } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { api, json } from '../../api';
@@ -35,6 +35,8 @@ const renderTemplate = (source: string) =>
   );
 
 function EmailTemplatesPage() {
+  const { message } = AntApp.useApp();
+  const [saving, setSaving] = useState(false);
   const [defs] = useLoad(
     () => api<{ items: Definition[] }>('/config-definitions?namespace=user-server'),
     [],
@@ -70,6 +72,8 @@ function EmailTemplatesPage() {
   };
   const save = async (v: AnyRow) => {
     if (!editing) return;
+    if (saving) return;
+    setSaving(true);
     try {
       const value = {
         enabled: !!v.enabled,
@@ -92,10 +96,14 @@ function EmailTemplatesPage() {
       reload();
     } catch (e) {
       reportError(e);
+    } finally {
+      setSaving(false);
     }
   };
   const sendTest = async (v: AnyRow) => {
     if (!testing) return;
+    if (saving) return;
+    setSaving(true);
     try {
       await api(
         `/configs/user-server/${testing.definition.config_key}/test`,
@@ -109,6 +117,8 @@ function EmailTemplatesPage() {
       setTesting(null);
     } catch (e) {
       reportError(e);
+    } finally {
+      setSaving(false);
     }
   };
   return (
@@ -117,7 +127,7 @@ function EmailTemplatesPage() {
         className="form-alert"
         type="info"
         showIcon
-        message="支持变量：{{code}}、{{expires_in_minutes}}、{{product_name}}、{{support_email}}；保存时后端会校验未知变量和邮件头注入。"
+        message="支持变量：{{code}}、{{expires_in_minutes}}、{{product_name}}、{{support_email}}。发送测试邮件前，请先保存并发布模板。"
       />
       <Card
         title="邮件模板"
@@ -128,6 +138,7 @@ function EmailTemplatesPage() {
         }
       >
         <Table
+          scroll={{ x: 900 }}
           rowKey={(r) => r.definition.config_key}
           loading={loading}
           dataSource={rows}
@@ -157,7 +168,7 @@ function EmailTemplatesPage() {
             {
               title: '操作',
               render: (_, r) => (
-                <Space>
+                <Space wrap>
                   <Button type="link" onClick={() => open(r)}>
                     编辑与预览
                   </Button>
@@ -175,13 +186,14 @@ function EmailTemplatesPage() {
         open={!!editing}
         title={editing?.definition.name}
         footer={null}
-        destroyOnClose
+        destroyOnHidden
         onCancel={() => setEditing(null)}
       >
         {editing && (
           <Row gutter={20}>
-            <Col span={13}>
+            <Col xs={24} lg={13}>
               <Form
+                name="user-service-1"
                 layout="vertical"
                 onFinish={save}
                 initialValues={editing.entry.value as AnyRow}
@@ -202,12 +214,12 @@ function EmailTemplatesPage() {
                 <Form.Item name="reason" label="发布原因" rules={[{ required: true }]}>
                   <Input />
                 </Form.Item>
-                <Button type="primary" htmlType="submit">
+                <Button type="primary" htmlType="submit" loading={saving}>
                   校验并发布
                 </Button>
               </Form>
             </Col>
-            <Col span={11}>
+            <Col xs={24} lg={11}>
               <Card size="small" title="模拟数据预览">
                 <Typography.Text strong>{renderTemplate(draft.subject)}</Typography.Text>
                 <iframe
@@ -228,11 +240,11 @@ function EmailTemplatesPage() {
         open={!!testing}
         title={`发送模板测试：${testing?.definition.name || ''}`}
         footer={null}
-        destroyOnClose
+        destroyOnHidden
         onCancel={() => setTesting(null)}
       >
         {testing && (
-          <Form layout="vertical" onFinish={sendTest}>
+          <Form name="user-service-2" layout="vertical" onFinish={sendTest}>
             <Form.Item
               name="test_recipient"
               label="测试收件邮箱"
@@ -243,7 +255,7 @@ function EmailTemplatesPage() {
             <Form.Item name="reason" label="测试原因" rules={[{ required: true }]}>
               <Input />
             </Form.Item>
-            <Button type="primary" htmlType="submit">
+            <Button type="primary" htmlType="submit" loading={saving}>
               发送测试邮件
             </Button>
           </Form>
@@ -254,13 +266,16 @@ function EmailTemplatesPage() {
 }
 
 function UserConfigsPage() {
+  const { message } = AntApp.useApp();
+  const [saving, setSaving] = useState(false);
   const [entries] = useLoad(
     () => api<{ items: ConfigEntry[] }>('/configs?namespace=user-server'),
     [],
   );
   const smtp = entries?.items.find((x) => x.config_key === 'smtp');
   const test = async (v: AnyRow) => {
-    if (!smtp) return;
+    if (!smtp || saving) return;
+    setSaving(true);
     try {
       await api(
         '/configs/user-server/smtp/test',
@@ -269,19 +284,21 @@ function UserConfigsPage() {
       message.success('SMTP 测试邮件已发送');
     } catch (e) {
       reportError(e);
+    } finally {
+      setSaving(false);
     }
   };
   return (
     <>
       <Card size="small" title="邮件服务连通性测试（SMTP）" className="form-alert">
-        <Form layout="inline" onFinish={test}>
+        <Form name="user-service-3" layout="inline" onFinish={test}>
           <Form.Item name="test_recipient" rules={[{ required: true, type: 'email' }]}>
             <Input placeholder="测试收件邮箱" />
           </Form.Item>
           <Form.Item name="reason" rules={[{ required: true }]}>
             <Input placeholder="测试原因" />
           </Form.Item>
-          <Button htmlType="submit" disabled={!smtp?.id}>
+          <Button htmlType="submit" loading={saving} disabled={!smtp?.id}>
             发送测试邮件
           </Button>
         </Form>

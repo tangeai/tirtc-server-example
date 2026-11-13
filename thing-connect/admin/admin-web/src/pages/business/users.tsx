@@ -1,3 +1,9 @@
+import {
+  QueryFilter,
+  ProFormText,
+  ProFormSelect,
+  ProFormDateRangePicker,
+} from '@ant-design/pro-components';
 import { IPAddress } from '../../shared/ip-address';
 import { useState } from 'react';
 import {
@@ -12,12 +18,11 @@ import {
   InputNumber,
   Modal,
   Popconfirm,
-  Select,
   Space,
   Table,
   Tag,
   Typography,
-  message,
+  App as AntApp,
 } from 'antd';
 import { api, json } from '../../api';
 import { reportError } from '../../error-feedback';
@@ -31,6 +36,8 @@ import {
 import { assignmentName } from '../../shared/admin-metadata';
 
 export function UsersPage() {
+  const { message } = AntApp.useApp();
+  const [saving, setSaving] = useState(false);
   const screens = Grid.useBreakpoint();
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('');
@@ -50,6 +57,8 @@ export function UsersPage() {
   const [detail, setDetail] = useState<AnyRow>();
   const [resetUser, setResetUser] = useState<AnyRow>();
   const saveQuota = async (v: AnyRow) => {
+    if (saving) return;
+    setSaving(true);
     try {
       await api(
         `/users/${quota!.id}/bind-quota`,
@@ -63,6 +72,8 @@ export function UsersPage() {
       reload();
     } catch (e) {
       reportError(e);
+    } finally {
+      setSaving(false);
     }
   };
   const openDetail = async (row: AnyRow) => {
@@ -74,12 +85,16 @@ export function UsersPage() {
   };
   const sendReset = async (v: AnyRow) => {
     if (!resetUser) return;
+    if (saving) return;
+    setSaving(true);
     try {
       await api(`/users/${resetUser.id}/password-reset-email`, json('POST', { reason: v.reason }));
       message.success('密码重置邮件已进入发送队列');
       setResetUser(undefined);
     } catch (e) {
       reportError(e);
+    } finally {
+      setSaving(false);
     }
   };
   const pagination = {
@@ -92,50 +107,44 @@ export function UsersPage() {
   };
   return (
     <>
-      {title('用户管理', '账号状态、设备归属与绑定额度')}
+      {title(
+        '用户管理',
+        '账号状态、设备归属与绑定额度',
+        <Button onClick={reload} loading={loading}>
+          刷新
+        </Button>,
+      )}
       <Card>
-        <Space className="toolbar" wrap>
-          <Input.Search
-            placeholder="用户 ID 或邮箱"
-            allowClear
-            onSearch={(value) => {
-              setPage(1);
-              setQuery(value);
-            }}
-          />
-          <Select
-            allowClear
-            placeholder="账号状态"
-            style={{ width: 130 }}
+        <QueryFilter
+          name="users-query-1"
+          defaultCollapsed={false}
+          onFinish={async (values) => {
+            setPage(1);
+            setQuery(values.keyword?.trim() || '');
+            setStatus(values.status || '');
+            setCreatedFrom(values.created?.[0] || '');
+            setCreatedTo(values.created?.[1] || '');
+          }}
+          onReset={() => {
+            setPage(1);
+            setQuery('');
+            setStatus('');
+            setCreatedFrom('');
+            setCreatedTo('');
+          }}
+        >
+          <ProFormText name="keyword" label="用户" placeholder="用户 ID 或邮箱" />
+          <ProFormSelect
+            name="status"
+            label="账号状态"
+            placeholder="全部状态"
             options={[
               { label: '正常', value: '1' },
               { label: '禁用', value: '0' },
             ]}
-            onChange={(value) => {
-              setPage(1);
-              setStatus(value ?? '');
-            }}
           />
-          <Input
-            type="date"
-            aria-label="注册开始日期"
-            style={{ width: 150 }}
-            onChange={(e) => {
-              setPage(1);
-              setCreatedFrom(e.target.value);
-            }}
-          />
-          <span>至</span>
-          <Input
-            type="date"
-            aria-label="注册结束日期"
-            style={{ width: 150 }}
-            onChange={(e) => {
-              setPage(1);
-              setCreatedTo(e.target.value);
-            }}
-          />
-        </Space>
+          <ProFormDateRangePicker name="created" label="注册日期" />
+        </QueryFilter>
         <Table
           rowKey="id"
           loading={loading}
@@ -235,10 +244,18 @@ export function UsersPage() {
           ]}
         />
       </Card>
-      <Modal open={!!quota} title="调整绑定额度" footer={null} onCancel={() => setQuota(undefined)}>
+      <Modal
+        destroyOnHidden
+        open={!!quota}
+        title="调整绑定额度"
+        footer={null}
+        onCancel={() => setQuota(undefined)}
+      >
         <Form
+          name="users-1"
           layout="vertical"
           onFinish={saveQuota}
+          key={quota?.id}
           initialValues={{ bind_quota: quota?.bind_quota }}
         >
           <Form.Item name="bind_quota" label="剩余绑定额度" rules={[{ required: true }]}>
@@ -247,7 +264,7 @@ export function UsersPage() {
           <Form.Item name="reason" label="操作原因" rules={[{ required: true }]}>
             <Input placeholder="例如：客户套餐升级" />
           </Form.Item>
-          <Button type="primary" htmlType="submit">
+          <Button type="primary" htmlType="submit" loading={saving}>
             保存
           </Button>
         </Form>
@@ -256,15 +273,15 @@ export function UsersPage() {
         open={!!resetUser}
         title="发送密码重置邮件"
         footer={null}
-        destroyOnClose
+        destroyOnHidden
         onCancel={() => setResetUser(undefined)}
       >
-        <Form layout="vertical" onFinish={sendReset}>
+        <Form name="users-2" layout="vertical" onFinish={sendReset}>
           <Alert className="form-alert" type="info" message={`收件人：${resetUser?.email || ''}`} />
           <Form.Item name="reason" label="操作原因" rules={[{ required: true }]}>
             <Input placeholder="例如：用户请求协助找回密码" />
           </Form.Item>
-          <Button type="primary" htmlType="submit">
+          <Button type="primary" htmlType="submit" loading={saving}>
             确认发送
           </Button>
         </Form>

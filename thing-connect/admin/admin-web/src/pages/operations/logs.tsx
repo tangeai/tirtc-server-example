@@ -1,5 +1,11 @@
+import {
+  QueryFilter,
+  ProFormText,
+  ProFormSelect,
+  ProFormDateRangePicker,
+} from '@ant-design/pro-components';
 import { useState } from 'react';
-import { Button, Card, Input, Select, Space, Table, Tag } from 'antd';
+import { Button, Card, Table, Tag } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { api } from '../../api';
 import {
@@ -22,7 +28,6 @@ export function LogsPage({ kind }: { kind: 'login' | 'audit' }) {
   const path = kind === 'login' ? '/login-logs' : '/audit-logs';
   const [page, setPage] = useState(1);
   const pageSize = 20;
-  const [draft, setDraft] = useState<AnyRow>({});
   const [filters, setFilters] = useState<AnyRow>({});
   const query = Object.entries(filters)
     .filter(([, value]) => value !== '' && value !== undefined)
@@ -32,10 +37,6 @@ export function LogsPage({ kind }: { kind: 'login' | 'audit' }) {
     () => api<PageData>(`${path}?page=${page}&page_size=${pageSize}&${query}`),
     [path, page, query],
   );
-  const applyFilters = () => {
-    setPage(1);
-    setFilters({ ...draft });
-  };
   const columns =
     kind === 'login'
       ? [
@@ -94,76 +95,56 @@ export function LogsPage({ kind }: { kind: 'login' | 'audit' }) {
         </Button>,
       )}
       <Card>
-        <Space className="toolbar" wrap>
-          {kind === 'login' ? (
-            <>
-              <Input
-                placeholder="管理员邮箱"
-                allowClear
-                onChange={(e) => setDraft({ ...draft, email: e.target.value })}
-              />
-              <Select
-                allowClear
-                placeholder="登录结果"
-                style={{ width: 130 }}
-                options={[
-                  { label: '成功', value: '1' },
-                  { label: '失败', value: '0' },
-                ]}
-                onChange={(value) => setDraft({ ...draft, status: value ?? '' })}
-              />
-            </>
-          ) : (
-            <>
-              <Input
-                placeholder="管理员编号"
-                allowClear
-                onChange={(e) => setDraft({ ...draft, admin_user_id: e.target.value })}
-              />
-              <Select
-                allowClear
-                showSearch
-                optionFilterProp="label"
-                placeholder="操作类型"
-                style={{ width: 200 }}
-                options={Object.entries(auditActionNames).map(([value, label]) => ({
-                  label,
-                  value,
-                }))}
-                onChange={(value) => setDraft({ ...draft, action: value ?? '' })}
-              />
-              <Select
-                allowClear
-                placeholder="操作对象"
-                style={{ width: 150 }}
-                options={Object.entries(resourceNames).map(([value, label]) => ({ label, value }))}
-                onChange={(value) => setDraft({ ...draft, resource_type: value ?? '' })}
-              />
-              <Input
-                placeholder="对象编号或标识"
-                allowClear
-                onChange={(e) => setDraft({ ...draft, resource_id: e.target.value })}
-              />
-            </>
+        <QueryFilter
+          name="logs-query-1"
+          defaultCollapsed={false}
+          onFinish={async ({ created, ...values }) => {
+            setPage(1);
+            setFilters({
+              ...values,
+              created_from: created?.[0] || '',
+              created_to: created?.[1] || '',
+            });
+          }}
+          onReset={() => {
+            setPage(1);
+            setFilters({});
+          }}
+        >
+          {kind === 'login' && (
+            <ProFormText name="email" label="管理员邮箱" placeholder="管理员邮箱" />
           )}
-          <Input
-            type="date"
-            aria-label="开始日期"
-            style={{ width: 150 }}
-            onChange={(e) => setDraft({ ...draft, created_from: e.target.value })}
-          />
-          <span>至</span>
-          <Input
-            type="date"
-            aria-label="结束日期"
-            style={{ width: 150 }}
-            onChange={(e) => setDraft({ ...draft, created_to: e.target.value })}
-          />
-          <Button type="primary" onClick={applyFilters}>
-            查询
-          </Button>
-        </Space>
+          {kind === 'login' && (
+            <ProFormSelect
+              name="status"
+              label="登录结果"
+              options={[
+                { label: '成功', value: '1' },
+                { label: '失败', value: '0' },
+              ]}
+            />
+          )}
+          {kind === 'audit' && <ProFormText name="admin_user_id" label="管理员编号" />}
+          {kind === 'audit' && (
+            <ProFormSelect
+              name="action"
+              label="操作类型"
+              showSearch
+              options={Object.entries(auditActionNames).map(([value, label]) => ({ value, label }))}
+            />
+          )}
+          {kind === 'audit' && (
+            <ProFormSelect
+              name="resource_type"
+              label="操作对象"
+              options={Object.entries(resourceNames).map(([value, label]) => ({ value, label }))}
+            />
+          )}
+          {kind === 'audit' && <ProFormText name="resource_id" label="对象编号" />}
+          <ProFormDateRangePicker name="created" label="发生日期" />
+        </QueryFilter>
         <Table
+          scroll={{ x: 900 }}
           rowKey="id"
           loading={loading}
           dataSource={data?.items}

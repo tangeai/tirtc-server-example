@@ -1,3 +1,4 @@
+import { QueryFilter, ProFormText, ProFormSelect } from '@ant-design/pro-components';
 import { IPAddress, type IPLocation } from '../../shared/ip-address';
 import { useState } from 'react';
 import {
@@ -11,17 +12,17 @@ import {
   Input,
   Modal,
   Popconfirm,
-  Select,
   Space,
   Table,
   Tabs,
   Tag,
   Typography,
   Upload,
-  message,
+  Tooltip,
+  App as AntApp,
   type UploadFile,
 } from 'antd';
-import { DownloadOutlined, UploadOutlined } from '@ant-design/icons';
+import { DownloadOutlined, UploadOutlined, ReloadOutlined } from '@ant-design/icons';
 import { api, json } from '../../api';
 import { DeviceReportedProfiles, type ReportedProfiles } from './device-profile';
 import { reportError } from '../../error-feedback';
@@ -80,6 +81,7 @@ type PoolDevice = {
 };
 
 export function DevicesPage() {
+  const { message } = AntApp.useApp();
   const [importOpen, setImportOpen] = useState(false);
   const [importFile, setImportFile] = useState<UploadFile>();
   const [importing, setImporting] = useState(false);
@@ -98,33 +100,34 @@ export function DevicesPage() {
       reportError('CSV 文件不能超过 10 MB');
       return;
     }
-    const content = await file.text();
-    if (content.includes('\ufffd')) {
-      reportError('CSV 文件必须使用 UTF-8 编码');
-      return;
-    }
-    const lines = content.split(/\r?\n/);
-    const header = (lines[0] || '')
-      .replace(/^\ufeff/, '')
-      .split(',')
-      .map((value) => value.trim().toLowerCase());
-    if (header[0] !== 'device_id' || header[1] !== 'device_key') {
-      reportError('CSV 前两列表头必须是 device_id,device_key');
-      return;
-    }
-    if (lines.length < 2 || !lines.slice(1).some((line) => line.trim())) {
-      reportError('CSV 至少需要一行设备数据');
-      return;
-    }
-    if (lines.length > 100001) {
-      reportError('CSV 数据不能超过 10 万行');
-      return;
-    }
-    const form = new FormData();
-    form.append('file', file);
-    form.append('reason', reason);
+    if (importing) return;
     setImporting(true);
     try {
+      const content = await file.text();
+      if (content.includes('\ufffd')) {
+        reportError('CSV 文件必须使用 UTF-8 编码');
+        return;
+      }
+      const lines = content.split(/\r?\n/);
+      const header = (lines[0] || '')
+        .replace(/^\ufeff/, '')
+        .split(',')
+        .map((value) => value.trim().toLowerCase());
+      if (header[0] !== 'device_id' || header[1] !== 'device_key') {
+        reportError('CSV 前两列表头必须是 device_id,device_key');
+        return;
+      }
+      if (lines.length < 2 || !lines.slice(1).some((line) => line.trim())) {
+        reportError('CSV 至少需要一行设备数据');
+        return;
+      }
+      if (lines.length > 100001) {
+        reportError('CSV 数据不能超过 10 万行');
+        return;
+      }
+      const form = new FormData();
+      form.append('file', file);
+      form.append('reason', reason);
       await api('/device-pool/imports', { method: 'POST', body: form });
       message.success('导入任务已创建，可在任务中心查看进度');
       closeImport();
@@ -146,7 +149,7 @@ export function DevicesPage() {
       )}
       <Card>
         <Tabs
-          destroyInactiveTabPane
+          destroyOnHidden
           items={[
             { key: 'devices', label: '用户设备', children: <UserDevicesPanel /> },
             { key: 'pool', label: '设备池', children: <DevicePoolPanel /> },
@@ -158,7 +161,7 @@ export function DevicesPage() {
         open={importOpen}
         title="导入设备池"
         footer={null}
-        destroyOnClose
+        destroyOnHidden
         onCancel={closeImport}
       >
         <Alert
@@ -182,7 +185,7 @@ export function DevicesPage() {
             </div>
           }
         />
-        <Form layout="vertical" onFinish={importDevices}>
+        <Form name="devices-1" layout="vertical" onFinish={importDevices}>
           <Form.Item label="选择 CSV 文件" required>
             <Upload.Dragger
               accept=".csv,text/csv"
@@ -215,7 +218,7 @@ export function DevicesPage() {
           >
             <Input placeholder="例如：导入生产批次设备" />
           </Form.Item>
-          <Space>
+          <Space wrap>
             <Button type="primary" htmlType="submit" loading={importing}>
               创建导入任务
             </Button>
@@ -228,6 +231,7 @@ export function DevicesPage() {
 }
 
 function UserDevicesPanel() {
+  const { message } = AntApp.useApp();
   const screens = Grid.useBreakpoint();
   const [query, setQuery] = useState('');
   const [bound, setBound] = useState('');
@@ -273,29 +277,43 @@ function UserDevicesPanel() {
   };
   return (
     <>
-      <Space className="toolbar">
-        <Input.Search
-          placeholder="设备 ID、MAC 或用户邮箱"
-          allowClear
-          onSearch={(value) => {
-            setPage(1);
-            setQuery(value);
-          }}
-        />
-        <Select
-          allowClear
-          placeholder="绑定状态"
-          style={{ width: 130 }}
+      <QueryFilter
+        name="devices-query-1"
+        defaultCollapsed={false}
+        submitter={{
+          render: (_, actions) => [
+            ...actions,
+            <Tooltip key="refresh" title="刷新设备（保留当前筛选）">
+              <Button
+                aria-label="刷新设备"
+                icon={<ReloadOutlined />}
+                loading={loading}
+                onClick={reload}
+              />
+            </Tooltip>,
+          ],
+        }}
+        onFinish={async (values) => {
+          setPage(1);
+          setQuery(values.keyword?.trim() || '');
+          setBound(values.bound || '');
+        }}
+        onReset={() => {
+          setPage(1);
+          setQuery('');
+          setBound('');
+        }}
+      >
+        <ProFormText name="keyword" label="设备 / 用户" placeholder="设备 ID、MAC 或用户邮箱" />
+        <ProFormSelect
+          name="bound"
+          label="绑定状态"
           options={[
             { label: '已绑定', value: 'true' },
-            { label: '已解绑', value: 'false' },
+            { label: '未绑定', value: 'false' },
           ]}
-          onChange={(value) => {
-            setPage(1);
-            setBound(value ?? '');
-          }}
         />
-      </Space>
+      </QueryFilter>
       <Table<ManagedDevice>
         rowKey="id"
         loading={loading}
@@ -489,6 +507,7 @@ function UserDevicesPanel() {
             />
             <Typography.Title level={5}>绑定历史</Typography.Title>
             <Table<BindLog>
+              scroll={{ x: 900 }}
               className="job-items"
               rowKey="id"
               size="small"
@@ -519,7 +538,7 @@ function DevicePoolPanel() {
   const [state, setState] = useState('');
   const [page, setPage] = useState(1);
   const pageSize = 20;
-  const [data, loading] = useLoad(
+  const [data, loading, reload] = useLoad(
     () =>
       api<PageData<PoolDevice>>(
         `/device-pool?page=${page}&page_size=${pageSize}&keyword=${encodeURIComponent(query)}&state=${state}`,
@@ -540,30 +559,44 @@ function DevicePoolPanel() {
         message="设备池不会显示设备密钥"
         description="已解绑设备保留原设备身份，不会再次分配给其他用户。导入来源可跳转到任务中心核对逐行结果。"
       />
-      <Space className="toolbar">
-        <Input.Search
-          placeholder="设备 ID"
-          allowClear
-          onSearch={(value) => {
-            setPage(1);
-            setQuery(value);
-          }}
-        />
-        <Select
-          allowClear
-          placeholder="设备池状态"
-          style={{ width: 160 }}
+      <QueryFilter
+        name="devices-query-2"
+        defaultCollapsed={false}
+        submitter={{
+          render: (_, actions) => [
+            ...actions,
+            <Tooltip key="refresh" title="刷新设备池（保留当前筛选）">
+              <Button
+                aria-label="刷新设备池"
+                icon={<ReloadOutlined />}
+                loading={loading}
+                onClick={reload}
+              />
+            </Tooltip>,
+          ],
+        }}
+        onFinish={async (values) => {
+          setPage(1);
+          setQuery(values.keyword?.trim() || '');
+          setState(values.state || '');
+        }}
+        onReset={() => {
+          setPage(1);
+          setQuery('');
+          setState('');
+        }}
+      >
+        <ProFormText name="keyword" label="设备 ID" placeholder="输入设备 ID" />
+        <ProFormSelect
+          name="state"
+          label="设备池状态"
           options={[
             { label: '可分配', value: 'available' },
             { label: '已分配', value: 'allocated' },
             { label: '已解绑保留', value: 'released' },
           ]}
-          onChange={(value) => {
-            setPage(1);
-            setState(value ?? '');
-          }}
         />
-      </Space>
+      </QueryFilter>
       <Table<PoolDevice>
         rowKey="id"
         loading={loading}
