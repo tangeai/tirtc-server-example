@@ -17,8 +17,9 @@ type DeviceStore interface {
 
 // UserStore handles user account and quota persistence.
 type UserStore interface {
+	RecordLogin(context.Context, int64, string, time.Time) error
 	GetUserByEmail(ctx context.Context, email string) (*model.User, error)
-	CreateUser(ctx context.Context, email, passwordHash string, bindQuota int) (int64, error)
+	CreateUser(ctx context.Context, email, passwordHash string, bindQuota int, registrationIP string) (int64, error)
 	UpdatePassword(ctx context.Context, userID int64, passwordHash string) error
 	GetQuota(ctx context.Context, userID int64) (int, error)
 	GetDeviceList(ctx context.Context, userID int64) ([]model.UserDeviceRow, error)

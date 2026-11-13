@@ -85,6 +85,7 @@ func DefaultConfigRegistry() *ConfigRegistry {
 		def("user-server", "user.default_bind_quota", "user", "新用户默认绑定额度", `{"quota":10}`, nil, []string{"user-server"}, validatePositiveFields("quota")),
 		def("user-server", "user.token_policy", "user", "用户 Token 策略", `{"token_expiry":"168h"}`, nil, []string{"user-server"}, validateDurationFields("token_expiry")),
 		def("user-server", "mqtt.ack_policy", "mqtt", "绑定 MQTT ACK 策略", `{"timeout":"5s"}`, nil, []string{"user-server"}, validateDurationFields("timeout")),
+		testDef(restartDef(blockingDef(def("device-server", "mqtt.connection", "mqtt", "MQTT 连接", `{"broker":"","auth_mode":"username","username":"","client_id":""}`, []string{"password"}, []string{"device-server"}, validateMQTTConnection), "设备服务需要 MQTT 才能维护设备在线状态")), "mqtt"),
 		testDef(restartDef(blockingDef(def("user-server", "mqtt.connection", "mqtt", "MQTT 连接", `{"broker":"","auth_mode":"username","username":"","client_id":""}`, []string{"password"}, []string{"user-server"}, validateMQTTConnection), "用户服务需要 MQTT 才能完成设备绑定消息交互")), "mqtt"),
 		def("voip-server", "wechat.apps", "wechat", "微信小程序", `{"default_app_id":"","apps":{}}`, []string{"apps.*.secret", "apps.*.token", "apps.*.encoding_aes_key"}, []string{"voip-server"}, validateWechatApps),
 		testDef(restartDef(blockingDef(def("voip-server", "mqtt.connection", "mqtt", "MQTT 连接", `{"broker":"","auth_mode":"username","username":"","client_id":""}`, []string{"password"}, []string{"voip-server"}, validateMQTTConnection), "VoIP 服务启动前必须配置可用的 MQTT 连接")), "mqtt"),

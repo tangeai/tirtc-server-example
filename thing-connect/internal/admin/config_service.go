@@ -520,7 +520,7 @@ func validateSecretShape(namespace, key string, object map[string]any) error {
 	switch definitionID(namespace, key) {
 	case "recognition-server/recognition.models":
 		allowed["api_key"] = true
-	case "recognition-server/mqtt.connection", "user-server/mqtt.connection", "voip-server/mqtt.connection", "call-server/mqtt.connection":
+	case "device-server/mqtt.connection", "recognition-server/mqtt.connection", "user-server/mqtt.connection", "voip-server/mqtt.connection", "call-server/mqtt.connection":
 		allowed["password"] = true
 	case "user-server/smtp":
 		allowed["password"] = true
@@ -626,7 +626,7 @@ func validateRequiredSecrets(namespace, key string, value, secrets json.RawMessa
 	var secretObject map[string]any
 	_ = json.Unmarshal(secrets, &secretObject)
 	switch definitionID(namespace, key) {
-	case "recognition-server/mqtt.connection", "user-server/mqtt.connection", "voip-server/mqtt.connection", "call-server/mqtt.connection":
+	case "device-server/mqtt.connection", "recognition-server/mqtt.connection", "user-server/mqtt.connection", "voip-server/mqtt.connection", "call-server/mqtt.connection":
 		password, _ := secretObject["password"].(string)
 		if strings.TrimSpace(password) == "" {
 			return errors.New("MQTT 连接必须填写密码")

@@ -16,26 +16,31 @@ import (
 // ---- fakes ----
 
 type fakeUserStore struct {
-	user         *model.User
-	lookupEmail  string
-	createdEmail string
-	createID     int64
-	createErr    error
-	allocateErr  error
-	quota        int
-	deviceRows   []model.UserDeviceRow
-	updateName   bool
-	updateErr    error
-	password     string
-	updatePwdErr error
+	user           *model.User
+	lookupEmail    string
+	createdEmail   string
+	registrationIP string
+	loginIP        string
+	loginCount     int
+	loginErr       error
+	createID       int64
+	createErr      error
+	allocateErr    error
+	quota          int
+	deviceRows     []model.UserDeviceRow
+	updateName     bool
+	updateErr      error
+	password       string
+	updatePwdErr   error
 }
 
 func (f *fakeUserStore) GetUserByEmail(_ context.Context, email string) (*model.User, error) {
 	f.lookupEmail = email
 	return f.user, nil
 }
-func (f *fakeUserStore) CreateUser(_ context.Context, email, _ string, _ int) (int64, error) {
+func (f *fakeUserStore) CreateUser(_ context.Context, email, _ string, _ int, ip string) (int64, error) {
 	f.createdEmail = email
+	f.registrationIP = ip
 	return f.createID, f.createErr
 }
 func (f *fakeUserStore) UpdatePassword(_ context.Context, _ int64, passwordHash string) error {
@@ -182,7 +187,7 @@ func TestUserService_Register_DuplicateEmail(t *testing.T) {
 	// pre-seed a valid code for a@b.com so the code check passes
 	_ = cache.SetEmailCode(context.Background(), "a@b.com", "123456", time.Minute)
 	svc := newSvc(&fakeUserStore{user: &model.User{ID: 1, Email: "a@b.com"}}, cache, false)
-	_, _, err := svc.Register(context.Background(), "a@b.com", "pass1234", "123456")
+	_, _, err := svc.Register(context.Background(), "a@b.com", "pass1234", "123456", "192.0.2.1")
 	if !errors.Is(err, ErrUserExists) {
 		t.Errorf("want ErrUserExists, got %v", err)
 	}
@@ -191,7 +196,7 @@ func TestUserService_Register_DuplicateEmail(t *testing.T) {
 func TestUserService_Register_InvalidCode(t *testing.T) {
 	cache := newFakeCache() // empty — no code stored
 	svc := newSvc(&fakeUserStore{user: nil, createID: 42}, cache, false)
-	_, _, err := svc.Register(context.Background(), "new@b.com", "pass1234", "000000")
+	_, _, err := svc.Register(context.Background(), "new@b.com", "pass1234", "000000", "192.0.2.1")
 	if !errors.Is(err, ErrInvalidCode) {
 		t.Errorf("want ErrInvalidCode, got %v", err)
 	}
@@ -202,7 +207,7 @@ func TestUserService_Register_Success(t *testing.T) {
 	_ = cache.SetEmailCode(context.Background(), "new@b.com", "123456", time.Minute)
 	users := &fakeUserStore{user: nil, createID: 42}
 	svc := newSvc(users, cache, false)
-	tok, userID, err := svc.Register(context.Background(), " New@B.COM ", "pass1234", "123456")
+	tok, userID, err := svc.Register(context.Background(), " New@B.COM ", "pass1234", "123456", "192.0.2.1")
 	if err != nil {
 		t.Fatalf("want nil error, got %v", err)
 	}
@@ -211,6 +216,9 @@ func TestUserService_Register_Success(t *testing.T) {
 	}
 	if tok == "" {
 		t.Error("want non-empty token")
+	}
+	if users.registrationIP != "192.0.2.1" {
+		t.Fatal("registration IP not recorded")
 	}
 	if users.lookupEmail != "new@b.com" || users.createdEmail != "new@b.com" {
 		t.Fatalf("register did not normalize email: lookup=%q create=%q", users.lookupEmail, users.createdEmail)
@@ -228,7 +236,7 @@ func TestUserService_EmailCodeIsolatedFromDeviceCode(t *testing.T) {
 	}
 
 	svc := newSvc(&fakeUserStore{createID: 42}, cache, false)
-	if _, _, err := svc.Register(context.Background(), "new@b.com", "pass1234", "123456"); err != nil {
+	if _, _, err := svc.Register(context.Background(), "new@b.com", "pass1234", "123456", "192.0.2.1"); err != nil {
 		t.Fatalf("register with same numeric code as a device should pass: %v", err)
 	}
 	if got, _ := cache.GetDeviceCodeLookup(context.Background(), "123456"); got != "physical-hash" {
@@ -570,5 +578,35 @@ func TestUserServiceDeviceListNestsVoIPProfile(t *testing.T) {
 		*devices[0].Hardware.ChipModel != "任意芯片值" || *devices[0].Hardware.BoardModel != "任意开发板值" ||
 		devices[0].FirmwareVersion == nil || *devices[0].FirmwareVersion != "任意版本值" {
 		t.Fatalf("metadata=%+v", devices[0])
+	}
+}
+
+func (f *fakeUserStore) RecordLogin(_ context.Context, _ int64, ip string, _ time.Time) error {
+	f.loginIP = ip
+	f.loginCount++
+	return f.loginErr
+}
+
+func TestUserService_LoginRecordsOnlySuccessfulAuthentication(t *testing.T) {
+	hash, err := bcrypt.GenerateFromPassword([]byte("pass1234"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	users := &fakeUserStore{user: &model.User{ID: 7, Email: "a@b.com", Password: string(hash), Status: 1, AuthRevision: 1}}
+	svc := newSvc(users, newFakeCache(), false)
+	token, _, err := svc.Login(context.Background(), "a@b.com", "pass1234", captcha.CaptchaToken{UserIP: "::ffff:192.0.2.7"})
+	if err != nil || token == "" || users.loginIP != "192.0.2.7" || users.loginCount != 1 {
+		t.Fatalf("success not recorded: err=%v ip=%s", err, users.loginIP)
+	}
+	if _, _, err := svc.Login(context.Background(), "a@b.com", "wrong", captcha.CaptchaToken{UserIP: "192.0.2.8"}); !errors.Is(err, ErrInvalidCreds) {
+		t.Fatal(err)
+	}
+	if users.loginCount != 1 {
+		t.Fatal("failed login changed last successful IP")
+	}
+	users.loginErr = errors.New("database unavailable")
+	token, _, err = svc.Login(context.Background(), "a@b.com", "pass1234", captcha.CaptchaToken{UserIP: "192.0.2.8"})
+	if err == nil || token != "" {
+		t.Fatal("login returned success without recording its IP")
 	}
 }

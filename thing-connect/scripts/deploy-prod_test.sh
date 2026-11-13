@@ -1017,6 +1017,60 @@ test_same_commit_missing_config_is_prepared_before_release_mutations() (
     [ -f "$DEPLOY_ROOT/recognition-server/config.yaml" ]
 )
 
+test_missing_business_config_publishes_admin_without_stopping_business() (
+    local mode="${1:-missing}" capture="$TEST_ROOT/config-phase-${1:-missing}.capture" result=0 checks=0
+    : >"$capture"
+    validate_deploy_root() { :; }
+    validate_release_options() { :; }
+    resolve_active_services() { ACTIVE_SERVICES=(admin-server device-server); ACTIVE_BUSINESS_SERVICES=(device-server); ACTIVE_STOP_ORDER=(device-server admin-server); }
+    pull_code() { :; }
+    load_deployment_service_catalog() { :; }
+    release_state_is_current() { return 1; }
+    invalidate_release_state() { :; }
+    validate_backup_retention() { :; }
+    validate_paths() { :; }
+    prepare_update_service_control() { ACTIVE_SERVICE_MANAGER=local; }
+    run_batch() { :; }
+    validate_build_release() { :; }
+    prepare_service_configs() { :; }
+    validate_configs() { :; }
+    backup_release() { BACKUP_DIR="$TEST_ROOT/config-phase-backup"; }
+    inspect_migrations() { MIGRATIONS_PENDING=0; if [ "$mode" = migration ]; then MIGRATIONS_PENDING=1; fi; }
+    preflight_business_services() {
+        checks=$((checks+1))
+        if [ "$mode" = dependency ]; then return 1; fi
+        if [ "$mode" = migration ] && [ "$checks" = 1 ]; then return 0; fi
+        return 78
+    }
+    validate_manual_services_stopped() { :; }
+    rollback_release() { printf 'rollback=%s\n' "${DEPLOYED_SERVICES[*]}" >>"$capture"; }
+    stop_one() { printf 'stop=%s\n' "$1" >>"$capture"; }
+    deploy_one() { printf 'deploy=%s\n' "$1" >>"$capture"; if [ "$mode" = admin_failure ]; then return 9; fi; }
+    start_one() { printf 'start=%s\n' "$1" >>"$capture"; }
+    mark_backup_failed() { printf 'pending\n' >>"$capture"; }
+    publish_release_state() { printf 'incorrect-complete\n' >>"$capture"; }
+    run_migrations() { MIGRATION_CHANGED=1; printf 'migration\n' >>"$capture"; }
+    full_deploy >/dev/null 2>&1 || result=$?
+    case "$mode" in
+        missing)
+            assert_eq 78 "$result" "missing config must leave a recoverable configuration phase"
+            assert_eq $'stop=admin-server\ndeploy=admin-server\nstart=admin-server\npending' "$(cat "$capture")" "new Admin must be reachable while existing business services remain untouched" ;;
+        dependency)
+            assert_eq 1 "$result" "dependency failure must not become configuration pause"
+            assert_eq pending "$(cat "$capture")" "dependency failure must not replace running services" ;;
+        admin_failure)
+            assert_eq 9 "$result" "Admin publish failure must retain its error"
+            assert_eq $'stop=admin-server\ndeploy=admin-server\nrollback=admin-server' "$(cat "$capture")" "rollback scope must exclude business services" ;;
+        migration)
+            assert_eq 78 "$result" "missing config after migration must keep new Admin available"
+            assert_eq $'stop=device-server\nstop=admin-server\nmigration\ndeploy=admin-server\ndeploy=device-server\nstart=admin-server\npending' "$(cat "$capture")" "after schema change only new Admin may start until configuration is ready" ;;
+    esac
+)
+
+test_missing_business_config_publishes_admin_without_stopping_business
+test_missing_business_config_publishes_admin_without_stopping_business dependency
+test_missing_business_config_publishes_admin_without_stopping_business admin_failure
+test_missing_business_config_publishes_admin_without_stopping_business migration
 test_build_prepares_missing_service_directories_and_templates
 test_missing_template_fails_before_partial_config_creation
 test_same_commit_missing_config_is_prepared_before_release_mutations

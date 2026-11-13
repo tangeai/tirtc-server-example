@@ -29,6 +29,7 @@ func defaultConfigFields(namespace, key string) []ConfigFieldDefinition {
 		},
 		definitionID("device-server", "mqtt.ack_policy"): mqttACKFields(),
 		definitionID("user-server", "mqtt.ack_policy"):   mqttACKFields(),
+		definitionID("device-server", "mqtt.connection"): mqttConnectionFields(),
 		definitionID("user-server", "mqtt.connection"):   mqttConnectionFields(),
 		definitionID("voip-server", "mqtt.connection"):   mqttConnectionFields(),
 		definitionID("call-server", "mqtt.connection"):   mqttConnectionFields(),

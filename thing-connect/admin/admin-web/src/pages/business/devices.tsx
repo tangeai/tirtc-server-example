@@ -43,6 +43,8 @@ type ManagedDevice = {
   online: boolean;
   presence_known: boolean;
   last_seen_at?: string;
+  last_online_ip?: string;
+  last_online_at?: string;
   hardware?: {
     chip_model?: string;
     board_model?: string;
@@ -408,6 +410,16 @@ function UserDevicesPanel() {
                   key: 'seen',
                   label: '最近心跳',
                   children: formatTime(detail.device.last_seen_at),
+                },
+                {
+                  key: 'last_online_ip',
+                  label: '最近上线 IP',
+                  children: detail.device.last_online_ip || '—',
+                },
+                {
+                  key: 'last_online_at',
+                  label: '最近上线时间',
+                  children: formatTime(detail.device.last_online_at),
                 },
                 { key: 'mac', label: 'MAC 地址', children: detail.device.mac || '—' },
                 {

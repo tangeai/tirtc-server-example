@@ -144,16 +144,12 @@ func (f *fakeCache3) SetNonce(_ context.Context, _ string, _ time.Duration) (boo
 // fakeMQTT simulates a device that never acks — PublishAndWaitACK behaves
 // like mqttc.Broker on a real timeout.
 type fakeMQTT struct {
-	ackErr        error
-	kickedClients []string
+	ackErr error
 }
 
 func (f *fakeMQTT) Publish(_ string, _ byte, _ any) error { return nil }
 func (f *fakeMQTT) PublishAndWaitACK(_, _ string, _ any, _ time.Duration) error {
 	return f.ackErr
-}
-func (f *fakeMQTT) KickClient(clientID string) {
-	f.kickedClients = append(f.kickedClients, clientID)
 }
 
 // compile-time interface checks
@@ -260,9 +256,6 @@ func TestBind_CaseA_AckTimeout_ReportsFailure(t *testing.T) {
 	}
 	if cache.delVerifyAndCodeCalled {
 		t.Error("verify/code record must NOT be cleared on ack timeout — user needs to retry with the same code")
-	}
-	if len(mqtt.kickedClients) != 1 {
-		t.Errorf("want temp client kicked exactly once so device can reconnect, got %v", mqtt.kickedClients)
 	}
 }
 

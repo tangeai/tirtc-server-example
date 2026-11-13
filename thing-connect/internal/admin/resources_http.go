@@ -1,8 +1,6 @@
 package admin
 
 import (
-	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,7 +14,6 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"thing-connect/internal/apiresp"
-	"thing-connect/internal/deviceprofile"
 	"thing-connect/internal/logging"
 )
 
@@ -85,89 +82,40 @@ func listOrder(c *gin.Context, allowed map[string]string, defaultField, tieColum
 	return " ORDER BY " + column + " " + direction + "," + tieColumn + " " + direction, nil
 }
 
-type managedUser struct {
-	ID           int64      `db:"id" json:"id"`
-	Email        string     `db:"email" json:"email"`
-	BindQuota    int        `db:"bind_quota" json:"bind_quota"`
-	Status       int8       `db:"status" json:"status"`
-	DisabledAt   *time.Time `db:"disabled_at" json:"disabled_at,omitempty"`
-	AuthRevision int64      `db:"auth_revision" json:"auth_revision"`
-	DeviceCount  int        `db:"device_count" json:"device_count"`
-	CreatedAt    time.Time  `db:"created_at" json:"created_at"`
-	UpdatedAt    time.Time  `db:"updated_at" json:"updated_at"`
-}
-
-func (s *HTTPServer) listUsers(c *gin.Context) {
+func resourceFilter(c *gin.Context) ResourceFilter {
 	page, size := pageParams(c)
-	keyword := strings.TrimSpace(c.Query("keyword"))
-	status := strings.TrimSpace(c.Query("status"))
-	where, args := ` WHERE 1=1`, []any{}
-	if keyword != "" {
-		where += ` AND (u.email LIKE ? OR CAST(u.id AS CHAR)=?)`
-		args = append(args, "%"+keyword+"%", keyword)
-	}
-	if status == "0" || status == "1" {
-		where += ` AND u.status=?`
-		args = append(args, status)
-	}
-	if err := appendDateRange(c, "u.created_at", &where, &args); err != nil {
-		apiresp.BadParam(c, err.Error())
-		return
-	}
-	order, err := listOrder(c, map[string]string{"created_at": "u.created_at"}, "created_at", "u.id")
-	if err != nil {
-		apiresp.BadParam(c, err.Error())
-		return
-	}
-	var total int
-	if err := s.store.db.GetContext(c, &total, `SELECT COUNT(*) FROM users u`+where, args...); err != nil {
-		apiresp.Internal(c, err.Error())
-		return
-	}
-	queryArgs := append(append([]any{}, args...), size, (page-1)*size)
-	var users []managedUser
-	err = s.store.db.SelectContext(c, &users, `SELECT u.id,u.email,u.bind_quota,u.status,u.disabled_at,u.auth_revision,u.created_at,u.updated_at,(SELECT COUNT(*) FROM device_bind d WHERE d.user_id=u.id) device_count FROM users u`+where+order+` LIMIT ? OFFSET ?`, queryArgs...)
-	if err != nil {
-		apiresp.Internal(c, err.Error())
-		return
-	}
-	apiresp.OK(c, pageResult{Items: users, Page: page, PageSize: size, Total: total})
+	return ResourceFilter{Page: page, PageSize: size, Keyword: c.Query("keyword"), Status: c.Query("status"), Bound: c.Query("bound"), CreatedFrom: c.Query("created_from"), CreatedTo: c.Query("created_to"), SortBy: c.Query("sort_by"), SortOrder: c.Query("sort_order")}
 }
-
+func resourceError(c *gin.Context, err error, missing string) {
+	switch {
+	case errors.Is(err, ErrInvalidResourceQuery):
+		apiresp.BadParam(c, err.Error())
+	case errors.Is(err, ErrNotFound):
+		c.JSON(http.StatusNotFound, apiresp.JSON{Code: 404, Msg: missing})
+	default:
+		apiresp.Internal(c, err.Error())
+	}
+}
+func (s *HTTPServer) listUsers(c *gin.Context) {
+	result, err := s.resources.Users(c.Request.Context(), resourceFilter(c))
+	if err != nil {
+		resourceError(c, err, "用户不存在")
+		return
+	}
+	apiresp.OK(c, result)
+}
 func (s *HTTPServer) getUser(c *gin.Context) {
 	id, err := positiveID(c.Param("id"))
 	if err != nil {
 		apiresp.BadParam(c, "用户 ID 无效")
 		return
 	}
-	var user managedUser
-	err = s.store.db.GetContext(c, &user, `SELECT u.id,u.email,u.bind_quota,u.status,u.disabled_at,u.auth_revision,u.created_at,u.updated_at,COUNT(d.id) device_count FROM users u LEFT JOIN device_bind d ON d.user_id=u.id WHERE u.id=? GROUP BY u.id`, id)
-	if errors.Is(err, sql.ErrNoRows) {
-		c.JSON(http.StatusNotFound, apiresp.JSON{Code: 404, Msg: "用户不存在"})
-		return
-	}
+	result, err := s.resources.User(c.Request.Context(), id)
 	if err != nil {
-		apiresp.Internal(c, err.Error())
+		resourceError(c, err, "用户不存在")
 		return
 	}
-	var devices []managedDevice
-	_ = s.store.db.SelectContext(c, &devices, managedDeviceSelect+` WHERE d.user_id=? ORDER BY d.id DESC`, id)
-	var bindLogs []struct {
-		ID        int64     `db:"id" json:"id"`
-		DeviceID  string    `db:"device_id" json:"device_id"`
-		Action    int8      `db:"action" json:"action"`
-		MAC       string    `db:"mac" json:"mac"`
-		Assign    string    `db:"assign" json:"assign"`
-		CreatedAt time.Time `db:"created_at" json:"created_at"`
-	}
-	_ = s.store.db.SelectContext(c, &bindLogs, `SELECT id,device_id,action,mac,assign,created_at FROM device_bind_log WHERE user_id=? ORDER BY id DESC LIMIT 100`, id)
-	type aiSummary struct {
-		RoleCount     int `db:"role_count" json:"role_count"`
-		ResourceCount int `db:"resource_count" json:"resource_count"`
-	}
-	var ai aiSummary
-	_ = s.store.db.GetContext(c, &ai, `SELECT (SELECT COUNT(*) FROM ai_user_role WHERE user_id=?) role_count,(SELECT COUNT(*) FROM ai_user_resource WHERE user_id=?) resource_count`, id, id)
-	apiresp.OK(c, gin.H{"user": user, "devices": devices, "bind_logs": bindLogs, "ai": ai})
+	apiresp.OK(c, result)
 }
 
 type statusRequest struct {
@@ -272,79 +220,13 @@ func (s *HTTPServer) sendPasswordResetEmail(c *gin.Context) {
 	c.JSON(http.StatusAccepted, apiresp.JSON{Code: 200, Msg: "ok", Data: gin.H{"queued": true}})
 }
 
-type managedDevice struct {
-	ID              int64                                 `db:"id" json:"id"`
-	DeviceID        string                                `db:"device_id" json:"device_id"`
-	MAC             string                                `db:"mac" json:"mac"`
-	Assign          string                                `db:"assign" json:"assign"`
-	DeviceName      string                                `db:"device_name" json:"device_name"`
-	UserID          int64                                 `db:"user_id" json:"user_id"`
-	UserEmail       string                                `db:"user_email" json:"user_email"`
-	LastUserID      int64                                 `db:"last_user_id" json:"last_user_id"`
-	ActiveTime      *time.Time                            `db:"active_time" json:"active_time,omitempty"`
-	BindTime        *time.Time                            `db:"bind_time" json:"bind_time,omitempty"`
-	UnbindTime      *time.Time                            `db:"unbind_time" json:"unbind_time,omitempty"`
-	CreatedAt       time.Time                             `db:"created_at" json:"created_at"`
-	UpdatedAt       time.Time                             `db:"updated_at" json:"updated_at"`
-	Online          bool                                  `db:"-" json:"online"`
-	PresenceKnown   bool                                  `db:"-" json:"presence_known"`
-	LastSeenAt      *time.Time                            `db:"-" json:"last_seen_at,omitempty"`
-	Profile         *string                               `db:"profile" json:"-"`
-	Profiles        map[string]map[string]json.RawMessage `db:"-" json:"profiles,omitempty"`
-	Hardware        *deviceprofile.Hardware               `db:"-" json:"hardware,omitempty"`
-	FirmwareVersion *string                               `db:"-" json:"firmware_version,omitempty"`
-}
-
-const managedDeviceSelect = `SELECT d.id,d.device_id,d.mac,d.assign,d.device_name,d.user_id,COALESCE(u.email,'') user_email,d.last_user_id,d.active_time,d.bind_time,d.unbind_time,d.created_at,d.updated_at FROM device_bind d LEFT JOIN users u ON u.id=d.user_id`
-
-const managedDeviceDetailSelect = `SELECT d.id,d.device_id,d.mac,d.assign,d.device_name,d.user_id,COALESCE(u.email,'') user_email,d.last_user_id,d.active_time,d.bind_time,d.unbind_time,d.created_at,d.updated_at,p.profile FROM device_bind d LEFT JOIN users u ON u.id=d.user_id LEFT JOIN device_profile p ON p.device_id=d.device_id`
-
-func (d *managedDevice) projectProfileMetadata() {
-	metadata := deviceprofile.PublicMetadata(d.Profile)
-	d.Hardware = metadata.Hardware
-	d.FirmwareVersion = metadata.FirmwareVersion
-	d.Profiles = deviceprofile.Public(d.Profile)
-}
-
 func (s *HTTPServer) listDevices(c *gin.Context) {
-	page, size := pageParams(c)
-	keyword := strings.TrimSpace(c.Query("keyword"))
-	bound := strings.TrimSpace(c.Query("bound"))
-	where, args := ` WHERE 1=1`, []any{}
-	if keyword != "" {
-		where += ` AND (d.device_id LIKE ? OR d.mac LIKE ? OR u.email LIKE ?)`
-		args = append(args, "%"+keyword+"%", "%"+keyword+"%", "%"+keyword+"%")
-	}
-	switch bound {
-	case "true":
-		where += ` AND d.user_id>0`
-	case "false":
-		where += ` AND d.user_id=0`
-	}
-	order, err := listOrder(c, map[string]string{
-		"id": "d.id", "active_time": "d.active_time", "bind_time": "d.bind_time",
-	}, "id", "d.id")
+	result, err := s.resources.Devices(c.Request.Context(), resourceFilter(c))
 	if err != nil {
-		apiresp.BadParam(c, err.Error())
+		resourceError(c, err, "设备不存在")
 		return
 	}
-	var total int
-	countFrom := ` FROM device_bind d`
-	if keyword != "" {
-		countFrom += ` LEFT JOIN users u ON u.id=d.user_id`
-	}
-	if err := s.store.db.GetContext(c, &total, `SELECT COUNT(*)`+countFrom+where, args...); err != nil {
-		apiresp.Internal(c, err.Error())
-		return
-	}
-	var devices []managedDevice
-	queryArgs := append(append([]any{}, args...), size, (page-1)*size)
-	if err := s.store.db.SelectContext(c, &devices, managedDeviceSelect+where+order+` LIMIT ? OFFSET ?`, queryArgs...); err != nil {
-		apiresp.Internal(c, err.Error())
-		return
-	}
-	s.attachDevicePresence(c, devices)
-	apiresp.OK(c, pageResult{Items: devices, Page: page, PageSize: size, Total: total})
+	apiresp.OK(c, result)
 }
 
 type managedPoolDevice struct {
@@ -412,54 +294,12 @@ func (s *HTTPServer) listDevicePool(c *gin.Context) {
 }
 
 func (s *HTTPServer) getDevice(c *gin.Context) {
-	var device managedDevice
-	err := s.store.db.GetContext(c, &device, managedDeviceDetailSelect+` WHERE d.device_id=?`, c.Param("device_id"))
-	if errors.Is(err, sql.ErrNoRows) {
-		c.JSON(http.StatusNotFound, apiresp.JSON{Code: 404, Msg: "设备不存在"})
-		return
-	}
+	result, err := s.resources.Device(c.Request.Context(), c.Param("device_id"))
 	if err != nil {
-		apiresp.Internal(c, err.Error())
+		resourceError(c, err, "设备不存在")
 		return
 	}
-	device.projectProfileMetadata()
-	devices := []managedDevice{device}
-	s.attachDevicePresence(c, devices)
-	device = devices[0]
-	apiresp.OK(c, device)
-}
-
-// devicePresenceKey maps a permanent device ID to the Redis presence key
-// written from its formal MQTT ClientID (sn_{device_id}).
-func devicePresenceKey(deviceID string) string { return "online:sn_" + deviceID }
-
-func (s *HTTPServer) attachDevicePresence(ctx context.Context, devices []managedDevice) {
-	if len(devices) == 0 || s.redis == nil {
-		return
-	}
-	keys := make([]string, len(devices))
-	for i := range devices {
-		keys[i] = devicePresenceKey(devices[i].DeviceID)
-	}
-	values, err := s.redis.MGet(ctx, keys...).Result()
-	if err != nil {
-		return
-	}
-	for i, value := range values {
-		devices[i].PresenceKnown = true
-		if value == nil {
-			continue
-		}
-		devices[i].Online = true
-		raw, ok := value.(string)
-		if !ok || raw == "1" {
-			continue
-		}
-		seen, err := time.Parse(time.RFC3339Nano, raw)
-		if err == nil {
-			devices[i].LastSeenAt = &seen
-		}
-	}
+	apiresp.OK(c, result)
 }
 
 func (s *HTTPServer) deviceBindLogs(c *gin.Context) {

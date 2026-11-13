@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"thing-connect/internal/testenv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
@@ -97,4 +98,36 @@ func TestOfflineServiceSummarySerializesInstancesAsArray(t *testing.T) {
 	if strings.Contains(string(payload), `"instances":null`) || !strings.Contains(string(payload), `"instances":[]`) {
 		t.Fatalf("offline service response must use an empty array: %s", payload)
 	}
+}
+
+func TestReporterPublishesMetricsThroughAggregator(t *testing.T) {
+	cfg := testenv.LoadConfigOrSkip(t, "../../tests/testdata/config.yaml")
+	client := testenv.OpenRedisOrSkip(t, cfg)
+	t.Cleanup(func() { _ = client.Close() })
+	t.Setenv("SERVICE_INSTANCE_ID", "presence-metrics-integration-test")
+	reporter, err := NewReporter(client, "device-server", map[string]DependencyProbe{"presence": func(context.Context) error { return errors.New("backlog overdue") }}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	t.Cleanup(func() { client.Del(ctx, reporter.key); client.SRem(ctx, instanceIndex, reporter.key) })
+	reporter.SetMetrics(func() map[string]int64 {
+		return map[string]int64{"connection_pending": 42, "connection_oldest_pending_age_ms": 151000}
+	})
+	reporter.report(ctx)
+	summaries, err := NewAggregator(client).List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, summary := range summaries {
+		for _, instance := range summary.Instances {
+			if instance.InstanceID == "presence-metrics-integration-test" {
+				if instance.Metrics["connection_pending"] != 42 || instance.Metrics["connection_oldest_pending_age_ms"] != 151000 || instance.Dependencies["presence"] != "unhealthy" {
+					t.Fatalf("metrics or readiness lost: %+v", instance)
+				}
+				return
+			}
+		}
+	}
+	t.Fatal("reported instance missing")
 }

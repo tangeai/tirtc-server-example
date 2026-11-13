@@ -3,15 +3,18 @@ package model
 import "time"
 
 type User struct {
-	ID           int64      `db:"id"`
-	Email        string     `db:"email"`
-	Password     string     `db:"password"`
-	BindQuota    int        `db:"bind_quota"`
-	Status       int8       `db:"status"`
-	DisabledAt   *time.Time `db:"disabled_at"`
-	AuthRevision int64      `db:"auth_revision"`
-	CreatedAt    time.Time  `db:"created_at"`
-	UpdatedAt    time.Time  `db:"updated_at"`
+	RegistrationIP string     `db:"registration_ip"`
+	LastLoginIP    string     `db:"last_login_ip"`
+	LastLoginAt    *time.Time `db:"last_login_at"`
+	ID             int64      `db:"id"`
+	Email          string     `db:"email"`
+	Password       string     `db:"password"`
+	BindQuota      int        `db:"bind_quota"`
+	Status         int8       `db:"status"`
+	DisabledAt     *time.Time `db:"disabled_at"`
+	AuthRevision   int64      `db:"auth_revision"`
+	CreatedAt      time.Time  `db:"created_at"`
+	UpdatedAt      time.Time  `db:"updated_at"`
 }
 
 // DevicePool — pre-generated device ID+KEY pool (renamed from GlobalDevicePool).

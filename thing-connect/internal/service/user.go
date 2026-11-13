@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/big"
+	"net/netip"
 	"regexp"
 	"strings"
 	"sync"
@@ -422,7 +423,7 @@ func (s *UserService) limitEmailCodeSend(ctx context.Context, email, clientIP st
 }
 
 // Register validates the email code, then creates the user.
-func (s *UserService) Register(ctx context.Context, email, password, code string) (string, int64, error) {
+func (s *UserService) Register(ctx context.Context, email, password, code, clientIP string) (string, int64, error) {
 	email = normalizeEmail(email)
 	// Validate email code first.
 	storedCode, err := s.cache.GetEmailCode(ctx, email)
@@ -449,7 +450,7 @@ func (s *UserService) Register(ctx context.Context, email, password, code string
 	s.runtimeMu.RLock()
 	defaultQuota := s.defaultBindQuota
 	s.runtimeMu.RUnlock()
-	userID, err := s.user.CreateUser(ctx, email, string(hash), defaultQuota)
+	userID, err := s.user.CreateUser(ctx, email, string(hash), defaultQuota, canonicalIP(clientIP))
 	if err != nil {
 		return "", 0, fmt.Errorf("service.Register CreateUser: %w", err)
 	}
@@ -489,6 +490,9 @@ func (s *UserService) Login(ctx context.Context, email, password string, tok cap
 	jwtTok, err := s.issueJWT(user.ID, user.AuthRevision)
 	if err != nil {
 		return "", 0, fmt.Errorf("service.Login issueJWT: %w", err)
+	}
+	if err := s.user.RecordLogin(ctx, user.ID, canonicalIP(tok.UserIP), time.Now().UTC()); err != nil {
+		return "", 0, fmt.Errorf("service.Login RecordLogin: %w", err)
 	}
 	return jwtTok, user.ID, nil
 }
@@ -606,4 +610,12 @@ func (s *UserService) issueJWT(userID, authRevision int64) (string, error) {
 		return "", fmt.Errorf("issueJWT: %w", err)
 	}
 	return signed, nil
+}
+
+func canonicalIP(value string) string {
+	ip, err := netip.ParseAddr(value)
+	if err != nil {
+		return ""
+	}
+	return ip.WithZone("").Unmap().String()
 }

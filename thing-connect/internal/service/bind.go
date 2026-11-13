@@ -20,7 +20,6 @@ import (
 type MQTTPublisher interface {
 	Publish(topic string, qos byte, payload any) error
 	PublishAndWaitACK(downTopic, ackTopic string, payload any, timeout time.Duration) error
-	KickClient(clientID string)
 }
 
 // BindService handles device binding and reset.
@@ -106,7 +105,7 @@ func (s *BindService) Bind(ctx context.Context, userID int64, code string) (stri
 		// Only clear the verify/code cache entries once the device has actually
 		// ack'd — on timeout the code stays valid within its TTL, so the user can
 		// retry without re-Reporting (consistent with Case A below).
-		ackErr := s.publishAndKick(ctx, vdata.TempClientID, "", "")
+		ackErr := s.publishAuthGrant(ctx, vdata.TempClientID, "", "")
 		if ackErr != nil {
 			slog.WarnContext(ctx, "bind pre-burned bound in DB but ack failed", "device_id", vdata.DeviceID, "err", ackErr)
 			return "", ackErr
@@ -166,7 +165,7 @@ func (s *BindService) Bind(ctx context.Context, userID int64, code string) (stri
 		// (mac, user_id) is already bound — a concurrent or repeated bind of the
 		// same MAC. CommitBindFromPool returned the existing device_id (newDevID)
 		// without allocating a new one or consuming quota. Fall through to
-		// GetDeviceKey + publishAndKick so the caller receives the one device_id
+		// GetDeviceKey + publishAuthGrant so the caller receives the one device_id
 		// for this MAC (per-user MAC uniqueness — "永远只下发一个 device_id").
 		slog.InfoContext(ctx, "Bind Case A MAC already bound, redelivering existing", "device_id", newDevID, "mac", fp.MAC)
 	} else if err != nil {
@@ -188,7 +187,7 @@ func (s *BindService) Bind(ctx context.Context, userID int64, code string) (stri
 	// ack'd — on timeout the code stays valid within its TTL, so a user retry
 	// re-resolves via GetBindByFingerprint into Case B (redeliver to the row
 	// just committed above) instead of allocating a second device from pool.
-	if err := s.publishAndKick(ctx, vdata.TempClientID, gpool.DeviceID, gpool.DeviceKey); err != nil {
+	if err := s.publishAuthGrant(ctx, vdata.TempClientID, gpool.DeviceID, gpool.DeviceKey); err != nil {
 		return "", err
 	}
 	s.cache.DelVerifyAndCode(ctx, physHash, code) //nolint:errcheck
@@ -393,7 +392,6 @@ func (s *BindService) ResetWithCleanup(ctx context.Context, deviceID string, use
 		// 不等 ACK（设备可能已离线），best-effort。
 		topic := "device/sn_" + deviceID + "/cmd"
 		s.mqtt.Publish(topic, 1, map[string]any{"type": "unbind"}) //nolint:errcheck
-		s.mqtt.KickClient("sn_" + deviceID)
 	}
 	return nil
 }
@@ -435,13 +433,13 @@ func (s *BindService) redeliverCredentials(ctx context.Context, deviceID, tempCl
 	if !online {
 		return "", ErrDeviceMQTTOffline
 	}
-	if err := s.publishAndKick(ctx, tempClientID, gpool.DeviceID, gpool.DeviceKey); err != nil {
+	if err := s.publishAuthGrant(ctx, tempClientID, gpool.DeviceID, gpool.DeviceKey); err != nil {
 		return "", err
 	}
 	return gpool.DeviceID, nil
 }
 
-// notifyBindSuccess sends auth_grant to the device's temp MQTT client, then kicks it.
+// notifyBindSuccess sends auth_grant to the device's temporary MQTT connection.
 // Used by BindByDeviceID (cases E/G): device already has its credentials (proved via
 // signed report → requireDeviceOnline) but is waiting on the temp MQTT connection for
 // the "you're bound, proceed" signal. Sends empty payload — device uses its existing
@@ -463,17 +461,17 @@ func (s *BindService) notifyBindSuccess(ctx context.Context, deviceID, mac strin
 	// Empty payload — device proved credential ownership via signed report.
 	// It calls /token with its device_key to get a permanent JWT after receiving
 	// this confirmation signal.
-	_ = s.publishAndKick(ctx, tempClientID, "", "")
+	_ = s.publishAuthGrant(ctx, tempClientID, "", "")
 	s.cache.DelPendingBind(ctx, deviceID)       //nolint:errcheck
 	s.cache.DelReportFingerprint(ctx, deviceID) //nolint:errcheck
 }
 
-// publishAndKick sends auth_grant and waits for the device's ACK. If the ACK
+// publishAuthGrant sends auth_grant and waits for the device's ACK. If the ACK
 // never arrives (device offline, dropped packet, etc.) it returns
 // ErrMQTTTimeout — the caller must treat the bind as failed rather than
-// assuming the device received its credentials. The device is kicked
-// unconditionally so it drops its temp connection and can retry.
-func (s *BindService) publishAndKick(ctx context.Context, tempClientID, deviceID, deviceKey string) error {
+// assuming the device received its credentials. The device owns its connection
+// transition; command delivery never mutates the presence projection.
+func (s *BindService) publishAuthGrant(ctx context.Context, tempClientID, deviceID, deviceKey string) error {
 	if s.mqtt == nil {
 		return nil
 	}
@@ -482,7 +480,6 @@ func (s *BindService) publishAndKick(ctx context.Context, tempClientID, deviceID
 		payload["payload"] = map[string]string{"device_id": deviceID, "device_key": deviceKey}
 	}
 	err := s.mqtt.PublishAndWaitACK("device/"+tempClientID+"/cmd", "device/"+tempClientID+"/ack", payload, s.Config().MQTTACKTimeout)
-	s.mqtt.KickClient(tempClientID)
 	if err != nil {
 		slog.WarnContext(ctx, "bind auth_grant delivery failed", "temp_client_id", tempClientID, "device_id", deviceID, "err", err)
 		if errors.Is(err, mqttc.ErrACKTimeout) {

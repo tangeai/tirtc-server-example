@@ -59,7 +59,7 @@ flowchart TB
 |---|---|---|
 | MySQL | 保存用户、设备、业务数据、动态配置和安装状态 | 迁移账号负责建库、建表和升级；所有服务共用运行账号，生产环境建议使用独立的 DML 账号 |
 | Redis | 保存会话、验证码、限频、在线状态和短期协调数据 | Admin 与已启用业务服务连接同一个 Redis 实例和 DB |
-| MQTT Broker | 承载设备长连接和实时指令 | User、VoIP、Call 分别配置账号；Admin、Device、AI 不直接连接 Broker |
+| MQTT Broker | 承载设备长连接和实时指令 | Device、User、VoIP、Call、Recognition 分别配置账号；Admin、AI 不直接连接 Broker |
 | `config-current/<service>/config.yaml` | 保存进程启动所需的基础配置和共享密钥 | 由安装器生成，不要手工拆分或复制 revision |
 | Admin | 首次安装、动态配置和服务状态 | 首次安装只启动 Admin；Admin 不执行主机命令或进程控制 |
 
@@ -74,7 +74,7 @@ Nginx、HTTPS 和生产进程托管都不是首次安装页面的前置条件。
 | 服务 | 默认 HTTP 端口 | 安装要求 |
 |---|---:|---|
 | `admin-server` | 9000 | 必装，管理后台和配置中心 |
-| `device-server` | 9001 | 生成基础配置，安装后由服务器命令启动 |
+| `device-server` | 9001 | 生成基础配置，完成 MQTT 后由服务器命令启动 |
 | `user-server` | 9002 | 生成基础配置，完成 MQTT、TiRTC 后启动，同时提供用户 H5 |
 | `voip-server` | 9003 | 生成基础配置，完成 MQTT、TiRTC 后启动 |
 | `ai-server` | 9004 | 生成基础配置，完成 TiRTC 后启动 |
@@ -247,7 +247,7 @@ CREATE DATABASE thing_connect
 )
 ```
 
-MQTT 凭据在 Admin 安装完成后配置，User、VoIP、Call 各用一套。需要注意以下限制：
+MQTT 凭据在 Admin 安装完成后配置，Device、User、VoIP、Call、Recognition 各用一套。需要注意以下限制：
 
 - Username 模式会结合进程的 `SERVICE_INSTANCE_ID` 生成实际 ClientID。
 - 固定 ClientID 不能由多个服务或副本共用。
@@ -360,7 +360,7 @@ sudo env \
 
 | 服务 | 启动前需发布的配置 |
 |---|---|
-| Device（必需） | 没有 MQTT 和 TiRTC 启动阻断配置 |
+| Device（必需） | 发布独立 MQTT 连接，用于维护设备在线状态 |
 | User（必需） | `common/tirtc`、`user-server/mqtt.connection` |
 | AI（按需启用） | `common/tirtc`；角色和资源按业务需要配置 |
 | VoIP（按需启用） | `common/tirtc`、`voip-server/mqtt.connection`；使用微信通话还需配置微信应用 |
@@ -650,7 +650,7 @@ sudo env \
 | Supervisor 中包含全部已启用服务 | 预检完成后停止服务，迁移、发布，再按 Admin 优先顺序启动并检查 readiness |
 | 没有 `supervisorctl`，或没有任何 ThingConnect 条目 | 使用 `service-local.sh` 自动完成相同停启和验收流程 |
 
-普通更新只需执行 `deploy-prod.sh update`。构建、配置校验和迁移前置检查失败时保留运行中的服务；停服后的发布失败触发文件恢复。数据库结构已经变化时，失败会保持整个服务组停止，需人工恢复数据库或确认兼容性，不能直接启动旧版本。
+普通更新只需执行 `deploy-prod.sh update`。构建、基础配置校验和依赖连接预检失败时保留运行中的服务；停服后的发布失败触发文件恢复。数据库结构已经变化时，失败会保持整个服务组停止，需人工恢复数据库或确认兼容性，不能直接启动旧版本。
 
 `SERVICE_MANAGER=local` 和 `SERVICE_MANAGER=supervisor` 可明确指定管理器。Supervisor 只配置部分已启用服务时拒绝发布。使用 systemd、容器等外部编排时可显式选择 `SERVICE_MANAGER=manual`，自行完成 stop-all、更新、start-all 和健康检查；该模式要求服务事先停止，并且没有冲突的 Supervisor 条目。
 
@@ -666,13 +666,25 @@ sudo env \
 
 Supervisor 部署在发布前执行 `supervisorctl reread` 和 `supervisorctl update`。缺少任何已启用服务的进程定义时，发布会在修改文件和数据库前停止。使用手动模式、systemd、容器平台或其他编排系统时，也要提供等价的显式迁移、Admin 优先启动和 readiness 门槛。
 
+### 升级遇到新增必填配置
+
+当新版增加了旧 Admin 无法编辑的必填配置时，`update` 会提供配置阶段，退出码为 `78`，不记录完整发布成功：
+
+- 数据库结构已是目标版本时，只更新并启动新版 Admin，现有业务服务保持运行。
+- 数据库需要迁移时，先按正常发布流程停服、迁移和替换文件，再启动新版 Admin；业务配置未完成时，业务服务保持停止。
+- 登录新版 Admin，填写、测试并发布提示的配置，再执行同一条 `update` 命令完成发布。不要将 MQTT 连接的 ClientID 与仍运行的其他服务重复使用。
+- Admin 发布或就绪检查失败时执行对应回滚流程；数据库结构已变化时不自动恢复旧二进制。手动服务管理模式需由运维启动已更新的 Admin。
+
+配置阶段不绕过业务服务的必填配置和依赖检查，也不会直接复制其他服务的 MQTT 身份。`deploy-local.sh update` 使用相同流程；若部署入口来自旧版本，应确保它打包的本地源码包含此发布流程。
+
 ### 4.7 失败后从哪里继续
 
 | 停止位置 | 处理后继续执行 |
 |---|---|
 | 工具缺失、版本过低或构建失败 | 修复工具链或下载网络，重跑同一个安装/更新命令；构建日志按终端给出的路径查看 |
 | 安装页面尚未完成、令牌丢失 | 使用同一目录再次执行 `install.sh`，按第 3.2 节恢复，不删表或配置 |
-| 必填配置或 MQTT 认证预检失败 | 在 Admin 补齐、测试并发布；首次启动重跑 `start-all`，更新重跑 `update` |
+| 必填配置缺失（退出码 78） | 登录配置阶段提供的新版 Admin，补齐、测试并发布，再重跑 `update`；首次安装按安装流程启动 |
+| MQTT 认证或依赖连接预检失败 | 检查连接地址、账号及网络，修复后重跑 `update` |
 | 提示需要数据库迁移 | 准备独立迁移配置及可恢复备份，使用第 4.6 节带参数的命令重试 |
 | 数据库结构已变化后发布失败 | 保持服务停止，先恢复数据库备份或确认版本兼容性，再处理文件回滚；不能直接启动旧二进制 |
 | 服务启动或 readiness 失败 | 查看 `/opt/thing-connect/logs/<服务名>.err.log` 和 `.out.log`，按错误修复；不要只凭 `RUNNING` 判断就绪 |
@@ -698,3 +710,26 @@ Admin 功能、RBAC、配置中心和任务说明见 [Admin Server README](admin
 Nginx 模板将 /v1/recognition/ 转发到9006并拒绝内部路径。/services 可通过 user-server 的 discovery.recognition_server_url 返回 recognition-srv；旧配置省略此字段时不影响原服务发现。统一代理部署下用户设备页面请求站点同源 /v1/recognition/。
 
 Admin 中配置识别服务 MQTT、千问默认 Key 及接口地域；只用音频识别无需配置 TiRTC 凭证。/health/ready 检查 MySQL、Redis 和 MQTT，缺少千问 Key 会拒绝新任务而不阻止配置管理。服务状态名称 recognition-server，动态模型配置 revision 随心跳上报。
+
+
+### 设备在线状态消费与升级验收
+
+Device 服务单实例订阅 `device/+/up`、`$SYS/brokers/+/clients/+/connected` 和 `disconnected`，维护 `online:{clientID}`，有效期为 150 秒。Broker 需要发布 EMQX 系统连接事件，并授权 Device 账号订阅；临时绑定连接依赖连接事件。User、VoIP、Call、Recognition 保留下行和 ACK 能力，通过 Redis 查询在线状态，不订阅全量设备心跳。
+
+若 Device 启动日志出现 `presence subscription rejected`，表示 MQTT 连接认证成功但必需主题未获订阅授权。按日志中的 `topic` 检查 Broker 的实际授权源，为 Device 专用账号允许订阅 `device/+/up`、`$SYS/brokers/+/clients/+/connected`、`$SYS/brokers/+/clients/+/disconnected`。EMQX 文件授权示例见 `deploy/emqx/device-acl.conf`，规则需位于通用拒绝规则前；使用数据库、HTTP 或云端授权时在对应授权源配置相同权限。还须启用 Broker 系统连接事件发布。Device 启动预检验证三个主题的 SUBACK，权限不足时在停服前拒绝完整更新；仅在 Admin 中保存账号密码不代表主题权限已配置。
+
+当前在线状态消费者要求 **Device 单实例**。不要直接复制 Device 进程来实现高可用；多消费者分片、接管和连接代次隔离需要另行实现和压测。现有设备心跳不带连接代次，因此不使用无法确认连接代次的断开事件删除在线记录，避免迟到断开误删新连接。离线由心跳 TTL 判定，最后一次有效观测后最多等待 150 秒；这不提供完整事件代次隔离，也不代表十万设备容量已经验收。
+
+升级前先执行 core 12 数据库迁移，再更新 Admin 并发布 `device-server/mqtt.connection`，确保 Device 账号具备上述订阅权限，再启动 Device 消费者并滚动更新其余 MQTT 服务。旧版本使用持久会话，账号和 ClientID 保持不变时，新进程会在每次连接后主动退订旧心跳和系统事件订阅；若同时更换身份，需在 Broker 管理端清理旧身份会话。验收应检查 Broker 中只有 Device 订阅全量设备状态，并确认正式设备心跳、临时绑定、下行 ACK 与断线状态处理正常。回滚消费归属时应按同样顺序保证至少一个消费者工作，避免全量停收窗口。数据库版本保护会拒绝直接启动只支持 core 11 的旧二进制；回滚需要保留 core 12 兼容性的构建，不能删除迁移记录来绕过检查。
+
+心跳按最多 256 条或 100 毫秒批量写入 Redis；内存接收队列最多 16384 条，存储失败时有界等待并按原顺序重试。队列溢出、存储写入持续失败或 MQTT 订阅失败会使 Device readiness 不通过，并记录错误。MQTT 订阅或退订失败时，连接恢复任务以 1 至 30 秒有界退避重试，成功前 readiness 不通过，任务随连接关闭退出。心跳有效期按原始观测时间计算，重试不会延长过期心跳；应用服务器与 Redis 必须保持时钟同步。在线查询接口仍沿用现有 Redis 读取语义，不能把其他服务 Redis 可达等同于状态消费者健康；运维必须同时监控 Device readiness。
+
+设备最近上线 IP 由 Broker `connected` 事件中的 `ipaddress` 获取，仅记录正式 `sn_` 连接；`connected_at` 必须是有效的正数毫秒时间戳，且不超过应用当前时间一分钟，用于防止较旧连接覆盖较新记录。缺失或异常时间的连接事件仍更新在线观测，但不记录 IP，已有可靠 IP 保留。参考 [EMQX 系统主题定义](https://docs.emqx.com/en/emqx/latest/guides/observability/mqtt-system-topics.html)。IP 与连接时间先随在线状态原子写入 Redis 的 `presence:connections:pending` 哈希，每台设备只保留最新待写快照且不设 TTL。`presence:connections:pending_since` 有序集合保存首次待写时间，更新快照不重置等待年龄，确认写入时一并删除。独立任务批量写入 MySQL，提交成功后比较快照再删除，避免旧任务删除新记录；MySQL 故障或应用重启后可继续补写已进入 Redis 的快照。心跳不写 MySQL，SQL 等待不阻塞 Redis 更新。Redis 必须配置持久化并避免淘汰这些待写记录；当前多键脚本要求单节点或兼容单端点的部署，不支持原生 Redis Cluster 跨槽执行。
+
+内存队列溢出且丢失连接 IP 时，Device readiness 持续报错，Redis 恢复可写后保存无 TTL 的 `presence:connections:gap` 标记，不因等待 150 秒自动恢复。处理时先停 Device，核对 Broker 连接记录并补齐或明确确认缺失范围，再清除此标记并启动验收。事件未送达、尚未写入 Redis 时进程异常退出或 Redis 数据丢失仍可能导致缺失；此字段表示最近观测到的上线来源，不是完整连接审计。部署前执行 core 12 迁移并按安装器清单授予运行账号 DML 权限。
+
+注册 IP 和成功登录 IP 来自 HTTP 服务解析的客户端地址。反向代理部署必须设置 `server.trusted_proxies`；只有可信代理转发的来源头可参与解析。设备 IP 是 Broker 所见地址，NAT 或未透传原地址的 MQTT 代理可能使它显示出口或代理地址；不要用应用 HTTP 地址推测 MQTT 来源。
+
+Device 的服务状态实例包含 `metrics`：内存排队数 `presence_queued`、累计丢弃数 `presence_rejected_total`、累计投影失败数 `presence_write_failures_total`、待补写设备数 `connection_pending`、最老待写年龄 `connection_oldest_pending_age_ms` 和采样时间 `connection_backlog_measured_at_ms`。这些值通过 Admin 服务状态接口读取；采样时间用于区分旧快照。最老待写超过 150 秒时 presence readiness 不通过，排空后恢复，不以单次 SQL 写入成功掩盖积压。
+
+绑定与解绑通知不直接修改在线状态，也不保证强制断开 Broker 连接。设备处理 `auth_grant` 或 `unbind` 后自行转换连接；在线观测只由 Device 消费链路维护，离线按 TTL 收敛。

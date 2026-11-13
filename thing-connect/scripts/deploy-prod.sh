@@ -965,7 +965,7 @@ preflight_business_services() {
         if [ "$svc" = recognition-server ] && [ "${DEFER_RECOGNITION_START:-0}" = 1 ]; then continue; fi
         log "停服前检查 $svc 必填配置及依赖连接..."
         "$BUILD_DIR/bin/admin-server" -c "$cfg" -deploy-root "$DEPLOY_ROOT" \
-            -check-service-config "$svc" || return 1
+            -check-service-config "$svc" || return $?
     done
 }
 
@@ -1477,6 +1477,34 @@ abort_active_release() {
     exit "$status"
 }
 
+# Exit 78 is an actionable configuration pause, never a completed release.
+configuration_pending() {
+    trap - ERR INT TERM
+    mark_backup_failed || return 1
+    warn "发布等待业务配置；未记录完整发布成功"
+    warn "请登录新版 Admin 发布缺失配置，然后重新执行原 update 命令继续"
+    return 78
+}
+
+publish_admin_configuration_phase() (
+    local status
+    [ "$MIGRATIONS_PENDING" = 0 ] || return 1
+    DEPLOYED_SERVICES=("$ADMIN_SERVICE")
+    trap 'status=$?; rollback_active_release "$status"; exit "$status"' ERR
+    trap 'abort_active_release 130' INT
+    trap 'abort_active_release 143' TERM
+    if [ "$ACTIVE_SERVICE_MANAGER" != manual ]; then
+        stop_one "$ADMIN_SERVICE" || { status=$?; rollback_active_release "$status"; return "$status"; }
+    fi
+    deploy_one "$ADMIN_SERVICE" || { status=$?; rollback_active_release "$status"; return "$status"; }
+    if [ "$ACTIVE_SERVICE_MANAGER" != manual ]; then
+        start_one "$ADMIN_SERVICE" || { status=$?; rollback_active_release "$status"; return "$status"; }
+    else
+        warn "新版 Admin 文件已就位，请使用外部服务管理器启动 Admin 完成配置"
+    fi
+    configuration_pending
+)
+
 full_deploy() (
     local services=() svc
     local status auxiliary_release_complete=1
@@ -1510,7 +1538,15 @@ full_deploy() (
     services=("${ACTIVE_SERVICES[@]}")
     backup_release "${services[@]}" || return 1
     inspect_migrations || { mark_backup_failed; return 1; }
-    preflight_business_services || { mark_backup_failed; return 1; }
+    if preflight_business_services; then :; else
+        status=$?
+        if [ "$status" = 78 ]; then
+            publish_admin_configuration_phase
+            return $?
+        fi
+        mark_backup_failed
+        return "$status"
+    fi
     DEPLOYED_SERVICES=("${services[@]}")
     trap 'status=$?; rollback_active_release "$status"; exit "$status"' ERR
     trap 'abort_active_release 130' INT
@@ -1542,7 +1578,16 @@ full_deploy() (
         fi
     done
     if [ "$ACTIVE_SERVICE_MANAGER" != manual ]; then
+        start_one "$ADMIN_SERVICE" || { status=$?; rollback_active_release "$status"; return "$status"; }
+        MIGRATIONS_PENDING=0
+        if preflight_business_services; then :; else
+            status=$?
+            if [ "$status" = 78 ]; then configuration_pending; return $?; fi
+            rollback_active_release "$status"
+            return "$status"
+        fi
         for svc in "${ACTIVE_SERVICES[@]}"; do
+            [ "$svc" != "$ADMIN_SERVICE" ] || continue
             if start_one "$svc"; then :; else
                 status=$?; rollback_active_release "$status"; return "$status"
             fi

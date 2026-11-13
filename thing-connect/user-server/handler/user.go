@@ -220,7 +220,7 @@ func (s *Server) postRegister(c *gin.Context) {
 		apiresp.BadParamError(c, err)
 		return
 	}
-	tok, userID, err := s.userSvc.Register(c.Request.Context(), req.Email, req.Password, req.Code)
+	tok, userID, err := s.userSvc.Register(c.Request.Context(), req.Email, req.Password, req.Code, c.ClientIP())
 	if err != nil {
 		apiresp.FromError(c, err)
 		return

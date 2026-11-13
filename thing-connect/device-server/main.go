@@ -12,6 +12,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
+	"thing-connect/internal/dynamicconfig"
+	"thing-connect/internal/mqttc"
+	"thing-connect/internal/presence"
 
 	devhandler "thing-connect/device-server/handler"
 	"thing-connect/internal/cache"
@@ -92,6 +96,37 @@ func main() {
 	}
 	cancelConfig()
 
+	startupCtx, startupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	mqttConfig, mqttRevision, err := dynamicconfig.ResolveMQTT(startupCtx, dynamicClient, "device-server", cfg.MQTT)
+	startupCancel()
+	if err != nil {
+		log.Fatalf("mqtt config: %v", err)
+	}
+	// A separate bounded Redis client keeps a stalled projection from occupying
+	// the request pool. ContextTimeoutEnabled makes the batch deadline effective.
+	presenceRedis := redis.NewClient(&redis.Options{
+		Addr: cfg.Redis.Addr, Password: cfg.Redis.Password, DB: cfg.Redis.DB,
+		PoolSize: 2, MaxRetries: -1, ContextTimeoutEnabled: true,
+		DialTimeout: 2 * time.Second, ReadTimeout: 2 * time.Second, WriteTimeout: 2 * time.Second,
+	})
+	presenceStore := &cache.PresenceStore{Client: presenceRedis}
+	projector := presence.New(presenceStore, mysqlstore.NewDeviceConnectionStore(sqlDB))
+	presenceCtx, presenceCancel := context.WithCancel(context.Background())
+	presenceDone := make(chan struct{})
+	go func() { defer close(presenceDone); projector.Run(presenceCtx) }()
+	presenceBroker, err := mqttc.NewPresence(mqttConfig, projector)
+	if err != nil {
+		presenceCancel()
+		<-presenceDone
+		_ = presenceRedis.Close()
+		log.Fatalf("presence mqtt: %v", err)
+	}
+	revisions := func() map[string]int64 {
+		values := dynamicClient.Revisions()
+		values["device-server/mqtt.connection"] = mqttRevision
+		return values
+	}
+
 	// Periodically reconcile global:pending_codes counter to correct drift
 	// caused by expired verification codes whose DelVerifyAndCode was never
 	// called (user didn't complete bind before TTL).
@@ -104,15 +139,16 @@ func main() {
 		log.Fatalf("trusted proxies: %v", err)
 	}
 	r.Use(gin.Recovery(), logging.RequestID("device"), logging.BodyLog(), gin.Logger())
-	probes := map[string]servicestatus.DependencyProbe{"database": servicestatus.SQLProbe(sqlDB), "redis": servicestatus.RedisProbe(rdb)}
+	probes := map[string]servicestatus.DependencyProbe{"database": servicestatus.SQLProbe(sqlDB), "redis": servicestatus.RedisProbe(rdb), "mqtt": presenceBroker.Ping, "presence": projector.Ping}
 	servicestatus.RegisterHealth(r, probes)
 	devhandler.NewServer(devSvc).Register(r)
 	devhandler.RegisterDeviceProfile(r, deviceprofile.NewService(mysqlstore.NewDeviceProfileStore(sqlDB)), cfg.JWTSecret)
 	statusCtx, statusCancel := context.WithCancel(context.Background())
-	reporter, err := servicestatus.NewReporter(rdb, "device-server", probes, dynamicClient.Revisions)
+	reporter, err := servicestatus.NewReporter(rdb, "device-server", probes, revisions)
 	if err != nil {
 		log.Fatalf("service status: %v", err)
 	}
+	reporter.SetMetrics(projector.Metrics)
 	go reporter.Run(statusCtx)
 
 	addr := fmt.Sprintf(":%d", cfg.Server.HTTPPort)
@@ -143,6 +179,12 @@ func main() {
 	}
 	gcCancel()
 	statusCancel()
+	presenceBroker.Close()
+	presenceCancel()
+	<-presenceDone
+	if err := presenceRedis.Close(); err != nil {
+		log.Printf("presence redis close: %v", err)
+	}
 	if err := rdb.Close(); err != nil {
 		log.Printf("device-server close redis: %v", err)
 	}

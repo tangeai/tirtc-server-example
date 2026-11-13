@@ -10,18 +10,12 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/redis/go-redis/v9"
 	"thing-connect/internal/config"
-)
-
-const (
-	// onlineTTL is set to 2.5× the broker keepalive (30s).
-	// $SYS disconnected event fires within keepalive timeout on abnormal disconnect,
-	// so TTL serves only as a safety net for missed disconnect events.
-	onlineTTL = 150 * time.Second
 )
 
 var (
@@ -31,17 +25,43 @@ var (
 	ErrACKTimeout      = errors.New("mqttc: ack timeout")
 )
 
+// onlineReader deliberately excludes writes: MQTT command clients do not own
+// the online projection. The Redis adapter is injected only for compatibility
+// with existing online queries.
+type onlineReader interface {
+	Get(context.Context, string) *redis.StringCmd
+}
+
 type Broker struct {
 	client mqtt.Client
 	cfg    config.MQTTCfg
-	rdb    *redis.Client
+	rdb    onlineReader
 	mu     sync.Mutex
 	// pending ACK channels: topic → chan struct{}
-	ackCh map[string]chan struct{}
+	ackCh           map[string]chan struct{}
+	ready           atomic.Bool
+	readyGeneration atomic.Uint64
+	presenceHandler mqtt.MessageHandler
+	cancel          context.CancelFunc
+	recoveryDone    chan struct{}
+	reconnect       chan struct{}
+	generation      atomic.Uint64
+	initialized     chan struct{}
+	initializeOnce  sync.Once
+	closeOnce       sync.Once
 }
 
 func New(cfg config.MQTTCfg, rdb *redis.Client) (*Broker, error) {
-	b := &Broker{cfg: cfg, rdb: rdb, ackCh: make(map[string]chan struct{})}
+	return newBroker(cfg, rdb, nil)
+}
+
+func newBroker(cfg config.MQTTCfg, rdb *redis.Client, handler mqtt.MessageHandler) (*Broker, error) {
+	b := &Broker{cfg: cfg, rdb: rdb, ackCh: make(map[string]chan struct{}), presenceHandler: handler}
+	ctx, cancel := context.WithCancel(context.Background())
+	b.cancel = cancel
+	b.recoveryDone = make(chan struct{})
+	b.reconnect = make(chan struct{}, 1)
+	b.initialized = make(chan struct{})
 
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(cfg.Broker)
@@ -68,6 +88,7 @@ func New(cfg config.MQTTCfg, rdb *redis.Client) (*Broker, error) {
 	opts.SetUsername(username)
 	opts.SetPassword(cfg.Password)
 	opts.SetKeepAlive(30 * time.Second)
+	opts.SetConnectTimeout(5 * time.Second)
 	opts.SetAutoReconnect(true)
 	opts.SetCleanSession(false)
 
@@ -76,22 +97,29 @@ func New(cfg config.MQTTCfg, rdb *redis.Client) (*Broker, error) {
 		opts.SetTLSConfig(&tls.Config{InsecureSkipVerify: false})
 	}
 
-	opts.SetOnConnectHandler(func(_ mqtt.Client) {
-		slog.Info("mqttc connected to broker")
-		b.subscribeSystemEvents()
-	})
+	opts.SetOnConnectHandler(func(_ mqtt.Client) { b.connectionChanged() })
 	opts.SetConnectionLostHandler(func(_ mqtt.Client, err error) {
+		b.connectionChanged()
 		slog.Warn("mqttc connection lost", "err", err)
 	})
 	opts.SetDefaultPublishHandler(b.handleMessage)
 
 	b.client = mqtt.NewClient(opts)
+	go b.recoverSubscriptions(ctx)
 	tok := b.client.Connect()
 	if !tok.WaitTimeout(10 * time.Second) {
+		b.Close()
 		return nil, fmt.Errorf("mqttc: connect timeout")
 	}
 	if err := tok.Error(); err != nil {
+		b.Close()
 		return nil, fmt.Errorf("mqttc: connect: %w", err)
+	}
+	select {
+	case <-b.initialized:
+	case <-time.After(10 * time.Second):
+		b.Close()
+		return nil, errors.New("mqttc: subscription setup timeout")
 	}
 	return b, nil
 }
@@ -100,6 +128,16 @@ func New(cfg config.MQTTCfg, rdb *redis.Client) (*Broker, error) {
 // Redis writes or a persistent session. It is intended for an explicit
 // server-side startup preflight while the target service is stopped.
 func Probe(ctx context.Context, cfg config.MQTTCfg) error {
+	return probe(ctx, cfg, false)
+}
+
+// ProbePresence verifies the required SUBACK grants in a clean temporary
+// session. It discards received messages and never updates online state.
+func ProbePresence(ctx context.Context, cfg config.MQTTCfg) error {
+	return probe(ctx, cfg, true)
+}
+
+func probe(ctx context.Context, cfg config.MQTTCfg, presence bool) error {
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(cfg.Broker)
 	hostname, _ := os.Hostname()
@@ -131,51 +169,59 @@ func Probe(ctx context.Context, cfg config.MQTTCfg) error {
 	if err := token.Error(); err != nil {
 		return fmt.Errorf("mqttc: connection check failed: %w", err)
 	}
-	client.Disconnect(100)
+	defer client.Disconnect(100)
+	if presence {
+		b := &Broker{presenceHandler: func(mqtt.Client, mqtt.Message) {}}
+		return b.configureSubscriptionsContext(ctx, client)
+	}
 	return nil
 }
 
-// subscribeSystemEvents listens for $SYS connect/disconnect events to maintain online cache.
-// TTL acts as safety net for missed disconnect events (e.g. broker restart).
-func (b *Broker) subscribeSystemEvents() {
-	topics := map[string]byte{
-		"$SYS/brokers/+/clients/+/connected":    0,
-		"$SYS/brokers/+/clients/+/disconnected": 0,
-		"device/+/up":                           0,
-	}
-	tok := b.client.SubscribeMultiple(topics, b.handleSystemEvent)
-	tok.Wait()
-	if err := tok.Error(); err != nil {
-		slog.Warn("mqttc subscribe $SYS failed (online status will rely on TTL only)", "err", err)
-	}
+var presenceTopics = []string{
+	"$SYS/brokers/+/clients/+/connected",
+	"$SYS/brokers/+/clients/+/disconnected",
+	"device/+/up",
 }
 
-func (b *Broker) handleSystemEvent(_ mqtt.Client, msg mqtt.Message) {
-	topic := msg.Topic()
-	parts := strings.Split(topic, "/")
-	ctx := context.Background()
+func (b *Broker) configureSubscriptions(client mqtt.Client) error {
+	return b.configureSubscriptionsContext(context.Background(), client)
+}
 
-	// device/<clientID>/up — heartbeat, refresh TTL
-	if len(parts) == 3 && parts[0] == "device" && parts[2] == "up" {
-		// Set instead of Expire so a broker-service restart can reconstruct
-		// presence from the next heartbeat even when the MQTT connection itself
-		// stays up and no new $SYS connected event is emitted.
-		b.rdb.Set(ctx, "online:"+parts[1], presenceValue(time.Now()), onlineTTL)
-		return
+func (b *Broker) configureSubscriptionsContext(ctx context.Context, client mqtt.Client) error {
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-
-	// $SYS/brokers/<node>/clients/<clientID>/connected|disconnected
-	if len(parts) < 6 {
-		return
+	var token mqtt.Token
+	if b.presenceHandler == nil {
+		// CleanSession=false retains subscriptions across upgrades. Every reconnect
+		// must explicitly remove the legacy presence subscriptions.
+		token = client.Unsubscribe(presenceTopics...)
+	} else {
+		topics := make(map[string]byte, len(presenceTopics))
+		for _, topic := range presenceTopics {
+			topics[topic] = 0
+		}
+		token = client.SubscribeMultiple(topics, b.presenceHandler)
 	}
-	clientID := parts[4]
-	key := "online:" + clientID
-	switch parts[5] {
-	case "connected":
-		b.rdb.Set(ctx, key, presenceValue(time.Now()), onlineTTL)
-	case "disconnected":
-		b.rdb.Del(ctx, key)
+	wait := 5 * time.Second
+	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < wait {
+		wait = time.Until(deadline)
 	}
+	if wait <= 0 || !token.WaitTimeout(wait) {
+		return errors.New("mqttc: subscription setup timeout")
+	}
+	if err := token.Error(); err != nil {
+		return err
+	}
+	if result, ok := token.(interface{ Result() map[string]byte }); ok {
+		for _, topic := range presenceTopics {
+			qos, exists := result.Result()[topic]
+			if !exists || qos == 0x80 {
+				return fmt.Errorf("mqttc: presence subscription rejected: topic=%s granted=%t code=0x%02x", topic, exists, qos)
+			}
+		}
+	}
+	return nil
 }
 
 func (b *Broker) handleMessage(_ mqtt.Client, msg mqtt.Message) {
@@ -202,15 +248,11 @@ func (b *Broker) IsOnline(ctx context.Context, clientID string) bool {
 	return err == nil && val != ""
 }
 
-func presenceValue(now time.Time) string {
-	return now.UTC().Format(time.RFC3339Nano)
-}
-
 // Ping reports whether this service instance currently has an open MQTT
 // connection. It matches servicestatus.DependencyProbe without coupling the
 // MQTT package to the status package.
 func (b *Broker) Ping(context.Context) error {
-	if b == nil || b.client == nil || !b.client.IsConnectionOpen() {
+	if b == nil || b.client == nil || !b.client.IsConnectionOpen() || !b.ready.Load() || b.readyGeneration.Load() != b.generation.Load() {
 		return errors.New("mqttc: connection is not open")
 	}
 	return nil
@@ -271,20 +313,21 @@ func (b *Broker) PublishAndWaitACK(downTopic, ackTopic string, payload any, time
 	}
 }
 
-// KickClient forces a client offline by publishing to the broker kick topic (EMQX compatible).
-// If the broker doesn't support this, the call is a no-op.
-func (b *Broker) KickClient(clientID string) {
-	// EMQX supports $SYS/brokers/<node>/clients/<clientID>/kick — but node is unknown.
-	// More portable: publish to a special management topic if configured.
-	// Here we just expire the online cache entry.
-	ctx := context.Background()
-	b.rdb.Del(ctx, "online:"+clientID)
-}
-
 // Close disconnects from the MQTT broker, waiting up to 500ms for in-flight
 // messages to complete. Safe to call multiple times.
 func (b *Broker) Close() {
-	b.client.Disconnect(500)
+	b.closeOnce.Do(func() {
+		if b.cancel != nil {
+			b.cancel()
+		}
+		if b.client != nil {
+			b.client.Disconnect(500)
+		}
+		if b.recoveryDone != nil {
+			<-b.recoveryDone
+		}
+		b.ready.Store(false)
+	})
 }
 
 // DeviceCmdTopic returns the server→device command topic (expects ACK for critical commands).
@@ -304,3 +347,60 @@ func DeviceACKTopic(clientID string) string {
 
 // Connected reports whether the current MQTT transport is available.
 func (b *Broker) Connected() bool { return b.client != nil && b.client.IsConnectionOpen() }
+
+func (b *Broker) connectionChanged() {
+	b.generation.Add(1)
+	b.ready.Store(false)
+	select {
+	case b.reconnect <- struct{}{}:
+	default:
+	}
+}
+
+// One lifecycle-owned worker retries subscriptions even while the transport
+// stays connected. An old connection's completion cannot mark a new one ready.
+func (b *Broker) recoverSubscriptions(ctx context.Context) {
+	defer close(b.recoveryDone)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-b.reconnect:
+		}
+		delay := time.Second
+		for b.client.IsConnectionOpen() && ctx.Err() == nil {
+			generation := b.generation.Load()
+			err := b.configureSubscriptions(b.client)
+			if ctx.Err() != nil {
+				return
+			}
+			if generation != b.generation.Load() {
+				continue
+			}
+			if err == nil && b.client.IsConnectionOpen() {
+				b.readyGeneration.Store(generation)
+				b.ready.Store(true)
+				b.initializeOnce.Do(func() { close(b.initialized) })
+				break
+			}
+			b.ready.Store(false)
+			slog.Warn("mqttc subscription setup failed; retrying", "err", err, "retry_in", delay)
+			timer := time.NewTimer(delay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-b.reconnect:
+				timer.Stop()
+				delay = time.Second
+			case <-timer.C:
+				if delay < 30*time.Second {
+					delay *= 2
+					if delay > 30*time.Second {
+						delay = 30 * time.Second
+					}
+				}
+			}
+		}
+	}
+}

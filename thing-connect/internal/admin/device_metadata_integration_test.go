@@ -14,7 +14,7 @@ import (
 	"thing-connect/internal/testenv"
 )
 
-func TestAdminDeviceViewsExposeOptionalProfileMetadata(t *testing.T) {
+func TestAdminVoipViewExposesOptionalProfileMetadata(t *testing.T) {
 	cfg := testenv.LoadConfigOrSkip(t, "../../tests/testdata/config.yaml")
 	db := testenv.OpenDBOrSkip(t, cfg)
 	t.Cleanup(func() { _ = db.Close() })
@@ -38,10 +38,9 @@ func TestAdminDeviceViewsExposeOptionalProfileMetadata(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	server := &HTTPServer{store: NewStore(db)}
-	router.GET("/devices/:device_id", server.getDevice)
 	router.GET("/voip/devices/:device_id/profile", server.voipDeviceProfile)
 
-	for _, path := range []string{"/devices/" + deviceID, "/voip/devices/" + deviceID + "/profile"} {
+	for _, path := range []string{"/voip/devices/" + deviceID + "/profile"} {
 		recorder := httptest.NewRecorder()
 		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
 		if recorder.Code != http.StatusOK {

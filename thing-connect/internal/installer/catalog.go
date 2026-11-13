@@ -134,3 +134,13 @@ func businessServiceNames() []string {
 	}
 	return result
 }
+
+// ServiceUsesMQTT is the shared dependency fact used by startup preflight.
+func ServiceUsesMQTT(name string) bool {
+	for _, service := range serviceCatalog {
+		if service.Name == name {
+			return service.UsesMQTT
+		}
+	}
+	return false
+}

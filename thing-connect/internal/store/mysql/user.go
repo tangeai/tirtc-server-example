@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 
@@ -18,7 +19,7 @@ func NewUserStore(db *sqlx.DB) store.UserStore { return &userStore{db} }
 
 func (s *userStore) GetUserByEmail(ctx context.Context, email string) (*model.User, error) {
 	var u model.User
-	err := s.db.GetContext(ctx, &u, `SELECT * FROM users WHERE email=?`, email)
+	err := s.db.GetContext(ctx, &u, `SELECT u.*,COALESCE(c.registration_ip,'') registration_ip,COALESCE(c.last_login_ip,'') last_login_ip,c.last_login_at FROM users u LEFT JOIN user_connection c ON c.user_id=u.id WHERE u.email=?`, email)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil //nolint:nilnil // absence is the UserStore lookup contract
 	}
@@ -28,15 +29,25 @@ func (s *userStore) GetUserByEmail(ctx context.Context, email string) (*model.Us
 	return &u, nil
 }
 
-func (s *userStore) CreateUser(ctx context.Context, email, passwordHash string, bindQuota int) (int64, error) {
-	res, err := s.db.ExecContext(ctx,
-		`INSERT INTO users (email, password, bind_quota) VALUES (?, ?, ?)`, email, passwordHash, bindQuota)
+func (s *userStore) CreateUser(ctx context.Context, email, passwordHash string, bindQuota int, registrationIP string) (int64, error) {
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("userStore.CreateUser begin: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // Commit or cancellation can already finish the transaction.
+	res, err := tx.ExecContext(ctx, `INSERT INTO users (email,password,bind_quota) VALUES (?,?,?)`, email, passwordHash, bindQuota)
 	if err != nil {
 		return 0, fmt.Errorf("userStore.CreateUser: %w", err)
 	}
 	id, err := res.LastInsertId()
 	if err != nil {
-		return 0, fmt.Errorf("userStore.CreateUser LastInsertId: %w", err)
+		return 0, fmt.Errorf("userStore.CreateUser id: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO user_connection (user_id,registration_ip) VALUES (?,?)`, id, registrationIP); err != nil {
+		return 0, fmt.Errorf("userStore.CreateUser IP: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("userStore.CreateUser commit: %w", err)
 	}
 	return id, nil
 }
@@ -104,4 +115,10 @@ func (s *userStore) UpdateDeviceName(
 		return false, fmt.Errorf("userStore.UpdateDeviceName commit: %w", err)
 	}
 	return true, nil
+}
+
+func (s *userStore) RecordLogin(ctx context.Context, userID int64, ip string, at time.Time) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO user_connection (user_id,last_login_ip,last_login_at) VALUES (?,?,?)
+ ON DUPLICATE KEY UPDATE last_login_ip=IF(last_login_at IS NULL OR VALUES(last_login_at)>=last_login_at,VALUES(last_login_ip),last_login_ip),last_login_at=GREATEST(COALESCE(last_login_at,VALUES(last_login_at)),VALUES(last_login_at))`, userID, ip, at)
+	return err
 }

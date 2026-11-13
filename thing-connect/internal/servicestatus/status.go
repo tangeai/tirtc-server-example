@@ -40,6 +40,7 @@ type Instance struct {
 	StartedAt      time.Time         `json:"started_at"`
 	LastHeartbeat  time.Time         `json:"last_heartbeat"`
 	Dependencies   map[string]string `json:"dependencies"`
+	Metrics        map[string]int64  `json:"metrics,omitempty"`
 	ConfigRevision map[string]int64  `json:"config_revision,omitempty"`
 }
 
@@ -49,6 +50,7 @@ type Reporter struct {
 	key       string
 	probes    map[string]DependencyProbe
 	revisions func() map[string]int64
+	metrics   func() map[string]int64
 }
 
 func NewReporter(client *redis.Client, service string, probes map[string]DependencyProbe, revisions func() map[string]int64) (*Reporter, error) {
@@ -71,6 +73,9 @@ func NewReporter(client *redis.Client, service string, probes map[string]Depende
 		instance: Instance{Service: service, InstanceID: instanceID, Node: node, Zone: os.Getenv("SERVICE_ZONE"), Version: firstNonEmpty(os.Getenv("BUILD_VERSION"), BuildVersion), Commit: firstNonEmpty(os.Getenv("BUILD_COMMIT"), BuildCommit), StartedAt: started},
 	}, nil
 }
+
+// SetMetrics attaches a non-blocking snapshot before Run starts.
+func (r *Reporter) SetMetrics(snapshot func() map[string]int64) { r.metrics = snapshot }
 
 func (r *Reporter) Run(ctx context.Context) {
 	ticker := time.NewTicker(15 * time.Second)
@@ -108,6 +113,9 @@ func (r *Reporter) report(ctx context.Context) {
 	instance.LastHeartbeat = time.Now().UTC()
 	if r.revisions != nil {
 		instance.ConfigRevision = r.revisions()
+	}
+	if r.metrics != nil {
+		instance.Metrics = r.metrics()
 	}
 	payload, err := json.Marshal(instance)
 	if err != nil {

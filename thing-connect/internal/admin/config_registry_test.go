@@ -22,8 +22,8 @@ func TestRegistryRejectsUnknownAndBadValues(t *testing.T) {
 func TestRegistryDefinitionsAndUsableInitialValues(t *testing.T) {
 	registry := DefaultConfigRegistry()
 	definitions := registry.List("")
-	if len(definitions) != 31 {
-		t.Fatalf("registered configuration count = %d, want 31", len(definitions))
+	if len(definitions) != 32 {
+		t.Fatalf("registered configuration count = %d, want 32", len(definitions))
 	}
 	for _, definition := range definitions {
 		value := definition.Default
@@ -73,7 +73,7 @@ func TestRegistryDefinitionsAndUsableInitialValues(t *testing.T) {
 
 func TestMQTTConnectionIsBlockingAndRequiresUnambiguousAuthentication(t *testing.T) {
 	registry := DefaultConfigRegistry()
-	for _, namespace := range []string{"user-server", "voip-server", "call-server"} {
+	for _, namespace := range []string{"device-server", "user-server", "voip-server", "call-server", "recognition-server"} {
 		definition, ok := registry.Lookup(namespace, "mqtt.connection")
 		if !ok || !definition.Required || !definition.Blocking || definition.TestKind != "mqtt" || definition.Reload != "restart" {
 			t.Fatalf("%s MQTT definition = %+v", namespace, definition)
@@ -99,7 +99,7 @@ func TestMQTTConnectionIsBlockingAndRequiresUnambiguousAuthentication(t *testing
 func TestBlockingDefinitionsAreTargetedPerService(t *testing.T) {
 	registry := DefaultConfigRegistry()
 	for service, want := range map[string][]string{
-		"device-server": {},
+		"device-server": {"device-server/mqtt.connection"},
 		"user-server":   {"common/tirtc", "user-server/mqtt.connection"},
 		"voip-server":   {"common/tirtc", "voip-server/mqtt.connection"},
 		"ai-server":     {"common/tirtc"},

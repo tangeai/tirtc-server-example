@@ -76,3 +76,32 @@ func TestRecognitionModelSecretValidation(t *testing.T) {
 		t.Fatalf("keeping existing secret rejected: %v", err)
 	}
 }
+
+func TestAllMQTTDefinitionsValidatePassword(t *testing.T) {
+	service := &ConfigService{registry: DefaultConfigRegistry()}
+	public := json.RawMessage(`{"broker":"mqtt://example.invalid:1883","auth_mode":"username","username":"service","client_id":""}`)
+	count := 0
+	for _, d := range service.registry.List("") {
+		if d.Key != "mqtt.connection" {
+			continue
+		}
+		count++
+		t.Run(d.Namespace, func(t *testing.T) {
+			if err := service.Validate(d.Namespace, d.Key, public, json.RawMessage(`{"password":"test-password"}`), true); err != nil {
+				t.Fatal(err)
+			}
+			for _, bad := range []string{`{}`, `{"password":""}`, `{"password":"  "}`, `{"password":123}`, `{"other":"bad"}`} {
+				err := service.Validate(d.Namespace, d.Key, public, json.RawMessage(bad), true)
+				if err == nil {
+					err = validateRequiredSecrets(d.Namespace, d.Key, public, json.RawMessage(bad))
+				}
+				if err == nil {
+					t.Fatalf("accepted invalid secrets: %s", bad)
+				}
+			}
+		})
+	}
+	if count != 5 {
+		t.Fatalf("tested %d MQTT definitions", count)
+	}
+}

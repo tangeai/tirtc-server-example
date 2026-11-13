@@ -109,11 +109,17 @@ MFA 验证请求：
 | AI 角色类型 | `GET/POST /ai-role-types`、`GET /ai-role-types/voices`、`PUT /ai-role-types/:id`、`PUT /ai-role-types/:id/status` |
 | 开发板目录 | `GET/POST /boards`、`POST /boards/images`、`PUT/DELETE /boards/:id`、`PUT /boards/:id/status` |
 
+服务状态的 `instances[]` 可包含 `metrics` 整数映射。Device 实例提供 `presence_queued`、`presence_rejected_total`、`presence_write_failures_total`、`connection_pending`、`connection_oldest_pending_age_ms`、`connection_backlog_measured_at_ms`，分别表示内存队列长度、累计拒收数、累计投影失败数、待补写设备数、最老待写年龄（毫秒）和指标采样时间（Unix 毫秒）。旧实例或其他服务可以省略该字段。待写超过 150 秒会使 presence 依赖不健康，不能只凭数据库连接成功判定服务就绪。
+
 `GET /services/:service/status` 在实例状态外返回 `configuration_ready`、`required_configurations[]`、`start_command` 和 `restart_command`。`required_configurations[]` 列出未发布或无效的启动阻断项。命令仅用于管理员复制到部署服务器执行，Admin 不执行主机进程控制。
 
 写操作由权限码控制。超级管理员默认拥有 [permissions.go](../../internal/admin/permissions.go) 中列出的全部权限，其他角色按后台配置授权。
 
 `GET /roles` 同时返回 `registered_permissions` 兼容权限码列表和 `permission_definitions` 元数据。元数据包含稳定的 `code`、面向管理员的中文 `name`、`group` 与 `description`；自定义后台可以直接按该元数据分组展示，不需要自行维护权限码文案。
+
+`GET /users` 和 `GET /users/:id` 的用户对象包含 `registration_ip`、`last_login_ip` 和可选的 `last_login_at`。注册 IP 只在创建账号时记录；最近登录字段只在成功登录时更新。已有账号的未知 IP 返回空字符串，未知时间省略。来源地址由 HTTP 可信代理配置决定，不接受请求体自报 IP。
+
+`GET /devices` 和 `GET /devices/:device_id` 的设备对象包含 `last_online_ip` 和可选的 `last_online_at`，表示最近观测到的正式 MQTT 连接来源和时间，来自 Broker 连接事件并异步持久化。未收到有效 IP 时返回空字符串，未知时间省略；离线后保留最近记录。这两个字段不表示当前在线状态，也不是心跳时间。
 
 `GET /devices` 和 `GET /devices/:device_id` 的设备对象包含在线状态字段：
 
@@ -121,7 +127,7 @@ MFA 验证请求：
 {"online":true,"presence_known":true,"last_seen_at":"2026-08-20T12:30:45Z"}
 ```
 
-`online` 依据 Redis 中 150 秒有效期的 MQTT 在线记录判定；设备心跳或 Broker 连接事件会刷新记录。`presence_known=false` 表示 Admin Server 当时无法读取 Redis，不能按离线处理。兼容升级前值时设备仍可显示在线，但 `last_seen_at` 可能为空；设备产生下一次心跳后会写入最近观测时间。
+`online` 依据 Redis 中 150 秒有效期的 MQTT 在线记录判定；设备心跳或 Broker 连接事件会刷新记录。无法确认连接代次的断开事件不直接删除记录，设备离线可能需要等待最后一次有效观测后的 150 秒 TTL 到期。`presence_known=false` 表示 Admin Server 当时无法读取 Redis，不能按离线处理。兼容升级前值时设备仍可显示在线，但 `last_seen_at` 可能为空；设备产生下一次心跳后会写入最近观测时间。
 
 `GET /devices/:device_id` 还会在设备已经上报时返回可选的 `hardware.chip_model`、`hardware.board_model` 和 `firmware_version`。未上报这些字段的旧设备不返回对应字段。设备详情同时返回可选的 `profiles` 对象，包含已上报且通过校验的 `stream`（实时音视频）、`call`（设备通话）、`voip`（微信通话）能力字段；无可展示场景时省略。此字段沿用 `device.read` 权限，不依赖微信授权记录。敏感字段和未知场景不返回；VoIP 中的 `has_camera`、`has_screen`、`voip_room_type` 为根据上报值推导的能力。
 
@@ -266,7 +272,7 @@ Content-Type: multipart/form-data; boundary=...
 
 `resource_refs` 控件编辑 `[{"id":"...","name":"..."}]` 结构，用于 AI 默认 MCP、设备插件和知识库资源。Admin Web 根据这些元数据生成输入控件和基础校验；只有使用自定义编辑器的复杂配置才维护独立页面。
 
-User、VoIP、Call 的 `mqtt.connection` 支持连接测试：
+Device、User、VoIP、Call、Recognition 的 `mqtt.connection` 支持连接测试：
 
 - 测试使用请求中的 `value` 和可选 `secrets`；没有提交 `secrets` 时，沿用已发布密码。
 - 测试只建立临时 MQTT 连接，不订阅、不发布消息、不写 Redis，也不发布配置项。

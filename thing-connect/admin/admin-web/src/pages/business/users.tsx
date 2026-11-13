@@ -160,6 +160,8 @@ export function UsersPage() {
               dataIndex: 'status',
               render: (v) => (v === 1 ? <Tag color="success">正常</Tag> : <Tag>禁用</Tag>),
             },
+            { title: '注册 IP', dataIndex: 'registration_ip', render: (v) => v || '—' },
+            { title: '最近登录 IP', dataIndex: 'last_login_ip', render: (v) => v || '—' },
             { title: '已绑定设备', dataIndex: 'device_count' },
             { title: '剩余绑定额度', dataIndex: 'bind_quota' },
             {
@@ -255,6 +257,21 @@ export function UsersPage() {
               items={[
                 { key: 'id', label: '用户编号', children: `#${detail.user.id}` },
                 { key: 'email', label: '邮箱', children: detail.user.email },
+                {
+                  key: 'registration_ip',
+                  label: '注册 IP',
+                  children: detail.user.registration_ip || '—',
+                },
+                {
+                  key: 'last_login_ip',
+                  label: '最近成功登录 IP',
+                  children: detail.user.last_login_ip || '—',
+                },
+                {
+                  key: 'last_login_at',
+                  label: '最近成功登录时间',
+                  children: formatTime(detail.user.last_login_at),
+                },
                 {
                   key: 'status',
                   label: '状态',

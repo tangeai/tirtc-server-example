@@ -34,6 +34,7 @@ type HTTPServer struct {
 	redis            *redis.Client
 	jobs             *JobService
 	devices          *DeviceService
+	resources        ResourceQueries
 	recognition      *RecognitionService
 	roleTypes        *RoleTypeService
 	boards           *BoardService
@@ -960,3 +961,5 @@ func identityFromContext(c *gin.Context) (AccessIdentity, bool) {
 func requestMeta(c *gin.Context) LoginMeta {
 	return LoginMeta{IP: c.ClientIP(), UserAgent: c.Request.UserAgent()}
 }
+
+func (s *HTTPServer) SetResourceQueries(queries ResourceQueries) { s.resources = queries }

@@ -52,7 +52,7 @@ func TestEmbeddedMigrationFilesAreNonEmpty(t *testing.T) {
 }
 
 func TestCurrentMigrationCatalogVersions(t *testing.T) {
-	want := map[string]int{"core": 11, "admin": 7}
+	want := map[string]int{"core": 12, "admin": 7}
 	if got := CurrentMigrationVersions(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("versions=%v want=%v", got, want)
 	}
@@ -402,4 +402,25 @@ func matchSet(pattern *regexp.Regexp, value string) map[string]bool {
 		result[match] = true
 	}
 	return result
+}
+
+func TestConnectionIPMigrationKeepsExistingTableShapes(t *testing.T) {
+	before, err := SchemaShapeForVersions(map[string]int{"core": 11, "admin": 7}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := SchemaShapeForVersions(map[string]int{"core": 12, "admin": 7}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, shape := range before {
+		if !reflect.DeepEqual(shape, after[name]) {
+			t.Fatalf("IP migration changes existing table %s; running old binaries must remain compatible", name)
+		}
+	}
+	for _, name := range []string{"user_connection", "device_connection"} {
+		if _, ok := after[name]; !ok {
+			t.Fatalf("missing %s", name)
+		}
+	}
 }

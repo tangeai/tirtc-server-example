@@ -13,6 +13,11 @@ import (
 )
 
 func TestMQTTPublishFailureReturnsGuidanceBeforeDatabaseWrite(t *testing.T) {
+	for _, namespace := range []string{"device-server", "user-server", "voip-server", "call-server", "recognition-server"} {
+		t.Run(namespace, func(t *testing.T) { checkMQTTPublishFailure(t, namespace) })
+	}
+}
+func checkMQTTPublishFailure(t *testing.T, namespace string) {
 	model, err := casbinmodel.NewModelFromString(rbacModel)
 	if err != nil {
 		t.Fatal(err)
@@ -44,7 +49,7 @@ func TestMQTTPublishFailureReturnsGuidanceBeforeDatabaseWrite(t *testing.T) {
 
 	body := `{"value":{"broker":"mqtt://broker.internal:1883","auth_mode":"username","username":"usersrv","client_id":""},"secrets":{"password":"secret"},"reason":"verify before publish","confirm":true}`
 	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/user-server/mqtt.connection", strings.NewReader(body)))
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/"+namespace+"/mqtt.connection", strings.NewReader(body)))
 
 	if recorder.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())

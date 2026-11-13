@@ -7,16 +7,9 @@ import (
 	"time"
 )
 
-func TestDevicePresenceKeyUsesFormalMQTTClientID(t *testing.T) {
-	const deviceID = "TIRE88CRGXG4"
-	if got, want := devicePresenceKey(deviceID), "online:sn_"+deviceID; got != want {
-		t.Fatalf("devicePresenceKey(%q) = %q, want %q", deviceID, got, want)
-	}
-}
-
 func TestManagedDeviceProjectsOptionalProfileMetadata(t *testing.T) {
 	profile := `{"hardware":{"chip_model":"x86_64","board_model":"thingconnect-device-sim-py"},"firmware_version":"1.0.0","voip":{}}`
-	device := managedDevice{Profile: &profile}
+	device := ManagedDevice{Profile: &profile}
 	device.projectProfileMetadata()
 	if device.Hardware == nil || device.Hardware.ChipModel == nil || *device.Hardware.ChipModel != "x86_64" ||
 		device.Hardware.BoardModel == nil || *device.Hardware.BoardModel != "thingconnect-device-sim-py" ||
@@ -24,7 +17,7 @@ func TestManagedDeviceProjectsOptionalProfileMetadata(t *testing.T) {
 		t.Fatalf("metadata=%+v firmware=%v", device.Hardware, device.FirmwareVersion)
 	}
 
-	legacy := managedDevice{}
+	legacy := ManagedDevice{}
 	legacy.projectProfileMetadata()
 	if legacy.Hardware != nil || legacy.FirmwareVersion != nil {
 		t.Fatalf("legacy metadata must stay absent: %+v", legacy)
@@ -49,7 +42,7 @@ func TestAdminDeviceProfileDataKeepsVoIPContractAndAddsMetadata(t *testing.T) {
 
 func TestManagedDeviceProjectsProfilesWithoutSecrets(t *testing.T) {
 	profile := `{"hardware":{"chip_model":"ESP32-S3"},"stream":{"audio_rate":16000,"up_video_mt":["h264","mjpeg"]},"call":{"audio_channels":1},"voip":{"audio_rate":8000,"device_key":"secret-value"},"credentials":{"token":"secret-value"}}`
-	device := managedDevice{Profile: &profile}
+	device := ManagedDevice{Profile: &profile}
 	device.projectProfileMetadata()
 	for _, scene := range []string{"stream", "call", "voip"} {
 		if _, ok := device.Profiles[scene]; !ok {

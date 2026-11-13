@@ -22,6 +22,8 @@ internal:
 admin:
   server_url: "http://127.0.0.1:9000"
 
+# Device 单实例消费心跳与 EMQX 系统连接事件；账号需具备对应订阅权限。
+# Admin 发布的 device-server/mqtt.connection 优先，YAML 仅在无发布记录时回退。
 mqtt:
   broker: "mqtts://mqtt-open.tangeopen.com:8883"
   # 二选一，不要同时填：

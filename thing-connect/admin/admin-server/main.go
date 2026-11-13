@@ -23,6 +23,7 @@ import (
 	adminapp "thing-connect/internal/admin"
 	"thing-connect/internal/apiresp"
 	"thing-connect/internal/cache"
+	admincache "thing-connect/internal/cache/admin"
 	baseconfig "thing-connect/internal/config"
 	"thing-connect/internal/db"
 	"thing-connect/internal/dynamicconfig"
@@ -148,7 +149,11 @@ func main() {
 	}
 	if strings.TrimSpace(*checkServiceConfig) != "" {
 		if err := checkBusinessServiceConfig(context.Background(), root, strings.TrimSpace(*checkServiceConfig), sqlDB); err != nil {
-			log.Fatalf("service config check: %v", err)
+			log.Printf("service config check: %v", err)
+			if errors.Is(err, errBusinessConfigurationRequired) {
+				os.Exit(78)
+			}
+			os.Exit(1)
 		}
 		log.Printf("service_config_check=passed service=%s", strings.TrimSpace(*checkServiceConfig))
 		return
@@ -265,6 +270,7 @@ func main() {
 	}
 	configTester := adminapp.NewConfigTester(configService, adminMQTTConnectionProbe{})
 	adminHTTP := adminapp.NewHTTPServer(store, authService, access, configService, configTester, servicestatus.NewAggregator(redisClient), redisClient, jobService, deviceService, cfg.Admin.CookieSecure)
+	adminHTTP.SetResourceQueries(adminapp.NewResourceService(adminmysql.NewResourceReadStore(sqlDB), admincache.NewAdminPresenceReader(redisClient)))
 	adminHTTP.SetRecognitionService(adminapp.NewRecognitionService(adminmysql.NewRecognitionStore(sqlDB)))
 	adminHTTP.SetBoardService(boardService)
 	adminHTTP.SetRoleTypeService(adminapp.NewRoleTypeService(adminmysql.NewRoleTypeStore(sqlDB), tirtcapi.NewRoleTypeVoices(directConfigLoader{service: configService})))
@@ -350,6 +356,8 @@ func adminMQTTProbeConfig(connection adminapp.MQTTConnection) baseconfig.MQTTCfg
 	return probeConfig
 }
 
+var errBusinessConfigurationRequired = errors.New("业务服务必填配置未完成")
+
 func checkBusinessServiceConfig(ctx context.Context, root, serviceName string, sqlDB *sqlx.DB) error {
 	if err := installer.ValidateConfiguredBusinessService(root, serviceName); err != nil {
 		return err
@@ -366,7 +374,7 @@ func checkBusinessServiceConfig(ctx context.Context, root, serviceName string, s
 		}
 	}
 	if len(missing) > 0 {
-		return fmt.Errorf("%s 必填配置未完成: %s；请登录 Admin 配置后重试", serviceName, strings.Join(missing, "、"))
+		return fmt.Errorf("%w: %s: %s；请登录 Admin 配置后重试", errBusinessConfigurationRequired, serviceName, strings.Join(missing, "、"))
 	}
 	serviceConfig, err := baseconfig.LoadFile(filepath.Join(root, serviceName, "config.yaml"))
 	if err != nil {
@@ -386,15 +394,19 @@ func checkBusinessServiceConfig(ctx context.Context, root, serviceName string, s
 		return fmt.Errorf("%s Redis 连接检查失败: %w", serviceName, err)
 	}
 	_ = redisClient.Close()
-	if serviceName == "recognition-server" || serviceName == "user-server" || serviceName == "voip-server" || serviceName == "call-server" {
+	if installer.ServiceUsesMQTT(serviceName) {
 		mqttConfig, _, err := dynamicconfig.ResolveMQTT(ctx, directConfigLoader{service: configService}, serviceName, serviceConfig.MQTT)
 		if err != nil {
 			return fmt.Errorf("%s MQTT 配置检查失败: %w", serviceName, err)
 		}
 		probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
-		if err := mqttc.Probe(probeCtx, mqttConfig); err != nil {
-			return fmt.Errorf("%s MQTT 连接或认证失败: %w", serviceName, err)
+		probe := mqttc.Probe
+		if serviceName == "device-server" {
+			probe = mqttc.ProbePresence
+		}
+		if err := probe(probeCtx, mqttConfig); err != nil {
+			return fmt.Errorf("%s MQTT 连接、认证或订阅检查失败: %w", serviceName, err)
 		}
 	}
 	return nil
