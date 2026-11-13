@@ -28,6 +28,7 @@ import (
 	"thing-connect/internal/db"
 	"thing-connect/internal/dynamicconfig"
 	"thing-connect/internal/installer"
+	"thing-connect/internal/iplocation"
 	"thing-connect/internal/logging"
 	"thing-connect/internal/mqttc"
 	"thing-connect/internal/servicestatus"
@@ -270,7 +271,22 @@ func main() {
 	}
 	configTester := adminapp.NewConfigTester(configService, adminMQTTConnectionProbe{})
 	adminHTTP := adminapp.NewHTTPServer(store, authService, access, configService, configTester, servicestatus.NewAggregator(redisClient), redisClient, jobService, deviceService, cfg.Admin.CookieSecure)
-	adminHTTP.SetResourceQueries(adminapp.NewResourceService(adminmysql.NewResourceReadStore(sqlDB), admincache.NewAdminPresenceReader(redisClient)))
+	ipDirectory := cfg.IPLocation.Directory
+	if ipDirectory == "" {
+		ipDirectory = filepath.Join(root, "admin-server", "ipdb")
+	} else if !filepath.IsAbs(ipDirectory) {
+		ipDirectory = filepath.Join(root, ipDirectory)
+	}
+	ipReader, ipErr := iplocation.Open(ipDirectory)
+	if ipErr != nil {
+		log.Printf("IP attribution database partially unavailable: %v", ipErr)
+	}
+	defer func() {
+		if err := ipReader.Close(); err != nil {
+			log.Printf("close IP databases: %v", err)
+		}
+	}()
+	adminHTTP.SetResourceQueries(adminapp.NewResourceService(adminmysql.NewResourceReadStore(sqlDB), admincache.NewAdminPresenceReader(redisClient), ipReader))
 	adminHTTP.SetRecognitionService(adminapp.NewRecognitionService(adminmysql.NewRecognitionStore(sqlDB)))
 	adminHTTP.SetBoardService(boardService)
 	adminHTTP.SetRoleTypeService(adminapp.NewRoleTypeService(adminmysql.NewRoleTypeStore(sqlDB), tirtcapi.NewRoleTypeVoices(directConfigLoader{service: configService})))

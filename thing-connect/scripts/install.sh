@@ -317,6 +317,8 @@ publish_release() {
         static_dir="${SERVICE_STATIC_DIR[$service]}"
         [ "$static_dir" = "-" ] || publish_static "$service" "$BUILD_DIR/$static_dir" || return 1
     done
+    source "$BUILD_DIR/scripts/ip-databases.sh" || return 1
+    publish_ip_databases "$BUILD_DIR/resources/ipdb" "$DEPLOY_ROOT/admin-server/ipdb" || return 1
     log "首次安装文件已发布到 $DEPLOY_ROOT"
 }
 

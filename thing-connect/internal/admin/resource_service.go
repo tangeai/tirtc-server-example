@@ -69,12 +69,13 @@ type ResourceQueries interface {
 	Device(context.Context, string) (ManagedDevice, error)
 }
 type ResourceService struct {
-	store    ResourceReadStore
-	presence ResourcePresenceReader
+	store     ResourceReadStore
+	presence  ResourcePresenceReader
+	locations IPLocationLookup
 }
 
-func NewResourceService(store ResourceReadStore, presence ResourcePresenceReader) *ResourceService {
-	return &ResourceService{store: store, presence: presence}
+func NewResourceService(store ResourceReadStore, presence ResourcePresenceReader, locations IPLocationLookup) *ResourceService {
+	return &ResourceService{store: store, presence: presence, locations: locations}
 }
 func normalizeResourceFilter(f ResourceFilter, devices bool) (ResourceQuery, error) {
 	q := ResourceQuery{Page: f.Page, PageSize: f.PageSize, Keyword: strings.TrimSpace(f.Keyword), Status: strings.TrimSpace(f.Status), Bound: strings.TrimSpace(f.Bound), SortBy: strings.TrimSpace(f.SortBy), Desc: true}
@@ -131,6 +132,9 @@ func (s *ResourceService) Users(ctx context.Context, f ResourceFilter) (Resource
 		return ResourcePage[ManagedUser]{}, err
 	}
 	rows, total, err := s.store.Users(ctx, q)
+	if err == nil {
+		s.enrichUsers(rows)
+	}
 	return ResourcePage[ManagedUser]{Items: rows, Page: q.Page, PageSize: q.PageSize, Total: total}, err
 }
 func (s *ResourceService) User(ctx context.Context, id int64) (UserDetail, error) {
@@ -141,6 +145,9 @@ func (s *ResourceService) User(ctx context.Context, id int64) (UserDetail, error
 	if err != nil {
 		return UserDetail{}, err
 	}
+	users := []ManagedUser{result.User}
+	s.enrichUsers(users)
+	result.User = users[0]
 	s.enrich(ctx, result.Devices)
 	return result, nil
 }
@@ -169,10 +176,12 @@ func (s *ResourceService) Device(ctx context.Context, id string) (ManagedDevice,
 	return rows[0], nil
 }
 func (s *ResourceService) enrich(ctx context.Context, rows []ManagedDevice) {
+	lookup := s.locationLookup()
 	ids := make([]string, len(rows))
 	for i := range rows {
 		ids[i] = rows[i].DeviceID
 		rows[i].projectProfileMetadata()
+		rows[i].LastOnlineLocation = lookup(rows[i].LastOnlineIP)
 	}
 	if len(rows) == 0 || s.presence == nil {
 		return
@@ -189,44 +198,69 @@ func (s *ResourceService) enrich(ctx context.Context, rows []ManagedDevice) {
 	}
 }
 
+func (s *ResourceService) locationLookup() func(string) *IPLocation {
+	cache := map[string]*IPLocation{}
+	return func(ip string) *IPLocation {
+		if s.locations == nil || ip == "" {
+			return nil
+		}
+		if value, ok := cache[ip]; ok {
+			return value
+		}
+		value := s.locations.Lookup(ip)
+		cache[ip] = &value
+		return &value
+	}
+}
+func (s *ResourceService) enrichUsers(rows []ManagedUser) {
+	lookup := s.locationLookup()
+	for i := range rows {
+		rows[i].RegistrationLocation = lookup(rows[i].RegistrationIP)
+		rows[i].LastLoginLocation = lookup(rows[i].LastLoginIP)
+	}
+}
+
 type ManagedUser struct {
-	RegistrationIP string     `db:"registration_ip" json:"registration_ip"`
-	LastLoginIP    string     `db:"last_login_ip" json:"last_login_ip"`
-	LastLoginAt    *time.Time `db:"last_login_at" json:"last_login_at,omitempty"`
-	ID             int64      `db:"id" json:"id"`
-	Email          string     `db:"email" json:"email"`
-	BindQuota      int        `db:"bind_quota" json:"bind_quota"`
-	Status         int8       `db:"status" json:"status"`
-	DisabledAt     *time.Time `db:"disabled_at" json:"disabled_at,omitempty"`
-	AuthRevision   int64      `db:"auth_revision" json:"auth_revision"`
-	DeviceCount    int        `db:"device_count" json:"device_count"`
-	CreatedAt      time.Time  `db:"created_at" json:"created_at"`
-	UpdatedAt      time.Time  `db:"updated_at" json:"updated_at"`
+	RegistrationLocation *IPLocation `db:"-" json:"registration_ip_location,omitempty"`
+	LastLoginLocation    *IPLocation `db:"-" json:"last_login_ip_location,omitempty"`
+	RegistrationIP       string      `db:"registration_ip" json:"registration_ip"`
+	LastLoginIP          string      `db:"last_login_ip" json:"last_login_ip"`
+	LastLoginAt          *time.Time  `db:"last_login_at" json:"last_login_at,omitempty"`
+	ID                   int64       `db:"id" json:"id"`
+	Email                string      `db:"email" json:"email"`
+	BindQuota            int         `db:"bind_quota" json:"bind_quota"`
+	Status               int8        `db:"status" json:"status"`
+	DisabledAt           *time.Time  `db:"disabled_at" json:"disabled_at,omitempty"`
+	AuthRevision         int64       `db:"auth_revision" json:"auth_revision"`
+	DeviceCount          int         `db:"device_count" json:"device_count"`
+	CreatedAt            time.Time   `db:"created_at" json:"created_at"`
+	UpdatedAt            time.Time   `db:"updated_at" json:"updated_at"`
 }
 
 type ManagedDevice struct {
-	LastOnlineIP    string                                `db:"last_online_ip" json:"last_online_ip"`
-	LastOnlineAt    *time.Time                            `db:"last_online_at" json:"last_online_at,omitempty"`
-	ID              int64                                 `db:"id" json:"id"`
-	DeviceID        string                                `db:"device_id" json:"device_id"`
-	MAC             string                                `db:"mac" json:"mac"`
-	Assign          string                                `db:"assign" json:"assign"`
-	DeviceName      string                                `db:"device_name" json:"device_name"`
-	UserID          int64                                 `db:"user_id" json:"user_id"`
-	UserEmail       string                                `db:"user_email" json:"user_email"`
-	LastUserID      int64                                 `db:"last_user_id" json:"last_user_id"`
-	ActiveTime      *time.Time                            `db:"active_time" json:"active_time,omitempty"`
-	BindTime        *time.Time                            `db:"bind_time" json:"bind_time,omitempty"`
-	UnbindTime      *time.Time                            `db:"unbind_time" json:"unbind_time,omitempty"`
-	CreatedAt       time.Time                             `db:"created_at" json:"created_at"`
-	UpdatedAt       time.Time                             `db:"updated_at" json:"updated_at"`
-	Online          bool                                  `db:"-" json:"online"`
-	PresenceKnown   bool                                  `db:"-" json:"presence_known"`
-	LastSeenAt      *time.Time                            `db:"-" json:"last_seen_at,omitempty"`
-	Profile         *string                               `db:"profile" json:"-"`
-	Profiles        map[string]map[string]json.RawMessage `db:"-" json:"profiles,omitempty"`
-	Hardware        *deviceprofile.Hardware               `db:"-" json:"hardware,omitempty"`
-	FirmwareVersion *string                               `db:"-" json:"firmware_version,omitempty"`
+	LastOnlineLocation *IPLocation                           `db:"-" json:"last_online_ip_location,omitempty"`
+	LastOnlineIP       string                                `db:"last_online_ip" json:"last_online_ip"`
+	LastOnlineAt       *time.Time                            `db:"last_online_at" json:"last_online_at,omitempty"`
+	ID                 int64                                 `db:"id" json:"id"`
+	DeviceID           string                                `db:"device_id" json:"device_id"`
+	MAC                string                                `db:"mac" json:"mac"`
+	Assign             string                                `db:"assign" json:"assign"`
+	DeviceName         string                                `db:"device_name" json:"device_name"`
+	UserID             int64                                 `db:"user_id" json:"user_id"`
+	UserEmail          string                                `db:"user_email" json:"user_email"`
+	LastUserID         int64                                 `db:"last_user_id" json:"last_user_id"`
+	ActiveTime         *time.Time                            `db:"active_time" json:"active_time,omitempty"`
+	BindTime           *time.Time                            `db:"bind_time" json:"bind_time,omitempty"`
+	UnbindTime         *time.Time                            `db:"unbind_time" json:"unbind_time,omitempty"`
+	CreatedAt          time.Time                             `db:"created_at" json:"created_at"`
+	UpdatedAt          time.Time                             `db:"updated_at" json:"updated_at"`
+	Online             bool                                  `db:"-" json:"online"`
+	PresenceKnown      bool                                  `db:"-" json:"presence_known"`
+	LastSeenAt         *time.Time                            `db:"-" json:"last_seen_at,omitempty"`
+	Profile            *string                               `db:"profile" json:"-"`
+	Profiles           map[string]map[string]json.RawMessage `db:"-" json:"profiles,omitempty"`
+	Hardware           *deviceprofile.Hardware               `db:"-" json:"hardware,omitempty"`
+	FirmwareVersion    *string                               `db:"-" json:"firmware_version,omitempty"`
 }
 
 func (d *ManagedDevice) projectProfileMetadata() {

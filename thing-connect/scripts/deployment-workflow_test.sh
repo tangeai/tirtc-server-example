@@ -111,7 +111,7 @@ test_update_prepares_before_downtime() (
             if grep -Eq 'stop|publish|ready|success|^migrate$' "$events"; then return 1; fi
         else
             [ "$result" = 0 ] || return 1
-            printf '%s\n' build inspect preflight 'stop user-server' 'stop admin-server' migrate 'publish admin-server' 'publish user-server' 'ready admin-server' 'ready user-server' success >"$TEST_ROOT/expected"
+            printf '%s\n' build inspect preflight 'stop user-server' 'stop admin-server' migrate 'publish admin-server' 'publish user-server' 'ready admin-server' preflight 'ready user-server' success >"$TEST_ROOT/expected"
             diff -u "$TEST_ROOT/expected" "$events" || return 1
         fi
     done

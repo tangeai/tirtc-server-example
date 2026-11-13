@@ -121,6 +121,11 @@ MFA 验证请求：
 
 `GET /devices` 和 `GET /devices/:device_id` 的设备对象包含 `last_online_ip` 和可选的 `last_online_at`，表示最近观测到的正式 MQTT 连接来源和时间，来自 Broker 连接事件并异步持久化。未收到有效 IP 时返回空字符串，未知时间省略；离线后保留最近记录。这两个字段不表示当前在线状态，也不是心跳时间。
 
+上述用户对象可带 `registration_ip_location`、`last_login_ip_location`，设备对象可带 `last_online_ip_location`（用户详情中的设备同样适用）。原始 IP 为空时省略对应归属地对象。归属地对象包含 `status`，以及可选的中文 `country`、`province`、`city`、`region`、`isp`；`region` 为优先展示的完整地区，缺失时组合国家、省、市。`isp` 表示运营商或网络所属机构，不保证是终端接入运营商。
+
+`status` 为 `found`（至少有一个中文归属字段）、`unknown`（无匹配）、`unavailable`（库不可用）、`loopback`、`private`、`reserved`、`invalid` 或 `empty`。部分地区或运营商未知时字段省略，客户端不得自行推断。查询使用服务器离线库，不修改原始 IP 或历史时间；归属地随库版本变化，不代表设备的精确物理位置。
+
+
 `GET /devices` 和 `GET /devices/:device_id` 的设备对象包含在线状态字段：
 
 ```json

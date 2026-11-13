@@ -41,7 +41,7 @@ func (p *resourcePresence) Read(_ context.Context, ids []string) (map[string]Dev
 }
 func TestResourceServiceValidatesAndBoundsQueries(t *testing.T) {
 	store := &readStore{}
-	svc := NewResourceService(store, nil)
+	svc := NewResourceService(store, nil, nil)
 	result, err := svc.Users(context.Background(), ResourceFilter{Page: -1, PageSize: 999, Keyword: " test ", CreatedFrom: "2026-01-01", CreatedTo: "2026-01-02", SortOrder: "asc"})
 	if err != nil {
 		t.Fatal(err)
@@ -59,7 +59,7 @@ func TestResourceServicePreservesUnknownPresenceAndFiltersProfiles(t *testing.T)
 	profile := `{"stream":{"audio_rate":16000},"credentials":{"token":"secret"},"hardware":{"chip_model":"arm64"}}`
 	store := &readStore{device: ManagedDevice{DeviceID: "d1", Profile: &profile, LastOnlineIP: "192.0.2.1"}}
 	reader := &resourcePresence{fail: true}
-	svc := NewResourceService(store, reader)
+	svc := NewResourceService(store, reader, nil)
 	row, err := svc.Device(context.Background(), "d1")
 	if err != nil {
 		t.Fatal(err)
@@ -85,7 +85,7 @@ func TestDeviceHTTPUsesResourceModule(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	store := &readStore{device: ManagedDevice{DeviceID: "d1", LastOnlineIP: "2001:db8::1"}}
-	server := &HTTPServer{resources: NewResourceService(store, nil)}
+	server := &HTTPServer{resources: NewResourceService(store, nil, nil)}
 	r.GET("/devices/:device_id", server.getDevice)
 	response := httptest.NewRecorder()
 	r.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/devices/d1", nil))
@@ -115,7 +115,7 @@ func TestIPFieldsHTTPSerialization(t *testing.T) {
 				device.LastOnlineAt = &at
 			}
 			store := &ipHTTPStore{user: user, device: device}
-			server := &HTTPServer{resources: NewResourceService(store, nil)}
+			server := &HTTPServer{resources: NewResourceService(store, nil, nil)}
 			r := gin.New()
 			r.GET("/users", server.listUsers)
 			r.GET("/users/:id", server.getUser)
@@ -192,3 +192,43 @@ func (s *ipHTTPStore) Devices(context.Context, ResourceQuery) ([]ManagedDevice, 
 	return []ManagedDevice{s.device}, 1, nil
 }
 func (s *ipHTTPStore) Device(context.Context, string) (ManagedDevice, error) { return s.device, nil }
+
+type locationStub struct{ calls map[string]int }
+
+func (s *locationStub) Lookup(ip string) IPLocation {
+	s.calls[ip]++
+	return IPLocation{Status: "found", Province: "广东", City: "深圳", ISP: "中国电信"}
+}
+func TestResourceIPLocations(t *testing.T) {
+	lookup := &locationStub{calls: map[string]int{}}
+	store := &ipHTTPStore{user: ManagedUser{ID: 7, RegistrationIP: "1.2.3.4", LastLoginIP: "1.2.3.4"}, device: ManagedDevice{DeviceID: "d1", LastOnlineIP: "1.2.3.4"}}
+	svc := NewResourceService(store, nil, lookup)
+	page, err := svc.Users(context.Background(), ResourceFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Items[0].RegistrationLocation.City != "深圳" || page.Items[0].LastLoginLocation.ISP != "中国电信" || lookup.calls["1.2.3.4"] != 1 {
+		t.Fatal("user enrichment or deduplication failed")
+	}
+	user, err := svc.User(context.Background(), 7)
+	if err != nil || user.User.LastLoginLocation == nil {
+		t.Fatal("user detail enrichment failed")
+	}
+	devices, err := svc.Devices(context.Background(), ResourceFilter{})
+	if err != nil || devices.Items[0].LastOnlineLocation == nil {
+		t.Fatal("device list enrichment failed")
+	}
+	device, err := svc.Device(context.Background(), "d1")
+	if err != nil || device.LastOnlineLocation.City != "深圳" {
+		t.Fatal("device detail enrichment failed")
+	}
+	raw, err := json.Marshal(device)
+	if err != nil || !strings.Contains(string(raw), `"last_online_ip_location"`) {
+		t.Fatal("missing public field")
+	}
+	store.user = ManagedUser{ID: 7}
+	user, err = svc.User(context.Background(), 7)
+	if err != nil || user.User.RegistrationLocation != nil {
+		t.Fatal("unknown IP must stay empty")
+	}
+}

@@ -733,3 +733,7 @@ Device 服务单实例订阅 `device/+/up`、`$SYS/brokers/+/clients/+/connected
 Device 的服务状态实例包含 `metrics`：内存排队数 `presence_queued`、累计丢弃数 `presence_rejected_total`、累计投影失败数 `presence_write_failures_total`、待补写设备数 `connection_pending`、最老待写年龄 `connection_oldest_pending_age_ms` 和采样时间 `connection_backlog_measured_at_ms`。这些值通过 Admin 服务状态接口读取；采样时间用于区分旧快照。最老待写超过 150 秒时 presence readiness 不通过，排空后恢复，不以单次 SQL 写入成功掩盖积压。
 
 绑定与解绑通知不直接修改在线状态，也不保证强制断开 Broker 连接。设备处理 `auth_grant` 或 `unbind` 后自行转换连接；在线观测只由 Device 消费链路维护，离线按 TTL 收敛。
+
+## Admin 离线 IP 库
+
+中文 IP 归属地使用三个离线库。发布前将库放到源码的 `thing-connect/resources/ipdb/`，安装与更新脚本只复制指定库文件到私有的 `admin-server/ipdb/`。库文件独立于 Git 传输，具体目录、打包与重启步骤见 [Admin IP 中文归属地](admin/admin-server/README.md#ip-中文归属地)。

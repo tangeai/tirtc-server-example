@@ -446,7 +446,7 @@ validate_release_options() {
 }
 
 release_state_is_current() {
-    local deployed_commit deployed_services target_commit
+    local deployed_commit deployed_services target_commit database
     local -a release_state=()
     [ "$FORCE_UPDATE" != "1" ] || return 1
     [ -r "$DEPLOY_ROOT/.release-state" ] || return 1
@@ -456,8 +456,16 @@ release_state_is_current() {
     deployed_services="${release_state[1]}"
     [[ "$deployed_commit" =~ ^[0-9a-f]{40,64}$ ]] || return 1
     target_commit="$(git -C "$REPO_PATH" rev-parse HEAD)" || return 1
-    [ "$deployed_commit" = "$target_commit" ] &&
-        [ "$deployed_services" = "${ACTIVE_SERVICES[*]}" ]
+    [ "$deployed_commit" = "$target_commit" ] || return 1
+    [ "$deployed_services" = "${ACTIVE_SERVICES[*]}" ] || return 1
+    # Offline assets can change independently of the source commit.
+    for database in qqwry.dat GeoLite2-City.mmdb GeoLite2-ASN.mmdb; do
+        [ ! -L "$BUILD_DIR/resources/ipdb/$database" ] || return 1
+        if [ -f "$BUILD_DIR/resources/ipdb/$database" ]; then
+            cmp -s "$BUILD_DIR/resources/ipdb/$database" "$DEPLOY_ROOT/admin-server/ipdb/$database" || return 1
+        fi
+    done
+    return 0
 }
 
 invalidate_release_state() {
@@ -1227,6 +1235,10 @@ deploy_one() {
         log "$svc: static/ 已同步"
     fi
 
+    if [ "$svc" = "admin-server" ]; then
+        source "$BUILD_DIR/scripts/ip-databases.sh" || return 1
+        publish_ip_databases "$BUILD_DIR/resources/ipdb" "$target_dir/ipdb" || return 1
+    fi
     log "发布完成 $svc"
 }
 
@@ -1348,6 +1360,9 @@ backup_release() {
         mkdir -p "$backup" || return 1
         [ ! -f "$target/$svc" ] || cp -a "$target/$svc" "$backup/$svc" || return 1
         [ ! -d "$target/static" ] || cp -a "$target/static" "$backup/static" || return 1
+        if [ "$svc" = "admin-server" ]; then
+            [ ! -d "$target/ipdb" ] || cp -a "$target/ipdb" "$backup/ipdb" || return 1
+        fi
     done
     log "当前版本已备份到 $BACKUP_DIR"
 }
@@ -1416,6 +1431,19 @@ rollback_release() {
             fi
         elif [ -d "$target/static" ]; then
             rm -rf "$target/static" || rollback_failed=1
+        fi
+        if [ "$svc" = "admin-server" ]; then
+            if [ -d "$backup/ipdb" ]; then
+                rm -rf -- "$target/ipdb.rollback" || rollback_failed=1
+                if cp -a "$backup/ipdb" "$target/ipdb.rollback"; then
+                    rm -rf -- "$target/ipdb" || rollback_failed=1
+                    mv -- "$target/ipdb.rollback" "$target/ipdb" || rollback_failed=1
+                else
+                    rollback_failed=1
+                fi
+            else
+                rm -rf -- "$target/ipdb" || rollback_failed=1
+            fi
         fi
         if [ -f "$backup/$svc" ] && [ "$ACTIVE_SERVICE_MANAGER" != "manual" ] && service_is_enabled "$svc"; then
             if ! start_one "$svc"; then

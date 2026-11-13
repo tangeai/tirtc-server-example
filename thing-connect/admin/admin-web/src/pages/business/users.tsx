@@ -1,3 +1,4 @@
+import { IPAddress } from '../../shared/ip-address';
 import { useState } from 'react';
 import {
   Alert,
@@ -6,6 +7,7 @@ import {
   Descriptions,
   Drawer,
   Form,
+  Grid,
   Input,
   InputNumber,
   Modal,
@@ -29,6 +31,7 @@ import {
 import { assignmentName } from '../../shared/admin-metadata';
 
 export function UsersPage() {
+  const screens = Grid.useBreakpoint();
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('');
   const [createdFrom, setCreatedFrom] = useState('');
@@ -137,6 +140,8 @@ export function UsersPage() {
           rowKey="id"
           loading={loading}
           dataSource={data?.items}
+          scroll={{ x: 1500 }}
+          tableLayout="fixed"
           pagination={pagination}
           onChange={(_, __, sorter, extra) => {
             if (extra.action !== 'sort') return;
@@ -147,9 +152,12 @@ export function UsersPage() {
           columns={[
             {
               title: '用户',
+              width: 240,
               render: (_, r) => (
                 <>
-                  <b>{r.email}</b>
+                  <Typography.Text strong ellipsis={{ tooltip: r.email }}>
+                    {r.email}
+                  </Typography.Text>
                   <br />
                   <Typography.Text type="secondary">用户编号 #{r.id}</Typography.Text>
                 </>
@@ -157,15 +165,31 @@ export function UsersPage() {
             },
             {
               title: '状态',
+              width: 80,
               dataIndex: 'status',
               render: (v) => (v === 1 ? <Tag color="success">正常</Tag> : <Tag>禁用</Tag>),
             },
-            { title: '注册 IP', dataIndex: 'registration_ip', render: (v) => v || '—' },
-            { title: '最近登录 IP', dataIndex: 'last_login_ip', render: (v) => v || '—' },
-            { title: '已绑定设备', dataIndex: 'device_count' },
-            { title: '剩余绑定额度', dataIndex: 'bind_quota' },
+            {
+              title: '注册 IP / 归属地',
+              width: 240,
+              dataIndex: 'registration_ip',
+              render: (v, row) => (
+                <IPAddress compact ip={v} location={row.registration_ip_location} />
+              ),
+            },
+            {
+              title: '最近登录 IP / 归属地',
+              width: 240,
+              dataIndex: 'last_login_ip',
+              render: (v, row) => (
+                <IPAddress compact ip={v} location={row.last_login_ip_location} />
+              ),
+            },
+            { title: '已绑定设备', width: 112, dataIndex: 'device_count' },
+            { title: '剩余绑定额度', width: 120, dataIndex: 'bind_quota' },
             {
               title: '注册时间',
+              width: 180,
               dataIndex: 'created_at',
               render: formatTime,
               sorter: true,
@@ -174,8 +198,10 @@ export function UsersPage() {
             },
             {
               title: '操作',
+              width: 200,
+              fixed: screens.md ? 'right' : undefined,
               render: (_, r) => (
-                <Space>
+                <Space wrap size={0}>
                   <Button type="link" onClick={() => openDetail(r)}>
                     详情
                   </Button>
@@ -244,7 +270,7 @@ export function UsersPage() {
         </Form>
       </Modal>
       <Drawer
-        width={860}
+        width={screens.sm ? 860 : '100%'}
         open={!!detail}
         title={`用户详情：${detail?.user?.email || ''}`}
         onClose={() => setDetail(undefined)}
@@ -253,19 +279,29 @@ export function UsersPage() {
           <>
             <Descriptions
               bordered
-              column={2}
+              column={{ xs: 1, sm: 2 }}
               items={[
                 { key: 'id', label: '用户编号', children: `#${detail.user.id}` },
                 { key: 'email', label: '邮箱', children: detail.user.email },
                 {
                   key: 'registration_ip',
                   label: '注册 IP',
-                  children: detail.user.registration_ip || '—',
+                  children: (
+                    <IPAddress
+                      ip={detail.user.registration_ip}
+                      location={detail.user.registration_ip_location}
+                    />
+                  ),
                 },
                 {
                   key: 'last_login_ip',
                   label: '最近成功登录 IP',
-                  children: detail.user.last_login_ip || '—',
+                  children: (
+                    <IPAddress
+                      ip={detail.user.last_login_ip}
+                      location={detail.user.last_login_ip_location}
+                    />
+                  ),
                 },
                 {
                   key: 'last_login_at',
@@ -287,6 +323,7 @@ export function UsersPage() {
               rowKey="id"
               size="small"
               pagination={false}
+              scroll={{ x: 650 }}
               dataSource={detail.devices}
               columns={[
                 { title: '设备 ID', dataIndex: 'device_id' },
@@ -300,6 +337,7 @@ export function UsersPage() {
               rowKey="id"
               size="small"
               pagination={false}
+              scroll={{ x: 650 }}
               dataSource={detail.bind_logs}
               columns={[
                 { title: '时间', dataIndex: 'created_at', render: formatTime },

@@ -6,11 +6,11 @@ SCRIPTS="$(cd -- "$(dirname -- "$0")" && pwd)"
 FIXTURE="$TEST_ROOT/source with spaces"
 mkdir -p "$FIXTURE/thing-connect/scripts"
 git -C "$FIXTURE" -c init.templateDir= init -q
-cp "$SCRIPTS/"{deploy-local,install,deploy-prod,service-catalog}.sh "$FIXTURE/thing-connect/scripts/"
+cp "$SCRIPTS/"{deploy-local,install,deploy-prod,service-catalog,ip-databases}.sh "$FIXTURE/thing-connect/scripts/"
 mkdir -p "$FIXTURE/thing-connect/internal/installer"
 cp "$SCRIPTS/../internal/installer/service_catalog.tsv" "$FIXTURE/thing-connect/internal/installer/"
 printf 'module fixture\n' >"$FIXTURE/thing-connect/go.mod"
-printf 'bin/\nnode_modules/\nconfig.yaml\n' >"$FIXTURE/.gitignore"
+printf 'bin/\nnode_modules/\nconfig.yaml\n/thing-connect/resources/ipdb/\n' >"$FIXTURE/.gitignore"
 cat >"$FIXTURE/thing-connect/build.sh" <<'BUILD'
 #!/usr/bin/env bash
 set -Eeuo pipefail
@@ -27,6 +27,9 @@ git -C "$FIXTURE" -c user.name=test -c user.email=test@localhost -c commit.gpgSi
 printf 'local change\n' >>"$FIXTURE/thing-connect/go.mod"
 printf 'untracked feature\n' >"$FIXTURE/thing-connect/new-feature.go"
 printf 'private secret\n' >"$FIXTURE/thing-connect/config.yaml"
+mkdir -p "$FIXTURE/thing-connect/resources/ipdb"
+for name in qqwry.dat GeoLite2-City.mmdb GeoLite2-ASN.mmdb; do printf 'dataset' >"$FIXTURE/thing-connect/resources/ipdb/$name"; done
+printf 'secret' >"$FIXTURE/thing-connect/resources/ipdb/private.yaml"
 BEFORE="$(git -C "$FIXTURE" status --porcelain)"
 
 run() { env SOURCE_ROOT="$FIXTURE" DEPLOY_ROOT="$TEST_ROOT/deploy with spaces" "$SCRIPTS/deploy-local.sh" "$@"; }
@@ -40,9 +43,11 @@ OVERRIDE_LINE="$(grep -n '^    validate_database_backup()' "$SCRIPTS/deploy-loca
 DEPLOY_LINE="$(grep -n '^    full_deploy\( || return \$?\)\?$' "$SCRIPTS/deploy-local.sh" | head -1 | cut -d: -f1)"
 [ -n "$OVERRIDE_LINE" ] && [ -n "$DEPLOY_LINE" ] && [ "$OVERRIDE_LINE" -lt "$DEPLOY_LINE" ]
 echo 'PASS: local update bypasses only the production backup restore gate'
-run prepare >"$TEST_ROOT/prepare.log" 2>&1
+run prepare >"$TEST_ROOT/prepare.log" 2>&1 || { cat "$TEST_ROOT/prepare.log"; exit 1; }
 SNAPSHOT="$(find "$TEST_ROOT/deploy with spaces.sources" -mindepth 1 -maxdepth 1 -type d)"
 [ -f "$SNAPSHOT/repository/thing-connect/new-feature.go" ]
+for name in qqwry.dat GeoLite2-City.mmdb GeoLite2-ASN.mmdb; do [ -f "$SNAPSHOT/repository/thing-connect/resources/ipdb/$name" ]; done
+[ ! -f "$SNAPSHOT/repository/thing-connect/resources/ipdb/private.yaml" ]
 [ ! -f "$SNAPSHOT/repository/thing-connect/config.yaml" ]
 rg -q 'local change' "$SNAPSHOT/repository/thing-connect/go.mod"
 [ "$(git -C "$FIXTURE" status --porcelain)" = "$BEFORE" ]

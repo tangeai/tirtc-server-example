@@ -95,6 +95,11 @@ local_prepare() {
         }
         printf '%s\0' "$file" >>"$LOCAL_SNAPSHOT/files.list"
     done <"$LOCAL_SNAPSHOT/files.all"
+    # Explicit private runtime assets, excluded from Git. No local/ contents.
+    for file in thing-connect/resources/ipdb/qqwry.dat thing-connect/resources/ipdb/GeoLite2-City.mmdb thing-connect/resources/ipdb/GeoLite2-ASN.mmdb; do
+        [ ! -L "$LOCAL_SOURCE_ROOT/$file" ] || return 1
+        [ ! -f "$LOCAL_SOURCE_ROOT/$file" ] || printf '%s\0' "$file" >>"$LOCAL_SNAPSHOT/files.list"
+    done
     tar -C "$LOCAL_SOURCE_ROOT" --null --verbatim-files-from --no-recursion \
         -T "$LOCAL_SNAPSHOT/files.list" -cf "$LOCAL_SNAPSHOT/source.tar"
     sha256sum "$LOCAL_SNAPSHOT/source.tar" >"$LOCAL_SNAPSHOT/source.sha256"

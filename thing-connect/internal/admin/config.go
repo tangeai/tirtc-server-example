@@ -38,15 +38,20 @@ type JobConfig struct {
 	MaxBytes   int64  `yaml:"max_bytes"`
 }
 
+type IPLocationConfig struct {
+	Directory string `yaml:"directory"`
+}
+
 type AppConfig struct {
-	Server   ServerConfig           `yaml:"server"`
-	Log      baseconfig.LogCfg      `yaml:"log"`
-	Database baseconfig.DatabaseCfg `yaml:"database"`
-	Redis    baseconfig.RedisCfg    `yaml:"redis"`
-	Internal baseconfig.InternalCfg `yaml:"internal"`
-	Admin    AdminAuthConfig        `yaml:"admin"`
-	Security SecurityConfig         `yaml:"security"`
-	Job      JobConfig              `yaml:"job"`
+	IPLocation IPLocationConfig       `yaml:"ip_location"`
+	Server     ServerConfig           `yaml:"server"`
+	Log        baseconfig.LogCfg      `yaml:"log"`
+	Database   baseconfig.DatabaseCfg `yaml:"database"`
+	Redis      baseconfig.RedisCfg    `yaml:"redis"`
+	Internal   baseconfig.InternalCfg `yaml:"internal"`
+	Admin      AdminAuthConfig        `yaml:"admin"`
+	Security   SecurityConfig         `yaml:"security"`
+	Job        JobConfig              `yaml:"job"`
 }
 
 func LoadAppConfig(path string) (*AppConfig, error) {

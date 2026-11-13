@@ -113,6 +113,8 @@ test_partial_installer_state_is_never_overwritten() (
 test_first_publish_never_creates_example_configs() (
     DEPLOY_ROOT="$TEST_ROOT/published"
     BUILD_DIR="$TEST_ROOT/release-fixture"
+    mkdir -p "$BUILD_DIR/scripts"
+    cp "$SOURCE_SCRIPTS/ip-databases.sh" "$BUILD_DIR/scripts/"
     make_release_fixture
     publish_release
     local service

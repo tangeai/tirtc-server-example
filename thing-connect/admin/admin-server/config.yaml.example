@@ -39,3 +39,7 @@ security:
 job:
   storage_dir: "var/admin-jobs"
   max_bytes: 10485760
+
+# Startup-only optional offline data. Relative paths use the deployment root.
+ip_location:
+  directory: "admin-server/ipdb"

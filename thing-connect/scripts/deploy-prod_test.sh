@@ -1115,3 +1115,20 @@ test_standalone_migration_failure_quiesces_services
 test_schema_change_failure_never_auto_starts_old_binaries
 test_daily_update_backs_up_files_before_database_migration
 echo "PASS: deploy-prod.sh"
+
+
+test_ip_database_only_update_is_not_skipped() (
+    DEPLOY_ROOT="$TEST_ROOT/ipdb-release"
+    BUILD_DIR="$TEST_ROOT/ipdb-build"
+    ACTIVE_SERVICES=(admin-server)
+    FORCE_UPDATE=0
+    mkdir -p "$DEPLOY_ROOT/admin-server/ipdb" "$BUILD_DIR/resources/ipdb"
+    git() { printf '%040d\n' 1; }
+    publish_release_state >/dev/null
+    release_state_is_current
+    printf new >"$BUILD_DIR/resources/ipdb/qqwry.dat"
+    if release_state_is_current; then return 1; fi
+    cp "$BUILD_DIR/resources/ipdb/qqwry.dat" "$DEPLOY_ROOT/admin-server/ipdb/"
+    release_state_is_current
+)
+test_ip_database_only_update_is_not_skipped

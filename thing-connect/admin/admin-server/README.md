@@ -6,7 +6,7 @@
 
 ## 启动配置
 
-启动配置示例位于 [config.yaml.example](config.yaml.example)，只包含进程启动必需项：
+启动配置示例位于 [config.yaml.example](config.yaml.example)，包含进程启动配置：
 
 - HTTP 端口和可信代理。
 - MySQL 运行账号 DSN，以及可选的 `database.max_open_conns` / `database.max_idle_conns` 连接池限制；修改后重启，容量预算见部署指南。
@@ -123,3 +123,21 @@ Admin 数据库迁移包含 58 条中文默认目录资料。普通话正式预�
 ## 查看设备上报属性
 
 进入“设备管理”，在“用户设备”列表点击“详情与上报属性”。详情显示芯片、开发板和固件版本；“设备上报属性”按实时音视频、设备通话、微信通话分栏展示有效能力字段，可展开查看对应 JSON。不需要先完成微信设备授权。未上报的场景显示空态，离线设备仍可查看已保存的上报信息；此页面读取需要 `device.read` 权限。
+
+## IP 中文归属地
+
+用户的注册、最近登录 IP 和设备的最近上线 IP 在管理列表及详情中显示中文归属地和运营商。 IP 旁的复制按钮复制完整地址；列表中的长归属地可悬停查看，详情展示完整内容。未记录 IP、归属地未知和内网地址分别标注。IPv4 优先使用 `qqwry.dat`，`GeoLite2-City.mmdb` 补充地区及 IPv6，`GeoLite2-ASN.mmdb` 补充网络所属机构。中文名称优先；已知拼音按国家、省份限定的地名映射转换，无法确定的部分显示未知，不猜测同音地名。库之间不做多数表决，IP 归属地不代表精确物理位置。
+
+三个文件放在源码的 `thing-connect/resources/ipdb/`，不需要 `local/`。首次安装、生产更新及本地快照发布将指定库文件复制到部署根目录的 `admin-server/ipdb/`；缺少源文件时保留已安装的对应库。三个库作为单独运维资源传输，不包含在 Git 中，也不放到 Web 静态目录。仅拉取代码不会取得库文件。
+
+需要单独传输时，在 `thing-connect/` 执行：
+
+```bash
+tar -czf /tmp/thing-connect-ipdb.tar.gz -C resources/ipdb qqwry.dat GeoLite2-City.mmdb GeoLite2-ASN.mmdb
+```
+
+将该压缩包传至目标服务器后解压到目标源码的 `thing-connect/resources/ipdb/`，再按部署指南执行更新。发布失败时默认目录的库随 Admin 版本回滚。
+
+可选启动配置 `ip_location.directory` 指定其他私有目录；默认值为部署根目录下的 `admin-server/ipdb`，相对路径也相对于部署根目录。自定义目录由运维自行同步，不受发布脚本管理。替换库或修改目录后重启 Admin 生效，不属于动态配置。
+
+归属地只在 Admin 查询时解析，不参与注册、登录、心跳写入或鉴权。库缺失或损坏不影响 readiness；页面显示未知或库未配置，损坏原因见 Admin 日志。`127.0.0.1` 显示回环地址，内网地址不推测省市；若原始 IP 是代理地址，应先检查可信代理和转发头配置。

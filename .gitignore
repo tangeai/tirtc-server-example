@@ -72,3 +72,7 @@ __pycache__/
 
 # Local homepage prototypes
 /thing-connect/user-server/prototypes/
+
+# Offline IP databases are deployed as private runtime assets, not source code.
+/thing-connect/resources/ipdb/*.dat
+/thing-connect/resources/ipdb/*.mmdb

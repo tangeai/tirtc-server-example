@@ -1,3 +1,4 @@
+import { IPAddress, type IPLocation } from '../../shared/ip-address';
 import { useState } from 'react';
 import {
   Alert,
@@ -6,6 +7,7 @@ import {
   Descriptions,
   Drawer,
   Form,
+  Grid,
   Input,
   Modal,
   Popconfirm,
@@ -44,6 +46,7 @@ type ManagedDevice = {
   presence_known: boolean;
   last_seen_at?: string;
   last_online_ip?: string;
+  last_online_ip_location?: IPLocation;
   last_online_at?: string;
   hardware?: {
     chip_model?: string;
@@ -225,6 +228,7 @@ export function DevicesPage() {
 }
 
 function UserDevicesPanel() {
+  const screens = Grid.useBreakpoint();
   const [query, setQuery] = useState('');
   const [bound, setBound] = useState('');
   const [sortBy, setSortBy] = useState('');
@@ -319,7 +323,7 @@ function UserDevicesPanel() {
           showTotal: (total) => `共 ${total} 条`,
           onChange: setPage,
         }}
-        scroll={{ x: 1450 }}
+        scroll={{ x: 1690 }}
         columns={[
           {
             title: '设备',
@@ -349,7 +353,20 @@ function UserDevicesPanel() {
               </>
             ),
           },
-          { title: '所属用户', dataIndex: 'user_email', render: (value) => value || '未绑定' },
+          {
+            title: '最近上线 IP / 归属地',
+            width: 240,
+            render: (_, row) => (
+              <IPAddress compact ip={row.last_online_ip} location={row.last_online_ip_location} />
+            ),
+          },
+          {
+            title: '所属用户',
+            width: 220,
+            dataIndex: 'user_email',
+            ellipsis: true,
+            render: (value) => value || '未绑定',
+          },
           { title: '设备名称', dataIndex: 'device_name', render: (value) => value || '—' },
           { title: '设备来源', dataIndex: 'assign', render: assignmentName },
           {
@@ -371,9 +388,10 @@ function UserDevicesPanel() {
           },
           {
             title: '操作',
-            fixed: 'right',
+            fixed: screens.md ? 'right' : undefined,
+            width: 210,
             render: (_, row) => (
-              <Space>
+              <Space wrap size={0}>
                 <Button type="link" onClick={() => openDetail(row)}>
                   详情与上报属性
                 </Button>
@@ -402,7 +420,7 @@ function UserDevicesPanel() {
           <>
             <Descriptions
               bordered
-              column={2}
+              column={{ xs: 1, sm: 2 }}
               items={[
                 { key: 'name', label: '设备名称', children: detail.device.device_name || '—' },
                 { key: 'presence', label: '在线状态', children: devicePresence(detail.device) },
@@ -414,7 +432,12 @@ function UserDevicesPanel() {
                 {
                   key: 'last_online_ip',
                   label: '最近上线 IP',
-                  children: detail.device.last_online_ip || '—',
+                  children: (
+                    <IPAddress
+                      ip={detail.device.last_online_ip}
+                      location={detail.device.last_online_ip_location}
+                    />
+                  ),
                 },
                 {
                   key: 'last_online_at',

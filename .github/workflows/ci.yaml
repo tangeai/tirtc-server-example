@@ -69,6 +69,7 @@ jobs:
       - name: Deployment script tests
         working-directory: thing-connect
         run: |
+          bash scripts/ip-databases_test.sh
           bash scripts/install_test.sh
           bash scripts/service-local_test.sh
           bash scripts/deploy-prod_test.sh

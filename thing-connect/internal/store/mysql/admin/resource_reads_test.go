@@ -28,7 +28,7 @@ func TestResourceReadStoreQueriesIPMetadata(t *testing.T) {
 		_, _ = db.Exec(`DELETE FROM user_connection WHERE user_id=?`, id)
 		_, _ = db.Exec(`DELETE FROM users WHERE id=?`, id)
 	})
-	serviceBefore := admin.NewResourceService(NewResourceReadStore(db), nil)
+	serviceBefore := admin.NewResourceService(NewResourceReadStore(db), nil, nil)
 	oldUser, err := serviceBefore.User(context.Background(), id)
 	if err != nil {
 		t.Fatal(err)
@@ -40,7 +40,7 @@ func TestResourceReadStoreQueriesIPMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := NewResourceReadStore(db)
-	service := admin.NewResourceService(store, nil)
+	service := admin.NewResourceService(store, nil, nil)
 	page, err := service.Users(context.Background(), admin.ResourceFilter{Keyword: "admin-resource-read@example.invalid"})
 	if err != nil {
 		t.Fatal(err)
