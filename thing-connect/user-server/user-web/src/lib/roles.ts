@@ -22,14 +22,14 @@ export function findVoice(voices: Voice[], id: string, model?: string): Voice | 
 export interface RoleDraft { video: boolean | undefined; region: string; typeId: string; typeRevision: number; voiceModel?: string; customPrompt: boolean | undefined; name: string; description: string; prompt: string; welcome: string; welcomeMode: 'static' | 'ai'; welcomePrompt: string; voice: string; model: string; rate: number; pitch: number; memory: boolean; knowledge: string; mcp: string[]; plugins: string[] }
 export const defaultWelcomeText = '你好呀，今天过得怎么样？';
 export const defaultWelcomePrompt = '请用温暖自然的语气向用户打招呼，控制在20字以内，每次尽量换一种表达。';
-export function resetWelcomeMode(ai: boolean): Pick<RoleDraft, 'welcomeMode' | 'welcome' | 'welcomePrompt'> {
-  return ai ? { welcomeMode: 'ai', welcome: '', welcomePrompt: defaultWelcomePrompt }
-    : { welcomeMode: 'static', welcome: defaultWelcomeText, welcomePrompt: '' };
+export function resetWelcomeMode(ai: boolean, translate: (key: string) => string = key => key): Pick<RoleDraft, 'welcomeMode' | 'welcome' | 'welcomePrompt'> {
+  return ai ? { welcomeMode: 'ai', welcome: '', welcomePrompt: translate(defaultWelcomePrompt) }
+    : { welcomeMode: 'static', welcome: translate(defaultWelcomeText), welcomePrompt: '' };
 }
-export function draftOf(role: Role): RoleDraft {
+export function draftOf(role: Role, translate: (key: string) => string = key => key): RoleDraft {
   const component = role.service_config?.config?.tts;
   const tts = voiceSettings(component);
-  return { video: role.agent_config?.video?.enable, region: role.region || (role.id ? '' : 'cn01'), typeId: role.user_params?.role_type_id || '', typeRevision: role.user_params?.role_type_revision || 0, customPrompt: role.user_params?.role_type_custom, name: role.name || '', description: role.user_params?.description || '', prompt: role.agent_config?.prompt || '', welcome: role.agent_config?.welcome_text ?? (role.id ? '' : defaultWelcomeText), welcomeMode: role.agent_config?.welcome_prompt?.trim() ? 'ai' : 'static', welcomePrompt: role.agent_config?.welcome_prompt || '',
+  return { video: role.agent_config?.video?.enable, region: role.region || (role.id ? '' : 'cn01'), typeId: role.user_params?.role_type_id || '', typeRevision: role.user_params?.role_type_revision || 0, customPrompt: role.user_params?.role_type_custom, name: role.name || '', description: role.user_params?.description || '', prompt: role.agent_config?.prompt || '', welcome: role.agent_config?.welcome_text ?? (role.id ? '' : translate(defaultWelcomeText)), welcomeMode: role.agent_config?.welcome_prompt?.trim() ? 'ai' : 'static', welcomePrompt: role.agent_config?.welcome_prompt || '',
     voiceModel: component?.provider_params?.model || '', voice: tts?.voice || role.user_params?.voice || '', model: role.service_config?.config?.llm?.provider_params?.model || (role.id ? '' : 'qwen3.5-flash'), rate: tts?.rate ?? 1, pitch: tts?.pitch ?? 1,
     memory: role.agent_config?.ali_memory?.enable === true, knowledge: role.agent_config?.ali_rag?.index_id || '', mcp: [...(role.agent_config?.mcp_tools || [])], plugins: [...(role.agent_config?.device_plugins || [])] };
 }

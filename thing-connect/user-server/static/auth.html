@@ -641,14 +641,23 @@ let loginCaptchaInited = false;
 let regCaptchaInited   = false;
 // 注册流：验证通过后自动触发的回调
 let _regSendAfterVerify = null;
+let captchaLanguageGeneration = 0;
 
 async function initCaptchaInstance(elementId, onVerified, onInstance) {
   const selector = '#' + elementId;
+  const english = WebI18n.getLanguage() === 'en';
+  const generation = captchaLanguageGeneration;
+  const verified = onVerified, ready = onInstance;
+  onVerified = value => { if (generation === captchaLanguageGeneration) verified(value); };
+  onInstance = instance => {
+    if (generation === captchaLanguageGeneration) ready(instance);
+    else instance.destroy?.();
+  };
   if (CAPTCHA_PROVIDER === 'yidun') {
     await loadScript('https://cstaticdun.126.net/load.min.js');
     window.initNECaptcha({
       captchaId: CAPTCHA_ID, element: selector, mode: 'popup',
-      width: Math.min(320, window.innerWidth - 24) + 'px', apiVersion: 2,
+      width: Math.min(320, window.innerWidth - 24) + 'px', apiVersion: 2, lang: english ? 'en' : 'zh-CN',
       onVerify(err, data) {
         if (!err && data && data.validate) onVerified(captchaToken(data.validate));
       },
@@ -657,12 +666,12 @@ async function initCaptchaInstance(elementId, onVerified, onInstance) {
   }
   if (CAPTCHA_PROVIDER === 'geetest') {
     await loadScript('https://static.geetest.com/v4/gt4.js');
-    window.initGeetest4({captchaId: CAPTCHA_ID, product: 'bind', language: 'zho'}, instance => {
+    window.initGeetest4({captchaId: CAPTCHA_ID, product: 'bind', language: english ? 'eng' : 'zho'}, instance => {
       instance.onSuccess(() => {
         const result = instance.getValidate();
         if (result) onVerified(captchaToken(result.lot_number, result));
       });
-      onInstance({refresh: () => instance.reset(), verify: () => instance.showCaptcha()});
+      onInstance({refresh: () => instance.reset(), verify: () => instance.showCaptcha(), destroy: () => instance.destroy?.()});
     });
     return;
   }
@@ -672,8 +681,8 @@ async function initCaptchaInstance(elementId, onVerified, onInstance) {
       if (result && result.ret === 0 && result.ticket) {
         onVerified(captchaToken(result.ticket, {randstr: result.randstr || ''}));
       }
-    }, {userLanguage: 'zh-cn'});
-    onInstance({refresh: () => {}, verify: () => instance.show()});
+    }, {userLanguage: english ? 'en' : 'zh-cn'});
+    onInstance({refresh: () => {}, verify: () => instance.show(), destroy: () => instance.destroy?.()});
     return;
   }
   if (CAPTCHA_PROVIDER === 'aliyun') {
@@ -683,7 +692,7 @@ async function initCaptchaInstance(elementId, onVerified, onInstance) {
     window.AliyunCaptchaConfig = {region, prefix};
     await loadScript('https://o.alicdn.com/captcha-frontend/aliyunCaptcha/AliyunCaptcha.js');
     let instance = null;
-    const wrapper = {refresh: () => {}, verify: () => {
+    const wrapper = {destroy: () => instance?.destroy?.(), refresh: () => {}, verify: () => {
       if (!instance) throw new Error('aliyun captcha is not ready');
       instance.show();
       if (instance.startTracelessVerification) instance.startTracelessVerification();
@@ -695,7 +704,7 @@ async function initCaptchaInstance(elementId, onVerified, onInstance) {
       onError: err => console.warn('captcha init error', err),
       getInstance: value => { instance = value; onInstance(wrapper); },
       slideStyle: {width: Math.max(320, Math.min(360, window.innerWidth - 24)), height: 40},
-      language: 'cn', delayBeforeSuccess: false,
+      language: english ? 'en' : 'cn', delayBeforeSuccess: false,
     });
     return;
   }
@@ -732,6 +741,7 @@ function setupCaptcha() {
 }
 
 const pendingCaptchaOpen = new Map();
+
 async function openCaptcha(getInstance, setupInstance, isCurrent = () => true) {
   const existing = pendingCaptchaOpen.get(setupInstance);
   if (existing) {
@@ -758,6 +768,17 @@ async function waitForCaptcha(getInstance, setupInstance) {
   }
   throw new Error('captcha load timeout');
 }
+
+WebI18n.onChange(() => {
+  captchaLanguageGeneration++;
+  loginCaptchaIns?.destroy?.(); regCaptchaIns?.destroy?.();
+  loginCaptchaIns = regCaptchaIns = null;
+  loginCaptchaInited = regCaptchaInited = false;
+  loginCaptchaToken = regCaptchaToken = null;
+  _regSendAfterVerify = null;
+  pendingCaptchaOpen.forEach(entry => { entry.isCurrent = () => false; });
+  pendingCaptchaOpen.clear();
+});
 
 // ── Auth logic ────────────────────────────────────────────────────────────
 function switchTab(tab, updateUrl = true) {

@@ -4,6 +4,10 @@
 
   const storageKey = "xiaotai.site.language";
   const english = {
+    "site.gettingStarted": "Getting started",
+    "site.faq": "FAQ",
+    "site.integrationHelp": "Integration help",
+    "site.icp": "Guangdong ICP No. 19005025-19",
     "site.brand": "Tange · Xiaotai",
     "site.homeLabel": "Xiaotai home",
     "site.mainNav": "Main navigation",

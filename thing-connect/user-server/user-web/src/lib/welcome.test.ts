@@ -39,3 +39,13 @@ test('changing welcome mode replaces custom content with the corresponding defau
   assert.equal(draftOf({}).welcome, defaultWelcomeText);
   assert.equal(draftOf({ id: 'r', agent_config: { welcome_text: '' } }).welcome, '');
 });
+
+
+test('new welcome defaults follow the UI language without translating saved content', () => {
+  const translate = (key: string) => key === defaultWelcomeText ? 'Hello!' : 'Greet the user in English.';
+  assert.equal(draftOf({}, translate).welcome, 'Hello!');
+  assert.equal(resetWelcomeMode(true, translate).welcomePrompt, 'Greet the user in English.');
+  assert.equal(resetWelcomeMode(false, translate).welcome, 'Hello!');
+  assert.equal(draftOf({id: 'saved', agent_config: {welcome_text: '用户原文'}}, translate).welcome, '用户原文');
+  assert.equal(draftOf({id: 'saved', agent_config: {welcome_text: ''}}, translate).welcome, '');
+});

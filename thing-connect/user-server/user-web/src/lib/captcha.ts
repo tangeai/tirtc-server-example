@@ -13,7 +13,7 @@ interface Geetest {
 interface Aliyun { show(): void; startTracelessVerification?(): void; destroy?(): void }
 declare global {
   interface Window {
-    initNECaptcha?: (options: { captchaId: string; element: string; mode: string; width: string; apiVersion: number; onClose(): void; onVerify(error: unknown, data?: { validate: string }): void }, ready: (instance: Instance) => void, fail: (error: unknown) => void) => void;
+    initNECaptcha?: (options: { captchaId: string; element: string; mode: string; width: string; apiVersion: number; lang: string; onClose(): void; onVerify(error: unknown, data?: { validate: string }): void }, ready: (instance: Instance) => void, fail: (error: unknown) => void) => void;
     initGeetest4?: (options: { captchaId: string; product: string; language: string }, ready: (instance: Geetest) => void) => void;
     TencentCaptcha?: new (id: string, callback: (result: { ret: number; ticket: string; randstr?: string }) => void, options: { userLanguage: string }) => { show(): void; destroy?(): void };
     AliyunCaptchaConfig?: { region: string; prefix: string };
@@ -38,6 +38,7 @@ function loadScript(src: string) {
 }
 
 async function createInstance(config: Config, element: string, verified: (token: CaptchaToken) => void, closed: () => void): Promise<Instance> {
+  const english = window.WebI18n?.getLanguage() === 'en';
   const id = config.public_config?.captcha_id || config.captcha_id || '';
   if (!id) throw new Error('captcha configuration missing');
   const token = (value: string, metadata: Metadata = {}) => verified({ captcha_id: id, validate: value,
@@ -60,19 +61,19 @@ async function createInstance(config: Config, element: string, verified: (token:
       switch (config.provider) {
         case 'yidun':
           if (!window.initNECaptcha) return fail();
-          window.initNECaptcha({ captchaId: id, element, mode: 'popup', width: Math.min(320, innerWidth - 24) + 'px', apiVersion: 2, onClose: closed,
+          window.initNECaptcha({ captchaId: id, element, mode: 'popup', width: Math.min(320, innerWidth - 24) + 'px', apiVersion: 2, lang: english ? 'en' : 'zh-CN', onClose: closed,
             onVerify: (error, data) => { if (!expired && !error && data?.validate) token(data.validate); } }, ready, fail);
           break;
         case 'geetest':
           if (!window.initGeetest4) return fail();
-          window.initGeetest4({ captchaId: id, product: 'bind', language: 'zho' }, instance => {
+          window.initGeetest4({ captchaId: id, product: 'bind', language: english ? 'eng' : 'zho' }, instance => {
             instance.onSuccess(() => { const data = instance.getValidate(); if (!expired && data) token(data.lot_number, data); });
             ready({ verify: () => instance.showCaptcha(), refresh: () => instance.reset(), destroy: () => instance.destroy?.() });
           });
           break;
         case 'tencent': {
           if (!window.TencentCaptcha) return fail();
-          const instance = new window.TencentCaptcha(id, result => { if (!expired && result.ret === 0 && result.ticket) token(result.ticket, { randstr: result.randstr || '' }); else if (!expired && result.ret === 2) closed(); }, { userLanguage: 'zh-cn' });
+          const instance = new window.TencentCaptcha(id, result => { if (!expired && result.ret === 0 && result.ticket) token(result.ticket, { randstr: result.randstr || '' }); else if (!expired && result.ret === 2) closed(); }, { userLanguage: english ? 'en' : 'zh-cn' });
           ready({ verify: () => instance.show(), refresh() {}, destroy: () => instance.destroy?.() });
           break;
         }
@@ -81,7 +82,7 @@ async function createInstance(config: Config, element: string, verified: (token:
           window.initAliyunCaptcha({ SceneId: id, mode: 'popup', element, button: element,
             success: value => { if (!expired) token(value, { captcha_verify_param: value }); }, fail() {}, onError: fail,
             getInstance: instance => ready({ verify: () => { instance.show(); instance.startTracelessVerification?.(); }, refresh() {}, destroy: () => instance.destroy?.() }),
-            slideStyle: { width: Math.min(360, innerWidth - 24), height: 40 }, language: 'cn', delayBeforeSuccess: false });
+            slideStyle: { width: Math.min(360, innerWidth - 24), height: 40 }, language: english ? 'en' : 'cn', delayBeforeSuccess: false });
           break;
       }
     } catch { fail(); }
@@ -93,9 +94,18 @@ export class CaptchaGate {
   private instance?: Instance;
   private active?: (token: CaptchaToken | null) => void;
   private disposed = false;
+  private pending = false;
+  private unsubscribe?: () => void;
   private generation = 0;
   private readonly closed: () => void;
-  constructor(closed: () => void = () => {}) { this.closed = closed; }
+  constructor(closed: () => void = () => {}) {
+    this.closed = closed;
+    this.unsubscribe = window.WebI18n?.onChange(() => {
+      const wasPending = this.pending;
+      this.cancel();
+      if (wasPending) this.closed();
+    });
+  }
   private intent = this.newIntent();
   private newIntent() {
     const generation = this.generation;
@@ -124,6 +134,7 @@ export class CaptchaGate {
   }
   private invalidate(deferDestroy = false) {
     this.active = undefined;
+    this.pending = false;
     this.generation++;
     this.intent.cancel();
     const instance = this.instance;
@@ -136,14 +147,15 @@ export class CaptchaGate {
   async open(action: (token: CaptchaToken | null) => void) {
     if (this.disposed) return;
     this.active = undefined;
+    this.pending = true;
     await this.intent.run(instance => {
       if (this.disposed) return;
       if (instance) { this.active = action; instance.verify(); }
-      else action(null);
+      else { this.pending = false; action(null); }
     });
   }
   reset() { this.cancel(); }
-  dispose() { this.disposed = true; this.cancel(); }
+  dispose() { this.unsubscribe?.(); this.disposed = true; this.cancel(); }
 }
 export function captchaFields(token: CaptchaToken | null) {
   return { captcha_id: token?.captcha_id ?? '', validate: token?.validate ?? '', user: '',

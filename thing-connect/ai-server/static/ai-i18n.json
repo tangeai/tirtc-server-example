@@ -279,5 +279,15 @@
   "AI 助手": "AI assistant",
   "系统": "System",
   "工具": "Tool",
-  "当前模型暂不支持，请重新选择模型": "This model is not supported. Please select another model."
+  "当前模型暂不支持，请重新选择模型": "This model is not supported. Please select another model.",
+  "搜索智能体...": "Search agents...",
+  "保存会影响所有使用该角色的设备；“切换到此角色”只更换当前设备。": "Saving affects all devices using this role. “Switch to this role” changes only the current device.",
+  "添加参数": "Add parameter",
+  "删除参数": "Remove parameter",
+  "当前音色模型暂不支持，请重新选择音色": "This voice model is not supported. Choose another voice.",
+  "语速应为 -50 至 100、音调应为 -12 至 12 的整数": "Speed must be an integer from -50 to 100, and pitch from -12 to 12.",
+  "语速和音调应为 0.5 至 2": "Speed and pitch must be between 0.5 and 2.",
+  "音色信息暂不可用，请重新加载音色列表": "Voice information is unavailable. Reload the voice list.",
+  "你好呀，今天过得怎么样？": "Hi! How is your day going?",
+  "请用温暖自然的语气向用户打招呼，控制在20字以内，每次尽量换一种表达。": "Greet the user warmly and naturally in English, in no more than 20 words. Try a different greeting each time."
 }

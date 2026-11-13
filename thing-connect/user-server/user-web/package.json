@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "test": "node --experimental-strip-types --test src/lib/*.test.ts src/media/*.test.ts",
+    "test": "node --experimental-strip-types --test src/lib/*.test.ts src/media/*.test.ts tests/*.test.cjs",
     "check": "npm test && npm run build",
     "test:browser": "node tests/run-browser.cjs"
   },

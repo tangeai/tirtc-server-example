@@ -27,8 +27,8 @@ export default function Roles() {
   const operation = useRef(false), selection = useRef(0), mounted = useRef(true), loadRevision = useRef(0);
   const voices = useRemote<{ items: Voice[] }>('/v1/ai/voices');
   const types = useRemote<{ items: RoleType[] }>('/v1/ai/role-types');
-  const typeName = (role: Role) => selectedRoleType(draftOf(role), types.data?.items || [])?.name || '';
-  const dirty = !!selected && !!draft && !selected.preset && JSON.stringify(draft) !== JSON.stringify(draftOf(selected));
+  const typeName = (role: Role) => selectedRoleType(draftOf(role, t), types.data?.items || [])?.name || '';
+  const dirty = !!selected && !!draft && !selected.preset && JSON.stringify(draft) !== JSON.stringify(draftOf(selected, t));
   const effective = binding?.role_id || binding?.default_role_id;
   const filteredRoles = roles.filter(role => (!region || role.region === region) && (!search.trim() || [role.name, typeName(role)].some(value => value?.toLowerCase().includes(search.trim().toLowerCase()))));
   const current = roles.find(role => role.id === effective && !role.unavailable);
@@ -79,7 +79,7 @@ export default function Roles() {
     try {
       const full = role.id && !role.preset ? { ...role, ...await request<Role>('/v1/ai/roles/' + encodeURIComponent(role.id)) } : role;
       if (!mounted.current || rev !== selection.current) return;
-      setSelected(full); setDraft(draftOf(full)); setMobileEditor(true);
+      setSelected(full); setDraft(draftOf(full, t)); setMobileEditor(true);
       if (!full.id) { setSearch(''); setRegion(''); }
       if (full.id) setRoles(items => items.map(item => item.id === full.id ? full : item));
     } catch (e) { if (mounted.current && rev === selection.current) setError(errorText(e)); }
@@ -98,7 +98,7 @@ export default function Roles() {
       if (!id) { setError('保存结果暂不可用，请重新加载角色列表'); return false; }
       const saved: Entry = { ...selected, ...payload, ...result, id };
       setRoles(items => items.some(role => role.id === id) ? items.map(role => role.id === id ? saved : role) : [...items, saved]);
-      setRegion(''); setSelected(saved); setDraft(draftOf(saved)); setNotice('保存成功'); return true;
+      setRegion(''); setSelected(saved); setDraft(draftOf(saved, t)); setNotice('保存成功'); return true;
     } catch (e) { if (mounted.current) setError(errorText(e)); return false; }
     finally { operation.current = false; if (mounted.current) setBusy(false); }
   }
@@ -107,7 +107,7 @@ export default function Roles() {
     if (dirty) {
       const answer = await ask({ title: '修改尚未保存', message: t('切换到“{p0}”前，请处理当前角色的修改。', { p0: role.name || role.id }), choices: [{ value: 'save', label: '保存并切换' }, { value: 'discard', label: '放弃修改并切换' }, { value: 'cancel', label: '继续编辑' }] });
       if (answer === 'cancel' || (answer === 'save' && !await save())) return;
-      if (answer === 'discard' && selected) setDraft(draftOf(selected));
+      if (answer === 'discard' && selected) setDraft(draftOf(selected, t));
     }
     let switched = false;
     operation.current = true; setBusy(true); setError(''); setNotice('');
@@ -151,7 +151,7 @@ export default function Roles() {
     </aside><main className="role-editor"><Button className="mobile-back" onClick={() => setMobileEditor(false)}>← {t('返回角色列表')}</Button>
       {error && <p role="alert" className="error">{t(error)}</p>}{notice && <p role="status" className="success">{t(notice)}</p>}{loading && <p role="status">{t('正在加载角色详情…')}</p>}
       {!loading && selected && draft ? <RoleEditor key={selected.id || 'new'} role={selected} draft={draft} setDraft={patch => { setNotice(''); setDraft(current => current ? { ...current, ...patch } : current); }} voices={voices.data?.items || []} voiceLoading={voices.loading} voiceError={!!voices.error} retryVoices={voices.reload} busy={busy || loading} resourceBlocked={resourceBlocked} onResourceBlocked={setResourceBlocked} remove={remove} inUse={selected.id === effective}/> : !loading && <p className="muted">{t('选择或新建智能体')}</p>}
-      {selected && !selected.preset && <div className="save-bar"><p>{t('保存会影响所有使用该角色的设备；“切换到此角色”只更换当前设备。')}</p><div className="row"><Button disabled={!dirty || busy || resourceBlocked || loading} onClick={async () => { if (await discard() && selected) setDraft(draftOf(selected)); }}>{t('放弃修改')}</Button><Button className="primary" disabled={!dirty || busy || resourceBlocked || loading} onClick={() => void save()}>{t(busy ? '保存中…' : '保存角色')}</Button></div></div>}
+      {selected && !selected.preset && <div className="save-bar"><p>{t('保存会影响所有使用该角色的设备；“切换到此角色”只更换当前设备。')}</p><div className="row"><Button disabled={!dirty || busy || resourceBlocked || loading} onClick={async () => { if (await discard() && selected) setDraft(draftOf(selected, t)); }}>{t('放弃修改')}</Button><Button className="primary" disabled={!dirty || busy || resourceBlocked || loading} onClick={() => void save()}>{t(busy ? '保存中…' : '保存角色')}</Button></div></div>}
     </main></div>
   </Shell></div>;
 }
@@ -173,7 +173,7 @@ function RoleEditor({ role, draft, setDraft, voices, voiceLoading, voiceError, r
       <div hidden={section !== 'advanced'}><section className="role-video-setting"><div className="row"><label htmlFor="role-video">{t('视频识别')}</label><Switch id="role-video" aria-label={t('视频识别')} checked={draft.video === true} disabled={busy || readonly || !providers.custom} onChange={video=>patch({video})}/></div><p className="muted">{t('允许 AI 理解设备上传的视频画面。')}{draft.video === undefined && ' ' + t('未单独设置，沿用基础配置。')}</p></section>
         <Collapse className="role-section" items={[{key:"content",label:t('更多角色信息'),children:<>
           <label>{t(draft.welcomeMode === 'ai' ? 'AI 欢迎语提示词' : '开场白')}<Input.TextArea aria-label={t(draft.welcomeMode === 'ai' ? 'AI 欢迎语提示词' : '开场白')} required={draft.welcomeMode === 'ai'} readOnly={readonly} value={draft.welcomeMode === 'ai' ? draft.welcomePrompt : draft.welcome} autoSize={{minRows:2,maxRows:8}} onChange={e => patch(draft.welcomeMode === 'ai' ? { welcomePrompt: e.target.value } : { welcome: e.target.value })}/></label>
-          <Checkbox disabled={busy || readonly} checked={draft.welcomeMode === 'ai'} onChange={e => patch(resetWelcomeMode(e.target.checked))}>{t('AI 随机欢迎语')}</Checkbox>
+          <Checkbox disabled={busy || readonly} checked={draft.welcomeMode === 'ai'} onChange={e => patch(resetWelcomeMode(e.target.checked, t))}>{t('AI 随机欢迎语')}</Checkbox>
           <p className="muted">{t('勾选后，输入内容作为 AI 提示词；不勾选时，直接使用输入的文字。勾选或取消勾选都会重置为默认内容。')}</p>
           <p className="muted">{t(draft.welcomeMode === 'ai' ? '提示词必填，每次新会话由 AI 生成欢迎语，内容可能重复。' : '留空并保存会清除本角色的欢迎语设置。')}</p>
         </>}]} />

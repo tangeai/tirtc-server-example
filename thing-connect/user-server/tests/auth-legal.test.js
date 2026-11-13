@@ -25,6 +25,9 @@ test('both configured legal documents exist and can be read without scripts',()=
     const contacts=[...document.matchAll(/mailto:([^"\s]+)/g)].map(match=>match[1]);
     assert.ok(contacts.length>0);
     assert.ok(contacts.every(email=>email==='openapi@tange.ai'));
-    assert.doesNotMatch(document,/<script/);assert.match(document,/文本更新日期/);
+    const withoutScripts=document.replace(/<script\b[^>]*>[\s\S]*?<\/script>/g,'');
+    assert.match(withoutScripts,/<h2 id="s1">/);
+    assert.match(withoutScripts,/文本更新日期/);
+    assert.deepEqual([...document.matchAll(/<script src="([^"]+)"/g)].map(match=>match[1]),['/v1/config/language.js','language.js']);
   }
 });

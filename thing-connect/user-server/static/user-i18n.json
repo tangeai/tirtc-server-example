@@ -435,5 +435,7 @@
   "确认设备已烧录小钛固件，然后接通电源。": "Make sure XiaoTai firmware is installed on the device, then power it on.",
   "Wi-Fi 设备请先完成配网；4G 设备请插入可用的 SIM 卡，等待联网。": "For Wi-Fi devices, complete Wi-Fi setup. For 4G devices, insert an active SIM card and wait for a connection.",
   "听取设备播报或查看屏幕上的 6 位绑定码，输入上方即可绑定。": "Listen for the 6-digit binding code or read it on the device screen, then enter it above to bind the device.",
-  "点击“添加设备”，输入设备绑定码完成绑定": "Select “Add device” and enter the device binding code."
+  "点击“添加设备”，输入设备绑定码完成绑定": "Select “Add device” and enter the device binding code.",
+  "开启声音": "Unmute",
+  "关闭声音": "Mute"
 }

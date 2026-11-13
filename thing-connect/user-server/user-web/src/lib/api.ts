@@ -49,6 +49,6 @@ export async function request<T>(path: string, options: {
 }
 export function errorText(error: unknown): string {
   if (error instanceof ApiError) return window.WebI18n?.errorMessage({ code: error.code, msg: error.message }) ?? error.message;
-  if (error instanceof DOMException && ['AbortError', 'TimeoutError'].includes(error.name)) return '请求超时，请检查网络后重试';
-  return '网络连接失败，请稍后重试';
+  if (error instanceof DOMException && ['AbortError', 'TimeoutError'].includes(error.name)) return window.WebI18n?.t('请求超时，请检查网络后重试') ?? '请求超时，请检查网络后重试';
+  return window.WebI18n?.t('网络连接失败，请稍后重试') ?? '网络连接失败，请稍后重试';
 }
