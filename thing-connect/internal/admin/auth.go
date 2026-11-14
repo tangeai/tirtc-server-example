@@ -341,41 +341,6 @@ func (a *AuthService) Logout(ctx context.Context, refreshToken string) error {
 	return a.store.RevokeSessionToken(ctx, TokenHash(refreshToken), "logout")
 }
 
-// VerifyStepUp performs a fresh MFA check for high-risk administrative
-// actions. TOTP steps and recovery codes are consumed exactly as at login.
-func (a *AuthService) VerifyStepUp(ctx context.Context, userID int64, code, recoveryCode string) error {
-	if !a.MFAEnabled() {
-		return nil
-	}
-	factor, err := a.store.ActiveMFAFactor(ctx, userID)
-	if err != nil {
-		return ErrInvalidMFA
-	}
-	if strings.TrimSpace(code) != "" {
-		secret, err := a.cipher.Decrypt(factor.SecretEnc, mfaAAD(userID))
-		if err != nil {
-			return err
-		}
-		step, ok := ValidateTOTP(string(secret), code, a.now(), factor.LastUsedStep)
-		if !ok {
-			return ErrInvalidMFA
-		}
-		used, err := a.store.MarkMFAStep(ctx, factor.ID, factor.LastUsedStep, step)
-		if err != nil || !used {
-			return ErrInvalidMFA
-		}
-		return nil
-	}
-	if normalized := normalizeRecoveryCode(recoveryCode); normalized != "" {
-		used, err := a.store.ConsumeRecoveryCode(ctx, userID, TokenHash(normalized))
-		if err != nil || !used {
-			return ErrInvalidMFA
-		}
-		return nil
-	}
-	return ErrInvalidMFA
-}
-
 func (a *AuthService) MFAEnabled() bool {
 	a.cfgMu.RLock()
 	defer a.cfgMu.RUnlock()

@@ -33,15 +33,26 @@ func (s *Store) SeedDefaults(ctx context.Context) error {
 	}
 	defer tx.Rollback()
 	roleIDs := make(map[string]int64, len(defaultRoles))
+	createdRoles := make(map[string]bool, len(defaultRoles))
 	for _, role := range defaultRoles {
-		if _, err := tx.ExecContext(ctx, `INSERT IGNORE INTO admin_roles (code,name,sort_no,remark) VALUES (?,?,?,?)`, role.Code, role.Name, role.Sort, role.Remark); err != nil {
+		result, err := tx.ExecContext(ctx, `INSERT IGNORE INTO admin_roles (code,name,sort_no,remark) VALUES (?,?,?,?)`, role.Code, role.Name, role.Sort, role.Remark)
+		if err != nil {
 			return fmt.Errorf("seed role %s: %w", role.Code, err)
 		}
+		created, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		createdRoles[role.Code] = created > 0
 		var roleID int64
 		if err := tx.GetContext(ctx, &roleID, `SELECT id FROM admin_roles WHERE code=?`, role.Code); err != nil {
 			return fmt.Errorf("load seeded role %s: %w", role.Code, err)
 		}
 		roleIDs[role.Code] = roleID
+		// Existing ordinary roles are administrator-owned, including explicit revocations.
+		if !createdRoles[role.Code] && role.Code != "super_admin" {
+			continue
+		}
 		for _, permission := range role.Permissions {
 			if _, err := tx.ExecContext(ctx, `INSERT IGNORE INTO admin_role_permissions (role_id,permission_code) VALUES (?,?)`, roleID, permission); err != nil {
 				return fmt.Errorf("seed role %s permission %s: %w", role.Code, permission, err)
@@ -95,6 +106,9 @@ func (s *Store) SeedDefaults(ctx context.Context) error {
 			if _, err := tx.ExecContext(ctx, `INSERT IGNORE INTO admin_role_menus (role_id,menu_id) SELECT ?,id FROM admin_menus`, roleID); err != nil {
 				return err
 			}
+			continue
+		}
+		if !createdRoles[role.Code] {
 			continue
 		}
 		for _, menuCode := range role.Menus {
@@ -186,8 +200,12 @@ func (s *Store) Navigation(ctx context.Context, userID int64) ([]Menu, error) {
 	effective := map[int64]bool{}
 	for _, roleID := range directRoleIDs {
 		for roleID > 0 && !effective[roleID] {
+			parentID, enabled := parents[roleID]
+			if !enabled {
+				break
+			}
 			effective[roleID] = true
-			roleID = parents[roleID]
+			roleID = parentID
 		}
 	}
 	roleIDs := make([]int64, 0, len(effective))

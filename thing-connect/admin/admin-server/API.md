@@ -93,6 +93,10 @@ MFA 验证请求：
 
 也可提交 `recovery_code` 替代 `code`。访问令牌默认有效期 15 分钟，刷新令牌默认有效期 7 天，具体值由系统会话策略控制。
 
+`PUT /me/password` 接受 `current_password` 和 `new_password`，不要求 MFA 验证码。成功后撤销当前账号全部会话，返回 `changed=true`、`reauthenticate=true`，客户端重新登录。
+
+MFA 用于登录及首次绑定确认。登录后的管理写操作和恢复码重新生成不重复要求 MFA，权限检查、操作原因和审计要求保持适用；修改 MFA 策略仍需对应权限及 `current_password`。旧客户端附带的 `current_mfa_code`、`current_recovery_code` 不参与校验，也不消耗恢复码。
+
 ## 管理资源
 
 | 资源 | 接口 |

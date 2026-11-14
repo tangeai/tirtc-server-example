@@ -3,6 +3,7 @@ import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import {
   App as AntApp,
   Button,
+  Dropdown,
   Form,
   Input,
   Modal,
@@ -26,13 +27,16 @@ import {
   TeamOutlined,
   UnorderedListOutlined,
   UserOutlined,
+  SaveOutlined,
+  LoginOutlined,
+  LockOutlined,
+  ArrowRightOutlined,
 } from '@ant-design/icons';
 import { BrowserRouter, useLocation, useNavigate } from 'react-router-dom';
 import { api, json, restoreSession, setAccessToken } from './api';
 import { reportError } from './error-feedback';
 import { ErrorFeedbackHost } from './error-feedback-view';
 import { ADMIN_PASSWORD_POLICY_MESSAGE, validateAdminPassword } from './password-policy';
-import { StepUpFields } from './shared/admin-ui';
 import { loadSetupStatus, SetupPage, type SetupSnapshot } from './setup';
 
 const RecognitionPage = lazy(() =>
@@ -104,8 +108,6 @@ type AdminProfile = { id: number; email: string; nick_name: string; must_change_
 type AnyPasswordForm = {
   current_password: string;
   new_password: string;
-  current_mfa_code?: string;
-  current_recovery_code?: string;
 };
 
 const icons: Record<string, React.ReactNode> = {
@@ -236,7 +238,7 @@ function Login({ onDone }: { onDone: () => void }) {
                 <code key={x}>{x}</code>
               ))}
             </Typography.Paragraph>
-            <Button block type="primary" onClick={onDone}>
+            <Button icon={<SaveOutlined />} block type="primary" onClick={onDone}>
               我已安全保存
             </Button>
           </>
@@ -292,7 +294,13 @@ function Login({ onDone }: { onDone: () => void }) {
                   )}
                 </>
               )}
-              <Button block type="primary" htmlType="submit" loading={submitting}>
+              <Button
+                icon={<LoginOutlined />}
+                block
+                type="primary"
+                htmlType="submit"
+                loading={submitting}
+              >
                 {!stage
                   ? '登录'
                   : stage.stage === 'mfa_required'
@@ -316,6 +324,8 @@ function Shell({ onLogout }: { onLogout: () => void }) {
   const [menus, setMenus] = useState<MenuRow[]>([]);
   const [currentUser, setCurrentUser] = useState<AdminProfile>();
   const [mustChangePassword, setMustChangePassword] = useState(false);
+  const [passwordOpen, setPasswordOpen] = useState(false);
+  const [passwordSaving, setPasswordSaving] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   useEffect(() => {
     api<{ user: AdminProfile }>('/me')
@@ -343,14 +353,22 @@ function Shell({ onLogout }: { onLogout: () => void }) {
     if (ready && path === '/' && pagePaths.length) nav(pagePaths[0], { replace: true });
   }, [nav, pagePaths, path, ready]);
   const changePassword = async (v: AnyPasswordForm) => {
+    if (passwordSaving) return;
+    setPasswordSaving(true);
     try {
-      await api('/me/password', json('PUT', v));
+      await api(
+        '/me/password',
+        json('PUT', { current_password: v.current_password, new_password: v.new_password }),
+      );
       message.success('密码已修改，请重新登录');
       setMustChangePassword(false);
+      setPasswordOpen(false);
       setAccessToken('');
       onLogout();
     } catch (e) {
       reportError(e);
+    } finally {
+      setPasswordSaving(false);
     }
   };
   if (!ready) return <Spin fullscreen />;
@@ -369,7 +387,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         subTitle="当前角色没有此页面的访问权限，请从左侧菜单选择可用功能。"
         extra={
           pagePaths[0] ? (
-            <Button type="primary" onClick={() => nav(pagePaths[0])}>
+            <Button icon={<ArrowRightOutlined />} type="primary" onClick={() => nav(pagePaths[0])}>
               前往可用页面
             </Button>
           ) : null
@@ -393,15 +411,16 @@ function Shell({ onLogout }: { onLogout: () => void }) {
   else if (path === '/access') page = <RolesPage />;
   else if (path === '/dictionaries') page = <DictionariesPage />;
   else if (path === '/jobs') page = <JobsPage />;
-  else if (path === '/login-logs') page = <LogsPage kind="login" />;
-  else if (path === '/audit-logs') page = <LogsPage kind="audit" />;
+  else if (path === '/login-logs') page = <LogsPage key="login" kind="login" />;
+  else if (path === '/audit-logs') page = <LogsPage key="audit" kind="audit" />;
   else page = <Result status="404" title="页面未注册" subTitle="请检查后台菜单的组件路径。" />;
   return (
     <>
       <ProLayout
         title="ThingConnect"
         logo={<ApiOutlined />}
-        layout="side"
+        layout="mix"
+        splitMenus={false}
         navTheme="light"
         fixedHeader
         fixSiderbar
@@ -430,23 +449,36 @@ function Shell({ onLogout }: { onLogout: () => void }) {
             {dom}
           </a>
         )}
-        avatarProps={{
-          icon: <UserOutlined />,
-          title: currentUser?.nick_name || currentUser?.email,
-        }}
         actionsRender={() => [
-          <Button
-            key="logout"
-            type="text"
-            icon={<LogoutOutlined />}
-            onClick={async () => {
-              await api('/auth/logout', { method: 'POST' }).catch(() => {});
-              setAccessToken('');
-              onLogout();
+          <Dropdown
+            key="account"
+            trigger={['click']}
+            placement="bottomRight"
+            menu={{
+              items: [
+                { key: 'password', icon: <LockOutlined />, label: '修改密码' },
+                { type: 'divider' },
+                { key: 'logout', icon: <LogoutOutlined />, label: '退出登录' },
+              ],
+              onClick: async ({ key }) => {
+                if (key === 'password') setPasswordOpen(true);
+                if (key === 'logout') {
+                  await api('/auth/logout', { method: 'POST' }).catch(() => {});
+                  setAccessToken('');
+                  onLogout();
+                }
+              },
             }}
           >
-            退出
-          </Button>,
+            <Button
+              type="text"
+              icon={<UserOutlined />}
+              aria-label="账号菜单"
+              className="admin-account-menu"
+            >
+              <span>{currentUser?.nick_name || currentUser?.email || '我的账号'}</span>
+            </Button>
+          </Dropdown>,
         ]}
         contentStyle={{ padding: 16, minWidth: 0 }}
       >
@@ -457,13 +489,16 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         </Suspense>
       </ProLayout>
       <Modal
-        open={mustChangePassword}
-        title="首次登录请修改初始密码"
+        open={mustChangePassword || passwordOpen}
+        title={mustChangePassword ? '首次登录请修改初始密码' : '修改密码'}
         footer={null}
-        closable={false}
+        closable={!mustChangePassword && !passwordSaving}
         maskClosable={false}
+        keyboard={!mustChangePassword && !passwordSaving}
+        destroyOnHidden
+        onCancel={() => setPasswordOpen(false)}
       >
-        <Form name="App-2" layout="vertical" onFinish={changePassword}>
+        <Form name="App-2" layout="vertical" preserve={false} onFinish={changePassword}>
           <Form.Item name="current_password" label="当前密码" rules={[{ required: true }]}>
             <Input.Password autoComplete="current-password" />
           </Form.Item>
@@ -478,8 +513,29 @@ function Shell({ onLogout }: { onLogout: () => void }) {
           >
             <Input.Password autoComplete="new-password" />
           </Form.Item>
-          <StepUpFields />
-          <Button block type="primary" htmlType="submit">
+          <Form.Item
+            name="confirm_password"
+            label="确认新密码"
+            dependencies={['new_password']}
+            rules={[
+              { required: true, message: '请再次输入新密码' },
+              ({ getFieldValue }) => ({
+                validator: (_, value) =>
+                  !value || value === getFieldValue('new_password')
+                    ? Promise.resolve()
+                    : Promise.reject(new Error('两次输入的新密码不一致')),
+              }),
+            ]}
+          >
+            <Input.Password autoComplete="new-password" />
+          </Form.Item>
+          <Button
+            icon={<SaveOutlined />}
+            block
+            type="primary"
+            htmlType="submit"
+            loading={passwordSaving}
+          >
             修改并重新登录
           </Button>
         </Form>

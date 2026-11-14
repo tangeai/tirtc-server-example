@@ -239,3 +239,63 @@ body,
     max-width: 100%;
   }
 }
+
+.panel-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.admin-page .ant-table-cell .ant-btn-link {
+  padding-inline: 4px;
+}
+
+.compact-query {
+  margin-bottom: 16px;
+}
+.compact-query .ant-pro-query-filter-row > .ant-col {
+  flex: 0 0 auto;
+  max-width: 100%;
+  margin-inline-start: 0;
+}
+.compact-query .ant-pro-query-filter-row > .ant-col:nth-child(1) {
+  width: var(--query-width-1, 244px);
+}
+.compact-query .ant-pro-query-filter-row > .ant-col:nth-child(2) {
+  width: var(--query-width-2, 244px);
+}
+.compact-query .ant-pro-query-filter-row > .ant-col:nth-child(3) {
+  width: var(--query-width-3, 244px);
+}
+.compact-query .ant-pro-query-filter-row > .ant-col:nth-child(4) {
+  width: var(--query-width-4, 244px);
+}
+.compact-query .ant-pro-query-filter-row > .ant-col:nth-child(5) {
+  width: var(--query-width-5, 244px);
+}
+.compact-query .ant-pro-query-filter-row > .ant-col:nth-child(6) {
+  width: var(--query-width-6, 244px);
+}
+.compact-query .ant-pro-query-filter-row > .ant-col:last-child {
+  width: 184px;
+}
+@media (max-width: 575px) {
+  .compact-query .ant-pro-query-filter-row > .ant-col:nth-child(n) {
+    width: 100%;
+  }
+}
+
+.admin-account-menu > span:not(.ant-btn-icon) {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 575px) {
+  .admin-account-menu > span:not(.ant-btn-icon) {
+    max-width: 88px;
+  }
+}

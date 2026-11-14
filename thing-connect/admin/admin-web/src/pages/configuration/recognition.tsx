@@ -1,3 +1,14 @@
+import {
+  PlusOutlined,
+  EditOutlined,
+  StopOutlined,
+  CheckCircleOutlined,
+  SearchOutlined,
+  ReloadOutlined,
+  SaveOutlined,
+  EyeOutlined,
+  CloudUploadOutlined,
+} from '@ant-design/icons';
 import { useRef, useState } from 'react';
 import {
   Alert,
@@ -22,7 +33,7 @@ import {
 } from 'antd';
 import { api, json } from '../../api';
 import { reportError } from '../../error-feedback';
-import { pageTitle, useLoad } from '../../shared/admin-ui';
+import { localPagination, RefreshButton, pageTitle, useLoad } from '../../shared/admin-ui';
 import { ConfigPage } from './config-page';
 
 type Scheme = {
@@ -211,10 +222,9 @@ export function RecognitionPage({ mode = 'business' }: { mode?: 'business' | 'co
                 title="识别类型"
                 extra={
                   <Space wrap>
-                    <Button loading={typesLoading} onClick={reload}>
-                      刷新
-                    </Button>
+                    <RefreshButton loading={typesLoading} onClick={reload} />
                     <Button
+                      icon={<PlusOutlined />}
                       type="primary"
                       disabled={!can('recognition.write')}
                       onClick={() => open()}
@@ -225,9 +235,10 @@ export function RecognitionPage({ mode = 'business' }: { mode?: 'business' | 'co
                 }
               >
                 <Typography.Paragraph type="secondary">
-                  音频分析 · 名称和提示词由管理员定义
+                  音频分析 · 名称和提示词由管理员定义；列表显示最近 200 个类型
                 </Typography.Paragraph>
                 <Table
+                  pagination={localPagination}
                   rowKey="scheme_id"
                   dataSource={data || []}
                   loading={typesLoading}
@@ -247,10 +258,11 @@ export function RecognitionPage({ mode = 'business' }: { mode?: 'business' | 'co
                       title: '操作',
                       render: (_, s: Scheme) => (
                         <Space wrap>
-                          <Button type="link" onClick={() => open(s)}>
+                          <Button icon={<EditOutlined />} type="link" onClick={() => open(s)}>
                             编辑 / 发布
                           </Button>
                           <Button
+                            icon={s.enabled ? <StopOutlined /> : <CheckCircleOutlined />}
                             type="link"
                             disabled={!s.scheme_version || busy || !can('recognition.write')}
                             onClick={() =>
@@ -276,21 +288,34 @@ export function RecognitionPage({ mode = 'business' }: { mode?: 'business' | 'co
             label: '设备用量与上限',
             children: (
               <Card>
-                <Space className="toolbar">
-                  <Input
-                    placeholder="设备 ID"
-                    value={device}
-                    onChange={(e) => changeDevice(e.target.value)}
-                  />
-                  <Button
-                    type="primary"
-                    disabled={!device.trim()}
-                    loading={deviceLoading}
-                    onClick={loadDevice}
-                  >
-                    查询设备
-                  </Button>
-                </Space>
+                <Form layout="inline" className="toolbar" onFinish={() => void loadDevice()}>
+                  <Form.Item label="设备 ID">
+                    <Input
+                      placeholder="设备 ID"
+                      value={device}
+                      onChange={(e) => changeDevice(e.target.value)}
+                      allowClear
+                    />
+                  </Form.Item>
+                  <Space wrap>
+                    <Button
+                      icon={<SearchOutlined />}
+                      type="primary"
+                      htmlType="submit"
+                      disabled={!device.trim() || deviceLoading}
+                      loading={deviceLoading}
+                    >
+                      查询
+                    </Button>
+                    <Button
+                      icon={<ReloadOutlined />}
+                      disabled={deviceLoading}
+                      onClick={() => changeDevice('')}
+                    >
+                      重置
+                    </Button>
+                  </Space>
+                </Form>
                 {!state && !deviceLoading && (
                   <Empty description="输入设备 ID 并查询，查看该设备的用量与额度" />
                 )}
@@ -350,7 +375,12 @@ export function RecognitionPage({ mode = 'business' }: { mode?: 'business' | 'co
                       >
                         <Input />
                       </Form.Item>
-                      <Button htmlType="submit" type="primary" loading={busy}>
+                      <Button
+                        icon={<SaveOutlined />}
+                        htmlType="submit"
+                        type="primary"
+                        loading={busy}
+                      >
                         保存上限
                       </Button>
                     </Form>
@@ -364,17 +394,39 @@ export function RecognitionPage({ mode = 'business' }: { mode?: 'business' | 'co
             label: '识别记录',
             children: (
               <Card>
-                <Space className="toolbar">
-                  <Input
-                    placeholder="设备 ID（留空查询全部）"
-                    value={device}
-                    onChange={(e) => changeDevice(e.target.value)}
-                  />
-                  <Button type="primary" loading={recordsLoading} onClick={loadRecords}>
-                    查询最近 50 条
-                  </Button>
-                </Space>
+                <Form layout="inline" className="toolbar" onFinish={() => void loadRecords()}>
+                  <Form.Item label="设备 ID">
+                    <Input
+                      placeholder="设备 ID（留空查询全部）"
+                      value={device}
+                      onChange={(e) => changeDevice(e.target.value)}
+                      allowClear
+                    />
+                  </Form.Item>
+                  <Space wrap>
+                    <Button
+                      icon={<SearchOutlined />}
+                      type="primary"
+                      htmlType="submit"
+                      disabled={recordsLoading}
+                      loading={recordsLoading}
+                    >
+                      查询
+                    </Button>
+                    <Button
+                      icon={<ReloadOutlined />}
+                      disabled={recordsLoading}
+                      onClick={() => changeDevice('')}
+                    >
+                      重置
+                    </Button>
+                  </Space>
+                </Form>
+                <Typography.Paragraph type="secondary">
+                  留空查询全部设备；每次返回最近 50 条识别记录。
+                </Typography.Paragraph>
                 <Table
+                  pagination={localPagination}
                   scroll={{ x: 900 }}
                   rowKey={(v) => v.task.device_id + v.task.request_id}
                   dataSource={records}
@@ -394,7 +446,9 @@ export function RecognitionPage({ mode = 'business' }: { mode?: 'business' | 'co
                     {
                       title: '结果与逐次用量',
                       render: (_, v: RecordRow) => (
-                        <Button onClick={() => setSelected(v)}>查看</Button>
+                        <Button type="link" icon={<EyeOutlined />} onClick={() => setSelected(v)}>
+                          查看
+                        </Button>
                       ),
                     },
                   ]}
@@ -490,10 +544,11 @@ export function RecognitionPage({ mode = 'business' }: { mode?: 'business' | 'co
             <Input />
           </Form.Item>
           <Space wrap>
-            <Button type="primary" htmlType="submit" loading={busy}>
+            <Button icon={<SaveOutlined />} type="primary" htmlType="submit" loading={busy}>
               保存草稿
             </Button>
             <Button
+              icon={<CloudUploadOutlined />}
               disabled={!edit?.scheme_id || busy}
               onClick={async () => {
                 if (!edit) return;

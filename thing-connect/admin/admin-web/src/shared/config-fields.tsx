@@ -1,4 +1,9 @@
-import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons';
+import {
+  PlusOutlined,
+  ArrowUpOutlined,
+  ArrowDownOutlined,
+  DeleteOutlined,
+} from '@ant-design/icons';
 import { Alert, Button, Form, Input, InputNumber, Select, Space, Switch, Tag } from 'antd';
 import type { AnyRow } from './admin-ui';
 
@@ -40,9 +45,9 @@ const configFieldInput = (field: ConfigField) =>
   field.kind === 'boolean' ? (
     <Switch />
   ) : field.kind === 'number' ? (
-    <InputNumber min={field.min} style={{ width: '100%' }} />
+    <InputNumber min={field.min} style={{ width: 160, maxWidth: '100%' }} />
   ) : field.kind === 'select' ? (
-    <Select allowClear options={field.options} />
+    <Select allowClear options={field.options} style={{ width: 280, maxWidth: '100%' }} />
   ) : field.kind === 'tags' ? (
     <Select mode="tags" tokenSeparators={[',']} placeholder="输入后按回车添加" />
   ) : field.kind === 'password' ? (
@@ -110,13 +115,21 @@ function NavigationLinksField({ field }: { field: ConfigField }) {
                   >
                     <Switch checkedChildren="启用" unCheckedChildren="停用" />
                   </Form.Item>
-                  <Button disabled={name === 0} onClick={() => move(name, name - 1)}>
+                  <Button
+                    icon={<ArrowUpOutlined />}
+                    disabled={name === 0}
+                    onClick={() => move(name, name - 1)}
+                  >
                     上移
                   </Button>
-                  <Button disabled={name === items.length - 1} onClick={() => move(name, name + 1)}>
+                  <Button
+                    icon={<ArrowDownOutlined />}
+                    disabled={name === items.length - 1}
+                    onClick={() => move(name, name + 1)}
+                  >
                     下移
                   </Button>
-                  <Button danger onClick={() => remove(name)}>
+                  <Button icon={<DeleteOutlined />} danger onClick={() => remove(name)}>
                     删除
                   </Button>
                 </Space>
@@ -165,9 +178,11 @@ function ResourceRefsField({ field }: { field: ConfigField }) {
                   type="text"
                   danger
                   aria-label={`删除${field.label}`}
-                  icon={<MinusCircleOutlined />}
+                  icon={<DeleteOutlined />}
                   onClick={() => remove(name)}
-                />
+                >
+                  删除
+                </Button>
               </Space>
             ))}
             <Button type="dashed" icon={<PlusOutlined />} onClick={() => add({ id: '', name: '' })}>

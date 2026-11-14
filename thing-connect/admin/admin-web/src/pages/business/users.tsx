@@ -1,4 +1,12 @@
 import {
+  EyeOutlined,
+  SettingOutlined,
+  SendOutlined,
+  StopOutlined,
+  CheckCircleOutlined,
+  SaveOutlined,
+} from '@ant-design/icons';
+import {
   QueryFilter,
   ProFormText,
   ProFormSelect,
@@ -27,6 +35,10 @@ import {
 import { api, json } from '../../api';
 import { reportError } from '../../error-feedback';
 import {
+  useCompactQueryLayout,
+  queryActions,
+  confirmationActions,
+  RefreshButton,
   formatTime,
   pageTitle as title,
   useLoad,
@@ -36,6 +48,7 @@ import {
 import { assignmentName } from '../../shared/admin-metadata';
 
 export function UsersPage() {
+  const queryLayout = useCompactQueryLayout(['text', 'status', 'date']);
   const { message } = AntApp.useApp();
   const [saving, setSaving] = useState(false);
   const screens = Grid.useBreakpoint();
@@ -45,13 +58,14 @@ export function UsersPage() {
   const [createdTo, setCreatedTo] = useState('');
   const [createdOrder, setCreatedOrder] = useState<'asc' | 'desc'>('desc');
   const [page, setPage] = useState(1);
+  const [queryVersion, setQueryVersion] = useState(0);
   const pageSize = 20;
   const [data, loading, reload] = useLoad(
     () =>
       api<PageData>(
         `/users?page=${page}&page_size=${pageSize}&keyword=${encodeURIComponent(query)}&status=${status}&created_from=${createdFrom}&created_to=${createdTo}&sort_by=created_at&sort_order=${createdOrder}`,
       ),
-    [query, status, createdFrom, createdTo, createdOrder, page],
+    [query, status, createdFrom, createdTo, createdOrder, page, queryVersion],
   );
   const [quota, setQuota] = useState<AnyRow>();
   const [detail, setDetail] = useState<AnyRow>();
@@ -110,15 +124,15 @@ export function UsersPage() {
       {title(
         '用户管理',
         '账号状态、设备归属与绑定额度',
-        <Button onClick={reload} loading={loading}>
-          刷新
-        </Button>,
+        <RefreshButton onClick={reload} loading={loading} />,
       )}
       <Card>
         <QueryFilter
+          {...queryLayout}
+          submitter={queryActions(loading)}
           name="users-query-1"
-          defaultCollapsed={false}
           onFinish={async (values) => {
+            setQueryVersion((value) => value + 1);
             setPage(1);
             setQuery(values.keyword?.trim() || '');
             setStatus(values.status || '');
@@ -126,6 +140,7 @@ export function UsersPage() {
             setCreatedTo(values.created?.[1] || '');
           }}
           onReset={() => {
+            setQueryVersion((value) => value + 1);
             setPage(1);
             setQuery('');
             setStatus('');
@@ -135,6 +150,7 @@ export function UsersPage() {
         >
           <ProFormText name="keyword" label="用户" placeholder="用户 ID 或邮箱" />
           <ProFormSelect
+            width={112}
             name="status"
             label="账号状态"
             placeholder="全部状态"
@@ -146,6 +162,7 @@ export function UsersPage() {
           <ProFormDateRangePicker name="created" label="注册日期" />
         </QueryFilter>
         <Table
+          locale={{ emptyText: '没有符合条件的用户' }}
           rowKey="id"
           loading={loading}
           dataSource={data?.items}
@@ -211,16 +228,17 @@ export function UsersPage() {
               fixed: screens.md ? 'right' : undefined,
               render: (_, r) => (
                 <Space wrap size={0}>
-                  <Button type="link" onClick={() => openDetail(r)}>
+                  <Button icon={<EyeOutlined />} type="link" onClick={() => openDetail(r)}>
                     详情
                   </Button>
-                  <Button type="link" onClick={() => setQuota(r)}>
+                  <Button icon={<SettingOutlined />} type="link" onClick={() => setQuota(r)}>
                     调整额度
                   </Button>
-                  <Button type="link" onClick={() => setResetUser(r)}>
+                  <Button icon={<SendOutlined />} type="link" onClick={() => setResetUser(r)}>
                     发送重置邮件
                   </Button>
                   <Popconfirm
+                    {...confirmationActions}
                     title={r.status === 1 ? '确认禁用用户？' : '确认启用用户？'}
                     onConfirm={async () => {
                       await api(
@@ -234,7 +252,11 @@ export function UsersPage() {
                       reload();
                     }}
                   >
-                    <Button type="link" danger={r.status === 1}>
+                    <Button
+                      icon={r.status === 1 ? <StopOutlined /> : <CheckCircleOutlined />}
+                      type="link"
+                      danger={r.status === 1}
+                    >
                       {r.status === 1 ? '禁用' : '启用'}
                     </Button>
                   </Popconfirm>
@@ -264,7 +286,7 @@ export function UsersPage() {
           <Form.Item name="reason" label="操作原因" rules={[{ required: true }]}>
             <Input placeholder="例如：客户套餐升级" />
           </Form.Item>
-          <Button type="primary" htmlType="submit" loading={saving}>
+          <Button icon={<SaveOutlined />} type="primary" htmlType="submit" loading={saving}>
             保存
           </Button>
         </Form>
@@ -281,7 +303,7 @@ export function UsersPage() {
           <Form.Item name="reason" label="操作原因" rules={[{ required: true }]}>
             <Input placeholder="例如：用户请求协助找回密码" />
           </Form.Item>
-          <Button type="primary" htmlType="submit" loading={saving}>
+          <Button icon={<SendOutlined />} type="primary" htmlType="submit" loading={saving}>
             确认发送
           </Button>
         </Form>

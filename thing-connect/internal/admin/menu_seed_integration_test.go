@@ -13,7 +13,7 @@ import (
 func TestVoIPMenuSplitPreservesGrantsOnlyOnCreation(t *testing.T) {
 	cfg := testenv.LoadConfigOrSkip(t, "../../tests/testdata/config.yaml")
 	db := testenv.OpenDBOrSkip(t, cfg)
-	defer db.Close()
+	t.Cleanup(func() { _ = db.Close() })
 	if err := mysqlmigrate.MigrateAdmin(db); err != nil {
 		t.Fatal(err)
 	}
@@ -65,4 +65,86 @@ func TestVoIPMenuSplitPreservesGrantsOnlyOnCreation(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertCount(0)
+}
+
+func TestDefaultRoleRevocationsSurviveRestart(t *testing.T) {
+	cfg := testenv.LoadConfigOrSkip(t, "../../tests/testdata/config.yaml")
+	db := testenv.OpenDBOrSkip(t, cfg)
+	t.Cleanup(func() { _ = db.Close() })
+	if err := mysqlmigrate.MigrateAdmin(db); err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore(db)
+	ctx := context.Background()
+	if err := store.SeedDefaults(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var roleID, menuID int64
+	if err := db.Get(&roleID, `SELECT id FROM admin_roles WHERE code='operations_admin'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Get(&menuID, `SELECT id FROM admin_menus WHERE menu_code='users'`); err != nil {
+		t.Fatal(err)
+	}
+	// This fixture runs only against a dedicated _test database.
+	t.Cleanup(func() {
+		_, _ = db.Exec(`INSERT IGNORE INTO admin_role_permissions(role_id,permission_code) VALUES (?,'user.read')`, roleID)
+		_, _ = db.Exec(`INSERT IGNORE INTO admin_role_menus(role_id,menu_id) VALUES (?,?)`, roleID, menuID)
+	})
+	if _, err := db.Exec(`DELETE FROM admin_role_permissions WHERE role_id=? AND permission_code='user.read'`, roleID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DELETE FROM admin_role_menus WHERE role_id=? AND menu_id=?`, roleID, menuID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SeedDefaults(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var permissions, menus int
+	if err := db.Get(&permissions, `SELECT COUNT(*) FROM admin_role_permissions WHERE role_id=? AND permission_code='user.read'`, roleID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Get(&menus, `SELECT COUNT(*) FROM admin_role_menus WHERE role_id=? AND menu_id=?`, roleID, menuID); err != nil {
+		t.Fatal(err)
+	}
+	if permissions != 0 || menus != 0 {
+		t.Fatalf("revoked grants restored after restart: permissions=%d menus=%d", permissions, menus)
+	}
+}
+
+func TestMenuSettingsSurviveRestart(t *testing.T) {
+	cfg := testenv.LoadConfigOrSkip(t, "../../tests/testdata/config.yaml")
+	db := testenv.OpenDBOrSkip(t, cfg)
+	t.Cleanup(func() { _ = db.Close() })
+	if err := mysqlmigrate.MigrateAdmin(db); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	store := NewStore(db)
+	if err := store.SeedDefaults(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var before Menu
+	query := `SELECT id,name,parent_id,sort_no,visible,status FROM admin_menus WHERE menu_code='users'`
+	if err := db.Get(&before, query); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Exec(`UPDATE admin_menus SET name=?,parent_id=?,sort_no=?,visible=?,status=? WHERE id=?`, before.Name, before.ParentID, before.SortNo, before.Visible, before.Status, before.ID)
+	})
+	if _, err := db.Exec(`UPDATE admin_menus SET name='自定义用户入口',parent_id=0,sort_no=987,visible=0,status=0 WHERE id=?`, before.ID); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := NewStore(db).SeedDefaults(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var after Menu
+	if err := db.Get(&after, query); err != nil {
+		t.Fatal(err)
+	}
+	if after.Name != "自定义用户入口" || after.ParentID != 0 || after.SortNo != 987 || after.Visible != 0 || after.Status != 0 {
+		t.Fatalf("menu settings overwritten: %+v", after)
+	}
 }

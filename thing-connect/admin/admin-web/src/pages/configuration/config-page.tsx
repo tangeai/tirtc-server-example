@@ -1,3 +1,9 @@
+import {
+  FileSearchOutlined,
+  SettingOutlined,
+  ApiOutlined,
+  CloudUploadOutlined,
+} from '@ant-design/icons';
 import { useMemo, useState } from 'react';
 import {
   Alert,
@@ -12,11 +18,10 @@ import {
   Typography,
   App as AntApp,
 } from 'antd';
-import { ReloadOutlined } from '@ant-design/icons';
 import { api, json } from '../../api';
 import { reportError } from '../../error-feedback';
 import {
-  StepUpFields,
+  RefreshButton,
   ServiceVersion,
   formatTime,
   pageTitle as title,
@@ -93,7 +98,7 @@ export function ConfigPage({
   excludeGroups?: string[];
 }) {
   const { message } = AntApp.useApp();
-  const [defs, , loadDefs] = useLoad(
+  const [defs, defsLoading, loadDefs] = useLoad(
     () => api<{ items: Definition[] }>(`/config-definitions?namespace=${namespace}`),
     [namespace],
   );
@@ -173,8 +178,6 @@ export function ConfigPage({
       if (namespace === 'system' && current.definition.config_key === 'mfa.policy')
         Object.assign(body, {
           current_password: v.current_password,
-          current_mfa_code: v.current_mfa_code,
-          current_recovery_code: v.current_recovery_code,
         });
       await api(`/configs/${namespace}/${current.definition.config_key}`, json('PUT', body));
       if (current.definition.reload === 'restart') {
@@ -196,15 +199,15 @@ export function ConfigPage({
   };
   const actions = (
     <Space wrap>
-      <Button href="/admin/audit-logs">操作日志</Button>
-      <Button
-        icon={<ReloadOutlined />}
+      <RefreshButton
         onClick={() => {
           loadDefs();
           loadEntries();
         }}
-      >
-        刷新
+        loading={loading || defsLoading}
+      />
+      <Button icon={<FileSearchOutlined />} href="/admin/audit-logs">
+        操作日志
       </Button>
     </Space>
   );
@@ -214,13 +217,12 @@ export function ConfigPage({
         title(
           namespaceNames[namespace] || namespace,
           namespace === 'system' ? '管理后台安全与会话策略' : '服务状态、运行实例与注册配置项',
-          actions,
         )}
       {!embedded && namespace === 'common' && <CommonServicePanel />}
       {!embedded && namespace !== 'system' && namespace !== 'common' && (
         <ServicePanel service={namespace} />
       )}
-      <Card title={embedded ? '配置项' : undefined} extra={embedded ? actions : undefined}>
+      <Card title="配置项" extra={actions}>
         <Table
           scroll={{ x: 900 }}
           rowKey={(r) => r.definition.config_key}
@@ -286,6 +288,7 @@ export function ConfigPage({
               title: '操作',
               render: (_, r) => (
                 <Button
+                  icon={<SettingOutlined />}
                   type="link"
                   onClick={() => {
                     setConnectionFeedback(undefined);
@@ -367,7 +370,6 @@ export function ConfigPage({
                 <Form.Item name="current_password" label="当前密码" rules={[{ required: true }]}>
                   <Input.Password />
                 </Form.Item>
-                <StepUpFields />
               </>
             )}
             <Form.Item name="reason" label="发布原因" rules={[{ required: true }]}>
@@ -384,11 +386,17 @@ export function ConfigPage({
             )}
             <Space wrap>
               {editing.definition.test_kind && (
-                <Button loading={testingConnection} disabled={publishing} onClick={testConnection}>
+                <Button
+                  icon={<ApiOutlined />}
+                  loading={testingConnection}
+                  disabled={publishing}
+                  onClick={testConnection}
+                >
                   测试连接
                 </Button>
               )}
               <Button
+                icon={<CloudUploadOutlined />}
                 type="primary"
                 htmlType="submit"
                 loading={publishing}
@@ -448,9 +456,7 @@ export function ServicePanel({ service }: { service: string }) {
       className="service-card"
       loading={loading}
       title={`${serviceName(service)}状态`}
-      extra={
-        <Button type="text" aria-label="刷新服务状态" icon={<ReloadOutlined />} onClick={reload} />
-      }
+      extra={<RefreshButton label="刷新服务状态" loading={loading} onClick={reload} />}
     >
       {data && (
         <>
@@ -526,9 +532,7 @@ function CommonServicePanel() {
       className="service-card"
       loading={loading}
       title="通用配置生效服务"
-      extra={
-        <Button type="text" aria-label="刷新服务状态" icon={<ReloadOutlined />} onClick={reload} />
-      }
+      extra={<RefreshButton label="刷新服务状态" loading={loading} onClick={reload} />}
     >
       {data && (
         <Table<AnyRow>

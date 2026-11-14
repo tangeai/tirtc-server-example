@@ -1,14 +1,17 @@
 import {
   QueryFilter,
   ProFormText,
+  ProFormDigit,
   ProFormSelect,
   ProFormDateRangePicker,
 } from '@ant-design/pro-components';
 import { useState } from 'react';
-import { Button, Card, Table, Tag } from 'antd';
-import { ReloadOutlined } from '@ant-design/icons';
+import { Card, Table, Tag } from 'antd';
 import { api } from '../../api';
 import {
+  useCompactQueryLayout,
+  queryActions,
+  RefreshButton,
   formatTime,
   pageTitle as title,
   useLoad,
@@ -25,17 +28,21 @@ import {
 } from '../../shared/admin-metadata';
 
 export function LogsPage({ kind }: { kind: 'login' | 'audit' }) {
+  const queryLayout = useCompactQueryLayout(
+    kind === 'login' ? ['wide', 'status', 'date'] : ['number', 'text', 'text', 'number', 'date'],
+  );
   const path = kind === 'login' ? '/login-logs' : '/audit-logs';
   const [page, setPage] = useState(1);
+  const [queryVersion, setQueryVersion] = useState(0);
   const pageSize = 20;
   const [filters, setFilters] = useState<AnyRow>({});
   const query = Object.entries(filters)
-    .filter(([, value]) => value !== '' && value !== undefined)
-    .map(([key, value]) => `${key}=${encodeURIComponent(String(value))}`)
+    .filter(([, value]) => value !== '' && value != null)
+    .map(([key, value]) => `${key}=${encodeURIComponent(String(value).trim())}`)
     .join('&');
   const [data, loading, reload] = useLoad(
     () => api<PageData>(`${path}?page=${page}&page_size=${pageSize}&${query}`),
-    [path, page, query],
+    [path, page, query, queryVersion],
   );
   const columns =
     kind === 'login'
@@ -90,15 +97,15 @@ export function LogsPage({ kind }: { kind: 'login' | 'audit' }) {
       {title(
         kind === 'login' ? '登录日志' : '操作日志',
         kind === 'login' ? '管理员登录与双重验证结果' : '所有管理写操作的脱敏审计记录',
-        <Button icon={<ReloadOutlined />} onClick={reload}>
-          刷新
-        </Button>,
+        <RefreshButton onClick={reload} loading={loading} />,
       )}
       <Card>
         <QueryFilter
+          {...queryLayout}
+          submitter={queryActions(loading)}
           name="logs-query-1"
-          defaultCollapsed={false}
           onFinish={async ({ created, ...values }) => {
+            setQueryVersion((value) => value + 1);
             setPage(1);
             setFilters({
               ...values,
@@ -107,6 +114,7 @@ export function LogsPage({ kind }: { kind: 'login' | 'audit' }) {
             });
           }}
           onReset={() => {
+            setQueryVersion((value) => value + 1);
             setPage(1);
             setFilters({});
           }}
@@ -116,6 +124,7 @@ export function LogsPage({ kind }: { kind: 'login' | 'audit' }) {
           )}
           {kind === 'login' && (
             <ProFormSelect
+              width={112}
               name="status"
               label="登录结果"
               options={[
@@ -124,12 +133,21 @@ export function LogsPage({ kind }: { kind: 'login' | 'audit' }) {
               ]}
             />
           )}
-          {kind === 'audit' && <ProFormText name="admin_user_id" label="管理员编号" />}
+          {kind === 'audit' && (
+            <ProFormDigit
+              name="admin_user_id"
+              label="管理员编号"
+              min={1}
+              fieldProps={{ precision: 0 }}
+              placeholder="输入管理员编号"
+            />
+          )}
           {kind === 'audit' && (
             <ProFormSelect
               name="action"
               label="操作类型"
               showSearch
+              fieldProps={{ optionFilterProp: 'label' }}
               options={Object.entries(auditActionNames).map(([value, label]) => ({ value, label }))}
             />
           )}
@@ -144,6 +162,7 @@ export function LogsPage({ kind }: { kind: 'login' | 'audit' }) {
           <ProFormDateRangePicker name="created" label="发生日期" />
         </QueryFilter>
         <Table
+          locale={{ emptyText: '没有符合条件的日志' }}
           scroll={{ x: 900 }}
           rowKey="id"
           loading={loading}

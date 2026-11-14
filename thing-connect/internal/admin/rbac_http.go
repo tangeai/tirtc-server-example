@@ -76,15 +76,13 @@ func effectiveRolePermissions(ctx *gin.Context, db *sqlx.DB, roleID int64) ([]st
 }
 
 type roleRequest struct {
-	Code            string `json:"code"`
-	Name            string `json:"name" binding:"required"`
-	ParentID        int64  `json:"parent_id"`
-	SortNo          int    `json:"sort_no"`
-	Status          *int8  `json:"status"`
-	Remark          string `json:"remark"`
-	Reason          string `json:"reason" binding:"required"`
-	CurrentMFACode  string `json:"current_mfa_code"`
-	CurrentRecovery string `json:"current_recovery_code"`
+	Code     string `json:"code"`
+	Name     string `json:"name" binding:"required"`
+	ParentID int64  `json:"parent_id"`
+	SortNo   int    `json:"sort_no"`
+	Status   *int8  `json:"status"`
+	Remark   string `json:"remark"`
+	Reason   string `json:"reason" binding:"required"`
 }
 
 func (s *HTTPServer) createRole(c *gin.Context) {
@@ -161,9 +159,6 @@ func (s *HTTPServer) updateRole(c *gin.Context) {
 		apiresp.BadParam(c, "超级管理员角色不能停用")
 		return
 	}
-	if !s.requireStepUp(c, identity.UserID, request.CurrentMFACode, request.CurrentRecovery) {
-		return
-	}
 	if _, err := tx.ExecContext(c, `UPDATE admin_roles SET name=?,parent_id=?,sort_no=?,status=?,remark=? WHERE id=?`, strings.TrimSpace(request.Name), request.ParentID, request.SortNo, status, strings.TrimSpace(request.Remark), id); err != nil {
 		apiresp.Internal(c, err.Error())
 		return
@@ -184,22 +179,8 @@ func (s *HTTPServer) updateRole(c *gin.Context) {
 }
 
 type permissionRequest struct {
-	Permissions     []string `json:"permissions"`
-	Reason          string   `json:"reason" binding:"required"`
-	CurrentMFACode  string   `json:"current_mfa_code"`
-	CurrentRecovery string   `json:"current_recovery_code"`
-}
-
-func (s *HTTPServer) requireStepUp(c *gin.Context, userID int64, code, recoveryCode string) bool {
-	if err := s.auth.VerifyStepUp(c, userID, code, recoveryCode); err == nil {
-		return true
-	}
-	if strings.TrimSpace(code) == "" && strings.TrimSpace(recoveryCode) == "" {
-		apiresp.BadParam(c, "此操作需要当前管理员的身份验证器验证码或恢复码")
-	} else {
-		apiresp.BadParam(c, "身份验证器验证码或恢复码无效，请重新输入")
-	}
-	return false
+	Permissions []string `json:"permissions"`
+	Reason      string   `json:"reason" binding:"required"`
 }
 
 func (s *HTTPServer) updateRolePermissions(c *gin.Context) {
@@ -208,9 +189,6 @@ func (s *HTTPServer) updateRolePermissions(c *gin.Context) {
 	identity, _ := identityFromContext(c)
 	if err != nil || c.ShouldBindJSON(&request) != nil {
 		apiresp.BadParam(c, "权限请求无效")
-		return
-	}
-	if !s.requireStepUp(c, identity.UserID, request.CurrentMFACode, request.CurrentRecovery) {
 		return
 	}
 	permissions, valid := validatePermissions(request.Permissions)
@@ -297,8 +275,6 @@ type adminUserRequest struct {
 	Remark             string  `json:"remark"`
 	RoleIDs            []int64 `json:"role_ids"`
 	Reason             string  `json:"reason" binding:"required"`
-	CurrentMFACode     string  `json:"current_mfa_code"`
-	CurrentRecovery    string  `json:"current_recovery_code"`
 }
 
 func (s *HTTPServer) createAdminUser(c *gin.Context) {
@@ -306,9 +282,6 @@ func (s *HTTPServer) createAdminUser(c *gin.Context) {
 	identity, _ := identityFromContext(c)
 	if c.ShouldBindJSON(&request) != nil || strings.TrimSpace(request.NickName) == "" {
 		apiresp.BadParam(c, "请填写有效的管理员邮箱、昵称和操作原因")
-		return
-	}
-	if !s.requireStepUp(c, identity.UserID, request.CurrentMFACode, request.CurrentRecovery) {
 		return
 	}
 	hash, err := HashAdminPassword(request.Password)
@@ -362,9 +335,6 @@ func (s *HTTPServer) updateAdminUser(c *gin.Context) {
 	}
 	if id == identity.UserID && request.Status != nil && *request.Status == 0 {
 		apiresp.BadParam(c, "不能禁用当前登录的管理员账号")
-		return
-	}
-	if !s.requireStepUp(c, identity.UserID, request.CurrentMFACode, request.CurrentRecovery) {
 		return
 	}
 	tx, err := s.store.db.BeginTxx(c, nil)
@@ -444,10 +414,8 @@ func (s *HTTPServer) updateAdminUser(c *gin.Context) {
 }
 
 type adminRolesRequest struct {
-	RoleIDs         []int64 `json:"role_ids"`
-	Reason          string  `json:"reason" binding:"required"`
-	CurrentMFACode  string  `json:"current_mfa_code"`
-	CurrentRecovery string  `json:"current_recovery_code"`
+	RoleIDs []int64 `json:"role_ids"`
+	Reason  string  `json:"reason" binding:"required"`
 }
 
 func (s *HTTPServer) updateAdminRoles(c *gin.Context) {
@@ -456,9 +424,6 @@ func (s *HTTPServer) updateAdminRoles(c *gin.Context) {
 	identity, _ := identityFromContext(c)
 	if err != nil || c.ShouldBindJSON(&request) != nil {
 		apiresp.BadParam(c, "角色授权请求无效")
-		return
-	}
-	if !s.requireStepUp(c, identity.UserID, request.CurrentMFACode, request.CurrentRecovery) {
 		return
 	}
 	tx, err := s.store.db.BeginTxx(c, nil)
@@ -500,16 +465,11 @@ func (s *HTTPServer) updateAdminRoles(c *gin.Context) {
 func (s *HTTPServer) revokeAdminSessions(c *gin.Context) {
 	id, err := positiveID(c.Param("id"))
 	var request struct {
-		Reason          string `json:"reason" binding:"required"`
-		CurrentMFACode  string `json:"current_mfa_code"`
-		CurrentRecovery string `json:"current_recovery_code"`
+		Reason string `json:"reason" binding:"required"`
 	}
 	identity, _ := identityFromContext(c)
 	if err != nil || c.ShouldBindJSON(&request) != nil {
 		apiresp.BadParam(c, "撤销请求无效")
-		return
-	}
-	if !s.requireStepUp(c, identity.UserID, request.CurrentMFACode, request.CurrentRecovery) {
 		return
 	}
 	if err := s.store.RevokeSessions(c, id, "revoked by administrator"); err != nil {
@@ -538,9 +498,7 @@ func (s *HTTPServer) listAdminSessions(c *gin.Context) {
 func (s *HTTPServer) resetAdminMFA(c *gin.Context) {
 	id, err := positiveID(c.Param("id"))
 	var request struct {
-		Reason          string `json:"reason" binding:"required"`
-		CurrentMFACode  string `json:"current_mfa_code"`
-		CurrentRecovery string `json:"current_recovery_code"`
+		Reason string `json:"reason" binding:"required"`
 	}
 	identity, _ := identityFromContext(c)
 	if err != nil || c.ShouldBindJSON(&request) != nil {
@@ -549,9 +507,6 @@ func (s *HTTPServer) resetAdminMFA(c *gin.Context) {
 	}
 	if id == identity.UserID {
 		apiresp.BadParam(c, "不能在管理员列表中重置当前登录账号的双重验证")
-		return
-	}
-	if !s.requireStepUp(c, identity.UserID, request.CurrentMFACode, request.CurrentRecovery) {
 		return
 	}
 	tx, err := s.store.db.BeginTxx(c, nil)
@@ -574,15 +529,10 @@ func (s *HTTPServer) resetAdminMFA(c *gin.Context) {
 func (s *HTTPServer) regenerateRecoveryCodes(c *gin.Context) {
 	identity, _ := identityFromContext(c)
 	var request struct {
-		Code         string `json:"code"`
-		RecoveryCode string `json:"recovery_code"`
-		Reason       string `json:"reason" binding:"required"`
+		Reason string `json:"reason" binding:"required"`
 	}
 	if c.ShouldBindJSON(&request) != nil {
 		apiresp.BadParam(c, "恢复码生成请求无效")
-		return
-	}
-	if !s.requireStepUp(c, identity.UserID, request.Code, request.RecoveryCode) {
 		return
 	}
 	codes, err := s.auth.RegenerateRecoveryCodes(c, identity.UserID)
@@ -628,7 +578,7 @@ func (s *HTTPServer) updateMenu(c *gin.Context) {
 }
 func (s *HTTPServer) saveMenu(c *gin.Context, id int64) {
 	var request menuRequest
-	if c.ShouldBindJSON(&request) != nil || !stableCode.MatchString(request.MenuCode) || !validMenuRequest(request) || id == request.ParentID {
+	if c.ShouldBindJSON(&request) != nil || !stableCode.MatchString(request.MenuCode) || !validMenuRequest(request) || (id > 0 && id == request.ParentID) {
 		apiresp.BadParam(c, "菜单数据无效或路径未在前端注册")
 		return
 	}

@@ -1,3 +1,4 @@
+import { EditOutlined, SendOutlined, CloudUploadOutlined } from '@ant-design/icons';
 import { useState } from 'react';
 import {
   Alert,
@@ -16,10 +17,9 @@ import {
   Typography,
   App as AntApp,
 } from 'antd';
-import { ReloadOutlined } from '@ant-design/icons';
 import { api, json } from '../../api';
 import { reportError } from '../../error-feedback';
-import { pageTitle as title, useLoad, type AnyRow } from '../../shared/admin-ui';
+import { RefreshButton, pageTitle as title, useLoad, type AnyRow } from '../../shared/admin-ui';
 import { ConfigPage, ServicePanel, type ConfigEntry, type Definition } from './config-page';
 
 const templateExamples: Record<string, string> = {
@@ -129,14 +129,7 @@ function EmailTemplatesPage() {
         showIcon
         message="支持变量：{{code}}、{{expires_in_minutes}}、{{product_name}}、{{support_email}}。发送测试邮件前，请先保存并发布模板。"
       />
-      <Card
-        title="邮件模板"
-        extra={
-          <Button icon={<ReloadOutlined />} onClick={reload}>
-            刷新
-          </Button>
-        }
-      >
+      <Card title="邮件模板" extra={<RefreshButton onClick={reload} loading={loading} />}>
         <Table
           scroll={{ x: 900 }}
           rowKey={(r) => r.definition.config_key}
@@ -169,10 +162,15 @@ function EmailTemplatesPage() {
               title: '操作',
               render: (_, r) => (
                 <Space wrap>
-                  <Button type="link" onClick={() => open(r)}>
+                  <Button icon={<EditOutlined />} type="link" onClick={() => open(r)}>
                     编辑与预览
                   </Button>
-                  <Button type="link" disabled={!r.entry.id} onClick={() => setTesting(r)}>
+                  <Button
+                    icon={<SendOutlined />}
+                    type="link"
+                    disabled={!r.entry.id}
+                    onClick={() => setTesting(r)}
+                  >
                     发送测试
                   </Button>
                 </Space>
@@ -214,7 +212,12 @@ function EmailTemplatesPage() {
                 <Form.Item name="reason" label="发布原因" rules={[{ required: true }]}>
                   <Input />
                 </Form.Item>
-                <Button type="primary" htmlType="submit" loading={saving}>
+                <Button
+                  icon={<CloudUploadOutlined />}
+                  type="primary"
+                  htmlType="submit"
+                  loading={saving}
+                >
                   校验并发布
                 </Button>
               </Form>
@@ -255,7 +258,7 @@ function EmailTemplatesPage() {
             <Form.Item name="reason" label="测试原因" rules={[{ required: true }]}>
               <Input />
             </Form.Item>
-            <Button type="primary" htmlType="submit" loading={saving}>
+            <Button icon={<SendOutlined />} type="primary" htmlType="submit" loading={saving}>
               发送测试邮件
             </Button>
           </Form>
@@ -298,7 +301,7 @@ function UserConfigsPage() {
           <Form.Item name="reason" rules={[{ required: true }]}>
             <Input placeholder="测试原因" />
           </Form.Item>
-          <Button htmlType="submit" loading={saving} disabled={!smtp?.id}>
+          <Button icon={<SendOutlined />} htmlType="submit" loading={saving} disabled={!smtp?.id}>
             发送测试邮件
           </Button>
         </Form>

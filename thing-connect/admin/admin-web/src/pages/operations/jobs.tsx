@@ -1,3 +1,5 @@
+import { QueryFilter, ProFormSelect } from '@ant-design/pro-components';
+import { ReloadOutlined, EyeOutlined, DownloadOutlined } from '@ant-design/icons';
 import { useState } from 'react';
 import {
   Alert,
@@ -6,17 +8,19 @@ import {
   Descriptions,
   Drawer,
   Popconfirm,
-  Select,
   Space,
   Table,
   Tag,
   Typography,
   App as AntApp,
 } from 'antd';
-import { ReloadOutlined } from '@ant-design/icons';
 import { api, download, json } from '../../api';
 import { reportError } from '../../error-feedback';
 import {
+  useCompactQueryLayout,
+  queryActions,
+  confirmationActions,
+  RefreshButton,
   formatTime,
   pageTitle as title,
   useLoad,
@@ -26,8 +30,10 @@ import {
 import { jobTypeNames } from '../../shared/admin-metadata';
 
 export function JobsPage() {
+  const queryLayout = useCompactQueryLayout(['status']);
   const { message } = AntApp.useApp();
   const [page, setPage] = useState(1);
+  const [queryVersion, setQueryVersion] = useState(0);
   const [status, setStatus] = useState<number>();
   const [jobID, setJobID] = useState<number>();
   const [itemPage, setItemPage] = useState(1);
@@ -36,7 +42,7 @@ export function JobsPage() {
       api<{ jobs: PageData; related_queues: AnyRow }>(
         `/jobs?page=${page}&page_size=20&status=${status ?? ''}`,
       ),
-    [page, status],
+    [page, status, queryVersion],
   );
   const [detail, detailLoading] = useLoad<AnyRow | undefined>(
     () =>
@@ -70,9 +76,7 @@ export function JobsPage() {
       {title(
         '任务中心',
         '设备池导入、解绑清理与配置发布队列',
-        <Button icon={<ReloadOutlined />} onClick={reload}>
-          刷新
-        </Button>,
+        <RefreshButton onClick={reload} loading={loading} />,
       )}
       {data && (
         <Alert
@@ -81,32 +85,34 @@ export function JobsPage() {
         />
       )}
       <Card>
-        <Space className="toolbar">
-          <Select
-            aria-label="任务状态"
-            placeholder="全部任务状态"
-            allowClear
-            style={{ width: 180 }}
-            value={status}
+        <QueryFilter
+          {...queryLayout}
+          name="jobs-query"
+          submitter={queryActions(loading)}
+          onFinish={async (values) => {
+            setStatus(values.status);
+            setPage(1);
+            setQueryVersion((value) => value + 1);
+          }}
+          onReset={() => {
+            setStatus(undefined);
+            setPage(1);
+            setQueryVersion((value) => value + 1);
+          }}
+        >
+          <ProFormSelect
+            width={112}
+            name="status"
+            label="任务状态"
+            placeholder="全部状态"
             options={['待执行', '执行中', '成功', '部分成功', '失败'].map((label, value) => ({
               label,
               value,
             }))}
-            onChange={(value) => {
-              setStatus(value);
-              setPage(1);
-            }}
           />
-          <Button
-            onClick={() => {
-              setStatus(undefined);
-              setPage(1);
-            }}
-          >
-            重置
-          </Button>
-        </Space>
+        </QueryFilter>
         <Table
+          locale={{ emptyText: '没有符合条件的任务' }}
           scroll={{ x: 900 }}
           rowKey="id"
           loading={loading}
@@ -156,17 +162,23 @@ export function JobsPage() {
               title: '操作',
               render: (_, r) => (
                 <Space wrap>
-                  <Button type="link" onClick={() => open(r)}>
+                  <Button icon={<EyeOutlined />} type="link" onClick={() => open(r)}>
                     详情
                   </Button>
                   {r.result_available ? (
-                    <Button type="link" onClick={() => getResult(r)}>
+                    <Button icon={<DownloadOutlined />} type="link" onClick={() => getResult(r)}>
                       下载结果
                     </Button>
                   ) : null}
                   {r.status >= 3 ? (
-                    <Popconfirm title="确认重新执行失败项目？" onConfirm={() => retry(r)}>
-                      <Button type="link">重试</Button>
+                    <Popconfirm
+                      {...confirmationActions}
+                      title="确认重新执行失败项目？"
+                      onConfirm={() => retry(r)}
+                    >
+                      <Button icon={<ReloadOutlined />} type="link">
+                        重试
+                      </Button>
                     </Popconfirm>
                   ) : null}
                 </Space>
@@ -186,7 +198,9 @@ export function JobsPage() {
           <>
             <Space className="toolbar">
               {detail.job.result_available ? (
-                <Button onClick={() => getResult(detail.job)}>下载导入结果</Button>
+                <Button icon={<DownloadOutlined />} onClick={() => getResult(detail.job)}>
+                  下载导入结果
+                </Button>
               ) : null}
             </Space>
             <Descriptions

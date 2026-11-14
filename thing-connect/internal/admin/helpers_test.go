@@ -280,11 +280,9 @@ func TestRBACAndMenuValidationHelpers(t *testing.T) {
 }
 
 func TestMarshalSafeRedactsTransientCredentials(t *testing.T) {
-	value := roleRequest{
-		Code:            "operator",
-		Name:            "运维",
-		CurrentMFACode:  "123456",
-		CurrentRecovery: "recovery-value",
+	value := map[string]string{
+		"code": "operator", "name": "运维",
+		"current_mfa_code": "123456", "current_recovery_code": "recovery-value",
 	}
 	got := marshalSafe(value)
 	if strings.Contains(got, "123456") || strings.Contains(got, "recovery-value") {

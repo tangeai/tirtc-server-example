@@ -1,3 +1,4 @@
+import { ApiOutlined, EditOutlined } from '@ant-design/icons';
 import { useEffect, useState } from 'react';
 import {
   Alert,
@@ -482,13 +483,24 @@ export function SetupPage({ initial }: { initial: SetupSnapshot }) {
                   value={token}
                   onChange={(event) => setToken(event.target.value)}
                 />
-                <Button type="primary" loading={busy} disabled={!token} onClick={resume}>
+                <Button
+                  icon={<ApiOutlined />}
+                  type="primary"
+                  loading={busy}
+                  disabled={!token}
+                  onClick={resume}
+                >
                   完成 Admin 安装并关闭安装入口
                 </Button>
               </Space.Compact>
             </>
           ) : snapshot.retryable ? (
-            <Button block className="setup-actions" onClick={() => setShowForm(true)}>
+            <Button
+              icon={<EditOutlined />}
+              block
+              className="setup-actions"
+              onClick={() => setShowForm(true)}
+            >
               重新输入连接信息
             </Button>
           ) : (
@@ -530,8 +542,10 @@ export function SetupPage({ initial }: { initial: SetupSnapshot }) {
               <Alert key={warning} type="warning" showIcon message={warning} />
             ))}
             <Space className="setup-actions">
-              <Button onClick={() => setPlan(undefined)}>返回修改</Button>
-              <Button type="primary" danger loading={busy} onClick={execute}>
+              <Button icon={<EditOutlined />} onClick={() => setPlan(undefined)}>
+                返回修改
+              </Button>
+              <Button icon={<ApiOutlined />} type="primary" danger loading={busy} onClick={execute}>
                 确认并开始安装
               </Button>
             </Space>
@@ -727,7 +741,7 @@ export function SetupPage({ initial }: { initial: SetupSnapshot }) {
             <Form.Item name={['network', 'cookie_secure']} valuePropName="checked">
               <Checkbox>管理后台通过 HTTPS 访问（生产环境推荐）</Checkbox>
             </Form.Item>
-            <Button block type="primary" htmlType="submit" loading={busy}>
+            <Button icon={<ApiOutlined />} block type="primary" htmlType="submit" loading={busy}>
               连接检查并生成安装计划
             </Button>
           </Form>

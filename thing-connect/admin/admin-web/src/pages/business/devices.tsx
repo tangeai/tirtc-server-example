@@ -18,15 +18,30 @@ import {
   Tag,
   Typography,
   Upload,
-  Tooltip,
   App as AntApp,
   type UploadFile,
 } from 'antd';
-import { DownloadOutlined, UploadOutlined, ReloadOutlined } from '@ant-design/icons';
+import {
+  DownloadOutlined,
+  UploadOutlined,
+  PlusOutlined,
+  CloseOutlined,
+  EyeOutlined,
+  DisconnectOutlined,
+} from '@ant-design/icons';
 import { api, json } from '../../api';
 import { DeviceReportedProfiles, type ReportedProfiles } from './device-profile';
 import { reportError } from '../../error-feedback';
-import { formatTime, pageTitle as title, useLoad, type PageData } from '../../shared/admin-ui';
+import {
+  useCompactQueryLayout,
+  queryActions,
+  confirmationActions,
+  RefreshButton,
+  formatTime,
+  pageTitle as title,
+  useLoad,
+  type PageData,
+} from '../../shared/admin-ui';
 import {
   assignmentName,
   devicePresence,
@@ -219,10 +234,12 @@ export function DevicesPage() {
             <Input placeholder="例如：导入生产批次设备" />
           </Form.Item>
           <Space wrap>
-            <Button type="primary" htmlType="submit" loading={importing}>
+            <Button icon={<PlusOutlined />} type="primary" htmlType="submit" loading={importing}>
               创建导入任务
             </Button>
-            <Button onClick={closeImport}>取消</Button>
+            <Button icon={<CloseOutlined />} onClick={closeImport}>
+              取消
+            </Button>
           </Space>
         </Form>
       </Modal>
@@ -231,6 +248,7 @@ export function DevicesPage() {
 }
 
 function UserDevicesPanel() {
+  const queryLayout = useCompactQueryLayout(['wide', 'status']);
   const { message } = AntApp.useApp();
   const screens = Grid.useBreakpoint();
   const [query, setQuery] = useState('');
@@ -238,6 +256,7 @@ function UserDevicesPanel() {
   const [sortBy, setSortBy] = useState('');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [page, setPage] = useState(1);
+  const [queryVersion, setQueryVersion] = useState(0);
   const [detail, setDetail] = useState<{ device: ManagedDevice; logs: BindLog[] }>();
   const pageSize = 20;
   const [data, loading, reload] = useLoad(
@@ -245,7 +264,7 @@ function UserDevicesPanel() {
       api<PageData<ManagedDevice>>(
         `/devices?page=${page}&page_size=${pageSize}&keyword=${encodeURIComponent(query)}&bound=${bound}&sort_by=${sortBy}&sort_order=${sortOrder}`,
       ),
-    [query, bound, sortBy, sortOrder, page],
+    [query, bound, sortBy, sortOrder, page, queryVersion],
   );
   const unbind = async (row: ManagedDevice) => {
     try {
@@ -277,28 +296,22 @@ function UserDevicesPanel() {
   };
   return (
     <>
+      <div className="panel-actions">
+        <Typography.Text strong>用户设备</Typography.Text>
+        <RefreshButton loading={loading} onClick={reload} />
+      </div>
       <QueryFilter
+        {...queryLayout}
+        submitter={queryActions(loading)}
         name="devices-query-1"
-        defaultCollapsed={false}
-        submitter={{
-          render: (_, actions) => [
-            ...actions,
-            <Tooltip key="refresh" title="刷新设备（保留当前筛选）">
-              <Button
-                aria-label="刷新设备"
-                icon={<ReloadOutlined />}
-                loading={loading}
-                onClick={reload}
-              />
-            </Tooltip>,
-          ],
-        }}
         onFinish={async (values) => {
+          setQueryVersion((value) => value + 1);
           setPage(1);
           setQuery(values.keyword?.trim() || '');
           setBound(values.bound || '');
         }}
         onReset={() => {
+          setQueryVersion((value) => value + 1);
           setPage(1);
           setQuery('');
           setBound('');
@@ -306,6 +319,7 @@ function UserDevicesPanel() {
       >
         <ProFormText name="keyword" label="设备 / 用户" placeholder="设备 ID、MAC 或用户邮箱" />
         <ProFormSelect
+          width={112}
           name="bound"
           label="绑定状态"
           options={[
@@ -410,15 +424,16 @@ function UserDevicesPanel() {
             width: 210,
             render: (_, row) => (
               <Space wrap size={0}>
-                <Button type="link" onClick={() => openDetail(row)}>
+                <Button icon={<EyeOutlined />} type="link" onClick={() => openDetail(row)}>
                   详情与上报属性
                 </Button>
                 {row.user_id > 0 ? (
                   <Popconfirm
+                    {...confirmationActions}
                     title="解绑会返还额度，并创建 AI、VoIP 和呼叫数据清理任务"
                     onConfirm={() => unbind(row)}
                   >
-                    <Button danger type="link">
+                    <Button icon={<DisconnectOutlined />} danger type="link">
                       强制解绑
                     </Button>
                   </Popconfirm>
@@ -534,16 +549,18 @@ function UserDevicesPanel() {
 }
 
 function DevicePoolPanel() {
+  const queryLayout = useCompactQueryLayout(['text', 'status']);
   const [query, setQuery] = useState('');
   const [state, setState] = useState('');
   const [page, setPage] = useState(1);
+  const [queryVersion, setQueryVersion] = useState(0);
   const pageSize = 20;
   const [data, loading, reload] = useLoad(
     () =>
       api<PageData<PoolDevice>>(
         `/device-pool?page=${page}&page_size=${pageSize}&keyword=${encodeURIComponent(query)}&state=${state}`,
       ),
-    [query, state, page],
+    [query, state, page, queryVersion],
   );
   const lifecycle = (row: PoolDevice) => {
     if (row.status === 1) return <Tag color="processing">已分配</Tag>;
@@ -559,28 +576,22 @@ function DevicePoolPanel() {
         message="设备池不会显示设备密钥"
         description="已解绑设备保留原设备身份，不会再次分配给其他用户。导入来源可跳转到任务中心核对逐行结果。"
       />
+      <div className="panel-actions">
+        <Typography.Text strong>设备池</Typography.Text>
+        <RefreshButton loading={loading} onClick={reload} />
+      </div>
       <QueryFilter
+        {...queryLayout}
+        submitter={queryActions(loading)}
         name="devices-query-2"
-        defaultCollapsed={false}
-        submitter={{
-          render: (_, actions) => [
-            ...actions,
-            <Tooltip key="refresh" title="刷新设备池（保留当前筛选）">
-              <Button
-                aria-label="刷新设备池"
-                icon={<ReloadOutlined />}
-                loading={loading}
-                onClick={reload}
-              />
-            </Tooltip>,
-          ],
-        }}
         onFinish={async (values) => {
+          setQueryVersion((value) => value + 1);
           setPage(1);
           setQuery(values.keyword?.trim() || '');
           setState(values.state || '');
         }}
         onReset={() => {
+          setQueryVersion((value) => value + 1);
           setPage(1);
           setQuery('');
           setState('');
@@ -588,6 +599,7 @@ function DevicePoolPanel() {
       >
         <ProFormText name="keyword" label="设备 ID" placeholder="输入设备 ID" />
         <ProFormSelect
+          width={112}
           name="state"
           label="设备池状态"
           options={[

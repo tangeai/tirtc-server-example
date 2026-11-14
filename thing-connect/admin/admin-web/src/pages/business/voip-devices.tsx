@@ -1,9 +1,12 @@
+import { EyeOutlined } from '@ant-design/icons';
 import { QueryFilter, ProFormText, ProFormSelect } from '@ant-design/pro-components';
 import { useEffect, useMemo, useState } from 'react';
-import { Button, Card, Descriptions, Drawer, Table, Tag, Typography } from 'antd';
-import { ReloadOutlined } from '@ant-design/icons';
+import { Button, Card, Form, Descriptions, Drawer, Table, Tag, Typography } from 'antd';
 import { api } from '../../api';
 import {
+  useCompactQueryLayout,
+  queryActions,
+  RefreshButton,
   formatTime,
   pageTitle as title,
   useLoad,
@@ -18,11 +21,16 @@ import {
 } from '../../shared/admin-metadata';
 
 export function VoIPDevicesPage() {
+  const queryLayout = useCompactQueryLayout(['wide', 'wide', 'status', 'status']);
   const [apps, appsLoading, reloadApps] = useLoad(
     () => api<{ items: AnyRow[]; revision: number }>('/voip/apps'),
     [],
   );
   const [selectedAppID, setSelectedAppID] = useState('');
+  const [queryForm] = Form.useForm();
+  useEffect(() => {
+    queryForm.setFieldValue('app_id', selectedAppID || undefined);
+  }, [selectedAppID, queryForm]);
   const selected = useMemo(
     () => apps?.items.find((item) => item.app_id === selectedAppID),
     [apps, selectedAppID],
@@ -42,6 +50,7 @@ export function VoIPDevicesPage() {
   const [authStatus, setAuthStatus] = useState('');
   const [profileReported, setProfileReported] = useState('');
   const [page, setPage] = useState(1);
+  const [queryVersion, setQueryVersion] = useState(0);
   const pageSize = 20;
   const deviceParams = useMemo(() => {
     const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
@@ -55,7 +64,7 @@ export function VoIPDevicesPage() {
       selectedAppID
         ? api<PageData>(`/voip/apps/${encodeURIComponent(selectedAppID)}/devices?${deviceParams}`)
         : Promise.resolve<PageData>({ items: [], page, page_size: pageSize, total: 0 }),
-    [selectedAppID, deviceParams],
+    [selectedAppID, deviceParams, queryVersion],
   );
   const [access] = useLoad<{ permissions: string[] }>(() => api('/permissions'));
   const canReadProfile = !!access?.permissions.some((p) => p === '*' || p === 'voip.profile.read');
@@ -87,49 +96,47 @@ export function VoIPDevicesPage() {
   ];
   return (
     <>
-      {title('VoIP 授权设备', '按微信小程序查看授权设备、授权状态与设备上报属性')}
-      <Card
-        title="授权设备"
-        style={{ marginTop: 16 }}
-        extra={
-          <Button
-            icon={<ReloadOutlined />}
-            onClick={() => {
-              reloadApps();
-              reloadDevices();
-            }}
-          >
-            刷新
-          </Button>
-        }
-      >
+      {title(
+        'VoIP 授权设备',
+        '按微信小程序查看授权设备、授权状态与设备上报属性',
+        <RefreshButton
+          loading={appsLoading || devicesLoading}
+          onClick={() => {
+            reloadApps();
+            reloadDevices();
+          }}
+        />,
+      )}
+      <Card>
         <QueryFilter
+          {...queryLayout}
+          submitter={queryActions(appsLoading || devicesLoading)}
           name="voip-devices-query-1"
-          defaultCollapsed={false}
+          form={queryForm}
           onFinish={async (values) => {
+            setQueryVersion((value) => value + 1);
             setPage(1);
+            setSelectedAppID(values.app_id || '');
             setDeviceQuery(values.keyword?.trim() || '');
             setAuthStatus(values.auth_status || '');
             setProfileReported(values.profile_reported || '');
           }}
           onReset={() => {
+            setQueryVersion((value) => value + 1);
             setPage(1);
+            queryForm.setFieldValue('app_id', selectedAppID || undefined);
             setDeviceQuery('');
             setAuthStatus('');
             setProfileReported('');
           }}
         >
           <ProFormSelect
+            name="app_id"
             label="微信小程序"
             fieldProps={{
               loading: appsLoading,
               showSearch: true,
               optionFilterProp: 'label',
-              value: selectedAppID || undefined,
-              onChange: (value) => {
-                setPage(1);
-                setSelectedAppID(String(value));
-              },
             }}
             options={(apps?.items || []).map((item) => ({
               value: item.app_id,
@@ -143,6 +150,7 @@ export function VoIPDevicesPage() {
             placeholder="设备 ID、名称、用户邮箱或 OpenID"
           />
           <ProFormSelect
+            width={112}
             name="auth_status"
             label="授权状态"
             options={[
@@ -151,6 +159,7 @@ export function VoIPDevicesPage() {
             ]}
           />
           <ProFormSelect
+            width={112}
             name="profile_reported"
             label="属性上报"
             options={[
@@ -231,6 +240,7 @@ export function VoIPDevicesPage() {
               render: (_, r) =>
                 r.profile_updated_at ? (
                   <Button
+                    icon={<EyeOutlined />}
                     type="link"
                     disabled={!canReadProfile}
                     onClick={() => setProfileID(r.device_id)}

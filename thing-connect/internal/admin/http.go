@@ -521,12 +521,10 @@ func (s *HTTPServer) changeOwnPassword(c *gin.Context) {
 	var request struct {
 		CurrentPassword string `json:"current_password" binding:"required"`
 		NewPassword     string `json:"new_password" binding:"required"`
-		CurrentMFACode  string `json:"current_mfa_code"`
-		CurrentRecovery string `json:"current_recovery_code"`
 	}
 	identity, _ := identityFromContext(c)
-	if c.ShouldBindJSON(&request) != nil || request.CurrentPassword == request.NewPassword || s.auth.VerifyPassword(c, identity.UserID, request.CurrentPassword) != nil || s.auth.VerifyStepUp(c, identity.UserID, request.CurrentMFACode, request.CurrentRecovery) != nil {
-		apiresp.BadParam(c, "当前密码或二次验证码错误")
+	if c.ShouldBindJSON(&request) != nil || request.CurrentPassword == request.NewPassword || s.auth.VerifyPassword(c, identity.UserID, request.CurrentPassword) != nil {
+		apiresp.BadParam(c, "当前密码不正确，或新密码与当前密码相同")
 		return
 	}
 	hash, err := HashAdminPassword(request.NewPassword)
@@ -637,8 +635,6 @@ type configWriteRequest struct {
 	ExpectedRevision int64            `json:"expected_revision"`
 	Reason           string           `json:"reason"`
 	CurrentPassword  string           `json:"current_password"`
-	CurrentMFACode   string           `json:"current_mfa_code"`
-	CurrentRecovery  string           `json:"current_recovery_code"`
 	Confirm          bool             `json:"confirm"`
 	TestRecipient    string           `json:"test_recipient"`
 }
@@ -824,8 +820,8 @@ func (s *HTTPServer) putConfig(c *gin.Context) {
 	identity, _ := identityFromContext(c)
 	isMFAPolicy := c.Param("namespace") == "system" && c.Param("config_key") == "mfa.policy"
 	if isMFAPolicy {
-		if !s.access.Enforce(identity.UserID, "security.mfa.write") || s.auth.VerifyPassword(c, identity.UserID, request.CurrentPassword) != nil || s.auth.VerifyStepUp(c, identity.UserID, request.CurrentMFACode, request.CurrentRecovery) != nil {
-			apiresp.BadParam(c, "修改 MFA 策略需要权限、当前密码、二次验证、原因和确认")
+		if !s.access.Enforce(identity.UserID, "security.mfa.write") || s.auth.VerifyPassword(c, identity.UserID, request.CurrentPassword) != nil {
+			apiresp.BadParam(c, "修改 MFA 策略需要权限、当前密码、原因和确认")
 			return
 		}
 	}

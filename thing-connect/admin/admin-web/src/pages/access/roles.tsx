@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { PlusOutlined, EditOutlined, SettingOutlined, SaveOutlined } from '@ant-design/icons';
+import { useRef, useState } from 'react';
 import {
   Alert,
   Button,
@@ -8,6 +9,7 @@ import {
   InputNumber,
   Modal,
   Select,
+  TreeSelect,
   Space,
   Switch,
   Table,
@@ -16,11 +18,11 @@ import {
   Typography,
   App as AntApp,
 } from 'antd';
-import { ReloadOutlined } from '@ant-design/icons';
 import { api, json } from '../../api';
 import { reportError } from '../../error-feedback';
 import {
-  StepUpFields,
+  localPagination,
+  RefreshButton,
   pageTitle as title,
   useLoad,
   type AnyRow,
@@ -28,23 +30,33 @@ import {
 } from '../../shared/admin-ui';
 import { iconOptions, nameWithCode, routeNames } from '../../shared/admin-metadata';
 
+import { hierarchy, descendantIDs, activeAncestors, type HierarchyRow } from './hierarchy';
+import { GrantTree } from './grant-tree';
+type AccessRow = AnyRow & HierarchyRow & { status: number };
+
 export function RolesPage() {
   const { message } = AntApp.useApp();
   const [saving, setSaving] = useState(false);
   const [roles, loading, reload] = useLoad(
     () =>
       api<{
-        items: AnyRow[];
+        items: AccessRow[];
         registered_permissions: string[];
         permission_definitions: PermissionDefinition[];
       }>('/roles'),
     [],
   );
-  const [menus, , reloadMenus] = useLoad(() => api<{ items: AnyRow[] }>('/menus'), []);
+  const [menus, menusLoading, reloadMenus] = useLoad(
+    () => api<{ items: AccessRow[] }>('/menus'),
+    [],
+  );
   const [roleEdit, setRoleEdit] = useState<AnyRow | null>(null);
   const [permissionEdit, setPermissionEdit] = useState<AnyRow | null>(null);
   const [menuGrant, setMenuGrant] = useState<AnyRow | null>(null);
   const [menuEdit, setMenuEdit] = useState<AnyRow | null>(null);
+  const menuRequest = useRef(0);
+  const [grantLoading, setGrantLoading] = useState(false);
+  const [inheritedMenuIDs, setInheritedMenuIDs] = useState<number[]>([]);
   const [grantedMenuIDs, setGrantedMenuIDs] = useState<number[]>([]);
   const saveRole = async (v: AnyRow) => {
     if (saving) return;
@@ -58,8 +70,6 @@ export function RolesPage() {
         status: v.enabled ? 1 : 0,
         remark: v.remark || '',
         reason: v.reason,
-        current_mfa_code: v.current_mfa_code || '',
-        current_recovery_code: v.current_recovery_code || '',
       };
       await api(
         roleEdit?.id ? `/roles/${roleEdit.id}` : '/roles',
@@ -83,8 +93,6 @@ export function RolesPage() {
         json('PUT', {
           permissions: v.permissions || [],
           reason: v.reason,
-          current_mfa_code: v.current_mfa_code,
-          current_recovery_code: v.current_recovery_code,
         }),
       );
       message.success('权限已更新');
@@ -97,12 +105,24 @@ export function RolesPage() {
     }
   };
   const openMenus = async (row: AnyRow) => {
+    const request = ++menuRequest.current;
+    setGrantLoading(true);
+    setMenuGrant(null);
     try {
-      const result = await api<{ menu_ids: number[] }>(`/roles/${row.id}/menus`);
-      setGrantedMenuIDs(result.menu_ids);
+      const ancestors = row.status === 1 ? activeAncestors(roles?.items || [], row.id) : [];
+      const results = await Promise.all(
+        [row, ...ancestors].map((role) => api<{ menu_ids: number[] }>(`/roles/${role.id}/menus`)),
+      );
+      if (request !== menuRequest.current) return;
+      setGrantedMenuIDs(results[0].menu_ids || []);
+      setInheritedMenuIDs([
+        ...new Set(results.slice(1).flatMap((result) => result.menu_ids || [])),
+      ]);
       setMenuGrant(row);
     } catch (e) {
       reportError(e);
+    } finally {
+      if (request === menuRequest.current) setGrantLoading(false);
     }
   };
   const saveMenus = async (v: AnyRow) => {
@@ -166,6 +186,42 @@ export function RolesPage() {
         value: item.code,
       })),
   }));
+  const roleRows = roles?.items || [];
+  const menuRows = menus?.items || [];
+  const roleTree = hierarchy(roleRows);
+  const menuTree = hierarchy(menuRows);
+  const selectionTree = (
+    rows: ReturnType<typeof hierarchy<AccessRow>>,
+    excluded: Set<number>,
+    directories = false,
+  ): any[] =>
+    rows.map((row) => ({
+      value: row.id,
+      title: `${row.name}${row.status === 1 ? '' : '（停用）'}`,
+      disabled: excluded.has(row.id) || (directories && row.menu_type !== 1),
+      children: row.children ? selectionTree(row.children, excluded, directories) : undefined,
+    }));
+  const menuGrantTree = (rows: ReturnType<typeof hierarchy<AccessRow>>): any[] =>
+    rows.map((row) => ({
+      key: row.id,
+      title: `${row.name}${row.status !== 1 ? '（停用）' : row.visible !== 1 ? '（隐藏）' : ''}${inheritedMenuIDs.includes(row.id) ? ' · 上级角色已授予' : ''}${row.permission_code ? ` · 需 ${permissionName(row.permission_code)}` : ''}`,
+      children: row.children ? menuGrantTree(row.children) : undefined,
+    }));
+  const inheritedPermissions =
+    permissionEdit?.status === 1
+      ? new Set(
+          activeAncestors(roleRows, permissionEdit.id).flatMap((row) => row.permissions || []),
+        )
+      : new Set<string>();
+  const permissionTree = permissionOptions.map((group) => ({
+    key: `group:${group.label}`,
+    title: group.label,
+    checkable: false,
+    children: group.options.map((option) => ({
+      key: option.value,
+      title: `${option.label}${inheritedPermissions.has(option.value) ? ' · 上级角色已授予' : ''}`,
+    })),
+  }));
   const roleNameByID = (id: number) =>
     id ? roles?.items.find((role) => role.id === id)?.name || `角色 #${id}` : '无';
   const routeOptions = Object.entries(routeNames).map(([value, name]) => ({
@@ -178,16 +234,14 @@ export function RolesPage() {
         '权限与菜单',
         '按业务模块配置角色权限、继承关系与可见菜单',
         <Space wrap>
-          <Button
-            icon={<ReloadOutlined />}
+          <RefreshButton
             onClick={() => {
               reload();
               reloadMenus();
             }}
-          >
-            刷新
-          </Button>
-          <Button type="primary" onClick={() => setRoleEdit({})}>
+            loading={loading || menusLoading}
+          />
+          <Button icon={<PlusOutlined />} type="primary" onClick={() => setRoleEdit({})}>
             新增角色
           </Button>
         </Space>,
@@ -200,10 +254,16 @@ export function RolesPage() {
             children: (
               <Card>
                 <Table
+                  pagination={{
+                    ...localPagination,
+                    showTotal: () => `共 ${roleRows.length} 个角色，${roleTree.length} 个顶级角色`,
+                  }}
                   scroll={{ x: 900 }}
                   rowKey="id"
                   loading={loading}
-                  dataSource={roles?.items}
+                  key={roleRows.map((row) => `${row.id}:${row.parent_id}`).join(',')}
+                  dataSource={roleTree}
+                  expandable={{ defaultExpandAllRows: true }}
                   columns={[
                     {
                       title: '角色',
@@ -231,7 +291,8 @@ export function RolesPage() {
                           </Space>
                           <br />
                           <Typography.Text type="secondary">
-                            直接授予 {r.permissions?.length || 0} 项，包含继承后共{' '}
+                            {r.code === 'super_admin' ? '系统固定全部授权；' : ''}直接授予{' '}
+                            {r.permissions?.length || 0} 项，生效权限共{' '}
                             {r.effective_permissions?.length || 0} 项
                           </Typography.Text>
                         </>
@@ -246,13 +307,27 @@ export function RolesPage() {
                       title: '操作',
                       render: (_, r) => (
                         <Space wrap>
-                          <Button type="link" onClick={() => setRoleEdit(r)}>
+                          <Button
+                            icon={<EditOutlined />}
+                            type="link"
+                            onClick={() => setRoleEdit(r)}
+                          >
                             编辑
                           </Button>
-                          <Button type="link" onClick={() => setPermissionEdit(r)}>
+                          <Button
+                            icon={<SettingOutlined />}
+                            type="link"
+                            disabled={r.code === 'super_admin'}
+                            onClick={() => setPermissionEdit(r)}
+                          >
                             配置权限
                           </Button>
-                          <Button type="link" onClick={() => openMenus(r)}>
+                          <Button
+                            icon={<SettingOutlined />}
+                            type="link"
+                            disabled={r.code === 'super_admin' || grantLoading}
+                            onClick={() => openMenus(r)}
+                          >
                             配置菜单
                           </Button>
                         </Space>
@@ -277,15 +352,23 @@ export function RolesPage() {
                 <Card
                   title="菜单列表"
                   extra={
-                    <Button type="primary" onClick={() => setMenuEdit({})}>
+                    <Button icon={<PlusOutlined />} type="primary" onClick={() => setMenuEdit({})}>
                       新增菜单
                     </Button>
                   }
                 >
                   <Table
+                    pagination={{
+                      ...localPagination,
+                      showTotal: () =>
+                        `共 ${menuRows.length} 个菜单，${menuTree.length} 个顶级菜单`,
+                    }}
                     scroll={{ x: 900 }}
                     rowKey="id"
-                    dataSource={menus?.items}
+                    key={menuRows.map((row) => `${row.id}:${row.parent_id}`).join(',')}
+                    dataSource={menuTree}
+                    loading={menusLoading}
+                    expandable={{ defaultExpandAllRows: true }}
                     columns={[
                       {
                         title: '菜单',
@@ -319,7 +402,11 @@ export function RolesPage() {
                       {
                         title: '操作',
                         render: (_, r) => (
-                          <Button type="link" onClick={() => setMenuEdit(r)}>
+                          <Button
+                            icon={<EditOutlined />}
+                            type="link"
+                            onClick={() => setMenuEdit(r)}
+                          >
                             编辑
                           </Button>
                         ),
@@ -365,12 +452,11 @@ export function RolesPage() {
               <Input disabled={!!roleEdit.id} placeholder="例如：customer_service" />
             </Form.Item>
             <Form.Item name="parent_id" label="继承角色">
-              <Select
-                options={[
-                  { label: '不继承其他角色', value: 0 },
-                  ...(roles?.items || [])
-                    .filter((r) => r.id !== roleEdit.id)
-                    .map((r) => ({ label: r.name, value: r.id })),
+              <TreeSelect
+                treeDefaultExpandAll
+                treeData={[
+                  { title: '不继承其他角色', value: 0 },
+                  ...selectionTree(roleTree, descendantIDs(roleRows, roleEdit.id)),
                 ]}
               />
             </Form.Item>
@@ -383,11 +469,10 @@ export function RolesPage() {
             <Form.Item name="remark" label="备注">
               <Input />
             </Form.Item>
-            {roleEdit.id && <StepUpFields />}
             <Form.Item name="reason" label="操作原因" rules={[{ required: true }]}>
               <Input placeholder="说明新增或调整原因" />
             </Form.Item>
-            <Button type="primary" htmlType="submit" loading={saving}>
+            <Button icon={<SaveOutlined />} type="primary" htmlType="submit" loading={saving}>
               保存
             </Button>
           </Form>
@@ -412,22 +497,15 @@ export function RolesPage() {
               className="form-alert"
               type="info"
               showIcon
-              message="权限已按业务模块分组。中文名称用于辨识，括号中的权限码用于接口鉴权和二次开发。"
+              message="权限按业务模块展开。勾选项是直接授权；上级角色已授予的权限另行标注，取消直接授权不会移除继承权限。各权限独立生效，管理权限不会自动包含查看权限。"
             />
-            <Form.Item name="permissions" label="授予权限">
-              <Select
-                mode="multiple"
-                showSearch
-                optionFilterProp="label"
-                placeholder="按中文名称或权限码搜索"
-                options={permissionOptions}
-              />
+            <Form.Item name="permissions" label="直接授予权限">
+              <GrantTree treeData={permissionTree} />
             </Form.Item>
-            <StepUpFields />
             <Form.Item name="reason" label="操作原因" rules={[{ required: true }]}>
               <Input placeholder="说明权限调整原因" />
             </Form.Item>
-            <Button type="primary" htmlType="submit" loading={saving}>
+            <Button icon={<SaveOutlined />} type="primary" htmlType="submit" loading={saving}>
               保存权限
             </Button>
           </Form>
@@ -447,16 +525,19 @@ export function RolesPage() {
             onFinish={saveMenus}
             initialValues={{ menu_ids: grantedMenuIDs }}
           >
-            <Form.Item name="menu_ids" label="可见菜单">
-              <Select
-                mode="multiple"
-                options={menus?.items.map((x) => ({ label: x.name, value: x.id }))}
-              />
+            <Alert
+              className="form-alert"
+              type="info"
+              showIcon
+              message="菜单按目录层级展示。勾选目录不会自动授予子页面；子页面的上级目录由导航自动补齐。实际访问还需对应页面权限。上级角色授予的菜单另行标注，本处只保存直接授权。"
+            />
+            <Form.Item name="menu_ids" label="直接授予菜单">
+              <GrantTree treeData={menuGrantTree(menuTree)} />
             </Form.Item>
             <Form.Item name="reason" label="操作原因" rules={[{ required: true }]}>
               <Input />
             </Form.Item>
-            <Button type="primary" htmlType="submit" loading={saving}>
+            <Button icon={<SaveOutlined />} type="primary" htmlType="submit" loading={saving}>
               保存菜单授权
             </Button>
           </Form>
@@ -499,12 +580,11 @@ export function RolesPage() {
               <Input disabled={!!menuEdit.id} />
             </Form.Item>
             <Form.Item name="parent_id" label="上级菜单">
-              <Select
-                options={[
-                  { label: '无（顶级菜单）', value: 0 },
-                  ...(menus?.items || [])
-                    .filter((x) => x.id !== menuEdit.id)
-                    .map((x) => ({ label: x.name, value: x.id })),
+              <TreeSelect
+                treeDefaultExpandAll
+                treeData={[
+                  { title: '无（顶级菜单）', value: 0 },
+                  ...selectionTree(menuTree, descendantIDs(menuRows, menuEdit.id), true),
                 ]}
               />
             </Form.Item>
@@ -543,7 +623,7 @@ export function RolesPage() {
             <Form.Item name="reason" label="操作原因" rules={[{ required: true }]}>
               <Input placeholder="说明菜单调整原因" />
             </Form.Item>
-            <Button type="primary" htmlType="submit" loading={saving}>
+            <Button icon={<SaveOutlined />} type="primary" htmlType="submit" loading={saving}>
               保存菜单
             </Button>
           </Form>

@@ -15,10 +15,16 @@ import {
   Typography,
   App as AntApp,
 } from 'antd';
-import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, SaveOutlined } from '@ant-design/icons';
 import { api, json } from '../../api';
 import { reportError } from '../../error-feedback';
-import { pageTitle as title, useLoad, type AnyRow } from '../../shared/admin-ui';
+import {
+  localPagination,
+  RefreshButton,
+  pageTitle as title,
+  useLoad,
+  type AnyRow,
+} from '../../shared/admin-ui';
 
 export function DictionariesPage() {
   const { message } = AntApp.useApp();
@@ -94,14 +100,17 @@ export function DictionariesPage() {
       {title(
         '数据字典',
         '维护下拉选项和展示文案；密钥与业务开关应放在服务配置中',
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setTypeEdit({})}>
-          新增字典类型
-        </Button>,
+        <Space wrap>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setTypeEdit({})}>
+            新增字典类型
+          </Button>
+        </Space>,
       )}
       <Row gutter={[16, 16]}>
         <Col xs={24} xl={9}>
-          <Card>
+          <Card title="字典类型" extra={<RefreshButton loading={loading} onClick={reload} />}>
             <Table
+              pagination={localPagination}
               scroll={{ x: 400 }}
               rowKey="id"
               loading={loading}
@@ -134,6 +143,7 @@ export function DictionariesPage() {
                   title: '操作',
                   render: (_, r) => (
                     <Button
+                      icon={<EditOutlined />}
                       type="link"
                       onClick={(e) => {
                         e.stopPropagation();
@@ -153,16 +163,20 @@ export function DictionariesPage() {
             title={selected ? `${selected.name} 字典项` : '请选择左侧字典'}
             extra={
               <Space wrap>
-                <Button icon={<ReloadOutlined />} disabled={!selected} onClick={reloadItems}>
-                  刷新
-                </Button>
-                <Button type="primary" disabled={!selected} onClick={() => setItemEdit({})}>
+                <RefreshButton disabled={!selected} onClick={reloadItems} loading={itemsLoading} />
+                <Button
+                  icon={<PlusOutlined />}
+                  type="primary"
+                  disabled={!selected}
+                  onClick={() => setItemEdit({})}
+                >
                   新增字典项
                 </Button>
               </Space>
             }
           >
             <Table
+              pagination={localPagination}
               scroll={{ x: 900 }}
               rowKey="id"
               dataSource={itemData?.items}
@@ -184,7 +198,7 @@ export function DictionariesPage() {
                 {
                   title: '操作',
                   render: (_, r) => (
-                    <Button type="link" onClick={() => setItemEdit(r)}>
+                    <Button icon={<EditOutlined />} type="link" onClick={() => setItemEdit(r)}>
                       编辑
                     </Button>
                   ),
@@ -233,7 +247,7 @@ export function DictionariesPage() {
             <Form.Item name="reason" label="操作原因" rules={[{ required: true }]}>
               <Input placeholder="说明新增或调整原因" />
             </Form.Item>
-            <Button type="primary" htmlType="submit" loading={saving}>
+            <Button icon={<SaveOutlined />} type="primary" htmlType="submit" loading={saving}>
               保存
             </Button>
           </Form>
@@ -294,7 +308,7 @@ export function DictionariesPage() {
             <Form.Item name="reason" label="操作原因" rules={[{ required: true }]}>
               <Input placeholder="说明新增或调整原因" />
             </Form.Item>
-            <Button type="primary" htmlType="submit" loading={saving}>
+            <Button icon={<SaveOutlined />} type="primary" htmlType="submit" loading={saving}>
               保存
             </Button>
           </Form>

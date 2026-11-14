@@ -1,3 +1,15 @@
+import { QueryFilter, ProFormText, ProFormSelect } from '@ant-design/pro-components';
+import {
+  CloseOutlined,
+  SaveOutlined,
+  CheckOutlined,
+  PlusOutlined,
+  EditOutlined,
+  StopOutlined,
+  CheckCircleOutlined,
+  ReloadOutlined,
+  PlayCircleOutlined,
+} from '@ant-design/icons';
 import { useEffect, useRef, useState } from 'react';
 import {
   Alert,
@@ -16,7 +28,13 @@ import {
 } from 'antd';
 import { api, json } from '../../api';
 import { reportError } from '../../error-feedback';
-import { pageTitle } from '../../shared/admin-ui';
+import {
+  useCompactQueryLayout,
+  queryActions,
+  localPagination,
+  RefreshButton,
+  pageTitle,
+} from '../../shared/admin-ui';
 
 type RoleType = {
   language: string;
@@ -39,6 +57,7 @@ const voiceKey = (voice: Voice) => JSON.stringify([voice.model, voice.id]);
 const statuses = { draft: '草稿', published: '已启用', offline: '未启用' };
 
 export function RoleTypesPage() {
+  const queryLayout = useCompactQueryLayout(['wide', 'language', 'language']);
   const { message } = AntApp.useApp();
   const [items, setItems] = useState<RoleType[]>([]),
     [voices, setVoices] = useState<Voice[]>([]),
@@ -49,6 +68,8 @@ export function RoleTypesPage() {
     [busy, setBusy] = useState(false),
     [query, setQuery] = useState(''),
     [language, setLanguage] = useState(''),
+    [status, setStatus] = useState(''),
+    [page, setPage] = useState(1),
     [statusTarget, setStatusTarget] = useState<RoleType>(),
     [reason, setReason] = useState(''),
     [playing, setPlaying] = useState(false);
@@ -126,6 +147,8 @@ export function RoleTypesPage() {
       Modal.confirm({
         title: '放弃未保存的修改？',
         okText: '放弃修改',
+        okButtonProps: { icon: <CloseOutlined /> },
+        cancelButtonProps: { icon: <EditOutlined /> },
         cancelText: '继续编辑',
         onOk: () => {
           stop();
@@ -230,10 +253,8 @@ export function RoleTypesPage() {
         'AI 角色类型',
         '维护用户创建角色时使用的类型名称、音色和默认提示词。',
         <Space wrap>
-          <Button onClick={() => void load()} disabled={busy || loading}>
-            刷新
-          </Button>
-          <Button type="primary" disabled={busy} onClick={() => edit()}>
+          <RefreshButton onClick={() => void load()} disabled={busy || loading} loading={loading} />
+          <Button icon={<PlusOutlined />} type="primary" disabled={busy} onClick={() => edit()}>
             新增角色类型
           </Button>
         </Space>,
@@ -249,26 +270,43 @@ export function RoleTypesPage() {
           {items.filter((item) => !item.voice_id).length} 个 · 缺少提示词{' '}
           {items.filter((item) => !item.prompt.trim()).length} 个
         </Typography.Paragraph>
-        <Select
-          aria-label="筛选语言"
-          value={language}
-          onChange={setLanguage}
-          style={{ width: 150, marginRight: 12 }}
-          options={[
-            { value: '', label: '全部语言' },
-            ...Array.from(new Set(items.map((item) => item.language)))
+        <QueryFilter
+          {...queryLayout}
+          name="role-types-query"
+          submitter={queryActions(loading)}
+          onFinish={async (values) => {
+            setQuery(values.keyword?.trim() || '');
+            setLanguage(values.language || '');
+            setStatus(values.status || '');
+            setPage(1);
+          }}
+          onReset={() => {
+            setQuery('');
+            setLanguage('');
+            setStatus('');
+            setPage(1);
+          }}
+        >
+          <ProFormText name="keyword" label="角色 / 音色" placeholder="类型名称、音色 ID 或模型" />
+          <ProFormSelect
+            width={112}
+            name="language"
+            label="语言"
+            placeholder="全部语言"
+            options={Array.from(new Set(items.map((item) => item.language)))
               .sort()
-              .map((value) => ({ value, label: value === 'zh' ? '中文' : value })),
-          ]}
-        />
-        <Input.Search
-          aria-label="搜索角色类型"
-          placeholder="搜索角色类型"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          style={{ maxWidth: 320, marginBottom: 20 }}
-        />
+              .map((value) => ({ value, label: value === 'zh' ? '中文' : value }))}
+          />
+          <ProFormSelect
+            width={112}
+            name="status"
+            label="状态"
+            placeholder="全部状态"
+            options={Object.entries(statuses).map(([value, label]) => ({ value, label }))}
+          />
+        </QueryFilter>
         <Table<RoleType>
+          locale={{ emptyText: '没有符合条件的角色类型' }}
           rowKey="id"
           loading={loading}
           scroll={{ x: 900 }}
@@ -276,15 +314,21 @@ export function RoleTypesPage() {
             .filter(
               (item) =>
                 (!language || item.language === language) &&
+                (!status || item.status === status) &&
                 [item.name, item.voice_id, item.voice_model].some((value) =>
                   value.toLowerCase().includes(query.toLowerCase()),
                 ),
             )
             .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name))}
-          pagination={{ pageSize: 20, showSizeChanger: false }}
+          pagination={{ ...localPagination, current: page, onChange: setPage }}
           columns={[
             { title: '角色类型名称', dataIndex: 'name', width: 170 },
-            { title: '语言', dataIndex: 'language', width: 70 },
+            {
+              title: '语言',
+              dataIndex: 'language',
+              width: 70,
+              render: (value) => (value === 'zh' ? '中文' : value || '—'),
+            },
             {
               title: '角色音色',
               dataIndex: 'voice_id',
@@ -329,10 +373,17 @@ export function RoleTypesPage() {
               width: 170,
               render: (_, item) => (
                 <Space wrap>
-                  <Button disabled={busy} onClick={() => edit(item)}>
+                  <Button
+                    type="link"
+                    icon={<EditOutlined />}
+                    disabled={busy}
+                    onClick={() => edit(item)}
+                  >
                     编辑
                   </Button>
                   <Button
+                    type="link"
+                    icon={item.status === 'published' ? <StopOutlined /> : <CheckCircleOutlined />}
                     disabled={
                       busy ||
                       ((!item.voice_id || !item.prompt.trim() || !supported(item.voice_model)) &&
@@ -361,9 +412,10 @@ export function RoleTypesPage() {
         onCancel={() => void close()}
         onOk={() => void save()}
         confirmLoading={busy}
-        cancelButtonProps={{ disabled: busy }}
+        cancelButtonProps={{ disabled: busy, icon: <CloseOutlined /> }}
         closable={!busy}
         maskClosable={false}
+        okButtonProps={{ icon: <SaveOutlined /> }}
         okText="保存类型"
         cancelText="取消"
         width={720}
@@ -390,7 +442,11 @@ export function RoleTypesPage() {
             <Alert
               type="warning"
               message="音色列表暂不可用，已有音色和提示词仍可编辑保存。"
-              action={<Button onClick={() => void loadVoices()}>重试</Button>}
+              action={
+                <Button icon={<ReloadOutlined />} onClick={() => void loadVoices()}>
+                  重试
+                </Button>
+              }
               style={{ marginBottom: 16 }}
             />
           )}
@@ -444,6 +500,7 @@ export function RoleTypesPage() {
             />
           </Form.Item>
           <Button
+            icon={playing ? <StopOutlined /> : <PlayCircleOutlined />}
             disabled={busy || !voice?.sample_url}
             onClick={() => void preview()}
             className="role-type-preview-button"
@@ -495,8 +552,8 @@ export function RoleTypesPage() {
         }}
         onOk={() => void changeStatus()}
         confirmLoading={busy}
-        okButtonProps={{ disabled: !reason.trim() }}
-        cancelButtonProps={{ disabled: busy }}
+        okButtonProps={{ disabled: !reason.trim(), icon: <CheckOutlined /> }}
+        cancelButtonProps={{ disabled: busy, icon: <CloseOutlined /> }}
         closable={!busy}
         okText="确认"
         cancelText="取消"

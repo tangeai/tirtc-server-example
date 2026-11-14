@@ -1,13 +1,15 @@
-import { PageContainer } from '@ant-design/pro-components';
+import { type QueryFilterProps, PageContainer } from '@ant-design/pro-components';
 import {
   useCallback,
   useEffect,
   useRef,
   useState,
+  type CSSProperties,
   type DependencyList,
   type ReactNode,
 } from 'react';
-import { Alert, Form, Input, Tag, Typography } from 'antd';
+import { Button, Grid, Tag, Typography } from 'antd';
+import { ReloadOutlined, SearchOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { reportError } from '../error-feedback';
 
@@ -56,6 +58,81 @@ export function useLoad<T>(
   return [data, loading, load];
 }
 
+const queryFieldWidths = {
+  text: 244,
+  wide: 280,
+  status: 188,
+  language: 160,
+  number: 216,
+  date: 332,
+};
+
+// Widths include the label and column gap; controls wrap instead of stretching.
+export function useCompactQueryLayout(fields: (keyof typeof queryFieldWidths)[]) {
+  const screens = Grid.useBreakpoint();
+  const style: CSSProperties = {
+    padding: 0,
+    ...Object.fromEntries(
+      fields.map((field, index) => [`--query-width-${index + 1}`, `${queryFieldWidths[field]}px`]),
+    ),
+  };
+  return {
+    className: 'compact-query',
+    layout: screens.sm ? 'horizontal' : 'vertical',
+    labelWidth: 'auto',
+    span: 6,
+    searchGutter: 12,
+    defaultCollapsed: false,
+    collapseRender: false,
+    style,
+  } satisfies QueryFilterProps;
+}
+
+export const queryActions = (loading = false) => ({
+  searchConfig: { submitText: '查询', resetText: '重置' },
+  submitButtonProps: { icon: <SearchOutlined />, loading, disabled: loading },
+  resetButtonProps: { icon: <ReloadOutlined />, disabled: loading },
+});
+
+export const localPagination = {
+  defaultPageSize: 20,
+  showSizeChanger: false,
+  showTotal: (total: number) => `共 ${total} 条`,
+};
+
+export const confirmationActions = {
+  okText: '确认',
+  cancelText: '取消',
+  okButtonProps: { icon: <CheckOutlined /> },
+  cancelButtonProps: { icon: <CloseOutlined /> },
+};
+
+// Page actions belong in the page header; independent panels own their refresh action.
+// Refresh keeps the current query, sorting and pagination. Loading prevents repeat clicks.
+export function RefreshButton({
+  loading,
+  onClick,
+  disabled = false,
+  label = '刷新',
+}: {
+  loading: boolean;
+  onClick: () => void;
+  disabled?: boolean;
+  label?: string;
+}) {
+  return (
+    <Button
+      icon={<ReloadOutlined />}
+      loading={loading}
+      disabled={disabled || loading}
+      aria-label={label}
+      onClick={onClick}
+    >
+      刷新
+    </Button>
+  );
+}
+
 export const pageTitle = (name: string, description: string, action?: ReactNode) => (
   <PageContainer
     className="admin-page-header"
@@ -82,40 +159,6 @@ export const formatTime = (value: unknown) => {
   const parsed = dayjs(String(value));
   return !parsed.isValid() || parsed.year() < 2000 ? '—' : parsed.format('YYYY-MM-DD HH:mm:ss');
 };
-
-type StepUpFieldsProps = {
-  alert?: boolean;
-  alertType?: 'info' | 'warning';
-  message?: ReactNode;
-  description?: ReactNode;
-};
-
-export function StepUpFields({
-  alert = false,
-  alertType = 'warning',
-  message = '高风险操作，需要验证当前操作者身份',
-  description,
-}: StepUpFieldsProps) {
-  return (
-    <>
-      {alert && (
-        <Alert
-          className="form-alert"
-          type={alertType}
-          showIcon
-          message={message}
-          description={description}
-        />
-      )}
-      <Form.Item name="current_mfa_code" label="当前管理员的身份验证器验证码（6 位）">
-        <Input maxLength={6} inputMode="numeric" autoComplete="one-time-code" />
-      </Form.Item>
-      <Form.Item name="current_recovery_code" label="或使用当前管理员的恢复码">
-        <Input autoComplete="one-time-code" />
-      </Form.Item>
-    </>
-  );
-}
 
 export function ServiceVersion({ version, commit }: { version?: string; commit?: string }) {
   const legacyCommit = /^[a-f0-9]{7,40}(?:-dirty)?$/i.test(version || '');

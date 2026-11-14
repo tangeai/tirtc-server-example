@@ -1,18 +1,7 @@
-import {
-  Button,
-  Card,
-  Col,
-  Collapse,
-  Descriptions,
-  Empty,
-  Row,
-  Space,
-  Statistic,
-  Table,
-} from 'antd';
-import { ReloadOutlined } from '@ant-design/icons';
+import { Card, Col, Collapse, Descriptions, Empty, Row, Space, Statistic, Table } from 'antd';
 import { api } from '../api';
 import {
+  RefreshButton,
   formatTime,
   ServiceVersion,
   pageTitle as title,
@@ -33,9 +22,7 @@ export function OverviewPage() {
       {title(
         '数据概览',
         '业务指标与各服务的跨主机实例状态',
-        <Button icon={<ReloadOutlined />} onClick={reload}>
-          刷新
-        </Button>,
+        <RefreshButton onClick={reload} loading={loading} />,
       )}
       <Row gutter={[16, 16]} className="form-alert">
         {[

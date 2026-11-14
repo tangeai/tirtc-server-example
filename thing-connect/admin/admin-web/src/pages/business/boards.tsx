@@ -24,12 +24,22 @@ import {
   CopyOutlined,
   EditOutlined,
   PlusOutlined,
-  ReloadOutlined,
   UploadOutlined,
+  ArrowDownOutlined,
+  CloudUploadOutlined,
+  DeleteOutlined,
+  SaveOutlined,
+  CloseOutlined,
 } from '@ant-design/icons';
 import { api, json } from '../../api';
 import { reportError } from '../../error-feedback';
-import { formatTime, pageTitle, useLoad } from '../../shared/admin-ui';
+import {
+  confirmationActions,
+  RefreshButton,
+  formatTime,
+  pageTitle,
+  useLoad,
+} from '../../shared/admin-ui';
 
 type Board = {
   id: string;
@@ -215,9 +225,7 @@ export function BoardsPage() {
         '开发板管理',
         '配置官网开发板目录、详情及固件等相关资源',
         <Space wrap>
-          <Button icon={<ReloadOutlined />} onClick={reload}>
-            刷新
-          </Button>
+          <RefreshButton onClick={reload} loading={loading} />
           <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>
             新增开发板
           </Button>
@@ -240,7 +248,7 @@ export function BoardsPage() {
           scroll={{ x: 1050 }}
           pagination={{
             defaultPageSize: 20,
-            showSizeChanger: true,
+            showSizeChanger: false,
             showTotal: (total) => `共 ${total} 款开发板`,
           }}
           columns={[
@@ -288,26 +296,31 @@ export function BoardsPage() {
               width: 260,
               render: (_, row) => (
                 <Space size="small" wrap>
-                  <Button size="small" icon={<EditOutlined />} onClick={() => openEditor(row)}>
+                  <Button type="link" icon={<EditOutlined />} onClick={() => openEditor(row)}>
                     编辑
                   </Button>
-                  <Button size="small" icon={<CopyOutlined />} onClick={() => copy(row)}>
+                  <Button type="link" icon={<CopyOutlined />} onClick={() => copy(row)}>
                     复制
                   </Button>
                   {row.publish_status === 'published' ? (
-                    <Button size="small" onClick={() => updateStatus(row, 'offline')}>
+                    <Button
+                      icon={<ArrowDownOutlined />}
+                      type="link"
+                      onClick={() => updateStatus(row, 'offline')}
+                    >
                       下架
                     </Button>
                   ) : (
                     <Button
-                      size="small"
-                      type="primary"
+                      icon={<CloudUploadOutlined />}
+                      type="link"
                       onClick={() => updateStatus(row, 'published')}
                     >
                       上架
                     </Button>
                   )}
                   <Popconfirm
+                    {...confirmationActions}
                     title="删除后无法恢复，确定删除？"
                     onConfirm={() =>
                       mutate(
@@ -318,7 +331,7 @@ export function BoardsPage() {
                       )
                     }
                   >
-                    <Button size="small" danger>
+                    <Button icon={<DeleteOutlined />} type="link" danger>
                       删除
                     </Button>
                   </Popconfirm>
@@ -471,10 +484,12 @@ export function BoardsPage() {
             </Col>
           </Row>
           <Space wrap>
-            <Button type="primary" htmlType="submit" loading={saving}>
+            <Button icon={<SaveOutlined />} type="primary" htmlType="submit" loading={saving}>
               保存
             </Button>
-            <Button onClick={() => setEditing(undefined)}>取消</Button>
+            <Button icon={<CloseOutlined />} onClick={() => setEditing(undefined)}>
+              取消
+            </Button>
           </Space>
         </Form>
       </Modal>

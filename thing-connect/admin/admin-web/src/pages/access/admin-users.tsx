@@ -7,25 +7,35 @@ import {
   Form,
   Input,
   Modal,
-  Select,
+  TreeSelect,
   Space,
   Switch,
   Table,
   Tag,
   App as AntApp,
 } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import {
+  PlusOutlined,
+  EditOutlined,
+  EyeOutlined,
+  StopOutlined,
+  ReloadOutlined,
+  SaveOutlined,
+  CheckOutlined,
+} from '@ant-design/icons';
 import { api, json } from '../../api';
 import { reportError } from '../../error-feedback';
 import { ADMIN_PASSWORD_POLICY_MESSAGE, validateAdminPassword } from '../../password-policy';
 import {
-  StepUpFields,
+  RefreshButton,
   formatTime,
   pageTitle as title,
   useLoad,
   type AnyRow,
   type PageData,
 } from '../../shared/admin-ui';
+
+import { hierarchy, type HierarchyRow } from './hierarchy';
 
 export function AdminUsersPage() {
   const { message } = AntApp.useApp();
@@ -36,7 +46,7 @@ export function AdminUsersPage() {
     () => api<PageData>(`/admin-users?page=${page}&page_size=20`),
     [page],
   );
-  const [roleData] = useLoad(() => api<{ items: AnyRow[] }>('/roles'), []);
+  const [roleData] = useLoad(() => api<{ items: (AnyRow & HierarchyRow)[] }>('/roles'), []);
   const [editing, setEditing] = useState<AnyRow | null>(null);
   const [sensitive, setSensitive] = useState<{ type: 'sessions' | 'mfa'; row: AnyRow } | null>(
     null,
@@ -61,8 +71,6 @@ export function AdminUsersPage() {
         remark: v.remark || '',
         role_ids: v.role_ids || [],
         reason: v.reason,
-        current_mfa_code: v.current_mfa_code || '',
-        current_recovery_code: v.current_recovery_code || '',
       };
       if (editing?.id) await api(`/admin-users/${editing.id}`, json('PUT', body));
       else await api('/admin-users', json('POST', body));
@@ -88,8 +96,6 @@ export function AdminUsersPage() {
         path,
         json('POST', {
           reason: v.reason,
-          current_mfa_code: v.current_mfa_code,
-          current_recovery_code: v.current_recovery_code,
         }),
       );
       message.success(sensitive.type === 'sessions' ? '会话已撤销' : '双重验证已重置');
@@ -120,9 +126,12 @@ export function AdminUsersPage() {
       {title(
         '管理员',
         '管理员账号、角色、双重验证与登录会话',
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setEditing({})}>
-          新增管理员
-        </Button>,
+        <Space wrap>
+          <RefreshButton loading={loading} onClick={reload} />
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setEditing({})}>
+            新增管理员
+          </Button>
+        </Space>,
       )}
       <Card>
         <Table
@@ -175,17 +184,22 @@ export function AdminUsersPage() {
               title: '操作',
               render: (_, r) => (
                 <Space wrap>
-                  <Button type="link" onClick={() => setEditing(r)}>
+                  <Button icon={<EditOutlined />} type="link" onClick={() => setEditing(r)}>
                     编辑
                   </Button>
-                  <Button type="link" onClick={() => openSessions(r)}>
+                  <Button icon={<EyeOutlined />} type="link" onClick={() => openSessions(r)}>
                     查看会话
                   </Button>
-                  <Button type="link" onClick={() => setSensitive({ type: 'sessions', row: r })}>
+                  <Button
+                    icon={<StopOutlined />}
+                    type="link"
+                    onClick={() => setSensitive({ type: 'sessions', row: r })}
+                  >
                     撤销会话
                   </Button>
                   {r.mfa_enabled ? (
                     <Button
+                      icon={<ReloadOutlined />}
                       danger
                       type="link"
                       onClick={() => setSensitive({ type: 'mfa', row: r })}
@@ -247,13 +261,30 @@ export function AdminUsersPage() {
             <Form.Item
               name="role_ids"
               label="角色"
+              extra="层级表示角色继承。选择子角色会继承启用的上级角色权限与菜单，不会自动分配其他子角色。"
+              getValueProps={(ids: number[] = []) => ({
+                value: ids.map((value) => ({
+                  value,
+                  label: roleData?.items.find((row) => row.id === value)?.name || `角色 #${value}`,
+                })),
+              })}
+              getValueFromEvent={(values: { value: number }[]) => values.map((item) => item.value)}
               rules={[{ required: true, type: 'array', min: 1, message: '请至少选择一个角色' }]}
             >
-              <Select
-                mode="multiple"
-                options={roleData?.items
-                  .filter((r) => r.status === 1)
-                  .map((r) => ({ label: r.name, value: r.id }))}
+              <TreeSelect
+                treeCheckable
+                treeCheckStrictly
+                treeDefaultExpandAll
+                showSearch
+                treeNodeFilterProp="title"
+                treeData={hierarchy(roleData?.items || []).map(function option(row): any {
+                  return {
+                    value: row.id,
+                    title: `${row.name}${row.status === 1 ? '' : '（停用）'}`,
+                    disabled: row.status !== 1,
+                    children: row.children?.map(option),
+                  };
+                })}
               />
             </Form.Item>
             <Form.Item name="enabled" label="启用账号" valuePropName="checked">
@@ -269,11 +300,10 @@ export function AdminUsersPage() {
             <Form.Item name="remark" label="备注">
               <Input />
             </Form.Item>
-            <StepUpFields />
             <Form.Item name="reason" label="操作原因" rules={[{ required: true }]}>
               <Input placeholder="说明新增或修改原因" />
             </Form.Item>
-            <Button type="primary" htmlType="submit" loading={saving}>
+            <Button icon={<SaveOutlined />} type="primary" htmlType="submit" loading={saving}>
               保存
             </Button>
           </Form>
@@ -288,11 +318,16 @@ export function AdminUsersPage() {
       >
         {sensitive && (
           <Form name="admin-users-2" layout="vertical" onFinish={runSensitive}>
-            <StepUpFields alert />
             <Form.Item name="reason" label="操作原因" rules={[{ required: true }]}>
               <Input placeholder="说明执行原因" />
             </Form.Item>
-            <Button danger type="primary" htmlType="submit" loading={saving}>
+            <Button
+              icon={<CheckOutlined />}
+              danger
+              type="primary"
+              htmlType="submit"
+              loading={saving}
+            >
               确认执行
             </Button>
           </Form>

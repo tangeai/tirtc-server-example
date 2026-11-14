@@ -12,10 +12,16 @@ import {
   Tag,
   App as AntApp,
 } from 'antd';
-import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, CloudUploadOutlined } from '@ant-design/icons';
 import { api, json } from '../../api';
 import { reportError } from '../../error-feedback';
-import { pageTitle as title, useLoad, type AnyRow } from '../../shared/admin-ui';
+import {
+  localPagination,
+  RefreshButton,
+  pageTitle as title,
+  useLoad,
+  type AnyRow,
+} from '../../shared/admin-ui';
 import { voipConfigStatusNames } from '../../shared/admin-metadata';
 import { ConfigPage, ServicePanel, type ConfigEntry } from './config-page';
 
@@ -28,7 +34,7 @@ export function VoIPPage() {
     () => api<{ items: AnyRow[]; revision: number }>('/voip/apps'),
     [],
   );
-  const [entries, , reloadEntries] = useLoad(
+  const [entries, entriesLoading, reloadEntries] = useLoad(
     () => api<{ items: ConfigEntry[] }>('/configs?namespace=voip-server'),
     [],
   );
@@ -98,19 +104,17 @@ export function VoIPPage() {
       <Card
         title="微信小程序"
         extra={
-          <Button
-            icon={<ReloadOutlined />}
-            loading={appsLoading}
+          <RefreshButton
+            loading={appsLoading || entriesLoading}
             onClick={() => {
               reloadApps();
               reloadEntries();
             }}
-          >
-            刷新
-          </Button>
+          />
         }
       >
         <Table
+          pagination={localPagination}
           rowKey="app_id"
           loading={appsLoading}
           dataSource={apps?.items}
@@ -135,7 +139,12 @@ export function VoIPPage() {
             {
               title: '操作',
               render: (_, app) => (
-                <Button type="link" disabled={!canWrite} onClick={() => setAppEdit(app)}>
+                <Button
+                  icon={<EditOutlined />}
+                  type="link"
+                  disabled={!canWrite}
+                  onClick={() => setAppEdit(app)}
+                >
                   编辑
                 </Button>
               ),
@@ -208,7 +217,12 @@ export function VoIPPage() {
             <Form.Item name="reason" label="发布原因" rules={[{ required: true }]}>
               <Input placeholder="说明新增或修改原因" />
             </Form.Item>
-            <Button type="primary" htmlType="submit" loading={saving}>
+            <Button
+              icon={<CloudUploadOutlined />}
+              type="primary"
+              htmlType="submit"
+              loading={saving}
+            >
               校验并发布
             </Button>
           </Form>

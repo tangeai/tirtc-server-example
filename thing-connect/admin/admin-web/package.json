@@ -10,10 +10,11 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "test": "node --experimental-strip-types --test src/api-client.test.ts src/error-feedback.test.ts src/password-policy.test.ts src/setup.test.ts src/pages/configuration/config-status.test.ts",
-    "check": "npm run format:check && npm test && npm run build",
-    "format": "prettier --write src vite.config.ts",
-    "format:check": "prettier --check src vite.config.ts"
+    "test": "node --experimental-strip-types --test src/api-client.test.ts src/error-feedback.test.ts src/password-policy.test.ts src/setup.test.ts src/pages/configuration/config-status.test.ts src/pages/access/hierarchy.test.ts",
+    "check": "npm run format:check && npm run check:ui && npm test && npm run build",
+    "format": "prettier --write src scripts vite.config.ts",
+    "format:check": "prettier --check src scripts vite.config.ts",
+    "check:ui": "node --test scripts/check-ui.test.mjs && node scripts/check-ui.mjs"
   },
   "dependencies": {
     "@ant-design/icons": "5.6.1",
