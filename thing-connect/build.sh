@@ -55,14 +55,13 @@ if contains_service admin-server; then
     npm --prefix admin/admin-web run build
 fi
 
-# A clean, exactly tagged release keeps its release name. Other builds use a
-# single UTC timestamp for the whole batch; process start time is unrelated.
+# A clean, exactly tagged release keeps its release name; later commits name
+# the nearest tag, e.g. v1.1.0-beta.1-3-g946320b, plus -dirty for local edits.
+# Without any tag the batch uses one UTC timestamp; process start is unrelated.
 version="${BUILD_VERSION:-}"
 if [ -z "$version" ]; then
-    version="$(git describe --tags --exact-match --dirty 2>/dev/null || true)"
-    case "$version" in
-        ""|*-dirty) version="$(date -u +%Y-%m-%dT%H:%M:%SZ)" ;;
-    esac
+    version="$(git describe --tags --dirty 2>/dev/null || true)"
+    [ -n "$version" ] || version="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 fi
 commit="${BUILD_COMMIT:-$(git rev-parse --short HEAD 2>/dev/null || printf 'unknown')}"
 ldflags="-s -w -X thing-connect/internal/servicestatus.BuildVersion=$version -X thing-connect/internal/servicestatus.BuildCommit=$commit"
