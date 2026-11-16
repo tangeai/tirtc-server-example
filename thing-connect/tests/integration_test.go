@@ -170,6 +170,7 @@ func doPost(t *testing.T, url, jwt string, body any) *apiResp {
 
 type apiResp struct {
 	HTTPStatus int
+	Header     http.Header     `json:"-"`
 	Code       int             `json:"code"`
 	Msg        string          `json:"msg"`
 	Data       json.RawMessage `json:"data"`
@@ -188,6 +189,7 @@ func parseResp(t *testing.T, resp *http.Response) *apiResp {
 		t.Fatalf("parse json: %v  raw: %s", err, body)
 	}
 	r.HTTPStatus = resp.StatusCode
+	r.Header = resp.Header
 	return &r
 }
 
@@ -411,6 +413,50 @@ func TestBindCodeNotFound(t *testing.T) {
 	r := s.usrPOST(t, "/v1/user/device/bind", tok, map[string]string{"code": "000000"})
 	if r.Code != 4002 {
 		t.Errorf("bind nonexistent code: want 4002, got %d  msg=%s", r.Code, r.Msg)
+	}
+}
+
+func TestBindFailuresStartSharedPerUserCooldown(t *testing.T) {
+	s := newSuite(t)
+	email := uniqueEmail()
+	seedCode(t, s.rdb, email, "123456")
+	tok := dataString(t, s.usrPOST(t, "/v1/user/register", "", map[string]string{"email": email, "password": "pass1234", "code": "123456"}), "token")
+	var userID int64
+	if err := s.sqlDB.QueryRow(`SELECT id FROM users WHERE email=?`, email).Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		tag := fmt.Sprintf("bind_attempt:{%d}", userID)
+		s.rdb.Del(context.Background(), tag+":count", tag+":lock")
+	})
+	for i := 1; i < 9; i++ {
+		if r := s.usrPOST(t, "/v1/user/device/bind", tok, map[string]string{"code": "000000"}); r.Code != 4002 {
+			t.Fatalf("failure %d: want 4002, got %d %s", i, r.Code, r.Msg)
+		}
+	}
+	if r := s.usrPOST(t, "/v1/user/device/bind-by-id", tok, map[string]string{"device_id": "NOT_IN_POOL_1"}); r.Code != 4040 {
+		t.Fatalf("failure 9: want 4040, got %d %s", r.Code, r.Msg)
+	}
+	attempts := []func() *apiResp{
+		func() *apiResp {
+			return s.usrPOST(t, "/v1/user/device/bind-by-id", tok, map[string]string{"device_id": "NOT_IN_POOL_2"})
+		},
+		func() *apiResp { return s.usrPOST(t, "/v1/user/device/bind", tok, map[string]string{"code": "000000"}) },
+	}
+	for i, attempt := range attempts {
+		r := attempt()
+		if r.HTTPStatus != 429 || r.Code != 429 || r.Msg != "绑定失败次数过多，请 60 分钟后重试" {
+			t.Fatalf("attempt %d: HTTP %d code %d msg %s", i, r.HTTPStatus, r.Code, r.Msg)
+		}
+		if retry, err := strconv.Atoi(r.Header.Get("Retry-After")); err != nil || retry <= 3500 || retry > 3600 {
+			t.Fatalf("attempt %d: Retry-After=%q", i, r.Header.Get("Retry-After"))
+		}
+	}
+	otherEmail := uniqueEmail()
+	seedCode(t, s.rdb, otherEmail, "123456")
+	other := dataString(t, s.usrPOST(t, "/v1/user/register", "", map[string]string{"email": otherEmail, "password": "pass1234", "code": "123456"}), "token")
+	if r := s.usrPOST(t, "/v1/user/device/bind", other, map[string]string{"code": "000000"}); r.Code != 4002 {
+		t.Fatalf("other user: want 4002, got %d %s", r.Code, r.Msg)
 	}
 }
 

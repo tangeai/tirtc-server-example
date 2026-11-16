@@ -22,18 +22,63 @@ type MQTTPublisher interface {
 	PublishAndWaitACK(downTopic, ackTopic string, payload any, timeout time.Duration) error
 }
 
-// BindService handles device binding and reset.
-type BindService struct {
-	bind  store.BindStore
-	cache store.CacheStore
-	mqtt  MQTTPublisher // nil = no MQTT (test / offline mode)
-	cfg   atomic.Value
+// BindAttempts bounds binding-code guesses per user. *bindlimit.Limiter
+// satisfies this interface.
+type BindAttempts interface {
+	Verify(ctx context.Context, userID int64, check func() error, counts func(error) bool) error
 }
 
-func NewBindService(bind store.BindStore, cache store.CacheStore, mqtt MQTTPublisher, cfg ServiceConfig) *BindService {
-	service := &BindService{bind: bind, cache: cache, mqtt: mqtt}
+// BindService handles device binding and reset.
+type BindService struct {
+	bind     store.BindStore
+	cache    store.CacheStore
+	mqtt     MQTTPublisher // nil = no MQTT (test / offline mode)
+	attempts BindAttempts
+	cfg      atomic.Value
+}
+
+func NewBindService(bind store.BindStore, cache store.CacheStore, mqtt MQTTPublisher, attempts BindAttempts, cfg ServiceConfig) *BindService {
+	if attempts == nil {
+		panic("service: bind attempt limiter is required")
+	}
+	service := &BindService{bind: bind, cache: cache, mqtt: mqtt, attempts: attempts}
 	service.cfg.Store(cfg)
 	return service
+}
+
+type bindCodeRecord struct {
+	Code         string `json:"code"`
+	TempToken    string `json:"temp_token"`
+	PhysicalID   string `json:"physical_id"`
+	DeviceID     string `json:"device_id"` // set only for pre-flashed devices
+	TempClientID string `json:"temp_client_id"`
+}
+
+// resolveCode returns ErrCodeExpired for every unknown, expired or mismatched
+// code; only that outcome counts as a failed guess.
+func (s *BindService) resolveCode(ctx context.Context, code string) (string, bindCodeRecord, error) {
+	var vdata bindCodeRecord
+	physHash, err := s.cache.GetDeviceCodeLookup(ctx, code)
+	if err != nil {
+		return "", vdata, fmt.Errorf("service.Bind GetDeviceCodeLookup: %w", err)
+	}
+	if physHash == "" {
+		return "", vdata, ErrCodeExpired
+	}
+	raw, err := s.cache.GetVerifyRecord(ctx, physHash)
+	if err != nil {
+		return "", vdata, fmt.Errorf("service.Bind GetVerifyRecord: %w", err)
+	}
+	if raw == nil {
+		return "", vdata, ErrCodeExpired
+	}
+	if err := json.Unmarshal(raw, &vdata); err != nil {
+		return "", vdata, fmt.Errorf("service.Bind unmarshal verify: %w", err)
+	}
+	if vdata.Code != code {
+		return "", vdata, ErrCodeExpired
+	}
+	return physHash, vdata, nil
 }
 
 func (s *BindService) Config() ServiceConfig          { return s.cfg.Load().(ServiceConfig) }
@@ -42,35 +87,15 @@ func (s *BindService) UpdateConfig(cfg ServiceConfig) { s.cfg.Store(cfg) }
 // Bind processes a scan-code flow (no device_id).
 // Implements cases B, D, A from design §3.1.
 func (s *BindService) Bind(ctx context.Context, userID int64, code string) (string, error) {
-	// Step 1: code → physHash
-	physHash, err := s.cache.GetDeviceCodeLookup(ctx, code)
+	var physHash string
+	var vdata bindCodeRecord
+	err := s.attempts.Verify(ctx, userID, func() error {
+		var err error
+		physHash, vdata, err = s.resolveCode(ctx, code)
+		return err
+	}, func(err error) bool { return errors.Is(err, ErrCodeExpired) })
 	if err != nil {
-		return "", fmt.Errorf("service.Bind GetDeviceCodeLookup: %w", err)
-	}
-	if physHash == "" {
-		return "", ErrCodeExpired
-	}
-
-	// Step 2: physHash → verify record
-	raw, err := s.cache.GetVerifyRecord(ctx, physHash)
-	if err != nil {
-		return "", fmt.Errorf("service.Bind GetVerifyRecord: %w", err)
-	}
-	if raw == nil {
-		return "", ErrCodeExpired
-	}
-	var vdata struct {
-		Code         string `json:"code"`
-		TempToken    string `json:"temp_token"`
-		PhysicalID   string `json:"physical_id"`
-		DeviceID     string `json:"device_id"`      // set only for pre-flashed devices
-		TempClientID string `json:"temp_client_id"` // mac_{MAC} or mac_{code}
-	}
-	if err := json.Unmarshal(raw, &vdata); err != nil {
-		return "", fmt.Errorf("service.Bind unmarshal verify: %w", err)
-	}
-	if vdata.Code != code {
-		return "", ErrCodeExpired
+		return "", err
 	}
 	// TRACE: log full verify record to see actual device_id and physical_id
 	slog.InfoContext(ctx, "Bind verify record trace",
@@ -203,8 +228,30 @@ func (s *BindService) bindByDeviceIDNoNotify(ctx context.Context, userID int64, 
 	return s.bindByDeviceIDInternal(ctx, userID, deviceID, fp, false)
 }
 
+// BindByDeviceID shares the per-user failure budget with code binding because
+// sequential device IDs can be probed for devices currently in pairing mode.
 func (s *BindService) BindByDeviceID(ctx context.Context, userID int64, deviceID string, fp model.Fingerprint) error {
-	return s.bindByDeviceIDInternal(ctx, userID, deviceID, fp, true)
+	return s.attempts.Verify(ctx, userID, func() error {
+		return s.bindByDeviceIDInternal(ctx, userID, deviceID, fp, true)
+	}, countsAsBindByIDProbe)
+}
+
+// countsAsBindByIDProbe excludes a dropped temporary connection so a genuine
+// owner can retry after the device reconnects.
+func countsAsBindByIDProbe(err error) bool {
+	for _, target := range []error{
+		ErrDeviceNotFound,
+		ErrDeviceReportProofMissing,
+		ErrDevicePendingBindMissing,
+		ErrBoundByOther,
+		ErrCloneConflict,
+		ErrFingerprintMismatch,
+	} {
+		if errors.Is(err, target) {
+			return true
+		}
+	}
+	return false
 }
 
 // requireDeviceOnline checks that deviceID has proven identity via a signed

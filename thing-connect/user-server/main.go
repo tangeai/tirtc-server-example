@@ -16,6 +16,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"thing-connect/internal/bindlimit"
 	"thing-connect/internal/boardcatalog"
 	"thing-connect/internal/cache"
 	captchapkg "thing-connect/internal/captcha"
@@ -96,12 +97,30 @@ func main() {
 	passwordResetMailQueue := service.NewInMemoryPasswordResetEmailQueue(userSvc.DeliverPasswordResetCode)
 	userSvc.SetPasswordResetEmailQueue(passwordResetMailQueue)
 
-	bindSvc := service.NewBindService(bindStore, cacheStore, broker, svcCfg)
+	bindAttemptPolicy, err := cfg.BindAttempt.Policy()
+	if err != nil {
+		log.Fatalf("bind attempt config: %v", err)
+	}
+	bindAttempts, err := bindlimit.New(&cache.BindAttemptStore{Client: rdb}, bindAttemptPolicy)
+	if err != nil {
+		log.Fatalf("bind attempt limiter: %v", err)
+	}
+	bindSvc := service.NewBindService(bindStore, cacheStore, broker, bindAttempts, svcCfg)
 	profileSvc := deviceprofile.NewService(mysqlstore.NewDeviceProfileStore(sqlDB))
 	dynamicClient, dynamicRefs, err := userDynamicConfig(dynamicClient, cfg.Tirtc, userSvc, bindSvc)
 	if err != nil {
 		log.Fatalf("dynamic config: %v", err)
 	}
+	dynamicRefs = append(dynamicRefs, dynamicconfig.Ref{Namespace: "user-server", Key: "user.bind_attempt_policy", Apply: func(snapshot dynamicconfig.Snapshot) error {
+		if snapshot.Revision == 0 {
+			return bindAttempts.Update(bindAttemptPolicy)
+		}
+		policy, err := bindlimit.ParseConfig(snapshot.Value)
+		if err != nil {
+			return err
+		}
+		return bindAttempts.Update(policy)
+	}})
 	navigation, err := webnav.New(cfg.Navigation)
 	if err != nil {
 		log.Fatalf("navigation config: %v", err)

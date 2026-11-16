@@ -147,3 +147,18 @@ func TestWebLanguageDefaultsAndYAMLFallback(t *testing.T) {
 		}
 	}
 }
+
+func TestHTTPPortOverride(t *testing.T) {
+	cfg := &Config{Server: ServerCfg{HTTPPort: 9001}}
+	if err := cfg.applyHTTPPortOverride(""); err != nil || cfg.Server.HTTPPort != 9001 {
+		t.Fatalf("empty override changed port: %d %v", cfg.Server.HTTPPort, err)
+	}
+	if err := cfg.applyHTTPPortOverride("9011"); err != nil || cfg.Server.HTTPPort != 9011 {
+		t.Fatalf("override not applied: %d %v", cfg.Server.HTTPPort, err)
+	}
+	for _, bad := range []string{"0", "65536", "90x1", "-1"} {
+		if err := cfg.applyHTTPPortOverride(bad); err == nil {
+			t.Errorf("accepted %q", bad)
+		}
+	}
+}

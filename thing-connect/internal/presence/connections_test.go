@@ -11,7 +11,7 @@ import (
 type durableQueue struct {
 	mu    sync.Mutex
 	items map[string]Observation
-	gap   bool
+	gapAt time.Time
 }
 
 func (q *durableQueue) Pending(context.Context) ([]Observation, error) {
@@ -33,16 +33,26 @@ func (q *durableQueue) Ack(_ context.Context, b []Observation) error {
 	}
 	return nil
 }
-func (q *durableQueue) MarkGap(context.Context) error {
+func (q *durableQueue) MarkGap(_ context.Context, at time.Time) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	q.gap = true
+	if at.After(q.gapAt) {
+		q.gapAt = at
+	}
+	return nil
+}
+func (q *durableQueue) ClearGap(_ context.Context, listedFrom time.Time) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.gapAt.Before(listedFrom) {
+		q.gapAt = time.Time{}
+	}
 	return nil
 }
 func (q *durableQueue) HasGap(context.Context) (bool, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	return q.gap, nil
+	return !q.gapAt.IsZero(), nil
 }
 
 type failingConnections struct {
@@ -81,12 +91,11 @@ func TestMetadataGapPersistsBeyondHeartbeatTTL(t *testing.T) {
 	q := &durableQueue{items: map[string]Observation{}}
 	projection := &memoryStore{}
 	q = &projection.durableQueue
-	p := New(projection, &failingConnections{})
+	p := New(projection, &failingConnections{}, nil)
 	for i := 0; i < QueueSize; i++ {
 		p.Observe(Observation{})
 	}
 	p.Observe(Observation{ClientID: "sn_a", IP: "192.0.2.1"})
-	p.degradedUntil.Store(0)
 	if err := p.apply(context.Background(), nil); err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +124,7 @@ func (q *durableQueue) Backlog(context.Context) (ConnectionBacklog, error) {
 func TestSuccessfulWritesDoNotHideOverdueBacklog(t *testing.T) {
 	old := time.Now().Add(-ConnectionMaxPendingAge - time.Second)
 	projection := &memoryStore{durableQueue: durableQueue{items: map[string]Observation{"sn_a": {ClientID: "sn_a", At: old, ConnectedAt: old, IP: "192.0.2.1"}}}}
-	p := New(projection, &failingConnections{})
+	p := New(projection, &failingConnections{}, nil)
 	r := p.connections
 	if err := r.flush(context.Background()); err != nil {
 		t.Fatal(err)

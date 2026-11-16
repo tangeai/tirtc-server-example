@@ -7,11 +7,14 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
 
+	"thing-connect/internal/bindlimit"
+	"thing-connect/internal/brokerapi"
 	"thing-connect/internal/model"
 	"thing-connect/internal/recognition"
 	"thing-connect/internal/room"
@@ -213,6 +216,8 @@ type Config struct {
 	Recognition recognition.Config `yaml:"recognition"`
 	Navigation  webnav.Config      `yaml:"navigation"`
 	Room        room.Config        `yaml:"room"`
+	BindAttempt bindlimit.Config   `yaml:"bind_attempt"`
+	BrokerAPI   brokerapi.Config   `yaml:"broker_api"`
 	Server      ServerCfg          `yaml:"server"`
 	Log         LogCfg             `yaml:"log"`
 	Database    DatabaseCfg        `yaml:"database"`
@@ -235,12 +240,31 @@ type Config struct {
 	Discovery   DiscoveryCfg       `yaml:"discovery"`
 }
 
+// HTTPPortEnv overrides server.http_port so several instances of a service
+// can share one config file, each with its own listening port.
+const HTTPPortEnv = "THING_CONNECT_HTTP_PORT"
+
 func Load(path string) *Config {
 	cfg, err := LoadFile(path)
 	if err != nil {
 		log.Fatal(err)
 	}
+	if err := cfg.applyHTTPPortOverride(os.Getenv(HTTPPortEnv)); err != nil {
+		log.Fatal(err)
+	}
 	return cfg
+}
+
+func (c *Config) applyHTTPPortOverride(value string) error {
+	if value == "" {
+		return nil
+	}
+	port, err := strconv.Atoi(value)
+	if err != nil || port < 1 || port > 65535 {
+		return fmt.Errorf("config: %s must be a port between 1 and 65535", HTTPPortEnv)
+	}
+	c.Server.HTTPPort = port
+	return nil
 }
 
 // LoadFile parses one service configuration and rejects unknown YAML fields.
@@ -252,7 +276,7 @@ func LoadFile(path string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("config: read %s: %w", path, err)
 	}
-	cfg := Config{Web: WebCfg{Language: weblanguage.DefaultConfig(), Site: sitebrand.DefaultConfig()}, Room: room.DefaultConfig(), Recognition: recognition.DefaultConfig()}
+	cfg := Config{Web: WebCfg{Language: weblanguage.DefaultConfig(), Site: sitebrand.DefaultConfig()}, Room: room.DefaultConfig(), BindAttempt: bindlimit.DefaultConfig(), Recognition: recognition.DefaultConfig()}
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&cfg); err != nil {
@@ -266,6 +290,12 @@ func LoadFile(path string) (*Config, error) {
 	}
 	if _, err := cfg.Room.Policy(); err != nil {
 		return nil, fmt.Errorf("config: room: %w", err)
+	}
+	if _, err := cfg.BindAttempt.Policy(); err != nil {
+		return nil, fmt.Errorf("config: bind_attempt: %w", err)
+	}
+	if err := cfg.BrokerAPI.Validate(); err != nil {
+		return nil, fmt.Errorf("config: broker_api: %w", err)
 	}
 	if cfg.Server.HTTPPort == 0 {
 		cfg.Server.HTTPPort = 8080

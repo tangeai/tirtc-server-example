@@ -2,6 +2,7 @@ package mysql
 
 import (
 	"context"
+	"slices"
 	"strings"
 
 	"github.com/jmoiron/sqlx"
@@ -21,9 +22,13 @@ func (s *deviceConnectionStore) SaveConnections(ctx context.Context, batch []pre
 	if len(batch) == 0 {
 		return nil
 	}
-	values := make([]string, 0, len(batch))
-	args := make([]any, 0, 3*len(batch))
-	for _, o := range batch {
+	// Device instances drain the shared pending set concurrently; a common row
+	// order keeps their overlapping upserts from deadlocking each other.
+	sorted := slices.Clone(batch)
+	slices.SortFunc(sorted, func(a, b presence.Observation) int { return strings.Compare(a.ClientID, b.ClientID) })
+	values := make([]string, 0, len(sorted))
+	args := make([]any, 0, 3*len(sorted))
+	for _, o := range sorted {
 		if o.IP == "" || !strings.HasPrefix(o.ClientID, "sn_") || o.ConnectedAt.IsZero() {
 			continue
 		}

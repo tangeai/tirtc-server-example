@@ -42,6 +42,7 @@ type Broker struct {
 	ready           atomic.Bool
 	readyGeneration atomic.Uint64
 	presenceHandler mqtt.MessageHandler
+	resubscribed    func()
 	cancel          context.CancelFunc
 	recoveryDone    chan struct{}
 	reconnect       chan struct{}
@@ -52,11 +53,11 @@ type Broker struct {
 }
 
 func New(cfg config.MQTTCfg, rdb *redis.Client) (*Broker, error) {
-	return newBroker(cfg, rdb, nil)
+	return newBroker(cfg, rdb, nil, nil)
 }
 
-func newBroker(cfg config.MQTTCfg, rdb *redis.Client, handler mqtt.MessageHandler) (*Broker, error) {
-	b := &Broker{cfg: cfg, rdb: rdb, ackCh: make(map[string]chan struct{}), presenceHandler: handler}
+func newBroker(cfg config.MQTTCfg, rdb *redis.Client, handler mqtt.MessageHandler, resubscribed func()) (*Broker, error) {
+	b := &Broker{cfg: cfg, rdb: rdb, ackCh: make(map[string]chan struct{}), presenceHandler: handler, resubscribed: resubscribed}
 	ctx, cancel := context.WithCancel(context.Background())
 	b.cancel = cancel
 	b.recoveryDone = make(chan struct{})
@@ -90,7 +91,10 @@ func newBroker(cfg config.MQTTCfg, rdb *redis.Client, handler mqtt.MessageHandle
 	opts.SetKeepAlive(30 * time.Second)
 	opts.SetConnectTimeout(5 * time.Second)
 	opts.SetAutoReconnect(true)
-	opts.SetCleanSession(false)
+	// Command clients keep their session across upgrades. The presence source
+	// ends its session on disconnect so the shared group re-dispatches its
+	// queued and new events to the remaining Device instances.
+	opts.SetCleanSession(handler != nil)
 
 	// TLS for mqtts://
 	if strings.HasPrefix(cfg.Broker, "mqtts://") || strings.HasPrefix(cfg.Broker, "ssl://") {
@@ -171,8 +175,7 @@ func probe(ctx context.Context, cfg config.MQTTCfg, presence bool) error {
 	}
 	defer client.Disconnect(100)
 	if presence {
-		b := &Broker{presenceHandler: func(mqtt.Client, mqtt.Message) {}}
-		return b.configureSubscriptionsContext(ctx, client)
+		return subscribePresence(ctx, client, probePresenceGroup, func(mqtt.Client, mqtt.Message) {})
 	}
 	return nil
 }
@@ -187,34 +190,42 @@ func (b *Broker) configureSubscriptions(client mqtt.Client) error {
 	return b.configureSubscriptionsContext(context.Background(), client)
 }
 
+// Device instances split presence events through one shared subscription
+// group. The probe uses its own group so a configuration check never takes
+// events away from running instances.
+const (
+	presenceGroup      = "thing-connect-presence"
+	probePresenceGroup = "thing-connect-presence-probe"
+)
+
+func sharedPresenceTopic(group, topic string) string { return "$share/" + group + "/" + topic }
+
 func (b *Broker) configureSubscriptionsContext(ctx context.Context, client mqtt.Client) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	var token mqtt.Token
-	if b.presenceHandler == nil {
-		// CleanSession=false retains subscriptions across upgrades. Every reconnect
-		// must explicitly remove the legacy presence subscriptions.
-		token = client.Unsubscribe(presenceTopics...)
-	} else {
-		topics := make(map[string]byte, len(presenceTopics))
-		for _, topic := range presenceTopics {
-			topics[topic] = 0
+	if b.presenceHandler != nil {
+		if err := subscribePresence(ctx, client, presenceGroup, b.presenceHandler); err != nil {
+			return err
 		}
-		token = client.SubscribeMultiple(topics, b.presenceHandler)
 	}
-	wait := 5 * time.Second
-	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < wait {
-		wait = time.Until(deadline)
+	// CleanSession=false retains the plain subscriptions of earlier versions.
+	// Removing them after the shared subscription is granted avoids a gap; a
+	// Device instance would otherwise receive every event twice.
+	return waitToken(ctx, client.Unsubscribe(presenceTopics...))
+}
+
+func subscribePresence(ctx context.Context, client mqtt.Client, group string, handler mqtt.MessageHandler) error {
+	topics := make(map[string]byte, len(presenceTopics))
+	for _, topic := range presenceTopics {
+		topics[sharedPresenceTopic(group, topic)] = 1
 	}
-	if wait <= 0 || !token.WaitTimeout(wait) {
-		return errors.New("mqttc: subscription setup timeout")
-	}
-	if err := token.Error(); err != nil {
+	token := client.SubscribeMultiple(topics, handler)
+	if err := waitToken(ctx, token); err != nil {
 		return err
 	}
 	if result, ok := token.(interface{ Result() map[string]byte }); ok {
-		for _, topic := range presenceTopics {
+		for topic := range topics {
 			qos, exists := result.Result()[topic]
 			if !exists || qos == 0x80 {
 				return fmt.Errorf("mqttc: presence subscription rejected: topic=%s granted=%t code=0x%02x", topic, exists, qos)
@@ -222,6 +233,17 @@ func (b *Broker) configureSubscriptionsContext(ctx context.Context, client mqtt.
 		}
 	}
 	return nil
+}
+
+func waitToken(ctx context.Context, token mqtt.Token) error {
+	wait := 5 * time.Second
+	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < wait {
+		wait = time.Until(deadline)
+	}
+	if wait <= 0 || !token.WaitTimeout(wait) {
+		return errors.New("mqttc: subscription setup timeout")
+	}
+	return token.Error()
 }
 
 func (b *Broker) handleMessage(_ mqtt.Client, msg mqtt.Message) {
@@ -380,7 +402,11 @@ func (b *Broker) recoverSubscriptions(ctx context.Context) {
 			if err == nil && b.client.IsConnectionOpen() {
 				b.readyGeneration.Store(generation)
 				b.ready.Store(true)
-				b.initializeOnce.Do(func() { close(b.initialized) })
+				first := false
+				b.initializeOnce.Do(func() { first = true; close(b.initialized) })
+				if !first && b.resubscribed != nil {
+					b.resubscribed()
+				}
 				break
 			}
 			b.ready.Store(false)

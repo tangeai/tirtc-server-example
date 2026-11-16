@@ -149,6 +149,12 @@ int connect_mqtt_blocking(const char *host, int port,
                           const MqttMsgHandler *handler, void *ctx,
                           volatile sig_atomic_t *stop_flag, int use_tls);
 
+/** Per-device reconnect delays so a Broker restart does not make every device
+ *  reconnect in the same second. `entropy` comes from the security random
+ *  source; the starting delay is 1-4 s and the ceiling 60-120 s. */
+void mqtt_reconnect_policy(unsigned int entropy,
+                           unsigned int *base_seconds, unsigned int *max_seconds);
+
 /* ── Crypto helpers ─────────────────────────────────────────────────────── */
 
 /** HMAC-SHA256(key, data) → Base64.

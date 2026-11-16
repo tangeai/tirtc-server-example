@@ -11,6 +11,8 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"thing-connect/internal/apiresp"
+	"thing-connect/internal/bindlimit"
+	"thing-connect/internal/cache"
 	"thing-connect/internal/captcha"
 	"thing-connect/internal/deviceprofile"
 	"thing-connect/internal/mqttc"
@@ -119,7 +121,15 @@ func (s *Server) Register(r *gin.Engine) {
 		if s.MQTT != nil {
 			mqttPub = s.MQTT
 		}
-		s.bindSvc = service.NewBindService(bindStore, cacheStore, mqttPub, cfg)
+		bindAttemptPolicy, err := bindlimit.DefaultConfig().Policy()
+		if err != nil {
+			panic(err)
+		}
+		bindAttempts, err := bindlimit.New(&cache.BindAttemptStore{Client: s.RDB}, bindAttemptPolicy)
+		if err != nil {
+			panic(err)
+		}
+		s.bindSvc = service.NewBindService(bindStore, cacheStore, mqttPub, bindAttempts, cfg)
 		s.mqtt = s.MQTT
 		s.jwtSecret = s.JWTSecret
 	}

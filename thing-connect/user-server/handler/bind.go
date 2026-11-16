@@ -3,15 +3,18 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"thing-connect/internal/apiresp"
+	"thing-connect/internal/bindlimit"
 	"thing-connect/internal/model"
 )
 
@@ -27,7 +30,7 @@ func (s *Server) postBind(c *gin.Context) {
 	}
 	deviceID, err := s.bindSvc.Bind(c.Request.Context(), currentUserID(c), req.Code)
 	if err != nil {
-		apiresp.FromError(c, err)
+		writeBindError(c, err)
 		return
 	}
 	apiresp.OK(c, gin.H{"device_id": deviceID, "msg": "bind success"})
@@ -48,10 +51,18 @@ func (s *Server) postBindByDeviceID(c *gin.Context) {
 	}
 	fp := model.Fingerprint{MAC: req.MAC, ChipUID: req.ChipUID, DeviceRand: req.DeviceRand}
 	if err := s.bindSvc.BindByDeviceID(c.Request.Context(), currentUserID(c), req.DeviceID, fp); err != nil {
-		apiresp.FromError(c, err)
+		writeBindError(c, err)
 		return
 	}
 	apiresp.OK(c, gin.H{"device_id": req.DeviceID, "msg": "bind success"})
+}
+
+func writeBindError(c *gin.Context, err error) {
+	var locked *bindlimit.LockedError
+	if errors.As(err, &locked) {
+		c.Header("Retry-After", strconv.Itoa(int((locked.RetryAfter+time.Second-1)/time.Second)))
+	}
+	apiresp.FromError(c, err)
 }
 
 type resetReq struct {

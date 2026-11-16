@@ -178,7 +178,7 @@ return connect_mqtt_blocking(svc.mqtt_host, svc.mqtt_port,
 > - **临时连接**：ClientID 和 Username 都填写 Report 返回的 `temp_client_id`，Password 填写 `temp_token`。
 > - **正式连接**：ClientID 填 `sn_{device_id}`（带前缀），Username 填 `device_id`（不带前缀）；Password 填 `mqtt_token`。
 >
-> EMQX 进行 JWT 认证时，会用 Username 比对 token 中的 `device_id` claim，因此 Username 一律不带前缀。ClientID 的 `tmp_` 和 `sn_` 前缀与认证无关，是服务端的寻址约定。在线状态（Redis `online:{clientID}`）、踢线和下行 Topic 都通过带前缀的 ClientID 查找设备，不能省略。
+> EMQX 进行 JWT 认证时，会用 Username 比对 token 中的 `device_id` claim，因此 Username 一律不带前缀。Broker 还可以用 token 中的 `clientid` claim 校验 ClientID，ClientID 必须与上表完全一致。在线状态（Redis `online:{clientID}`）、踢线和下行 Topic 都通过带前缀的 ClientID 查找设备，不能省略。设备只能订阅和发布上表连接对应的自有 Topic，订阅其他设备 Topic 或通配 Topic 会被 Broker 拒绝。
 
 ---
 
@@ -290,12 +290,14 @@ Report 成功后，设备从 HTTP 响应中取得 `temp_client_id`（格式为 `
 
 ## token 生命周期
 
-`mqtt_token` 有效期由 `service.token_expiry` 控制（默认 168h = 7 天）。产品应明确选择以下一种策略：
+`mqtt_token` 有效期不超过 `service.token_expiry`（默认 168h = 7 天）。为避免同批设备同时到期，服务端在 90% 到 100% 之间随机签发，实际到期时间以 token 的 `exp` 为准，设备不能按固定时长推算。产品应明确选择以下一种策略：
 
 - **内存缓存并提前刷新**：运行期间记录到期时间，在过期前重新获取；重启后重新取 token。这样不增加长期凭证落盘范围。
 - **安全持久化 token**：仅在产品必须离线快速启动时采用；存储必须防止未授权读取，并在到期前或认证失败后刷新。
 
 **token 过期断连：** EMQX 在 JWT 过期时主动断开设备，`onDisconnect` 收到原因码 `0x98`（认证过期）或 `0x99`（ACL 拒绝）。设备应以此作为触发信号，重新调用 [`/v1/device/token`](api-reference.md#post-v1devicetoken) 换取新 token 后重连。
+
+**重连与重试退避：** 断线重连、换取 token 和上线 HTTP 请求失败后，都必须使用指数退避加随机抖动：每台设备的起始间隔在 1 到 4 秒之间随机选择，之后逐次增长，上限在 60 到 120 秒之间随机选择。不要使用固定间隔，也不要在同一时刻集中重试。Broker 或服务端重启时，所有设备会同时断开；固定间隔会让全部设备在同一秒集中重连并重复换取 token，拖慢恢复。HTTP `429` 和 `5xx` 按同一策略退避；HTTP 签名失败、已解绑和参数错误不自动重试。
 
 ---
 
@@ -316,6 +318,7 @@ Report 成功后，设备从 HTTP 响应中取得 `temp_client_id`（格式为 `
 |--------|------|---------|
 | `152` | 认证失败（MQTT CONNECT 被拒） | 停止无界重试，检查连接参数并重新获取 token 后按退避策略重连 |
 | `153` | 认证失败（MQTT CONNECT 被拒） | 同上 |
+| `0x86` | 用户名或密码错误（MQTT CONNECT 被拒） | 检查 ClientID 与 Username 是否按连接参数表填写，重新获取 token 后按退避策略重连 |
 | `0x98` | JWT 认证过期（EMQX `auth_expired`） | 重新调 [`POST /v1/device/token`](api-reference.md#post-v1devicetoken) 换取新 token 后重连 |
 | `0x99` | ACL 拒绝（EMQX `acl_denied`） | 检查 token 中的 `device_id` claim 是否匹配 ClientID |
 
