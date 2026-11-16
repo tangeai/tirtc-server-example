@@ -18,8 +18,9 @@ type PresenceObserver interface {
 	SubscriptionGap()
 }
 
-// NewPresence is only used by device-server. Command clients use New and
-// explicitly unsubscribe from the former presence subscriptions.
+// PresenceSource is created by NewPresence, which only device-server uses.
+// Command clients use New and explicitly unsubscribe from the former presence
+// subscriptions.
 type PresenceSource interface {
 	Ping(context.Context) error
 	Close()

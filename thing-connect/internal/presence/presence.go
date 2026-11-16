@@ -82,7 +82,7 @@ type Projector struct {
 	subscriptionGaps  atomic.Uint64
 }
 
-// tempTTL returns the current pairing-code lifetime. Temporary connections send
+// New creates a Projector. tempTTL returns the current pairing-code lifetime. Temporary connections send
 // no heartbeat, so their single connected event must stay online until the code
 // expires. A nil tempTTL keeps the heartbeat TTL for every connection.
 func New(store ProjectionStore, connections ConnectionStore, tempTTL func() time.Duration) *Projector {

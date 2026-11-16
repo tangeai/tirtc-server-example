@@ -85,7 +85,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	rdb := redis.NewClient(&redis.Options{Addr: o.redisAddr, DB: o.redisDB})
-	defer rdb.Close()
+	defer func() { _ = rdb.Close() }()
 	if err := rdb.Ping(ctx).Err(); err != nil {
 		log.Fatalf("redis: %v", err)
 	}

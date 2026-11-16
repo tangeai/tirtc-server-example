@@ -1003,7 +1003,7 @@ func (c *AgentAPIClient) finishDisabledMCPCreate(ctx context.Context, created *A
 	if created == nil || created.ID == "" {
 		return nil, errors.New("agent: MCP create returned no resource ID")
 	}
-	_, err := c.UpdateAppMCPTool(ctx, created.ID, AppMCPToolUpdateRequest{Config: req.Config, Enabled: req.Enabled})
+	_, err := c.UpdateAppMCPTool(ctx, created.ID, AppMCPToolUpdateRequest(req))
 	if err == nil {
 		for attempt := 0; attempt < 4; attempt++ {
 			var stored *AppMCPTool

@@ -78,12 +78,16 @@ type Client struct {
 
 var _ presence.BrokerClients = (*Client)(nil)
 
+// ErrDisabled reports a configuration without a broker API URL.
+var ErrDisabled = errors.New("brokerapi: disabled")
+
+// New returns ErrDisabled when the URL is empty.
 func New(c Config) (*Client, error) {
 	if err := c.Validate(); err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(c.URL) == "" {
-		return nil, nil
+		return nil, ErrDisabled
 	}
 	return &Client{
 		base:   strings.TrimRight(strings.TrimSpace(c.URL), "/"),
@@ -163,6 +167,10 @@ type Source struct{ current atomic.Pointer[Client] }
 // Update replaces the client atomically. An empty URL disables listing.
 func (s *Source) Update(c Config) error {
 	client, err := New(c)
+	if errors.Is(err, ErrDisabled) {
+		s.current.Store(nil)
+		return nil
+	}
 	if err != nil {
 		return err
 	}
