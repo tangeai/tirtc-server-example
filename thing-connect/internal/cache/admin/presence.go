@@ -1,3 +1,4 @@
+// Package admincache reads Redis projections for Admin Server.
 package admincache
 
 import (

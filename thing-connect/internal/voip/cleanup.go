@@ -1,3 +1,4 @@
+// Package voip owns VoIP contact cleanup and remark notification delivery.
 package voip
 
 import (
