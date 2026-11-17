@@ -819,6 +819,8 @@ case "$1" in
             printf 'thing-connect:device-server-2 RUNNING pid 11\n'
             printf 'thing-connect:device-server-x RUNNING pid 13\n'
             printf 'thing-connect:user-server RUNNING pid 14\n'
+            printf 'thing-connect:user-server-2 RUNNING pid 16\n'
+            printf 'thing-connect:admin-server-2 RUNNING pid 17\n'
             printf 'other:device-server-3 RUNNING pid 15\n'
             exit 3
         fi
@@ -831,7 +833,7 @@ BASH
     chmod +x "$path"
 }
 
-test_device_server_instances_restart_one_at_a_time() (
+test_service_instances_restart_one_at_a_time() (
     local capture="$TEST_ROOT/instances.capture"
     : >"$capture"
     write_fake_supervisorctl "$TEST_ROOT/fake-supervisorctl"
@@ -844,7 +846,8 @@ test_device_server_instances_restart_one_at_a_time() (
 
     assert_eq "device-server-2 device-server-10" "$(service_extra_programs device-server | tr '\n' ' ' | sed 's/ $//')" \
         "only numbered device-server programs in the group are extra instances"
-    assert_eq "" "$(service_extra_programs user-server)" "other services stay single-instance"
+    assert_eq "user-server-2" "$(service_extra_programs user-server)" "every business service may run extra instances"
+    assert_eq "" "$(service_extra_programs "$ADMIN_SERVICE")" "Admin stays single-instance"
 
     restart_one device-server >/dev/null
     assert_eq "restart thing-connect:device-server|ready device-server|restart thing-connect:device-server-2|ready device-server-2|restart thing-connect:device-server-10|ready device-server-10" \
@@ -1183,7 +1186,7 @@ test_interrupted_migration_with_change_marker_quiesces_services
 test_standalone_migration_failure_quiesces_services
 test_schema_change_failure_never_auto_starts_old_binaries
 test_daily_update_backs_up_files_before_database_migration
-test_device_server_instances_restart_one_at_a_time
+test_service_instances_restart_one_at_a_time
 test_extra_instance_health_uses_process_port
 echo "PASS: deploy-prod.sh"
 

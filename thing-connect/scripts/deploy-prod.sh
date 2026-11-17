@@ -1144,16 +1144,17 @@ service_health_url() {
     printf 'http://%s:%s/health/ready\n' "$HEALTH_HOST" "$port"
 }
 
-# device-server 可在同一 Supervisor 组中增加 device-server-2、device-server-3
-# 等程序并行运行，各程序用环境变量 THING_CONNECT_HTTP_PORT 指定端口；
-# 其他服务只运行一个实例。
+# 业务服务可在同一 Supervisor 组中增加 <服务>-2、<服务>-3 等程序并行运行，
+# 各程序用环境变量 THING_CONNECT_HTTP_PORT 指定端口。Admin 和手动服务管理
+# 模式只运行一个实例。
 service_extra_programs() {
     local svc="$1"
-    [ "$svc" = device-server ] && [ "$ACTIVE_SERVICE_MANAGER" != local ] || return 0
-    { "$SUPERVISORCTL" status 2>/dev/null || true; } | awk -v prefix="$SUPERVISOR_GROUP:" '
+    [ "$svc" != "$ADMIN_SERVICE" ] && [ "$ACTIVE_SERVICE_MANAGER" != local ] || return 0
+    { "$SUPERVISORCTL" status 2>/dev/null || true; } | awk -v prefix="$SUPERVISOR_GROUP:" -v svc="$svc" '
         index($1, prefix) == 1 {
             name = substr($1, length(prefix) + 1)
-            if (name ~ /^device-server-[0-9]+$/) print name
+            suffix = substr(name, length(svc) + 1)
+            if (index(name, svc "-") == 1 && suffix ~ /^-[0-9]+$/) print name
         }' | sort -V
 }
 
