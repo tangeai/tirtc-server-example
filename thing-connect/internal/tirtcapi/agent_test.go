@@ -3,6 +3,8 @@ package tirtcapi
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -61,6 +63,51 @@ func TestUploadBinaryBodyPreserved(t *testing.T) {
 	}
 	if !bytes.Contains(received, content) {
 		t.Errorf("Go 发送的 multipart body 丢失了高位字节；received=% x", received)
+	}
+}
+
+func TestLifecycleUnknownDeviceHasNoRoleBinding(t *testing.T) {
+	const notFound = `{"code":16280016,"msg":"未找到此设备","ok":0,"status":"error"}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			DeviceIDs []string `json:"device_ids"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		for _, id := range req.DeviceIDs {
+			if id == "unknown" {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(notFound))
+				return
+			}
+		}
+		if r.Method == http.MethodPost && r.URL.Path == deviceRolesPath {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(notFound))
+			return
+		}
+		if r.URL.Path == deviceRolesPath+"/query" {
+			_, _ = w.Write([]byte(`{"code":200,"data":[{"device_id":"known","role_id":"role_1"}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"code":200}`))
+	}))
+	defer srv.Close()
+	cloud := NewRoleCloud(NewAgentAPIClient(AgentAPIConfig{BaseURL: srv.URL, AppID: "a", AccessKeyID: "k", SecretKeyID: "s"}, srv.Client()))
+	ctx := context.Background()
+
+	rows, err := cloud.Query(ctx, []string{"unknown"})
+	if err != nil || len(rows) != 0 {
+		t.Fatalf("Query unknown = %v, %v; want no binding", rows, err)
+	}
+	rows, err = cloud.Query(ctx, []string{"known", "unknown"})
+	if err != nil || len(rows) != 1 || rows[0].DeviceID != "known" {
+		t.Fatalf("mixed batch Query = %v, %v; want the known binding", rows, err)
+	}
+	if err = cloud.Unbind(ctx, []string{"known", "unknown"}, "role_1"); err != nil {
+		t.Fatalf("Unbind with unknown device: %v", err)
+	}
+	if err = cloud.Bind(ctx, []string{"unknown"}, "role_1"); !errors.Is(err, ErrDeviceNotFound) {
+		t.Fatalf("Bind unknown device = %v, want ErrDeviceNotFound", err)
 	}
 }
 

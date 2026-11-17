@@ -231,7 +231,12 @@ func (s *aiRoleLifecycleStore) CloudTarget(ctx context.Context, device string, c
 	}
 	return target, tx.Commit()
 }
-func (s *aiRoleLifecycleStore) CompleteCloud(ctx context.Context, target ai.CloudTarget) (bool, error) {
+
+// aiCloudSettled parks a confirmed target; the row stays as the generation
+// fence and any new target write makes it due again.
+const aiCloudSettled = "9999-12-31 23:59:59"
+
+func (s *aiRoleLifecycleStore) CompleteCloud(ctx context.Context, target ai.CloudTarget, settled bool) (bool, error) {
 	tx, err := s.executor(ctx).BeginTxx(ctx, nil)
 	if err != nil {
 		return false, err
@@ -257,16 +262,37 @@ func (s *aiRoleLifecycleStore) CompleteCloud(ctx context.Context, target ai.Clou
 	if err != nil {
 		return false, err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE ai_cloud_role_target SET attempts=0,next_attempt_at=DATE_ADD(NOW(),INTERVAL 30 SECOND) WHERE device_id=?`, target.DeviceID)
+	if settled {
+		_, err = tx.ExecContext(ctx, `UPDATE ai_cloud_role_target SET attempts=0,next_attempt_at=? WHERE device_id=?`, aiCloudSettled, target.DeviceID)
+	} else {
+		_, err = tx.ExecContext(ctx, `UPDATE ai_cloud_role_target SET attempts=0,next_attempt_at=DATE_ADD(NOW(),INTERVAL 30 SECOND) WHERE device_id=?`, target.DeviceID)
+	}
 	if err != nil {
 		return false, err
 	}
 	return true, tx.Commit()
 }
-func (s *aiRoleLifecycleStore) DueCloud(ctx context.Context) ([]string, error) {
+func (s *aiRoleLifecycleStore) ClaimCloud(ctx context.Context, limit int, lease time.Duration) ([]string, error) {
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
 	var ids []string
-	err := s.db.SelectContext(ctx, &ids, `SELECT device_id FROM ai_cloud_role_target WHERE next_attempt_at<=NOW() ORDER BY next_attempt_at,device_id LIMIT 100`)
-	return ids, err
+	if err = tx.SelectContext(ctx, &ids, `SELECT device_id FROM ai_cloud_role_target WHERE next_attempt_at<=NOW() ORDER BY next_attempt_at,device_id LIMIT ? FOR UPDATE SKIP LOCKED`, limit); err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return nil, tx.Commit()
+	}
+	query, args, err := sqlx.In(`UPDATE ai_cloud_role_target SET next_attempt_at=DATE_ADD(NOW(),INTERVAL ? SECOND) WHERE device_id IN (?)`, int(lease/time.Second), ids)
+	if err != nil {
+		return nil, err
+	}
+	if _, err = tx.ExecContext(ctx, tx.Rebind(query), args...); err != nil {
+		return nil, err
+	}
+	return ids, tx.Commit()
 }
 func (s *aiRoleLifecycleStore) DelayCloud(ctx context.Context, device string, failed bool) error {
 	if !failed {

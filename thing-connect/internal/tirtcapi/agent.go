@@ -656,6 +656,17 @@ func (c *AgentAPIClient) doDelete(ctx context.Context, path string) error {
 
 const deviceRolesPath = "/v2/ai/device-roles"
 
+// ErrDeviceNotFound means the cloud has no record of a requested device, so it
+// also holds no role binding for it.
+var ErrDeviceNotFound = errors.New("cloud device does not exist")
+
+const cloudCodeDeviceNotFound = 16280016
+
+func deviceNotFound(body []byte) bool {
+	var wrap roleResp
+	return json.Unmarshal(body, &wrap) == nil && wrap.Code == cloudCodeDeviceNotFound
+}
+
 // BatchCreateDeviceRoles creates device-role bindings for multiple devices.
 func (c *AgentAPIClient) BatchCreateDeviceRoles(ctx context.Context, req BatchDeviceRolesRequest) error {
 	start := time.Now()
@@ -712,6 +723,9 @@ func (c *AgentAPIClient) doDeviceRoleWrite(ctx context.Context, method, path str
 	}
 	defer res.Body.Close()
 	respBody, _ := io.ReadAll(res.Body)
+	if deviceNotFound(respBody) {
+		return ErrDeviceNotFound
+	}
 	if res.StatusCode != http.StatusOK {
 		return fmt.Errorf("agent: HTTP %d: %s", res.StatusCode, string(respBody))
 	}
@@ -744,6 +758,9 @@ func (c *AgentAPIClient) doDeviceRoleQuery(ctx context.Context, req BatchDeviceR
 	respBody, err := io.ReadAll(res.Body)
 	if err != nil {
 		return nil, err
+	}
+	if deviceNotFound(respBody) {
+		return nil, ErrDeviceNotFound
 	}
 	if res.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("agent: HTTP %d: %s", res.StatusCode, string(respBody))
