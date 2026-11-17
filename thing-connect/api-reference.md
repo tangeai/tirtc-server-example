@@ -654,6 +654,7 @@ int device_sign(const char *device_id, const char *device_key,
 | [查询开发板详情](#get-v1boardsslug) | Web | GET | `/v1/boards/:slug` | 无需登录鉴权 |
 | [读取开发板图片](#get-v1board-imagesname) | Web | GET | `/v1/board-images/:name` | 无需登录鉴权 |
 | [获取顶部导航链接](#get-v1confignavigation) | Web | GET | `/v1/config/navigation` | 无需登录鉴权 |
+| [获取官网公开配置](#get-v1configsite) | Web | GET | `/v1/config/site` | 无需登录鉴权 |
 | [查询当前账号](#get-v1userme) | Web、小程序 | GET | `/v1/user/me` | 必需：用户 JWT（user_jwt） |
 
 <a id="get-v1configcaptcha"></a>
@@ -1848,6 +1849,42 @@ Authorization: Bearer <user_jwt>
 | `data.links[].url` | string | 跳转地址 |
 | `data.links[].enabled` | boolean | 返回项均为 true |
 | `data.revision` | integer | 配置版本；0 表示本地回退配置 |
+
+<a id="get-v1configsite"></a>
+
+### 获取官网公开配置
+
+**接口**：`GET /v1/config/site`
+
+**调用方**：Web。
+
+公开读取站点名称和正式站点地址，无需鉴权。成功为 HTTP 200，响应 `Cache-Control: no-store`：
+
+```jsonc
+{
+  "code": 200, // 业务码：本接口成功为 200
+  "msg": "ok", // 结果说明，业务判断使用 code
+  "data": { // 业务数据
+    "name": "探鸽 · 小钛", // 站点名称
+    "name_en": "Tange · Xiaotai", // 英文站点名称；为空时英文界面沿用 name
+    "public_url": "https://example.com", // 正式站点 HTTPS 根地址；未配置时为空
+    "revision": 3 // 配置版本；0 表示 YAML 回退值
+  }
+}
+```
+
+首页和开发板页直接内嵌有效配置，静态预览或内嵌数据不可用时才调用此接口，参见[官网公开配置](#官网公开配置)。
+
+**请求参数**：无。
+
+**返回字段**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `data.name` | string | 站点名称 |
+| `data.name_en` | string | 英文站点名称；为空时英文界面沿用 `name` |
+| `data.public_url` | string | 正式站点 HTTPS 根地址；未配置时为空 |
+| `data.revision` | integer | 配置版本；0 表示 YAML 回退值 |
 
 <a id="get-v1userme"></a>
 

@@ -103,9 +103,10 @@ func (s *ResourceReadStore) Devices(ctx context.Context, q admin.ResourceQuery) 
 		where += " AND (d.device_id LIKE ? OR d.mac LIKE ? OR u.email LIKE ?)"
 		args = append(args, "%"+q.Keyword+"%", "%"+q.Keyword+"%", "%"+q.Keyword+"%")
 	}
-	if q.Bound == "true" {
+	switch q.Bound {
+	case "true":
 		where += " AND d.user_id>0"
-	} else if q.Bound == "false" {
+	case "false":
 		where += " AND d.user_id=0"
 	}
 	order, err := resourceOrder(q, true)
