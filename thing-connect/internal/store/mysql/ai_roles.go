@@ -273,7 +273,7 @@ func (s *aiRoleLifecycleStore) CompleteCloud(ctx context.Context, target ai.Clou
 	return true, tx.Commit()
 }
 func (s *aiRoleLifecycleStore) ClaimCloud(ctx context.Context, limit int, lease time.Duration) ([]string, error) {
-	tx, err := s.db.BeginTxx(ctx, nil)
+	tx, err := s.db.BeginTxx(ctx, claimTx)
 	if err != nil {
 		return nil, err
 	}

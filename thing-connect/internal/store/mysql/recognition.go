@@ -371,7 +371,7 @@ func recSave(c context.Context, tx *sqlx.Tx, row recRow, v recSnapshot) error {
 	return recEvent(c, tx, v.Task.DeviceID, row.Bind, "recognition_result", v.PublicTask())
 }
 func (s *RecognitionStore) Claim(c context.Context) (*r.Work, error) {
-	tx, e := s.db.BeginTxx(c, nil)
+	tx, e := s.db.BeginTxx(c, claimTx)
 	if e != nil {
 		return nil, e
 	}
@@ -486,7 +486,7 @@ func (s *RecognitionStore) Complete(c context.Context, done r.Completion) error 
 	return tx.Commit()
 }
 func (s *RecognitionStore) Recover(c context.Context) error {
-	tx, e := s.db.BeginTxx(c, nil)
+	tx, e := s.db.BeginTxx(c, claimTx)
 	if e != nil {
 		return e
 	}
@@ -520,7 +520,7 @@ const recognitionLeaseFormat = "%Y-%m-%d %H:%i:%s.%f"
 // regardless of next_at because legacy inserts used the session time zone;
 // claiming increments attempts so a held lease is honoured.
 func (s *RecognitionStore) ClaimEvents(c context.Context, limit int, lease time.Duration) ([]r.Event, error) {
-	tx, e := s.db.BeginTxx(c, nil)
+	tx, e := s.db.BeginTxx(c, claimTx)
 	if e != nil {
 		return nil, e
 	}

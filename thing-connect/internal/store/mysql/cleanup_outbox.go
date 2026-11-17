@@ -2,6 +2,7 @@ package mysql
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 
@@ -26,8 +27,13 @@ func NewCleanupOutboxStore(db *sqlx.DB) cleanup.Queue {
 // independent of driver time zone conversion.
 const leaseFormat = "%Y-%m-%d %H:%i:%s"
 
+// claimTx runs queue claims under READ COMMITTED. Under REPEATABLE READ a
+// SKIP LOCKED range scan also takes gap locks, and moving a claimed row's
+// index key deadlocks against a concurrent claimer's gap locks.
+var claimTx = &sql.TxOptions{Isolation: sql.LevelReadCommitted}
+
 func (s *cleanupOutboxStore) Claim(ctx context.Context, limit int, lease time.Duration) ([]cleanup.Task, error) {
-	tx, err := s.db.BeginTxx(ctx, nil)
+	tx, err := s.db.BeginTxx(ctx, claimTx)
 	if err != nil {
 		return nil, fmt.Errorf("cleanup outbox claim begin: %w", err)
 	}

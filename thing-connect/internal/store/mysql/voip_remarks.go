@@ -58,7 +58,7 @@ func (s *voipRemarkStore) Save(ctx context.Context, deviceID, peerID, remark str
 }
 
 func (s *voipRemarkStore) Claim(ctx context.Context, limit int, lease time.Duration) ([]voip.RemarkEvent, error) {
-	tx, err := s.db.BeginTxx(ctx, nil)
+	tx, err := s.db.BeginTxx(ctx, claimTx)
 	if err != nil {
 		return nil, err
 	}
