@@ -3,6 +3,7 @@ package testenv
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -103,6 +104,11 @@ func findConfigPath(candidates ...string) (string, error) {
 	paths := make([]string, 0, len(candidates)+1)
 	if envPath := os.Getenv("THING_CONNECT_TEST_CONFIG"); envPath != "" {
 		paths = append(paths, envPath)
+		// go test runs in each package directory; the documented relative
+		// path is relative to the module root.
+		if root := moduleRoot(); root != "" && !filepath.IsAbs(envPath) {
+			paths = append(paths, filepath.Join(root, envPath))
+		}
 	}
 	paths = append(paths, candidates...)
 
@@ -115,4 +121,21 @@ func findConfigPath(candidates ...string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("checked THING_CONNECT_TEST_CONFIG and %v", candidates)
+}
+
+func moduleRoot() string {
+	dir, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
 }

@@ -78,9 +78,8 @@ func TestConnectionRecorderResumesPendingAfterRestart(t *testing.T) {
 	}
 }
 func TestMetadataGapPersistsBeyondHeartbeatTTL(t *testing.T) {
-	q := &durableQueue{items: map[string]Observation{}}
 	projection := &memoryStore{}
-	q = &projection.durableQueue
+	q := &projection.durableQueue
 	p := New(projection, &failingConnections{})
 	for i := 0; i < QueueSize; i++ {
 		p.Observe(Observation{})

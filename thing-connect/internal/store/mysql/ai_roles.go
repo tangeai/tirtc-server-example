@@ -57,7 +57,7 @@ func (s *aiRoleLifecycleStore) withLocks(ctx context.Context, keys []string, fn 
 		if err != nil {
 			return err
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 	}
 	locked := []string{}
 	defer func() {
@@ -65,7 +65,7 @@ func (s *aiRoleLifecycleStore) withLocks(ctx context.Context, keys []string, fn 
 		defer cancel()
 		for i := len(locked) - 1; i >= 0; i-- {
 			if _, err := conn.ExecContext(c, `SELECT RELEASE_LOCK(?)`, locked[i]); err != nil {
-				_ = conn.Conn.Raw(func(any) error { return driver.ErrBadConn })
+				_ = conn.Raw(func(any) error { return driver.ErrBadConn })
 				break
 			}
 		}
