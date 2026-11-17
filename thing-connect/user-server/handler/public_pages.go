@@ -40,7 +40,7 @@ const publicMetadata = `
 
 const homeBoardCards = `{{range .Boards}}<article class="catalog-card"><div class="product-art">{{if .ImageURL}}<img src="{{.ImageURL}}" alt="{{.Name}} 产品图" loading="lazy">{{else}}<span class="board-image-fallback">{{.Chip}}</span>{{end}}</div><div class="catalog-info"><small>{{.Vendor}} · {{.Chip}}</small><h3>{{if .DetailSlug}}<a href="/boards/{{.DetailSlug}}">{{.Name}}</a>{{else}}{{.Name}}{{end}}</h3><div class="catalog-actions">{{if .FirmwareURL}}<a class="primary" href="{{.FirmwareURL}}" target="_blank" rel="noopener noreferrer">下载固件 ↓</a>{{end}}{{if .FlashingGuideURL}}<a class="guide-link" href="{{.FlashingGuideURL}}" target="_blank" rel="noopener noreferrer">烧录指南 ↗</a>{{end}}</div></div></article>{{end}}`
 
-// Public pages render the same catalog to people and crawlers. Only presentation
+// RegisterPublicPages renders the same catalog to people and crawlers. Only presentation
 // belongs here; publication/filtering stays in the catalog business module.
 func RegisterPublicPages(r *gin.Engine, staticDir string, site *sitebrand.State, catalog *boardcatalog.Service) error {
 	templates := map[string]*template.Template{}
@@ -66,7 +66,8 @@ func RegisterPublicPages(r *gin.Engine, staticDir string, site *sitebrand.State,
 		text = brandRE.ReplaceAllString(text, `${1}{{.Site.Name}}${2}`)
 		text = strings.Replace(text, "<!-- public:metadata -->", publicMetadata, 1)
 		text = strings.Replace(text, "<!-- public:bootstrap -->", `<script id="site-brand-data" type="application/json">{{.SiteJSON}}</script><script id="public-catalog-data" type="application/json">{{.CatalogJSON}}</script>`, 1)
-		if route == "/" {
+		switch route {
+		case "/":
 			text = homeGridRE.ReplaceAllStringFunc(text, func(match string) string {
 				parts := homeGridRE.FindStringSubmatch(match)
 				return strings.Replace(parts[1], `aria-busy="true"`, `aria-busy="false"`, 1) + homeBoardCards + parts[2]
@@ -74,7 +75,7 @@ func RegisterPublicPages(r *gin.Engine, staticDir string, site *sitebrand.State,
 			// Static preview fallback must not say "loading" after server-side rendering.
 			stateRE := regexp.MustCompile(`(?s)<p id="home-board-state"[^>]*>.*?</p>`)
 			text = stateRE.ReplaceAllString(text, `<p id="home-board-state" role="status" {{if .Boards}}hidden{{end}}>{{if .CatalogError}}开发板加载失败，请重试。{{else}}暂无已上架开发板{{end}}</p>`)
-		} else if route == "/boards" {
+		case "/boards":
 			// The catalog remains useful without JavaScript, including resource links.
 			text = strings.Replace(text, `<section id="featured-list" class="featured-list" aria-label="开发板" data-i18n-aria-label="site.boards"></section>`, `<section id="featured-list" class="featured-list" aria-label="开发板" data-i18n-aria-label="site.boards"></section><noscript><div class="catalog-static">`+homeBoardCards+`</div></noscript>`, 1)
 		}
@@ -93,9 +94,10 @@ func RegisterPublicPages(r *gin.Engine, staticDir string, site *sitebrand.State,
 			var boards []boardcatalog.Board
 			var board *boardcatalog.Board
 			var err error
-			if route == "/" || route == "/boards" {
+			switch route {
+			case "/", "/boards":
 				boards, err = catalog.List(ctx)
-			} else if route == "/boards/:slug" {
+			case "/boards/:slug":
 				value, lookupErr := catalog.BySlug(ctx, c.Param("slug"))
 				if lookupErr != nil {
 					c.Header("X-Robots-Tag", "noindex")
