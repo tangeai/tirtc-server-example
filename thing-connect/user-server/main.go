@@ -199,7 +199,7 @@ func main() {
 	outboxCtx, outboxCancel := context.WithCancel(context.Background())
 	go outbox.Run(outboxCtx)
 	go passwordResetMailQueue.Run(outboxCtx)
-	go runAdminUserCommands(outboxCtx, rdb, userSvc)
+	go runAdminUserCommands(outboxCtx, rdb, userSvc.DeliverPasswordResetCode)
 	go dynamicClient.Run(outboxCtx, dynamicRefs)
 	// A cleanup backlog is reported as degraded status but must not fail
 	// /health/ready: draining user-server would not help a stuck target.
