@@ -34,8 +34,8 @@ BEFORE="$(git -C "$FIXTURE" status --porcelain)"
 
 run() { env SOURCE_ROOT="$FIXTURE" DEPLOY_ROOT="$TEST_ROOT/deploy with spaces" "$SCRIPTS/deploy-local.sh" "$@"; }
 run help >"$TEST_ROOT/help"
-rg -q -- '--archive-existing' "$TEST_ROOT/help"
-if rg -q 'DATABASE_BACKUP_FILE|DATABASE_BACKUP_RESTORE_VERIFIED|恢复演练确认' "$TEST_ROOT/help"; then
+grep -qE -- '--archive-existing' "$TEST_ROOT/help"
+if grep -qE 'DATABASE_BACKUP_FILE|DATABASE_BACKUP_RESTORE_VERIFIED|恢复演练确认' "$TEST_ROOT/help"; then
     echo 'FAIL: local update help must not require the production backup gate' >&2
     exit 1
 fi
@@ -49,7 +49,7 @@ SNAPSHOT="$(find "$TEST_ROOT/deploy with spaces.sources" -mindepth 1 -maxdepth 1
 for name in qqwry.dat GeoLite2-City.mmdb GeoLite2-ASN.mmdb; do [ -f "$SNAPSHOT/repository/thing-connect/resources/ipdb/$name" ]; done
 [ ! -f "$SNAPSHOT/repository/thing-connect/resources/ipdb/private.yaml" ]
 [ ! -f "$SNAPSHOT/repository/thing-connect/config.yaml" ]
-rg -q 'local change' "$SNAPSHOT/repository/thing-connect/go.mod"
+grep -qE 'local change' "$SNAPSHOT/repository/thing-connect/go.mod"
 [ "$(git -C "$FIXTURE" status --porcelain)" = "$BEFORE" ]
 [ "$(stat -c %a "$SNAPSHOT")" = 700 ]
 sha256sum -c "$SNAPSHOT/source.sha256" >/dev/null
@@ -64,24 +64,24 @@ echo 'PASS: invalid command, option and root rejected'
 mkdir -p "$TEST_ROOT/deploy with spaces/var/installer"
 printf 'keep\n' >"$TEST_ROOT/deploy with spaces/var/installer/installed.json"
 if run install >"$TEST_ROOT/install.log" 2>&1; then exit 1; fi
-rg -q 'keep' "$TEST_ROOT/deploy with spaces/var/installer/installed.json"
+grep -qE 'keep' "$TEST_ROOT/deploy with spaces/var/installer/installed.json"
 echo 'PASS: installed instance cannot be overwritten by install'
 
 if run update >"$TEST_ROOT/update.log" 2>&1; then exit 1; fi
-rg -q 'config-current/admin-server/config.yaml' "$TEST_ROOT/update.log"
+grep -qE 'config-current/admin-server/config.yaml' "$TEST_ROOT/update.log"
 echo 'PASS: update defaults to the installed Admin database configuration'
 
 (
     exec 8>"$TEST_ROOT/deploy with spaces/deploy.lock"
     flock -n 8
     if run prepare >"$TEST_ROOT/lock.log" 2>&1; then exit 1; fi
-    rg -q '另一个安装或发布' "$TEST_ROOT/lock.log"
+    grep -qE '另一个安装或发布' "$TEST_ROOT/lock.log"
 )
 echo 'PASS: deployment lock prevents concurrent mutation'
 
 ln -s /etc/passwd "$FIXTURE/thing-connect/external-link"
 if run prepare >"$TEST_ROOT/symlink.log" 2>&1; then exit 1; fi
-rg -q '符号链接' "$TEST_ROOT/symlink.log"
+grep -qE '符号链接' "$TEST_ROOT/symlink.log"
 rm "$FIXTURE/thing-connect/external-link"
 echo 'PASS: external symlinks cannot enter source snapshot'
 
@@ -92,8 +92,8 @@ BUILD
 mkdir -p "$TEST_ROOT/deploy with spaces/call-server"
 printf 'old executable\n' >"$TEST_ROOT/deploy with spaces/call-server/call-server"
 if run prepare >"$TEST_ROOT/build-failure.log" 2>&1; then exit 1; fi
-rg -q '构建失败' "$TEST_ROOT/build-failure.log"
-rg -q 'old executable' "$TEST_ROOT/deploy with spaces/call-server/call-server"
+grep -qE '构建失败' "$TEST_ROOT/build-failure.log"
+grep -qE 'old executable' "$TEST_ROOT/deploy with spaces/call-server/call-server"
 echo 'PASS: failed build preserves deployed files'
 # Exercise the directory cutover without launching fixture services.
 ARCHIVE_ROOT="$TEST_ROOT/archive target"
@@ -113,7 +113,7 @@ bash -c '
     local_main install --archive-existing
 ' >"$TEST_ROOT/archive.log" 2>&1
 ARCHIVE="$(find "$TEST_ROOT" -maxdepth 1 -type d -name 'archive target.backup-*')"
-rg -q 'old config' "$ARCHIVE/config-preserved"
+grep -qE 'old config' "$ARCHIVE/config-preserved"
 [ -f "$ARCHIVE_ROOT/published" ]
 [ "$(stat -c %i "$ARCHIVE/deploy.lock")" = "$(stat -c %i "$ARCHIVE_ROOT/deploy.lock")" ]
 [ -f "$ARCHIVE_ROOT/local-release-path" ]
@@ -131,8 +131,8 @@ if MIGRATION_CONFIG="$TEST_ROOT/migration.yaml" bash -c '
     local_prepare() { LOCAL_SNAPSHOT="$TEST_ROOT/preflight-snapshot"; }
     local_main update
 ' >"$TEST_ROOT/preflight.log" 2>&1; then exit 1; fi
-rg -q '数据库预检失败' "$TEST_ROOT/preflight.log"
-rg -q 'published' "$ARCHIVE_ROOT/published"
+grep -qE '数据库预检失败' "$TEST_ROOT/preflight.log"
+grep -qE 'published' "$ARCHIVE_ROOT/published"
 echo 'PASS: migration incompatibility leaves deployed files intact'
 echo 'PASS: deploy-local.sh'
 
@@ -153,7 +153,7 @@ bash -c '
     test "$(service_config_path recognition-server)" = "$LOCAL_DEPLOY_ROOT/recognition-server/config.yaml"
     local_prepare_recognition
     test -z "$LOCAL_RECOGNITION_CONFIG"
-    rg -q 9006 "$LOCAL_DEPLOY_ROOT/recognition-server/config.yaml"
+    grep -qE 9006 "$LOCAL_DEPLOY_ROOT/recognition-server/config.yaml"
     LOCAL_DEPLOY_ROOT="$TEST_ROOT/recognition-bundled"
     mkdir -p "$LOCAL_DEPLOY_ROOT/config-current/recognition-server"
     printf "existing-config\n" >"$LOCAL_DEPLOY_ROOT/config-current/recognition-server/config.yaml"
@@ -180,16 +180,16 @@ STUB
     MQTT_STATE=pending
     local_start_updated
     test "$LOCAL_RECOGNITION_PENDING" = 1
-    rg -q "start admin-server defer=0" "$START_LOG"
-    rg -q "start-all defer=1" "$START_LOG"
+    grep -qE "start admin-server defer=0" "$START_LOG"
+    grep -qE "start-all defer=1" "$START_LOG"
     : >"$START_LOG"
     MQTT_STATE=ready
     local_start_updated
-    rg -q "start-all defer=0" "$START_LOG"
+    grep -qE "start-all defer=0" "$START_LOG"
     : >"$START_LOG"
     go() { return 1; }
     if local_start_updated; then exit 1; fi
-    if rg -q start-all "$START_LOG"; then exit 1; fi
+    if grep -qE start-all "$START_LOG"; then exit 1; fi
 '
 echo 'PASS: unpublished recognition MQTT defers only recognition; configuration errors fail closed'
 
@@ -204,10 +204,10 @@ bash -c '
     config_exists() { return 0; }
     preflight_service() { printf "preflight %s\n" "$1"; }
     DEFER_RECOGNITION_START=1 start_all >"$TEST_ROOT/deferred-services.log"
-    if rg -q recognition-server "$TEST_ROOT/deferred-services.log"; then exit 1; fi
-    rg -q "start call-server" "$TEST_ROOT/deferred-services.log"
+    if grep -qE recognition-server "$TEST_ROOT/deferred-services.log"; then exit 1; fi
+    grep -qE "start call-server" "$TEST_ROOT/deferred-services.log"
     DEFER_RECOGNITION_START=0 start_all >"$TEST_ROOT/all-services.log"
-    rg -q "preflight recognition-server" "$TEST_ROOT/all-services.log"
-    rg -q "start recognition-server" "$TEST_ROOT/all-services.log"
+    grep -qE "preflight recognition-server" "$TEST_ROOT/all-services.log"
+    grep -qE "start recognition-server" "$TEST_ROOT/all-services.log"
 '
 echo 'PASS: controller defers only recognition and normal start includes its readiness checks'

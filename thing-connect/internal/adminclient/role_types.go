@@ -1,3 +1,4 @@
+// Package adminclient calls Admin Server internal APIs from business services.
 package adminclient
 
 import (

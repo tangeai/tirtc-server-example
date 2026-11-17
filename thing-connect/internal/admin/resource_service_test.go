@@ -137,13 +137,14 @@ func TestIPFieldsHTTPSerialization(t *testing.T) {
 				if err := json.Unmarshal(envelope.Data, &object); err != nil {
 					t.Fatal(err)
 				}
-				if path == "/users" || path == "/devices" {
+				switch path {
+				case "/users", "/devices":
 					var items []map[string]json.RawMessage
 					if err := json.Unmarshal(object["items"], &items); err != nil || len(items) != 1 {
 						t.Fatalf("bad items %s", response.Body.String())
 					}
 					object = items[0]
-				} else if path == "/users/7" {
+				case "/users/7":
 					var nested map[string]json.RawMessage
 					if err := json.Unmarshal(object["user"], &nested); err != nil {
 						t.Fatal(err)
