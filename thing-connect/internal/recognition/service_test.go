@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"testing"
+	"time"
 )
 
 func wav(seconds int) []byte {
@@ -64,6 +65,65 @@ type workStore struct {
 func (s *workStore) Recover(context.Context) error                  { return nil }
 func (s *workStore) Claim(context.Context) (*Work, error)           { return s.work, nil }
 func (s *workStore) Complete(_ context.Context, c Completion) error { s.done = &c; return nil }
+
+type eventStore struct {
+	Store
+	events    []Event
+	delivered []bool
+	unbounded int
+}
+
+func (s *eventStore) bounded(ctx context.Context) {
+	if d, ok := ctx.Deadline(); !ok || time.Until(d) > eventStoreTimeout {
+		s.unbounded++
+	}
+}
+func (s *eventStore) ClaimEvents(ctx context.Context, _ int, _ time.Duration) ([]Event, error) {
+	s.bounded(ctx)
+	return s.events, nil
+}
+func (s *eventStore) Deliver(ctx context.Context, _ Event, ok bool) (bool, error) {
+	s.bounded(ctx)
+	s.delivered = append(s.delivered, ok)
+	return true, nil
+}
+
+type eventNotifier struct {
+	err    error
+	onSend func()
+}
+
+func (n *eventNotifier) Publish(context.Context, string, []byte) error {
+	if n.onSend != nil {
+		n.onSend()
+	}
+	return n.err
+}
+
+func TestPublishEventsRecordsResultWithinLease(t *testing.T) {
+	store := &eventStore{events: []Event{{ID: 1}, {ID: 2}}}
+	svc := New(store, nil, DefaultConfig())
+	notifier := &eventNotifier{}
+	svc.SetNotifier(notifier)
+	if err := svc.publishEvents(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.delivered) != 2 || !store.delivered[0] || !store.delivered[1] || store.unbounded != 0 {
+		t.Fatalf("delivered=%v unbounded=%d", store.delivered, store.unbounded)
+	}
+
+	now := time.Unix(1_800_000_000, 0)
+	svc.now = func() time.Time { return now }
+	store.delivered = nil
+	notifier.err = errors.New("broker down")
+	notifier.onSend = func() { now = now.Add(eventLease) }
+	if err := svc.publishEvents(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.delivered) != 0 {
+		t.Fatalf("acknowledged %v after the lease ran out", store.delivered)
+	}
+}
 
 type fakeProvider struct {
 	calls int

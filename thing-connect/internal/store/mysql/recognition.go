@@ -511,20 +511,58 @@ func (s *RecognitionStore) Recover(c context.Context) error {
 	}
 	return tx.Commit()
 }
-func (s *RecognitionStore) Events(c context.Context) ([]r.Event, error) {
+
+// recognitionLeaseFormat keeps the microseconds of the DATETIME(6) next_at
+// lease so the snapshot compares exactly.
+const recognitionLeaseFormat = "%Y-%m-%d %H:%i:%s.%f"
+
+// ClaimEvents leases events through next_at. Rows never attempted stay due
+// regardless of next_at because legacy inserts used the session time zone;
+// claiming increments attempts so a held lease is honoured.
+func (s *RecognitionStore) ClaimEvents(c context.Context, limit int, lease time.Duration) ([]r.Event, error) {
+	tx, e := s.db.BeginTxx(c, nil)
+	if e != nil {
+		return nil, e
+	}
+	defer func() { _ = tx.Rollback() }()
+	var ids []int64
+	if e = tx.SelectContext(c, &ids, `SELECT o.id FROM recognition_outbox o JOIN device_bind d ON CONCAT(d.id,':',d.binding_revision)=o.bind_id AND d.device_id=o.device_id WHERE o.delivered=FALSE AND o.attempts<8 AND (o.attempts=0 OR o.next_at<=UTC_TIMESTAMP(6)) ORDER BY o.id LIMIT ? FOR UPDATE OF o SKIP LOCKED`, limit); e != nil {
+		return nil, e
+	}
+	if len(ids) == 0 {
+		return nil, tx.Commit()
+	}
+	q, args, e := sqlx.In(`UPDATE recognition_outbox SET attempts=attempts+1,next_at=TIMESTAMPADD(MICROSECOND,?,UTC_TIMESTAMP(6)) WHERE id IN (?)`, lease.Microseconds(), ids)
+	if e != nil {
+		return nil, e
+	}
+	if _, e = tx.ExecContext(c, tx.Rebind(q), args...); e != nil {
+		return nil, e
+	}
 	var rows []struct {
 		ID      int64  `db:"id"`
 		Device  string `db:"device_id"`
 		Payload []byte `db:"payload"`
+		Lease   string `db:"lease"`
 	}
-	e := s.db.SelectContext(c, &rows, `SELECT o.id,o.device_id,o.payload FROM recognition_outbox o JOIN device_bind d ON CONCAT(d.id,':',d.binding_revision)=o.bind_id AND d.device_id=o.device_id WHERE o.delivered=FALSE AND o.attempts<8 AND (o.attempts=0 OR o.next_at<=UTC_TIMESTAMP(6)) ORDER BY o.id LIMIT 20`)
-	out := []r.Event{}
+	q, args, e = sqlx.In(`SELECT id,device_id,payload,DATE_FORMAT(next_at,'`+recognitionLeaseFormat+`') AS lease FROM recognition_outbox WHERE id IN (?) ORDER BY id`, ids)
+	if e != nil {
+		return nil, e
+	}
+	if e = tx.SelectContext(c, &rows, tx.Rebind(q), args...); e != nil {
+		return nil, e
+	}
+	out := make([]r.Event, 0, len(rows))
 	for _, v := range rows {
-		out = append(out, r.Event{ID: v.ID, DeviceID: v.Device, Payload: v.Payload})
+		out = append(out, r.Event{ID: v.ID, DeviceID: v.Device, Payload: v.Payload, Lease: v.Lease})
 	}
-	return out, e
+	return out, tx.Commit()
 }
-func (s *RecognitionStore) Deliver(c context.Context, v r.Event, ok bool) error {
-	_, e := s.db.ExecContext(c, `UPDATE recognition_outbox SET delivered=?,attempts=attempts+1,next_at=TIMESTAMPADD(SECOND,LEAST(300,POW(2,attempts)),UTC_TIMESTAMP(6)) WHERE id=? AND delivered=FALSE`, ok, v.ID)
-	return e
+func (s *RecognitionStore) Deliver(c context.Context, v r.Event, ok bool) (bool, error) {
+	res, e := s.db.ExecContext(c, `UPDATE recognition_outbox SET delivered=?,next_at=IF(?,next_at,TIMESTAMPADD(SECOND,LEAST(300,POW(2,attempts-1)),UTC_TIMESTAMP(6))) WHERE id=? AND delivered=FALSE AND next_at=?`, ok, ok, v.ID, v.Lease)
+	if e != nil {
+		return false, e
+	}
+	n, e := res.RowsAffected()
+	return n == 1, e
 }

@@ -20,10 +20,11 @@ type Service struct {
 	notifier Notifier
 	mu       sync.RWMutex
 	config   Config
+	now      func() time.Time
 }
 
 func New(store Store, p Provider, c Config) *Service {
-	return &Service{store: store, provider: p, config: c}
+	return &Service{store: store, provider: p, config: c, now: time.Now}
 }
 func (s *Service) SetNotifier(n Notifier) { s.notifier = n }
 func (s *Service) Configure(c Config) error {
@@ -114,22 +115,52 @@ func (s *Service) Run(ctx context.Context) {
 		}
 	}
 }
+
+const (
+	eventBatchSize      = 20
+	eventPublishTimeout = 5 * time.Second
+	eventLease          = eventBatchSize*eventPublishTimeout + 30*time.Second
+	eventLeaseMargin    = 10 * time.Second
+	eventStoreTimeout   = 10 * time.Second
+)
+
+// publishEvents delivers one claimed batch and stops acknowledging once the
+// lease may have passed to another worker; those events are published again.
+func (s *Service) publishEvents(ctx context.Context) error {
+	deadline := s.now().Add(eventLease - eventLeaseMargin)
+	claimCtx, cancel := context.WithTimeout(ctx, eventStoreTimeout)
+	events, e := s.store.ClaimEvents(claimCtx, eventBatchSize, eventLease)
+	cancel()
+	if e != nil {
+		return e
+	}
+	for _, v := range events {
+		if !s.now().Before(deadline) {
+			return nil
+		}
+		c, cancel := context.WithTimeout(ctx, eventPublishTimeout)
+		err := s.notifier.Publish(c, v.DeviceID, v.Payload)
+		cancel()
+		if !s.now().Before(deadline) {
+			return nil
+		}
+		c, cancel = context.WithTimeout(ctx, eventStoreTimeout)
+		_, e = s.store.Deliver(c, v, err == nil)
+		cancel()
+		if e != nil {
+			return e
+		}
+	}
+	return nil
+}
+
 func (s *Service) step(ctx context.Context) error {
 	if e := s.store.Recover(ctx); e != nil {
 		return e
 	}
 	if s.notifier != nil {
-		events, e := s.store.Events(ctx)
-		if e != nil {
+		if e := s.publishEvents(ctx); e != nil {
 			return e
-		}
-		for _, v := range events {
-			c, cancel := context.WithTimeout(ctx, 5*time.Second)
-			err := s.notifier.Publish(c, v.DeviceID, v.Payload)
-			cancel()
-			if e = s.store.Deliver(ctx, v, err == nil); e != nil {
-				return e
-			}
 		}
 	}
 	cfg := s.configCopy()
