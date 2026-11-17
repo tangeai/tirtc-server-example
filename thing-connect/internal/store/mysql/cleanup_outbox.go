@@ -22,7 +22,9 @@ func NewCleanupOutboxStore(db *sqlx.DB) cleanup.Queue {
 	return &cleanupOutboxStore{db: db}
 }
 
-const cleanupLeaseFormat = "%Y-%m-%d %H:%i:%s"
+// leaseFormat renders a DATETIME lease column as an exact comparison snapshot,
+// independent of driver time zone conversion.
+const leaseFormat = "%Y-%m-%d %H:%i:%s"
 
 func (s *cleanupOutboxStore) Claim(ctx context.Context, limit int, lease time.Duration) ([]cleanup.Task, error) {
 	tx, err := s.db.BeginTxx(ctx, nil)
@@ -49,7 +51,7 @@ func (s *cleanupOutboxStore) Claim(ctx context.Context, limit int, lease time.Du
 		return nil, fmt.Errorf("cleanup outbox claim lease: %w", err)
 	}
 	query, args, err = sqlx.In(`
-		SELECT id, device_id, target, attempts, DATE_FORMAT(next_attempt_at, '`+cleanupLeaseFormat+`') AS lease
+		SELECT id, device_id, target, attempts, DATE_FORMAT(next_attempt_at, '`+leaseFormat+`') AS lease
 		FROM cleanup_outbox WHERE id IN (?) ORDER BY id`, ids)
 	if err != nil {
 		return nil, err

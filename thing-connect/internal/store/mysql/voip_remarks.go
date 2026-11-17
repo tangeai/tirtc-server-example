@@ -12,7 +12,10 @@ import (
 type voipRemarkStore struct{ db *sqlx.DB }
 
 func NewVoipRemarkStore(db *sqlx.DB) voip.RemarkStore { return &voipRemarkStore{db: db} }
-func (s *voipRemarkStore) Save(ctx context.Context, deviceID, peerID, remark string, userID int64) (voip.RemarkEvent, error) {
+
+// The outbox is leased through next_attempt_at, as in cleanup_outbox: every
+// event is a new row and its lease time is the acknowledgement snapshot.
+func (s *voipRemarkStore) Save(ctx context.Context, deviceID, peerID, remark string, userID int64, lease time.Duration) (voip.RemarkEvent, error) {
 	event := voip.RemarkEvent{DeviceID: deviceID, PeerID: peerID}
 	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -40,7 +43,7 @@ func (s *voipRemarkStore) Save(ctx context.Context, deviceID, peerID, remark str
 	if _, err = tx.ExecContext(ctx, `UPDATE voip_device_auth SET device_remark=? WHERE id=?`, remark, id); err != nil {
 		return event, err
 	}
-	result, err := tx.ExecContext(ctx, `INSERT INTO voip_remark_outbox (device_id,peer_id) VALUES (?,?)`, deviceID, peerID)
+	result, err := tx.ExecContext(ctx, `INSERT INTO voip_remark_outbox (device_id,peer_id,next_attempt_at) VALUES (?,?,DATE_ADD(NOW(),INTERVAL ? SECOND))`, deviceID, peerID, int(lease/time.Second))
 	if err != nil {
 		return event, err
 	}
@@ -48,18 +51,57 @@ func (s *voipRemarkStore) Save(ctx context.Context, deviceID, peerID, remark str
 	if err != nil {
 		return event, err
 	}
+	if err = tx.GetContext(ctx, &event.Lease, `SELECT DATE_FORMAT(next_attempt_at,'`+leaseFormat+`') FROM voip_remark_outbox WHERE id=?`, event.ID); err != nil {
+		return event, err
+	}
 	return event, tx.Commit()
 }
-func (s *voipRemarkStore) Pending(ctx context.Context) ([]voip.RemarkEvent, error) {
+
+func (s *voipRemarkStore) Claim(ctx context.Context, limit int, lease time.Duration) ([]voip.RemarkEvent, error) {
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var ids []int64
+	if err := tx.SelectContext(ctx, &ids, `SELECT id FROM voip_remark_outbox WHERE next_attempt_at<=NOW() ORDER BY id LIMIT ? FOR UPDATE SKIP LOCKED`, limit); err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return nil, tx.Commit()
+	}
+	query, args, err := sqlx.In(`UPDATE voip_remark_outbox SET next_attempt_at=DATE_ADD(NOW(),INTERVAL ? SECOND) WHERE id IN (?)`, int(lease/time.Second), ids)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(query), args...); err != nil {
+		return nil, err
+	}
+	query, args, err = sqlx.In(`SELECT id,device_id,peer_id,attempts,DATE_FORMAT(next_attempt_at,'`+leaseFormat+`') AS lease FROM voip_remark_outbox WHERE id IN (?) ORDER BY id`, ids)
+	if err != nil {
+		return nil, err
+	}
 	var events []voip.RemarkEvent
-	err := s.db.SelectContext(ctx, &events, `SELECT id,device_id,peer_id,attempts FROM voip_remark_outbox WHERE next_attempt_at<=NOW() ORDER BY id LIMIT 20`)
-	return events, err
+	if err := tx.SelectContext(ctx, &events, tx.Rebind(query), args...); err != nil {
+		return nil, err
+	}
+	return events, tx.Commit()
 }
-func (s *voipRemarkStore) Complete(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM voip_remark_outbox WHERE id=?`, id)
-	return err
+
+func (s *voipRemarkStore) Complete(ctx context.Context, event voip.RemarkEvent) (bool, error) {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM voip_remark_outbox WHERE id=? AND next_attempt_at=?`, event.ID, event.Lease)
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	return affected == 1, err
 }
-func (s *voipRemarkStore) Retry(ctx context.Context, id int64, delay time.Duration) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE voip_remark_outbox SET attempts=LEAST(attempts+1,7),next_attempt_at=DATE_ADD(NOW(),INTERVAL ? SECOND) WHERE id=?`, int(delay.Seconds()), id)
-	return err
+
+func (s *voipRemarkStore) Retry(ctx context.Context, event voip.RemarkEvent, delay time.Duration) (bool, error) {
+	result, err := s.db.ExecContext(ctx, `UPDATE voip_remark_outbox SET attempts=LEAST(attempts+1,7),next_attempt_at=DATE_ADD(NOW(),INTERVAL ? SECOND) WHERE id=? AND next_attempt_at=?`, int(delay.Seconds()), event.ID, event.Lease)
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	return affected == 1, err
 }
