@@ -24,19 +24,27 @@ type fakeQueue struct {
 	backlog    Backlog
 	backlogErr error
 	onComplete func()
+	deadlines  []bool
 }
 
-func (q *fakeQueue) Claim(context.Context, int, time.Duration) ([]Task, error) {
+func (q *fakeQueue) recordDeadline(ctx context.Context) {
+	deadline, ok := ctx.Deadline()
+	q.deadlines = append(q.deadlines, ok && time.Until(deadline) <= queueTimeout)
+}
+
+func (q *fakeQueue) Claim(ctx context.Context, _ int, _ time.Duration) ([]Task, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	q.recordDeadline(ctx)
 	tasks := q.claimed
 	q.claimed = nil
 	return tasks, nil
 }
 
-func (q *fakeQueue) Complete(_ context.Context, task Task) (bool, error) {
+func (q *fakeQueue) Complete(ctx context.Context, task Task) (bool, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	q.recordDeadline(ctx)
 	q.completed = append(q.completed, task.ID)
 	if q.onComplete != nil {
 		q.onComplete()
@@ -44,16 +52,18 @@ func (q *fakeQueue) Complete(_ context.Context, task Task) (bool, error) {
 	return !q.stale[task.ID], nil
 }
 
-func (q *fakeQueue) Retry(_ context.Context, task Task, _ time.Duration, _ string) (bool, error) {
+func (q *fakeQueue) Retry(ctx context.Context, task Task, _ time.Duration, _ string) (bool, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	q.recordDeadline(ctx)
 	q.retried = append(q.retried, task.ID)
 	return !q.stale[task.ID], nil
 }
 
-func (q *fakeQueue) Backlog(context.Context) (Backlog, error) {
+func (q *fakeQueue) Backlog(ctx context.Context) (Backlog, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	q.recordDeadline(ctx)
 	return q.backlog, q.backlogErr
 }
 
@@ -140,6 +150,26 @@ func TestProcessCompletesSuccessAndRetriesFailure(t *testing.T) {
 	}
 	if len(queue.retried) != 1 || queue.retried[0] != 2 {
 		t.Fatalf("retried=%v, want [2]", queue.retried)
+	}
+}
+
+// A half-open database connection must not block the delivery loop forever.
+func TestProcessBoundsEveryQueueCall(t *testing.T) {
+	queue := &fakeQueue{claimed: []Task{{ID: 1, Target: "voip"}, {ID: 2, Target: "ai"}}}
+	o, _ := newTestOutbox(t, queue, func(r *http.Request) (int, string) {
+		if r.URL.Host == "ai.invalid" {
+			return 503, ""
+		}
+		return 200, `{"code":0}`
+	})
+	o.process(context.Background())
+	if len(queue.deadlines) != 4 {
+		t.Fatalf("queue calls=%d, want backlog, claim, complete and retry", len(queue.deadlines))
+	}
+	for i, bounded := range queue.deadlines {
+		if !bounded {
+			t.Fatalf("queue call %d has no deadline within %s", i, queueTimeout)
+		}
 	}
 }
 

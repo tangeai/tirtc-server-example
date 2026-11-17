@@ -23,6 +23,10 @@ const (
 	// later tasks become due again and are redelivered, which targets tolerate.
 	leaseMargin = 10 * time.Second
 
+	// queueTimeout bounds every queue call; a half-open database connection
+	// would otherwise block the delivery loop forever.
+	queueTimeout = 10 * time.Second
+
 	backlogUnhealthyAge = 15 * time.Minute
 	backlogSampleStale  = time.Minute
 )
@@ -128,7 +132,9 @@ func (o *Outbox) Run(ctx context.Context) {
 func (o *Outbox) process(ctx context.Context) {
 	o.sampleBacklog(ctx)
 	deadline := o.now().Add(leaseDuration - leaseMargin)
-	tasks, err := o.queue.Claim(ctx, batchSize, leaseDuration)
+	claimCtx, cancel := context.WithTimeout(ctx, queueTimeout)
+	tasks, err := o.queue.Claim(claimCtx, batchSize, leaseDuration)
+	cancel()
 	if err != nil {
 		if ctx.Err() == nil {
 			slog.Warn("cleanup outbox claim failed", "err", err)
@@ -145,9 +151,11 @@ func (o *Outbox) process(ctx context.Context) {
 			slog.Warn("cleanup outbox lease expired during delivery, task will be redelivered", "id", current.ID)
 			return
 		}
+		ackCtx, cancel := context.WithTimeout(ctx, queueTimeout)
 		if deliverErr != nil {
 			delay := retryDelay(current.Attempts + 1)
-			applied, err := o.queue.Retry(ctx, current, delay, truncateError(deliverErr))
+			applied, err := o.queue.Retry(ackCtx, current, delay, truncateError(deliverErr))
+			cancel()
 			if err != nil && ctx.Err() == nil {
 				slog.Warn("cleanup outbox retry update failed", "id", current.ID, "err", err)
 			} else if err == nil && !applied {
@@ -155,7 +163,8 @@ func (o *Outbox) process(ctx context.Context) {
 			}
 			continue
 		}
-		applied, err := o.queue.Complete(ctx, current)
+		applied, err := o.queue.Complete(ackCtx, current)
+		cancel()
 		if err != nil && ctx.Err() == nil {
 			slog.Warn("cleanup outbox delete failed", "id", current.ID, "err", err)
 		} else if err == nil && !applied {
@@ -165,7 +174,9 @@ func (o *Outbox) process(ctx context.Context) {
 }
 
 func (o *Outbox) sampleBacklog(ctx context.Context) {
-	backlog, err := o.queue.Backlog(ctx)
+	sampleCtx, cancel := context.WithTimeout(ctx, queueTimeout)
+	defer cancel()
+	backlog, err := o.queue.Backlog(sampleCtx)
 	if err != nil {
 		if ctx.Err() == nil {
 			slog.Warn("cleanup outbox backlog sample failed", "err", err)
