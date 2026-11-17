@@ -53,6 +53,11 @@ func (c *adminUserCommands) run(ctx context.Context) {
 		}
 		if err != nil && !errors.Is(err, redis.Nil) {
 			log.Printf("read admin user commands: %v", err)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(time.Second):
+			}
 			continue
 		}
 		for _, stream := range streams {
