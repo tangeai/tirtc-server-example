@@ -1,6 +1,7 @@
 package mqttc
 
 import (
+	"errors"
 	"net"
 	"sync"
 	"testing"
@@ -176,7 +177,7 @@ func TestACKWaiterTimeoutKeepsSubscriptionForRemainingWaiter(t *testing.T) {
 	f.expect("subscribe")
 	f.expect("publish")
 
-	if err := b.PublishAndWaitACK("device/sn_ack/cmd", ackFixtureTopic, map[string]string{"type": "short"}, 200*time.Millisecond); err != ErrACKTimeout {
+	if err := b.PublishAndWaitACK("device/sn_ack/cmd", ackFixtureTopic, map[string]string{"type": "short"}, 200*time.Millisecond); !errors.Is(err, ErrACKTimeout) {
 		t.Fatalf("short waiter err=%v, want ErrACKTimeout", err)
 	}
 	f.expect("subscribe")
