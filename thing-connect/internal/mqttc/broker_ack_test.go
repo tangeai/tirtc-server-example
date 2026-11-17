@@ -1,6 +1,7 @@
 package mqttc
 
 import (
+	"context"
 	"errors"
 	"net"
 	"sync"
@@ -196,4 +197,32 @@ func TestACKWaiterTimeoutKeepsSubscriptionForRemainingWaiter(t *testing.T) {
 	if remaining != 0 {
 		t.Fatalf("ack waiter topics left=%d, want 0", remaining)
 	}
+}
+
+func TestACKWaitEndsWithCallerContext(t *testing.T) {
+	f := newACKFixture(t)
+	b := f.broker()
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		result <- b.PublishAndWaitACKContext(ctx, "device/sn_ack/cmd", ackFixtureTopic, map[string]string{"type": "cancel"}, time.Minute)
+	}()
+	f.expect("subscribe")
+	f.expect("publish")
+	cancel()
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("err=%v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("ACK wait ignored caller cancellation")
+	}
+	f.expect("unsubscribe")
+
+	f.sendACK()
+	if err := b.PublishContext(ctx, "device/sn_ack/cmd", 1, map[string]string{"type": "late"}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("publish with ended context err=%v", err)
+	}
+	f.expectNone(200 * time.Millisecond)
 }

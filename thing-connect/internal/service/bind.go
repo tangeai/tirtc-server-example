@@ -17,9 +17,11 @@ import (
 
 // MQTTPublisher is the minimal MQTT interface needed by BindService.
 // *mqttc.Broker satisfies this interface.
+// MQTTPublisher waits for the Broker and the device no longer than the
+// caller's context, and never longer than its own bounds.
 type MQTTPublisher interface {
-	Publish(topic string, qos byte, payload any) error
-	PublishAndWaitACK(downTopic, ackTopic string, payload any, timeout time.Duration) error
+	PublishContext(ctx context.Context, topic string, qos byte, payload any) error
+	PublishAndWaitACKContext(ctx context.Context, downTopic, ackTopic string, payload any, timeout time.Duration) error
 }
 
 // BindAttempts bounds binding-code guesses per user. *bindlimit.Limiter
@@ -438,7 +440,7 @@ func (s *BindService) ResetWithCleanup(ctx context.Context, deviceID string, use
 		// 先通知设备已被解绑，让它清除本地凭证并主动断开。
 		// 不等 ACK（设备可能已离线），best-effort。
 		topic := "device/sn_" + deviceID + "/cmd"
-		s.mqtt.Publish(topic, 1, map[string]any{"type": "unbind"}) //nolint:errcheck
+		s.mqtt.PublishContext(ctx, topic, 1, map[string]any{"type": "unbind"}) //nolint:errcheck
 	}
 	return nil
 }
@@ -526,7 +528,7 @@ func (s *BindService) publishAuthGrant(ctx context.Context, tempClientID, device
 	if deviceID != "" {
 		payload["payload"] = map[string]string{"device_id": deviceID, "device_key": deviceKey}
 	}
-	err := s.mqtt.PublishAndWaitACK("device/"+tempClientID+"/cmd", "device/"+tempClientID+"/ack", payload, s.Config().MQTTACKTimeout)
+	err := s.mqtt.PublishAndWaitACKContext(ctx, "device/"+tempClientID+"/cmd", "device/"+tempClientID+"/ack", payload, s.Config().MQTTACKTimeout)
 	if err != nil {
 		slog.WarnContext(ctx, "bind auth_grant delivery failed", "temp_client_id", tempClientID, "device_id", deviceID, "err", err)
 		if errors.Is(err, mqttc.ErrACKTimeout) {

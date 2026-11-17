@@ -18,6 +18,14 @@ type subscriptionToken struct {
 
 func (t subscriptionToken) WaitTimeout(time.Duration) bool { return !t.timeout }
 func (t subscriptionToken) Error() error                   { return t.err }
+func (t subscriptionToken) Done() <-chan struct{} {
+	if t.timeout {
+		return nil
+	}
+	done := make(chan struct{})
+	close(done)
+	return done
+}
 
 type subscriptionClient struct {
 	mqtt.Client

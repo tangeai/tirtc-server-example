@@ -147,8 +147,11 @@ type fakeMQTT struct {
 	ackErr error
 }
 
-func (f *fakeMQTT) Publish(_ string, _ byte, _ any) error { return nil }
-func (f *fakeMQTT) PublishAndWaitACK(_, _ string, _ any, _ time.Duration) error {
+func (f *fakeMQTT) PublishContext(context.Context, string, byte, any) error { return nil }
+func (f *fakeMQTT) PublishAndWaitACKContext(ctx context.Context, _, _ string, _ any, _ time.Duration) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	return f.ackErr
 }
 

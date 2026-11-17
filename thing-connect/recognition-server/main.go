@@ -30,10 +30,7 @@ import (
 type notifier struct{ broker *mqttc.Broker }
 
 func (n notifier) Publish(ctx context.Context, id string, payload []byte) error {
-	if e := ctx.Err(); e != nil {
-		return e
-	}
-	return n.broker.Publish("device/sn_"+id+"/notify", 1, json.RawMessage(payload))
+	return n.broker.PublishContext(ctx, "device/sn_"+id+"/notify", 1, json.RawMessage(payload))
 }
 func main() {
 	cfg := config.Load(config.ParseFlags())
