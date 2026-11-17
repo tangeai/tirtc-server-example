@@ -37,8 +37,11 @@ type Broker struct {
 	cfg    config.MQTTCfg
 	rdb    onlineReader
 	mu     sync.Mutex
-	// pending ACK channels: topic → chan struct{}
-	ackCh           map[string]chan struct{}
+	// ackWaiters holds every pending waiter per ACK topic; guarded by mu.
+	ackWaiters map[string]map[chan struct{}]struct{}
+	// ackSubMu orders SUBSCRIBE/UNSUBSCRIBE for ACK topics so a departing
+	// last waiter's UNSUBSCRIBE is always sent before a newcomer's SUBSCRIBE.
+	ackSubMu        sync.Mutex
 	ready           atomic.Bool
 	readyGeneration atomic.Uint64
 	presenceHandler mqtt.MessageHandler
@@ -57,7 +60,7 @@ func New(cfg config.MQTTCfg, rdb *redis.Client) (*Broker, error) {
 }
 
 func newBroker(cfg config.MQTTCfg, rdb *redis.Client, handler mqtt.MessageHandler, resubscribed func()) (*Broker, error) {
-	b := &Broker{cfg: cfg, rdb: rdb, ackCh: make(map[string]chan struct{}), presenceHandler: handler, resubscribed: resubscribed}
+	b := &Broker{cfg: cfg, rdb: rdb, ackWaiters: make(map[string]map[chan struct{}]struct{}), presenceHandler: handler, resubscribed: resubscribed}
 	ctx, cancel := context.WithCancel(context.Background())
 	b.cancel = cancel
 	b.recoveryDone = make(chan struct{})
@@ -251,16 +254,18 @@ func (b *Broker) handleMessage(_ mqtt.Client, msg mqtt.Message) {
 	slog.Debug("mqttc handleMessage", "topic", topic, "payload", string(msg.Payload()))
 	// ACK from device: device/{clientID}/ack
 	if strings.HasSuffix(topic, "/ack") {
+		// Device ACKs carry no request ID, so an ACK confirms delivery to
+		// every command currently waiting on that device.
 		b.mu.Lock()
-		ch, ok := b.ackCh[topic]
-		b.mu.Unlock()
-		slog.Debug("mqttc ack", "topic", topic, "found_waiter", ok)
-		if ok {
+		waiters := len(b.ackWaiters[topic])
+		for ch := range b.ackWaiters[topic] {
 			select {
 			case ch <- struct{}{}:
 			default:
 			}
 		}
+		b.mu.Unlock()
+		slog.Debug("mqttc ack", "topic", topic, "waiters", waiters)
 	}
 }
 
@@ -297,23 +302,15 @@ func (b *Broker) Publish(topic string, qos byte, payload any) error {
 }
 
 // PublishAndWaitACK publishes to downTopic and waits for an ACK on ackTopic within timeout.
+// Concurrent waiters on the same ACK topic share its subscription.
 func (b *Broker) PublishAndWaitACK(downTopic, ackTopic string, payload any, timeout time.Duration) error {
 	ch := make(chan struct{}, 1)
-	b.mu.Lock()
-	b.ackCh[ackTopic] = ch
-	b.mu.Unlock()
-
-	defer func() {
-		b.mu.Lock()
-		delete(b.ackCh, ackTopic)
-		b.mu.Unlock()
-		// unsubscribe ACK topic
-		b.client.Unsubscribe(ackTopic)
-	}()
-
-	// subscribe before publish to avoid race
-	tok := b.client.Subscribe(ackTopic, 1, nil)
-	tok.Wait()
+	// Subscribe before publish so the ACK cannot arrive unobserved.
+	tok := b.addACKWaiter(ackTopic, ch)
+	defer b.removeACKWaiter(ackTopic, ch)
+	if !tok.WaitTimeout(5 * time.Second) {
+		return fmt.Errorf("%w: timeout", ErrSubscribeFailed)
+	}
 	slog.Debug("mqttc subscribe ack", "ack_topic", ackTopic, "err", tok.Error())
 	if err := tok.Error(); err != nil {
 		return fmt.Errorf("%w: %w", ErrSubscribeFailed, err)
@@ -332,6 +329,40 @@ func (b *Broker) PublishAndWaitACK(downTopic, ackTopic string, payload any, time
 	case <-time.After(timeout):
 		slog.Warn("mqttc ack timeout", "ack_topic", ackTopic, "timeout", timeout)
 		return ErrACKTimeout
+	}
+}
+
+// addACKWaiter registers ch and (re)subscribes the topic. Every waiter sends
+// its own SUBSCRIBE and waits for its SUBACK; repeating a subscription is
+// harmless and proves it is active before this waiter publishes.
+func (b *Broker) addACKWaiter(topic string, ch chan struct{}) mqtt.Token {
+	b.ackSubMu.Lock()
+	defer b.ackSubMu.Unlock()
+	b.mu.Lock()
+	waiters := b.ackWaiters[topic]
+	if waiters == nil {
+		waiters = make(map[chan struct{}]struct{})
+		b.ackWaiters[topic] = waiters
+	}
+	waiters[ch] = struct{}{}
+	b.mu.Unlock()
+	return b.client.Subscribe(topic, 1, nil)
+}
+
+// removeACKWaiter unsubscribes only when the last waiter leaves.
+func (b *Broker) removeACKWaiter(topic string, ch chan struct{}) {
+	b.ackSubMu.Lock()
+	defer b.ackSubMu.Unlock()
+	b.mu.Lock()
+	waiters := b.ackWaiters[topic]
+	delete(waiters, ch)
+	last := len(waiters) == 0
+	if last {
+		delete(b.ackWaiters, topic)
+	}
+	b.mu.Unlock()
+	if last {
+		b.client.Unsubscribe(topic)
 	}
 }
 
