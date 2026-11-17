@@ -516,11 +516,30 @@ sudo /opt/thing-connect/service-local.sh restart thing-connect:admin-server
 - Admin 先启动并达到 `/health/ready`，再预检并启动已启用的业务服务。
 - 每个进程使用安装器生成的对应 `config-current/<service>/config.yaml`，不要复制或手工拆分配置 revision。
 - 每个进程设置稳定且唯一的 `SERVICE_INSTANCE_ID`；Username MQTT 模式依赖它生成不冲突的连接 ClientID。
-- Device 可以运行多个实例，其他服务每种只运行一个实例。多实例的条件和配置见[Device 多实例](#device-multi-instance)。
+- 除 Admin 外，业务服务可以运行多个实例，条件和配置见[业务服务多实例](#multi-instance)。
 - 向进程发送 `SIGTERM` 并留出优雅退出时间，不使用强制终止作为正常重启方式。
 - 对全部业务服务执行 readiness 检查；`/health/live` 不能替代 `/health/ready`。
 - 部署环境负责异常重启、开机自启、日志收集和日志轮转，且同一服务同一实例不能同时被两个进程管理器拉起。
 - 安装产物默认归 `root` 所有。改用非 `root` 运行账号时，只调整该账号必需的配置读取、日志和任务目录权限，并继续保护 `0600` 配置中的数据库与服务密钥。
+
+<a id="multi-instance"></a>
+
+#### 业务服务多实例
+
+Device、User、VoIP、AI、Call 和 Recognition 可以各自运行多个实例分担请求并互为备份；Admin 只运行一个实例。`service-local.sh` 只管理单实例，多实例需要 Supervisor 或其他进程管理器。启用前须满足：
+
+- 连接 MQTT 的服务（AI 以外）在 Admin 中把 `<服务>/mqtt.connection` 设为 Username 认证方式。ClientID 认证方式使用固定 ClientID，多个实例会互相挤掉连接，只能单实例运行。
+- 每个实例的 `SERVICE_INSTANCE_ID` 和 HTTP 端口不能重复。MQTT ClientID 由 Username 和实例 ID 组成，两个进程使用同一实例 ID 时，后连接的进程会挤掉前一个。同一服务的实例共用一个 `config.yaml`，用环境变量 `THING_CONNECT_HTTP_PORT` 覆盖 `server.http_port`。
+- 按全部实例重新核算 [MySQL 连接预算](#mysql-连接预算)：每个实例都有独立连接池，总量为各服务“实例数 × `max_open_conns`”之和。Redis 同样按实例数估算客户端连接。
+- 公网请求经 Nginx 分发，每个服务的 upstream 列出全部实例。
+- 运行多个 AI、VoIP 或 Call 实例时，User 调用它们内部接口的地址也要负载均衡：启用 Nginx 模板中注释掉的内网入口（只监听 `127.0.0.1:9100`，只转发 `/v1/{ai,voip,call}/internal/`），并把 User 启动配置（`config-current/user-server/config.yaml`）中的 `ai.server_url`、`voip.server_url`、`call.server_url` 改为 `http://127.0.0.1:9100`，然后重启 User。内网入口不得开放到公网，`internal.key` 不变。
+- 实例分布在多台机器时，所有机器须启用 NTP 时钟同步；Admin 上传的开发板图片保存在 Admin 部署根目录的 `var/board-images`，由 User 从本机读取，须把该目录挂载为共享存储，或只在与 Admin 同机的 User 实例上提供 `/v1/board-images/`。同机多实例只分担进程故障，不等于高可用。
+
+[Supervisor 模板](deploy/supervisor/thing-connect.supervisor.conf)中注释掉的 `device-server-2` 和 `user-server-2` 是第二个实例的写法，约定端口为主实例端口加 10（Device 9011、User 9012、VoIP 9013、AI 9014、Call 9015、Recognition 9016）。取消注释并修改程序名、目录、实例 ID 和端口，保留原程序的 `priority`，把新程序加入 `[group:thing-connect]` 的 `programs`，执行 `sudo supervisorctl reread && sudo supervisorctl update`。再在 [Nginx 模板](deploy/nginx/thing-connect.nginx.conf)对应 upstream 中加入 `server 127.0.0.1:<端口>;` 并重新加载 Nginx。已停止的实例拒绝连接时，Nginx 把请求转给下一个实例。
+
+`deploy-prod.sh` 把 Supervisor 组中名为 `<服务>-<数字>` 的程序识别为该服务的额外实例，按进程环境中的 `THING_CONNECT_HTTP_PORT` 检查各自的 `/health/ready`。`restart` 逐台重启：上一台通过 readiness 后才重启下一台，其余实例继续服务。`update` 仍先停止全部服务再迁移和发布，避免新旧二进制在同一数据库结构上混跑。
+
+验收时在 Broker 客户端列表确认每个实例各有一个连接且保持在线，ClientID 互不相同；逐个重启实例期间，经 Nginx 的请求不出现 502 或连接失败。
 
 ### 4.4 可选：配置 Nginx 单一入口
 
@@ -743,15 +762,7 @@ Device 以共享订阅 `$share/thing-connect-presence/<主题>` 订阅 `device/+
 
 #### Device 多实例
 
-Device 可以运行多个实例分担在线事件并互为备份，其他服务每种只运行一个实例。启用多实例前须满足：
-
-- `device-server/mqtt.connection` 使用 Username 认证方式。ClientID 认证方式使用固定 ClientID，多个实例会互相挤掉连接，只能单实例运行。
-- 每个实例的 `SERVICE_INSTANCE_ID` 和 HTTP 端口不能重复。实例共用同一个 `config.yaml`，用环境变量 `THING_CONNECT_HTTP_PORT` 覆盖 `server.http_port`。
-- 已配置 [Broker 管理接口](#device-broker-api)。
-
-[Supervisor 模板](deploy/supervisor/thing-connect.supervisor.conf)中注释掉的 `device-server-2` 是第二个实例：取消整段注释，把它加入 `[group:thing-connect]` 的 `programs`，执行 `sudo supervisorctl reread && sudo supervisorctl update`。再在 [Nginx 模板](deploy/nginx/thing-connect.nginx.conf)的 `device_server` upstream 中加入 `server 127.0.0.1:9011;` 并重新加载 Nginx。已停止的实例拒绝连接时，Nginx 把请求转给下一个实例。
-
-`deploy-prod.sh` 把 Supervisor 组中名为 `device-server-<数字>` 的程序识别为 Device 的额外实例，按进程环境中的 `THING_CONNECT_HTTP_PORT` 检查各自的 `/health/ready`。`restart` 逐台重启：上一台通过 readiness 后才重启下一台，其余实例继续服务。`update` 仍先停止全部服务再迁移和发布，避免新旧二进制在同一数据库结构上混跑。`service-local.sh` 只管理单实例。
+Device 多实例除满足[业务服务多实例](#multi-instance)的通用条件外，还须配置 [Broker 管理接口](#device-broker-api)。多个实例共同分担在线事件：
 
 Device 的在线订阅连接断开时立即结束 MQTT 会话，Broker 把该实例未处理和新到的事件改派给组内其他实例。每次断线重连后，Device 都把断线期间记为事件缺口：配置了 Broker 管理接口时自动核对补齐，readiness 在核对完成或 150 秒内恢复；未配置时由后续心跳在 150 秒内修正在线状态，但断线期间新上线设备的 IP 要等它下次连接才会记录。
 
