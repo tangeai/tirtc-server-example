@@ -112,12 +112,12 @@ func (s *Server) postSnTicket(c *gin.Context) {
 		apiresp.Fail(c, apiresp.ErrWechatCfg, "未配置微信应用或 model_id")
 		return
 	}
-	accessToken, err := wechat.GetAccessToken(c.Request.Context(), wxAppID, app.Secret)
-	if err != nil {
-		apiresp.Fail(c, apiresp.ErrWechatAPI, err.Error())
-		return
-	}
-	ticket, err := wechat.GetSnTicket(c.Request.Context(), accessToken, req.DeviceID, app.ModelID)
+	var ticket string
+	err = wechat.CallWithAccessToken(c.Request.Context(), wxAppID, app.Secret, func(accessToken string) error {
+		var callErr error
+		ticket, callErr = wechat.GetSnTicket(c.Request.Context(), accessToken, req.DeviceID, app.ModelID)
+		return callErr
+	})
 	if err != nil {
 		apiresp.Fail(c, apiresp.ErrWechatAPI, err.Error())
 		return
