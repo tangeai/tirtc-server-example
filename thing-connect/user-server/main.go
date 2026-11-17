@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"maps"
 	"net/http"
 	"os"
 	"os/signal"
@@ -187,17 +188,25 @@ func main() {
 	if len(targets) > 0 && cfg.Internal.Key == "" {
 		log.Fatal("config: internal.key must be set when cross-service cleanup URLs are configured")
 	}
-	outbox := cleanupoutbox.NewOutbox(sqlDB, targets)
+	outbox, err := cleanupoutbox.NewOutbox(mysqlstore.NewCleanupOutboxStore(sqlDB), targets)
+	if err != nil {
+		log.Fatalf("cleanup outbox: %v", err)
+	}
 	cleanup := &usrhandler.UnbindCleanup{Targets: cleanupoutbox.TargetNames(targets)}
 	outboxCtx, outboxCancel := context.WithCancel(context.Background())
 	go outbox.Run(outboxCtx)
 	go passwordResetMailQueue.Run(outboxCtx)
 	go runAdminUserCommands(outboxCtx, rdb, userSvc)
 	go dynamicClient.Run(outboxCtx, dynamicRefs)
-	reporter, err := servicestatus.NewReporter(rdb, "user-server", probes, dynamicClient.Revisions)
+	// A cleanup backlog is reported as degraded status but must not fail
+	// /health/ready: draining user-server would not help a stuck target.
+	statusProbes := maps.Clone(probes)
+	statusProbes["cleanup_outbox"] = outbox.Health
+	reporter, err := servicestatus.NewReporter(rdb, "user-server", statusProbes, dynamicClient.Revisions)
 	if err != nil {
 		log.Fatalf("service status: %v", err)
 	}
+	reporter.SetMetrics(outbox.Metrics)
 	go reporter.Run(outboxCtx)
 
 	usrhandler.NewServer(userSvc, bindSvc, profileSvc, broker, sqlDB, rdb, cfg.JWTSecret, cfg.Call.ServerURL, cfg.Internal.Key, roleStore, cleanup).Register(r)

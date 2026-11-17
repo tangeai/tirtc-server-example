@@ -791,6 +791,16 @@ Device 的服务状态实例包含 `metrics`：
 
 这些值通过 Admin 服务状态接口按实例读取；采样时间用于区分旧快照。最老待写超过 150 秒时 presence readiness 不通过，排空后恢复，不以单次 SQL 写入成功掩盖积压。
 
+User 的服务状态实例包含解绑清理队列（`cleanup_outbox`）的 `metrics`：
+
+| 指标 | 含义 |
+|---|---|
+| `cleanup_pending` | 待通知 AI、VoIP、呼叫服务清理的任务数 |
+| `cleanup_oldest_pending_age_ms` | 最老任务自首次入队起的等待时长；同一设备重新解绑不重置 |
+| `cleanup_backlog_measured_at_ms` | 积压的采样时间 |
+
+最老任务等待超过 15 分钟，或积压超过 1 分钟未能采样时，服务状态中的 `cleanup_outbox` 依赖显示不健康，User 显示为降级；排空后自动恢复。该状态不影响 `/health/ready`，因为摘除 User 实例无法恢复下游清理。排查时检查对应目标服务的内部接口、`internal.key` 和 `last_error` 列。
+
 #### 容量验收与 Broker 调优
 
 `tests/presence-load` 用真实的共享订阅消费链路做容量验收：模拟设备连接测试 Broker 并发送心跳，在进程内启动多个与 Device 相同的消费者，每 5 秒输出 Redis 在线覆盖率和各消费者的队列、缓存、丢弃和核对指标。只能连接测试 Broker 和专用 Redis 库，工具退出时会删除该库中的在线状态 key：

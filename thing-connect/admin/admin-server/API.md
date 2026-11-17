@@ -113,7 +113,7 @@ MFA 用于登录及首次绑定确认。登录后的管理写操作和恢复码�
 | AI 角色类型 | `GET/POST /ai-role-types`、`GET /ai-role-types/voices`、`PUT /ai-role-types/:id`、`PUT /ai-role-types/:id/status` |
 | 开发板目录 | `GET/POST /boards`、`POST /boards/images`、`PUT/DELETE /boards/:id`、`PUT /boards/:id/status` |
 
-服务状态的 `instances[]` 可包含 `metrics` 整数映射。Device 实例提供 `presence_queued`、`presence_rejected_total`、`presence_write_failures_total`、`connection_pending`、`connection_oldest_pending_age_ms`、`connection_backlog_measured_at_ms`，分别表示内存队列长度、累计拒收数、累计投影失败数、待补写设备数、最老待写年龄（毫秒）和指标采样时间（Unix 毫秒）。旧实例或其他服务可以省略该字段。待写超过 150 秒会使 presence 依赖不健康，不能只凭数据库连接成功判定服务就绪。
+服务状态的 `instances[]` 可包含 `metrics` 整数映射。Device 实例提供 `presence_queued`、`presence_rejected_total`、`presence_write_failures_total`、`connection_pending`、`connection_oldest_pending_age_ms`、`connection_backlog_measured_at_ms`，分别表示内存队列长度、累计拒收数、累计投影失败数、待补写设备数、最老待写年龄（毫秒）和指标采样时间（Unix 毫秒）。User 实例提供 `cleanup_pending`、`cleanup_oldest_pending_age_ms`、`cleanup_backlog_measured_at_ms`，分别表示解绑清理待处理任务数、最老任务等待时长（毫秒，自首次入队起）和采样时间（Unix 毫秒）；最老任务超过 15 分钟或采样过期时 `cleanup_outbox` 依赖不健康，但不影响 User 的 `/health/ready`。旧实例或其他服务可以省略该字段。待写超过 150 秒会使 presence 依赖不健康，不能只凭数据库连接成功判定服务就绪。
 
 `GET /services/:service/status` 在实例状态外返回 `configuration_ready`、`required_configurations[]`、`start_command` 和 `restart_command`。`required_configurations[]` 列出未发布或无效的启动阻断项。命令仅用于管理员复制到部署服务器执行，Admin 不执行主机进程控制。
 
