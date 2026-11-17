@@ -95,7 +95,10 @@ func main() {
 	cacheStore := mysqlstore.NewCacheStore(rdb)
 
 	userSvc := service.NewUserService(userStore, cacheStore, captchapkg.DevVerifier{}, mailerpkg.DisabledMailer{}, cfg.JWTSecret, svcCfg)
-	passwordResetMailQueue := service.NewInMemoryPasswordResetEmailQueue(userSvc.DeliverPasswordResetCode)
+	passwordResetMailQueue, err := service.NewInMemoryPasswordResetEmailQueue(userSvc.DeliverPasswordResetCode, cache.NewPasswordResetMailGate(rdb))
+	if err != nil {
+		log.Fatalf("password reset email queue: %v", err)
+	}
 	userSvc.SetPasswordResetEmailQueue(passwordResetMailQueue)
 
 	bindAttemptPolicy, err := cfg.BindAttempt.Policy()

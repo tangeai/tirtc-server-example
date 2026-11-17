@@ -112,7 +112,10 @@ func (s *Server) Register(r *gin.Engine) {
 		cfg := service.DefaultServiceConfig()
 		// In the legacy/test path captcha and mailer are noop stubs.
 		s.userSvc = service.NewUserService(userStore, cacheStore, &noopCaptcha{}, &noopMailer{}, s.JWTSecret, cfg)
-		passwordResetMailQueue := service.NewInMemoryPasswordResetEmailQueue(s.userSvc.DeliverPasswordResetCode)
+		passwordResetMailQueue, err := service.NewInMemoryPasswordResetEmailQueue(s.userSvc.DeliverPasswordResetCode, cache.NewPasswordResetMailGate(s.RDB))
+		if err != nil {
+			panic(err)
+		}
 		s.userSvc.SetPasswordResetEmailQueue(passwordResetMailQueue)
 		queueCtx, queueCancel := context.WithCancel(context.Background())
 		s.passwordResetMailQueueCancel = queueCancel
