@@ -157,15 +157,3 @@ Python 模拟器支持设备上线、用户绑定、MQTT 长连接和实时音�
 MIT © 探鸽智能
 
 参与开发见 [CONTRIBUTING.md](CONTRIBUTING.md)，安全问题见 [SECURITY.md](SECURITY.md)，第三方组件边界见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
-
-B8 tirtc example issue 1 retry
-
-C1 example
-
-C9 partial
-
-C11 source mr
-
-F3 B
-
-F3b B
