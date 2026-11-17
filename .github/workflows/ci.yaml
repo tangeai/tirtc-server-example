@@ -156,5 +156,6 @@ jobs:
         working-directory: thing-connect/device-sim/device-sim-py
         env:
           TIRTC_SDK_VERSION: 2.5.0
+          PYTHONUTF8: "1"
           REQUIRE_AI_CODECS: ${{ runner.os == 'Linux' && '1' || '0' }}
         run: python -m unittest discover -p 'test_*.py'

@@ -1,3 +1,4 @@
+// Package ai owns AI role lifecycle and plugin naming shared by AI services.
 package ai
 
 import (
@@ -38,9 +39,7 @@ type RoleCloud interface {
 	Delete(context.Context, string) error
 }
 
-// RoleLifecycleStore serializes all user-facing mutations across processes.
-// Remote work runs outside SQL transactions. Durable deletion markers and
-// conservative cloud reservations survive timeouts and process interruption.
+// CloudTarget is the cloud role a device should have at one binding revision.
 type CloudTarget struct {
 	DeviceID string `db:"device_id"`
 	UserID   int64  `db:"user_id"`
@@ -54,6 +53,10 @@ type RoleOperations interface {
 	SetCloud(context.Context, int64, []string, string, bool) error
 	CleanupDevice(context.Context, string) error
 }
+
+// RoleLifecycleStore serializes all user-facing mutations across processes.
+// Remote work runs outside SQL transactions. Durable deletion markers and
+// conservative cloud reservations survive timeouts and process interruption.
 type RoleLifecycleStore interface {
 	WithAccount(context.Context, int64, func(context.Context) error) error
 	CheckRole(context.Context, int64, string, bool) error
@@ -180,7 +183,7 @@ func (s *Roles) SetCloud(ctx context.Context, user int64, devices []string, role
 	})
 }
 
-// Cleanup and reconciliation share the same device lock as user mutations.
+// CleanupDevice shares the same device lock as user mutations and reconciliation.
 // The durable target remains after success: a remote request can finish even
 // after its HTTP caller timed out, so absence of a single response is not proof
 // that the cloud state will never change again.

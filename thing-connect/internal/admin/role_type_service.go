@@ -114,7 +114,7 @@ func (s *RoleTypeService) Save(ctx context.Context, v roletypes.Type, revision i
 	return s.store.Save(ctx, RoleTypeMutation{Type: v, ExpectedRevision: revision, Action: action, Audit: audit})
 }
 
-// RequestMeta belongs to role type management, independently of board resources.
+// RoleTypeRequestMeta belongs to role type management, independently of board resources.
 type RoleTypeRequestMeta struct {
 	Actor                                                AccessIdentity
 	RequestID, Method, Path, ClientIP, UserAgent, Reason string

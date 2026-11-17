@@ -224,7 +224,7 @@ class DeviceSimulatorTests(unittest.TestCase):
     def test_credentials_save_without_fchmod_on_windows(self):
         with tempfile.TemporaryDirectory() as root:
             path = os.path.join(root, "creds.json")
-            with mock.patch.object(device_credentials.os, "fchmod", None):
+            with mock.patch.object(device_credentials.os, "fchmod", None, create=True):
                 self.assertTrue(device_credentials.save_creds("dev1", "key1", path))
             self.assertEqual(device_credentials.load_saved_creds(path), ("dev1", "key1"))
 
