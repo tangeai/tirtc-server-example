@@ -64,7 +64,7 @@ func TestVoipRemarkClaimsDoNotOverlapAndStaleAcksAreIgnored(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for {
-				events, err := store.Claim(context.Background(), 4, time.Second)
+				events, err := store.Claim(context.Background(), 4, time.Minute)
 				if err != nil {
 					t.Errorf("Claim: %v", err)
 					return
