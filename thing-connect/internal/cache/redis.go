@@ -10,12 +10,20 @@ import (
 	"thing-connect/internal/config"
 )
 
+// options makes a caller's context deadline bound both the pool wait and the
+// socket read. Without ContextTimeoutEnabled go-redis waits for its own 3
+// second read timeout even when the request has less time left.
+func options(cfg config.RedisCfg) *redis.Options {
+	return &redis.Options{
+		Addr:                  cfg.Addr,
+		Password:              cfg.Password,
+		DB:                    cfg.DB,
+		ContextTimeoutEnabled: true,
+	}
+}
+
 func New(cfg config.RedisCfg) (*redis.Client, error) {
-	rdb := redis.NewClient(&redis.Options{
-		Addr:     cfg.Addr,
-		Password: cfg.Password,
-		DB:       cfg.DB,
-	})
+	rdb := redis.NewClient(options(cfg))
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	if err := rdb.Ping(ctx).Err(); err != nil {
