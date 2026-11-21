@@ -129,6 +129,25 @@ func TestMergeKeepsLatestExpiryAndNewestConnection(t *testing.T) {
 	}
 }
 
+func TestProjectionMetricsRetainSlowTailAndExcludeFailedWrites(t *testing.T) {
+	p := New(&memoryStore{failures: 1}, nil, nil)
+	w := &writer{p: p, pending: map[string]Observation{}}
+	now := time.Now()
+	w.merge(Observation{ClientID: "sn_slow", At: now.Add(-20 * time.Second), ExpiresAt: now.Add(TTL)})
+	w.flush(context.Background(), now)
+	if p.Metrics()["presence_projected_samples_total"] != 0 {
+		t.Fatal("failed write counted as completed")
+	}
+	w.flush(context.Background(), now.Add(time.Second))
+	m := p.Metrics()
+	if m["presence_projected_samples_total"] != 1 || m["presence_projection_age_le_inf_total"] != 1 || m["presence_projection_age_le_5000ms_total"] != 0 {
+		t.Fatal(m)
+	}
+	if m["presence_projection_age_ms_total"] < 20000 {
+		t.Fatal("lost slow tail", m)
+	}
+}
+
 func TestMergeBufferIsBounded(t *testing.T) {
 	p := New(&memoryStore{}, nil, nil)
 	w := &writer{p: p, pending: map[string]Observation{}}

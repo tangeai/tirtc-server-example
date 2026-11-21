@@ -33,10 +33,11 @@ type onlineReader interface {
 }
 
 type Broker struct {
-	client mqtt.Client
-	cfg    config.MQTTCfg
-	rdb    onlineReader
-	mu     sync.Mutex
+	ackActive, ackCompleted, ackFailed, ackTimeouts, ackCanceled, ackElapsedMS atomic.Int64
+	client                                                                     mqtt.Client
+	cfg                                                                        config.MQTTCfg
+	rdb                                                                        onlineReader
+	mu                                                                         sync.Mutex
 	// ackWaiters holds every pending waiter per ACK topic; guarded by mu.
 	ackWaiters map[string]map[chan struct{}]struct{}
 	// ackSubMu orders SUBSCRIBE/UNSUBSCRIBE for ACK topics so a departing
@@ -326,7 +327,24 @@ func (b *Broker) PublishAndWaitACK(downTopic, ackTopic string, payload any, time
 
 // PublishAndWaitACKContext is PublishAndWaitACK that also returns ctx.Err()
 // as soon as ctx ends; the subscription is released either way.
-func (b *Broker) PublishAndWaitACKContext(ctx context.Context, downTopic, ackTopic string, payload any, timeout time.Duration) error {
+func (b *Broker) PublishAndWaitACKContext(ctx context.Context, downTopic, ackTopic string, payload any, timeout time.Duration) (result error) {
+	start := time.Now()
+	b.ackActive.Add(1)
+	defer func() {
+		b.ackActive.Add(-1)
+		b.ackElapsedMS.Add(time.Since(start).Milliseconds())
+		if result == nil {
+			b.ackCompleted.Add(1)
+		} else {
+			b.ackFailed.Add(1)
+			if errors.Is(result, ErrACKTimeout) || errors.Is(result, context.DeadlineExceeded) {
+				b.ackTimeouts.Add(1)
+			}
+			if errors.Is(result, context.Canceled) {
+				b.ackCanceled.Add(1)
+			}
+		}
+	}()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -359,6 +377,12 @@ func (b *Broker) PublishAndWaitACKContext(ctx context.Context, downTopic, ackTop
 		slog.Warn("mqttc ack timeout", "ack_topic", ackTopic, "timeout", timeout)
 		return ErrACKTimeout
 	}
+}
+
+// Metrics counts complete subscribe/publish/ACK operations, without topic or
+// device labels. Failures include subscription and publish failures.
+func (b *Broker) Metrics() map[string]int64 {
+	return map[string]int64{"mqtt_ack_active": b.ackActive.Load(), "mqtt_ack_completed_total": b.ackCompleted.Load(), "mqtt_ack_failed_total": b.ackFailed.Load(), "mqtt_ack_timeout_total": b.ackTimeouts.Load(), "mqtt_ack_canceled_total": b.ackCanceled.Load(), "mqtt_ack_duration_ms_total": b.ackElapsedMS.Load()}
 }
 
 var errSubscribeTimeout = errors.New("timeout")

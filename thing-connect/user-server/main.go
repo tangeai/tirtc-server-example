@@ -29,6 +29,7 @@ import (
 	"thing-connect/internal/logging"
 	mailerpkg "thing-connect/internal/mailer"
 	"thing-connect/internal/mqttc"
+	"thing-connect/internal/requestguard"
 	"thing-connect/internal/service"
 	"thing-connect/internal/servicestatus"
 	"thing-connect/internal/sitebrand"
@@ -205,21 +206,25 @@ func main() {
 	// /health/ready: draining user-server would not help a stuck target.
 	statusProbes := maps.Clone(probes)
 	statusProbes["cleanup_outbox"] = outbox.Health
+	guard, guardErr := requestguard.New(cfg.Server.RequestLimits)
+	if guardErr != nil {
+		log.Fatal(guardErr)
+	}
 	reporter, err := servicestatus.NewReporter(rdb, "user-server", statusProbes, dynamicClient.Revisions)
 	if err != nil {
 		log.Fatalf("service status: %v", err)
 	}
-	reporter.SetMetrics(outbox.Metrics)
+	reporter.SetMetrics(servicestatus.MergeMetrics(broker.Metrics, outbox.Metrics, guard.Metrics, servicestatus.PoolMetrics(sqlDB, rdb)))
 	go reporter.Run(outboxCtx)
 
 	usrhandler.NewServer(userSvc, bindSvc, profileSvc, broker, sqlDB, rdb, cfg.JWTSecret, cfg.Call.ServerURL, cfg.Internal.Key, roleStore, cleanup).Register(r)
 
 	addr := fmt.Sprintf(":%d", cfg.Server.HTTPPort)
 	srv := &http.Server{
-		Addr: addr, Handler: r,
+		Addr: addr, Handler: guard.Wrap(r),
 		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      60 * time.Second,
+		ReadTimeout:       max(30*time.Second, guard.MaxTimeout()),
+		WriteTimeout:      max(60*time.Second, guard.MaxTimeout()+5*time.Second),
 		IdleTimeout:       90 * time.Second,
 	}
 	go func() {

@@ -17,6 +17,7 @@ import (
 	"thing-connect/internal/brokerapi"
 	"thing-connect/internal/model"
 	"thing-connect/internal/recognition"
+	"thing-connect/internal/requestguard"
 	"thing-connect/internal/room"
 	"thing-connect/internal/sitebrand"
 	"thing-connect/internal/weblanguage"
@@ -24,8 +25,9 @@ import (
 )
 
 type ServerCfg struct {
-	HTTPPort       int      `yaml:"http_port"`
-	TrustedProxies []string `yaml:"trusted_proxies"`
+	RequestLimits  requestguard.Config `yaml:"request_limits"`
+	HTTPPort       int                 `yaml:"http_port"`
+	TrustedProxies []string            `yaml:"trusted_proxies"`
 }
 
 // LogCfg configures the slog logger shared by all servers.
@@ -281,6 +283,9 @@ func LoadFile(path string) (*Config, error) {
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&cfg); err != nil {
 		return nil, fmt.Errorf("config: parse %s: %w", path, err)
+	}
+	if _, err := cfg.Server.RequestLimits.Resolve(); err != nil {
+		return nil, err
 	}
 	if _, _, err := cfg.Database.ConnectionLimits(); err != nil {
 		return nil, err

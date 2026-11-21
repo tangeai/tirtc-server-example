@@ -1,4 +1,10 @@
 server:
+  # Per-instance request budgets; restart after changing. Omitted classes use these defaults.
+  request_limits:
+    token: {concurrency: 128, timeout: 10s}
+    query: {concurrency: 64, timeout: 10s}
+    upload: {concurrency: 8, timeout: 25s}
+    upstream: {concurrency: 32, timeout: 25s}
   http_port: 9005
   trusted_proxies: []  # Add only the reverse-proxy CIDRs that set client IP headers.
 

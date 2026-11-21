@@ -45,6 +45,7 @@ func TestPresenceBatchRedisCompatibility(t *testing.T) {
 		t.Fatal("unversioned disconnect deleted current connection")
 	}
 	older := online
+	before := store.Metrics()
 	older.At = now.Add(-time.Minute)
 	older.ExpiresAt = older.At.Add(presence.TTL)
 	if err := store.Project(ctx, []presence.Observation{older}); err != nil {
@@ -52,6 +53,10 @@ func TestPresenceBatchRedisCompatibility(t *testing.T) {
 	}
 	if ttl := rdb.PTTL(ctx, key).Val(); ttl < 148*time.Second {
 		t.Fatalf("reordered observation shortened ttl to %s", ttl)
+	}
+	after := store.Metrics()
+	if after["presence_online_updates_total"] != before["presence_online_updates_total"] || after["presence_online_ignored_total"] != before["presence_online_ignored_total"]+1 {
+		t.Fatalf("old observation counted as update: before=%v after=%v", before, after)
 	}
 	expired := online
 	expired.At = now.Add(-2 * presence.TTL)

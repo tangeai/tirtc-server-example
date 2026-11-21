@@ -215,6 +215,12 @@ voip-server、ai-server 和 call-server 使用相同的 `jwt_secret` 验证。�
 `multipart/form-data`；微信 VoIP 通知回调的请求体是 XML，不适用上述 JSON 约定。GET
 接口通常无需设置 `Content-Type`。
 
+### 请求预算与过载
+
+业务服务对 token、查询、上传及其余上游/写请求设置独立的进程并发上限和总预算，配置见[部署指南](deployment.md#请求预算与队列观测)。达到并发上限时不继续排队，返回现有 `50000` 错误及 `Retry-After: 1`；Device/User/AI/Recognition 使用 HTTP 500，Call/VoIP 使用 HTTP 200。微信通知仍使用 HTTP 200、`errcode=10`。健康检查和静态资源不受此并发限制。
+
+客户端重试应有次数上限并加入随机退避。写操作或上传超时后先查询原结果；识别请求保留原 `request_id`，不得通过更换编号重复占用额度。已有业务限频、鉴权、错误码及字段约定保持各接口所述含义。
+
 ---
 
 <a id="device-server"></a>

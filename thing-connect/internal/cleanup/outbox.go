@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sync/atomic"
+	"thing-connect/internal/backoff"
 	"time"
 )
 
@@ -116,6 +117,21 @@ func TargetNames(targets []Target) []string {
 
 // Run delivers queued tasks until ctx is cancelled.
 func (o *Outbox) Run(ctx context.Context) {
+	sampled := make(chan struct{})
+	go func() {
+		defer close(sampled)
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+		for {
+			o.sampleBacklog(ctx)
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+	defer func() { <-sampled }()
 	o.process(ctx)
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
@@ -130,7 +146,6 @@ func (o *Outbox) Run(ctx context.Context) {
 }
 
 func (o *Outbox) process(ctx context.Context) {
-	o.sampleBacklog(ctx)
 	deadline := o.now().Add(leaseDuration - leaseMargin)
 	claimCtx, cancel := context.WithTimeout(ctx, queueTimeout)
 	tasks, err := o.queue.Claim(claimCtx, batchSize, leaseDuration)
@@ -259,7 +274,7 @@ func retryDelay(attempt int) time.Duration {
 	if attempt > 6 {
 		attempt = 6
 	}
-	return time.Duration(1<<attempt) * 5 * time.Second
+	return backoff.Jitter(time.Duration(1<<max(0, attempt)) * 5 * time.Second)
 }
 
 func truncateError(err error) string {

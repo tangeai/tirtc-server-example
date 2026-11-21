@@ -182,7 +182,7 @@ func (s *aiRoleLifecycleStore) PrepareCloud(ctx context.Context, user int64, dev
 			return nil, ai.ErrRoleBusy
 		}
 		target := ai.CloudTarget{DeviceID: device, UserID: user, Revision: revision, RoleID: role, Remove: remove}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO ai_cloud_role_target(device_id,user_id,binding_revision,role_id,remove_role,next_attempt_at) VALUES(?,?,?,?,?,NOW()) ON DUPLICATE KEY UPDATE user_id=VALUES(user_id),binding_revision=VALUES(binding_revision),role_id=VALUES(role_id),remove_role=VALUES(remove_role),attempts=0,next_attempt_at=NOW()`, device, user, revision, role, remove); err != nil {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO ai_cloud_role_target(device_id,user_id,binding_revision,role_id,remove_role,next_attempt_at) VALUES(?,?,?,?,?,NOW()) ON DUPLICATE KEY UPDATE pending_since=IF(next_attempt_at='9999-12-31 23:59:59',CURRENT_TIMESTAMP(6),pending_since),user_id=VALUES(user_id),binding_revision=VALUES(binding_revision),role_id=VALUES(role_id),remove_role=VALUES(remove_role),attempts=0,next_attempt_at=NOW()`, device, user, revision, role, remove); err != nil {
 			return nil, err
 		}
 		if !remove {
@@ -225,7 +225,7 @@ func (s *aiRoleLifecycleStore) CloudTarget(ctx context.Context, device string, c
 	}
 	if e != nil || target.Revision != revision || target.UserID != owner {
 		target = ai.CloudTarget{DeviceID: device, UserID: owner, Revision: revision, Remove: true}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO ai_cloud_role_target(device_id,user_id,binding_revision,role_id,remove_role,next_attempt_at) VALUES(?,?,?,'',1,NOW()) ON DUPLICATE KEY UPDATE user_id=VALUES(user_id),binding_revision=VALUES(binding_revision),role_id='',remove_role=1,attempts=0,next_attempt_at=NOW()`, device, owner, revision); err != nil {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO ai_cloud_role_target(device_id,user_id,binding_revision,role_id,remove_role,next_attempt_at) VALUES(?,?,?,'',1,NOW()) ON DUPLICATE KEY UPDATE pending_since=IF(next_attempt_at='9999-12-31 23:59:59',CURRENT_TIMESTAMP(6),pending_since),user_id=VALUES(user_id),binding_revision=VALUES(binding_revision),role_id='',remove_role=1,attempts=0,next_attempt_at=NOW()`, device, owner, revision); err != nil {
 			return target, err
 		}
 	}
@@ -321,7 +321,7 @@ func (s *aiRoleLifecycleStore) DelayCloud(ctx context.Context, target ai.CloudTa
 	if err != nil || !current {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE ai_cloud_role_target SET next_attempt_at=DATE_ADD(NOW(),INTERVAL LEAST(300,POW(2,LEAST(attempts,8))) SECOND),attempts=LEAST(attempts+1,9) WHERE device_id=?`, target.DeviceID)
+	_, err = tx.ExecContext(ctx, `UPDATE ai_cloud_role_target SET next_attempt_at=DATE_ADD(NOW(),INTERVAL (1+FLOOR(RAND()*LEAST(300,POW(2,LEAST(attempts,8))))) SECOND),attempts=LEAST(attempts+1,9) WHERE device_id=?`, target.DeviceID)
 	if err != nil {
 		return err
 	}

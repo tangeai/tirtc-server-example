@@ -162,6 +162,7 @@ func TestProcessBoundsEveryQueueCall(t *testing.T) {
 		}
 		return 200, `{"code":0}`
 	})
+	o.sampleBacklog(context.Background())
 	o.process(context.Background())
 	if len(queue.deadlines) != 4 {
 		t.Fatalf("queue calls=%d, want backlog, claim, complete and retry", len(queue.deadlines))
@@ -218,6 +219,7 @@ func TestHealthTracksBacklogAgeAndRecovery(t *testing.T) {
 	}
 
 	queue.backlog = Backlog{Pending: 3, OldestAge: backlogUnhealthyAge + time.Second}
+	o.sampleBacklog(context.Background())
 	o.process(context.Background())
 	if o.Health(context.Background()) == nil {
 		t.Fatal("an over-age backlog should be unhealthy even when deliveries succeed")
@@ -228,12 +230,14 @@ func TestHealthTracksBacklogAgeAndRecovery(t *testing.T) {
 	}
 
 	queue.backlog = Backlog{Pending: 1, OldestAge: time.Minute}
+	o.sampleBacklog(context.Background())
 	o.process(context.Background())
 	if err := o.Health(context.Background()); err != nil {
 		t.Fatalf("drained backlog should recover: %v", err)
 	}
 
 	queue.backlog = Backlog{}
+	o.sampleBacklog(context.Background())
 	o.process(context.Background())
 	if got := o.Metrics()["cleanup_oldest_pending_age_ms"]; got != 0 {
 		t.Fatalf("empty backlog age=%d, want 0", got)

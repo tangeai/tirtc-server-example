@@ -814,9 +814,36 @@ User 的服务状态实例包含解绑清理队列（`cleanup_outbox`）的 `met
 
 最老任务等待超过 15 分钟，或积压超过 1 分钟未能采样时，服务状态中的 `cleanup_outbox` 依赖显示不健康，User 显示为降级；排空后自动恢复。该状态不影响 `/health/ready`，因为摘除 User 实例无法恢复下游清理。排查时检查对应目标服务的内部接口、`internal.key` 和 `last_error` 列。
 
+#### 请求预算与队列观测
+
+六个业务服务按进程独立执行 `server.request_limits`，修改 YAML 后重启生效，不通过 Admin 动态配置发布。省略时使用下表默认值；各组不共用并发名额，满额立即拒绝，不建立等待队列。
+
+| 组 | 范围 | 默认并发 | 默认总预算 |
+|---|---|---:|---:|
+| `token` | 设备 MQTT token、AI token、用户 RTC token、多人对讲 connect-token | 128 | 10 秒 |
+| `query` | 其余非 AI、非微信回调的 GET/HEAD JSON 请求 | 64 | 10 秒 |
+| `upload` | AI 知识库上传、识别音频提交 | 8 | 25 秒 |
+| `upstream` | 其余 AI 请求、微信回调及其他写请求 | 32 | 25 秒 |
+
+配置格式见各服务的 `config.yaml.example`。并发范围 1–10000，总预算范围 1 毫秒至 3 分钟，0 表示使用默认值。预算从进入应用开始，覆盖读取请求体、鉴权、数据库/Redis 连接池等待和下游调用；下游已有更短超时时使用较短值。健康接口、页面及静态资源不占用这些名额。外部代理的超时须覆盖所选预算。已知资源的必要补偿可能使用独立的短超时，例如 MCP 创建后的失败删除最多 5 秒；不会重新发起创建或付费识别。
+
+过载沿用业务错误 `50000`：Device/User/AI/Recognition 返回 HTTP 500，Call/VoIP 返回 HTTP 200；微信通知返回 HTTP 200、`errcode=10`。响应带 `Retry-After: 1`。上传或写请求失败不证明尚未提交，客户端先查询已有结果，不得盲目新建任务。处理中的超时由原业务错误映射返回。
+
+服务状态实例的 `request_<组>_active/limit` 表示当前并发和上限；`rejected_total`、`completed_total`、`deadline_exceeded_total`、`duration_ms_total` 为进程累计值。`sql_pool_wait_total` 和 `sql_pool_wait_ms_total` 表示 SQL 连接池等待次数和时间；`sql_pool_open/in_use/idle` 为连接数。Redis 使用 `redis_pool_connections/idle/timeouts_total/misses_total`。只在相同实例生命周期内计算增量，不把多个实例的累计值直接比较。
+
+具有下行能力的 User、VoIP、Call、Recognition 实例上报 `mqtt_ack_active`、`mqtt_ack_completed_total`、`mqtt_ack_failed_total`、`mqtt_ack_timeout_total`、`mqtt_ack_canceled_total` 和 `mqtt_ack_duration_ms_total`。这是从订阅、发布到收到设备 ACK 的完整调用统计，失败包括订阅和发布失败；它不证明媒体会话成功。Device 的 `presence_online_updates_total`、`presence_connection_updates_total` 统计 Redis 已确认的在线和连接快照有效更新；对应 `*_ignored_total` 包含同时间、旧时间及已过期的无效更新。网络中断而未收到脚本结果时不推测写入是否成功。
+
+Call 的 `remark_outbox`、AI 的 `ai_cloud_outbox`、Recognition 的 `recognition_outbox` 在服务状态中报告积压健康，指标前缀分别为 `remark`、`ai_cloud`、`recognition`：`*_pending`、`*_oldest_pending_age_ms`、`*_backlog_measured_at_ms`、`*_exhausted`。采样每 15 秒执行一次，查询最多 5 秒；一分钟没有有效样本、最老积压超过 15 分钟或存在耗尽重试的识别通知时，状态降级。排空并获得新样本后恢复；这些下游投递告警不摘除 HTTP readiness。
+
+计数包含已领取及退避中的任务。AI 已完成的版本屏障记录不算积压，替换尚未完成的目标保留首次等待时间，已完成后重新入队开始新的计时周期。识别通知排除旧绑定生命周期和已交付记录，最多投递 8 次；耗尽后通过设备查询补偿并排查 Broker 权限，不能用单次发布成功代替收包验收。解绑清理、备注通知、AI 对账使用有上限的随机退避持续重试；不自动丢弃仍需完成的工作。通用 Redis 客户端不自动重放不确定的命令，由业务流程或持久队列负责恢复，避免跨层重试放大和重复计数。
+
+部署需要 core 13 迁移，新增三个队列的首次入队时间列。旧记录没有可靠的首次入队时间，从迁移时开始计龄，不能据此推断升级前等待时长。迁移将旧识别通知中尚未尝试、受会话时区影响的未来时间归一到当前 UTC，不改动已领取的租约；后续首次投递和重试都遵守 `next_at`。迁移可重复执行，运行账号仍只需 DML；回滚遵循前文数据库备份恢复流程，不允许通过删除迁移记录启动旧二进制。
+
 #### 容量验收与 Broker 调优
 
-`tests/presence-load` 用真实的共享订阅消费链路做容量验收：模拟设备连接测试 Broker 并发送心跳，在进程内启动多个与 Device 相同的消费者，每 5 秒输出 Redis 在线覆盖率和各消费者的队列、缓存、丢弃和核对指标。只能连接测试 Broker 和专用 Redis 库，工具退出时会删除该库中的在线状态 key：
+分布式 token 压测、JSONL 汇总、72 小时稳态及故障验收步骤见[容量与故障验收](tests/scale-acceptance.md)。Device 的 `presence_projected_samples_total` 统计合并后成功提交 Redis 的观测数，`presence_projection_age_ms_total` 统计这些观测从接收到提交的累计年龄；`presence_projection_age_le_<阈值>ms_total` 为累计直方图（10、50、100、500、1000、5000 毫秒，另有 `presence_projection_age_le_inf_total`）。它们不是物理 Redis 写次数，也不包含设备到 Broker 的网络延迟；失败写入和被合并的旧观测不计为成功样本。
+
+`tests/presence-load` 用真实的共享订阅消费链路做容量验收：模拟设备连接测试 Broker 并发送心跳，在进程内启动多个与 Device 相同的消费者，每 5 秒输出 Redis 在线覆盖率和各消费者的队列、缓存、丢弃和核对指标。只能连接测试 Broker 和专用 Redis 库，工具退出时仅删除本次设备前缀对应的在线状态 key：
 
 ```bash
 cd /opt/thing-connect/tirtc-server-example/thing-connect

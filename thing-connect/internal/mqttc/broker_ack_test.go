@@ -165,6 +165,9 @@ func TestConcurrentACKWaitersShareOneDeviceACK(t *testing.T) {
 		}
 	}
 	f.expect("unsubscribe")
+	if m := b.Metrics(); m["mqtt_ack_active"] != 0 || m["mqtt_ack_completed_total"] != 2 || m["mqtt_ack_failed_total"] != 0 {
+		t.Fatalf("ACK metrics: %v", m)
+	}
 }
 
 func TestACKWaiterTimeoutKeepsSubscriptionForRemainingWaiter(t *testing.T) {

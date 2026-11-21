@@ -19,6 +19,9 @@ func options(cfg config.RedisCfg) *redis.Options {
 		Password:              cfg.Password,
 		DB:                    cfg.DB,
 		ContextTimeoutEnabled: true,
+		// The use case/outbox owns retries. Replaying an uncertain write here
+		// could increment counters twice or multiply retries across layers.
+		MaxRetries: -1,
 	}
 }
 

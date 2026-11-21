@@ -23,6 +23,8 @@ import (
 	"thing-connect/internal/dynamicconfig"
 	"thing-connect/internal/logging"
 	"thing-connect/internal/mqttc"
+	"thing-connect/internal/queuehealth"
+	"thing-connect/internal/requestguard"
 	"thing-connect/internal/room"
 	roomsignals "thing-connect/internal/room/signals"
 	"thing-connect/internal/servicestatus"
@@ -141,18 +143,31 @@ func main() {
 		rooms.Run(statusCtx, func(e error) { log.Printf("room worker: %v", e) })
 	}()
 	go dynamicClient.Run(statusCtx, dynamicRefs)
-	reporter, err := servicestatus.NewReporter(rdb, "call-server", probes, dynamicClient.Revisions)
+	backlog := queuehealth.New("remark", mysqlstore.NewRemarkBacklog(sqlDB))
+	statusProbes := make(map[string]servicestatus.DependencyProbe, len(probes)+1)
+	for name, probe := range probes {
+		statusProbes[name] = probe
+	}
+	statusProbes["remark_outbox"] = backlog.Health
+	guard, guardErr := requestguard.New(cfg.Server.RequestLimits)
+	if guardErr != nil {
+		log.Fatal(guardErr)
+	}
+	reporter, err := servicestatus.NewReporter(rdb, "call-server", statusProbes, dynamicClient.Revisions)
 	if err != nil {
 		log.Fatalf("service status: %v", err)
 	}
+	reporter.SetMetrics(servicestatus.MergeMetrics(broker.Metrics, backlog.Metrics, guard.Metrics, servicestatus.PoolMetrics(sqlDB, rdb)))
+	backlogDone := make(chan struct{})
+	go func() { defer close(backlogDone); backlog.Run(statusCtx) }()
 	go reporter.Run(statusCtx)
 
 	addr := fmt.Sprintf(":%d", cfg.Server.HTTPPort)
 	srv := &http.Server{
-		Addr: addr, Handler: r,
+		Addr: addr, Handler: guard.Wrap(r),
 		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      60 * time.Second,
+		ReadTimeout:       max(30*time.Second, guard.MaxTimeout()),
+		WriteTimeout:      max(60*time.Second, guard.MaxTimeout()+5*time.Second),
 		IdleTimeout:       90 * time.Second,
 	}
 	go func() {
@@ -174,6 +189,7 @@ func main() {
 		log.Printf("call-server shutdown: %v", err)
 	}
 	statusCancel()
+	<-backlogDone
 	<-roomDone
 	<-remarksDone
 	broker.Close()

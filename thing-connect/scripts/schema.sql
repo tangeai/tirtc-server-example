@@ -496,7 +496,7 @@ INSERT IGNORE INTO schema_migrations (component, version) VALUES
     ('core', 7),
     ('core', 8),
     ('core', 9),
-    ('core', 10), ('core', 11), ('core', 12);
+    ('core', 10), ('core', 11), ('core', 12), ('core', 13);
 CREATE TABLE IF NOT EXISTS ai_recognition_policy (
  device_id VARCHAR(64) NOT NULL COMMENT '设备标识',
  enabled BOOLEAN NOT NULL DEFAULT FALSE COMMENT '是否启用媒体识别',
@@ -579,6 +579,7 @@ CREATE TABLE IF NOT EXISTS recognition_call (
  UNIQUE KEY uq_recognition_call(task_id,item_id,stage)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='每次分析或语音合成的实际调用账本';
 CREATE TABLE IF NOT EXISTS recognition_outbox (
+ pending_since TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '连续待处理周期的首次入队时间',
  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '记录主键',
  device_id VARCHAR(64) NOT NULL COMMENT '设备标识',
  bind_id VARCHAR(128) NOT NULL COMMENT '绑定记录主键与生命周期版本',
@@ -591,6 +592,7 @@ CREATE TABLE IF NOT EXISTS recognition_outbox (
 
 
 CREATE TABLE IF NOT EXISTS voip_remark_outbox (
+ pending_since TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '连续待处理周期的首次入队时间',
     id BIGINT NOT NULL AUTO_INCREMENT COMMENT '通知事件ID',
     device_id VARCHAR(20) NOT NULL COMMENT '需刷新联系人缓存的设备ID',
     peer_id VARCHAR(64) NOT NULL COMMENT '微信联系人OpenID',
@@ -610,6 +612,7 @@ CREATE TABLE IF NOT EXISTS ai_cloud_role_ref (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='云端角色关联的持久化删除保护';
 
 CREATE TABLE IF NOT EXISTS ai_cloud_role_target (
+ pending_since TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '连续待处理周期的首次入队时间',
  device_id VARCHAR(64) NOT NULL PRIMARY KEY COMMENT '设备 ID',
  user_id BIGINT NOT NULL COMMENT '目标所属用户',
  binding_revision BIGINT NOT NULL COMMENT '设备归属代次',

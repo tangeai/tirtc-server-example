@@ -326,7 +326,7 @@ func TestRecognitionDurableOrderQuotaAndOwnership(t *testing.T) {
 	})
 }
 
-func TestRecognitionOutboxUsesUTCAndDrainsLegacyFirstAttempts(t *testing.T) {
+func TestRecognitionOutboxUsesUTCAndHonorsFirstAttemptSchedule(t *testing.T) {
 	db := openTestDB(t)
 	db.SetMaxOpenConns(1)
 	if _, err := db.Exec(`SET time_zone='+08:00'`); err != nil {
@@ -352,7 +352,7 @@ func TestRecognitionOutboxUsesUTCAndDrainsLegacyFirstAttempts(t *testing.T) {
 	if delta > 5 {
 		t.Fatalf("new event uses non-UTC clock: delta=%d", delta)
 	}
-	// Reproduce old rows inserted with CURRENT_TIMESTAMP in a UTC+8 session.
+	// A future first attempt must not bypass its schedule.
 	if _, err := db.Exec(`UPDATE recognition_outbox SET next_at=NOW(6) WHERE device_id=?`, id); err != nil {
 		t.Fatal(err)
 	}
@@ -370,9 +370,15 @@ func TestRecognitionOutboxUsesUTCAndDrainsLegacyFirstAttempts(t *testing.T) {
 		}
 		return mine
 	}
+	if events := claim(); len(events) != 0 {
+		t.Fatal("first attempt ignored next_at")
+	}
+	if _, err := db.Exec(`UPDATE recognition_outbox SET next_at=UTC_TIMESTAMP(6) WHERE device_id=?`, id); err != nil {
+		t.Fatal(err)
+	}
 	events := claim()
 	if len(events) != 1 {
-		t.Fatalf("legacy first attempt delayed by eight hours: %+v", events)
+		t.Fatalf("due first attempt missing: %+v", events)
 	}
 	event := events[0]
 	if again := claim(); len(again) != 0 {

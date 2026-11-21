@@ -20,6 +20,7 @@ import (
 	"thing-connect/internal/dynamicconfig"
 	"thing-connect/internal/logging"
 	"thing-connect/internal/mqttc"
+	"thing-connect/internal/requestguard"
 	"thing-connect/internal/servicestatus"
 	mysqlstore "thing-connect/internal/store/mysql"
 	mysqlmigrate "thing-connect/internal/store/mysql/migrate"
@@ -93,19 +94,25 @@ func main() {
 	}
 	cancelConfig()
 	go dynamicClient.Run(statusCtx, dynamicRefs)
+	guard, guardErr := requestguard.New(cfg.Server.RequestLimits)
+	if guardErr != nil {
+		slog.Error("request limits invalid", "err", guardErr)
+		os.Exit(1)
+	}
 	reporter, err := servicestatus.NewReporter(rdb, "voip-server", probes, dynamicClient.Revisions)
 	if err != nil {
 		slog.Error("service status init failed", "err", err)
 		os.Exit(1)
 	}
+	reporter.SetMetrics(servicestatus.MergeMetrics(broker.Metrics, guard.Metrics, servicestatus.PoolMetrics(sqlDB, rdb)))
 	go reporter.Run(statusCtx)
 
 	addr := fmt.Sprintf(":%d", cfg.Server.HTTPPort)
 	srv := &http.Server{
-		Addr: addr, Handler: r,
+		Addr: addr, Handler: guard.Wrap(r),
 		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      60 * time.Second,
+		ReadTimeout:       max(30*time.Second, guard.MaxTimeout()),
+		WriteTimeout:      max(60*time.Second, guard.MaxTimeout()+5*time.Second),
 		IdleTimeout:       90 * time.Second,
 	}
 	go func() {

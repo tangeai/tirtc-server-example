@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
+	"thing-connect/internal/backoff"
 	"time"
 	"unicode/utf8"
 )
@@ -93,7 +94,7 @@ func (s *Remarks) deliver(ctx context.Context, event RemarkEvent, deadline time.
 	defer cancel()
 	if notifyErr != nil {
 		attempt := min(event.Attempts, 6)
-		if _, e := s.store.Retry(storeCtx, event, time.Duration(1<<attempt)*time.Second); e != nil && ctx.Err() == nil {
+		if _, e := s.store.Retry(storeCtx, event, max(time.Second, backoff.Jitter(time.Duration(1<<max(0, attempt))*time.Second))); e != nil && ctx.Err() == nil {
 			slog.WarnContext(ctx, "contact notification retry failed", "err", e)
 		}
 		return

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -20,8 +21,9 @@ const connectionGapKey = "presence:connections:gap"
 // retain the public key/format/TTL contract. Pending IP snapshots have no TTL.
 // Multi-key scripts require the existing single-endpoint Redis deployment.
 type PresenceStore struct {
-	Client *redis.Client
-	cursor uint64 // owned exclusively by the connection persistence worker
+	onlineUpdates, onlineIgnored, connectionUpdates, connectionIgnored atomic.Int64
+	Client                                                             *redis.Client
+	cursor                                                             uint64 // owned exclusively by the connection persistence worker
 }
 
 type connectionSnapshot struct {
@@ -41,11 +43,13 @@ func connectionJSON(o presence.Observation) string {
 var writePresence = redis.NewScript(`
 local exp=tonumber(ARGV[2])
 local now=tonumber(ARGV[6])
+local result=2
 if exp>now then
  local ttl=redis.call('PTTL',KEYS[1])
  if ttl<0 or now+ttl<exp then
   redis.call('SET',KEYS[1],ARGV[1])
   redis.call('PEXPIREAT',KEYS[1],exp)
+  result=1
  end
 end
 if ARGV[3]~='' then
@@ -53,9 +57,18 @@ if ARGV[3]~='' then
  if not old or cjson.decode(old).at_ms<tonumber(ARGV[5]) then
   redis.call('HSET',KEYS[2],ARGV[3],ARGV[4])
   redis.call('ZADD',KEYS[3],'NX',ARGV[6],ARGV[3])
+  result=result+4
+ else
+  result=result+8
  end
 end
-return 1`)
+return result`)
+
+// Metrics counts only acknowledged script results, not writes whose reply was lost.
+// Ignored observations include equal, older and expired observations.
+func (s *PresenceStore) Metrics() map[string]int64 {
+	return map[string]int64{"presence_online_updates_total": s.onlineUpdates.Load(), "presence_online_ignored_total": s.onlineIgnored.Load(), "presence_connection_updates_total": s.connectionUpdates.Load(), "presence_connection_ignored_total": s.connectionIgnored.Load()}
+}
 
 func (s *PresenceStore) Project(ctx context.Context, batch []presence.Observation) error {
 	if len(batch) == 0 {
@@ -76,6 +89,7 @@ func (s *PresenceStore) Project(ctx context.Context, batch []presence.Observatio
 func (s *PresenceStore) project(ctx context.Context, batch []presence.Observation) error {
 	now := time.Now().UnixMilli()
 	pipe := s.Client.Pipeline()
+	commands := make([]*redis.Cmd, 0, len(batch))
 	for _, o := range batch {
 		// Unversioned SYS disconnects cannot safely delete a current connection.
 		// Heartbeat expiration is authoritative; late disconnects are harmless.
@@ -86,12 +100,28 @@ func (s *PresenceStore) project(ctx context.Context, batch []presence.Observatio
 		if o.IP != "" {
 			pendingID, snapshot = o.ClientID, connectionJSON(o)
 		}
-		writePresence.EvalSha(ctx, pipe, []string{"online:" + o.ClientID, connectionPendingKey, connectionPendingSinceKey}, o.At.UTC().Format(time.RFC3339Nano), o.ExpiresAt.UnixMilli(), pendingID, snapshot, o.ConnectedAt.UnixMilli(), now)
+		commands = append(commands, writePresence.EvalSha(ctx, pipe, []string{"online:" + o.ClientID, connectionPendingKey, connectionPendingSinceKey}, o.At.UTC().Format(time.RFC3339Nano), o.ExpiresAt.UnixMilli(), pendingID, snapshot, o.ConnectedAt.UnixMilli(), now))
 	}
 	if pipe.Len() == 0 {
 		return nil
 	}
 	_, err := pipe.Exec(ctx)
+	for _, command := range commands {
+		if result, readErr := command.Int64(); readErr == nil {
+			if result&1 != 0 {
+				s.onlineUpdates.Add(1)
+			}
+			if result&2 != 0 {
+				s.onlineIgnored.Add(1)
+			}
+			if result&4 != 0 {
+				s.connectionUpdates.Add(1)
+			}
+			if result&8 != 0 {
+				s.connectionIgnored.Add(1)
+			}
+		}
+	}
 	return err
 }
 func (s *PresenceStore) Pending(ctx context.Context) ([]presence.Observation, error) {

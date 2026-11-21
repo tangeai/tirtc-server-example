@@ -516,9 +516,8 @@ func (s *RecognitionStore) Recover(c context.Context) error {
 // lease so the snapshot compares exactly.
 const recognitionLeaseFormat = "%Y-%m-%d %H:%i:%s.%f"
 
-// ClaimEvents leases events through next_at. Rows never attempted stay due
-// regardless of next_at because legacy inserts used the session time zone;
-// claiming increments attempts so a held lease is honoured.
+// ClaimEvents honors next_at for both initial delivery and retries. The core
+// upgrade migration normalizes legacy first-attempt timestamps once.
 func (s *RecognitionStore) ClaimEvents(c context.Context, limit int, lease time.Duration) ([]r.Event, error) {
 	tx, e := s.db.BeginTxx(c, claimTx)
 	if e != nil {
@@ -526,7 +525,7 @@ func (s *RecognitionStore) ClaimEvents(c context.Context, limit int, lease time.
 	}
 	defer func() { _ = tx.Rollback() }()
 	var ids []int64
-	if e = tx.SelectContext(c, &ids, `SELECT o.id FROM recognition_outbox o JOIN device_bind d ON CONCAT(d.id,':',d.binding_revision)=o.bind_id AND d.device_id=o.device_id WHERE o.delivered=FALSE AND o.attempts<8 AND (o.attempts=0 OR o.next_at<=UTC_TIMESTAMP(6)) ORDER BY o.id LIMIT ? FOR UPDATE OF o SKIP LOCKED`, limit); e != nil {
+	if e = tx.SelectContext(c, &ids, `SELECT o.id FROM recognition_outbox o JOIN device_bind d ON CONCAT(d.id,':',d.binding_revision)=o.bind_id AND d.device_id=o.device_id WHERE o.delivered=FALSE AND o.attempts<8 AND o.next_at<=UTC_TIMESTAMP(6) ORDER BY o.id LIMIT ? FOR UPDATE OF o SKIP LOCKED`, limit); e != nil {
 		return nil, e
 	}
 	if len(ids) == 0 {
@@ -559,7 +558,7 @@ func (s *RecognitionStore) ClaimEvents(c context.Context, limit int, lease time.
 	return out, tx.Commit()
 }
 func (s *RecognitionStore) Deliver(c context.Context, v r.Event, ok bool) (bool, error) {
-	res, e := s.db.ExecContext(c, `UPDATE recognition_outbox SET delivered=?,next_at=IF(?,next_at,TIMESTAMPADD(SECOND,LEAST(300,POW(2,attempts-1)),UTC_TIMESTAMP(6))) WHERE id=? AND delivered=FALSE AND next_at=?`, ok, ok, v.ID, v.Lease)
+	res, e := s.db.ExecContext(c, `UPDATE recognition_outbox SET delivered=?,next_at=IF(?,next_at,TIMESTAMPADD(SECOND,1+FLOOR(RAND()*LEAST(300,POW(2,attempts-1))),UTC_TIMESTAMP(6))) WHERE id=? AND delivered=FALSE AND next_at=?`, ok, ok, v.ID, v.Lease)
 	if e != nil {
 		return false, e
 	}

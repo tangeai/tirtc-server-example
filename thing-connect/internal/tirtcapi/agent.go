@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"thing-connect/internal/backoff"
 	"time"
 )
 
@@ -1071,7 +1072,7 @@ func (c *AgentAPIClient) finishDisabledMCPCreate(ctx context.Context, created *A
 }
 
 func waitMCPRetry(ctx context.Context, delay time.Duration) bool {
-	timer := time.NewTimer(delay)
+	timer := time.NewTimer(backoff.Jitter(delay))
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():

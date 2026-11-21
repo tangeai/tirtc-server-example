@@ -42,6 +42,9 @@ func hungRedis(t *testing.T) string {
 
 func TestRedisCallsReturnAtCallerDeadline(t *testing.T) {
 	opts := options(config.RedisCfg{Addr: hungRedis(t)})
+	if opts.MaxRetries != -1 {
+		t.Fatal("Redis must not automatically replay uncertain writes")
+	}
 	opts.PoolSize = 1
 	client := redis.NewClient(opts)
 	t.Cleanup(func() { _ = client.Close() })
@@ -52,7 +55,12 @@ func TestRedisCallsReturnAtCallerDeadline(t *testing.T) {
 		defer cancel()
 		start := time.Now()
 		err := client.Get(ctx, "k").Err()
-		if elapsed := time.Since(start); elapsed > time.Second || !errors.Is(err, context.DeadlineExceeded) {
+		// With retries disabled the socket deadline may return net.Error before
+		// the context timer publishes DeadlineExceeded. Both must respect the
+		// caller's budget; a fast connection failure is not this test's success.
+		var netErr net.Error
+		timedOut := errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout())
+		if elapsed := time.Since(start); elapsed < 250*time.Millisecond || elapsed > time.Second || !timedOut {
 			t.Fatalf("%s: returned after %v err=%v, want the 300ms caller deadline", name, elapsed, err)
 		}
 	}

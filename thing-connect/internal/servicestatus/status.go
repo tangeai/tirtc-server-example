@@ -4,6 +4,7 @@ package servicestatus
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -76,6 +77,35 @@ func NewReporter(client *redis.Client, service string, probes map[string]Depende
 
 // SetMetrics attaches a non-blocking snapshot before Run starts.
 func (r *Reporter) SetMetrics(snapshot func() map[string]int64) { r.metrics = snapshot }
+
+// MergeMetrics combines fixed-name, non-blocking snapshots at reporting time.
+func MergeMetrics(sources ...func() map[string]int64) func() map[string]int64 {
+	return func() map[string]int64 {
+		values := map[string]int64{}
+		for _, source := range sources {
+			for name, value := range source() {
+				values[name] = value
+			}
+		}
+		return values
+	}
+}
+
+// PoolMetrics exposes process-local cumulative waits without querying either
+// dependency. Compare deltas within the same instance lifetime.
+func PoolMetrics(db interface{ Stats() sql.DBStats }, client *redis.Client) func() map[string]int64 {
+	return func() map[string]int64 {
+		s := db.Stats()
+		r := client.PoolStats()
+		return map[string]int64{
+			"sql_pool_open": int64(s.OpenConnections), "sql_pool_in_use": int64(s.InUse),
+			"sql_pool_idle": int64(s.Idle), "sql_pool_wait_total": s.WaitCount,
+			"sql_pool_wait_ms_total": s.WaitDuration.Milliseconds(),
+			"redis_pool_connections": int64(r.TotalConns), "redis_pool_idle": int64(r.IdleConns),
+			"redis_pool_timeouts_total": int64(r.Timeouts), "redis_pool_misses_total": int64(r.Misses),
+		}
+	}
+}
 
 func (r *Reporter) Run(ctx context.Context) {
 	ticker := time.NewTicker(15 * time.Second)

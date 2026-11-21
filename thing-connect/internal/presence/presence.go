@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/netip"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -76,10 +77,13 @@ type Projector struct {
 	rejected       atomic.Uint64
 	failures       atomic.Uint64
 
-	reconcileLast     atomic.Int64
-	reconcileClients  atomic.Int64
-	reconcileFailures atomic.Uint64
-	subscriptionGaps  atomic.Uint64
+	reconcileLast        atomic.Int64
+	reconcileClients     atomic.Int64
+	reconcileFailures    atomic.Uint64
+	subscriptionGaps     atomic.Uint64
+	projectedSamples     atomic.Int64
+	projectionAgeMS      atomic.Int64
+	projectionAgeBuckets [7]atomic.Int64
 }
 
 // New creates a Projector. tempTTL returns the current pairing-code lifetime. Temporary connections send
@@ -261,6 +265,7 @@ func (w *writer) flush(ctx context.Context, now time.Time) {
 		}
 		w.backoff = 0
 		w.p.lastSuccess.Store(time.Now().UnixNano())
+		w.p.recordProjection(batch, time.Now())
 		for _, o := range batch {
 			delete(w.pending, o.ClientID)
 		}
@@ -268,6 +273,26 @@ func (w *writer) flush(ctx context.Context, now time.Time) {
 		if len(w.pending) == 0 {
 			return
 		}
+	}
+}
+
+var projectionAgeBounds = [...]int64{10, 50, 100, 500, 1000, 5000}
+
+// These are ages of coalesced observations at successful Redis submission,
+// not per-heartbeat network latency or a count of physical Redis mutations.
+func (p *Projector) recordProjection(batch []Observation, now time.Time) {
+	for _, o := range batch {
+		age := max(int64(0), now.Sub(o.At).Milliseconds())
+		p.projectedSamples.Add(1)
+		p.projectionAgeMS.Add(age)
+		bucket := len(projectionAgeBounds)
+		for i, bound := range projectionAgeBounds {
+			if age <= bound {
+				bucket = i
+				break
+			}
+		}
+		p.projectionAgeBuckets[bucket].Add(1)
 	}
 }
 
@@ -415,7 +440,15 @@ func (p *Projector) Metrics() map[string]int64 {
 		"presence_reconcile_clients":        p.reconcileClients.Load(),
 		"presence_reconcile_failures_total": int64(p.reconcileFailures.Load()),
 		"presence_subscription_gaps_total":  int64(p.subscriptionGaps.Load()),
+		"presence_projected_samples_total":  p.projectedSamples.Load(),
+		"presence_projection_age_ms_total":  p.projectionAgeMS.Load(),
 	}
+	var cumulative int64
+	for i, bound := range projectionAgeBounds {
+		cumulative += p.projectionAgeBuckets[i].Load()
+		result["presence_projection_age_le_"+strconv.FormatInt(bound, 10)+"ms_total"] = cumulative
+	}
+	result["presence_projection_age_le_inf_total"] = cumulative + p.projectionAgeBuckets[len(projectionAgeBounds)].Load()
 	if r := p.connections; r != nil {
 		result["connection_pending"] = r.pending.Load()
 		result["connection_backlog_measured_at_ms"] = r.measuredMS.Load()

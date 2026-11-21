@@ -70,7 +70,7 @@ func TestMigrateNewTables(t *testing.T) {
 	if err := sqlDB.Get(&count, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='admin_users'`); err != nil || count == 0 {
 		t.Errorf("admin_users table missing: n=%d err=%v", count, err)
 	}
-	if err := sqlDB.Get(&count, `SELECT COUNT(*) FROM schema_migrations WHERE component IN ('core','admin')`); err != nil || count != 19 {
+	if err := sqlDB.Get(&count, `SELECT COUNT(*) FROM schema_migrations WHERE component IN ('core','admin')`); err != nil || count != 20 {
 		t.Errorf("schema_migrations entries: n=%d err=%v", count, err)
 	}
 	if err := sqlDB.Get(&count, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='call_requests'`); err != nil || count != 0 {
@@ -126,5 +126,64 @@ func resetTestSchema(t *testing.T, sqlDB *sqlx.DB) {
 		if _, err := conn.ExecContext(ctx, `DROP TABLE IF EXISTS `+quoted); err != nil {
 			t.Fatalf("drop test table %s: %v", quoted, err)
 		}
+	}
+}
+
+func TestQueueObservationUpgradePreservesRowsAndActiveLeases(t *testing.T) {
+	cfg := testenv.LoadConfigOrSkip(t, "../../../../tests/testdata/config.yaml")
+	db := testenv.OpenDBOrSkip(t, cfg)
+	defer db.Close()
+	resetTestSchema(t, db)
+	if err := migrate.Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrate.MigrateAdmin(db); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		for _, table := range []string{"recognition_outbox", "voip_remark_outbox", "ai_cloud_role_target"} {
+			if _, err := db.Exec(`DELETE FROM ` + table + ` WHERE device_id IN ('upgrade','leased')`); err != nil {
+				t.Error(err)
+			}
+		}
+	}()
+	// Reconstruct the immediately preceding schema only inside the guarded
+	// disposable test database, including legacy UTC+8 first attempts.
+	for _, table := range []string{"recognition_outbox", "voip_remark_outbox", "ai_cloud_role_target"} {
+		if _, err := db.Exec(`ALTER TABLE ` + table + ` DROP COLUMN pending_since`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, q := range []string{
+		`DELETE FROM schema_migrations WHERE component='core' AND version=13`,
+		`INSERT INTO recognition_outbox(device_id,bind_id,payload,attempts,next_at) VALUES('upgrade','1:1','{}',0,DATE_ADD(UTC_TIMESTAMP(6),INTERVAL 8 HOUR)),('leased','1:1','{}',1,DATE_ADD(UTC_TIMESTAMP(6),INTERVAL 1 HOUR))`,
+		`INSERT INTO voip_remark_outbox(device_id,peer_id) VALUES('upgrade','peer')`,
+		`INSERT INTO ai_cloud_role_target(device_id,user_id,binding_revision,role_id) VALUES('upgrade',1,1,'role')`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := migrate.Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrate.Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"recognition_outbox", "voip_remark_outbox", "ai_cloud_role_target"} {
+		var count int
+		if err := db.Get(&count, `SELECT COUNT(*) FROM `+table+` WHERE device_id='upgrade' AND pending_since IS NOT NULL`); err != nil || count != 1 {
+			t.Fatalf("%s lost existing data: count=%d err=%v", table, count, err)
+		}
+	}
+	var due, held int
+	if err := db.Get(&due, `SELECT COUNT(*) FROM recognition_outbox WHERE device_id='upgrade' AND next_at<=UTC_TIMESTAMP(6)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Get(&held, `SELECT COUNT(*) FROM recognition_outbox WHERE device_id='leased' AND attempts=1 AND next_at>UTC_TIMESTAMP(6)`); err != nil {
+		t.Fatal(err)
+	}
+	if due != 1 || held != 1 {
+		t.Fatalf("legacy due=%d active lease=%d", due, held)
 	}
 }
