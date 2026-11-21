@@ -14,7 +14,7 @@ python3 tests/scale_load.py \
   > token-baseline-0.jsonl
 ```
 
-`--rate` 是每台压测机的目标请求速率，`--workers` 是并发上限，不会无限堆积提交任务。输出不含凭证或响应正文；HTTP 成功但业务失败也计为失败。`dropped` 表示压测机无空闲 worker 或未能按时调度，不能当成服务器成功或从分母中删除。`--timeout` 是网络 I/O 等待上限，默认 10 秒；压测机也须监控线程和网络资源。
+`--rate` 是每台压测机的目标请求速率，`--workers` 是并发上限，不会无限堆积提交任务。输出不含凭证或响应正文；HTTP 成功但业务失败也计为失败。`planned` 是本分片计划请求数；正常结束时 `completed + dropped = planned`。`dropped` 包含无空闲 worker、调度停顿和结束前未发出的请求，不能当成服务器成功或从分母中删除。`--timeout` 是网络 I/O 等待上限，默认 10 秒；压测机也须监控线程和网络资源。
 
 分布式运行使用相同 CSV、`--run-id`、`--shards N` 和未来的 `--start-at` Unix 秒时间戳，每台分别指定 `--shard 0..N-1`。工具按 CSV 行号分片，同一设备不会同时分配给多个节点。各节点速率之和为总速率；十万次/60 秒约为总计 1667 请求/秒，先逐级提高负载并检查压测机自身是否饱和。
 
@@ -28,7 +28,7 @@ python3 tests/scale_load.py --merge token-baseline-0.jsonl token-baseline-1.json
 
 `tests/presence-load` 使用真实 MQTT 连接和 QoS 1 心跳。部署链路验收使用 `-consumers 0`，让真实 Device 实例处理事件；Redis 密码可通过 `LOAD_REDIS_PASSWORD` 注入。
 
-真实认证模式指定 `-fixtures` 和 `-token-url`，各节点使用相同 CSV 和 `-shards N`，分别指定 `-shard 0..N-1`。设备数量取本分片 CSV 行数，此时不使用 `-devices` 或 `LOAD_JWT_SECRET`。每次 MQTT 连接及重连以独立签名换取 token；单次 HTTP 总期限 10 秒，每节点同时最多 32 次换取，达到上限计入 `token_admission_rejected`。下次 MQTT 重连尝试会再次换取 token；`token_failures` 和订阅失败必须保留在验收结果中。正常连接需同时获准订阅本设备 cmd/notify。收到 cmd 时回复收包 ACK，通知只计数；工具不执行真实通话、解绑或媒体业务。
+真实认证模式指定 `-fixtures` 和 `-token-url`，各节点使用相同 CSV 和 `-shards N`，分别指定 `-shard 0..N-1`。设备数量取本分片 CSV 行数，此时不使用 `-devices` 或 `LOAD_JWT_SECRET`。每次 MQTT 连接及重连以独立签名换取 token；单次 HTTP 总期限 10 秒，每节点同时最多 32 次换取，达到上限计入 `token_admission_rejected`。只有取得有效 token 才发起 MQTT 连接；签名错误、已解绑及其他永久拒绝立即停止该设备。网络故障、HTTP 429/5xx、业务码 429/50000 和 MQTT 连接失败采用指数退避及抖动，每次故障最多尝试 8 次；成功连接后的断线开启新的恢复周期。退避起始为 1–4 秒、上限不超过 120 秒，退出可取消等待。`authentication_stopped` 记录永久拒绝或耗尽次数后停止的设备，`connect_failures` 记录 MQTT 连接失败；这些计数以及 `token_failures` 和订阅失败必须保留在验收结果中。正常连接需同时获准订阅本设备 cmd/notify。收到 cmd 时回复收包 ACK，通知只计数；工具不执行真实通话、解绑或媒体业务。
 
 ```bash
 go build -o /tmp/presence-load ./tests/presence-load

@@ -112,9 +112,11 @@ def run(args):
         time.sleep(max(0, min(.2, start_epoch - time.time())))
     start = time.monotonic()
     deadline, next_sample, sequence = start + args.duration, start, 0
+    planned = math.ceil(args.duration * args.rate)
     metadata = dict(run_id=args.run_id, shard=args.shard, shards=args.shards,
                     start_at=start_epoch, latency_bucket_upper_ms=list(BUCKETS),
-                    duration=args.duration, rate_per_shard=args.rate, workers=args.workers)
+                    duration=args.duration, rate_per_shard=args.rate, workers=args.workers,
+                    planned=planned)
     interrupted = False
 
     def emit(kind):
@@ -131,7 +133,7 @@ def run(args):
         try:
             while time.monotonic() < deadline:
                 # Missed schedule slots are generator drops, not a catch-up burst.
-                current_slot = int((time.monotonic() - start) * args.rate)
+                current_slot = min(planned, int((time.monotonic() - start) * args.rate))
                 if current_slot > sequence:
                     with stats.lock:
                         stats.dropped += current_slot - sequence
@@ -140,7 +142,7 @@ def run(args):
                 remaining = due - time.monotonic()
                 if remaining > 0:
                     time.sleep(min(remaining, max(0, deadline-time.monotonic())))
-                if time.monotonic() >= deadline:
+                if sequence >= planned or time.monotonic() >= deadline:
                     break
                 if slots.acquire(blocking=False):
                     pool.submit(invoke, devices[sequence % len(devices)])
@@ -153,6 +155,11 @@ def run(args):
                     next_sample = time.monotonic() + 5
         except KeyboardInterrupt:
             interrupted = True
+        finally:
+            # A stall in output, sleep or scheduling can cross the end of the
+            # run without another loop iteration. Account for the entire tail.
+            with stats.lock:
+                stats.dropped += max(0, planned - sequence)
     emit("final")
     snapshot = stats.snapshot()
     return 1 if interrupted or not snapshot["completed"] or snapshot["failed"] or snapshot["dropped"] else 0

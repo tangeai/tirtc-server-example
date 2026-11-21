@@ -216,6 +216,7 @@ func startConsumers(ctx context.Context, o options) ([]*consumer, error) {
 }
 
 type fleet struct {
+	authenticationStopped, connectFailures                                       atomic.Int64
 	ackJobs                                                                      chan ackJob
 	credentials                                                                  []credential
 	authSlots                                                                    chan struct{}
@@ -341,34 +342,22 @@ func (f *fleet) run(ctx context.Context) {
 				}
 			}).
 			SetConnectionLostHandler(func(mqtt.Client, error) { f.losses.Add(1) })
-		if len(f.credentials) > 0 {
-			cred := f.credentials[i]
-			opts.SetCredentialsProvider(func() (string, string) {
-				if ctx.Err() != nil {
-					return id, ""
-				}
-				select {
-				case f.authSlots <- struct{}{}:
-				default:
-					f.tokenRejected.Add(1)
-					return id, ""
-				}
-				defer func() { <-f.authSlots }()
-				f.tokenRequests.Add(1)
-				token, err := fetchToken(ctx, f.http, f.opts.tokenURL, cred)
-				if err != nil {
-					f.tokenFailures.Add(1)
-				}
-				return id, token
-			})
+		index := i
+		var client mqtt.Client
+		if len(f.credentials) == 0 {
+			client = mqtt.NewClient(opts)
 		}
-		client := mqtt.NewClient(opts)
-		client.Connect()
 		f.mu.Lock()
 		f.clients = append(f.clients, client)
 		f.mu.Unlock()
+		if len(f.credentials) > 0 {
+			heartbeats.Add(1)
+			go func() { defer heartbeats.Done(); f.runRealDevice(ctx, index, opts) }()
+		} else {
+			client.Connect()
+		}
 		heartbeats.Add(1)
-		go func() { defer heartbeats.Done(); f.heartbeat(ctx, client, "device/sn_"+id+"/up") }()
+		go func() { defer heartbeats.Done(); f.heartbeat(ctx, index, "device/sn_"+id+"/up") }()
 		timer := time.NewTimer(interval)
 		select {
 		case <-ctx.Done():
@@ -380,11 +369,13 @@ func (f *fleet) run(ctx context.Context) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for _, c := range f.clients {
-		c.Disconnect(0)
+		if c != nil {
+			c.Disconnect(0)
+		}
 	}
 }
 
-func (f *fleet) heartbeat(ctx context.Context, client mqtt.Client, topic string) {
+func (f *fleet) heartbeat(ctx context.Context, index int, topic string) {
 	delay := randomDuration(0, f.opts.heartbeat)
 	if f.opts.syncHeartbeats {
 		delay = time.Until(time.Now().Truncate(f.opts.heartbeat).Add(f.opts.heartbeat))
@@ -397,7 +388,8 @@ func (f *fleet) heartbeat(ctx context.Context, client mqtt.Client, topic string)
 			return
 		case <-timer.C:
 		}
-		if client.IsConnectionOpen() {
+		client := f.client(index)
+		if client != nil && client.IsConnectionOpen() {
 			token := client.Publish(topic, 1, false, `{"type":"heartbeat"}`)
 			if waitLoadToken(ctx, token) {
 				f.heartbeats.Add(1)
@@ -421,7 +413,7 @@ func (f *fleet) report(ctx context.Context, rdb *redis.Client, consumers []*cons
 	f.mu.Unlock()
 	connected := 0
 	for _, c := range clients {
-		if c.IsConnectionOpen() {
+		if c != nil && c.IsConnectionOpen() {
 			connected++
 		}
 	}
@@ -460,7 +452,7 @@ func (f *fleet) report(ctx context.Context, rdb *redis.Client, consumers []*cons
 			projections = append(projections, c.projector.Metrics())
 		}
 		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"at": time.Now().UTC(), "prefix": f.opts.prefix, "elapsed_ms": elapsed.Milliseconds(), "started": len(clients), "connected": connected, "online": online, "heartbeats": f.heartbeats.Load(), "publish_failures": f.failures.Load(), "connects": f.connects.Load(), "losses": f.losses.Load(), "consumers": projections, "services": states, "status_sample_failed": statusErr != nil, "online_sample_failed": onlineErr != nil,
-			"token_requests": f.tokenRequests.Load(), "token_failures": f.tokenFailures.Load(), "token_admission_rejected": f.tokenRejected.Load(), "subscriptions": f.subscribed.Load(), "subscription_failures": f.subscriptionFailures.Load(), "commands": f.commands.Load(), "notifications": f.notifications.Load(), "acks": f.acks.Load(), "ack_failures": f.ackFailures.Load()})
+			"authentication_stopped": f.authenticationStopped.Load(), "connect_failures": f.connectFailures.Load(), "token_requests": f.tokenRequests.Load(), "token_failures": f.tokenFailures.Load(), "token_admission_rejected": f.tokenRejected.Load(), "subscriptions": f.subscribed.Load(), "subscription_failures": f.subscriptionFailures.Load(), "commands": f.commands.Load(), "notifications": f.notifications.Load(), "acks": f.acks.Load(), "ack_failures": f.ackFailures.Load()})
 		return
 	}
 	fmt.Println(line)

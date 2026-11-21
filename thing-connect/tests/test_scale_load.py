@@ -5,12 +5,41 @@ import json
 import os
 import tempfile
 import threading
+import time
+import types
 import unittest
+from unittest.mock import patch
 
 import scale_load as load
 
 
 class LoadTests(unittest.TestCase):
+    def test_stall_at_end_counts_every_unissued_request(self):
+        with tempfile.NamedTemporaryFile(mode="w") as f:
+            f.write("device_id,device_key\nd,k\n")
+            f.flush()
+            args = types.SimpleNamespace(url="http://example.test/token", fixtures=f.name,
+                                         shard=0, shards=1, workers=1, start_at=None,
+                                         duration=.1, rate=100, run_id="stall", timeout=1)
+            samples = []
+
+            def output(line, **kwargs):
+                item = json.loads(line)
+                samples.append(item)
+                if item["kind"] == "sample":
+                    time.sleep(.2)
+
+            def success(url, device, timeout, stats):
+                stats.record(1, "ok", True)
+
+            with patch("builtins.print", side_effect=output), patch.object(load, "request_once", side_effect=success):
+                result = load.run(args)
+            final = samples[-1]
+            self.assertEqual(1, result)
+            self.assertEqual(10, final["planned"])
+            self.assertEqual(10, final["completed"] + final["dropped"])
+            self.assertGreater(final["dropped"], 0)
+
     def test_shards_do_not_overlap_or_drop_devices(self):
         with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
             f.write("device_id,device_key\n" + "".join(f"d{i},k{i}\n" for i in range(11)))

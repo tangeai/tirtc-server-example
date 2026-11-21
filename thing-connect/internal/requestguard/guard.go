@@ -103,6 +103,15 @@ func (g *Guard) Wrap(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		ctx, cancel := context.WithTimeout(r.Context(), l.limit.Timeout)
+		defer cancel()
+		// Socket I/O does not stop merely because a context expires. Keep these
+		// deadlines through net/http's response flush and unread-body drain,
+		// including rejected requests. net/http resets them for keep-alive.
+		controller := http.NewResponseController(w)
+		deadline, _ := ctx.Deadline()
+		_ = controller.SetReadDeadline(deadline)
+		_ = controller.SetWriteDeadline(deadline)
 		if r.Context().Err() != nil {
 			reject(w, r)
 			return
@@ -115,8 +124,6 @@ func (g *Guard) Wrap(next http.Handler) http.Handler {
 			return
 		}
 		start := time.Now()
-		ctx, cancel := context.WithTimeout(r.Context(), l.limit.Timeout)
-		defer cancel()
 		l.active.Add(1)
 		defer func() {
 			<-l.slots
@@ -127,13 +134,6 @@ func (g *Guard) Wrap(next http.Handler) http.Handler {
 				l.expired.Add(1)
 			}
 		}()
-		// A context alone cannot interrupt a client stalled while sending its
-		// body. Set the underlying net/http read deadline before logging/parsing.
-		controller := http.NewResponseController(w)
-		deadline, _ := ctx.Deadline()
-		if err := controller.SetReadDeadline(deadline); err == nil {
-			defer func() { _ = controller.SetReadDeadline(time.Time{}) }()
-		}
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
