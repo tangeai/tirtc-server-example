@@ -48,7 +48,7 @@
 ### 步骤 1：准备环境和测试素材
 
 ```bash
-git clone https://github.com/tange-ai/tirtc-server-example.git
+git clone https://github.com/tangeai/tirtc-server-example.git
 cd tirtc-server-example/thing-connect/device-sim/device-sim-py
 # Ubuntu/Debian（CPython 3.10–3.14、x86_64）：安装 Python
 sudo apt update

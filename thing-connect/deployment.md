@@ -267,7 +267,7 @@ TiRTC App ID、Access Key ID 和 Secret Key ID 同样没有可运行默认值。
 
 ### 3.1 下载并运行安装脚本
 
-以下命令只下载首次安装入口。脚本会把完整仓库克隆到 `/opt/thing-connect/tirtc-server-example`：
+以下命令只下载首次安装入口。脚本会把完整仓库克隆到 `/opt/thing-connect/tirtc-server-example`，默认使用仓库的默认分支 `main`，适合开发与集成验证。`main` 包含待发布改动；生产应选择稳定版 tag，并按该版本的发布说明或受控发布流程部署。当前安装脚本没有固定 tag 或自动选择最新稳定版的参数；仅修改脚本下载 URL 不能固定后续克隆的源码版本。
 
 ```bash
 (
@@ -615,7 +615,9 @@ HTTP 会明文传输管理员登录信息和会话 Cookie。公网生产环境�
 
 其他部署环境可以参考 `deploy-prod.sh` 的构建、迁移和发布流程，但要按自身目录、权限和服务管理方式调整，不要把它当作通用安装器。
 
-在符合该生产目录约定的环境中执行维护发布：
+`update` 快进拉取部署仓库当前分支所跟踪的上游，不自动选择稳定版 tag。当前分支为 `main` 时会部署开发分支；`release/*` 也可能包含尚未发布的提交。生产使用前应由维护者明确控制待发布的源码提交与验证结果。切换到 tag 的 detached HEAD 后直接执行 `update` 不属于该脚本支持的固定版本发布方式。
+
+在符合该生产目录约定、且已确认待发布源码的环境中执行维护发布：
 
 ```bash
 sudo /opt/thing-connect/deploy-prod.sh update
