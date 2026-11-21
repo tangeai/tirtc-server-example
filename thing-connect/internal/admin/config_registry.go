@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"thing-connect/internal/bindlimit"
+	"thing-connect/internal/brokerapi"
 	"thing-connect/internal/recognition"
 	"thing-connect/internal/room"
 	"thing-connect/internal/sitebrand"
@@ -75,6 +77,7 @@ func DefaultConfigRegistry() *ConfigRegistry {
 		def("call-server", "room.policy", "call", "多人对讲策略", room.DefaultConfigJSON, nil, []string{"call-server"}, func(raw json.RawMessage) error { _, err := room.ParseConfig(raw); return err }),
 		def("device-server", "device.code_policy", "device", "设备验证码策略", `{"code_ttl":"190s","rate_limit_window":"190s","rate_limit_max_hits":10,"ip_rate_limit_window":"60s","ip_rate_limit_max_fingerprints":50,"global_max_pending_codes":10000}`, nil, []string{"device-server"}, validateDeviceCodePolicy),
 		def("device-server", "device.token_policy", "device", "设备 Token 策略", `{"token_expiry":"168h"}`, nil, []string{"device-server"}, validateDurationFields("token_expiry")),
+		def("device-server", "mqtt.broker_api", "mqtt", "MQTT Broker 管理接口", brokerapi.DefaultConfigJSON, []string{"api_secret"}, []string{"device-server"}, validateBrokerAPI),
 		def("device-server", "mqtt.ack_policy", "mqtt", "MQTT ACK 策略", `{"timeout":"5s"}`, nil, []string{"device-server"}, validateDurationFields("timeout")),
 		def("user-server", "smtp", "email", "SMTP 邮件服务", `{"enabled":false,"host":"","port":465,"tls_mode":"implicit_tls","username":"","from":""}`, []string{"password"}, []string{"user-server"}, validateSMTP),
 		def("user-server", "captcha", "captcha", "人机验证", `{"enabled":false,"provider":"yidun","captcha_id":"","public_config":{"mini_program_captcha_id":""}}`, []string{"secret_id", "secret_key", "app_secret_key", "mini_program_secret_key"}, []string{"user-server"}, validateCaptcha),
@@ -83,6 +86,7 @@ func DefaultConfigRegistry() *ConfigRegistry {
 		def("user-server", "email.code_ttl", "email_policy", "邮件验证码有效期", `{"duration":"5m"}`, nil, []string{"user-server"}, validateDurationFields("duration")),
 		def("user-server", "email.send_rate_limit", "email_policy", "邮件发送限频", `{"window":"15m","max_per_email":5,"max_per_ip":20}`, nil, []string{"user-server"}, validateRateLimit),
 		def("user-server", "user.default_bind_quota", "user", "新用户默认绑定额度", `{"quota":10}`, nil, []string{"user-server"}, validatePositiveFields("quota")),
+		def("user-server", "user.bind_attempt_policy", "user", "设备绑定失败限制", bindlimit.DefaultConfigJSON, nil, []string{"user-server"}, validateBindAttemptPolicy),
 		def("user-server", "user.token_policy", "user", "用户 Token 策略", `{"token_expiry":"168h"}`, nil, []string{"user-server"}, validateDurationFields("token_expiry")),
 		def("user-server", "mqtt.ack_policy", "mqtt", "绑定 MQTT ACK 策略", `{"timeout":"5s"}`, nil, []string{"user-server"}, validateDurationFields("timeout")),
 		testDef(restartDef(blockingDef(def("device-server", "mqtt.connection", "mqtt", "MQTT 连接", `{"broker":"","auth_mode":"username","username":"","client_id":""}`, []string{"password"}, []string{"device-server"}, validateMQTTConnection), "设备服务需要 MQTT 才能维护设备在线状态")), "mqtt"),
@@ -251,6 +255,20 @@ func validatePositiveFields(fields ...string) func(json.RawMessage) error {
 		}
 		return nil
 	}
+}
+
+func validateBindAttemptPolicy(raw json.RawMessage) error {
+	if _, err := bindlimit.ParseConfig(raw); err != nil {
+		return errors.New("设备绑定失败限制格式不正确：统计周期和冷却时间须在 1s 到 24h 之间，最多失败次数须在 1 到 1000 之间，且不能包含未知字段")
+	}
+	return nil
+}
+
+func validateBrokerAPI(raw json.RawMessage) error {
+	if _, err := brokerapi.ParseConfig(raw, nil); err != nil {
+		return errors.New("MQTT Broker 管理接口格式不正确：地址须为不含账号、查询参数的 http(s) 地址，填写地址时必须填写 API Key，且不能包含未知字段")
+	}
+	return nil
 }
 
 func validateDeviceCodePolicy(raw json.RawMessage) error {

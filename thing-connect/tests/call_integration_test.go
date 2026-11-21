@@ -64,6 +64,10 @@ func (b *fakeBroker) IsOnline(_ context.Context, clientID string) bool {
 	return b.online[clientID]
 }
 
+func (b *fakeBroker) PublishContext(_ context.Context, topic string, qos byte, payload any) error {
+	return b.Publish(topic, qos, payload)
+}
+
 func (b *fakeBroker) Publish(topic string, qos byte, payload any) error {
 	raw, err := json.Marshal(payload)
 	if err != nil {

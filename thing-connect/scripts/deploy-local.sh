@@ -112,9 +112,13 @@ local_prepare() {
     git -C "$LOCAL_SNAPSHOT/repository" -c core.hooksPath=/dev/null \
         -c user.name=local-deploy -c user.email=local-deploy@localhost \
         -c commit.gpgSign=false commit -qm 'Local deployment source snapshot'
+    # The snapshot has no tags or source history; name the build after the source repository.
+    local source_version source_commit
+    source_version="$(git -C "$LOCAL_SOURCE_ROOT" describe --tags --dirty 2>/dev/null || true)"
+    source_commit="$(cat "$LOCAL_SNAPSHOT/source-commit")"
     (
         cd "$LOCAL_SNAPSHOT/repository/thing-connect"
-        ./build.sh
+        BUILD_VERSION="$source_version" BUILD_COMMIT="${source_commit:0:7}" ./build.sh
     ) >"$LOCAL_SNAPSHOT/build.log" 2>&1 || {
         local_error "构建失败，未替换运行文件；日志: $LOCAL_SNAPSHOT/build.log"; return 1;
     }

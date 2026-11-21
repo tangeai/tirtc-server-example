@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"thing-connect/internal/ai"
+	"time"
 )
 
 // Adapter for the existing handler fixtures. Lifecycle behavior is exercised
@@ -74,8 +75,10 @@ func (f *fixtureRoleLifecycle) CloudTarget(ctx context.Context, id string, clean
 	}
 	return ai.CloudTarget{DeviceID: id, Remove: true}, nil
 }
-func (f *fixtureRoleLifecycle) CompleteCloud(context.Context, ai.CloudTarget) (bool, error) {
+func (f *fixtureRoleLifecycle) CompleteCloud(context.Context, ai.CloudTarget, bool) (bool, error) {
 	return true, nil
 }
-func (f *fixtureRoleLifecycle) DueCloud(context.Context) ([]string, error)     { return nil, nil }
+func (f *fixtureRoleLifecycle) ClaimCloud(context.Context, int, time.Duration) ([]string, error) {
+	return nil, nil
+}
 func (f *fixtureRoleLifecycle) DelayCloud(context.Context, string, bool) error { return nil }

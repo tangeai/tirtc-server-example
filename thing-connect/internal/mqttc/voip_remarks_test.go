@@ -15,7 +15,7 @@ type remarkCapture struct {
 	value any
 }
 
-func (b *remarkCapture) Publish(topic string, qos byte, value any) error {
+func (b *remarkCapture) PublishContext(_ context.Context, topic string, qos byte, value any) error {
 	b.topic = topic
 	b.qos = qos
 	b.value = value

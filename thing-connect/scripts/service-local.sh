@@ -122,6 +122,14 @@ service_port() {
     printf '%s\n' "${SERVICE_PORT[$1]}"
 }
 
+# 与 Supervisor 模板的 stopwaitsecs 保持一致；识别服务退出时会等待已发出的模型调用。
+stop_wait_seconds() {
+    case "$1" in
+        recognition-server) echo 100 ;;
+        *) echo 15 ;;
+    esac
+}
+
 port_in_use() {
     local port="$1"
     (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null
@@ -222,8 +230,9 @@ start_one() (
 )
 
 stop_one() (
-    local service="$1" pid pgid elapsed=0
+    local service="$1" pid pgid elapsed=0 limit
     local -a pids=() remaining=()
+    limit="$(stop_wait_seconds "$service")"
     mkdir -p "$STATE_DIR"
     exec 9>"$STATE_DIR/$service.lock"
     flock 9
@@ -236,7 +245,7 @@ stop_one() (
     for pid in "${pids[@]}"; do
         kill -TERM "$pid" 2>/dev/null || true
     done
-    while [ "$elapsed" -lt 15 ]; do
+    while [ "$elapsed" -lt "$limit" ]; do
         mapfile -t remaining < <(managed_pids "$service")
         [ "${#remaining[@]}" -ne 0 ] || break
         sleep 1

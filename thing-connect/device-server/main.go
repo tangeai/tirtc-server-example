@@ -13,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
+	"thing-connect/internal/brokerapi"
 	"thing-connect/internal/dynamicconfig"
 	"thing-connect/internal/mqttc"
 	"thing-connect/internal/presence"
@@ -89,6 +90,17 @@ func main() {
 	if err != nil {
 		log.Fatalf("dynamic config: %v", err)
 	}
+	var brokerClients brokerapi.Source
+	dynamicRefs = append(dynamicRefs, dynamicconfig.Ref{Namespace: "device-server", Key: "mqtt.broker_api", Apply: func(snapshot dynamicconfig.Snapshot) error {
+		if snapshot.Revision == 0 {
+			return brokerClients.Update(cfg.BrokerAPI)
+		}
+		parsed, err := brokerapi.ParseConfig(snapshot.Value, snapshot.Secrets)
+		if err != nil {
+			return err
+		}
+		return brokerClients.Update(parsed)
+	}})
 	configCtx, cancelConfig := context.WithTimeout(context.Background(), 10*time.Second)
 	if err := dynamicClient.ApplyInitial(configCtx, dynamicRefs); err != nil {
 		cancelConfig()
@@ -110,7 +122,7 @@ func main() {
 		DialTimeout: 2 * time.Second, ReadTimeout: 2 * time.Second, WriteTimeout: 2 * time.Second,
 	})
 	presenceStore := &cache.PresenceStore{Client: presenceRedis}
-	projector := presence.New(presenceStore, mysqlstore.NewDeviceConnectionStore(sqlDB))
+	projector := presence.New(presenceStore, mysqlstore.NewDeviceConnectionStore(sqlDB), devSvc.CodeTTL)
 	presenceCtx, presenceCancel := context.WithCancel(context.Background())
 	presenceDone := make(chan struct{})
 	go func() { defer close(presenceDone); projector.Run(presenceCtx) }()
@@ -121,6 +133,9 @@ func main() {
 		_ = presenceRedis.Close()
 		log.Fatalf("presence mqtt: %v", err)
 	}
+	reconcileCtx, reconcileCancel := context.WithCancel(context.Background())
+	reconcileDone := make(chan struct{})
+	go func() { defer close(reconcileDone); projector.RunReconciler(reconcileCtx, brokerClients.Current) }()
 	revisions := func() map[string]int64 {
 		values := dynamicClient.Revisions()
 		values["device-server/mqtt.connection"] = mqttRevision
@@ -179,6 +194,8 @@ func main() {
 	}
 	gcCancel()
 	statusCancel()
+	reconcileCancel()
+	<-reconcileDone
 	presenceBroker.Close()
 	presenceCancel()
 	<-presenceDone

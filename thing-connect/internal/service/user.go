@@ -81,43 +81,74 @@ const (
 	defaultEmailSendMaxPerIP    = 20
 )
 
+// PasswordResetMailGate admits at most one pending reset delivery per email
+// across all user-server instances, so concurrent requests do not send
+// several mails whose codes overwrite each other.
+type PasswordResetMailGate interface {
+	// Acquire reserves email for ttl; acquired=false means a delivery is
+	// already pending. The token identifies this reservation for Release.
+	Acquire(ctx context.Context, email string, ttl time.Duration) (token string, acquired bool, err error)
+	// Release drops the reservation only while it still carries token.
+	Release(ctx context.Context, email, token string) error
+}
+
+const (
+	// passwordResetMailPendingTTL bounds how long a crashed instance can
+	// block new reset mails for one address.
+	passwordResetMailPendingTTL  = 2 * time.Minute
+	passwordResetMailGateTimeout = 5 * time.Second
+)
+
+type passwordResetMailJob struct {
+	email string
+	token string
+}
+
 // InMemoryPasswordResetEmailQueue keeps the public request path independent
 // of account lookup and SMTP without adding persistent application state. A
 // user can safely request a new code if a process restart drops a queued job.
 type InMemoryPasswordResetEmailQueue struct {
-	jobs    chan string
+	jobs    chan passwordResetMailJob
 	deliver func(context.Context, string) error
-
-	mu      sync.Mutex
-	pending map[string]struct{}
+	gate    PasswordResetMailGate
 }
 
 func NewInMemoryPasswordResetEmailQueue(
 	deliver func(context.Context, string) error,
-) *InMemoryPasswordResetEmailQueue {
-	return &InMemoryPasswordResetEmailQueue{
-		jobs:    make(chan string, passwordResetMailQueueSize),
-		deliver: deliver,
-		pending: make(map[string]struct{}),
+	gate PasswordResetMailGate,
+) (*InMemoryPasswordResetEmailQueue, error) {
+	if deliver == nil || gate == nil {
+		return nil, errors.New("password reset email queue requires a delivery function and a gate")
 	}
+	return &InMemoryPasswordResetEmailQueue{
+		jobs:    make(chan passwordResetMailJob, passwordResetMailQueueSize),
+		deliver: deliver,
+		gate:    gate,
+	}, nil
 }
 
 func (q *InMemoryPasswordResetEmailQueue) Enqueue(ctx context.Context, email string) error {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	if _, ok := q.pending[email]; ok {
+	token, acquired, err := q.gate.Acquire(ctx, email, passwordResetMailPendingTTL)
+	if err != nil {
+		return fmt.Errorf("password reset mail gate: %w", err)
+	}
+	if !acquired {
 		return nil
 	}
-	q.pending[email] = struct{}{}
 	select {
-	case q.jobs <- email:
+	case q.jobs <- passwordResetMailJob{email: email, token: token}:
 		return nil
-	case <-ctx.Done():
-		delete(q.pending, email)
-		return ctx.Err()
 	default:
-		delete(q.pending, email)
+		q.release(passwordResetMailJob{email: email, token: token})
 		return ErrPasswordResetMailQueueFull
+	}
+}
+
+func (q *InMemoryPasswordResetEmailQueue) release(job passwordResetMailJob) {
+	ctx, cancel := context.WithTimeout(context.Background(), passwordResetMailGateTimeout)
+	defer cancel()
+	if err := q.gate.Release(ctx, job.email, job.token); err != nil {
+		slog.Warn("password reset mail gate release failed", "err", err)
 	}
 }
 
@@ -135,13 +166,11 @@ func (q *InMemoryPasswordResetEmailQueue) runWorker(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case email := <-q.jobs:
+		case job := <-q.jobs:
 			deliveryCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			err := q.deliver(deliveryCtx, email)
+			err := q.deliver(deliveryCtx, job.email)
 			cancel()
-			q.mu.Lock()
-			delete(q.pending, email)
-			q.mu.Unlock()
+			q.release(job)
 			if err != nil {
 				slog.Warn("password reset email delivery failed", "err", err)
 			}

@@ -4,13 +4,31 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"sync/atomic"
 	"time"
+)
 
-	"github.com/jmoiron/sqlx"
+const (
+	batchSize       = 20
+	deliveryTimeout = 5 * time.Second
+	// leaseDuration covers a full batch of sequential deliveries so the last
+	// task in a batch is still leased when it is acknowledged.
+	leaseDuration = 2 * time.Minute
+	// leaseMargin stops acknowledging before the database lease can expire;
+	// later tasks become due again and are redelivered, which targets tolerate.
+	leaseMargin = 10 * time.Second
+
+	// queueTimeout bounds every queue call; a half-open database connection
+	// would otherwise block the delivery loop forever.
+	queueTimeout = 10 * time.Second
+
+	backlogUnhealthyAge = 15 * time.Minute
+	backlogSampleStale  = time.Minute
 )
 
 // Target is one idempotent service-to-service cleanup endpoint.
@@ -20,22 +38,62 @@ type Target struct {
 	InternalKey string
 }
 
-// Outbox persists cleanup notifications so transient failures and process
-// restarts cannot silently lose them.
-type Outbox struct {
-	db      *sqlx.DB
-	client  *http.Client
-	targets map[string]Target
+// Task is one claimed cleanup notification. Lease is the opaque claim
+// snapshot; acknowledging with a stale snapshot must not touch the row.
+type Task struct {
+	ID       int64
+	DeviceID string
+	Target   string
+	Attempts int
+	Lease    string
 }
 
-func NewOutbox(db *sqlx.DB, targets []Target) *Outbox {
+// Backlog is a sample of all pending tasks. OldestAge measures from the first
+// enqueue, so re-enqueueing a pending task keeps its waiting age.
+type Backlog struct {
+	Pending   int64
+	OldestAge time.Duration
+}
+
+// Queue is the durable task store behind the outbox. Unbind transactions
+// insert tasks; several user-server instances may drain it concurrently.
+type Queue interface {
+	// Claim leases up to limit due tasks that no other claimer holds. The
+	// lease time comes from the database clock.
+	Claim(ctx context.Context, limit int, lease time.Duration) ([]Task, error)
+	// Complete deletes the task only if it still carries task.Lease. It
+	// reports false when the task was re-enqueued or re-claimed meanwhile.
+	Complete(ctx context.Context, task Task) (bool, error)
+	// Retry records the failure and schedules the next attempt only if the
+	// task still carries task.Lease.
+	Retry(ctx context.Context, task Task, delay time.Duration, lastError string) (bool, error)
+	Backlog(ctx context.Context) (Backlog, error)
+}
+
+// Outbox delivers persisted cleanup notifications so transient failures,
+// process restarts and concurrent instances cannot silently lose them.
+type Outbox struct {
+	queue   Queue
+	client  *http.Client
+	targets map[string]Target
+	now     func() time.Time
+
+	pending    atomic.Int64
+	oldestMS   atomic.Int64
+	measuredMS atomic.Int64
+}
+
+func NewOutbox(queue Queue, targets []Target) (*Outbox, error) {
+	if queue == nil {
+		return nil, errors.New("cleanup outbox: queue is required")
+	}
 	m := make(map[string]Target, len(targets))
 	for _, target := range targets {
 		if target.Name != "" && target.URL != "" {
 			m[target.Name] = target
 		}
 	}
-	return &Outbox{db: db, client: &http.Client{Timeout: 5 * time.Second}, targets: m}
+	return &Outbox{queue: queue, client: &http.Client{Timeout: deliveryTimeout}, targets: m, now: time.Now}, nil
 }
 
 // TargetNames returns the configured, de-duplicated delivery targets. It is
@@ -56,35 +114,6 @@ func TargetNames(targets []Target) []string {
 	return names
 }
 
-// Enqueue records one task per configured target. Re-enqueueing an existing
-// task makes it immediately eligible for another attempt.
-func (o *Outbox) Enqueue(ctx context.Context, deviceID string) error {
-	tx, err := o.db.BeginTxx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("cleanup outbox begin: %w", err)
-	}
-	defer tx.Rollback()
-	for name := range o.targets {
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO cleanup_outbox (device_id, target, next_attempt_at)
-			VALUES (?, ?, NOW())
-			ON DUPLICATE KEY UPDATE next_attempt_at=NOW(), last_error=''`, deviceID, name); err != nil {
-			return fmt.Errorf("cleanup outbox enqueue %s: %w", name, err)
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("cleanup outbox commit: %w", err)
-	}
-	return nil
-}
-
-type task struct {
-	ID       int64  `db:"id"`
-	DeviceID string `db:"device_id"`
-	Target   string `db:"target"`
-	Attempts int    `db:"attempts"`
-}
-
 // Run delivers queued tasks until ctx is cancelled.
 func (o *Outbox) Run(ctx context.Context) {
 	o.process(ctx)
@@ -101,36 +130,98 @@ func (o *Outbox) Run(ctx context.Context) {
 }
 
 func (o *Outbox) process(ctx context.Context) {
-	var tasks []task
-	if err := o.db.SelectContext(ctx, &tasks, `
-		SELECT id, device_id, target, attempts
-		FROM cleanup_outbox
-		WHERE next_attempt_at <= NOW()
-		ORDER BY id LIMIT 20`); err != nil {
+	o.sampleBacklog(ctx)
+	deadline := o.now().Add(leaseDuration - leaseMargin)
+	claimCtx, cancel := context.WithTimeout(ctx, queueTimeout)
+	tasks, err := o.queue.Claim(claimCtx, batchSize, leaseDuration)
+	cancel()
+	if err != nil {
 		if ctx.Err() == nil {
-			slog.Warn("cleanup outbox query failed", "err", err)
+			slog.Warn("cleanup outbox claim failed", "err", err)
 		}
 		return
 	}
 	for _, current := range tasks {
-		if err := o.deliver(ctx, current); err != nil {
+		if !o.now().Before(deadline) {
+			slog.Warn("cleanup outbox lease nearly expired, leaving remaining tasks for redelivery", "remaining_from_id", current.ID)
+			return
+		}
+		deliverErr := o.deliver(ctx, current)
+		if !o.now().Before(deadline) {
+			slog.Warn("cleanup outbox lease expired during delivery, task will be redelivered", "id", current.ID)
+			return
+		}
+		ackCtx, cancel := context.WithTimeout(ctx, queueTimeout)
+		if deliverErr != nil {
 			delay := retryDelay(current.Attempts + 1)
-			_, updateErr := o.db.ExecContext(ctx, `
-				UPDATE cleanup_outbox
-				SET attempts=attempts+1, last_error=?, next_attempt_at=DATE_ADD(NOW(), INTERVAL ? SECOND)
-				WHERE id=?`, truncateError(err), int(delay.Seconds()), current.ID)
-			if updateErr != nil && ctx.Err() == nil {
-				slog.Warn("cleanup outbox retry update failed", "id", current.ID, "err", updateErr)
+			applied, err := o.queue.Retry(ackCtx, current, delay, truncateError(deliverErr))
+			cancel()
+			if err != nil && ctx.Err() == nil {
+				slog.Warn("cleanup outbox retry update failed", "id", current.ID, "err", err)
+			} else if err == nil && !applied {
+				slog.Info("cleanup outbox task changed during delivery, keeping newer task", "id", current.ID)
 			}
 			continue
 		}
-		if _, err := o.db.ExecContext(ctx, `DELETE FROM cleanup_outbox WHERE id=?`, current.ID); err != nil && ctx.Err() == nil {
+		applied, err := o.queue.Complete(ackCtx, current)
+		cancel()
+		if err != nil && ctx.Err() == nil {
 			slog.Warn("cleanup outbox delete failed", "id", current.ID, "err", err)
+		} else if err == nil && !applied {
+			slog.Info("cleanup outbox task changed during delivery, keeping newer task", "id", current.ID)
 		}
 	}
 }
 
-func (o *Outbox) deliver(ctx context.Context, current task) error {
+func (o *Outbox) sampleBacklog(ctx context.Context) {
+	sampleCtx, cancel := context.WithTimeout(ctx, queueTimeout)
+	defer cancel()
+	backlog, err := o.queue.Backlog(sampleCtx)
+	if err != nil {
+		if ctx.Err() == nil {
+			slog.Warn("cleanup outbox backlog sample failed", "err", err)
+		}
+		return
+	}
+	now := o.now()
+	o.pending.Store(backlog.Pending)
+	if backlog.Pending > 0 {
+		o.oldestMS.Store(now.Add(-backlog.OldestAge).UnixMilli())
+	} else {
+		o.oldestMS.Store(0)
+	}
+	o.measuredMS.Store(now.UnixMilli())
+}
+
+// Metrics is a non-blocking snapshot for the service status reporter.
+func (o *Outbox) Metrics() map[string]int64 {
+	age := int64(0)
+	if oldest := o.oldestMS.Load(); oldest > 0 {
+		age = max(0, o.now().UnixMilli()-oldest)
+	}
+	return map[string]int64{
+		"cleanup_pending":                o.pending.Load(),
+		"cleanup_oldest_pending_age_ms":  age,
+		"cleanup_backlog_measured_at_ms": o.measuredMS.Load(),
+	}
+}
+
+// Health fails while the oldest pending task has waited longer than
+// backlogUnhealthyAge, or while the backlog cannot be sampled. It recovers
+// once a fresh sample shows the old tasks drained.
+func (o *Outbox) Health(context.Context) error {
+	now := o.now().UnixMilli()
+	measured := o.measuredMS.Load()
+	if measured == 0 || now-measured > backlogSampleStale.Milliseconds() {
+		return errors.New("cleanup outbox backlog sample is stale")
+	}
+	if oldest := o.oldestMS.Load(); oldest > 0 && now-oldest > backlogUnhealthyAge.Milliseconds() {
+		return fmt.Errorf("cleanup outbox oldest task waited over %s", backlogUnhealthyAge)
+	}
+	return nil
+}
+
+func (o *Outbox) deliver(ctx context.Context, current Task) error {
 	target, ok := o.targets[current.Target]
 	if !ok {
 		return fmt.Errorf("unknown cleanup target %q", current.Target)

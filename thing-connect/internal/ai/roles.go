@@ -68,17 +68,31 @@ type RoleLifecycleStore interface {
 	WithDevices(context.Context, []string, func(context.Context) error) error
 	PrepareCloud(context.Context, int64, []string, string, bool) ([]CloudTarget, error)
 	CloudTarget(context.Context, string, bool) (CloudTarget, error)
-	CompleteCloud(context.Context, CloudTarget) (bool, error)
-	DueCloud(context.Context) ([]string, error)
+	// CompleteCloud records the target as applied when the device generation is
+	// unchanged. A settled target was confirmed without a remote mutation and is
+	// no longer rechecked; otherwise one recheck catches late remote requests.
+	CompleteCloud(ctx context.Context, target CloudTarget, settled bool) (bool, error)
+	// ClaimCloud leases up to limit due targets that no other worker holds.
+	ClaimCloud(ctx context.Context, limit int, lease time.Duration) ([]string, error)
 	DelayCloud(context.Context, string, bool) error
 }
+
+const (
+	reconcileBatchSize    = 20
+	reconcileTimeout      = 20 * time.Second
+	reconcileLease        = reconcileBatchSize*reconcileTimeout + 30*time.Second
+	reconcileLeaseMargin  = 10 * time.Second
+	reconcileClaimTimeout = 10 * time.Second
+)
+
 type Roles struct {
 	store RoleLifecycleStore
 	cloud func() RoleCloud
+	now   func() time.Time
 }
 
 func NewRoles(store RoleLifecycleStore, cloud func() RoleCloud) *Roles {
-	return &Roles{store: store, cloud: cloud}
+	return &Roles{store: store, cloud: cloud, now: time.Now}
 }
 func (s *Roles) Delete(ctx context.Context, user int64, role string) error {
 	cloud := s.cloud()
@@ -164,7 +178,7 @@ func (s *Roles) SetCloud(ctx context.Context, user int64, devices []string, role
 			}
 			stale := false
 			for _, target := range targets {
-				current, e := s.store.CompleteCloud(ctx, target)
+				current, e := s.store.CompleteCloud(ctx, target, false)
 				if e != nil {
 					return e
 				}
@@ -210,6 +224,7 @@ func (s *Roles) reconcileLocked(ctx context.Context, device string, cloud RoleCl
 			found = true
 		}
 	}
+	mutated := target.Remove == found
 	if target.Remove && found {
 		err = cloud.Unbind(ctx, []string{device}, target.RoleID)
 	}
@@ -219,7 +234,7 @@ func (s *Roles) reconcileLocked(ctx context.Context, device string, cloud RoleCl
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrRoleUpstream, err)
 	}
-	current, err := s.store.CompleteCloud(ctx, target)
+	current, err := s.store.CompleteCloud(ctx, target, !mutated)
 	if err != nil {
 		return err
 	}
@@ -237,25 +252,36 @@ func (s *Roles) Reconcile(ctx context.Context, device string) error {
 		return err
 	})
 }
+
+// reconcileDue works through one claimed batch. Device locks keep concurrent
+// workers correct; the lease only avoids duplicate cloud calls, so a pass that
+// could outlive it stops and leaves the rest to the next claimer.
+func (s *Roles) reconcileDue(ctx context.Context) {
+	deadline := s.now().Add(reconcileLease - reconcileLeaseMargin - reconcileTimeout)
+	claimCtx, cancel := context.WithTimeout(ctx, reconcileClaimTimeout)
+	ids, err := s.store.ClaimCloud(claimCtx, reconcileBatchSize, reconcileLease)
+	cancel()
+	if err != nil && ctx.Err() == nil {
+		slog.WarnContext(ctx, "role reconciliation queue unavailable", "err", err)
+	}
+	for _, id := range ids {
+		if ctx.Err() != nil || !s.now().Before(deadline) {
+			return
+		}
+		op, cancel := context.WithTimeout(ctx, reconcileTimeout)
+		err = s.Reconcile(op, id)
+		cancel()
+		if err != nil && ctx.Err() == nil {
+			slog.WarnContext(ctx, "role reconciliation pending", "err", err)
+		}
+	}
+}
+
 func (s *Roles) Run(ctx context.Context) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
-		ids, err := s.store.DueCloud(ctx)
-		if err != nil && ctx.Err() == nil {
-			slog.WarnContext(ctx, "role reconciliation queue unavailable", "err", err)
-		}
-		for _, id := range ids {
-			if ctx.Err() != nil {
-				return
-			}
-			op, cancel := context.WithTimeout(ctx, 20*time.Second)
-			err = s.Reconcile(op, id)
-			cancel()
-			if err != nil && ctx.Err() == nil {
-				slog.WarnContext(ctx, "role reconciliation pending", "err", err)
-			}
-		}
+		s.reconcileDue(ctx)
 		select {
 		case <-ctx.Done():
 			return

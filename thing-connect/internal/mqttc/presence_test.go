@@ -3,6 +3,7 @@ package mqttc
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +18,14 @@ type subscriptionToken struct {
 
 func (t subscriptionToken) WaitTimeout(time.Duration) bool { return !t.timeout }
 func (t subscriptionToken) Error() error                   { return t.err }
+func (t subscriptionToken) Done() <-chan struct{} {
+	if t.timeout {
+		return nil
+	}
+	done := make(chan struct{})
+	close(done)
+	return done
+}
 
 type subscriptionClient struct {
 	mqtt.Client
@@ -44,8 +53,13 @@ func TestPresenceSubscriptionOwnership(t *testing.T) {
 		if err := b.configureSubscriptions(client); err != nil {
 			t.Fatal(err)
 		}
-		if source && (len(client.subscribed) != 3 || len(client.unsubscribed) != 0) {
-			t.Fatal("source subscriptions missing")
+		if source && (len(client.subscribed) != 3 || len(client.unsubscribed) != 3) {
+			t.Fatal("source must join the shared group and drop legacy subscriptions")
+		}
+		for _, topic := range client.subscribed {
+			if !strings.HasPrefix(topic, "$share/"+presenceGroup+"/") {
+				t.Fatalf("plain presence subscription %s", topic)
+			}
 		}
 		if !source && (len(client.unsubscribed) != 3 || len(client.subscribed) != 0) {
 			t.Fatal("publisher retained legacy subscriptions")

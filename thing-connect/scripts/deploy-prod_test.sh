@@ -662,6 +662,15 @@ test_supervisor_boot_order_starts_admin_first() {
     grep -A1 '^\[program:recognition-server\]$' "$config" | grep -qx 'priority=30'
 }
 
+test_recognition_stop_wait_covers_model_call() {
+    local root config local_wait
+    root="$(cd "$(dirname "$0")/.." && pwd)"
+    config="$root/deploy/supervisor/thing-connect.supervisor.conf"
+    sed -n '/^\[program:recognition-server\]$/,/^$/p' "$config" | grep -qx 'stopwaitsecs=100'
+    local_wait="$(bash -c 'source <(sed -n "/^stop_wait_seconds() {/,/^}/p" "$1"); stop_wait_seconds recognition-server' _ "$root/scripts/service-local.sh")"
+    assert_eq "100" "$local_wait" "service-local must wait as long as Supervisor for recognition-server"
+}
+
 test_activated_bundle_is_resolved_and_not_overwritten() (
     local root="$TEST_ROOT/bundle-deploy"
     DEPLOY_ROOT="$root"
@@ -805,6 +814,78 @@ test_status_reports_every_service_even_when_one_is_missing() (
     assert_eq "1" "$result" "status must return failure when a service is missing"
     assert_eq "$(select_all)" "$(tr '\n' ' ' <"$capture" | sed 's/ $//')" \
         "status must still inspect every service"
+)
+
+write_fake_supervisorctl() {
+    local path="$1"
+    cat >"$path" <<'BASH'
+#!/usr/bin/env bash
+case "$1" in
+    status)
+        if [ "$#" -eq 1 ]; then
+            printf 'thing-connect:device-server RUNNING pid 10\n'
+            printf 'thing-connect:device-server-10 RUNNING pid 12\n'
+            printf 'thing-connect:device-server-2 RUNNING pid 11\n'
+            printf 'thing-connect:device-server-x RUNNING pid 13\n'
+            printf 'thing-connect:user-server RUNNING pid 14\n'
+            printf 'thing-connect:user-server-2 RUNNING pid 16\n'
+            printf 'thing-connect:admin-server-2 RUNNING pid 17\n'
+            printf 'other:device-server-3 RUNNING pid 15\n'
+            exit 3
+        fi
+        printf '%s RUNNING pid 1\n' "$2"
+        ;;
+    pid) printf '%s\n' "${FAKE_PID:-0}" ;;
+    *) printf '%s %s\n' "$1" "$2" >>"$SUPERVISOR_CAPTURE" ;;
+esac
+BASH
+    chmod +x "$path"
+}
+
+test_service_instances_restart_one_at_a_time() (
+    local capture="$TEST_ROOT/instances.capture"
+    : >"$capture"
+    write_fake_supervisorctl "$TEST_ROOT/fake-supervisorctl"
+    SUPERVISORCTL="$TEST_ROOT/fake-supervisorctl"
+    SUPERVISOR_CAPTURE="$capture"
+    export SUPERVISOR_CAPTURE
+    ACTIVE_SERVICE_MANAGER=supervisor
+    SUPERVISOR_STABLE_SECONDS=0
+    wait_for_readiness() { printf 'ready %s\n' "${2:-$1}" >>"$capture"; }
+
+    assert_eq "device-server-2 device-server-10" "$(service_extra_programs device-server | tr '\n' ' ' | sed 's/ $//')" \
+        "only numbered device-server programs in the group are extra instances"
+    assert_eq "user-server-2" "$(service_extra_programs user-server)" "every business service may run extra instances"
+    assert_eq "" "$(service_extra_programs "$ADMIN_SERVICE")" "Admin stays single-instance"
+
+    restart_one device-server >/dev/null
+    assert_eq "restart thing-connect:device-server|ready device-server|restart thing-connect:device-server-2|ready device-server-2|restart thing-connect:device-server-10|ready device-server-10" \
+        "$(paste -sd '|' "$capture")" "instances must restart one at a time after readiness"
+
+    : >"$capture"
+    supervisor_state() { printf 'RUNNING\n'; }
+    wait_for_supervisor_state() { :; }
+    stop_one device-server >/dev/null
+    assert_eq "stop thing-connect:device-server|stop thing-connect:device-server-2|stop thing-connect:device-server-10" \
+        "$(paste -sd '|' "$capture")" "stop must cover every instance"
+)
+
+test_extra_instance_health_uses_process_port() (
+    local pid url result=0
+    write_fake_supervisorctl "$TEST_ROOT/fake-supervisorctl"
+    SUPERVISORCTL="$TEST_ROOT/fake-supervisorctl"
+    env THING_CONNECT_HTTP_PORT=9011 sleep 30 &
+    pid=$!
+    FAKE_PID="$pid"
+    export FAKE_PID
+    url="$(instance_health_url device-server-2)"
+    assert_eq "http://$HEALTH_HOST:9011/health/ready" "$url" "extra instance must be checked on its own port"
+    kill "$pid"
+    env sleep 30 &
+    FAKE_PID=$!
+    instance_health_url device-server-2 >/dev/null 2>&1 || result=$?
+    kill "$FAKE_PID"
+    assert_eq "1" "$result" "an instance without a port override must fail the readiness check"
 )
 
 test_optional_services_are_not_treated_as_installed_without_config() (
@@ -1098,6 +1179,7 @@ test_running_admin_is_restarted_after_init
 test_initialize_admin_is_noninteractive_and_refreshes_running_service
 test_full_deploy_starts_admin_before_business_services
 test_supervisor_boot_order_starts_admin_first
+test_recognition_stop_wait_covers_model_call
 test_activated_bundle_is_resolved_and_not_overwritten
 test_file_publish_never_creates_configuration
 test_deploy_uses_catalog_static_directory
@@ -1114,6 +1196,8 @@ test_interrupted_migration_with_change_marker_quiesces_services
 test_standalone_migration_failure_quiesces_services
 test_schema_change_failure_never_auto_starts_old_binaries
 test_daily_update_backs_up_files_before_database_migration
+test_service_instances_restart_one_at_a_time
+test_extra_instance_health_uses_process_port
 echo "PASS: deploy-prod.sh"
 
 

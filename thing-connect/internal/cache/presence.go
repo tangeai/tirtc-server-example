@@ -35,22 +35,46 @@ func connectionJSON(o presence.Observation) string {
 	return string(data)
 }
 
-const writePresence = `
-redis.call('SET',KEYS[1],ARGV[1])
-redis.call('PEXPIREAT',KEYS[1],ARGV[2])
-if ARGV[3] ~= '' then
+// writePresence only moves an online expiry forward, so retries, reordering
+// and concurrent Device instances cannot shorten a newer observation. PTTL
+// keeps the comparison compatible with Redis 6.
+var writePresence = redis.NewScript(`
+local exp=tonumber(ARGV[2])
+local now=tonumber(ARGV[6])
+if exp>now then
+ local ttl=redis.call('PTTL',KEYS[1])
+ if ttl<0 or now+ttl<exp then
+  redis.call('SET',KEYS[1],ARGV[1])
+  redis.call('PEXPIREAT',KEYS[1],exp)
+ end
+end
+if ARGV[3]~='' then
  local old=redis.call('HGET',KEYS[2],ARGV[3])
- if not old or cjson.decode(old).at_ms < tonumber(ARGV[5]) then
+ if not old or cjson.decode(old).at_ms<tonumber(ARGV[5]) then
   redis.call('HSET',KEYS[2],ARGV[3],ARGV[4])
   redis.call('ZADD',KEYS[3],'NX',ARGV[6],ARGV[3])
  end
 end
-return 1`
+return 1`)
 
 func (s *PresenceStore) Project(ctx context.Context, batch []presence.Observation) error {
 	if len(batch) == 0 {
 		return s.Client.Ping(ctx).Err()
 	}
+	err := s.project(ctx, batch)
+	if err != nil && redis.HasErrorPrefix(err, "NOSCRIPT") {
+		// A restarted or failed-over Redis loses its script cache. Replaying
+		// the batch is safe because every write is monotonic.
+		if err := writePresence.Load(ctx, s.Client).Err(); err != nil {
+			return err
+		}
+		err = s.project(ctx, batch)
+	}
+	return err
+}
+
+func (s *PresenceStore) project(ctx context.Context, batch []presence.Observation) error {
+	now := time.Now().UnixMilli()
 	pipe := s.Client.Pipeline()
 	for _, o := range batch {
 		// Unversioned SYS disconnects cannot safely delete a current connection.
@@ -58,11 +82,14 @@ func (s *PresenceStore) Project(ctx context.Context, batch []presence.Observatio
 		if o.Offline {
 			continue
 		}
-		if o.IP == "" {
-			pipe.Eval(ctx, `redis.call('SET',KEYS[1],ARGV[1]);redis.call('PEXPIREAT',KEYS[1],ARGV[2]);return 1`, []string{"online:" + o.ClientID}, o.At.UTC().Format(time.RFC3339Nano), o.At.Add(presence.TTL).UnixMilli())
-		} else {
-			pipe.Eval(ctx, writePresence, []string{"online:" + o.ClientID, connectionPendingKey, connectionPendingSinceKey}, o.At.UTC().Format(time.RFC3339Nano), o.At.Add(presence.TTL).UnixMilli(), o.ClientID, connectionJSON(o), o.ConnectedAt.UnixMilli(), time.Now().UnixMilli())
+		pendingID, snapshot := "", ""
+		if o.IP != "" {
+			pendingID, snapshot = o.ClientID, connectionJSON(o)
 		}
+		writePresence.EvalSha(ctx, pipe, []string{"online:" + o.ClientID, connectionPendingKey, connectionPendingSinceKey}, o.At.UTC().Format(time.RFC3339Nano), o.ExpiresAt.UnixMilli(), pendingID, snapshot, o.ConnectedAt.UnixMilli(), now)
+	}
+	if pipe.Len() == 0 {
+		return nil
 	}
 	_, err := pipe.Exec(ctx)
 	return err
@@ -106,8 +133,17 @@ func (s *PresenceStore) Ack(ctx context.Context, batch []presence.Observation) e
 	_, err := pipe.Exec(ctx)
 	return err
 }
-func (s *PresenceStore) MarkGap(ctx context.Context) error {
-	return s.Client.Set(ctx, connectionGapKey, "1", 0).Err()
+
+// MarkGap records the latest loss time. Legacy markers hold "1", which
+// ClearGap treats as older than any reconciliation.
+func (s *PresenceStore) MarkGap(ctx context.Context, lostAt time.Time) error {
+	return s.Client.Eval(ctx, `local v=tonumber(redis.call('GET',KEYS[1]) or '0') or 0;if v<tonumber(ARGV[1]) then redis.call('SET',KEYS[1],ARGV[1]) end;return 1`, []string{connectionGapKey}, lostAt.UnixMilli()).Err()
+}
+
+// ClearGap removes the marker only when the loss happened before a completed
+// broker listing started; a loss during reconciliation keeps the marker.
+func (s *PresenceStore) ClearGap(ctx context.Context, listedFrom time.Time) error {
+	return s.Client.Eval(ctx, `local v=redis.call('GET',KEYS[1]);if v and (tonumber(v) or 0)<tonumber(ARGV[1]) then return redis.call('DEL',KEYS[1]) end;return 0`, []string{connectionGapKey}, listedFrom.UnixMilli()).Err()
 }
 func (s *PresenceStore) HasGap(ctx context.Context) (bool, error) {
 	n, err := s.Client.Exists(ctx, connectionGapKey).Result()

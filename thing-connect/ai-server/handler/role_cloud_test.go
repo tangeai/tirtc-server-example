@@ -154,7 +154,7 @@ func TestRoleCloudValidationFailureDoesNotSaveLocalOwnership(t *testing.T) {
 			client := tirtcapi.NewAgentAPIClient(tirtcapi.AgentAPIConfig{BaseURL: srv.URL}, srv.Client())
 			w := doRequest(setupTestRouter(&AgentHandler{agentAPI: client, userRoleStore: store}), http.MethodPost, "/v1/ai/roles", body, makeToken(1))
 			result := parseJSON(t, w)
-			if w.Code != http.StatusBadGateway || result.Code != 50200 || calls.Load() != 1 {
+			if w.Code != http.StatusBadRequest || result.Code != 40000 || calls.Load() != 1 {
 				t.Fatalf("unexpected cloud validation result: HTTP=%d body=%s calls=%d", w.Code, w.Body.String(), calls.Load())
 			}
 			if len(store.roles[1]) != 0 {

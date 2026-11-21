@@ -1144,12 +1144,46 @@ service_health_url() {
     printf 'http://%s:%s/health/ready\n' "$HEALTH_HOST" "$port"
 }
 
+# 业务服务可在同一 Supervisor 组中增加 <服务>-2、<服务>-3 等程序并行运行，
+# 各程序用环境变量 THING_CONNECT_HTTP_PORT 指定端口。Admin 和手动服务管理
+# 模式只运行一个实例。
+service_extra_programs() {
+    local svc="$1"
+    [ "$svc" != "$ADMIN_SERVICE" ] && [ "$ACTIVE_SERVICE_MANAGER" != local ] || return 0
+    { "$SUPERVISORCTL" status 2>/dev/null || true; } | awk -v prefix="$SUPERVISOR_GROUP:" -v svc="$svc" '
+        index($1, prefix) == 1 {
+            name = substr($1, length(prefix) + 1)
+            suffix = substr(name, length(svc) + 1)
+            if (index(name, svc "-") == 1 && suffix ~ /^-[0-9]+$/) print name
+        }' | sort -V
+}
+
+instance_health_url() {
+    local program="$1" pid port
+    pid="$("$SUPERVISORCTL" pid "$(supervisor_program "$program")" 2>/dev/null || true)"
+    if [[ ! "$pid" =~ ^[1-9][0-9]*$ ]] || [ ! -r "/proc/$pid/environ" ]; then
+        err "$program: 无法读取进程环境"
+        return 1
+    fi
+    port="$(tr '\0' '\n' <"/proc/$pid/environ" | sed -n 's/^THING_CONNECT_HTTP_PORT=//p' | head -n 1)"
+    [[ "$port" =~ ^[1-9][0-9]*$ ]] || {
+        err "$program: Supervisor 程序缺少有效的 THING_CONNECT_HTTP_PORT"
+        return 1
+    }
+    printf 'http://%s:%s/health/ready\n' "$HEALTH_HOST" "$port"
+}
+
+# 第二个参数为额外实例的 Supervisor 程序名；省略时检查服务主实例。
 wait_for_readiness() {
-    local svc="$1" url elapsed=0 state
-    url="$(service_health_url "$svc")" || return 1
+    local svc="$1" program="${2:-$1}" url elapsed=0 state
+    if [ "$program" = "$svc" ]; then
+        url="$(service_health_url "$svc")" || return 1
+    else
+        url="$(instance_health_url "$program")" || return 1
+    fi
     while [ "$elapsed" -lt "$HEALTH_WAIT_SECONDS" ]; do
         if curl -fsS --max-time "$HEALTH_REQUEST_TIMEOUT_SECONDS" "$url" >/dev/null 2>&1; then
-            log "$svc readiness 检查通过"
+            log "$program readiness 检查通过"
             return
         fi
         if [ "$ACTIVE_SERVICE_MANAGER" = local ]; then
@@ -1157,15 +1191,15 @@ wait_for_readiness() {
             elapsed=$((elapsed + 1))
             continue
         fi
-        state="$(supervisor_state "$svc")"
+        state="$(supervisor_state "$program")"
         if [ "$state" != "RUNNING" ] && [ "$state" != "STARTING" ]; then
-            err "$svc readiness 检查期间 Supervisor 状态变为 ${state:-UNKNOWN}"
+            err "$program readiness 检查期间 Supervisor 状态变为 ${state:-UNKNOWN}"
             return 1
         fi
         sleep 1
         elapsed=$((elapsed + 1))
     done
-    err "$svc 在 ${HEALTH_WAIT_SECONDS}s 内未通过 $url"
+    err "$program 在 ${HEALTH_WAIT_SECONDS}s 内未通过 $url"
     curl -sS --max-time "$HEALTH_REQUEST_TIMEOUT_SECONDS" "$url" || true
     return 1
 }
@@ -1178,20 +1212,26 @@ stop_one() {
         return $?
     fi
 
-    log "停止 $svc ..."
+    local program
+    for program in "$svc" $(service_extra_programs "$svc"); do
+        stop_program "$program" || return 1
+    done
+}
 
-    local state
-    require_supervisor_service "$svc" || return 1
-    state="$(supervisor_state "$svc")"
+stop_program() {
+    local program="$1" state
+    log "停止 $program ..."
+    require_supervisor_service "$program" || return 1
+    state="$(supervisor_state "$program")"
     case "$state" in
         STOPPED|EXITED|FATAL|BACKOFF)
-            log "$svc 当前未运行（Supervisor: $state）"
+            log "$program 当前未运行（Supervisor: $state）"
             return
             ;;
     esac
-    "$SUPERVISORCTL" stop "$(supervisor_program "$svc")" || true
-    wait_for_supervisor_state "$svc" "STOPPED" || return 1
-    log "$svc 已停止（Supervisor）"
+    "$SUPERVISORCTL" stop "$(supervisor_program "$program")" || true
+    wait_for_supervisor_state "$program" "STOPPED" || return 1
+    log "$program 已停止（Supervisor）"
 }
 
 # ================== 发布 ==================
@@ -1268,19 +1308,27 @@ start_one() {
         return 1
     fi
 
-    local state
-    require_supervisor_service "$svc" || return 1
-    state="$(supervisor_state "$svc")"
+    local program
+    for program in "$svc" $(service_extra_programs "$svc"); do
+        start_program "$svc" "$program" || return 1
+    done
+}
+
+# 多实例逐台启动：上一台通过 readiness 后才处理下一台。
+start_program() {
+    local svc="$1" program="$2" state
+    require_supervisor_service "$program" || return 1
+    state="$(supervisor_state "$program")"
     if [ "$state" = "RUNNING" ]; then
-        wait_for_readiness "$svc" || return 1
-        log "$svc 已在运行且就绪（Supervisor）"
+        wait_for_readiness "$svc" "$program" || return 1
+        log "$program 已在运行且就绪（Supervisor）"
         return
     fi
-    log "启动 $svc（Supervisor）..."
-    "$SUPERVISORCTL" start "$(supervisor_program "$svc")" || return 1
-    wait_for_supervisor_state "$svc" "RUNNING" || return 1
-    wait_for_readiness "$svc" || return 1
-    log "$svc 启动成功（Supervisor）"
+    log "启动 $program（Supervisor）..."
+    "$SUPERVISORCTL" start "$(supervisor_program "$program")" || return 1
+    wait_for_supervisor_state "$program" "RUNNING" || return 1
+    wait_for_readiness "$svc" "$program" || return 1
+    log "$program 启动成功（Supervisor）"
 }
 
 # ================== 重启 ==================
@@ -1291,12 +1339,16 @@ restart_one() {
         return $?
     fi
 
-    require_supervisor_service "$svc" || return 1
-    log "重启 $svc（Supervisor）..."
-    "$SUPERVISORCTL" restart "$(supervisor_program "$svc")" || return 1
-    wait_for_supervisor_state "$svc" "RUNNING" || return 1
-    wait_for_readiness "$svc" || return 1
-    log "$svc 重启成功（Supervisor）"
+    # 多实例滚动重启：一台通过 readiness 后再重启下一台，其余实例继续服务。
+    local program
+    for program in "$svc" $(service_extra_programs "$svc"); do
+        require_supervisor_service "$program" || return 1
+        log "重启 $program（Supervisor）..."
+        "$SUPERVISORCTL" restart "$(supervisor_program "$program")" || return 1
+        wait_for_supervisor_state "$program" "RUNNING" || return 1
+        wait_for_readiness "$svc" "$program" || return 1
+        log "$program 重启成功（Supervisor）"
+    done
 }
 
 # ================== 状态 ==================
@@ -1306,8 +1358,11 @@ status_one() {
         "$LOCAL_SERVICECTL" status "$SUPERVISOR_GROUP:$svc"
         return $?
     fi
-    require_supervisor_service "$svc" || return 1
-    "$SUPERVISORCTL" status "$(supervisor_program "$svc")" || return 1
+    local program
+    for program in "$svc" $(service_extra_programs "$svc"); do
+        require_supervisor_service "$program" || return 1
+        "$SUPERVISORCTL" status "$(supervisor_program "$program")" || return 1
+    done
 }
 
 # ================== 批量 ==================

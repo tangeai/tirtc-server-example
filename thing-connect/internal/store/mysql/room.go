@@ -170,7 +170,7 @@ func (s *RoomStore) DueRooms(ctx context.Context, limit int) ([]string, error) {
 	return ids, e
 }
 func (s *RoomStore) Events(ctx context.Context, limit int) ([]room.Event, error) {
-	tx, e := s.db.BeginTxx(ctx, nil)
+	tx, e := s.db.BeginTxx(ctx, claimTx)
 	if e != nil {
 		return nil, e
 	}

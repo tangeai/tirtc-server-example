@@ -691,6 +691,29 @@ func TestCreateRole_APITimeout(t *testing.T) {
 	}
 }
 
+func TestCreateRole_CloudRejectsParameters(t *testing.T) {
+	for _, tc := range []struct {
+		status   int
+		wantHTTP int
+		wantCode int
+	}{
+		{http.StatusBadRequest, 400, 40000},
+		{http.StatusUnprocessableEntity, 400, 40000},
+		{http.StatusUnauthorized, 502, 50200},
+		{http.StatusInternalServerError, 502, 50200},
+	} {
+		api := &mockAgentAPI{createRoleErr: &tirtcapi.HTTPError{Status: tc.status, Body: `{"msg":"model 和 voice 不能为空"}`}}
+		w := doRequest(setupTestRouter(&AgentHandler{agentAPI: api}), "POST", "/v1/ai/roles", `{"name":"X","service_config":{"name":"default","type":"custom-compose"}}`, makeToken(1))
+		resp := parseJSON(t, w)
+		if w.Code != tc.wantHTTP || resp.Code != tc.wantCode {
+			t.Fatalf("cloud HTTP %d: got HTTP=%d code=%d, want HTTP=%d code=%d", tc.status, w.Code, resp.Code, tc.wantHTTP, tc.wantCode)
+		}
+		if strings.Contains(w.Body.String(), "voice") {
+			t.Fatalf("cloud HTTP %d: upstream text leaked: %s", tc.status, w.Body.String())
+		}
+	}
+}
+
 func TestCreateRole_UserRoleStoreError(t *testing.T) {
 	api := &mockAgentAPI{
 		roles:            map[string]*tirtcapi.Role{},

@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"thing-connect/internal/apiresp"
+	"thing-connect/internal/bindlimit"
 )
 
 func RegisterErrors() {
@@ -31,4 +32,5 @@ func RegisterErrors() {
 	apiresp.RegisterError(ErrFingerprintMismatch, http.StatusForbidden, apiresp.CodeFingerprintMismatch)
 	apiresp.RegisterError(ErrDeviceIDUntrusted, http.StatusBadRequest, apiresp.CodeDeviceIDUntrusted)
 	apiresp.RegisterError(ErrMACDuplicateBinding, http.StatusConflict, apiresp.CodeMACDuplicateBinding)
+	apiresp.RegisterError(bindlimit.ErrLocked, http.StatusTooManyRequests, apiresp.CodeRateLimit)
 }

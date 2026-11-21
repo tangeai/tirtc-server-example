@@ -262,7 +262,7 @@ func (s *DeviceService) reportSigned(ctx context.Context, hdr ReportHeaders, mac
 		return nil, fmt.Errorf("service.reportSigned reserveDeviceCode: %w", err)
 	}
 	tempClientID := "tmp_" + generateRandHex4()
-	tempToken, err := issueMQTTToken(tempClientID, s.jwtSecret, cfg.CodeTTL)
+	tempToken, err := issueMQTTToken(tempClientID, tempClientID, s.jwtSecret, cfg.CodeTTL)
 	if err != nil {
 		s.cache.DelDeviceCodeLookup(ctx, code) //nolint:errcheck
 		s.cache.DecrGlobalPending(ctx)         //nolint:errcheck
@@ -376,7 +376,7 @@ func (s *DeviceService) reportUnsigned(ctx context.Context, clientIP, mac, devic
 		return nil, fmt.Errorf("service.reportUnsigned reserveDeviceCode: %w", err)
 	}
 	tempClientID := "tmp_" + generateRandHex4()
-	tempToken, err := issueMQTTToken(tempClientID, s.jwtSecret, cfg.CodeTTL)
+	tempToken, err := issueMQTTToken(tempClientID, tempClientID, s.jwtSecret, cfg.CodeTTL)
 	if err != nil {
 		s.cache.DelDeviceCodeLookup(ctx, code) //nolint:errcheck
 		s.cache.DecrGlobalPending(ctx)         //nolint:errcheck
@@ -487,7 +487,7 @@ func (s *DeviceService) Token(ctx context.Context, deviceID, tsStr, nonce, sigB6
 		}
 	}
 
-	tok, err := issueMQTTToken(pool.DeviceID, s.jwtSecret, s.Config().TokenExpiry)
+	tok, err := issueMQTTToken(pool.DeviceID, "sn_"+pool.DeviceID, s.jwtSecret, spreadExpiry(s.Config().TokenExpiry))
 	if err != nil {
 		return "", err
 	}
@@ -560,9 +560,23 @@ func computeHMAC(key, data string) string {
 	return base64.StdEncoding.EncodeToString(mac.Sum(nil))
 }
 
-func issueMQTTToken(deviceID, secret string, expiry time.Duration) (string, error) {
+// spreadExpiry shortens a formal token lifetime by up to 10% so devices
+// provisioned together do not expire and reconnect together. It never exceeds
+// the configured lifetime, which operators rely on when rotating Broker rules.
+func spreadExpiry(d time.Duration) time.Duration {
+	n, err := rand.Int(rand.Reader, big.NewInt(int64(d/10)+1))
+	if err != nil {
+		return d
+	}
+	return d - time.Duration(n.Int64())
+}
+
+// issueMQTTToken signs a Broker password. The Broker verifies device_id against
+// the MQTT Username and, once enabled, clientid against the MQTT ClientID.
+func issueMQTTToken(username, clientID, secret string, expiry time.Duration) (string, error) {
 	claims := jwt.MapClaims{
-		"device_id": deviceID,
+		"device_id": username,
+		"clientid":  clientID,
 		"exp":       time.Now().Add(expiry).Unix(),
 		"iat":       time.Now().Unix(),
 	}

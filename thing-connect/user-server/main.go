@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"maps"
 	"net/http"
 	"os"
 	"os/signal"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"thing-connect/internal/bindlimit"
 	"thing-connect/internal/boardcatalog"
 	"thing-connect/internal/cache"
 	captchapkg "thing-connect/internal/captcha"
@@ -93,15 +95,36 @@ func main() {
 	cacheStore := mysqlstore.NewCacheStore(rdb)
 
 	userSvc := service.NewUserService(userStore, cacheStore, captchapkg.DevVerifier{}, mailerpkg.DisabledMailer{}, cfg.JWTSecret, svcCfg)
-	passwordResetMailQueue := service.NewInMemoryPasswordResetEmailQueue(userSvc.DeliverPasswordResetCode)
+	passwordResetMailQueue, err := service.NewInMemoryPasswordResetEmailQueue(userSvc.DeliverPasswordResetCode, cache.NewPasswordResetMailGate(rdb))
+	if err != nil {
+		log.Fatalf("password reset email queue: %v", err)
+	}
 	userSvc.SetPasswordResetEmailQueue(passwordResetMailQueue)
 
-	bindSvc := service.NewBindService(bindStore, cacheStore, broker, svcCfg)
+	bindAttemptPolicy, err := cfg.BindAttempt.Policy()
+	if err != nil {
+		log.Fatalf("bind attempt config: %v", err)
+	}
+	bindAttempts, err := bindlimit.New(&cache.BindAttemptStore{Client: rdb}, bindAttemptPolicy)
+	if err != nil {
+		log.Fatalf("bind attempt limiter: %v", err)
+	}
+	bindSvc := service.NewBindService(bindStore, cacheStore, broker, bindAttempts, svcCfg)
 	profileSvc := deviceprofile.NewService(mysqlstore.NewDeviceProfileStore(sqlDB))
 	dynamicClient, dynamicRefs, err := userDynamicConfig(dynamicClient, cfg.Tirtc, userSvc, bindSvc)
 	if err != nil {
 		log.Fatalf("dynamic config: %v", err)
 	}
+	dynamicRefs = append(dynamicRefs, dynamicconfig.Ref{Namespace: "user-server", Key: "user.bind_attempt_policy", Apply: func(snapshot dynamicconfig.Snapshot) error {
+		if snapshot.Revision == 0 {
+			return bindAttempts.Update(bindAttemptPolicy)
+		}
+		policy, err := bindlimit.ParseConfig(snapshot.Value)
+		if err != nil {
+			return err
+		}
+		return bindAttempts.Update(policy)
+	}})
 	navigation, err := webnav.New(cfg.Navigation)
 	if err != nil {
 		log.Fatalf("navigation config: %v", err)
@@ -168,17 +191,25 @@ func main() {
 	if len(targets) > 0 && cfg.Internal.Key == "" {
 		log.Fatal("config: internal.key must be set when cross-service cleanup URLs are configured")
 	}
-	outbox := cleanupoutbox.NewOutbox(sqlDB, targets)
+	outbox, err := cleanupoutbox.NewOutbox(mysqlstore.NewCleanupOutboxStore(sqlDB), targets)
+	if err != nil {
+		log.Fatalf("cleanup outbox: %v", err)
+	}
 	cleanup := &usrhandler.UnbindCleanup{Targets: cleanupoutbox.TargetNames(targets)}
 	outboxCtx, outboxCancel := context.WithCancel(context.Background())
 	go outbox.Run(outboxCtx)
 	go passwordResetMailQueue.Run(outboxCtx)
-	go runAdminUserCommands(outboxCtx, rdb, userSvc)
+	go runAdminUserCommands(outboxCtx, rdb, userSvc.DeliverPasswordResetCode)
 	go dynamicClient.Run(outboxCtx, dynamicRefs)
-	reporter, err := servicestatus.NewReporter(rdb, "user-server", probes, dynamicClient.Revisions)
+	// A cleanup backlog is reported as degraded status but must not fail
+	// /health/ready: draining user-server would not help a stuck target.
+	statusProbes := maps.Clone(probes)
+	statusProbes["cleanup_outbox"] = outbox.Health
+	reporter, err := servicestatus.NewReporter(rdb, "user-server", statusProbes, dynamicClient.Revisions)
 	if err != nil {
 		log.Fatalf("service status: %v", err)
 	}
+	reporter.SetMetrics(outbox.Metrics)
 	go reporter.Run(outboxCtx)
 
 	usrhandler.NewServer(userSvc, bindSvc, profileSvc, broker, sqlDB, rdb, cfg.JWTSecret, cfg.Call.ServerURL, cfg.Internal.Key, roleStore, cleanup).Register(r)
