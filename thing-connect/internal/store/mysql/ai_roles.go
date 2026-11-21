@@ -242,13 +242,9 @@ func (s *aiRoleLifecycleStore) CompleteCloud(ctx context.Context, target ai.Clou
 		return false, err
 	}
 	defer tx.Rollback()
-	var owner, revision int64
-	err = tx.QueryRowxContext(ctx, `SELECT user_id,binding_revision FROM device_bind WHERE device_id=? FOR UPDATE`, target.DeviceID).Scan(&owner, &revision)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	current, err := lockCloudTarget(ctx, tx, target)
+	if err != nil || !current {
 		return false, err
-	}
-	if owner != target.UserID || revision != target.Revision {
-		return false, nil
 	}
 	if target.Remove {
 		if target.RoleID == "" {
@@ -294,10 +290,40 @@ func (s *aiRoleLifecycleStore) ClaimCloud(ctx context.Context, limit int, lease 
 	}
 	return ids, tx.Commit()
 }
-func (s *aiRoleLifecycleStore) DelayCloud(ctx context.Context, device string, failed bool) error {
-	if !failed {
-		return nil
+
+// lockCloudTarget fences both ownership changes and target replacement before
+// changing retry state or deletion protection. Keep device-before-target lock
+// ordering consistent with PrepareCloud and CloudTarget.
+func lockCloudTarget(ctx context.Context, tx *sqlx.Tx, target ai.CloudTarget) (bool, error) {
+	var owner, revision int64
+	err := tx.QueryRowxContext(ctx, `SELECT user_id,binding_revision FROM device_bind WHERE device_id=? FOR UPDATE`, target.DeviceID).Scan(&owner, &revision)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return false, err
 	}
-	_, err := s.executor(ctx).ExecContext(ctx, `UPDATE ai_cloud_role_target SET next_attempt_at=DATE_ADD(NOW(),INTERVAL LEAST(300,POW(2,LEAST(attempts,8))) SECOND),attempts=LEAST(attempts+1,9) WHERE device_id=?`, device)
-	return err
+	if owner != target.UserID || revision != target.Revision {
+		return false, nil
+	}
+	var current ai.CloudTarget
+	err = tx.GetContext(ctx, &current, `SELECT device_id,user_id,binding_revision,role_id,remove_role FROM ai_cloud_role_target WHERE device_id=? FOR UPDATE`, target.DeviceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return current == target, err
+}
+
+func (s *aiRoleLifecycleStore) DelayCloud(ctx context.Context, target ai.CloudTarget) error {
+	tx, err := s.executor(ctx).BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	current, err := lockCloudTarget(ctx, tx, target)
+	if err != nil || !current {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE ai_cloud_role_target SET next_attempt_at=DATE_ADD(NOW(),INTERVAL LEAST(300,POW(2,LEAST(attempts,8))) SECOND),attempts=LEAST(attempts+1,9) WHERE device_id=?`, target.DeviceID)
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }

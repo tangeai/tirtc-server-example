@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -13,6 +14,8 @@ type reconcileStore struct {
 	settled   map[string]bool
 	unbounded int
 	onWork    func()
+	targetErr error
+	delayed   []CloudTarget
 }
 
 func (s *reconcileStore) WithDevices(ctx context.Context, _ []string, fn func(context.Context) error) error {
@@ -22,13 +25,16 @@ func (s *reconcileStore) CloudTarget(_ context.Context, device string, _ bool) (
 	if s.onWork != nil {
 		s.onWork()
 	}
-	return s.targets[device], nil
+	return s.targets[device], s.targetErr
 }
 func (s *reconcileStore) CompleteCloud(_ context.Context, target CloudTarget, settled bool) (bool, error) {
 	s.settled[target.DeviceID] = settled
 	return true, nil
 }
-func (s *reconcileStore) DelayCloud(context.Context, string, bool) error { return nil }
+func (s *reconcileStore) DelayCloud(_ context.Context, target CloudTarget) error {
+	s.delayed = append(s.delayed, target)
+	return nil
+}
 func (s *reconcileStore) ClaimCloud(ctx context.Context, _ int, _ time.Duration) ([]string, error) {
 	if d, ok := ctx.Deadline(); !ok || time.Until(d) > reconcileClaimTimeout {
 		s.unbounded++
@@ -40,9 +46,13 @@ type reconcileCloud struct {
 	RoleCloud
 	bindings []CloudRoleBinding
 	mutated  []string
+	queryErr error
 }
 
 func (c *reconcileCloud) Query(_ context.Context, ids []string) ([]CloudRoleBinding, error) {
+	if c.queryErr != nil {
+		return nil, c.queryErr
+	}
 	var out []CloudRoleBinding
 	for _, b := range c.bindings {
 		if b.DeviceID == ids[0] {
@@ -50,6 +60,32 @@ func (c *reconcileCloud) Query(_ context.Context, ids []string) ([]CloudRoleBind
 		}
 	}
 	return out, nil
+}
+
+func TestReconcileRetriesOnlyTheSnapshotReadBeforeFailure(t *testing.T) {
+	target := CloudTarget{DeviceID: "a", UserID: 7, Revision: 12, RoleID: "role"}
+	for _, targetErr := range []error{nil, errors.New("store unavailable"), ErrCleanupSuperseded} {
+		store := &reconcileStore{targets: map[string]CloudTarget{"a": target}, targetErr: targetErr}
+		cloudErr := errors.New("cloud unavailable")
+		roles := NewRoles(store, func() RoleCloud { return &reconcileCloud{queryErr: cloudErr} })
+		err := roles.Reconcile(context.Background(), "a")
+		if targetErr == nil {
+			if !errors.Is(err, cloudErr) || len(store.delayed) != 1 || store.delayed[0] != target {
+				t.Fatalf("failure lost its snapshot: err=%v retries=%v", err, store.delayed)
+			}
+		} else {
+			if len(store.delayed) != 0 {
+				t.Fatalf("retry scheduled without a valid snapshot: %v", store.delayed)
+			}
+			if errors.Is(targetErr, ErrCleanupSuperseded) {
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else if !errors.Is(err, targetErr) {
+				t.Fatal(err)
+			}
+		}
+	}
 }
 func (c *reconcileCloud) Bind(_ context.Context, ids []string, _ string) error {
 	c.mutated = append(c.mutated, ids...)

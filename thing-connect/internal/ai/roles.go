@@ -68,13 +68,15 @@ type RoleLifecycleStore interface {
 	WithDevices(context.Context, []string, func(context.Context) error) error
 	PrepareCloud(context.Context, int64, []string, string, bool) ([]CloudTarget, error)
 	CloudTarget(context.Context, string, bool) (CloudTarget, error)
-	// CompleteCloud records the target as applied when the device generation is
-	// unchanged. A settled target was confirmed without a remote mutation and is
-	// no longer rechecked; otherwise one recheck catches late remote requests.
+	// CompleteCloud records the target as applied only while both device ownership
+	// and the persisted target still match the snapshot. A settled target was
+	// confirmed without a remote mutation and is no longer rechecked; otherwise
+	// one recheck catches late remote requests.
 	CompleteCloud(ctx context.Context, target CloudTarget, settled bool) (bool, error)
 	// ClaimCloud leases up to limit due targets that no other worker holds.
 	ClaimCloud(ctx context.Context, limit int, lease time.Duration) ([]string, error)
-	DelayCloud(context.Context, string, bool) error
+	// DelayCloud backs off only the failed snapshot, never a replacement target.
+	DelayCloud(context.Context, CloudTarget) error
 }
 
 const (
@@ -214,6 +216,11 @@ func (s *Roles) reconcileLocked(ctx context.Context, device string, cloud RoleCl
 	if err != nil {
 		return err
 	}
+	return s.reconcileTarget(ctx, target, cloud)
+}
+
+func (s *Roles) reconcileTarget(ctx context.Context, target CloudTarget, cloud RoleCloud) error {
+	device := target.DeviceID
 	rows, err := cloud.Query(ctx, []string{device})
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrRoleUpstream, err)
@@ -245,11 +252,17 @@ func (s *Roles) reconcileLocked(ctx context.Context, device string, cloud RoleCl
 }
 func (s *Roles) Reconcile(ctx context.Context, device string) error {
 	return s.store.WithDevices(ctx, []string{device}, func(ctx context.Context) error {
-		err := s.reconcileLocked(ctx, device, s.cloud(), false)
-		if delayErr := s.store.DelayCloud(ctx, device, err != nil); delayErr != nil {
-			return errors.Join(err, delayErr)
+		target, err := s.store.CloudTarget(ctx, device, false)
+		if errors.Is(err, ErrCleanupSuperseded) {
+			return nil
 		}
-		return err
+		if err != nil {
+			return err // No snapshot was read; leave the lease for recovery.
+		}
+		if err = s.reconcileTarget(ctx, target, s.cloud()); err != nil {
+			return errors.Join(err, s.store.DelayCloud(ctx, target))
+		}
+		return nil
 	})
 }
 

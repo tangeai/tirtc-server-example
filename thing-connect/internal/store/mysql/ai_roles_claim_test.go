@@ -101,3 +101,120 @@ func containsAny(ids []string, set map[string]bool) bool {
 	}
 	return false
 }
+
+func TestAICloudStaleCompletionPreservesReplacement(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	store := mysqlstore.NewRoleLifecycleStore(db)
+	for _, remove := range []bool{false, true} {
+		t.Run(fmt.Sprintf("remove=%v", remove), func(t *testing.T) {
+			device := uniqueDevID()
+			const user = 101
+			if _, err := db.Exec(`INSERT INTO device_bind(device_id,user_id,bind_time) VALUES(?,?,NOW())`, device, user); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				_, _ = db.Exec(`DELETE FROM ai_cloud_role_target WHERE device_id=?`, device)
+				_, _ = db.Exec(`DELETE FROM ai_cloud_role_ref WHERE device_id=?`, device)
+				_, _ = db.Exec(`DELETE FROM device_bind WHERE device_id=?`, device)
+			})
+			old, err := store.PrepareCloud(ctx, user, []string{device}, "old-role", remove)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = store.PrepareCloud(ctx, user, []string{device}, "new-role", false); err != nil {
+				t.Fatal(err)
+			}
+			if err = store.DelayCloud(ctx, old[0]); err != nil {
+				t.Fatal(err)
+			}
+			var attempts int
+			if err = db.Get(&attempts, `SELECT attempts FROM ai_cloud_role_target WHERE device_id=?`, device); err != nil {
+				t.Fatal(err)
+			}
+			if attempts != 0 {
+				t.Fatalf("old failure incremented replacement attempts: %d", attempts)
+			}
+			current, err := store.CompleteCloud(ctx, old[0], true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if current {
+				t.Error("old target was accepted after its replacement")
+			}
+			var due, protected bool
+			if err = db.Get(&due, `SELECT next_attempt_at<=NOW() FROM ai_cloud_role_target WHERE device_id=?`, device); err != nil {
+				t.Fatal(err)
+			}
+			if err = db.Get(&protected, `SELECT EXISTS(SELECT 1 FROM ai_cloud_role_ref WHERE device_id=? AND role_id='new-role')`, device); err != nil {
+				t.Fatal(err)
+			}
+			if !due || !protected {
+				t.Fatalf("replacement due=%v deletion-protected=%v, want both true", due, protected)
+			}
+		})
+	}
+}
+
+func TestAICloudRetryFencesOwnershipAndResumesAfterLease(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	store := mysqlstore.NewRoleLifecycleStore(db)
+	device := uniqueDevID()
+	const user = 102
+	if _, err := db.Exec(`INSERT INTO device_bind(device_id,user_id,bind_time) VALUES(?,?,NOW())`, device, user); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Exec(`DELETE FROM ai_cloud_role_target WHERE device_id=?`, device)
+		_, _ = db.Exec(`DELETE FROM ai_cloud_role_ref WHERE device_id=?`, device)
+		_, _ = db.Exec(`DELETE FROM device_bind WHERE device_id=?`, device)
+	})
+	targets, err := store.PrepareCloud(ctx, user, []string{device}, "role", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := targets[0]
+	if ids, e := store.ClaimCloud(ctx, 100, time.Minute); e != nil || !containsAny(ids, map[string]bool{device: true}) {
+		t.Fatalf("claim: ids=%v err=%v", ids, e)
+	}
+	if err = store.DelayCloud(ctx, old); err != nil {
+		t.Fatal(err)
+	}
+	var attempts int
+	if err = db.Get(&attempts, `SELECT attempts FROM ai_cloud_role_target WHERE device_id=?`, device); err != nil || attempts != 1 {
+		t.Fatalf("current failure: attempts=%d err=%v", attempts, err)
+	}
+	// A device ownership change does not acquire the AI named device lock.
+	if _, err = db.Exec(`UPDATE device_bind SET user_id=0,binding_revision=binding_revision+1 WHERE device_id=?`, device); err != nil {
+		t.Fatal(err)
+	}
+	if err = store.DelayCloud(ctx, old); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.Get(&attempts, `SELECT attempts FROM ai_cloud_role_target WHERE device_id=?`, device); err != nil || attempts != 1 {
+		t.Fatalf("superseded failure: attempts=%d err=%v", attempts, err)
+	}
+	if current, e := store.CompleteCloud(ctx, old, true); e != nil || current {
+		t.Fatalf("superseded completion: current=%v err=%v", current, e)
+	}
+	// A restarted worker reclaims the expired lease and derives a cleanup target
+	// from current ownership instead of replaying the old role assignment.
+	if _, err = db.Exec(`UPDATE ai_cloud_role_target SET next_attempt_at=DATE_SUB(NOW(),INTERVAL 1 SECOND) WHERE device_id=?`, device); err != nil {
+		t.Fatal(err)
+	}
+	restarted := mysqlstore.NewRoleLifecycleStore(db)
+	if ids, e := restarted.ClaimCloud(ctx, 100, time.Minute); e != nil || !containsAny(ids, map[string]bool{device: true}) {
+		t.Fatalf("recovery claim: ids=%v err=%v", ids, e)
+	}
+	current, err := restarted.CloudTarget(ctx, device, false)
+	if err != nil || !current.Remove || current.UserID != 0 || current.Revision != old.Revision+1 {
+		t.Fatalf("recovery target=%+v err=%v", current, err)
+	}
+	if applied, e := restarted.CompleteCloud(ctx, current, true); e != nil || !applied {
+		t.Fatalf("cleanup completion: current=%v err=%v", applied, e)
+	}
+	if ids, e := restarted.ClaimCloud(ctx, 100, time.Minute); e != nil || containsAny(ids, map[string]bool{device: true}) {
+		t.Fatalf("settled cleanup reclaimed: ids=%v err=%v", ids, e)
+	}
+}

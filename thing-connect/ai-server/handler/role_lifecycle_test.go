@@ -81,4 +81,4 @@ func (f *fixtureRoleLifecycle) CompleteCloud(context.Context, ai.CloudTarget, bo
 func (f *fixtureRoleLifecycle) ClaimCloud(context.Context, int, time.Duration) ([]string, error) {
 	return nil, nil
 }
-func (f *fixtureRoleLifecycle) DelayCloud(context.Context, string, bool) error { return nil }
+func (f *fixtureRoleLifecycle) DelayCloud(context.Context, ai.CloudTarget) error { return nil }
