@@ -49,6 +49,7 @@ func main() {
 	prepareSetup := flag.Bool("prepare-setup", false, "authorize a new empty deployment for one-time web setup")
 	validateConfigBundle := flag.Bool("validate-config-bundle", false, "strictly validate required and configured optional service configs and exit")
 	checkServiceConfig := flag.String("check-service-config", "", "read-only startup preflight for one business service and exit")
+	checkServiceInstances := flag.Int("check-service-instances", 1, "instance count for startup preflight; MQTT multi-instance requires username authentication")
 	deployRoot := flag.String("deploy-root", "", "deployment root used by first-run setup")
 	setupPort := flag.Int("setup-port", 9000, "HTTP port used before the Admin config exists")
 	setupBind := flag.String("setup-bind", "127.0.0.1", "listen address used only during first-run setup")
@@ -149,7 +150,7 @@ func main() {
 		log.Fatalf("schema: %v", err)
 	}
 	if strings.TrimSpace(*checkServiceConfig) != "" {
-		if err := checkBusinessServiceConfig(context.Background(), root, strings.TrimSpace(*checkServiceConfig), sqlDB); err != nil {
+		if err := checkBusinessServiceConfig(context.Background(), root, strings.TrimSpace(*checkServiceConfig), sqlDB, *checkServiceInstances); err != nil {
 			log.Printf("service config check: %v", err)
 			if errors.Is(err, errBusinessConfigurationRequired) {
 				os.Exit(78)
@@ -374,7 +375,10 @@ func adminMQTTProbeConfig(connection adminapp.MQTTConnection) baseconfig.MQTTCfg
 
 var errBusinessConfigurationRequired = errors.New("业务服务必填配置未完成")
 
-func checkBusinessServiceConfig(ctx context.Context, root, serviceName string, sqlDB *sqlx.DB) error {
+func checkBusinessServiceConfig(ctx context.Context, root, serviceName string, sqlDB *sqlx.DB, instances int) error {
+	if instances < 1 || instances > 32 {
+		return errors.New("服务实例数必须为 1-32")
+	}
 	if err := installer.ValidateConfiguredBusinessService(root, serviceName); err != nil {
 		return err
 	}
@@ -415,6 +419,9 @@ func checkBusinessServiceConfig(ctx context.Context, root, serviceName string, s
 		if err != nil {
 			return fmt.Errorf("%s MQTT 配置检查失败: %w", serviceName, err)
 		}
+		if err := validateInstanceMQTT(mqttConfig, instances); err != nil {
+			return fmt.Errorf("%s: %w", serviceName, err)
+		}
 		probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
 		probe := mqttc.Probe
@@ -424,6 +431,15 @@ func checkBusinessServiceConfig(ctx context.Context, root, serviceName string, s
 		if err := probe(probeCtx, mqttConfig); err != nil {
 			return fmt.Errorf("%s MQTT 连接、认证或订阅检查失败: %w", serviceName, err)
 		}
+	}
+	return nil
+}
+
+// Check the resolved Admin/YAML configuration before connecting a probe or
+// launching another process with a potentially conflicting MQTT ClientID.
+func validateInstanceMQTT(cfg baseconfig.MQTTCfg, instances int) error {
+	if instances > 1 && cfg.AuthMode() != "username" {
+		return errors.New("多实例要求 MQTT username 认证；请在 Admin 发布独立服务账号后重试")
 	}
 	return nil
 }

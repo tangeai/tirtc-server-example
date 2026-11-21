@@ -12,8 +12,22 @@ import (
 	"github.com/gin-gonic/gin"
 
 	adminapp "thing-connect/internal/admin"
+	baseconfig "thing-connect/internal/config"
 	"thing-connect/internal/installer"
 )
+
+func TestMultiInstancePreflightRejectsFixedMQTTClientID(t *testing.T) {
+	fixed := baseconfig.MQTTCfg{ClientID: "usersrv"}
+	if err := validateInstanceMQTT(fixed, 1); err != nil {
+		t.Fatalf("single-instance compatibility: %v", err)
+	}
+	if err := validateInstanceMQTT(fixed, 2); err == nil {
+		t.Fatal("multiple clients would disconnect each other with a fixed ClientID")
+	}
+	if err := validateInstanceMQTT(baseconfig.MQTTCfg{Username: "usersrv"}, 2); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestSecurityHeaders(t *testing.T) {
 	gin.SetMode(gin.TestMode)

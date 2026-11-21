@@ -222,6 +222,20 @@ YAML
     }
 )
 
+test_local_restart_preserves_controller_rolling_sequence() (
+    local capture="$TEST_ROOT/local-rolling.capture"
+    ACTIVE_SERVICE_MANAGER=local
+    LOCAL_SERVICECTL="$TEST_ROOT/local-rolling-controller"
+    cat >"$LOCAL_SERVICECTL" <<SH
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >>"$capture"
+SH
+    chmod +x "$LOCAL_SERVICECTL"
+    wait_for_readiness() { echo "ready $1" >>"$capture"; }
+    restart_one user-server
+    assert_eq $'restart thing-connect:user-server\nready user-server' "$(cat "$capture")" 'local restart must delegate the whole rolling group'
+)
+
 test_missing_supervisor_selects_manual_service_control() (
     local root="$TEST_ROOT/manual-service-control"
     DEPLOY_ROOT="$root"
@@ -1162,6 +1176,7 @@ test_pending_database_still_requires_verified_backup
 test_failed_migration_check_never_runs_ddl
 test_yaml_section_headers_allow_valid_whitespace
 test_dynamic_mqtt_is_not_required_in_base_yaml
+test_local_restart_preserves_controller_rolling_sequence
 test_missing_supervisor_selects_manual_service_control
 test_partial_supervisor_inventory_is_rejected
 test_explicit_manual_mode_rejects_existing_supervisor_services

@@ -69,9 +69,14 @@ jobs:
       - name: Deployment script tests
         working-directory: thing-connect
         run: |
+          if ! command -v nginx >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install --yes nginx
+          fi
           bash scripts/ip-databases_test.sh
           bash scripts/install_test.sh
           bash scripts/service-local_test.sh
+          bash scripts/service-local_multi_test.sh
           bash scripts/deploy-prod_test.sh
           bash scripts/deploy-local_test.sh
           bash scripts/deployment-workflow_test.sh

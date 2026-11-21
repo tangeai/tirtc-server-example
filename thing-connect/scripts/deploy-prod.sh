@@ -972,8 +972,15 @@ preflight_business_services() {
     for svc in "${ACTIVE_BUSINESS_SERVICES[@]}"; do
         if [ "$svc" = recognition-server ] && [ "${DEFER_RECOGNITION_START:-0}" = 1 ]; then continue; fi
         log "停服前检查 $svc 必填配置及依赖连接..."
+        local ports
+        local -a instance_args=() instance_ports=()
+        if [ "$ACTIVE_SERVICE_MANAGER" = local ] && [ -e "$DEPLOY_ROOT/local-instances" ]; then
+            ports="$(DEPLOY_ROOT="$DEPLOY_ROOT" "$BUILD_DIR/scripts/service-local.sh" ports "$svc")" || return 1
+            mapfile -t instance_ports <<<"$ports"
+            instance_args=(-check-service-instances "${#instance_ports[@]}")
+        fi
         "$BUILD_DIR/bin/admin-server" -c "$cfg" -deploy-root "$DEPLOY_ROOT" \
-            -check-service-config "$svc" || return $?
+            -check-service-config "$svc" "${instance_args[@]}" || return $?
     done
 }
 
@@ -1145,8 +1152,8 @@ service_health_url() {
 }
 
 # 业务服务可在同一 Supervisor 组中增加 <服务>-2、<服务>-3 等程序并行运行，
-# 各程序用环境变量 THING_CONNECT_HTTP_PORT 指定端口。Admin 和手动服务管理
-# 模式只运行一个实例。
+# 各程序用环境变量 THING_CONNECT_HTTP_PORT 指定端口。Admin 保持单实例；
+# local 模式由 service-local.sh 负责同一服务的全部实例。
 service_extra_programs() {
     local svc="$1"
     [ "$svc" != "$ADMIN_SERVICE" ] && [ "$ACTIVE_SERVICE_MANAGER" != local ] || return 0
@@ -1335,7 +1342,8 @@ start_program() {
 restart_one() {
     local svc="$1"
     if [ "$ACTIVE_SERVICE_MANAGER" = local ]; then
-        stop_one "$svc" && start_one "$svc"
+        "$LOCAL_SERVICECTL" restart "$SUPERVISOR_GROUP:$svc" || return 1
+        wait_for_readiness "$svc"
         return $?
     fi
 

@@ -332,6 +332,38 @@ local_update() (
     fi
 )
 
+# Render from the production route template, using the controller's inventory
+# for both public and internal upstreams. Single-instance output keeps the
+# optional internal listener commented out.
+local_gateway_config() {
+    local port="$1"
+    printf 'pid nginx.pid;\nerror_log logs/error.log;\nevents {}\nhttp {\n'
+    printf 'include /etc/nginx/mime.types;\naccess_log logs/access.log;\n'
+    local line upstream service backend controller="$LOCAL_DEPLOY_ROOT/service-local.sh" ports multi=0 internal_block=0
+    while IFS= read -r line || [ -n "$line" ]; do
+        if [[ "$line" =~ ^upstream[[:space:]]+([a-z_]+)[[:space:]] ]]; then
+            upstream="${BASH_REMATCH[1]}"
+            service="${upstream//_/-}"
+            ports="$(DEPLOY_ROOT="$LOCAL_DEPLOY_ROOT" "$controller" ports "$service")" || return 1
+            [[ "$ports" != *$'\n'* ]] || multi=1
+            printf 'upstream %s {' "$upstream"
+            # Local rolling restarts must not keep a recovered peer blacklisted
+            # while the next peer stops. Connection failures still try another peer.
+            for backend in $ports; do printf ' server 127.0.0.1:%s max_fails=0;' "$backend"; done
+            printf ' }\n'
+        else
+            if [ "$multi" = 1 ]; then
+                [ "$line" != '#server {' ] || internal_block=1
+                if [ "$internal_block" = 1 ]; then line="${line#\#}"; fi
+            fi
+            line="${line/listen 80;/listen 127.0.0.1:$port;}"
+            line="${line/server_name thing.example.com;/server_name localhost;}"
+            printf '%s\n' "$line"
+        fi
+    done <"$LOCAL_SOURCE_ROOT/thing-connect/deploy/nginx/thing-connect.nginx.conf"
+    printf '}\n'
+}
+
 local_gateway() {
     local action="$1" port="${GATEWAY_PORT:-18080}" prefix="$LOCAL_DEPLOY_ROOT/nginx-local" pid args
     command -v nginx >/dev/null || { local_error '请先安装 nginx'; return 1; }
@@ -359,13 +391,7 @@ local_gateway() {
         local_error "入口端口 $port 已占用；请用 GATEWAY_PORT 指定其他端口"; return 1;
     fi
     mkdir -p "$prefix/logs"
-    {
-        printf 'pid nginx.pid;\nerror_log logs/error.log;\nevents {}\nhttp {\n'
-        printf 'include /etc/nginx/mime.types;\naccess_log logs/access.log;\n'
-        sed "s/listen 80;/listen 127.0.0.1:$port;/; s/server_name thing.example.com;/server_name localhost;/" \
-            "$LOCAL_SOURCE_ROOT/thing-connect/deploy/nginx/thing-connect.nginx.conf"
-        printf '}\n'
-    } >"$prefix/nginx.conf.new"
+    local_gateway_config "$port" >"$prefix/nginx.conf.new" || return 1
     nginx -t -p "$prefix/" -c nginx.conf.new
     mv -f "$prefix/nginx.conf.new" "$prefix/nginx.conf"
     nginx -p "$prefix/" -c nginx.conf 9>&-

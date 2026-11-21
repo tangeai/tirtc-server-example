@@ -526,7 +526,7 @@ sudo /opt/thing-connect/service-local.sh restart thing-connect:admin-server
 
 #### 业务服务多实例
 
-Device、User、VoIP、AI、Call 和 Recognition 可以各自运行多个实例分担请求并互为备份；Admin 只运行一个实例。`service-local.sh` 只管理单实例，多实例需要 Supervisor 或其他进程管理器。启用前须满足：
+Device、User、VoIP、AI、Call 和 Recognition 可以各自运行多个实例分担请求并互为备份；Admin 只运行一个实例。`service-local.sh` 支持本机多实例，配置步骤见[本机多实例联调](deployment-local.md#本机多实例联调)；生产也可使用 Supervisor 或其他进程管理器。启用前须满足：
 
 - 连接 MQTT 的服务（AI 以外）在 Admin 中把 `<服务>/mqtt.connection` 设为 Username 认证方式。ClientID 认证方式使用固定 ClientID，多个实例会互相挤掉连接，只能单实例运行。
 - 每个实例的 `SERVICE_INSTANCE_ID` 和 HTTP 端口不能重复。MQTT ClientID 由 Username 和实例 ID 组成，两个进程使用同一实例 ID 时，后连接的进程会挤掉前一个。同一服务的实例共用一个 `config.yaml`，用环境变量 `THING_CONNECT_HTTP_PORT` 覆盖 `server.http_port`。
