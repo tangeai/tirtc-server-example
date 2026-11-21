@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -376,9 +378,54 @@ func TestUserService_SendPasswordResetCode(t *testing.T) {
 	}
 }
 
+type memoryMailGate struct {
+	mu       sync.Mutex
+	pending  map[string]string
+	next     int
+	err      error
+	released int
+}
+
+func newMemoryMailGate() *memoryMailGate { return &memoryMailGate{pending: map[string]string{}} }
+
+func (g *memoryMailGate) Acquire(_ context.Context, email string, _ time.Duration) (string, bool, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.err != nil {
+		return "", false, g.err
+	}
+	if _, ok := g.pending[email]; ok {
+		return "", false, nil
+	}
+	g.next++
+	token := fmt.Sprint(g.next)
+	g.pending[email] = token
+	return token, true, nil
+}
+
+func (g *memoryMailGate) Release(_ context.Context, email, token string) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.pending[email] == token {
+		delete(g.pending, email)
+		g.released++
+	}
+	return nil
+}
+
+func newTestMailQueue(t *testing.T, gate PasswordResetMailGate, deliver func(context.Context, string) error) *InMemoryPasswordResetEmailQueue {
+	t.Helper()
+	queue, err := NewInMemoryPasswordResetEmailQueue(deliver, gate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return queue
+}
+
 func TestInMemoryPasswordResetEmailQueue(t *testing.T) {
 	delivered := make(chan string, 1)
-	queue := NewInMemoryPasswordResetEmailQueue(func(_ context.Context, email string) error {
+	gate := newMemoryMailGate()
+	queue := newTestMailQueue(t, gate, func(_ context.Context, email string) error {
 		delivered <- email
 		return nil
 	})
@@ -396,23 +443,46 @@ func TestInMemoryPasswordResetEmailQueue(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("queued email was not delivered")
 	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		gate.mu.Lock()
+		released := gate.released
+		gate.mu.Unlock()
+		if released == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("delivery did not release the pending reservation")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 }
 
-func TestInMemoryPasswordResetEmailQueue_CoalescesSameEmail(t *testing.T) {
-	started := make(chan struct{}, 1)
+func TestNewInMemoryPasswordResetEmailQueueRejectsMissingGate(t *testing.T) {
+	if _, err := NewInMemoryPasswordResetEmailQueue(func(context.Context, string) error { return nil }, nil); err == nil {
+		t.Fatal("queue without a gate accepted")
+	}
+}
+
+// Two queues sharing one gate stand for two user-server instances.
+func TestInMemoryPasswordResetEmailQueue_CoalescesSameEmailAcrossInstances(t *testing.T) {
+	started := make(chan struct{}, 2)
 	release := make(chan struct{})
 	delivered := make(chan string, 2)
-	queue := NewInMemoryPasswordResetEmailQueue(func(_ context.Context, email string) error {
+	deliver := func(_ context.Context, email string) error {
 		started <- struct{}{}
 		<-release
 		delivered <- email
 		return nil
-	})
+	}
+	gate := newMemoryMailGate()
+	first, second := newTestMailQueue(t, gate, deliver), newTestMailQueue(t, gate, deliver)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go queue.Run(ctx)
+	go first.Run(ctx)
+	go second.Run(ctx)
 
-	if err := queue.Enqueue(context.Background(), "a@b.com"); err != nil {
+	if err := first.Enqueue(context.Background(), "a@b.com"); err != nil {
 		t.Fatalf("first Enqueue returned error: %v", err)
 	}
 	select {
@@ -420,8 +490,10 @@ func TestInMemoryPasswordResetEmailQueue_CoalescesSameEmail(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("first job did not start")
 	}
-	if err := queue.Enqueue(context.Background(), "a@b.com"); err != nil {
-		t.Fatalf("duplicate Enqueue returned error: %v", err)
+	for _, queue := range []*InMemoryPasswordResetEmailQueue{first, second} {
+		if err := queue.Enqueue(context.Background(), "a@b.com"); err != nil {
+			t.Fatalf("duplicate Enqueue returned error: %v", err)
+		}
 	}
 	close(release)
 	select {
@@ -439,6 +511,26 @@ func TestInMemoryPasswordResetEmailQueue_CoalescesSameEmail(t *testing.T) {
 	}
 }
 
+func TestInMemoryPasswordResetEmailQueue_GateFailureAndFullQueue(t *testing.T) {
+	gate := newMemoryMailGate()
+	queue := newTestMailQueue(t, gate, func(context.Context, string) error { return nil })
+	gate.err = errors.New("redis down")
+	if err := queue.Enqueue(context.Background(), "a@b.com"); err == nil || errors.Is(err, ErrPasswordResetMailQueueFull) {
+		t.Fatalf("gate failure Enqueue = %v, want a dependency error", err)
+	}
+	gate.err = nil
+	for i := 0; i < passwordResetMailQueueSize; i++ {
+		if err := queue.Enqueue(context.Background(), fmt.Sprintf("u%d@b.com", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := queue.Enqueue(context.Background(), "overflow@b.com"); !errors.Is(err, ErrPasswordResetMailQueueFull) {
+		t.Fatalf("full queue Enqueue = %v", err)
+	}
+	if _, pending := gate.pending["overflow@b.com"]; pending {
+		t.Fatal("rejected request kept its reservation and would block a retry")
+	}
+}
 func TestUserService_SendPasswordResetCode_RateLimited(t *testing.T) {
 	cache := newFakeCache()
 	queue := &fakePasswordResetEmailQueue{}

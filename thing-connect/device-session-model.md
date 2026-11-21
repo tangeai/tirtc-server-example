@@ -1,6 +1,6 @@
 # 设备统一状态机与业务抢占规则
 
-同一台设备同时接入 H5 实时、微信 VoIP、AI 对讲和设备互呼时，建议通过统一状态机管理 TiRTC 生命周期、MQTT 消息路由和业务抢占。
+同一台设备同时接入 H5 实时、微信 VoIP、AI 对讲、设备互呼和多人对讲时，建议通过统一状态机管理 TiRTC 生命周期、MQTT 消息路由和业务抢占。
 
 > 这里说明多业务共存时的设备端主干设计。设备上线和 MQTT 规范见 [device-integration.md](device-integration.md)，各业务接入细节见 [device-h5-live.md](device-h5-live.md)、[device-voip.md](device-voip.md)、[device-ai.md](device-ai.md) 和 [device-call.md](device-call.md)。
 >
@@ -16,6 +16,7 @@
 - [MQTT 消息路由](#mqtt-消息路由)
 - [H5 实时与通话并存策略](#h5-实时与通话并存策略)
 - [推荐实现方式](#推荐实现方式)
+- [多人对讲 ROOM](#多人对讲-room)
 
 ---
 
@@ -24,12 +25,12 @@
 设备的主媒体资源只能由一个前台业务独占时，可按以下原则处理：
 
 1. **同一时刻只允许一个 TiRTC 业务会话占用主媒体资源**
-2. H5 实时流视为“后台常驻流”，VoIP、AI 和设备互呼视为“前台抢占会话”
-3. 前台会话开始前暂停实时流，结束后恢复实时流
+2. H5 实时流视为“后台常驻流”，ROOM 多人对讲是可被抢占的常驻会话，VoIP、AI 和设备互呼视为“前台抢占会话”
+3. ROOM 或前台会话开始前暂停实时流；前台会话结束后先恢复实时流，再由 ROOM 同步当前房间关系并按准入条件恢复收听
 4. VoIP 与设备呼设备的来电都通过 MQTT 到达，但必须交给各自独立状态机处理
 5. 冲突来电不要“排队自动接听”，要么自动拒接，要么明确进入 pending 态等待用户/业务层处理
 
-Linux C 参考实现按这套原则实现：`SessionArbiter` 维护唯一的前台 owner、pending 和 generation，`SessionCoordinator` 只负责 `STREAM`、`VOIP`、`AI`、`CALL` 的停止、启动和恢复。
+Linux C 参考实现按这套原则实现：`SessionArbiter` 维护唯一的前台 owner、pending 和 generation，`SessionCoordinator` 只负责 `STREAM`、`ROOM`、`VOIP`、`AI`、`CALL` 的停止、启动和恢复。
 
 ---
 
@@ -47,13 +48,14 @@ Linux C 参考实现按这套原则实现：`SessionArbiter` 维护唯一的前�
 | `VOIP` | 微信 VoIP 会话 |
 | `AI` | AI 对讲会话 |
 | `CALL` | 设备呼设备会话 |
+| `ROOM` | 可被前台业务抢占的多人对讲会话 |
 | `NONE` | 启动中、切换中或停止状态 |
 
 推荐规则：
 
 - 启动完成后默认进入 `STREAM`
-- 进入 `VOIP`、`AI` 或 `CALL` 前，先停止 `STREAM`
-- `VOIP`、`AI` 或 `CALL` 结束后，自动恢复 `STREAM`
+- 进入 `ROOM` 前先停止 `STREAM`；进入 `VOIP`、`AI` 或 `CALL` 前先停止当前 `STREAM` 或 `ROOM`
+- 前台会话结束后，协调器先恢复 `STREAM`；ROOM 再同步关系并申请新的连接租约，符合准入条件时恢复收听
 
 ### 2. 各业务自己的子状态机
 
@@ -77,7 +79,7 @@ Linux C 参考实现按这套原则实现：`SessionArbiter` 维护唯一的前�
 ### 1. H5 实时是后台态
 
 - 默认启动实时流
-- 当 `VOIP`、`AI` 或 `CALL` 任一会话开始时，暂停实时流
+- 当 `ROOM`、`VOIP`、`AI` 或 `CALL` 任一会话开始时，暂停实时流
 - 当前台会话结束时，再恢复实时流
 
 ### 2. AI 与其它通话互斥
@@ -95,7 +97,7 @@ AI 通常会占用麦克风、扬声器和主会话上下文，与人工通话�
 
 Linux C 参考实现在 [main.c](device-sim/device-sim-c/src/main.c) 注册 MQTT 回调。所有来电、终端动作和 SDK 异步结束事件先进入 `SessionArbiter`，由 Arbiter 原子判断 pending、owner、room_id 和 generation。
 
-准入成功后，`SessionCoordinator` 才会串行停止 STREAM 并启动目标业务。各业务模块无需互相读取状态来拼接冲突判断。
+准入成功后，`SessionCoordinator` 才会串行停止当前 STREAM 或 ROOM 并启动目标业务。各业务模块无需互相读取状态来拼接冲突判断。
 
 ### 4. 全局只保留一个 pending 来电
 
@@ -124,6 +126,7 @@ Linux C 参考实现使用一个带 `room_id`、代次和 45 秒有效期的全�
 | `call_cancel` | VoIP 状态机 | 微信侧取消/挂断 |
 | `callers_update` + VoIP 来源 | VoIP 状态机 | 微信授权列表变化 |
 | `call_incoming` + `channel=device` | 设备呼设备状态机 | 设备来电 |
+| `room_assignment_changed` | ROOM 状态机 | 同步多人房间关系，按仲裁结果加入或恢复 |
 | `room_cancel` | 设备呼设备状态机 | 房间结束 |
 | `call_reject` | 设备呼设备状态机 | 某个被叫拒接 |
 | `callers_update` + call 来源 | 设备呼设备状态机 | 联系人变化 |
@@ -192,7 +195,7 @@ H5 实时是否与通话并存，主要由设备端决定。
    - 负责来电准入、唯一 owner、待接记录、超时与会话代次隔离
 4. `session_coordinator`
    - 不判断业务优先级，只串行停止当前适配器、启动目标适配器和恢复 STREAM
-5. `voip`、`ai`、`call`、`stream`
+5. `voip`、`ai`、`call`、`room`、`stream`
    - 各自负责本业务 HTTP、媒体、命令和局部状态机
 
 这套结构将 MQTT 协议、TiRTC 生命周期、业务规则和媒体线程分开。增加业务时，只需接入仲裁器和生命周期适配器，不必重写原有协议。

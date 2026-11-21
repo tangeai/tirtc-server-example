@@ -23,6 +23,8 @@ import (
 	"thing-connect/internal/db"
 	"thing-connect/internal/dynamicconfig"
 	"thing-connect/internal/logging"
+	"thing-connect/internal/queuehealth"
+	"thing-connect/internal/requestguard"
 	"thing-connect/internal/servicestatus"
 	mysqlstore "thing-connect/internal/store/mysql"
 	mysqlmigrate "thing-connect/internal/store/mysql/migrate"
@@ -127,18 +129,31 @@ func main() {
 	roleWorkerDone := make(chan struct{})
 	go func() { defer close(roleWorkerDone); roleLifecycle.Run(statusCtx) }()
 	go dynamicClient.Run(statusCtx, dynamicRefs)
-	reporter, err := servicestatus.NewReporter(rdb, "ai-server", probes, dynamicClient.Revisions)
+	backlog := queuehealth.New("ai_cloud", mysqlstore.NewAICloudBacklog(sqlDB))
+	statusProbes := make(map[string]servicestatus.DependencyProbe, len(probes)+1)
+	for name, probe := range probes {
+		statusProbes[name] = probe
+	}
+	statusProbes["ai_cloud_outbox"] = backlog.Health
+	guard, guardErr := requestguard.New(cfg.Server.RequestLimits)
+	if guardErr != nil {
+		log.Fatal(guardErr)
+	}
+	reporter, err := servicestatus.NewReporter(rdb, "ai-server", statusProbes, dynamicClient.Revisions)
 	if err != nil {
 		log.Fatalf("service status: %v", err)
 	}
+	reporter.SetMetrics(servicestatus.MergeMetrics(backlog.Metrics, guard.Metrics, servicestatus.PoolMetrics(sqlDB, rdb)))
+	backlogDone := make(chan struct{})
+	go func() { defer close(backlogDone); backlog.Run(statusCtx) }()
 	go reporter.Run(statusCtx)
 
 	addr := fmt.Sprintf(":%d", cfg.Server.HTTPPort)
 	srv := &http.Server{
-		Addr: addr, Handler: r,
+		Addr: addr, Handler: guard.Wrap(r),
 		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      60 * time.Second,
+		ReadTimeout:       max(30*time.Second, guard.MaxTimeout()),
+		WriteTimeout:      max(60*time.Second, guard.MaxTimeout()+5*time.Second),
 		IdleTimeout:       90 * time.Second,
 	}
 	go func() {
@@ -160,6 +175,7 @@ func main() {
 		log.Printf("ai-server shutdown: %v", err)
 	}
 	statusCancel()
+	<-backlogDone
 	<-roleWorkerDone
 	if err := rdb.Close(); err != nil {
 		log.Printf("ai-server close redis: %v", err)

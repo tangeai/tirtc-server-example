@@ -3,7 +3,6 @@ package mqttc
 import (
 	"context"
 	"encoding/json"
-	"net/netip"
 	"strings"
 	"time"
 
@@ -12,7 +11,12 @@ import (
 	"thing-connect/internal/presence"
 )
 
-type PresenceObserver interface{ Observe(presence.Observation) }
+type PresenceObserver interface {
+	Observe(presence.Observation)
+	// SubscriptionGap reports that events published while the subscription
+	// was down may be missing.
+	SubscriptionGap()
+}
 
 // PresenceSource is created by NewPresence, which only device-server uses.
 // Command clients use New and explicitly unsubscribe from the former presence
@@ -27,7 +31,7 @@ func NewPresence(cfg config.MQTTCfg, observer PresenceObserver) (PresenceSource,
 		if o, ok := presenceObservation(msg.Topic(), msg.Payload(), msg.Retained(), time.Now()); ok {
 			observer.Observe(o)
 		}
-	})
+	}, observer.SubscriptionGap)
 }
 
 func presenceObservation(topic string, payload []byte, retained bool, now time.Time) (presence.Observation, bool) {
@@ -49,21 +53,17 @@ func presenceObservation(topic string, payload []byte, retained bool, now time.T
 			return o, false
 		}
 		o.ClientID = parts[4]
-		o.Offline = parts[5] == "disconnected"
-		if !o.Offline && strings.HasPrefix(o.ClientID, "sn_") {
+		if parts[5] == "connected" {
 			var body struct {
 				IP          string `json:"ipaddress"`
 				ConnectedAt int64  `json:"connected_at"`
 			}
-			if json.Unmarshal(payload, &body) == nil && body.ConnectedAt > 0 && body.ConnectedAt <= now.Add(time.Minute).UnixMilli() {
-				if ip, err := netip.ParseAddr(body.IP); err == nil {
-					o.IP = ip.WithZone("").Unmap().String()
-				}
-				o.ConnectedAt = time.UnixMilli(body.ConnectedAt).UTC()
-			}
+			_ = json.Unmarshal(payload, &body)
+			return presence.Connected(o.ClientID, body.IP, time.UnixMilli(body.ConnectedAt), now)
 		}
+		o.Offline = true
 	} else {
 		return o, false
 	}
-	return o, (strings.HasPrefix(o.ClientID, "sn_") && len(o.ClientID) > 3 && len(o.ClientID) <= 67) || (strings.HasPrefix(o.ClientID, "tmp_") && len(o.ClientID) > 4 && len(o.ClientID) <= 68)
+	return o, presence.ValidClientID(o.ClientID)
 }

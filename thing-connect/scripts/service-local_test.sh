@@ -27,6 +27,20 @@ prepare_controller() {
     cp "$SOURCE_SCRIPT" "$CONTROLLER"
     cp "$SOURCE_LOADER" "$DEPLOY_ROOT/service-catalog.sh"
     cp "$SOURCE_CATALOG" "$DEPLOY_ROOT/service-catalog.tsv"
+    # These lifecycle fixtures do not listen; avoid treating real installed
+    # services on 9000-9006 as part of the test environment.
+    python3 - "$DEPLOY_ROOT/service-catalog.tsv" <<'PYPORTS'
+import pathlib, socket, sys
+p = pathlib.Path(sys.argv[1]); rows = []; sockets = []
+for row in p.read_text().splitlines():
+    if row and not row.startswith('#'):
+        fields = row.split('\t'); sock = socket.socket()
+        sock.bind(('127.0.0.1', 0)); sockets.append(sock)
+        fields[1] = str(sock.getsockname()[1]); row = '\t'.join(fields)
+    rows.append(row)
+p.write_text('\n'.join(rows)+'\n')
+for sock in sockets: sock.close()
+PYPORTS
     chmod 0755 "$CONTROLLER"
     mkdir -p "$DEPLOY_ROOT/admin-server"
     printf '#!/usr/bin/env bash\nexit 0\n' >"$DEPLOY_ROOT/admin-server/admin-server"
@@ -214,6 +228,19 @@ test_start_all_stops_service_that_never_becomes_ready() (
     grep -qx 'stop=device-server' "$capture"
 )
 
+test_start_all_checks_every_instance() (
+    local capture="$TEST_ROOT/start-multi.capture"
+    DEPLOY_ROOT="$TEST_ROOT/start-multi-deploy"
+    source "$SOURCE_SCRIPT"
+    LOCAL_INSTANCE_COUNT[user-server]=2
+    start_one() { printf 'start=%s\n' "$1" >>"$capture"; }
+    wait_ready() { printf 'ready=%s:%s\n' "$1" "$2" >>"$capture"; }
+    preflight_service() { return 0; }
+    config_exists() { [ "$1" = user-server ]; }
+    start_all
+    [ "$(cat "$capture")" = $'start=admin-server\nready=admin-server:9000\nstart=user-server\nready=user-server:9002\nstart=user-server-2\nready=user-server-2:9012' ] || fail 'start-all skipped an instance or readiness'
+)
+
 test_unknown_service_is_rejected() {
     if DEPLOY_ROOT="$DEPLOY_ROOT" "$CONTROLLER" status thing-connect:unknown \
         >/dev/null 2>&1; then
@@ -231,5 +258,6 @@ test_start_rejects_failed_config_preflight
 test_admin_receives_setup_listener
 test_start_all_only_uses_existing_configs
 test_start_all_stops_service_that_never_becomes_ready
+test_start_all_checks_every_instance
 test_unknown_service_is_rejected
 echo "PASS: service-local.sh"

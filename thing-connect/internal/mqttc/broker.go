@@ -33,15 +33,20 @@ type onlineReader interface {
 }
 
 type Broker struct {
-	client mqtt.Client
-	cfg    config.MQTTCfg
-	rdb    onlineReader
-	mu     sync.Mutex
-	// pending ACK channels: topic → chan struct{}
-	ackCh           map[string]chan struct{}
+	ackActive, ackCompleted, ackFailed, ackTimeouts, ackCanceled, ackElapsedMS atomic.Int64
+	client                                                                     mqtt.Client
+	cfg                                                                        config.MQTTCfg
+	rdb                                                                        onlineReader
+	mu                                                                         sync.Mutex
+	// ackWaiters holds every pending waiter per ACK topic; guarded by mu.
+	ackWaiters map[string]map[chan struct{}]struct{}
+	// ackSubMu orders SUBSCRIBE/UNSUBSCRIBE for ACK topics so a departing
+	// last waiter's UNSUBSCRIBE is always sent before a newcomer's SUBSCRIBE.
+	ackSubMu        sync.Mutex
 	ready           atomic.Bool
 	readyGeneration atomic.Uint64
 	presenceHandler mqtt.MessageHandler
+	resubscribed    func()
 	cancel          context.CancelFunc
 	recoveryDone    chan struct{}
 	reconnect       chan struct{}
@@ -52,11 +57,11 @@ type Broker struct {
 }
 
 func New(cfg config.MQTTCfg, rdb *redis.Client) (*Broker, error) {
-	return newBroker(cfg, rdb, nil)
+	return newBroker(cfg, rdb, nil, nil)
 }
 
-func newBroker(cfg config.MQTTCfg, rdb *redis.Client, handler mqtt.MessageHandler) (*Broker, error) {
-	b := &Broker{cfg: cfg, rdb: rdb, ackCh: make(map[string]chan struct{}), presenceHandler: handler}
+func newBroker(cfg config.MQTTCfg, rdb *redis.Client, handler mqtt.MessageHandler, resubscribed func()) (*Broker, error) {
+	b := &Broker{cfg: cfg, rdb: rdb, ackWaiters: make(map[string]map[chan struct{}]struct{}), presenceHandler: handler, resubscribed: resubscribed}
 	ctx, cancel := context.WithCancel(context.Background())
 	b.cancel = cancel
 	b.recoveryDone = make(chan struct{})
@@ -90,7 +95,10 @@ func newBroker(cfg config.MQTTCfg, rdb *redis.Client, handler mqtt.MessageHandle
 	opts.SetKeepAlive(30 * time.Second)
 	opts.SetConnectTimeout(5 * time.Second)
 	opts.SetAutoReconnect(true)
-	opts.SetCleanSession(false)
+	// Command clients keep their session across upgrades. The presence source
+	// ends its session on disconnect so the shared group re-dispatches its
+	// queued and new events to the remaining Device instances.
+	opts.SetCleanSession(handler != nil)
 
 	// TLS for mqtts://
 	if strings.HasPrefix(cfg.Broker, "mqtts://") || strings.HasPrefix(cfg.Broker, "ssl://") {
@@ -171,8 +179,7 @@ func probe(ctx context.Context, cfg config.MQTTCfg, presence bool) error {
 	}
 	defer client.Disconnect(100)
 	if presence {
-		b := &Broker{presenceHandler: func(mqtt.Client, mqtt.Message) {}}
-		return b.configureSubscriptionsContext(ctx, client)
+		return subscribePresence(ctx, client, probePresenceGroup, func(mqtt.Client, mqtt.Message) {})
 	}
 	return nil
 }
@@ -187,34 +194,42 @@ func (b *Broker) configureSubscriptions(client mqtt.Client) error {
 	return b.configureSubscriptionsContext(context.Background(), client)
 }
 
+// Device instances split presence events through one shared subscription
+// group. The probe uses its own group so a configuration check never takes
+// events away from running instances.
+const (
+	presenceGroup      = "thing-connect-presence"
+	probePresenceGroup = "thing-connect-presence-probe"
+)
+
+func sharedPresenceTopic(group, topic string) string { return "$share/" + group + "/" + topic }
+
 func (b *Broker) configureSubscriptionsContext(ctx context.Context, client mqtt.Client) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	var token mqtt.Token
-	if b.presenceHandler == nil {
-		// CleanSession=false retains subscriptions across upgrades. Every reconnect
-		// must explicitly remove the legacy presence subscriptions.
-		token = client.Unsubscribe(presenceTopics...)
-	} else {
-		topics := make(map[string]byte, len(presenceTopics))
-		for _, topic := range presenceTopics {
-			topics[topic] = 0
+	if b.presenceHandler != nil {
+		if err := subscribePresence(ctx, client, presenceGroup, b.presenceHandler); err != nil {
+			return err
 		}
-		token = client.SubscribeMultiple(topics, b.presenceHandler)
 	}
-	wait := 5 * time.Second
-	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < wait {
-		wait = time.Until(deadline)
+	// CleanSession=false retains the plain subscriptions of earlier versions.
+	// Removing them after the shared subscription is granted avoids a gap; a
+	// Device instance would otherwise receive every event twice.
+	return waitToken(ctx, client.Unsubscribe(presenceTopics...), errSetupTimeout)
+}
+
+func subscribePresence(ctx context.Context, client mqtt.Client, group string, handler mqtt.MessageHandler) error {
+	topics := make(map[string]byte, len(presenceTopics))
+	for _, topic := range presenceTopics {
+		topics[sharedPresenceTopic(group, topic)] = 1
 	}
-	if wait <= 0 || !token.WaitTimeout(wait) {
-		return errors.New("mqttc: subscription setup timeout")
-	}
-	if err := token.Error(); err != nil {
+	token := client.SubscribeMultiple(topics, handler)
+	if err := waitToken(ctx, token, errSetupTimeout); err != nil {
 		return err
 	}
 	if result, ok := token.(interface{ Result() map[string]byte }); ok {
-		for _, topic := range presenceTopics {
+		for topic := range topics {
 			qos, exists := result.Result()[topic]
 			if !exists || qos == 0x80 {
 				return fmt.Errorf("mqttc: presence subscription rejected: topic=%s granted=%t code=0x%02x", topic, exists, qos)
@@ -224,21 +239,25 @@ func (b *Broker) configureSubscriptionsContext(ctx context.Context, client mqtt.
 	return nil
 }
 
+var errSetupTimeout = errors.New("mqttc: subscription setup timeout")
+
 func (b *Broker) handleMessage(_ mqtt.Client, msg mqtt.Message) {
 	topic := msg.Topic()
 	slog.Debug("mqttc handleMessage", "topic", topic, "payload", string(msg.Payload()))
 	// ACK from device: device/{clientID}/ack
 	if strings.HasSuffix(topic, "/ack") {
+		// Device ACKs carry no request ID, so an ACK confirms delivery to
+		// every command currently waiting on that device.
 		b.mu.Lock()
-		ch, ok := b.ackCh[topic]
-		b.mu.Unlock()
-		slog.Debug("mqttc ack", "topic", topic, "found_waiter", ok)
-		if ok {
+		waiters := len(b.ackWaiters[topic])
+		for ch := range b.ackWaiters[topic] {
 			select {
 			case ch <- struct{}{}:
 			default:
 			}
 		}
+		b.mu.Unlock()
+		slog.Debug("mqttc ack", "topic", topic, "waiters", waiters)
 	}
 }
 
@@ -258,58 +277,147 @@ func (b *Broker) Ping(context.Context) error {
 	return nil
 }
 
+// tokenTimeout bounds every PUBLISH and SUBSCRIBE acknowledgement wait, even
+// when the caller's context has a longer or no deadline.
+const tokenTimeout = 5 * time.Second
+
+// waitToken returns ctx.Err() if ctx ends first and errTimeout after
+// tokenTimeout. Abandoning the wait does not leak a goroutine: paho completes
+// the token on its own.
+func waitToken(ctx context.Context, tok mqtt.Token, errTimeout error) error {
+	timer := time.NewTimer(tokenTimeout)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return errTimeout
+	case <-tok.Done():
+		return tok.Error()
+	}
+}
+
 // Publish sends a message to a topic.
 func (b *Broker) Publish(topic string, qos byte, payload any) error {
+	return b.PublishContext(context.Background(), topic, qos, payload)
+}
+
+// PublishContext sends a message and waits for the broker to accept it until
+// ctx ends or tokenTimeout passes.
+func (b *Broker) PublishContext(ctx context.Context, topic string, qos byte, payload any) error {
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("%w: marshal: %w", ErrPublishFailed, err)
 	}
-	tok := b.client.Publish(topic, qos, false, data)
-	if !tok.WaitTimeout(5 * time.Second) {
-		return ErrPublishTimeout
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-	if err := tok.Error(); err != nil {
-		return fmt.Errorf("%w: %w", ErrPublishFailed, err)
+	err = waitToken(ctx, b.client.Publish(topic, qos, false, data), ErrPublishTimeout)
+	if err == nil || errors.Is(err, ErrPublishTimeout) || ctx.Err() != nil {
+		return err
 	}
-	return nil
+	return fmt.Errorf("%w: %w", ErrPublishFailed, err)
 }
 
 // PublishAndWaitACK publishes to downTopic and waits for an ACK on ackTopic within timeout.
+// Concurrent waiters on the same ACK topic share its subscription.
 func (b *Broker) PublishAndWaitACK(downTopic, ackTopic string, payload any, timeout time.Duration) error {
-	ch := make(chan struct{}, 1)
-	b.mu.Lock()
-	b.ackCh[ackTopic] = ch
-	b.mu.Unlock()
+	return b.PublishAndWaitACKContext(context.Background(), downTopic, ackTopic, payload, timeout)
+}
 
+// PublishAndWaitACKContext is PublishAndWaitACK that also returns ctx.Err()
+// as soon as ctx ends; the subscription is released either way.
+func (b *Broker) PublishAndWaitACKContext(ctx context.Context, downTopic, ackTopic string, payload any, timeout time.Duration) (result error) {
+	start := time.Now()
+	b.ackActive.Add(1)
 	defer func() {
-		b.mu.Lock()
-		delete(b.ackCh, ackTopic)
-		b.mu.Unlock()
-		// unsubscribe ACK topic
-		b.client.Unsubscribe(ackTopic)
+		b.ackActive.Add(-1)
+		b.ackElapsedMS.Add(time.Since(start).Milliseconds())
+		if result == nil {
+			b.ackCompleted.Add(1)
+		} else {
+			b.ackFailed.Add(1)
+			if errors.Is(result, ErrACKTimeout) || errors.Is(result, context.DeadlineExceeded) {
+				b.ackTimeouts.Add(1)
+			}
+			if errors.Is(result, context.Canceled) {
+				b.ackCanceled.Add(1)
+			}
+		}
 	}()
-
-	// subscribe before publish to avoid race
-	tok := b.client.Subscribe(ackTopic, 1, nil)
-	tok.Wait()
-	slog.Debug("mqttc subscribe ack", "ack_topic", ackTopic, "err", tok.Error())
-	if err := tok.Error(); err != nil {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	ch := make(chan struct{}, 1)
+	// Subscribe before publish so the ACK cannot arrive unobserved.
+	tok := b.addACKWaiter(ackTopic, ch)
+	defer b.removeACKWaiter(ackTopic, ch)
+	if err := waitToken(ctx, tok, errSubscribeTimeout); err != nil {
+		if ctx.Err() != nil {
+			return err
+		}
 		return fmt.Errorf("%w: %w", ErrSubscribeFailed, err)
 	}
 
-	if err := b.Publish(downTopic, 1, payload); err != nil {
+	if err := b.PublishContext(ctx, downTopic, 1, payload); err != nil {
 		slog.Warn("mqttc publish failed", "down_topic", downTopic, "err", err)
 		return err
 	}
 	slog.Debug("mqttc published, waiting ack", "down_topic", downTopic, "ack_topic", ackTopic)
 
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	select {
 	case <-ch:
 		slog.Debug("mqttc ack received", "ack_topic", ackTopic)
 		return nil
-	case <-time.After(timeout):
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
 		slog.Warn("mqttc ack timeout", "ack_topic", ackTopic, "timeout", timeout)
 		return ErrACKTimeout
+	}
+}
+
+// Metrics counts complete subscribe/publish/ACK operations, without topic or
+// device labels. Failures include subscription and publish failures.
+func (b *Broker) Metrics() map[string]int64 {
+	return map[string]int64{"mqtt_ack_active": b.ackActive.Load(), "mqtt_ack_completed_total": b.ackCompleted.Load(), "mqtt_ack_failed_total": b.ackFailed.Load(), "mqtt_ack_timeout_total": b.ackTimeouts.Load(), "mqtt_ack_canceled_total": b.ackCanceled.Load(), "mqtt_ack_duration_ms_total": b.ackElapsedMS.Load()}
+}
+
+var errSubscribeTimeout = errors.New("timeout")
+
+// addACKWaiter registers ch and (re)subscribes the topic. Every waiter sends
+// its own SUBSCRIBE and waits for its SUBACK; repeating a subscription is
+// harmless and proves it is active before this waiter publishes.
+func (b *Broker) addACKWaiter(topic string, ch chan struct{}) mqtt.Token {
+	b.ackSubMu.Lock()
+	defer b.ackSubMu.Unlock()
+	b.mu.Lock()
+	waiters := b.ackWaiters[topic]
+	if waiters == nil {
+		waiters = make(map[chan struct{}]struct{})
+		b.ackWaiters[topic] = waiters
+	}
+	waiters[ch] = struct{}{}
+	b.mu.Unlock()
+	return b.client.Subscribe(topic, 1, nil)
+}
+
+// removeACKWaiter unsubscribes only when the last waiter leaves.
+func (b *Broker) removeACKWaiter(topic string, ch chan struct{}) {
+	b.ackSubMu.Lock()
+	defer b.ackSubMu.Unlock()
+	b.mu.Lock()
+	waiters := b.ackWaiters[topic]
+	delete(waiters, ch)
+	last := len(waiters) == 0
+	if last {
+		delete(b.ackWaiters, topic)
+	}
+	b.mu.Unlock()
+	if last {
+		b.client.Unsubscribe(topic)
 	}
 }
 
@@ -380,7 +488,11 @@ func (b *Broker) recoverSubscriptions(ctx context.Context) {
 			if err == nil && b.client.IsConnectionOpen() {
 				b.readyGeneration.Store(generation)
 				b.ready.Store(true)
-				b.initializeOnce.Do(func() { close(b.initialized) })
+				first := false
+				b.initializeOnce.Do(func() { first = true; close(b.initialized) })
+				if !first && b.resubscribed != nil {
+					b.resubscribed()
+				}
 				break
 			}
 			b.ready.Store(false)

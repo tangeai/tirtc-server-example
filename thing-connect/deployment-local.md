@@ -80,6 +80,50 @@ sudo /opt/thing-connect/deploy-local.sh gateway
 `call_rooms`、`call_room_codes`、`call_assignments`、`call_leases`、`call_outbox`。
 `prepare` 只构建代码，不安装数据库，不会创建这些表。
 
+## 本机多实例联调
+
+六个业务服务支持每服务 1–32 个本机实例；Admin 保持单实例。各实例共享该服务的
+配置与二进制，独立保存进程、锁和日志。实例数量保存在部署根目录的 `local-instances`，
+`update` 保留该文件。第一个实例沿用服务名和默认端口；第 N 个实例名为
+`<服务名>-N`，端口为默认端口加 `10 × (N-1)`。例如 User 两实例为
+`user-server:9002` 和 `user-server-2:9012`，日志分别为 `logs/user-server.*.log`
+和 `logs/user-server-2.*.log`。脚本为每个实例设置独立 `SERVICE_INSTANCE_ID`。
+
+MQTT 服务须先在 Admin 发布 username 认证配置，不能使用固定 ClientID 认证；
+多实例启动预检会拒绝固定 ClientID，避免互相断线。按全部实例核算数据库和 Redis
+连接数。可选服务先完成配置并 `enable`，设置数量不会自动启用服务。
+
+```bash
+# 扩容不必停止主实例；start 会保留已运行实例，并启动新增实例。
+sudo /opt/thing-connect/service-local.sh instances user-server 2
+sudo /opt/thing-connect/service-local.sh start user-server
+sudo /opt/thing-connect/service-local.sh status user-server
+
+# 服务名表示全部配置实例；带编号表示只操作该实例。
+sudo /opt/thing-connect/service-local.sh restart user-server
+sudo /opt/thing-connect/service-local.sh restart user-server-2
+
+# 缩容前先停止待移除的实例。
+sudo /opt/thing-connect/service-local.sh stop user-server-2
+sudo /opt/thing-connect/service-local.sh instances user-server 1
+```
+
+多实例 `restart` 逐台停止、启动并等待 readiness；任一实例预检或就绪失败时立即停止
+后续重启，不停止其余实例。`start-all`、`stop-all`、`status-all`、可选服务停用和
+`deploy-local.sh update` 均覆盖配置的全部实例。更新涉及共享二进制或数据库迁移时仍按
+原流程停止全部服务；滚动重启不代表数据库升级可以不停服。
+
+已有系统 Nginx 时直接维护现有配置，不需要重新安装或另外启动网关。各业务 upstream
+加入对应实例端口并执行 `nginx -t` 后 reload。连续滚动重启时，已恢复的实例不能仍被
+失败缓存排除；本地生成配置使用 `max_fails=0`，连接失败仍可尝试另一个上游。
+
+使用 `deploy-local.sh gateway` 的独立网关时，调整实例数后执行 `gateway-stop` 再执行
+`gateway`。它按 `local-instances` 生成全部 upstream；有多实例时同时启用
+`127.0.0.1:9100` 内网入口，仅放行 AI、VoIP、Call 内部接口。该端口须空闲。
+要使 User 的内部调用也分担到多个实例，将其启动配置中的 `ai.server_url`、
+`voip.server_url`、`call.server_url` 指向该入口，再重启 User；公网入口仍拒绝内部接口。
+同机多实例用于进程级故障和滚动重启验证，不能替代跨机器故障及容量验收。
+
 ## 构建与后续更新
 
 只检查当前源码能否构建：

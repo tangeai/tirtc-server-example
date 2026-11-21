@@ -76,7 +76,7 @@
 <summary><b>Go</b></summary>
 
 ```go
-import tirtcsigning "github.com/tange-ai/tirtc-device-token/go"
+import tirtcsigning "github.com/tange-ai/token-signing/go"
 
 token, claims, _ := tirtcsigning.GenerateDeviceToken(
     accessKeyID,      // 开发者 Access Key（控制台获取）

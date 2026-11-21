@@ -63,7 +63,7 @@ summary 为中文说明；alarm 表示模型按管理员分析目标判断是否
 
 父任务状态为 queued/processing/succeeded/partial_failed/failed/unknown/cancelled。queued 表示任务尚未开始；开始后等待语音或下一类型时保持 processing，直到进入终态。结合子项与语音状态显示进度。子项分析状态独立于 speech.status（pending/synthesizing/ready/failed/unknown/skipped）。明确失败后继续下一个类型；未知结果暂停，不自动重新调用模型。设备应展示失败或待确认，不能当作已经完成。
 
-MQTT topic 沿用 `device/sn_{device_id}/notify`，QoS1、retain=false，type=recognition_result、channel=recognition、event_id 为事件标识，payload 是固定响应信封。同一任务每次更新递增 status_revision，设备忽略旧版本。配置变化 type=recognition_config_changed，设备重新读取配置。通知最多尝试投递8次，失败后由查询补偿；MQTT 发布确认不代表设备收到或完成播放，当前没有设备结果 ACK 接口。文字随通知直接返回，语音就绪后通过 HTTP 下载。重连时逐个补查本地未完成任务；列表 cursor 只按任务创建顺序分页，不会因旧任务更新而变化。
+MQTT topic 沿用 `device/sn_{device_id}/notify`，QoS1、retain=false，type=recognition_result、channel=recognition、event_id 为事件标识，payload 是固定响应信封。同一任务每次更新递增 status_revision。服务端重试或多个实例投递时，同一版本可能重复到达，不同版本也可能乱序到达；设备按任务记录已处理的最大 status_revision，忽略不大于它的通知。配置变化 type=recognition_config_changed，设备重新读取配置。通知最多尝试投递8次，失败后由查询补偿；MQTT 发布确认不代表设备收到或完成播放，当前没有设备结果 ACK 接口。文字随通知直接返回，语音就绪后通过 HTTP 下载。重连时逐个补查本地未完成任务；列表 cursor 只按任务创建顺序分页，不会因旧任务更新而变化。
 
 speech.url 是本识别服务的相对路径，必须相对 recognition-srv 请求并附设备凭证，不能当作无需鉴权的公开下载地址。按任务编号和 item_id 去重播放，按 order 排队；不能因重复通知重播，也不能打断设备现有通话。硬件音频格式适配与会话仲裁由设备接入层实现；服务端提供 WAV 完整文件，不提供实时音频会话。
 

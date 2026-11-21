@@ -69,7 +69,7 @@ func (s *RecognitionStore) Update(c context.Context, v a.RecognitionMutation) (r
 		return r.State{}, e
 	}
 	payload, _ := json.Marshal(map[string]any{"type": "recognition_config_changed", "event_id": fmt.Sprintf("recognition-config-%s-%s-%d", v.DeviceID, bind, p.Revision), "channel": "recognition", "payload": map[string]any{"code": 200, "msg": "ok", "data": map[string]any{"device_id": v.DeviceID, "revision": p.Revision}}})
-	if _, e = tx.ExecContext(c, `INSERT INTO recognition_outbox(device_id,bind_id,payload) VALUES(?,?,?)`, v.DeviceID, bind, string(payload)); e != nil {
+	if _, e = tx.ExecContext(c, `INSERT INTO recognition_outbox(device_id,bind_id,payload,next_at) VALUES(?,?,?,UTC_TIMESTAMP(6))`, v.DeviceID, bind, string(payload)); e != nil {
 		return r.State{}, e
 	}
 	v.Audit.Before = string(before)

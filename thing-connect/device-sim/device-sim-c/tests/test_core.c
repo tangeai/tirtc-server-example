@@ -1753,10 +1753,26 @@ static void test_monotonic_condition_timeout(void) {
     pthread_mutex_destroy(&lock);
 }
 
+static void test_mqtt_reconnect_policy_spreads_devices(void) {
+    unsigned int lowest_base = 99, highest_base = 0, lowest_max = 999, highest_max = 0;
+    for (unsigned int entropy = 0; entropy <= 0xffff; entropy++) {
+        unsigned int base = 0, max = 0;
+        mqtt_reconnect_policy(entropy, &base, &max);
+        assert(base >= 1 && base <= 4 && max >= 60 && max <= 120 && base < max);
+        if (base < lowest_base) lowest_base = base;
+        if (base > highest_base) highest_base = base;
+        if (max < lowest_max) lowest_max = max;
+        if (max > highest_max) highest_max = max;
+    }
+    assert(lowest_base == 1 && highest_base == 4);
+    assert(lowest_max == 60 && highest_max == 120);
+}
+
 int main(void) {
     g_log_level = 100;
     test_monotonic_condition_timeout();
     test_hmac_sha256_b64();
+    test_mqtt_reconnect_policy_spreads_devices();
     assert(linux_device_adapter_install_default() == 0);
     test_device_adapter_contract();
     test_format_tables();

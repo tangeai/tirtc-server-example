@@ -326,7 +326,7 @@ func TestRecognitionDurableOrderQuotaAndOwnership(t *testing.T) {
 	})
 }
 
-func TestRecognitionOutboxUsesUTCAndDrainsLegacyFirstAttempts(t *testing.T) {
+func TestRecognitionOutboxUsesUTCAndHonorsFirstAttemptSchedule(t *testing.T) {
 	db := openTestDB(t)
 	db.SetMaxOpenConns(1)
 	if _, err := db.Exec(`SET time_zone='+08:00'`); err != nil {
@@ -352,73 +352,71 @@ func TestRecognitionOutboxUsesUTCAndDrainsLegacyFirstAttempts(t *testing.T) {
 	if delta > 5 {
 		t.Fatalf("new event uses non-UTC clock: delta=%d", delta)
 	}
-	// Reproduce old rows inserted with CURRENT_TIMESTAMP in a UTC+8 session.
+	// A future first attempt must not bypass its schedule.
 	if _, err := db.Exec(`UPDATE recognition_outbox SET next_at=NOW(6) WHERE device_id=?`, id); err != nil {
 		t.Fatal(err)
 	}
-	events, err := store.Events(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var event r.Event
-	for _, v := range events {
-		if v.DeviceID == id {
-			event = v
+	claim := func() []r.Event {
+		t.Helper()
+		events, err := store.ClaimEvents(ctx, 20, time.Minute)
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
-	if event.ID == 0 {
-		t.Fatal("legacy first attempt delayed by eight hours")
-	}
-	if err = store.Deliver(ctx, event, false); err != nil {
-		t.Fatal(err)
-	}
-	events, err = store.Events(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, v := range events {
-		if v.ID == event.ID {
-			t.Fatal("retry backoff ignored")
+		var mine []r.Event
+		for _, v := range events {
+			if v.DeviceID == id {
+				mine = append(mine, v)
+			}
 		}
+		return mine
 	}
-	if _, err = db.Exec(`UPDATE recognition_outbox SET next_at=DATE_SUB(UTC_TIMESTAMP(6),INTERVAL 1 SECOND) WHERE id=?`, event.ID); err != nil {
+	if events := claim(); len(events) != 0 {
+		t.Fatal("first attempt ignored next_at")
+	}
+	if _, err := db.Exec(`UPDATE recognition_outbox SET next_at=UTC_TIMESTAMP(6) WHERE device_id=?`, id); err != nil {
 		t.Fatal(err)
 	}
-	events, err = store.Events(ctx)
-	if err != nil {
+	events := claim()
+	if len(events) != 1 {
+		t.Fatalf("due first attempt missing: %+v", events)
+	}
+	event := events[0]
+	if again := claim(); len(again) != 0 {
+		t.Fatal("leased event claimed by a second worker")
+	}
+	if applied, err := store.Deliver(ctx, event, false); err != nil || !applied {
+		t.Fatalf("failed delivery applied=%v err=%v", applied, err)
+	}
+	if again := claim(); len(again) != 0 {
+		t.Fatal("retry backoff ignored")
+	}
+	if _, err := db.Exec(`UPDATE recognition_outbox SET next_at=DATE_SUB(UTC_TIMESTAMP(6),INTERVAL 1 SECOND) WHERE id=?`, event.ID); err != nil {
 		t.Fatal(err)
 	}
-	found := false
-	for _, v := range events {
-		if v.ID == event.ID {
-			found = true
-		}
-	}
-	if !found {
+	retried := claim()
+	if len(retried) != 1 {
 		t.Fatal("due retry not returned")
 	}
-	if err = store.Deliver(ctx, event, true); err != nil {
-		t.Fatal(err)
+	if applied, err := store.Deliver(ctx, event, true); err != nil || applied {
+		t.Fatalf("stale lease acknowledged applied=%v err=%v", applied, err)
+	}
+	if applied, err := store.Deliver(ctx, retried[0], true); err != nil || !applied {
+		t.Fatalf("delivery applied=%v err=%v", applied, err)
 	}
 	// A second publisher can report failure after the first publisher succeeds.
-	if err = store.Deliver(ctx, event, false); err != nil {
-		t.Fatal(err)
+	if applied, err := store.Deliver(ctx, retried[0], false); err != nil || applied {
+		t.Fatalf("late failure applied=%v err=%v", applied, err)
 	}
 	var delivered bool
-	if err = db.Get(&delivered, `SELECT delivered FROM recognition_outbox WHERE id=?`, event.ID); err != nil {
+	var attempts int
+	if err := db.QueryRow(`SELECT delivered,attempts FROM recognition_outbox WHERE id=?`, event.ID).Scan(&delivered, &attempts); err != nil {
 		t.Fatal(err)
 	}
-	if !delivered {
-		t.Fatal("late failed delivery overwrote an acknowledged event")
+	if !delivered || attempts != 2 {
+		t.Fatalf("delivered=%v attempts=%d, want acknowledged after two attempts", delivered, attempts)
 	}
-	events, err = store.Events(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, v := range events {
-		if v.ID == event.ID {
-			t.Fatal("delivered event returned again")
-		}
+	if again := claim(); len(again) != 0 {
+		t.Fatal("delivered event returned again")
 	}
 }
 

@@ -1,4 +1,10 @@
 server:
+  # Per-instance request budgets; restart after changing. Omitted classes use these defaults.
+  request_limits:
+    token: {concurrency: 128, timeout: 10s}
+    query: {concurrency: 64, timeout: 10s}
+    upload: {concurrency: 8, timeout: 25s}
+    upstream: {concurrency: 32, timeout: 25s}
   http_port: 9002
   trusted_proxies: []  # Add only the reverse-proxy CIDRs that set client IP headers.
 
@@ -53,6 +59,12 @@ discovery:
   recognition_server_url: "http://thing.example.com" # 可选；需代理 /v1/recognition/ 到 9006
   mqtt_url: "mqtts://mqtt.example.com:8883"
   tirtc_endpoint: "https://your-tirtc-endpoint"
+
+# 未发布 Admin user.bind_attempt_policy 时使用；按用户统计验证码绑定错误。
+bind_attempt:
+  window: "10m"
+  max_failures: 10
+  cooldown: "1h"
 
 # 未发布后台配置时使用；链接顺序即展示顺序，最多 3 项。
 navigation:

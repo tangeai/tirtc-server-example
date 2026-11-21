@@ -10,11 +10,13 @@ import (
 
 // ConnectionQueue retains the latest pending connection per device until SQL
 // confirms it. Ack must compare the exact snapshot so it cannot remove a newer
-// connection. Gap markers survive restarts until explicit reconciliation.
+// connection. Gap markers survive restarts until a broker listing that started
+// after the latest loss clears them.
 type ConnectionQueue interface {
 	Pending(context.Context) ([]Observation, error)
 	Ack(context.Context, []Observation) error
-	MarkGap(context.Context) error
+	MarkGap(ctx context.Context, lostAt time.Time) error
+	ClearGap(ctx context.Context, listedFrom time.Time) error
 	HasGap(context.Context) (bool, error)
 	Backlog(context.Context) (ConnectionBacklog, error)
 }

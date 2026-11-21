@@ -10,6 +10,7 @@ import (
 
 	"github.com/eclipse/paho.mqtt.golang/packets"
 	"thing-connect/internal/config"
+	"thing-connect/internal/presence"
 )
 
 // Exercise the real Paho client over MQTT 3.1.1 wire packets. The fixture
@@ -139,11 +140,17 @@ func TestPresencePreflightRejectsMissingSubscriptionPermission(t *testing.T) {
 							done <- fmt.Errorf("required topics missing")
 							return
 						}
+						for _, topic := range msg.Topics {
+							if !strings.HasPrefix(topic, "$share/"+probePresenceGroup+"/") {
+								done <- fmt.Errorf("probe joined a live group: %s", topic)
+								return
+							}
+						}
 						ack := packets.NewControlPacket(packets.Suback).(*packets.SubackPacket)
 						ack.MessageID = msg.MessageID
 						for _, topic := range msg.Topics {
 							code := byte(0)
-							if topic == denied {
+							if denied != "" && strings.HasSuffix(topic, "/"+denied) {
 								code = 0x80
 							}
 							ack.ReturnCodes = append(ack.ReturnCodes, code)
@@ -180,5 +187,133 @@ func TestPresencePreflightRejectsMissingSubscriptionPermission(t *testing.T) {
 				t.Fatal("probe did not disconnect")
 			}
 		})
+	}
+}
+
+type observed struct {
+	items chan presence.Observation
+	gaps  chan struct{}
+}
+
+func (o observed) Observe(item presence.Observation) { o.items <- item }
+func (o observed) SubscriptionGap()                  { o.gaps <- struct{}{} }
+
+// A Device instance joins the shared group at QoS1 in a clean session before
+// removing plain subscriptions kept by an older version, routes shared
+// deliveries, and reports a gap after re-subscribing on a new connection.
+func TestPresenceUsesSharedSubscriptionBeforeRemovingLegacy(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	order := make(chan string, 16)
+	serverErr := make(chan error, 2)
+	drop := make(chan struct{})
+	go func() {
+		for connection := 1; connection <= 2; connection++ {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			if connection == 1 {
+				go func(conn net.Conn) { <-drop; _ = conn.Close() }(conn)
+			}
+			serve := func() {
+				defer conn.Close()
+				_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
+				for {
+					p, err := packets.ReadPacket(conn)
+					if err != nil {
+						return
+					}
+					var replies []packets.ControlPacket
+					switch msg := p.(type) {
+					case *packets.ConnectPacket:
+						if !msg.CleanSession {
+							serverErr <- fmt.Errorf("presence source kept a persistent session")
+							return
+						}
+						replies = append(replies, packets.NewControlPacket(packets.Connack))
+					case *packets.SubscribePacket:
+						for i, topic := range msg.Topics {
+							if !strings.HasPrefix(topic, "$share/"+presenceGroup+"/") || msg.Qoss[i] != 1 {
+								serverErr <- fmt.Errorf("subscription %s qos %d", topic, msg.Qoss[i])
+								return
+							}
+						}
+						order <- "subscribe"
+						ack := packets.NewControlPacket(packets.Suback).(*packets.SubackPacket)
+						ack.MessageID = msg.MessageID
+						ack.ReturnCodes = []byte{1, 0, 1}
+						replies = append(replies, ack)
+						heartbeat := packets.NewControlPacket(packets.Publish).(*packets.PublishPacket)
+						heartbeat.TopicName = "device/sn_wire/up"
+						heartbeat.Qos = 1
+						heartbeat.MessageID = 7
+						heartbeat.Payload = []byte(`{"type":"heartbeat"}`)
+						replies = append(replies, heartbeat)
+					case *packets.UnsubscribePacket:
+						if len(msg.Topics) != 3 || strings.HasPrefix(msg.Topics[0], "$share/") {
+							serverErr <- fmt.Errorf("unexpected unsubscribe %v", msg.Topics)
+							return
+						}
+						order <- "unsubscribe"
+						ack := packets.NewControlPacket(packets.Unsuback).(*packets.UnsubackPacket)
+						ack.MessageID = msg.MessageID
+						replies = append(replies, ack)
+					case *packets.PingreqPacket:
+						replies = append(replies, packets.NewControlPacket(packets.Pingresp))
+					case *packets.DisconnectPacket:
+						return
+					}
+					for _, reply := range replies {
+						if err := reply.Write(conn); err != nil {
+							return
+						}
+					}
+				}
+			}
+			serve()
+		}
+	}()
+	got := observed{items: make(chan presence.Observation, 4), gaps: make(chan struct{}, 4)}
+	source, err := NewPresence(config.MQTTCfg{Broker: "tcp://" + listener.Addr().String(), ClientID: "presence-wire"}, got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer source.Close()
+	for _, want := range []string{"subscribe", "unsubscribe"} {
+		select {
+		case step := <-order:
+			if step != want {
+				t.Fatalf("step=%s want %s", step, want)
+			}
+		case err := <-serverErr:
+			t.Fatal(err)
+		case <-time.After(3 * time.Second):
+			t.Fatalf("missing %s", want)
+		}
+	}
+	select {
+	case o := <-got.items:
+		if o.ClientID != "sn_wire" {
+			t.Fatalf("observation=%+v", o)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("shared delivery not routed to the presence handler")
+	}
+	select {
+	case <-got.gaps:
+		t.Fatal("first subscription reported as a gap")
+	default:
+	}
+	close(drop)
+	select {
+	case <-got.gaps:
+	case err := <-serverErr:
+		t.Fatal(err)
+	case <-time.After(8 * time.Second):
+		t.Fatal("re-subscription after reconnect not reported")
 	}
 }

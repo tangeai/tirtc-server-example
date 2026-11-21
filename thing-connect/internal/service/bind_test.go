@@ -147,8 +147,11 @@ type fakeMQTT struct {
 	ackErr error
 }
 
-func (f *fakeMQTT) Publish(_ string, _ byte, _ any) error { return nil }
-func (f *fakeMQTT) PublishAndWaitACK(_, _ string, _ any, _ time.Duration) error {
+func (f *fakeMQTT) PublishContext(context.Context, string, byte, any) error { return nil }
+func (f *fakeMQTT) PublishAndWaitACKContext(ctx context.Context, _, _ string, _ any, _ time.Duration) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	return f.ackErr
 }
 
@@ -159,8 +162,14 @@ var _ MQTTPublisher = (*fakeMQTT)(nil)
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
+type unlimitedBindAttempts struct{}
+
+func (unlimitedBindAttempts) Verify(_ context.Context, _ int64, check func() error, _ func(error) bool) error {
+	return check()
+}
+
 func newBindSvc(bs *fakeBindStore, cache *fakeCache3) *BindService {
-	return NewBindService(bs, cache, nil, DefaultServiceConfig())
+	return NewBindService(bs, cache, nil, unlimitedBindAttempts{}, DefaultServiceConfig())
 }
 
 // ── Scan (no device_id) tests ─────────────────────────────────────────────
@@ -242,7 +251,7 @@ func TestBind_CaseA_AckTimeout_ReportsFailure(t *testing.T) {
 	}
 	cache := newFakeCache3("123456", "BB:CC", "", "", true)
 	mqtt := &fakeMQTT{ackErr: mqttc.ErrACKTimeout}
-	svc := NewBindService(bs, cache, mqtt, DefaultServiceConfig())
+	svc := NewBindService(bs, cache, mqtt, unlimitedBindAttempts{}, DefaultServiceConfig())
 
 	id, err := svc.Bind(context.Background(), 2, "123456")
 	if !errors.Is(err, ErrMQTTTimeout) {
@@ -266,7 +275,7 @@ func TestBind_CaseA_MQTTPublishFailure_ReportsActionableFailure(t *testing.T) {
 	}
 	cache := newFakeCache3("123456", "BB:CC", "", "", true)
 	mqtt := &fakeMQTT{ackErr: mqttc.ErrPublishFailed}
-	svc := NewBindService(bs, cache, mqtt, DefaultServiceConfig())
+	svc := NewBindService(bs, cache, mqtt, unlimitedBindAttempts{}, DefaultServiceConfig())
 
 	_, err := svc.Bind(context.Background(), 2, "123456")
 	if !errors.Is(err, ErrMQTTPublishFailed) || !errors.Is(err, ErrMQTTTimeout) {

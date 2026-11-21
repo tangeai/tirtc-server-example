@@ -152,6 +152,7 @@ type Event struct {
 	ID       int64
 	DeviceID string
 	Payload  []byte
+	Lease    string
 }
 type Provider interface {
 	Analyze(context.Context, Config, Scheme, []byte) (Result, CallUsage, error)
@@ -174,6 +175,10 @@ type Store interface {
 	Claim(context.Context) (*Work, error)
 	Complete(context.Context, Completion) error
 	Recover(context.Context) error
-	Events(context.Context) ([]Event, error)
-	Deliver(context.Context, Event, bool) error
+	// ClaimEvents leases up to limit due notifications that no other worker
+	// holds; claiming counts as a delivery attempt.
+	ClaimEvents(ctx context.Context, limit int, lease time.Duration) ([]Event, error)
+	// Deliver records the Broker result only while the event still carries its
+	// Lease, so a worker whose lease ran out cannot overwrite a newer claim.
+	Deliver(context.Context, Event, bool) (bool, error)
 }

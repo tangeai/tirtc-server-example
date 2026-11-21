@@ -17,8 +17,10 @@ import (
 	"thing-connect/internal/dynamicconfig"
 	"thing-connect/internal/logging"
 	"thing-connect/internal/mqttc"
+	"thing-connect/internal/queuehealth"
 	"thing-connect/internal/recognition"
 	"thing-connect/internal/recognitionprovider"
+	"thing-connect/internal/requestguard"
 	"thing-connect/internal/servicestatus"
 	mysqlstore "thing-connect/internal/store/mysql"
 	mysqlmigrate "thing-connect/internal/store/mysql/migrate"
@@ -30,10 +32,7 @@ import (
 type notifier struct{ broker *mqttc.Broker }
 
 func (n notifier) Publish(ctx context.Context, id string, payload []byte) error {
-	if e := ctx.Err(); e != nil {
-		return e
-	}
-	return n.broker.Publish("device/sn_"+id+"/notify", 1, json.RawMessage(payload))
+	return n.broker.PublishContext(ctx, "device/sn_"+id+"/notify", 1, json.RawMessage(payload))
 }
 func main() {
 	cfg := config.Load(config.ParseFlags())
@@ -106,18 +105,29 @@ func main() {
 	}}
 	servicestatus.RegisterHealth(router, probes)
 	handler.Register(router, cfg.JWTSecret, service)
-	reporter, e := servicestatus.NewReporter(rdb, "recognition-server", probes, dc.Revisions)
+	backlog := queuehealth.New("recognition", mysqlstore.NewRecognitionBacklog(sqlDB))
+	statusProbes := make(map[string]servicestatus.DependencyProbe, len(probes)+1)
+	for name, probe := range probes {
+		statusProbes[name] = probe
+	}
+	statusProbes["recognition_outbox"] = backlog.Health
+	guard, guardErr := requestguard.New(cfg.Server.RequestLimits)
+	if guardErr != nil {
+		log.Fatal(guardErr)
+	}
+	reporter, e := servicestatus.NewReporter(rdb, "recognition-server", statusProbes, dc.Revisions)
 	if e != nil {
 		log.Fatal(e)
 	}
+	reporter.SetMetrics(servicestatus.MergeMetrics(broker.Metrics, backlog.Metrics, guard.Metrics, servicestatus.PoolMetrics(sqlDB, rdb)))
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	var wg sync.WaitGroup
-	for _, run := range []func(context.Context){service.Run, reporter.Run, func(c context.Context) { dc.Run(c, refs) }} {
+	for _, run := range []func(context.Context){service.Run, reporter.Run, backlog.Run, func(c context.Context) { dc.Run(c, refs) }} {
 		wg.Add(1)
 		go func(f func(context.Context)) { defer wg.Done(); f(ctx) }(run)
 	}
-	srv := &http.Server{Addr: fmt.Sprintf(":%d", cfg.Server.HTTPPort), Handler: router, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 90 * time.Second}
+	srv := &http.Server{Addr: fmt.Sprintf(":%d", cfg.Server.HTTPPort), Handler: guard.Wrap(router), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: max(30*time.Second, guard.MaxTimeout()), WriteTimeout: max(30*time.Second, guard.MaxTimeout()+5*time.Second), IdleTimeout: 90 * time.Second}
 	go func() {
 		log.Printf("recognition-server listening on %s", srv.Addr)
 		if e := srv.ListenAndServe(); e != nil && !errors.Is(e, http.ErrServerClosed) {

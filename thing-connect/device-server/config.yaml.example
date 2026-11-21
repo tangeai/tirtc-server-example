@@ -1,4 +1,10 @@
 server:
+  # Per-instance request budgets; restart after changing. Omitted classes use these defaults.
+  request_limits:
+    token: {concurrency: 128, timeout: 10s}
+    query: {concurrency: 64, timeout: 10s}
+    upload: {concurrency: 8, timeout: 25s}
+    upstream: {concurrency: 32, timeout: 25s}
   http_port: 9001
   trusted_proxies: []  # Add only the reverse-proxy CIDRs that set client IP headers.
 
@@ -22,15 +28,22 @@ internal:
 admin:
   server_url: "http://127.0.0.1:9000"
 
-# Device 单实例消费心跳与 EMQX 系统连接事件；账号需具备对应订阅权限。
+# Device 以共享订阅消费心跳与 EMQX 系统连接事件，多个实例各收一份；账号需具备对应订阅权限。
 # Admin 发布的 device-server/mqtt.connection 优先，YAML 仅在无发布记录时回退。
 mqtt:
   broker: "mqtts://mqtt-open.tangeopen.com:8883"
   # 二选一，不要同时填：
-  # clientid 认证模式（单实例，ClientID 固定，在 EMQX 内置数据库注册对应 ClientID）
+  # clientid 认证模式（仅单实例，ClientID 固定，在 EMQX 内置数据库注册对应 ClientID）
   client_id: "devicesrv"
-  # username 认证模式（多实例，实际 ClientID 自动加 hostname 后缀，在 EMQX 注册对应 username）
+  # username 认证模式（多实例，实际 ClientID 为 username-SERVICE_INSTANCE_ID，每个实例的 SERVICE_INSTANCE_ID 必须不同）
   # username: "devicesrv"
   password: "replace-with-mqtt-password"
+
+# EMQX 管理接口，用于启动时和丢失连接事件后自动核对设备在线状态。
+# Admin 发布的 device-server/mqtt.broker_api 优先，YAML 仅在无发布记录时回退；url 留空表示不自动核对。
+broker_api:
+  url: ""  # 例如 http://127.0.0.1:18083
+  api_key: ""
+  api_secret: ""
 
 jwt_secret: "replace-with-a-strong-random-secret"

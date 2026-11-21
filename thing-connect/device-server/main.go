@@ -13,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
+	"thing-connect/internal/brokerapi"
 	"thing-connect/internal/dynamicconfig"
 	"thing-connect/internal/mqttc"
 	"thing-connect/internal/presence"
@@ -23,6 +24,7 @@ import (
 	"thing-connect/internal/db"
 	"thing-connect/internal/deviceprofile"
 	"thing-connect/internal/logging"
+	"thing-connect/internal/requestguard"
 	"thing-connect/internal/service"
 	"thing-connect/internal/servicestatus"
 	"thing-connect/internal/store"
@@ -89,6 +91,17 @@ func main() {
 	if err != nil {
 		log.Fatalf("dynamic config: %v", err)
 	}
+	var brokerClients brokerapi.Source
+	dynamicRefs = append(dynamicRefs, dynamicconfig.Ref{Namespace: "device-server", Key: "mqtt.broker_api", Apply: func(snapshot dynamicconfig.Snapshot) error {
+		if snapshot.Revision == 0 {
+			return brokerClients.Update(cfg.BrokerAPI)
+		}
+		parsed, err := brokerapi.ParseConfig(snapshot.Value, snapshot.Secrets)
+		if err != nil {
+			return err
+		}
+		return brokerClients.Update(parsed)
+	}})
 	configCtx, cancelConfig := context.WithTimeout(context.Background(), 10*time.Second)
 	if err := dynamicClient.ApplyInitial(configCtx, dynamicRefs); err != nil {
 		cancelConfig()
@@ -110,7 +123,7 @@ func main() {
 		DialTimeout: 2 * time.Second, ReadTimeout: 2 * time.Second, WriteTimeout: 2 * time.Second,
 	})
 	presenceStore := &cache.PresenceStore{Client: presenceRedis}
-	projector := presence.New(presenceStore, mysqlstore.NewDeviceConnectionStore(sqlDB))
+	projector := presence.New(presenceStore, mysqlstore.NewDeviceConnectionStore(sqlDB), devSvc.CodeTTL)
 	presenceCtx, presenceCancel := context.WithCancel(context.Background())
 	presenceDone := make(chan struct{})
 	go func() { defer close(presenceDone); projector.Run(presenceCtx) }()
@@ -121,6 +134,9 @@ func main() {
 		_ = presenceRedis.Close()
 		log.Fatalf("presence mqtt: %v", err)
 	}
+	reconcileCtx, reconcileCancel := context.WithCancel(context.Background())
+	reconcileDone := make(chan struct{})
+	go func() { defer close(reconcileDone); projector.RunReconciler(reconcileCtx, brokerClients.Current) }()
 	revisions := func() map[string]int64 {
 		values := dynamicClient.Revisions()
 		values["device-server/mqtt.connection"] = mqttRevision
@@ -144,19 +160,23 @@ func main() {
 	devhandler.NewServer(devSvc).Register(r)
 	devhandler.RegisterDeviceProfile(r, deviceprofile.NewService(mysqlstore.NewDeviceProfileStore(sqlDB)), cfg.JWTSecret)
 	statusCtx, statusCancel := context.WithCancel(context.Background())
+	guard, guardErr := requestguard.New(cfg.Server.RequestLimits)
+	if guardErr != nil {
+		log.Fatal(guardErr)
+	}
 	reporter, err := servicestatus.NewReporter(rdb, "device-server", probes, revisions)
 	if err != nil {
 		log.Fatalf("service status: %v", err)
 	}
-	reporter.SetMetrics(projector.Metrics)
+	reporter.SetMetrics(servicestatus.MergeMetrics(projector.Metrics, presenceStore.Metrics, guard.Metrics, servicestatus.PoolMetrics(sqlDB, rdb)))
 	go reporter.Run(statusCtx)
 
 	addr := fmt.Sprintf(":%d", cfg.Server.HTTPPort)
 	srv := &http.Server{
-		Addr: addr, Handler: r,
+		Addr: addr, Handler: guard.Wrap(r),
 		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      60 * time.Second,
+		ReadTimeout:       max(30*time.Second, guard.MaxTimeout()),
+		WriteTimeout:      max(60*time.Second, guard.MaxTimeout()+5*time.Second),
 		IdleTimeout:       90 * time.Second,
 	}
 	go func() {
@@ -179,6 +199,8 @@ func main() {
 	}
 	gcCancel()
 	statusCancel()
+	reconcileCancel()
+	<-reconcileDone
 	presenceBroker.Close()
 	presenceCancel()
 	<-presenceDone
