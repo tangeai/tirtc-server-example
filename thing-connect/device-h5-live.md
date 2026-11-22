@@ -179,7 +179,11 @@ Authorization: Bearer <user_jwt>
 
 页面实现可直接参考：
 
-- 页面实现：[user-server/static/player.html](user-server/static/player.html)
+- 播放器页面：[Player.tsx](user-server/user-web/src/pages/Player.tsx)。
+- 媒体会话与资源释放：[session.ts](user-server/user-web/src/media/session.ts)。
+- 开发、构建与测试：[用户控制台说明](user-server/user-web/README.md)。
+
+浏览器入口为 `/player`。user-server 提供 `user-server/static/app/` 中的构建产物；旧 `/static/player.html` 地址跳转到该入口。修改播放器时编辑前端源码并重新构建。
 
 ### 1. 前置条件
 

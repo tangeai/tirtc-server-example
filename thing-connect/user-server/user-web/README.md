@@ -8,7 +8,7 @@ React + TypeScript + Vite 用户前端。Go user-server 提供构建后的页面
 
 AI 角色创建时可选择国内或海外，角色列表支持按地域筛选。已有角色显示云端地域且不可直接修改，其他地域须新建角色；上游未提供地域时显示“地域未标注”。
 
-在 `thing-connect/` 执行：
+开发和测试需要 Node.js 22.12+、npm 10+。在 `thing-connect/` 执行：
 
 ```sh
 npm --prefix user-server/user-web ci
@@ -21,15 +21,17 @@ npm --prefix user-server/user-web run dev
 npm --prefix user-server/user-web run check
 ```
 
-浏览器回归使用 Playwright，模拟业务响应，不操作真实用户、邮件或设备。先构建前端，再在本目录运行：
+浏览器回归使用 Playwright，模拟业务响应，不操作真实用户、邮件或设备。在本目录安装依赖和 Chromium，构建前端后运行完整回归：
 
 ```sh
-node tests/auth-contacts.browser.cjs
-node tests/devices-roles.browser.cjs
-node tests/layout.browser.cjs
-node tests/captcha-layout.browser.cjs
+npm ci
+npx playwright install chromium
+npm run build
+npm run test:browser
 ```
 
-需要可解析的 `playwright` 包及 Chromium；已有独立安装时可通过 `PLAYWRIGHT_MODULE` 指定模块路径、`PLAYWRIGHT_CHROMIUM` 指定浏览器可执行文件。截图存入仓库的 `output/playwright/`。
+Linux 缺少浏览器系统库时，使用 `npx playwright install --with-deps chromium` 安装；安装系统依赖可能需要管理员权限。统一入口执行 `tests/` 中全部 `*.browser.cjs`，单独运行某个脚本仅用于局部排查。
+
+需要可解析的 `playwright` 包及 Chromium；已有独立安装时可通过 `PLAYWRIGHT_MODULE` 指定模块路径、`PLAYWRIGHT_CHROMIUM` 指定浏览器可执行文件。截图与各测试组日志存入仓库的 `output/playwright/`；汇总报告为 `acceptance-report.html`，结构化结果为 `acceptance-browser-results.json`。
 
 媒体单元测试使用 SDK 替身，验证流 ID、权限延迟回调和资源释放。真实音视频、微信小程序宿主、人机验证供应商与邮件投递需要对应环境单独验收。

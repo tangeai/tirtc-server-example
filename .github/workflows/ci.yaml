@@ -97,11 +97,14 @@ jobs:
       - name: User browser acceptance
         working-directory: thing-connect/user-server/user-web
         run: npm run test:browser
-      - name: Preserve user browser acceptance results
+      - name: Admin browser acceptance
+        working-directory: thing-connect/admin/admin-web
+        run: npm run test:browser
+      - name: Preserve browser acceptance results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: user-browser-acceptance
+          name: browser-acceptance
           path: output/playwright/
           if-no-files-found: ignore
 

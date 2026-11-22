@@ -18,6 +18,7 @@ import (
 
 	callhandler "thing-connect/call-server/handler"
 	"thing-connect/internal/cache"
+	callservice "thing-connect/internal/call"
 	"thing-connect/internal/config"
 	"thing-connect/internal/db"
 	"thing-connect/internal/dynamicconfig"
@@ -84,7 +85,9 @@ func main() {
 	probes := map[string]servicestatus.DependencyProbe{"database": servicestatus.SQLProbe(sqlDB), "redis": servicestatus.RedisProbe(rdb), "mqtt": broker.Ping}
 	servicestatus.RegisterHealth(r, probes)
 
-	callHTTP := callhandler.NewServer(cfg, sqlDB, rdb, broker, devStore)
+	callRooms := cache.NewCallRooms(rdb)
+	calls := callservice.NewService(callRooms, mqttc.NewCallNotifier(broker))
+	callHTTP := callhandler.NewServer(cfg, sqlDB, calls, broker, devStore)
 	remarks := voip.NewRemarks(mysqlstore.NewVoipRemarkStore(sqlDB), mqttc.NewRemarkNotifier(broker))
 	callHTTP.SetRemarks(remarks)
 	callHTTP.SetContactNames(mysqlstore.NewContactNamesStore(sqlDB))
@@ -135,6 +138,8 @@ func main() {
 	dynamicRefs = append(dynamicRefs, roomRefs...)
 	callHTTP.SetIntercom(rooms)
 	callhandler.RegisterIntercom(r, cfg.JWTSecret, rooms)
+	callDone := make(chan struct{})
+	go func() { defer close(callDone); calls.Run(statusCtx) }()
 	remarksDone := make(chan struct{})
 	go func() { defer close(remarksDone); remarks.Run(statusCtx) }()
 	roomDone := make(chan struct{})
@@ -144,11 +149,13 @@ func main() {
 	}()
 	go dynamicClient.Run(statusCtx, dynamicRefs)
 	backlog := queuehealth.New("remark", mysqlstore.NewRemarkBacklog(sqlDB))
-	statusProbes := make(map[string]servicestatus.DependencyProbe, len(probes)+1)
+	callBacklog := queuehealth.New("call_notification", callRooms)
+	statusProbes := make(map[string]servicestatus.DependencyProbe, len(probes)+2)
 	for name, probe := range probes {
 		statusProbes[name] = probe
 	}
 	statusProbes["remark_outbox"] = backlog.Health
+	statusProbes["call_notification_outbox"] = callBacklog.Health
 	guard, guardErr := requestguard.New(cfg.Server.RequestLimits)
 	if guardErr != nil {
 		log.Fatal(guardErr)
@@ -157,9 +164,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("service status: %v", err)
 	}
-	reporter.SetMetrics(servicestatus.MergeMetrics(broker.Metrics, backlog.Metrics, guard.Metrics, servicestatus.PoolMetrics(sqlDB, rdb)))
+	reporter.SetMetrics(servicestatus.MergeMetrics(broker.Metrics, backlog.Metrics, callBacklog.Metrics, guard.Metrics, servicestatus.PoolMetrics(sqlDB, rdb)))
 	backlogDone := make(chan struct{})
 	go func() { defer close(backlogDone); backlog.Run(statusCtx) }()
+	callBacklogDone := make(chan struct{})
+	go func() { defer close(callBacklogDone); callBacklog.Run(statusCtx) }()
 	go reporter.Run(statusCtx)
 
 	addr := fmt.Sprintf(":%d", cfg.Server.HTTPPort)
@@ -190,6 +199,8 @@ func main() {
 	}
 	statusCancel()
 	<-backlogDone
+	<-callBacklogDone
+	<-callDone
 	<-roomDone
 	<-remarksDone
 	broker.Close()

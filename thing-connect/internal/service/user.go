@@ -41,10 +41,18 @@ type OnlineChecker interface {
 	IsOnline(ctx context.Context, clientID string) bool
 }
 
+// UserCache keeps code publication and failed-delivery cleanup in one adapter.
+// Delivery IDs distinguish overlapping sends even if their six-digit codes match.
+type UserCache interface {
+	store.CacheStore
+	SetEmailCodeDelivery(context.Context, string, string, string, time.Duration) error
+	DiscardEmailCodeDelivery(context.Context, string, string) error
+}
+
 // UserService handles user registration, login, and quota.
 type UserService struct {
 	user                    store.UserStore
-	cache                   store.CacheStore
+	cache                   UserCache
 	captcha                 captcha.Verifier
 	mailer                  mailer.Mailer
 	passwordResetEmailQueue PasswordResetEmailQueue
@@ -180,7 +188,7 @@ func (q *InMemoryPasswordResetEmailQueue) runWorker(ctx context.Context) {
 
 func NewUserService(
 	user store.UserStore,
-	cache store.CacheStore,
+	cache UserCache,
 	captcha captcha.Verifier,
 	mailer mailer.Mailer,
 	jwtSecret string,
@@ -331,15 +339,20 @@ func (s *UserService) sendEmailCode(
 		return fmt.Errorf("service.SendCode rand: %w", err)
 	}
 	code := fmt.Sprintf("%06d", n.Int64())
+	generation := make([]byte, 16)
+	if _, err := rand.Read(generation); err != nil {
+		return fmt.Errorf("email delivery generation: %w", err)
+	}
+	delivery := fmt.Sprintf("%x", generation)
 	_, activeMailer, cfg, templates, _, _, _ := s.runtimeSnapshot()
-	if err := s.cache.SetEmailCode(ctx, cacheKey, code, cfg.CodeTTL); err != nil {
+	if err := s.cache.SetEmailCodeDelivery(ctx, cacheKey, code, delivery, cfg.CodeTTL); err != nil {
 		return fmt.Errorf("service.SendCode SetEmailCode: %w", err)
 	}
 
 	message := buildMessage(code, cfg.CodeTTL)
 	if template, ok := templates[templateKey]; ok {
 		if !template.Enabled {
-			_ = s.cache.DelEmailCode(ctx, cacheKey)
+			_ = s.cache.DiscardEmailCodeDelivery(ctx, cacheKey, delivery)
 			return errors.New("email template is disabled")
 		}
 		message = renderEmailTemplate(template, code, cfg.CodeTTL)
@@ -351,7 +364,7 @@ func (s *UserService) sendEmailCode(
 		sendErr = activeMailer.Send(ctx, email, message.subject, message.body)
 	}
 	if sendErr != nil {
-		_ = s.cache.DelEmailCode(ctx, cacheKey)
+		_ = s.cache.DiscardEmailCodeDelivery(ctx, cacheKey, delivery)
 		return fmt.Errorf("service.SendCode Send: %w", sendErr)
 	}
 	return nil

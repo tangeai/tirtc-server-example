@@ -151,3 +151,95 @@ func TestGetAIToken_Success(t *testing.T) {
 		t.Errorf("want fetch called once (cache hit on 2nd), got %d calls", calls)
 	}
 }
+
+func TestAITokenRejectsTemporaryCredential(t *testing.T) {
+	calls := 0
+	srv := newTestServer(func(context.Context, string, string) (string, string, int32, string, error) {
+		calls++
+		return "peer", "token", 0, "", nil
+	})
+	r := gin.New()
+	srv.Register(r)
+	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"device_id": "tmp_a1b2c3d4", "clientid": "tmp_a1b2c3d4", "exp": time.Now().Add(time.Minute).Unix()})
+	signed, _ := tok.SignedString([]byte("test-secret"))
+	req := httptest.NewRequest("GET", "/v1/ai/token", nil)
+	req.Header.Set("Authorization", "Bearer "+signed)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if calls != 0 || w.Code != http.StatusUnauthorized {
+		t.Fatalf("temporary device JWT was not rejected; status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+func TestAITokenOldFetchCannotPopulateNewRuntimeCache(t *testing.T) {
+	started, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	srv := newTestServer(func(context.Context, string, string) (string, string, int32, string, error) {
+		close(started)
+		<-release
+		return "old-peer", "old-token", 0, "", nil
+	})
+	r := gin.New()
+	srv.Register(r)
+	signed := makeJWT(t, "dev1", "test-secret", time.Hour)
+	request := func() {
+		req := httptest.NewRequest("GET", "/v1/ai/token", nil)
+		req.Header.Set("Authorization", "Bearer "+signed)
+		r.ServeHTTP(httptest.NewRecorder(), req)
+	}
+	go func() { defer close(done); request() }()
+	<-started
+	srv.UpdateRuntime("fin63bby1og0", "http://127.0.0.1:1", "new-access", "new-app", "new-secret")
+	newCalls := 0
+	srv.mu.Lock()
+	srv.fetch = func(context.Context, string, string) (string, string, int32, string, error) {
+		newCalls++
+		return "new-peer", "new-token", 0, "", nil
+	}
+	srv.mu.Unlock()
+	close(release)
+	<-done
+	if srv.cache.ItemCount() != 0 {
+		t.Fatal("old runtime repopulated flushed cache")
+	}
+	request()
+	request()
+	if newCalls != 1 {
+		t.Fatalf("new runtime calls=%d, want one fetch and one cache hit", newCalls)
+	}
+}
+
+func TestAITokenRejectsInvalidDeviceClaims(t *testing.T) {
+	for _, name := range []string{"missing-expiry", "user-token", "mixed-identity", "wrong-method"} {
+		t.Run(name, func(t *testing.T) {
+			srv := newTestServer(func(context.Context, string, string) (string, string, int32, string, error) {
+				t.Error("invalid identity reached upstream")
+				return "", "", 0, "", nil
+			})
+			claims := jwt.MapClaims{"device_id": "dev1", "exp": time.Now().Add(time.Hour).Unix()}
+			method := jwt.SigningMethodHS256
+			switch name {
+			case "missing-expiry":
+				delete(claims, "exp")
+			case "user-token":
+				delete(claims, "device_id")
+				claims["user_id"] = 1
+			case "mixed-identity":
+				claims["user_id"] = 1
+			case "wrong-method":
+				method = jwt.SigningMethodHS384
+			}
+			token, err := jwt.NewWithClaims(method, claims).SignedString([]byte("test-secret"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := gin.New()
+			srv.Register(r)
+			req := httptest.NewRequest("GET", "/v1/ai/token", nil)
+			req.Header.Set("Authorization", "Bearer "+token)
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			if w.Code != http.StatusUnauthorized {
+				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+			}
+		})
+	}
+}

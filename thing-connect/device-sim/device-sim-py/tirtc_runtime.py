@@ -48,6 +48,8 @@ class TiRtcRuntime:
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
+        self._connections_changed = threading.Condition(self._lock)
+        self._rejected_connections: set[int] = set()
         self._started_event = threading.Event()
         self._stopped_event = threading.Event()
         self._initialized = False
@@ -220,18 +222,27 @@ class TiRtcRuntime:
             for guard in service_guards:
                 guard.wait_for_all()
             self._callback_guard.wait_for_all()
+            # Disconnect is asynchronous. Keep the callback table alive until
+            # every owned or rejected connection acknowledges destruction.
+            self._wait_for_connections_released()
+            self._callback_guard.wait_for_all()
             rc = sdk.TiRtcStop()
             if rc != 0:
                 self._warn(
                     f"TiRtcStop rc={rc} "
                     f"({sdk.TiRtcGetErrorStr(rc).decode()})")
             if not self._stopped_event.wait(timeout=8.0):
-                self._warn("等待 TiRTC SYS_STOPPED 超时，继续执行反初始化")
+                raise RuntimeError("等待 TiRTC SYS_STOPPED 超时，保留 SDK 与回调资源")
             self._callback_guard.wait_for_all()
             for guard in service_guards:
                 guard.wait_for_all()
             # A service's final deferred Disconnect may produce one last
             # callback through the unified table.
+            self._callback_guard.wait_for_all()
+            # An inbound connection can arrive between the first release
+            # barrier and SYS_STOPPED. Deferred Disconnect completion is not
+            # its release acknowledgement; retain callbacks until both finish.
+            self._wait_for_connections_released()
             self._callback_guard.wait_for_all()
         if initialized:
             sdk.TiRtcUninit()
@@ -251,6 +262,15 @@ class TiRtcRuntime:
             self._connections.clear()
             self._sdk_callbacks = None
             self._sdk_log_callback = None
+
+    def _wait_for_connections_released(self) -> None:
+        with self._connections_changed:
+            released = self._connections_changed.wait_for(
+                lambda: not self._connections and not self._rejected_connections,
+                timeout=8.0,
+            )
+        if not released:
+            raise RuntimeError("等待 TiRTC 连接释放超时，保留 SDK 与回调资源")
 
     def activate(self, service: ServiceKind) -> int:
         with self._lock:
@@ -321,6 +341,8 @@ class TiRtcRuntime:
             owner = self._connections.get(handle)
             if remove:
                 self._connections.pop(handle, None)
+                self._rejected_connections.discard(handle)
+                self._connections_changed.notify_all()
             if owner is None:
                 return None, None
             current = (
@@ -387,8 +409,10 @@ class TiRtcRuntime:
             f" service={owner.service.value if owner else 'unknown'}"
             f" generation={owner.generation if owner else 0}"
             f" hconn={handle if handle is not None else 0:#x} rc={error}")
-        if handle is not None:
-            self._disconnect_after_callback(handle)
+        # Adapters release their connections before deactivation. A late error
+        # does not transfer ownership back to the runtime: Disconnect makes
+        # the handle unusable immediately, even before on_disconnected arrives.
+        # Unknown handles may already have completed that release as well.
 
     def _on_disconnected(self, hconn) -> None:
         handler, owner = self._current_handler(hconn, remove=True)
@@ -464,8 +488,9 @@ class TiRtcRuntime:
 
     def _disconnect_after_callback(self, handle: int) -> None:
         with self._lock:
-            if not self._started:
+            if not self._started or handle in self._rejected_connections:
                 return
+            self._rejected_connections.add(handle)
 
         def disconnect() -> None:
             sdk.TiRtcDisconnect(ctypes.c_void_p(handle))

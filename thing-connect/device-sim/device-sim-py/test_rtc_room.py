@@ -2,7 +2,9 @@ import ctypes
 import json
 import os
 import threading
+import tempfile
 import unittest
+from itertools import count
 from types import SimpleNamespace
 from unittest import mock
 
@@ -12,6 +14,90 @@ from rtc_room import RoomSession, RoomError, descriptor
 
 
 class RoomSessionTests(unittest.TestCase):
+    def test_disconnected_callback_never_reuses_released_handle(self):
+        self.joined()
+        self.send.reset_mock()
+
+        def finish():
+            self.room.stop_service()
+            self.room.closed.set()
+
+        self.room.finish.side_effect = finish
+        self.room.callbacks.on_disconnected(123)
+        with mock.patch('builtins.print'):
+            self.room._run()
+
+        self.assertIsNone(self.room.conn)
+        self.send.assert_not_called()
+        self.disconnect.assert_not_called()
+
+    def test_connection_error_still_releases_owned_handle(self):
+        self.joined()
+        self.send.reset_mock()
+
+        def finish():
+            self.room.stop_service()
+            self.room.closed.set()
+
+        self.room.finish.side_effect = finish
+        self.room.callbacks.on_conn_error(123, -9001)
+        with mock.patch('builtins.print'):
+            self.room._run()
+
+        self.assertIsNone(self.room.conn)
+        self.send.assert_not_called()
+        self.disconnect.assert_called_once_with(123)
+
+    def test_error_followed_by_disconnected_releases_handle_only_once(self):
+        self.joined()
+        self.send.reset_mock()
+        self.room.callbacks.on_conn_error(123, -9001)
+        with self.assertRaises(RoomError):
+            self.room._event(self.room.events.get_nowait())
+        # The SDK acknowledges release only after the owner's Disconnect.
+        self.room.callbacks.on_disconnected(123)
+        self.room._event(self.room.events.get_nowait())
+        self.disconnect.assert_called_once_with(123)
+        self.send.assert_not_called()
+
+    def test_late_disconnected_does_not_clear_replacement_connection(self):
+        self.joined()
+        self.room.callbacks.on_disconnected(123)
+        self.room.generation += 1
+        self.room.conn = 456
+        self.room._event(self.room.events.get_nowait())
+        self.assertEqual(self.room.conn, 456)
+        self.disconnect.assert_not_called()
+
+    def test_file_audio_keeps_sending_across_timestamp_wrap(self):
+        self.joined()
+        self.room.ptt = True
+        self.room.audio_timestamp = (1 << 32) - 20
+        timestamps = []
+
+        def send(conn, frame_pointer, data):
+            frame = ctypes.cast(frame_pointer,
+                                ctypes.POINTER(rtc_room.sdk.TIRTCFRAMEINFO)).contents
+            timestamps.append(frame.ts)
+            return frame.length
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, 'audio.alaw')
+            with open(path, 'wb') as audio:
+                audio.write(b'\xd5' * 480)
+            self.room.reader = rtc_room.AudioFileReader(path, 'alaw_8khz')
+            with mock.patch.object(self.room.closed, 'wait',
+                                   side_effect=[False, False, False, True]), \
+                    mock.patch.object(rtc_room.time, 'monotonic',
+                                      side_effect=count(10, .1)), \
+                    mock.patch.object(rtc_room.sdk, 'TiRtcSendAudioStream',
+                                      side_effect=send):
+                self.room._media_loop()
+
+        self.assertEqual(timestamps, [(1 << 32) - 20, 0, 20])
+        self.assertEqual(self.room.audio_sent, 3)
+        self.assertTrue(self.room.ptt)
+
     def setUp(self):
         self.config = SimpleNamespace(hardware_audio=False, up_audio_format='alaw_8khz',
             down_audio_format='alaw_8khz', up_audio_file='', device_id='device-1',

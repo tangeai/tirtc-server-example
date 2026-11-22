@@ -5537,7 +5537,7 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|:--:|------|
-| targets | string[] | ✅ | 被叫设备 ID 数组 |
+| targets | string[] | ✅ | 被叫设备 ID 数组；重复 ID 按一个目标处理 |
 | call_type | string | ✅ | `audio` 或 `video` |
 
 **请求示例**
@@ -5574,6 +5574,8 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 
 > `room_id` 前缀 `d_` 与微信 VoIP 的 `wx_room_id` 区分，避免跨系统排查时混淆。
 
+通话创建、接听、拒接和结束的通知与房间状态一起保存。接口成功表示状态及待通知消息已保存；MQTT 暂时不可用时由服务端重试，应用重启后可续传。同一事件重试保持 `msg_id` 不变，设备按 `room_id` 隔离会话，并幂等处理重复通知；通知使用 QoS 1，Broker 接受不等于设备已执行。
+
 **错误码**
 
 | code | 含义 |
@@ -5595,7 +5597,9 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 
 **调用方**：设备。
 
-接听来电（`purpose=call`）。该操作会执行 SETNX/DEL 并发送 MQTT 通知，因此使用 POST。
+接听来电（`purpose=call`）。该操作会修改通话状态并安排 MQTT 通知，因此使用 POST。
+
+同一被叫对同一房间重复提交接听请求可再次获取连接凭证，适用于成功响应丢失后的重试。只有其他被叫抢先接听时返回 `40210`。凭证生成失败不会提交接听或切换原房间；重试时房间仍须存在。
 
 **鉴权**： ✅ `Authorization: Bearer <mqtt_token>`（设备 JWT）
 
@@ -5687,7 +5691,7 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 
 **错误码**： `401`（JWT 鉴权失败，HTTP 401）、`40000`（缺 room_id）、`40300`（不是该房间 target，HTTP 200）、`40400`（房间不存在）
 
-> 所有 target（含离线预拒接的）都拒接后，房间解散，主叫收到 `room_cancel{reason:"all_rejected"}`。
+> 所有 target（含离线预拒接的）都拒接后，房间解散，主叫收到 `room_cancel{reason:"all_rejected"}`。已接听房间收到迟到的拒接请求时返回成功，不改变当前通话；结束已接听通话使用 `/v1/call/hangup`。
 
 **请求体字段**
 
@@ -7230,7 +7234,9 @@ curl "$RECOGNITION_SERVER/v1/recognition/requests" \
         "order": 1,
         "scheme_id": "cry_detection",
         "scheme_version": 1,
+        "name": "哭声检测",
         "output_mode": "text_audio",
+        "overall_status": "queued",
         "status": "queued",
         "result": null,
         "error": null,
@@ -7277,7 +7283,9 @@ curl "$RECOGNITION_SERVER/v1/recognition/requests" \
         "order": 1,
         "scheme_id": "cry_detection",
         "scheme_version": 1,
+        "name": "哭声检测",
         "output_mode": "text_audio",
+        "overall_status": "processing",
         "status": "succeeded",
         "result": {
           "summary": "检测到持续的婴儿哭声，建议查看宝宝情况。",
@@ -7319,7 +7327,9 @@ curl "$RECOGNITION_SERVER/v1/recognition/requests" \
         "order": 1,
         "scheme_id": "cry_detection",
         "scheme_version": 1,
+        "name": "哭声检测",
         "output_mode": "text_audio",
+        "overall_status": "succeeded",
         "status": "succeeded",
         "result": {
           "summary": "检测到持续的婴儿哭声，建议查看宝宝情况。",
@@ -7369,7 +7379,9 @@ curl "$RECOGNITION_SERVER/v1/recognition/requests" \
 | data.status_revision | 同一任务的递增快照版本；不是配置版本。版本可跳号，不保证每个版本都发通知 |
 | data.results | 按配置顺序排列的结果数组，不保证各项同时完成 |
 | results[].item_id / order | 任务内子项标识及从1开始的执行顺序 |
-| results[].scheme_id / scheme_version | 分析使用的类型和发布版本。当前结果不带类型名称，可从上传时保存的 schemes 映射 |
+| results[].scheme_id / scheme_version | 分析使用的类型和发布版本 |
+| results[].name | 任务受理时的发布版本名称快照；类型改名不改变历史记录。历史快照缺失时为空字符串，可回退显示 scheme_id |
+| results[].overall_status | 该类型的整体状态，包含分析及所需语音处理；不能用分析 status 代替 |
 | results[].output_mode | text、audio、text_audio，分别表示文字、语音、两者 |
 | results[].status | **仅分析阶段状态**，succeeded 不代表语音也已完成 |
 | results[].result | 文字分析对象；未完成、失败或纯语音类型时为 null |
@@ -7384,10 +7396,27 @@ curl "$RECOGNITION_SERVER/v1/recognition/requests" \
 | 状态所属层 | 当前枚举及处理 |
 |---|---|
 | 任务 status | queued、processing：未结束；succeeded：全部成功；partial_failed：部分成功；failed：失败；unknown：结果不确定；cancelled：取消 |
+| 类型整体 results[].overall_status | queued、processing、succeeded、partial_failed、failed、unknown、cancelled；含义见下表 |
 | 分析 results[].status | queued、processing、succeeded、failed、unknown、cancelled |
 | 语音 speech.status | pending、synthesizing、ready、failed、unknown、skipped |
 
 **状态处理**：queued 表示任务尚未开始；任一分析或语音阶段开始后，等待语音或下一个类型时保持 processing，直到进入终态。results[].status 仍只表示分析阶段；播放必须等待 speech.status=ready。任务终态及 unknown 不应触发客户端自动新建任务；unknown 只允许补查原任务，避免重复付费调用。
+
+`name` 与 `overall_status` 不改变原有 `status`、`result`、`speech` 字段含义。判断单个类型是否完成使用 `overall_status`；播放仍只在 `speech.status=ready` 时进行。成功表示服务端结果可下载或读取，不表示设备已播放或确认收到。
+
+| 场景 | overall_status |
+|---|---|
+| 类型尚未开始 | queued |
+| 正在分析，或分析成功但语音仍为 pending/synthesizing | processing |
+| 仅文字分析成功，或所需语音已 ready | succeeded |
+| 文字＋语音的语音失败，或取消后仍有可交付文字 | partial_failed |
+| 纯语音合成失败，或分析明确失败且无可交付内容 | failed |
+| 分析或合成结果无法确认 | unknown |
+| 处理取消且无可交付内容 | cancelled |
+
+父任务按顺序聚合：整体取消时，有可交付内容为 partial_failed，否则 cancelled；其他情况下任一类型 unknown 则暂停后续处理；仍有待处理类型时保持 queued（从未开始）或 processing（已经开始）；全部结束后，全部成功为 succeeded，存在失败或取消但仍有可交付内容为 partial_failed，无可交付内容且有明确失败为 failed，其余全部取消为 cancelled。纯语音的内部分析文字不算可交付内容。明确失败允许继续下一个类型，unknown 不自动重试模型调用。
+
+历史任务查询从任务保存的发布快照补出名称，并按已有阶段结果计算整体状态，不重新执行模型或扣费。升级前已生成的待投递 MQTT 快照、旧服务实例仍可能不含扩展字段；客户端必须允许字段缺失，回退组合分析和语音状态。按 request_id/status_revision 过滤旧快照，不因字段缺失新建付费任务。
 
 返回方式按每个已选类型的发布版本独立执行，不由上传参数覆盖：
 
@@ -7522,7 +7551,9 @@ speech.url 为识别服务相对路径，相对 recognition-srv 解析，并携�
           "order": 1,
           "scheme_id": "cry_detection",
           "scheme_version": 1,
+          "name": "哭声检测",
           "output_mode": "text_audio",
+          "overall_status": "succeeded",
           "status": "succeeded",
           "result": {
             "summary": "检测到持续的婴儿哭声，建议查看宝宝情况。",

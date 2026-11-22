@@ -10,6 +10,7 @@ import (
 	"testing"
 	r "thing-connect/internal/recognition"
 	m "thing-connect/internal/store/mysql"
+	adminmysql "thing-connect/internal/store/mysql/admin"
 	"time"
 )
 
@@ -258,6 +259,83 @@ func TestRecognitionDurableOrderQuotaAndOwnership(t *testing.T) {
 		}
 		if audioCount != 0 {
 			t.Fatal("late completion persisted audio")
+		}
+	})
+
+	t.Run("HTTP list and durable notification share projected snapshot", func(t *testing.T) {
+		current, err := store.Get(ctx, r.Actor{DeviceID: id}, id, "same-request")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if current.Results[0].Name != "声音分析" || current.Results[0].OverallStatus != "succeeded" || current.Results[1].OverallStatus != "unknown" {
+			t.Fatalf("%+v", current)
+		}
+		var payload string
+		if err = db.Get(&payload, `SELECT payload FROM recognition_outbox WHERE device_id=? ORDER BY id DESC LIMIT 1`, id); err != nil {
+			t.Fatal(err)
+		}
+		var event struct {
+			Payload struct {
+				Data r.Task `json:"data"`
+			} `json:"payload"`
+		}
+		if err = json.Unmarshal([]byte(payload), &event); err != nil {
+			t.Fatal(err)
+		}
+		a, _ := json.Marshal(current)
+		b, _ := json.Marshal(event.Payload.Data)
+		if string(a) != string(b) {
+			t.Fatalf("notification differs: %s != %s", a, b)
+		}
+		records, err := adminmysql.NewRecognitionStore(db).Records(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		encoded, _ := json.Marshal(records)
+		var adminRows []struct {
+			Task r.Task `json:"task"`
+		}
+		if err = json.Unmarshal(encoded, &adminRows); err != nil || len(adminRows) != 1 {
+			t.Fatalf("admin records %v", err)
+		}
+		adminTask, _ := json.Marshal(adminRows[0].Task)
+		if string(a) != string(adminTask) {
+			t.Fatalf("admin projection differs: %s", adminTask)
+		}
+		list, err := store.List(ctx, r.Actor{DeviceID: id}, id, 0)
+		if err != nil || len(list) != 1 || list[0].Results[0].Name != "声音分析" {
+			t.Fatalf("list=%+v err=%v", list, err)
+		}
+	})
+	t.Run("legacy reads preserve names quota calls and persisted snapshot", func(t *testing.T) {
+		if _, err := db.Exec(`UPDATE recognition_task SET snapshot=JSON_REMOVE(snapshot,'$.task.results[0].name','$.task.results[1].name','$.task.results[0].overall_status','$.task.results[1].overall_status') WHERE device_id=?`, id); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(`UPDATE recognition_scheme SET draft=JSON_SET(draft,'$.name','新草稿名称') WHERE id IN (?,?)`, ids[0], ids[1]); err != nil {
+			t.Fatal(err)
+		}
+		var before, after string
+		var callsBefore, callsAfter int
+		if err := db.Get(&before, `SELECT snapshot FROM recognition_task WHERE device_id=?`, id); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Get(&callsBefore, `SELECT COUNT(*) FROM recognition_call WHERE task_id=?`, w.TaskKey); err != nil {
+			t.Fatal(err)
+		}
+		restarted := m.NewRecognitionStore(db)
+		current, err := restarted.Get(ctx, r.Actor{DeviceID: id}, id, "same-request")
+		if err != nil || current.Results[0].Name != "声音分析" || current.Results[1].OverallStatus != "unknown" {
+			t.Fatalf("%+v %v", current, err)
+		}
+		if err = db.Get(&after, `SELECT snapshot FROM recognition_task WHERE device_id=?`, id); err != nil {
+			t.Fatal(err)
+		}
+		if err = db.Get(&callsAfter, `SELECT COUNT(*) FROM recognition_call WHERE task_id=?`, w.TaskKey); err != nil {
+			t.Fatal(err)
+		}
+		usage, err := restarted.State(ctx, actor, id)
+		if err != nil || before != after || callsBefore != callsAfter || usage.Usage.Used != 2 {
+			t.Fatalf("history read changed state: %v", err)
 		}
 	})
 	if _, e = db.Exec(`UPDATE device_bind SET binding_revision=binding_revision+1 WHERE device_id=?`, id); e != nil {

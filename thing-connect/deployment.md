@@ -108,7 +108,7 @@ Nginx、HTTPS 和生产进程托管都不是首次安装页面的前置条件。
 )
 ```
 
-使用企业软件源或已有工具链时可跳过 `snap install`，但必须满足 Go 1.21+、Node.js 20.19+ 或 22.12+、npm 10+。验证：
+使用企业软件源或已有工具链时可跳过 `snap install`，但必须满足 Go 1.21+、Node.js 22.12+、npm 10+。验证：
 
 ```bash
 (
@@ -615,7 +615,7 @@ HTTP 会明文传输管理员登录信息和会话 Cookie。公网生产环境�
 
 其他部署环境可以参考 `deploy-prod.sh` 的构建、迁移和发布流程，但要按自身目录、权限和服务管理方式调整，不要把它当作通用安装器。
 
-`update` 快进拉取部署仓库当前分支所跟踪的上游，不自动选择稳定版 tag。当前分支为 `main` 时会部署开发分支；`release/*` 也可能包含尚未发布的提交。生产使用前应由维护者明确控制待发布的源码提交与验证结果。切换到 tag 的 detached HEAD 后直接执行 `update` 不属于该脚本支持的固定版本发布方式。
+`update` 快进拉取部署仓库当前分支所跟踪的上游，不自动选择稳定版 tag。当前分支为 `main` 时会部署主干最新提交，其中可能包含尚未发布的改动。生产使用前应由维护者明确控制待发布的源码提交与验证结果。切换到 tag 的 detached HEAD 后直接执行 `update` 不属于该脚本支持的固定版本发布方式。
 
 在符合该生产目录约定、且已确认待发布源码的环境中执行维护发布：
 
@@ -833,7 +833,9 @@ User 的服务状态实例包含解绑清理队列（`cleanup_outbox`）的 `met
 
 具有下行能力的 User、VoIP、Call、Recognition 实例上报 `mqtt_ack_active`、`mqtt_ack_completed_total`、`mqtt_ack_failed_total`、`mqtt_ack_timeout_total`、`mqtt_ack_canceled_total` 和 `mqtt_ack_duration_ms_total`。这是从订阅、发布到收到设备 ACK 的完整调用统计，失败包括订阅和发布失败；它不证明媒体会话成功。Device 的 `presence_online_updates_total`、`presence_connection_updates_total` 统计 Redis 已确认的在线和连接快照有效更新；对应 `*_ignored_total` 包含同时间、旧时间及已过期的无效更新。网络中断而未收到脚本结果时不推测写入是否成功。
 
-Call 的 `remark_outbox`、AI 的 `ai_cloud_outbox`、Recognition 的 `recognition_outbox` 在服务状态中报告积压健康，指标前缀分别为 `remark`、`ai_cloud`、`recognition`：`*_pending`、`*_oldest_pending_age_ms`、`*_backlog_measured_at_ms`、`*_exhausted`。采样每 15 秒执行一次，查询最多 5 秒；一分钟没有有效样本、最老积压超过 15 分钟或存在耗尽重试的识别通知时，状态降级。排空并获得新样本后恢复；这些下游投递告警不摘除 HTTP readiness。
+Call 的 `remark_outbox` 和 `call_notification_outbox`、AI 的 `ai_cloud_outbox`、Recognition 的 `recognition_outbox` 在服务状态中报告积压健康，指标前缀分别为 `remark`、`call_notification`、`ai_cloud`、`recognition`：`*_pending`、`*_oldest_pending_age_ms`、`*_backlog_measured_at_ms`、`*_exhausted`。采样每 15 秒执行一次，查询最多 5 秒；一分钟没有有效样本、最老积压超过 15 分钟或存在耗尽重试的识别通知时，状态降级。排空并获得新样本后恢复；这些下游投递告警不摘除 HTTP readiness。
+
+一对一通话通知与房间状态在 Redis 中原子保存。`call_notification_pending` 按待发送消息计数，包含已领取与退避中的消息；同一房间按顺序发送，发布失败按不超过 256 秒的随机退避持续重试。应用重启后其他 Call 实例可继续领取；Redis 数据的重启保留能力取决于其持久化配置，部署时须配置并验证 Redis 持久化与备份。成功发布表示 Broker 已接受 QoS 1 消息，不代表设备已处理；旧房间或已拒接目标的待发来电在发送前丢弃。
 
 计数包含已领取及退避中的任务。AI 已完成的版本屏障记录不算积压，替换尚未完成的目标保留首次等待时间，已完成后重新入队开始新的计时周期。识别通知排除旧绑定生命周期和已交付记录，最多投递 8 次；耗尽后通过设备查询补偿并排查 Broker 权限，不能用单次发布成功代替收包验收。解绑清理、备注通知、AI 对账使用有上限的随机退避持续重试；不自动丢弃仍需完成的工作。通用 Redis 客户端不自动重放不确定的命令，由业务流程或持久队列负责恢复，避免跨层重试放大和重复计数。
 

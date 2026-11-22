@@ -99,10 +99,6 @@ func (s *BindService) Bind(ctx context.Context, userID int64, code string) (stri
 	if err != nil {
 		return "", err
 	}
-	// TRACE: log full verify record to see actual device_id and physical_id
-	slog.InfoContext(ctx, "Bind verify record trace",
-		"code", code, "vdata.DeviceID", vdata.DeviceID, "vdata.PhysicalID", vdata.PhysicalID,
-		"vdata.TempClientID", vdata.TempClientID, "physHash", physHash)
 
 	mac := physid.Parse(vdata.PhysicalID)
 

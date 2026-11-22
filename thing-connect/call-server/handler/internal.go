@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"errors"
 	"github.com/gin-gonic/gin"
+	"thing-connect/internal/call"
 
 	"thing-connect/call-server/apiresp"
 )
@@ -32,17 +34,16 @@ func (s *Server) postInternalUnbind(c *gin.Context) {
 		}
 	}
 
-	if roomID, err := s.rdb.Get(ctx, lockKey(body.DeviceID)).Result(); err == nil && roomID != "" {
-		if rm, err := s.getRoom(ctx, roomID); err == nil && rm != nil {
-			var notify []string
-			switch {
-			case rm.Caller == body.DeviceID:
-				notify = rm.Targets
-			case rm.AnsweredBy == body.DeviceID:
-				notify = []string{rm.Caller}
-			}
-			notify = removeString(notify, body.DeviceID)
-			_ = s.releaseRoom(ctx, rm, "unbound", notify)
+	rm, err := s.rooms.Current(ctx, body.DeviceID)
+	if err != nil {
+		s.callError(c, err)
+		return
+	}
+	if rm != nil {
+		_, err := s.rooms.End(ctx, rm.RoomID, body.DeviceID, false, "unbound")
+		if err != nil && !errors.Is(err, call.ErrNotFound) {
+			s.callError(c, err)
+			return
 		}
 	}
 

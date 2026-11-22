@@ -9,8 +9,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jmoiron/sqlx"
-	"github.com/redis/go-redis/v9"
 
+	"thing-connect/internal/call"
 	"thing-connect/internal/config"
 	"thing-connect/internal/store"
 	"thing-connect/internal/voip"
@@ -37,7 +37,7 @@ type Server struct {
 	mu     sync.RWMutex
 	cfg    *config.Config
 	db     *sqlx.DB
-	rdb    *redis.Client
+	rooms  *call.Service
 	broker mqttBroker
 	dev    store.DeviceStore
 }
@@ -50,8 +50,8 @@ func (s *Server) Config() *config.Config {
 }
 func (s *Server) UpdateConfig(cfg *config.Config) { s.mu.Lock(); s.cfg = cfg; s.mu.Unlock() }
 
-func NewServer(cfg *config.Config, db *sqlx.DB, rdb *redis.Client, broker mqttBroker, dev store.DeviceStore) *Server {
-	return &Server{cfg: cfg, db: db, rdb: rdb, broker: broker, dev: dev}
+func NewServer(cfg *config.Config, db *sqlx.DB, rooms *call.Service, broker mqttBroker, dev store.DeviceStore) *Server {
+	return &Server{cfg: cfg, db: db, rooms: rooms, broker: broker, dev: dev}
 }
 
 func (s *Server) SetRemarks(remarks *voip.Remarks) { s.remarks = remarks }

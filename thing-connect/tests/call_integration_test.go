@@ -24,6 +24,8 @@ import (
 
 	"thing-connect/call-server/apiresp"
 	callhandler "thing-connect/call-server/handler"
+	"thing-connect/internal/cache"
+	callservice "thing-connect/internal/call"
 	"thing-connect/internal/config"
 	"thing-connect/internal/mqttc"
 	mysqlstore "thing-connect/internal/store/mysql"
@@ -43,9 +45,10 @@ type publishedMsg struct {
 }
 
 type fakeBroker struct {
-	mu        sync.Mutex
-	online    map[string]bool
-	published []publishedMsg
+	mu         sync.Mutex
+	online     map[string]bool
+	published  []publishedMsg
+	publishErr error
 }
 
 func newFakeBroker() *fakeBroker {
@@ -83,6 +86,9 @@ func (b *fakeBroker) Publish(topic string, qos byte, payload any) error {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if b.publishErr != nil {
+		return b.publishErr
+	}
 	b.published = append(b.published, publishedMsg{Topic: topic, QoS: qos, Type: env.Type, From: env.From, Msg: env.Msg})
 	return nil
 }
@@ -127,7 +133,7 @@ func newCallSuite(t *testing.T) *callSuite {
 	devStore := mysqlstore.NewDeviceStore(sqlDB)
 
 	r := gin.New()
-	contactHTTP := callhandler.NewServer(cfg, sqlDB, rdb, broker, devStore)
+	contactHTTP := callhandler.NewServer(cfg, sqlDB, callservice.NewService(cache.NewCallRooms(rdb), mqttc.NewCallNotifier(broker)), broker, devStore)
 	contactHTTP.SetContactNames(mysqlstore.NewContactNamesStore(sqlDB))
 	contactHTTP.SetRemarks(voip.NewRemarks(mysqlstore.NewVoipRemarkStore(sqlDB), mqttc.NewRemarkNotifier(broker)))
 	contactHTTP.Register(r)
@@ -1428,10 +1434,10 @@ func TestGetDeviceRoomWhileInRoom(t *testing.T) {
 	}
 }
 
-// TestHangupAnsweredRoomSendsQoS0Cancel verifies that when a room has status=answered
+// TestHangupAnsweredRoomSendsQoS1Cancel verifies that when a room has status=answered
 // (callee has called /v1/call/device/info), calling /v1/call/hangup sends a
-// room_cancel MQTT message with QoS=0 (in-call reliability mode).
-func TestHangupAnsweredRoomSendsQoS0Cancel(t *testing.T) {
+// room_cancel MQTT message with QoS=1 for acknowledged delivery.
+func TestHangupAnsweredRoomSendsQoS1Cancel(t *testing.T) {
 	cs := newCallSuite(t)
 	caller, callee := uniqueDeviceID(t), uniqueDeviceID(t)
 	cs.seedDevice(t, caller, 13001)
@@ -1459,7 +1465,7 @@ func TestHangupAnsweredRoomSendsQoS0Cancel(t *testing.T) {
 		t.Fatalf("call/device/info: want code=200, got %d msg=%s", r2.Code, r2.Msg)
 	}
 
-	// 主叫挂断 → releaseRoom 应以 QoS=0 发送 room_cancel（room status=answered）
+	// Answered rooms also require acknowledged notification delivery.
 	r3 := cs.POST(t, "/v1/call/hangup", jwtCaller, map[string]any{"room_id": roomID})
 	if r3.Code != 200 {
 		t.Fatalf("call/hangup: want code=200, got %d msg=%s", r3.Code, r3.Msg)
@@ -1473,8 +1479,8 @@ func TestHangupAnsweredRoomSendsQoS0Cancel(t *testing.T) {
 	if msg.Msg["reason"] != "hangup" {
 		t.Errorf("room_cancel reason = %v, want hangup", msg.Msg["reason"])
 	}
-	if msg.QoS != 0 {
-		t.Errorf("room_cancel QoS = %d, want 0 (room was answered)", msg.QoS)
+	if msg.QoS != 1 {
+		t.Errorf("room_cancel QoS = %d, want 1 (room was answered)", msg.QoS)
 	}
 }
 
@@ -1728,5 +1734,150 @@ func TestContacts_RejectRequest(t *testing.T) {
 		if c.DeviceID == d2 {
 			t.Fatal("rejected contact should not appear in list")
 		}
+	}
+}
+
+func TestCall_AnswerFailureAndResponseRetry(t *testing.T) {
+	cs := newCallSuite(t)
+	a, b, c := uniqueDeviceID(t), uniqueDeviceID(t), uniqueDeviceID(t)
+	cs.seedDevice(t, a, 1001)
+	cs.seedDevice(t, b, 1002)
+	cs.seedContact(t, a, b, 1001, 1002, 1)
+	cs.broker.SetOnline(b)
+	cs.seedDevice(t, c, 1003)
+	cs.seedContact(t, b, c, 1002, 1003, 1)
+	cs.broker.SetOnline(c)
+	jwtA, jwtB := deviceJWT(t, cs.cfg.JWTSecret, a), deviceJWT(t, cs.cfg.JWTSecret, b)
+	old := cs.POST(t, "/v1/call/request", jwtB, map[string]any{"targets": []string{c}, "call_type": "audio"})
+	oldRoomID := dataString(t, old, "room_id")
+	created := cs.POST(t, "/v1/call/request", jwtA, map[string]any{"targets": []string{b}, "call_type": "audio"})
+	roomID := dataString(t, created, "room_id")
+	body := map[string]any{"device_id": a, "room_id": roomID, "purpose": "call"}
+	if _, err := cs.sqlDB.Exec(`DELETE FROM device_pool WHERE device_id=?`, a); err != nil {
+		t.Fatal(err)
+	}
+	failed := cs.POST(t, "/v1/call/device/info", jwtB, body)
+	if failed.Code == 200 {
+		t.Fatal("expected credential failure")
+	}
+	if msg := cs.broker.findPublished("callee_answered", "sn_"+a); msg != nil {
+		t.Error("announced answer before credentials were available")
+	}
+	if got := cs.roomIDForLock(t, b); got != oldRoomID {
+		t.Fatalf("credential failure switched existing room: %s", got)
+	}
+	if msg := cs.broker.findPublished("room_cancel", "sn_"+c); msg != nil {
+		t.Error("credential failure cancelled old peer")
+	}
+	cs.seedDevice(t, a, 1001)
+	for i := 0; i < 2; i++ {
+		response := cs.POST(t, "/v1/call/device/info", jwtB, body)
+		if response.Code != 200 {
+			t.Fatalf("retry %d: code=%d", i, response.Code)
+		}
+	}
+	if got := cs.roomIDForLock(t, b); got != roomID {
+		t.Fatalf("successful retry did not switch room: %s", got)
+	}
+	if exists := cs.rdb.Exists(context.Background(), "room:"+oldRoomID).Val(); exists != 0 {
+		t.Fatal("old room survived successful switch")
+	}
+}
+func TestCall_DuplicateTargetsAndIndependentNames(t *testing.T) {
+	cs := newCallSuite(t)
+	a, b, c := uniqueDeviceID(t), uniqueDeviceID(t), uniqueDeviceID(t)
+	for i, id := range []string{a, b, c} {
+		cs.seedDevice(t, id, int64(1001+i))
+		cs.broker.SetOnline(id)
+	}
+	cs.seedContact(t, a, b, 1001, 1002, 1)
+	cs.seedContact(t, a, c, 1001, 1003, 1)
+	jwtA, jwtB, jwtC := deviceJWT(t, cs.cfg.JWTSecret, a), deviceJWT(t, cs.cfg.JWTSecret, b), deviceJWT(t, cs.cfg.JWTSecret, c)
+	remark := cs.PUT(t, "/v1/call/device/contacts/remark", jwtB, map[string]any{"peer_id": a, "remark": "private-name-for-b"})
+	if remark.Code != 200 {
+		t.Fatal(remark)
+	}
+	result := cs.POST(t, "/v1/call/request", jwtA, map[string]any{"targets": []string{b, b, c}, "call_type": "audio"})
+	if result.Code != 200 {
+		t.Fatal(result)
+	}
+	id := dataString(t, result, "room_id")
+	if own := cs.broker.findPublished("call_incoming", "sn_"+b); own == nil || own.Msg["caller_name"] != "private-name-for-b" {
+		t.Errorf("b did not receive its own remark: %+v", own)
+	}
+	cs.broker.mu.Lock()
+	incomingCount := 0
+	for _, message := range cs.broker.published {
+		if message.Type == "call_incoming" && message.Topic == "device/sn_"+b+"/cmd" {
+			incomingCount++
+		}
+	}
+	cs.broker.mu.Unlock()
+	if incomingCount != 1 {
+		t.Errorf("duplicate target notified %d times", incomingCount)
+	}
+	msg := cs.broker.findPublished("call_incoming", "sn_"+c)
+	if msg == nil || msg.Msg["caller_name"] != a {
+		t.Errorf("c received another recipient's private name: %+v", msg)
+	}
+	for _, tok := range []string{jwtB, jwtC} {
+		response := cs.POST(t, "/v1/call/reject", tok, map[string]any{"room_id": id})
+		if response.Code != 200 {
+			t.Fatal(response)
+		}
+	}
+	if lock := cs.roomIDForLock(t, a); lock != "" {
+		t.Errorf("all distinct targets rejected but caller remains locked: %s", lock)
+	}
+}
+
+func TestCall_HangupPublishFailureRecoversAfterRestart(t *testing.T) {
+	cs := newCallSuite(t)
+	a, b := uniqueDeviceID(t), uniqueDeviceID(t)
+	cs.seedDevice(t, a, 19001)
+	cs.seedDevice(t, b, 19002)
+	cs.seedContact(t, a, b, 19001, 19002, 1)
+	cs.broker.SetOnline(b)
+	token := deviceJWT(t, cs.cfg.JWTSecret, a)
+	r := cs.POST(t, "/v1/call/request", token, map[string]any{"targets": []string{b}, "call_type": "audio"})
+	if r.Code != 200 {
+		t.Fatal(r)
+	}
+	roomID := dataString(t, r, "room_id")
+	cs.broker.mu.Lock()
+	cs.broker.publishErr = errors.New("broker unavailable")
+	cs.broker.mu.Unlock()
+	r = cs.POST(t, "/v1/call/hangup", token, map[string]any{"room_id": roomID})
+	if r.Code != 200 {
+		t.Fatal(r)
+	}
+	if cs.roomIDForLock(t, a) != "" {
+		t.Fatal("hangup did not release room")
+	}
+	if cs.broker.findPublished("room_cancel", "sn_"+b) != nil {
+		t.Fatal("failed publish was delivered")
+	}
+	if n, err := cs.rdb.LLen(context.Background(), "call:outbox:room:"+roomID).Result(); err != nil || n != 1 {
+		t.Fatalf("pending=%d err=%v", n, err)
+	}
+	repeated := cs.POST(t, "/v1/call/hangup", token, map[string]any{"room_id": roomID})
+	if repeated.Code == 200 {
+		t.Fatal("deleted room unexpectedly exists")
+	}
+	cs.broker.mu.Lock()
+	cs.broker.publishErr = nil
+	cs.broker.mu.Unlock()
+	if err := cs.rdb.ZAdd(context.Background(), "call:outbox:due", redis.Z{Score: 0, Member: roomID}).Err(); err != nil {
+		t.Fatal(err)
+	}
+	restarted := callservice.NewService(cache.NewCallRooms(cs.rdb), mqttc.NewCallNotifier(cs.broker))
+	if err := restarted.Dispatch(context.Background(), 128); err != nil {
+		t.Fatal(err)
+	}
+	if msg := cs.broker.findPublished("room_cancel", "sn_"+b); msg == nil || msg.Msg["reason"] != "hangup" {
+		t.Fatalf("recovered notification: %+v", msg)
+	}
+	if n, err := cs.rdb.LLen(context.Background(), "call:outbox:room:"+roomID).Result(); err != nil || n != 0 {
+		t.Fatalf("pending=%d err=%v", n, err)
 	}
 }

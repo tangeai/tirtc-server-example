@@ -45,36 +45,6 @@ func (s *Server) publish(deviceID string, qos byte, topic string, msgType, from 
 	}
 }
 
-func (s *Server) publishCallIncoming(target, roomID, callerID, callerName, callType string) {
-	s.publish(target, 1, mqttc.DeviceCmdTopic(snClientID(target)), "call_incoming", callerID, map[string]any{
-		"room_id":     roomID,
-		"caller_id":   callerID,
-		"caller_name": callerName,
-		"call_type":   callType,
-	})
-}
-
-func (s *Server) publishRoomCancel(target, roomID, reason string, qos byte) {
-	s.publish(target, qos, mqttc.DeviceNotifyTopic(snClientID(target)), "room_cancel", "", map[string]any{
-		"room_id": roomID,
-		"reason":  reason,
-	})
-}
-
-func (s *Server) publishCalleeAnswered(callerID, roomID, calleeID string) {
-	s.publish(callerID, 1, mqttc.DeviceNotifyTopic(snClientID(callerID)), "callee_answered", "", map[string]any{
-		"room_id":   roomID,
-		"callee_id": calleeID,
-	})
-}
-
-func (s *Server) publishCallReject(target, roomID, rejecterID, reason string) {
-	s.publish(target, 1, mqttc.DeviceNotifyTopic(snClientID(target)), "call_reject", rejecterID, map[string]any{
-		"room_id": roomID,
-		"reason":  reason,
-	})
-}
-
 func (s *Server) publishCallersUpdate(target, action, contactType, peerID string) {
 	s.publish(target, 1, mqttc.DeviceNotifyTopic(snClientID(target)), "callers_update", "", map[string]any{
 		"action":       action,

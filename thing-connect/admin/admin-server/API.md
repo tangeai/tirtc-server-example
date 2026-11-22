@@ -326,6 +326,8 @@ X-Internal-Key: <shared-internal-key>
 | GET | `/v1/admin/devices/:device_id/recognition` | device.read | 用户选择、开关与月用量 |
 | PUT | `/v1/admin/devices/:device_id/recognition` | device.recognition.write | 管理许可与月额度 |
 
+任务记录中的 `task` 使用与[设备识别任务](../../api-reference.md#recognition-task)一致的公开结果结构，包含发布版本名称 `results[].name`、类型整体状态 `results[].overall_status`；纯语音类型不返回内部分析文字。`calls` 单独保留逐阶段调用状态和用量，不以任务整体状态代替计费记录。
+
 类型写入体为 scheme、action（save/publish/status）、expected_revision、reason。scheme 包含 scheme_id（新建为空）、name、description、media_type=audio、model、prompt、output_mode=text/audio/text_audio、voice、limits.max_file_bytes、limits.max_audio_seconds、enabled。publish 使用已保存草稿，生成不可变版本；status 使用 scheme_id 和 enabled，不编辑发布内容。错误40000表示字段不合法，40901表示编辑版本冲突，40400表示资源不存在。
 
 设备 PUT 为 allowed、monthly_limit、expected_revision、reason。管理员不覆盖用户开关与选择。月限额0至1000000，每执行一个类型占一次，默认100；按UTC自然月计量。模型实际 usage 按 analysis/tts 调用分别记录，不因失败抹去已报告消耗。

@@ -125,7 +125,8 @@ class RoomSession:
                                       ctypes.string_at(data, length), time.monotonic(), int(command))):
                     self.command_dropped += 1
         cbs.on_disconnected = sdk.OnDisconnCB(disconnected)
-        cbs.on_conn_error = sdk.OnConnErrCB(lambda conn, error: disconnected(conn))
+        cbs.on_conn_error = sdk.OnConnErrCB(
+            lambda conn, error: self._enqueue(('connection_error', self.generation, conn)))
         cbs.on_command = sdk.OnCmdCB(command)
         cbs.on_subscribe_audio = sdk.OnSubAudioCB(lambda conn, stream: 0 if stream == 1 else -1)
         # File-mode simulator consumes downlink without recording private room
@@ -439,7 +440,13 @@ class RoomSession:
                                              'device_id': self.config.device_id,
                                              'input_audio': descriptor(self.config.up_audio_format),
                                              'output_audio': descriptor(self.config.down_audio_format)}})
-            elif kind == 'disconnected':
+            elif kind in ('disconnected', 'connection_error'):
+                # on_disconnected returns ownership to the SDK; the queued
+                # handle must never be used again. An error still requires an
+                # explicit release, but neither path may send leave_room.
+                self.conn = None
+                if kind == 'connection_error':
+                    sdk.TiRtcDisconnect(conn)
                 raise RoomError(50200, '房间连接已断开')
             elif kind == 'audio':
                 if self.state == 'joined':
@@ -574,7 +581,9 @@ class RoomSession:
                     frame.stream_id, frame.media, frame.flags = 1, spec.media, spec.flags
                     if self.audio_timestamp is None:
                         self.audio_timestamp = int(time.monotonic() * 1000)
-                    frame.ts, frame.length = self.audio_timestamp & 0xffffffff, len(payload)
+                    # File packets have floating-point durations. Preserve the
+                    # fractional timeline, but pass an integer to the SDK ABI.
+                    frame.ts, frame.length = int(self.audio_timestamp) & 0xffffffff, len(payload)
                     self.audio_timestamp += duration
                     data = ctypes.create_string_buffer(payload)
                     with self.lock:
@@ -588,7 +597,7 @@ class RoomSession:
                         else:
                             self.audio_sent += 1
                         if rc in sdk.CONN_FATAL_ERRORS:
-                            self._enqueue(('disconnected', generation, conn))
+                            self._enqueue(('connection_error', generation, conn))
                     self.next_audio = time.monotonic() + duration/1000
                 now = time.monotonic()
                 if self.diagnostics and joined and now >= self.next_audio_diagnostic:

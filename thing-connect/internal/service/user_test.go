@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -64,13 +65,14 @@ func (f *fakeUserStore) UpdateDeviceName(_ context.Context, _ int64, _, _ string
 
 type fakeCacheStore struct {
 	deviceCodes           map[string]string // code → physical hash
+	emailDeliveries       map[string]string
 	emailCodes            map[string]string // email → code
 	passwordResetAttempts map[string]int64
 }
 
 func newFakeCache() *fakeCacheStore {
 	return &fakeCacheStore{
-		deviceCodes: map[string]string{}, emailCodes: map[string]string{}, passwordResetAttempts: map[string]int64{},
+		emailDeliveries: map[string]string{}, deviceCodes: map[string]string{}, emailCodes: map[string]string{}, passwordResetAttempts: map[string]int64{},
 	}
 }
 
@@ -701,4 +703,55 @@ func TestUserService_LoginRecordsOnlySuccessfulAuthentication(t *testing.T) {
 	if err == nil || token != "" {
 		t.Fatal("login returned success without recording its IP")
 	}
+}
+
+type auditMailFunc func(context.Context, string, string, string) error
+
+func (f auditMailFunc) Send(ctx context.Context, to, subject, body string) error {
+	return f(ctx, to, subject, body)
+}
+func TestOlderRegistrationMailFailurePreservesNewCode(t *testing.T) {
+	cache := newFakeCache()
+	started, release := make(chan struct{}), make(chan struct{})
+	var calls atomic.Int32
+	sender := auditMailFunc(func(context.Context, string, string, string) error {
+		if calls.Add(1) == 1 {
+			close(started)
+			<-release
+			return errors.New("old SMTP attempt failed")
+		}
+		return nil
+	})
+	svc := NewUserService(&fakeUserStore{}, cache, &fakeCaptcha{}, sender, "test-secret", DefaultServiceConfig())
+	done := make(chan error, 1)
+	go func() {
+		done <- svc.SendCode(context.Background(), "person@example.test", "192.0.2.1", captcha.CaptchaToken{})
+	}()
+	<-started
+	err := svc.SendCode(context.Background(), "person@example.test", "192.0.2.1", captcha.CaptchaToken{})
+	if err != nil {
+		close(release)
+		<-done
+		t.Fatal(err)
+	}
+	second := cache.emailCodes["person@example.test"]
+	close(release)
+	if err := <-done; err == nil {
+		t.Fatal("missing injected failure")
+	}
+	if got := cache.emailCodes["person@example.test"]; got != second || got == "" {
+		t.Fatal("late failure deleted the successfully sent newer registration code")
+	}
+}
+
+func (f *fakeCacheStore) SetEmailCodeDelivery(ctx context.Context, email, code, delivery string, ttl time.Duration) error {
+	f.emailDeliveries[email] = delivery
+	return f.SetEmailCode(ctx, email, code, ttl)
+}
+func (f *fakeCacheStore) DiscardEmailCodeDelivery(ctx context.Context, email, delivery string) error {
+	if f.emailDeliveries[email] == delivery {
+		delete(f.emailDeliveries, email)
+		return f.DelEmailCode(ctx, email)
+	}
+	return nil
 }

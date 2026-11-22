@@ -425,7 +425,7 @@ func (s *bindStore) GetUserDevices(ctx context.Context, userID int64) ([]model.D
 
 type cacheStore struct{ rdb *redis.Client }
 
-func NewCacheStore(rdb *redis.Client) store.CacheStore { return &cacheStore{rdb} }
+func NewCacheStore(rdb *redis.Client) *cacheStore { return &cacheStore{rdb} }
 
 func (s *cacheStore) IncrReportAttempt(ctx context.Context, physHash string, window time.Duration) (int64, error) {
 	key := "rate:" + physHash
@@ -505,7 +505,7 @@ func (s *cacheStore) DelDeviceCodeLookup(ctx context.Context, code string) error
 }
 
 func (s *cacheStore) SetEmailCode(ctx context.Context, email, code string, ttl time.Duration) error {
-	if err := s.rdb.Set(ctx, "email_code:"+email, code, ttl).Err(); err != nil {
+	if err := s.rdb.Eval(ctx, `redis.call("SET",KEYS[1],ARGV[1],"PX",ARGV[2]);redis.call("DEL",KEYS[2]);return 1`, []string{"email_code:" + email, "email_code_delivery:" + email}, code, ttl.Milliseconds()).Err(); err != nil {
 		return fmt.Errorf("cacheStore.SetEmailCode: %w", err)
 	}
 	return nil
@@ -712,4 +712,16 @@ func (s *cacheStore) GetReportFingerprint(ctx context.Context, deviceID string) 
 func (s *cacheStore) DelReportFingerprint(ctx context.Context, deviceID string) error {
 	s.rdb.Del(ctx, "report_fp:"+deviceID) //nolint:errcheck
 	return nil
+}
+
+// SetEmailCodeDelivery preserves the existing email_code value/TTL contract;
+// a separate, equally-lived generation fences failure cleanup.
+func (s *cacheStore) SetEmailCodeDelivery(ctx context.Context, email, code, delivery string, ttl time.Duration) error {
+	if ttl.Milliseconds() <= 0 || delivery == "" {
+		return fmt.Errorf("invalid email code delivery")
+	}
+	return s.rdb.Eval(ctx, `redis.call('SET',KEYS[1],ARGV[1],'PX',ARGV[3]);redis.call('SET',KEYS[2],ARGV[2],'PX',ARGV[3]);return 1`, []string{"email_code:" + email, "email_code_delivery:" + email}, code, delivery, ttl.Milliseconds()).Err()
+}
+func (s *cacheStore) DiscardEmailCodeDelivery(ctx context.Context, email, delivery string) error {
+	return s.rdb.Eval(ctx, `if redis.call('GET',KEYS[2])==ARGV[1] then redis.call('DEL',KEYS[1],KEYS[2]) end;return 1`, []string{"email_code:" + email, "email_code_delivery:" + email}, delivery).Err()
 }

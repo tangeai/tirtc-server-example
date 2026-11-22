@@ -193,9 +193,7 @@ func (s *RecognitionStore) Records(c context.Context, id string) (any, error) {
 	}
 	out := []map[string]any{}
 	for _, row := range rows {
-		var snap struct {
-			Task r.Task `json:"task"`
-		}
+		var snap r.Snapshot
 		if e := json.Unmarshal([]byte(row.Raw), &snap); e != nil {
 			return nil, e
 		}
@@ -231,7 +229,7 @@ func (s *RecognitionStore) Records(c context.Context, id string) (any, error) {
 		if e != nil {
 			return nil, e
 		}
-		out = append(out, map[string]any{"task": snap.Task, "calls": calls})
+		out = append(out, map[string]any{"task": snap.PublicTask(), "calls": calls})
 	}
 	return out, nil
 }

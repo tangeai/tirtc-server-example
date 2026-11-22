@@ -1,9 +1,12 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -568,3 +571,16 @@ func (f *fakeCache3) GetReportFingerprint(_ context.Context, _ string) (string, 
 	return f.reportFP, nil
 }
 func (f *fakeCache3) DelReportFingerprint(_ context.Context, _ string) error { return nil }
+
+func TestBindDoesNotLogVerificationCode(t *testing.T) {
+	var output bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&output, nil)))
+	defer slog.SetDefault(previous)
+	bs := &fakeBindStore{claimErr: errors.New("fixture failure")}
+	svc := newBindSvc(bs, newFakeCache3("819273", "BB:CC", "", "", true))
+	_, _ = svc.Bind(context.Background(), 2, "819273")
+	if strings.Contains(output.String(), "819273") {
+		t.Fatal("binding credential leaked to logs")
+	}
+}

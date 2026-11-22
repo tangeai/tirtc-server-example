@@ -21,9 +21,9 @@ git push -u origin feat/your-feature
 
 提交 PR 前完成本地验证，在 PR 中写明测试结果、跳过项和未覆盖的外部环境。未完成的工作使用 Draft PR。合并前必须通过 GitHub Actions 必需检查并解决审查意见；`main` 有新提交时更新分支并重新检查。
 
-维护者审查后使用 Squash merge 合并。合并后的远端功能分支自动删除，本地分支由贡献者自行清理。不要直接推送到 `main` 或 `release/*`，也不要通过绕过规则替代测试。
+维护者审查后使用 Squash merge 合并。合并后的远端功能分支自动删除，本地分支由贡献者自行清理。不要直接推送到 `main`，也不要通过绕过规则替代测试。
 
-`release/<主版本.次版本>` 用于发布稳定和版本维护；旧版本修复先进入适用的主干，再由维护者按需回移并提交到对应发布分支的 PR。正式发布以 `v<版本号>` Tag 和 GitHub Release 标识，已发布 Tag 不移动或删除。
+验收通过的功能分支通过 PR 合并到 `main`，维护者从经过验证的 `main` 提交创建 `v<版本号>` Tag 和 GitHub Release；Beta 使用 `v<版本号>-beta.N`。日常开发和发布不创建 `develop` 或 `release/*` 分支，已发布 Tag 不移动或删除。历史维护分支不作为当前开发、集成或发布入口。
 
 ## 开发环境
 
@@ -31,10 +31,11 @@ git push -u origin feat/your-feature
 cd thing-connect
 go mod download
 npm ci
+npm --prefix user-server/user-web ci
 npm --prefix admin/admin-web ci
 ```
 
-Go 版本以 `thing-connect/go.mod` 为准；前端需要 Node.js 20.19+ 或 22.12+。
+Go 版本以 `thing-connect/go.mod` 为准；前端需要 Node.js 22.12+、npm 10+。
 
 ## 验证
 

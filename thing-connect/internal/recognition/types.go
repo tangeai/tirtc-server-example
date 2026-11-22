@@ -101,6 +101,8 @@ type Speech struct {
 	Error  *Failure `json:"error"`
 }
 type Item struct {
+	Name          string   `json:"name"`
+	OverallStatus string   `json:"overall_status"`
 	ID            string   `json:"item_id"`
 	Order         int      `json:"order"`
 	SchemeID      string   `json:"scheme_id"`
