@@ -970,6 +970,31 @@ test_multi_instance_restart_preserves_configuration_pause() (
     assert_eq "78" "$result" "start must preserve the configuration pause"
 )
 
+test_rollback_restore_skips_start_preflight() (
+    local capture="$TEST_ROOT/restore-start.capture" result=0
+    : >"$capture"
+    write_fake_supervisorctl "$TEST_ROOT/fake-supervisorctl"
+    SUPERVISORCTL="$TEST_ROOT/fake-supervisorctl"
+    SUPERVISOR_CAPTURE="$capture"
+    export SUPERVISOR_CAPTURE
+    ACTIVE_SERVICE_MANAGER=supervisor
+    DEPLOY_ROOT="$TEST_ROOT/restore-start"
+    mkdir -p "$DEPLOY_ROOT/admin-server" "$DEPLOY_ROOT/device-server"
+    : >"$DEPLOY_ROOT/device-server/device-server"
+    service_config_path() { echo "$DEPLOY_ROOT/admin-server/config.yaml"; }
+    # The checker fails like an unreachable dependency would.
+    printf '#!/usr/bin/env bash\nexit 1\n' >"$DEPLOY_ROOT/admin-server/admin-server"
+    chmod +x "$DEPLOY_ROOT/admin-server/admin-server"
+    start_program() { printf 'start %s\n' "$2" >>"$capture"; }
+    start_one device-server >/dev/null 2>&1 || result=$?
+    assert_eq "1" "$result" "an ordinary start must stop on a failed preflight"
+    assert_eq "" "$(cat "$capture")" "no instance may start after a failed preflight"
+    start_one device-server 1 >/dev/null 2>&1 || result=$?
+    assert_eq "start device-server
+start device-server-2
+start device-server-10" "$(cat "$capture")" "restoring a release must start every instance without the preflight"
+)
+
 test_supervisor_preflight_counts_every_instance() (
     local capture="$TEST_ROOT/preflight-instances.capture"
     : >"$capture"
@@ -1314,6 +1339,7 @@ test_service_instances_restart_one_at_a_time
 test_extra_instance_health_uses_process_port
 test_unreachable_supervisor_never_hides_extra_instances
 test_supervisor_preflight_counts_every_instance
+test_rollback_restore_skips_start_preflight
 test_multi_instance_restart_preserves_configuration_pause
 echo "PASS: deploy-prod.sh"
 

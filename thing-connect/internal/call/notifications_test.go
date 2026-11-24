@@ -76,17 +76,18 @@ func (q *expiryQueue) ExpireNotification(_ context.Context, n Notification) erro
 }
 
 func TestDispatchDropsSignalingOlderThanMaxAge(t *testing.T) {
-	now := time.Now()
+	// A skewed instance clock cannot matter: CreatedAt is far in the past
+	// relative to this process, yet only the queue-measured Age decides.
+	skewed := time.Now().Add(-time.Hour).UnixMilli()
 	q := &expiryQueue{pending: []Notification{
-		{ID: "stale", Kind: "room_cancel", CreatedAt: now.Add(-MaxNotificationAge - time.Millisecond).UnixMilli()},
-		{ID: "fresh", Kind: "room_cancel", CreatedAt: now.Add(-MaxNotificationAge + time.Second).UnixMilli()},
+		{ID: "stale", Kind: "room_cancel", CreatedAt: skewed, Age: MaxNotificationAge + time.Millisecond},
+		{ID: "fresh", Kind: "room_cancel", CreatedAt: skewed, Age: MaxNotificationAge - time.Second},
 	}}
 	var published []string
 	s := NewService(q, publisherFunc(func(_ context.Context, n Notification) error {
 		published = append(published, n.ID)
 		return nil
 	}))
-	s.now = func() time.Time { return now }
 	if err := s.Dispatch(context.Background(), 10); err != nil {
 		t.Fatal(err)
 	}

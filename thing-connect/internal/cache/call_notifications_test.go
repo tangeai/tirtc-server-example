@@ -558,3 +558,41 @@ func TestCallNotificationsExpiredSignalIsDroppedAndAlerts(t *testing.T) {
 	}
 	f.rdb.ZRem(ctx, "call:outbox:expired", head.ID)
 }
+
+// The age of a message is measured on the clock that stamped created_at, so an
+// instance whose own clock is skewed neither expires fresh signaling nor keeps
+// stale signaling alive.
+func TestCallNotificationClaimAgeComesFromQueueClock(t *testing.T) {
+	f := newRoomFixture(t)
+	ctx := context.Background()
+	r := f.create(t, "age", "caller", "callee")
+	fresh, ok, err := f.store.ClaimRoomNotification(ctx, time.Minute, r.RoomID)
+	if err != nil || !ok {
+		t.Fatalf("fresh claim: %v %v", ok, err)
+	}
+	if fresh.Age < 0 || fresh.Age > 10*time.Second {
+		t.Fatalf("fresh age=%s", fresh.Age)
+	}
+	var stored call.Notification
+	key := "call:outbox:room:" + r.RoomID
+	raw, err := f.rdb.LIndex(ctx, key, 0).Result()
+	if err != nil || json.Unmarshal([]byte(raw), &stored) != nil {
+		t.Fatalf("read head: %q %v", raw, err)
+	}
+	stored.CreatedAt -= (3 * time.Minute).Milliseconds()
+	aged, err := json.Marshal(stored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.rdb.LSet(ctx, key, 0, aged).Err(); err != nil {
+		t.Fatal(err)
+	}
+	dueRoom(t, f, r.RoomID)
+	old, ok, err := f.store.ClaimRoomNotification(ctx, time.Minute, r.RoomID)
+	if err != nil || !ok {
+		t.Fatalf("aged claim: %v %v", ok, err)
+	}
+	if old.Age < 3*time.Minute || old.Age > 3*time.Minute+10*time.Second || old.Age <= call.MaxNotificationAge {
+		t.Fatalf("aged age=%s", old.Age)
+	}
+}

@@ -172,6 +172,8 @@ config_exists() {
 }
 
 preflight_service() {
+    # deploy-prod.sh sets this only while restoring a release that already ran.
+    [ "${THING_CONNECT_SKIP_START_PREFLIGHT:-0}" != 1 ] || return 0
     local service checker="$DEPLOY_ROOT/$ADMIN_SERVICE/$ADMIN_SERVICE"
     service="$(base_service "$1")" || return 1
     local -a instance_args=()

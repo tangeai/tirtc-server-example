@@ -48,7 +48,7 @@ end
 if not raw then return {'more'} end
 redis.call('HSET','call:outbox:leases',room,ARGV[1])
 redis.call('ZADD','call:outbox:due',now+tonumber(ARGV[2]),room)
-return {raw,redis.call('HGET','call:outbox:attempts',room) or '0'}
+return {raw,redis.call('HGET','call:outbox:attempts',room) or '0',now}
 `)
 var finishCallNotification = redis.NewScript(`
 local room=ARGV[1]
@@ -150,8 +150,19 @@ func (s *CallRooms) claimNotification(ctx context.Context, lease time.Duration, 
 		return event, false, err
 	}
 	event.Lease = token
-	event.Attempts, err = strconv.Atoi(fmt.Sprint(rows[1]))
-	return event, err == nil, err
+	if len(rows) != 3 {
+		return event, false, fmt.Errorf("invalid call notification claim")
+	}
+	if event.Attempts, err = strconv.Atoi(fmt.Sprint(rows[1])); err != nil {
+		return event, false, err
+	}
+	// Age is measured on the clock that stamped CreatedAt, never an instance clock.
+	claimedAt, err := strconv.ParseInt(fmt.Sprint(rows[2]), 10, 64)
+	if err != nil {
+		return event, false, err
+	}
+	event.Age = time.Duration(max(0, claimedAt-event.CreatedAt)) * time.Millisecond
+	return event, true, nil
 }
 func (s *CallRooms) CompleteNotification(ctx context.Context, event call.Notification) error {
 	return finishCallNotification.Run(ctx, s.client, nil, event.RoomID, event.ID, event.Lease, "complete", 0).Err()

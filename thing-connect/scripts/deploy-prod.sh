@@ -1186,12 +1186,13 @@ service_programs() {
 
 # Standalone start/restart uses the installed checker even without a source checkout.
 # Resolve the inventory once so preflight covers exactly the programs we start.
+# The second argument "1" skips the check when restoring a release that already ran.
 supervisor_start_programs() {
-    local svc="$1" programs cfg
+    local svc="$1" skip_preflight="${2:-0}" programs cfg
     local -a instances
     programs="$(service_programs "$svc")" || return 1
     mapfile -t instances <<<"$programs"
-    if [ "${#instances[@]}" -gt 1 ]; then
+    if [ "$skip_preflight" != 1 ] && [ "${#instances[@]}" -gt 1 ]; then
         cfg="$(service_config_path "$ADMIN_SERVICE")" || return 1
         "$DEPLOY_ROOT/$ADMIN_SERVICE/$ADMIN_SERVICE" -c "$cfg" -deploy-root "$DEPLOY_ROOT" \
             -check-service-config "$svc" -check-service-instances "${#instances[@]}" >&2 || return $?
@@ -1325,14 +1326,17 @@ deploy_one() {
 }
 
 # ================== 启动 ==================
+# The second argument "1" restores a previous release without the start
+# preflight: a dependency outage that failed the update must not also keep the
+# last working instances stopped. Updates and ordinary starts always check.
 start_one() {
-    local svc="$1"
+    local svc="$1" skip_preflight="${2:-0}"
     if [ "$svc" = recognition-server ] && [ "${DEFER_RECOGNITION_START:-0}" = 1 ]; then
         log "识别服务等待 MQTT 配置发布，保持停止"
         return 0
     fi
     if [ "$ACTIVE_SERVICE_MANAGER" = local ]; then
-        "$LOCAL_SERVICECTL" start "$SUPERVISOR_GROUP:$svc" || return $?
+        THING_CONNECT_SKIP_START_PREFLIGHT="$skip_preflight" "$LOCAL_SERVICECTL" start "$SUPERVISOR_GROUP:$svc" || return $?
         wait_for_readiness "$svc"
         return $?
     fi
@@ -1351,7 +1355,7 @@ start_one() {
     fi
 
     local program programs
-    programs="$(supervisor_start_programs "$svc")" || return $?
+    programs="$(supervisor_start_programs "$svc" "$skip_preflight")" || return $?
     for program in $programs; do
         start_program "$svc" "$program" || return 1
     done
@@ -1547,7 +1551,7 @@ rollback_release() {
             fi
         fi
         if [ -f "$backup/$svc" ] && [ "$ACTIVE_SERVICE_MANAGER" != "manual" ] && service_is_enabled "$svc"; then
-            if ! start_one "$svc"; then
+            if ! start_one "$svc" 1; then
                 err "$svc 回滚后启动失败，请人工处理"
                 rollback_failed=1
             fi

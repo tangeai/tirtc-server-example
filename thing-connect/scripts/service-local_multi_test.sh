@@ -69,6 +69,12 @@ for action in start restart; do
     TEST_PREFLIGHT_STATUS=78 "$CONTROLLER" "$action" user-server >"$TEST_ROOT/pause.log" 2>&1 || status=$?
     [ "$status" = 78 ] || fail "$action returned $status for a configuration pause"
 done
+# Restoring a release that already ran must not depend on the preflight.
+checks="$(wc -l <"$DEPLOY_ROOT/preflight.log")"
+TEST_PREFLIGHT_STATUS=78 THING_CONNECT_SKIP_START_PREFLIGHT=1 "$CONTROLLER" start user-server >"$TEST_ROOT/skip.log" 2>&1 ||
+    fail "restore start was blocked by the preflight: $(cat "$TEST_ROOT/skip.log")"
+[ "$(wc -l <"$DEPLOY_ROOT/preflight.log")" = "$checks" ] || fail 'restore start ran the preflight'
+"$CONTROLLER" stop user-server >/dev/null
 "$CONTROLLER" start user-server
 grep -q -- '-check-service-instances 2' "$DEPLOY_ROOT/preflight.log" || fail 'missing multi-instance preflight'
 [ "$(curl -fsS "http://127.0.0.1:$PORT/health/ready")" = local-user-server ] || fail 'primary identity'

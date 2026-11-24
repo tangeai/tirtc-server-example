@@ -19,6 +19,9 @@ type Notification struct {
 	CreatedAt int64             `json:"created_at"`
 	Lease     string            `json:"-"`
 	Attempts  int               `json:"-"`
+	// Age is the time since enqueue, measured by the queue's own clock when the
+	// message is claimed. Instance clocks may differ from the queue's.
+	Age time.Duration `json:"-"`
 }
 
 // NotificationQueue is part of the room store: transitions and their messages
@@ -49,14 +52,13 @@ type Publisher interface {
 type Service struct {
 	store     Rooms
 	publisher Publisher
-	now       func() time.Time
 }
 
 func NewService(store Rooms, publisher Publisher) *Service {
 	if store == nil || publisher == nil {
 		panic("call service requires room store and publisher")
 	}
-	return &Service{store: store, publisher: publisher, now: time.Now}
+	return &Service{store: store, publisher: publisher}
 }
 func (s *Service) Create(ctx context.Context, r Room, offline []string, ttl time.Duration) (string, error) {
 	existing, err := s.store.Create(ctx, r, offline, ttl)
@@ -149,7 +151,7 @@ func (s *Service) dispatch(ctx context.Context, limit int, claim func(context.Co
 		if !found {
 			return nil
 		}
-		if age := s.now().Sub(time.UnixMilli(event.CreatedAt)); age > MaxNotificationAge {
+		if age := event.Age; age > MaxNotificationAge {
 			slog.WarnContext(ctx, "call notification expired undelivered",
 				"room_id", event.RoomID, "kind", event.Kind, "age_ms", age.Milliseconds(), "attempts", event.Attempts)
 			finishCtx, finish := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
