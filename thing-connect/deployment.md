@@ -529,7 +529,7 @@ sudo /opt/thing-connect/service-local.sh restart thing-connect:admin-server
 Device、User、VoIP、AI、Call 和 Recognition 可以各自运行多个实例分担请求并互为备份；Admin 只运行一个实例。`service-local.sh` 支持本机多实例，配置步骤见[本机多实例联调](deployment-local.md#本机多实例联调)；生产也可使用 Supervisor 或其他进程管理器。启用前须满足：
 
 - 连接 MQTT 的服务（AI 以外）在 Admin 中把 `<服务>/mqtt.connection` 设为 Username 认证方式。ClientID 认证方式使用固定 ClientID，多个实例会互相挤掉连接，只能单实例运行。
-- 每个实例的 `SERVICE_INSTANCE_ID` 和 HTTP 端口不能重复。MQTT ClientID 由 Username 和实例 ID 组成，两个进程使用同一实例 ID 时，后连接的进程会挤掉前一个。同一服务的实例共用一个 `config.yaml`，用环境变量 `THING_CONNECT_HTTP_PORT` 覆盖 `server.http_port`。
+- 每个实例的 `SERVICE_INSTANCE_ID` 和 HTTP 端口不能重复。MQTT ClientID 由 Username 和实例 ID 组成，两个进程使用同一实例 ID 时，后连接的进程会挤掉前一个。服务状态通过心跳发现同一 ID 的另一个运行中进程，把该实例的 `instance_id` 依赖标为 `unhealthy` 并写入错误日志；两个进程都会降级，为其中一个改用唯一 ID 并重启后恢复。该检查要求各主机时钟同步，且不摘除 HTTP readiness。同一服务的实例共用一个 `config.yaml`，用环境变量 `THING_CONNECT_HTTP_PORT` 覆盖 `server.http_port`。
 - 按全部实例重新核算 [MySQL 连接预算](#mysql-连接预算)：每个实例都有独立连接池，总量为各服务“实例数 × `max_open_conns`”之和。Redis 同样按实例数估算客户端连接。
 - 公网请求经 Nginx 分发，每个服务的 upstream 列出全部实例。
 - 运行多个 AI、VoIP 或 Call 实例时，User 调用它们内部接口的地址也要负载均衡：启用 Nginx 模板中注释掉的内网入口（只监听 `127.0.0.1:9100`，只转发 `/v1/{ai,voip,call}/internal/`），并把 User 启动配置（`config-current/user-server/config.yaml`）中的 `ai.server_url`、`voip.server_url`、`call.server_url` 改为 `http://127.0.0.1:9100`，然后重启 User。内网入口不得开放到公网，`internal.key` 不变。
@@ -537,7 +537,7 @@ Device、User、VoIP、AI、Call 和 Recognition 可以各自运行多个实例�
 
 [Supervisor 模板](deploy/supervisor/thing-connect.supervisor.conf)中注释掉的 `device-server-2` 和 `user-server-2` 是第二个实例的写法，约定端口为主实例端口加 10（Device 9011、User 9012、VoIP 9013、AI 9014、Call 9015、Recognition 9016）。取消注释并修改程序名、目录、实例 ID 和端口，保留原程序的 `priority`，把新程序加入 `[group:thing-connect]` 的 `programs`，执行 `sudo supervisorctl reread && sudo supervisorctl update`。再在 [Nginx 模板](deploy/nginx/thing-connect.nginx.conf)对应 upstream 中加入 `server 127.0.0.1:<端口> max_fails=0;` 并重新加载 Nginx。已停止的实例拒绝连接时，Nginx 把请求转给下一个实例。每个 `server` 都须保留 `max_fails=0`：Nginx 默认在一次连接失败后把该实例排除 10 秒，刚重启完的实例仍被排除时再重启下一台，upstream 没有可用实例，请求返回 502。
 
-`deploy-prod.sh` 把 Supervisor 组中名为 `<服务>-<数字>` 的程序识别为该服务的额外实例，在启动或重启多实例服务前按清单数量预检 MQTT 配置，按进程环境中的 `THING_CONNECT_HTTP_PORT` 检查各自的 `/health/ready`。`restart` 逐台重启：上一台通过 readiness 后才重启下一台，其余实例继续服务。`update` 仍先停止全部服务再迁移和发布，避免新旧二进制在同一数据库结构上混跑。
+`deploy-prod.sh` 把 Supervisor 组中名为 `<服务>-<数字>` 的程序识别为该服务的额外实例，在启动或重启业务服务前预检必填配置和依赖，多实例服务再按清单数量预检 MQTT 配置，按进程环境中的 `THING_CONNECT_HTTP_PORT` 检查各自的 `/health/ready`。`restart` 逐台重启：上一台通过 readiness 后才重启下一台，其余实例继续服务。`update` 仍先停止全部服务再迁移和发布，避免新旧二进制在同一数据库结构上混跑。
 
 User 实例收到停止信号后先排空 HTTP，再等正在投递的邮件和队列确认完成。Supervisor 和本地控制器为每个 User 实例预留 50 秒退出时间。
 
@@ -607,7 +607,7 @@ HTTP 会明文传输管理员登录信息和会话 Cookie。公网生产环境�
 
 ### 4.6 版本更新与数据库升级
 
-`build.sh` 为同一批服务注入统一的程序版本。通过 `BUILD_VERSION=v1.2.3 ./build.sh` 可指定发布版本号；未指定时使用 `git describe --tags --dirty`：干净工作区且当前提交恰好对应标签时为标签本身（如 `v1.0.0`），标签之后的开发构建为“最近标签-提交数-g提交号”（如 `v1.1.0-beta.1-3-g946320b`），有未提交修改时追加 `-dirty`；仓库没有任何标签时使用精确到秒的 UTC 构建时间，后台将其转换为浏览器本地时间展示。`deploy-local.sh` 按本地源码仓库计算版本号和提交号。后台同时显示 Git 提交号用于排查。构建时间不是服务启动时间；旧程序只有提交号时显示“历史构建（未记录时间）”，重新构建并部署后才会带上时间。配置修订号 `rN` 独立表示动态配置的发布次数，不作为程序版本。
+`build.sh` 为同一批服务注入统一的程序版本。通过 `BUILD_VERSION=v1.2.3 ./build.sh` 可指定发布版本号；未指定时使用 `git describe --tags --dirty`：干净工作区且当前提交恰好对应标签时为标签本身（如 `v1.0.0`），标签之后的开发构建为“最近标签-提交数-g提交号”（如 `v1.1.0-beta.1-3-g946320b`），有未提交修改时追加 `-dirty`；仓库没有任何标签时使用精确到秒的 UTC 构建时间，后台将其转换为浏览器本地时间展示。`deploy-local.sh` 按本地源码仓库计算版本号和提交号。从有未提交修改的工作区完成的构建，其完整构建标记带有 `-dirty` 后缀，`deploy-prod.sh` 和安装入口拒绝发布；还原修改后需重新构建。后台同时显示 Git 提交号用于排查。构建时间不是服务启动时间；旧程序只有提交号时显示“历史构建（未记录时间）”，重新构建并部署后才会带上时间。配置修订号 `rN` 独立表示动态配置的发布次数，不作为程序版本。
 
 
 两个脚本用途不同：

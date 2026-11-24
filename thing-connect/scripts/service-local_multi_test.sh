@@ -115,6 +115,9 @@ curl -fsS "http://127.0.0.1:$PORT/health/ready" >/dev/null
     source "$SCRIPTS/deploy-local.sh"
     LOCAL_SOURCE_ROOT="$(cd "$SCRIPTS/../.." && pwd)"
     local_gateway_config 18080 >"$TEST_ROOT/gateway.conf"
+    ports="$(local_gateway_backend_ports "$TEST_ROOT/gateway.conf")"
+    grep -qx "$PORT" <<<"$ports" || fail 'gateway backend ports missing the instance'
+    ! grep -qx 9011 <<<"$ports" || fail 'template comment port counted as a backend'
 )
 grep -q "upstream user_server { server 127.0.0.1:$PORT max_fails=0; server 127.0.0.1:$((PORT+10)) max_fails=0; }" "$TEST_ROOT/gateway.conf" || fail 'gateway inventory'
 grep -q '^    listen 127.0.0.1:9100;' "$TEST_ROOT/gateway.conf" || fail 'internal gateway missing'

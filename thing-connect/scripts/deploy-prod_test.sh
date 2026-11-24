@@ -761,6 +761,41 @@ test_deploy_requires_complete_current_build() (
     validate_build_release "${ALL_SERVICES[@]}"
 )
 
+test_build_marks_artifacts_from_modified_worktree() (
+    local root="$TEST_ROOT/build-marker" scripts_dir marker commit
+    scripts_dir="$(cd "$(dirname "$0")" && pwd)"
+    mkdir -p "$root/thing-connect/scripts" "$root/thing-connect/internal/installer" "$root/stub-bin"
+    cp "$scripts_dir/../build.sh" "$root/thing-connect/"
+    cp "$scripts_dir/service-catalog.sh" "$root/thing-connect/scripts/"
+    cp "$scripts_dir/../internal/installer/service_catalog.tsv" "$root/thing-connect/internal/installer/"
+    printf 'bin/\nnode_modules/\n' >"$root/.gitignore"
+    # Stubs replace the toolchain: only the marker behavior is under test.
+    printf '#!/usr/bin/env bash\nexit 0\n' >"$root/stub-bin/npm"
+    cat >"$root/stub-bin/go" <<'BASH'
+#!/usr/bin/env bash
+while [ "$#" -gt 0 ]; do [ "$1" = -o ] && { out="$2"; break; }; shift; done
+printf '#!/usr/bin/env bash\n' >"$out"
+BASH
+    chmod +x "$root/stub-bin/npm" "$root/stub-bin/go" "$root/thing-connect/build.sh"
+    git -C "$root" -c init.templateDir= init -q
+    git -C "$root" add --all
+    git -C "$root" -c user.name=test -c user.email=test@localhost -c commit.gpgSign=false commit -qm fixture
+    commit="$(git -C "$root" rev-parse HEAD)"
+    marker="$root/thing-connect/bin/.release-commit"
+
+    (cd "$root/thing-connect" && PATH="$root/stub-bin:$PATH" ./build.sh >/dev/null 2>&1)
+    assert_eq "$commit" "$(tr -d '[:space:]' <"$marker")" "a clean build records the exact commit"
+
+    printf 'uncommitted\n' >"$root/thing-connect/feature.go"
+    (cd "$root/thing-connect" && PATH="$root/stub-bin:$PATH" ./build.sh >/dev/null 2>&1)
+    assert_eq "$commit-dirty" "$(tr -d '[:space:]' <"$marker")" "a build from a modified work tree must not match the commit"
+    rm -f "$root/thing-connect/feature.go"
+    [ "$(tr -d '[:space:]' <"$marker")" != "$commit" ] || {
+        echo "FAIL: reverting the change made the dirty artifacts look current" >&2
+        exit 1
+    }
+)
+
 test_deploy_lock_is_scoped_to_one_mutating_command() (
     local capture="$TEST_ROOT/deploy-lock.capture"
     full_deploy() {
@@ -993,6 +1028,40 @@ test_rollback_restore_skips_start_preflight() (
     assert_eq "start device-server
 start device-server-2
 start device-server-10" "$(cat "$capture")" "restoring a release must start every instance without the preflight"
+)
+
+test_single_instance_start_runs_preflight() (
+    local capture="$TEST_ROOT/single-start.capture" result=0
+    : >"$capture"
+    write_fake_supervisorctl "$TEST_ROOT/fake-supervisorctl"
+    SUPERVISORCTL="$TEST_ROOT/fake-supervisorctl"
+    SUPERVISOR_CAPTURE="$capture"
+    export SUPERVISOR_CAPTURE
+    ACTIVE_SERVICE_MANAGER=supervisor
+    DEPLOY_ROOT="$TEST_ROOT/single-start"
+    mkdir -p "$DEPLOY_ROOT/admin-server" "$DEPLOY_ROOT/voip-server"
+    : >"$DEPLOY_ROOT/voip-server/voip-server"
+    : >"$DEPLOY_ROOT/admin-server/admin-server.checks"
+    service_config_path() { echo "$DEPLOY_ROOT/admin-server/config.yaml"; }
+    cat >"$DEPLOY_ROOT/admin-server/admin-server" <<'BASH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$(dirname "$0")/admin-server.checks"
+exit "${CHECK_STATUS:-0}"
+BASH
+    chmod +x "$DEPLOY_ROOT/admin-server/admin-server"
+    start_program() { printf 'start %s\n' "$2" >>"$capture"; }
+    CHECK_STATUS=78 start_one voip-server >/dev/null 2>&1 || result=$?
+    assert_eq "78" "$result" "a single-instance start must surface a pending configuration"
+    assert_eq "" "$(cat "$capture")" "no single instance may start while the preflight fails"
+    grep -q -- '-check-service-config voip-server$' "$DEPLOY_ROOT/admin-server/admin-server.checks" || {
+        echo "FAIL: single-instance start did not run the preflight without an instance count" >&2
+        exit 1
+    }
+    start_one voip-server >/dev/null 2>&1
+    assert_eq "start voip-server" "$(cat "$capture")" "a passing preflight must start the single instance"
+    : >"$DEPLOY_ROOT/admin-server/admin-server.checks"
+    CHECK_STATUS=1 start_one "$ADMIN_SERVICE" >/dev/null 2>&1 || true
+    assert_eq "" "$(cat "$DEPLOY_ROOT/admin-server/admin-server.checks")" "Admin never checks itself as a business service"
 )
 
 test_supervisor_preflight_counts_every_instance() (
@@ -1323,6 +1392,7 @@ test_activated_bundle_is_resolved_and_not_overwritten
 test_file_publish_never_creates_configuration
 test_deploy_uses_catalog_static_directory
 test_deploy_requires_complete_current_build
+test_build_marks_artifacts_from_modified_worktree
 test_deploy_lock_is_scoped_to_one_mutating_command
 test_menu_starts_with_maintenance_update
 test_first_install_is_not_a_deploy_command
@@ -1340,6 +1410,7 @@ test_extra_instance_health_uses_process_port
 test_unreachable_supervisor_never_hides_extra_instances
 test_supervisor_preflight_counts_every_instance
 test_rollback_restore_skips_start_preflight
+test_single_instance_start_runs_preflight
 test_multi_instance_restart_preserves_configuration_pause
 echo "PASS: deploy-prod.sh"
 
