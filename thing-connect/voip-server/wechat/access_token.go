@@ -16,11 +16,6 @@ import (
 )
 
 // stableTokenURL is a variable so tests can point it at a fake WeChat server.
-//
-// Every voip-server instance must use stable_token without force_refresh:
-// within its validity window WeChat returns the same token to all callers,
-// while client_credential /cgi-bin/token issues a new token per call and
-// invalidates the previous one, so instances would revoke each other's tokens.
 var stableTokenURL = "https://api.weixin.qq.com/cgi-bin/stable_token"
 
 var tokenHTTPClient = &http.Client{Timeout: 10 * time.Second}
@@ -39,7 +34,7 @@ type cachedToken struct {
 
 // tokenState 每个 appID 一个锁，持锁期间进行 fetch，后续并发请求等待同一结果。
 type tokenState struct {
-	mu    sync.Mutex
+	lock  chan struct{}
 	cache cachedToken
 }
 
@@ -60,7 +55,7 @@ func getTokenState(appID, secret string) *tokenState {
 	if s, ok := tokens[key]; ok {
 		return s
 	}
-	s := &tokenState{}
+	s := &tokenState{lock: make(chan struct{}, 1)}
 	tokens[key] = s
 	return s
 }
@@ -73,19 +68,26 @@ func GetAccessToken(ctx context.Context, appID, secret string) (string, error) {
 	}
 
 	st := getTokenState(appID, secret)
-	st.mu.Lock()
-	defer st.mu.Unlock()
-
-	now := time.Now()
-	if st.cache.token != "" && now.Add(5*time.Minute).Before(st.cache.expiresAt) {
+	select {
+	case st.lock <- struct{}{}:
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+	defer func() { <-st.lock }()
+	if st.cache.token != "" && time.Now().Add(5*time.Minute).Before(st.cache.expiresAt) {
 		return st.cache.token, nil
 	}
+	return st.fetch(ctx, appID, secret, false)
+}
 
+// fetch updates the cache while the caller holds the per-credential lock.
+func (st *tokenState) fetch(ctx context.Context, appID, secret string, force bool) (string, error) {
+	now := time.Now()
 	body, err := json.Marshal(map[string]any{
 		"grant_type":    "client_credential",
 		"appid":         appID,
 		"secret":        secret,
-		"force_refresh": false,
+		"force_refresh": force,
 	})
 	if err != nil {
 		return "", err
@@ -101,7 +103,7 @@ func GetAccessToken(ctx context.Context, appID, secret string) (string, error) {
 		return "", err
 	}
 	defer res.Body.Close()
-	respBody, err := io.ReadAll(res.Body)
+	respBody, err := io.ReadAll(io.LimitReader(res.Body, 64<<10))
 	if err != nil {
 		return "", err
 	}
@@ -110,7 +112,7 @@ func GetAccessToken(ctx context.Context, appID, secret string) (string, error) {
 		return "", fmt.Errorf("wechat response: %w", err)
 	}
 	if r.Errcode != 0 {
-		slog.WarnContext(ctx, "wechat get access_token failed", "errcode", r.Errcode, "errmsg", r.Errmsg)
+		slog.WarnContext(ctx, "wechat get access_token failed", "errcode", r.Errcode)
 		return "", &APIError{Errcode: r.Errcode, Errmsg: r.Errmsg}
 	}
 	if r.AccessToken == "" {
@@ -127,15 +129,45 @@ func GetAccessToken(ctx context.Context, appID, secret string) (string, error) {
 	return st.cache.token, nil
 }
 
-// invalidateAccessToken drops the cached token only if it is still the one
-// WeChat rejected, so a concurrent caller's fresher token survives.
-func invalidateAccessToken(appID, secret, rejected string) {
-	st := getTokenState(appID, secret)
-	st.mu.Lock()
-	defer st.mu.Unlock()
-	if st.cache.token == rejected {
-		st.cache = cachedToken{}
+// RefreshGate grants one forced refresh per application across VoIP instances.
+type RefreshGate func(ctx context.Context, appID string) (bool, error)
+
+func (st *tokenState) replacementToken(ctx context.Context, appID, secret, rejected string, reserve RefreshGate) (string, error) {
+	select {
+	case st.lock <- struct{}{}:
+	case <-ctx.Done():
+		return "", ctx.Err()
 	}
+	defer func() { <-st.lock }()
+	if st.cache.token != "" && st.cache.token != rejected && time.Now().Add(5*time.Minute).Before(st.cache.expiresAt) {
+		return st.cache.token, nil
+	}
+	st.cache = cachedToken{}
+	token, err := st.fetch(ctx, appID, secret, false)
+	if err != nil || token != rejected {
+		return token, err
+	}
+	// A peer may have renewed the token between rejection and the stable read.
+	// Only rotate when the stable endpoint still supplies the rejected token.
+	granted, err := reserve(ctx, appID)
+	if err != nil {
+		return "", err
+	}
+	if granted {
+		return st.fetch(ctx, appID, secret, true)
+	}
+	for delay := 100 * time.Millisecond; delay <= 800*time.Millisecond; delay *= 2 {
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(delay):
+		}
+		token, err = st.fetch(ctx, appID, secret, false)
+		if err != nil || token != rejected {
+			return token, err
+		}
+	}
+	return "", errors.New("wechat: token refresh in progress")
 }
 
 // tokenRejected reports WeChat errors meaning the access_token itself is
@@ -153,11 +185,8 @@ func tokenRejected(err error) bool {
 	return false
 }
 
-// CallWithAccessToken runs call with the cached access_token. When WeChat
-// rejects that token it is dropped and call runs once more with a freshly
-// fetched one. The refetch never forces a refresh, which would invalidate the
-// token every other voip-server instance is using.
-func CallWithAccessToken(ctx context.Context, appID, secret string, call func(accessToken string) error) error {
+// CallWithAccessToken retries the business call once after a token rejection.
+func CallWithAccessToken(ctx context.Context, appID, secret string, reserve RefreshGate, call func(accessToken string) error) error {
 	token, err := GetAccessToken(ctx, appID, secret)
 	if err != nil {
 		return err
@@ -166,9 +195,8 @@ func CallWithAccessToken(ctx context.Context, appID, secret string, call func(ac
 	if !tokenRejected(err) {
 		return err
 	}
-	slog.WarnContext(ctx, "wechat rejected cached access_token, refetching", "appid", appID, "err", err)
-	invalidateAccessToken(appID, secret, token)
-	token, err = GetAccessToken(ctx, appID, secret)
+	slog.WarnContext(ctx, "wechat rejected cached access_token, refetching", "appid", appID)
+	token, err = getTokenState(appID, secret).replacementToken(ctx, appID, secret, token, reserve)
 	if err != nil {
 		return err
 	}

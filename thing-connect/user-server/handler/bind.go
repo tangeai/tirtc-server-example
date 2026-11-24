@@ -1,14 +1,8 @@
 package handler
 
 import (
-	"context"
-	"encoding/json"
 	"errors"
-	"log"
-	"log/slog"
-	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -76,79 +70,9 @@ func (s *Server) deleteReset(c *gin.Context) {
 		return
 	}
 	deviceID := req.DeviceID
-	var cleanupTargets []string
-	if s.UnbindCleanup != nil {
-		cleanupTargets = s.UnbindCleanup.Targets
-	}
-	if err := s.bindSvc.ResetWithCleanup(c.Request.Context(), deviceID, currentUserID(c), cleanupTargets); err != nil {
+	if err := s.bindSvc.ResetWithCleanup(c.Request.Context(), deviceID, currentUserID(c), s.cleanupTargets); err != nil {
 		apiresp.FromError(c, err)
 		return
 	}
-	// Transactional outbox targets were recorded with the unbind above. Legacy
-	// callback wiring remains for tests and local integrations without targets.
-	if len(cleanupTargets) == 0 {
-		s.runUnbindCleanup(c.Request.Context(), deviceID)
-	}
 	apiresp.OK(c, gin.H{"msg": "reset success"})
-}
-
-// runUnbindCleanup executes all registered cleanup callbacks after a successful
-// unbind. Each callback runs in its own goroutine; failures are logged but never
-// block the response.
-func (s *Server) runUnbindCleanup(ctx context.Context, deviceID string) {
-	if s.UnbindCleanup == nil {
-		return
-	}
-	if s.UnbindCleanup.Enqueue != nil {
-		if err := s.UnbindCleanup.Enqueue(ctx, deviceID); err != nil {
-			log.Printf("[reset] enqueue durable cleanup device=%s: %v", deviceID, err)
-		}
-		return
-	}
-	// Synchronous: local DB cleanup (cheap, want it done before response in most cases).
-	if s.UnbindCleanup.DeleteLocalRole != nil {
-		if err := s.UnbindCleanup.DeleteLocalRole(ctx, deviceID); err != nil {
-			log.Printf("[reset] cleanup local ai_device_role device=%s: %v", deviceID, err)
-		}
-	}
-	// Asynchronous: cloud API calls and inter-service notifications.
-	if s.UnbindCleanup.DeleteCloudRoles != nil {
-		go func() {
-			if err := s.UnbindCleanup.DeleteCloudRoles(context.Background(), deviceID); err != nil {
-				log.Printf("[reset] cleanup cloud device-roles device=%s: %v", deviceID, err)
-			}
-		}()
-	}
-	if s.callServerURL != "" {
-		go s.notifyCallServerUnbind(deviceID)
-	}
-	if s.UnbindCleanup.NotifyVoIP != nil {
-		go s.UnbindCleanup.NotifyVoIP(deviceID)
-	}
-}
-
-// notifyCallServerUnbind tells call-server to clean up contacts for the unbound
-// device. Runs in its own goroutine with a 3s timeout; failures are logged but
-// never block the unbind response (best-effort).
-func (s *Server) notifyCallServerUnbind(deviceID string) {
-	body, _ := json.Marshal(map[string]string{"device_id": deviceID})
-	slog.Info("unbind notify call-server req", "url", s.callServerURL+"/v1/call/internal/unbind", "body", string(body))
-	req, _ := http.NewRequest(http.MethodPost,
-		s.callServerURL+"/v1/call/internal/unbind",
-		strings.NewReader(string(body)))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Internal-Key", s.internalKey)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
-	resp, err := http.DefaultClient.Do(req.WithContext(ctx))
-	if err != nil {
-		slog.Warn("unbind notify call-server failed", "device", deviceID, "err", err)
-		return
-	}
-	resp.Body.Close()
-	if resp.StatusCode != 200 {
-		log.Printf("[reset] call-server unbind device=%s returned %d", deviceID, resp.StatusCode)
-	}
 }

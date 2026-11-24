@@ -285,6 +285,141 @@ func TestCallNotificationsFailedRoomDoesNotBlockAnotherRoom(t *testing.T) {
 	}
 }
 
+func TestCallNotificationsOrphanIndexDoesNotBlockQueue(t *testing.T) {
+	f := newRoomFixture(t)
+	ctx := context.Background()
+	live := f.create(t, "live", "caller", "callee")
+	orphan := f.prefix + "orphan"
+	for _, key := range []string{"call:outbox:due", "call:outbox:age"} {
+		if err := f.rdb.ZAdd(ctx, key, redis.Z{Score: -1, Member: orphan}).Err(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.rdb.HSet(ctx, "call:outbox:attempts", orphan, 3).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := f.store.ClaimRoomNotification(ctx, time.Minute, orphan); err != nil || found {
+		t.Fatalf("scoped orphan claim: found=%v err=%v", found, err)
+	}
+	if !errors.Is(f.rdb.ZScore(ctx, "call:outbox:due", orphan).Err(), redis.Nil) || f.rdb.HExists(ctx, "call:outbox:attempts", orphan).Val() {
+		t.Fatal("scoped claim kept orphan index")
+	}
+	for _, key := range []string{"call:outbox:due", "call:outbox:age"} {
+		if err := f.rdb.ZAdd(ctx, key, redis.Z{Score: -1, Member: orphan}).Err(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sink := &callCapture{}
+	if err := call.NewService(f.store, sink).Dispatch(ctx, 32); err != nil {
+		t.Fatalf("orphan index blocked dispatch: %v", err)
+	}
+	found := false
+	for _, e := range sink.events {
+		found = found || e.RoomID == live.RoomID
+	}
+	if !found {
+		t.Fatalf("live room not delivered: %+v", sink.events)
+	}
+	if !errors.Is(f.rdb.ZScore(ctx, "call:outbox:due", orphan).Err(), redis.Nil) || !errors.Is(f.rdb.ZScore(ctx, "call:outbox:age", orphan).Err(), redis.Nil) {
+		t.Fatal("orphan index retained")
+	}
+}
+
+func TestCallNotificationsRepairOrphanCountWhileOtherRoomIsLeased(t *testing.T) {
+	f := newRoomFixture(t)
+	ctx := context.Background()
+	live := f.create(t, "still-pending", "caller", "a", "b")
+	if _, ok, err := f.store.ClaimRoomNotification(ctx, time.Hour, live.RoomID); err != nil || !ok {
+		t.Fatalf("lease: %v %v", ok, err)
+	}
+	lost := f.create(t, "evicted", "other", "x", "y", "z")
+	if err := f.rdb.Del(ctx, "call:outbox:room:"+lost.RoomID).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := f.store.ClaimRoomNotification(ctx, time.Hour, lost.RoomID); err != nil || ok {
+		t.Fatalf("orphan: %v %v", ok, err)
+	}
+	restarted := cache.NewCallRooms(f.rdb)
+	b, err := restarted.Backlog(ctx)
+	if err != nil || b.Pending != 2 {
+		t.Fatalf("surviving backlog: %+v %v", b, err)
+	}
+	if count, err := f.rdb.Get(ctx, "call:outbox:count").Int64(); err != nil || count != 2 {
+		t.Fatalf("persistent count: %d %v", count, err)
+	}
+}
+
+func TestCallNotificationsAppendReplacesEvictedLeasedList(t *testing.T) {
+	f := newRoomFixture(t)
+	ctx := context.Background()
+	r := f.create(t, "lost", "caller", "a", "b")
+	old, ok, err := f.store.ClaimRoomNotification(ctx, time.Hour, r.RoomID)
+	if err != nil || !ok {
+		t.Fatal(err)
+	}
+	if err := f.rdb.Del(ctx, "call:outbox:room:"+r.RoomID).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.Answer(ctx, r.RoomID, r.Caller, r.Targets[0]); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.CompleteNotification(ctx, old); err != nil {
+		t.Fatal(err)
+	}
+	b, err := f.store.Backlog(ctx)
+	if err != nil || b.Pending != 2 {
+		t.Fatalf("replaced backlog: %+v %v", b, err)
+	}
+	next, ok, err := f.store.ClaimRoomNotification(ctx, time.Hour, r.RoomID)
+	if err != nil || !ok || next.Kind != "callee_answered" {
+		t.Fatalf("replacement delayed by lost lease: %+v %v %v", next, ok, err)
+	}
+}
+
+func TestCallNotificationsRequestFlushOnlyDeliversChangedRoom(t *testing.T) {
+	f := newRoomFixture(t)
+	ctx := context.Background()
+	backlog := f.create(t, "backlog", "caller-a", "callee-a")
+	delivered := []string{}
+	service := call.NewService(f.store, notificationPublishFunc(func(_ context.Context, e call.Notification) error {
+		delivered = append(delivered, e.RoomID)
+		return nil
+	}))
+	r := call.Room{RoomID: f.prefix + "request", Caller: f.prefix + "caller-b", Targets: []string{f.prefix + "callee-b"}, CallType: "audio", CreatedAt: time.Now().UTC().Format(time.RFC3339)}
+	if existing, err := service.Create(ctx, r, nil, time.Hour); err != nil || existing != "" {
+		t.Fatalf("create: %q %v", existing, err)
+	}
+	if !reflect.DeepEqual(delivered, []string{r.RoomID}) {
+		t.Fatalf("request flush delivered %v", delivered)
+	}
+	if n := f.rdb.LLen(ctx, "call:outbox:room:"+backlog.RoomID).Val(); n != 1 {
+		t.Fatalf("request flush drained another room: %d", n)
+	}
+
+	// Auto-switch cancels the answering device's previous room in the same request.
+	if _, err := service.Answer(ctx, r.RoomID, r.Caller, r.Targets[0]); err != nil {
+		t.Fatal(err)
+	}
+	switched := f.create(t, "switched", "caller-c", "callee-b")
+	delivered = nil
+	result, err := service.Answer(ctx, switched.RoomID, switched.Caller, r.Targets[0])
+	if err != nil || result.Previous == nil || result.Previous.RoomID != r.RoomID {
+		t.Fatalf("auto-switch: %+v %v", result, err)
+	}
+	rooms := map[string]bool{}
+	for _, id := range delivered {
+		rooms[id] = true
+	}
+	if !rooms[r.RoomID] || !rooms[switched.RoomID] || rooms[backlog.RoomID] {
+		t.Fatalf("auto-switch flush delivered %v", delivered)
+	}
+	for _, id := range []string{r.RoomID, switched.RoomID} {
+		if n := f.rdb.LLen(ctx, "call:outbox:room:"+id).Val(); n != 0 {
+			t.Fatalf("room %s kept %d notifications", id, n)
+		}
+	}
+}
+
 func TestCallNotificationsExpiredRoomDoesNotRing(t *testing.T) {
 	f := newRoomFixture(t)
 	r := f.create(t, "expired", "caller", "callee")

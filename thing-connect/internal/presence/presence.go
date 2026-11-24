@@ -141,9 +141,18 @@ func (p *Projector) lose(o Observation) {
 		slog.Error("presence observation dropped", "rejected", p.rejected.Load())
 	}
 	now := time.Now().UnixMilli()
-	p.lostAt.Store(now)
+	recordLatest(&p.lostAt, now)
 	if o.IP != "" {
-		p.lostIPAt.Store(now)
+		recordLatest(&p.lostIPAt, now)
+	}
+}
+
+// Loss callbacks can run concurrently and reach the store out of time order.
+func recordLatest(dst *atomic.Int64, ms int64) {
+	for old := dst.Load(); old < ms; old = dst.Load() {
+		if dst.CompareAndSwap(old, ms) {
+			return
+		}
 	}
 }
 
@@ -152,7 +161,7 @@ func (p *Projector) lose(o Observation) {
 // next broker listing restores them and heartbeats refresh within TTL.
 func (p *Projector) SubscriptionGap() {
 	p.subscriptionGaps.Add(1)
-	p.lostAt.Store(time.Now().UnixMilli())
+	recordLatest(&p.lostAt, time.Now().UnixMilli())
 	slog.Warn("presence subscription re-established; reconciliation requested")
 }
 
@@ -342,7 +351,7 @@ func (w *writer) drain() {
 }
 
 func (p *Projector) apply(ctx context.Context, batch []Observation) error {
-	if lost := p.lostIPAt.Load(); p.connections != nil && lost > p.gapPersisted.Load() {
+	if lost := p.lostIPAt.Load(); p.connections != nil && p.unresolved(lost) && lost > p.gapPersisted.Load() {
 		if err := p.connections.queue.MarkGap(ctx, time.UnixMilli(lost)); err != nil {
 			return err
 		}
@@ -374,15 +383,12 @@ func (p *Projector) Reconcile(ctx context.Context, clients BrokerClients) error 
 	})
 	if err == nil && p.connections != nil {
 		err = p.connections.queue.ClearGap(ctx, listedFrom)
-		if err == nil {
-			p.connections.gap.Store(false)
-		}
 	}
 	if err != nil {
 		p.reconcileFailures.Add(1)
 		return err
 	}
-	p.reconciledFrom.Store(listedFrom.UnixMilli())
+	recordLatest(&p.reconciledFrom, listedFrom.UnixMilli())
 	p.reconcileClients.Store(count)
 	p.reconcileLast.Store(time.Now().UnixMilli())
 	return nil

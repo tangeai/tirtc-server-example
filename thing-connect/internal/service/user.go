@@ -163,19 +163,25 @@ func (q *InMemoryPasswordResetEmailQueue) release(job passwordResetMailJob) {
 // Run processes password-reset email jobs until ctx is cancelled. Delivery
 // errors are logged; users can request another verification code to retry.
 func (q *InMemoryPasswordResetEmailQueue) Run(ctx context.Context) {
+	var workers sync.WaitGroup
 	for i := 0; i < passwordResetMailWorkers; i++ {
-		go q.runWorker(ctx)
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			q.runWorker(ctx)
+		}()
 	}
-	<-ctx.Done()
+	workers.Wait()
 }
 
 func (q *InMemoryPasswordResetEmailQueue) runWorker(ctx context.Context) {
-	for {
+	for ctx.Err() == nil {
 		select {
 		case <-ctx.Done():
 			return
 		case job := <-q.jobs:
-			deliveryCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			// Finish an admitted SMTP operation before releasing its gate on shutdown.
+			deliveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 			err := q.deliver(deliveryCtx, job.email)
 			cancel()
 			q.release(job)

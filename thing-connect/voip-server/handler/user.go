@@ -113,7 +113,7 @@ func (s *Server) postSnTicket(c *gin.Context) {
 		return
 	}
 	var ticket string
-	err = wechat.CallWithAccessToken(c.Request.Context(), wxAppID, app.Secret, func(accessToken string) error {
+	err = wechat.CallWithAccessToken(c.Request.Context(), wxAppID, app.Secret, s.refresh, func(accessToken string) error {
 		var callErr error
 		ticket, callErr = wechat.GetSnTicket(c.Request.Context(), accessToken, req.DeviceID, app.ModelID)
 		return callErr

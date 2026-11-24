@@ -30,7 +30,7 @@ func TestInternalUnbindDelegatesAndPreservesResponseContract(t *testing.T) {
 			}
 			return nil
 		})
-		s := NewServer(&config.Config{Internal: config.InternalCfg{Key: "test-key"}}, nil, nil, nil, nil, service)
+		s := NewServer(&config.Config{Internal: config.InternalCfg{Key: "test-key"}}, nil, nil, nil, nil, service, unusedRefreshGate)
 		r := gin.New()
 		r.POST("/", s.postInternalUnbind)
 		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"device_id":"device-1"}`))

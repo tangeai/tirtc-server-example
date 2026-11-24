@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
 	"testing"
 
 	"thing-connect/internal/presence"
@@ -39,16 +41,16 @@ func TestListConnectedPagesAndFilters(t *testing.T) {
 			return
 		}
 		q := r.URL.Query()
-		if r.URL.Path != "/api/v5/clients" || q.Get("conn_state") != "connected" || q.Get("fields") == "" {
+		if r.URL.Path != "/api/v5/clients_v2" || q.Get("conn_state") != "connected" || q.Get("fields") == "" || q.Has("gte_connected_at") {
 			t.Errorf("unexpected request %s", r.URL)
 		}
-		switch q.Get("page") {
-		case "1":
-			fmt.Fprint(w, `{"data":[{"clientid":"sn_a","ip_address":"::ffff:192.0.2.1","connected_at":"2026-01-01T08:00:00.123+08:00"},{"clientid":"devsrv-1","ip_address":"127.0.0.1"}],"meta":{"hasnext":true}}`)
-		case "2":
+		switch q.Get("cursor") {
+		case "":
+			fmt.Fprint(w, `{"data":[{"clientid":"sn_a","ip_address":"::ffff:192.0.2.1","connected_at":"2026-01-01T08:00:00.123+08:00"},{"clientid":"devsrv-1","ip_address":"127.0.0.1"}],"meta":{"cursor":"after+/="}}`)
+		case "after+/=":
 			fmt.Fprint(w, `{"data":[{"clientid":"tmp_a1b2c3d4","ip_address":"192.0.2.2","connected_at":"2026-01-01T08:00:00+08:00"}],"meta":{"hasnext":false}}`)
 		default:
-			t.Errorf("unexpected page %s", q.Get("page"))
+			t.Errorf("unexpected page %s", q.Get("cursor"))
 		}
 	}))
 	defer server.Close()
@@ -74,6 +76,72 @@ func TestListConnectedPagesAndFilters(t *testing.T) {
 	wrong, _ := New(Config{URL: server.URL, APIKey: "k", APISecret: "bad"})
 	if err := wrong.ListConnected(context.Background(), func([]presence.Observation) error { return nil }); err == nil {
 		t.Fatal("unauthorized listing succeeded")
+	}
+}
+
+func TestLegacyListingRecoversLaterConnectionAfterEarlierDisconnect(t *testing.T) {
+	const pivot = "1767225600000"
+	var ranges []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v5/clients_v2" {
+			http.NotFound(w, r)
+			return
+		}
+		q := r.URL.Query()
+		if q.Get("page") != "1" {
+			t.Errorf("offset paging would skip a device after the disconnect: %s", r.URL)
+		}
+		lo, hi := q.Get("gte_connected_at"), q.Get("lte_connected_at")
+		ranges = append(ranges, lo+".."+hi)
+		switch {
+		case lo == "" && hi == "":
+			fmt.Fprint(w, `{"data":[{"clientid":"sn_gone","connected_at":"2026-01-01T00:00:00Z"}],"meta":{"hasnext":true}}`)
+		case lo == "" && hi == pivot:
+			// The old first page is now empty.
+			fmt.Fprint(w, `{"data":[],"meta":{"hasnext":false}}`)
+		case lo == "1767225600001" && hi == "":
+			fmt.Fprint(w, `{"data":[{"clientid":"sn_lost","connected_at":"2026-01-01T00:00:01Z","ip_address":"192.0.2.8"}],"meta":{"hasnext":false}}`)
+		default:
+			t.Errorf("unexpected interval %s", r.URL)
+		}
+	}))
+	defer server.Close()
+	c, _ := New(Config{URL: server.URL, APIKey: "key"})
+	var got []presence.Observation
+	if err := c.ListConnected(context.Background(), func(batch []presence.Observation) error { got = append(got, batch...); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if len(ranges) != 3 || len(got) != 1 || got[0].ClientID != "sn_lost" || got[0].IP != "192.0.2.8" {
+		t.Fatalf("ranges=%v observations=%+v", ranges, got)
+	}
+}
+
+func TestIncompleteListingsReturnErrors(t *testing.T) {
+	for i, tc := range []struct {
+		legacy   bool
+		response string
+		want     string
+	}{
+		{false, `{"data":[],"meta":{"cursor":"again"}}`, "repeated"},
+		{false, `{"data":[],"meta":{"hasnext":true}}`, "missing continuation"},
+		{false, `{"data":[]}`, "incomplete"},
+		{true, `{"data":[],"meta":{}}`, "pagination"},
+		{true, `{"data":[],"meta":{"hasnext":true}}`, "exceeds"},
+	} {
+		t.Run(strconv.Itoa(i), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tc.legacy && r.URL.Path == "/api/v5/clients_v2" {
+					http.NotFound(w, r)
+					return
+				}
+				fmt.Fprint(w, tc.response)
+			}))
+			defer server.Close()
+			c, _ := New(Config{URL: server.URL, APIKey: "key"})
+			if err := c.ListConnected(context.Background(), func([]presence.Observation) error { return nil }); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err=%v, want %s", err, tc.want)
+			}
+		})
 	}
 }
 

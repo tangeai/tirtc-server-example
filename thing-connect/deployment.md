@@ -535,9 +535,13 @@ Device、User、VoIP、AI、Call 和 Recognition 可以各自运行多个实例�
 - 运行多个 AI、VoIP 或 Call 实例时，User 调用它们内部接口的地址也要负载均衡：启用 Nginx 模板中注释掉的内网入口（只监听 `127.0.0.1:9100`，只转发 `/v1/{ai,voip,call}/internal/`），并把 User 启动配置（`config-current/user-server/config.yaml`）中的 `ai.server_url`、`voip.server_url`、`call.server_url` 改为 `http://127.0.0.1:9100`，然后重启 User。内网入口不得开放到公网，`internal.key` 不变。
 - 实例分布在多台机器时，所有机器须启用 NTP 时钟同步；Admin 上传的开发板图片保存在 Admin 部署根目录的 `var/board-images`，由 User 从本机读取，须把该目录挂载为共享存储，或只在与 Admin 同机的 User 实例上提供 `/v1/board-images/`。同机多实例只分担进程故障，不等于高可用。
 
-[Supervisor 模板](deploy/supervisor/thing-connect.supervisor.conf)中注释掉的 `device-server-2` 和 `user-server-2` 是第二个实例的写法，约定端口为主实例端口加 10（Device 9011、User 9012、VoIP 9013、AI 9014、Call 9015、Recognition 9016）。取消注释并修改程序名、目录、实例 ID 和端口，保留原程序的 `priority`，把新程序加入 `[group:thing-connect]` 的 `programs`，执行 `sudo supervisorctl reread && sudo supervisorctl update`。再在 [Nginx 模板](deploy/nginx/thing-connect.nginx.conf)对应 upstream 中加入 `server 127.0.0.1:<端口>;` 并重新加载 Nginx。已停止的实例拒绝连接时，Nginx 把请求转给下一个实例。
+[Supervisor 模板](deploy/supervisor/thing-connect.supervisor.conf)中注释掉的 `device-server-2` 和 `user-server-2` 是第二个实例的写法，约定端口为主实例端口加 10（Device 9011、User 9012、VoIP 9013、AI 9014、Call 9015、Recognition 9016）。取消注释并修改程序名、目录、实例 ID 和端口，保留原程序的 `priority`，把新程序加入 `[group:thing-connect]` 的 `programs`，执行 `sudo supervisorctl reread && sudo supervisorctl update`。再在 [Nginx 模板](deploy/nginx/thing-connect.nginx.conf)对应 upstream 中加入 `server 127.0.0.1:<端口> max_fails=0;` 并重新加载 Nginx。已停止的实例拒绝连接时，Nginx 把请求转给下一个实例。每个 `server` 都须保留 `max_fails=0`：Nginx 默认在一次连接失败后把该实例排除 10 秒，刚重启完的实例仍被排除时再重启下一台，upstream 没有可用实例，请求返回 502。
 
-`deploy-prod.sh` 把 Supervisor 组中名为 `<服务>-<数字>` 的程序识别为该服务的额外实例，按进程环境中的 `THING_CONNECT_HTTP_PORT` 检查各自的 `/health/ready`。`restart` 逐台重启：上一台通过 readiness 后才重启下一台，其余实例继续服务。`update` 仍先停止全部服务再迁移和发布，避免新旧二进制在同一数据库结构上混跑。
+`deploy-prod.sh` 把 Supervisor 组中名为 `<服务>-<数字>` 的程序识别为该服务的额外实例，在启动或重启多实例服务前按清单数量预检 MQTT 配置，按进程环境中的 `THING_CONNECT_HTTP_PORT` 检查各自的 `/health/ready`。`restart` 逐台重启：上一台通过 readiness 后才重启下一台，其余实例继续服务。`update` 仍先停止全部服务再迁移和发布，避免新旧二进制在同一数据库结构上混跑。
+
+User 实例收到停止信号后先排空 HTTP，再等正在投递的邮件和队列确认完成。Supervisor 和本地控制器为每个 User 实例预留 50 秒退出时间。
+
+VoIP 使用微信稳定版接口凭据。微信拒绝缓存的 token 时，实例先读取微信当前凭据；若仍是被拒的值，通过 Redis 协调同一 AppID 的强制刷新，每分钟最多一次。业务调用最多重试一次。重置 AppSecret 后，应先在 Admin 发布新的密钥。
 
 验收时在 Broker 客户端列表确认每个实例各有一个连接且保持在线，ClientID 互不相同；逐个重启实例期间，经 Nginx 的请求不出现 502 或连接失败。
 
@@ -749,7 +753,7 @@ Admin 中配置识别服务 MQTT、千问默认 Key 及接口地域；只用音�
 公网设备连接 Broker 时同时依赖 JWT 认证和 Topic 授权，二者共同保证每台设备只能访问自己的 Topic。
 
 - **JWT 认证**：使用 HS256 和业务服务共享的 `jwt_secret`，从 Password 读取 token，`verify_claims` 至少包含 `device_id = "${username}"`。业务服务签发的临时 token 和正式 token 都带 `clientid` claim，值分别为 `temp_client_id` 和 `sn_{device_id}`。
-- **Topic 授权**：`deploy/emqx/acl.conf` 是完整的 EMQX 文件授权规则，可直接作为当前生效的文件授权源；服务账号用户名与 Admin 发布值不同时同步替换，`authorization.no_match` 设为 `deny`。规则中的本机来源拥有全部权限，公网设备须直连 EMQX，不能经同机反向代理转发。规则按已认证的 Username 生成 Topic：正式连接只能订阅 `device/sn_{device_id}/cmd`、`device/sn_{device_id}/notify`，发布 `device/sn_{device_id}/ack`、`device/sn_{device_id}/up`；临时连接只能订阅自己的 `cmd`，发布自己的 `ack`、`up`。其他设备的 Topic 和通配订阅均被拒绝。使用数据库、HTTP 或云端授权源时配置等价规则。
+- **Topic 授权**：`deploy/emqx/acl.conf` 是完整的 EMQX 文件授权规则，可直接作为当前生效的文件授权源；服务账号用户名与 Admin 发布值不同时同步替换，`authorization.no_match` 设为 `deny`。服务账号使用与设备用户名互不重叠的专用用户名。设备直连或经同机 TLS 代理连接时，均按认证身份授权。规则按已认证的 Username 生成 Topic：正式连接只能订阅 `device/sn_{device_id}/cmd`、`device/sn_{device_id}/notify`，发布 `device/sn_{device_id}/ack`、`device/sn_{device_id}/up`；临时连接只能订阅自己的 `cmd`，发布自己的 `ack`、`up`。其他设备的 Topic 和通配订阅均被拒绝。使用数据库、HTTP 或云端授权源时配置等价规则。
 - **ClientID 绑定**：在 `verify_claims` 中加入 `clientid = "${clientid}"` 后，Broker 拒绝使用其他设备 ClientID 的连接，防止合法设备冒用 ClientID 挤掉对方连接或伪造在线状态。不带 `clientid` claim 的 token 会被拒绝（CONNACK `0x86`），因此须在 Device 签发该 claim 后，至少等待一个 `device-server/device.token_policy` 的 `token_expiry`（期间调整过时取最大值）再启用，使旧 token 全部自然过期；启用前在 Broker 客户端列表确认所有 `sn_` 连接的 ClientID 都等于 `sn_` 加 Username。启用后如需回滚 Device 到不签发 `clientid` claim 的版本，先从 `verify_claims` 移除该项。
 
 ### 设备在线状态消费与升级验收
@@ -774,7 +778,7 @@ Device 的在线订阅连接断开时立即结束 MQTT 会话，Broker 把该实
 
 Admin 配置 `device-server/mqtt.broker_api` 填写 EMQX 管理接口地址（例如 `http://127.0.0.1:18083`）、API Key 和 API Secret。在 EMQX 控制台“系统设置 - API 密钥”创建密钥；EMQX 支持密钥角色时选择只读角色。地址留空表示不自动核对。未发布 Admin 配置时读取 Device `config.yaml` 的 `broker_api`，修改后运行时生效。管理接口只供 Device 从内网访问，不得开放公网。
 
-Device 启动时，以及发生事件丢失（接收队列溢出、待写缓冲溢出或订阅断线重连）后，分页读取 Broker 的全部在线连接：恢复 `sn_` 和 `tmp_` 设备的在线状态，用 Broker 记录的连接时间和地址补写正式设备的上线 IP。只有在丢失发生之后开始的完整读取成功，才清除丢失状态和 Redis 中的 `presence:connections:gap` 标记；读取期间再次丢失时保持未恢复并在下一轮重试。读取失败按 5 秒递增退避，最长 1 分钟。
+Device 启动时，以及发生事件丢失（接收队列溢出、待写缓冲溢出或订阅断线重连）后，分页读取 Broker 的全部在线连接：恢复 `sn_` 和 `tmp_` 设备的在线状态，用 Broker 记录的连接时间和地址补写正式设备的上线 IP。优先使用 EMQX 的 `/api/v5/clients_v2` 游标接口；若 Broker 仅提供 `/api/v5/clients`，则按连接时间拆分为互不重叠的区间，每个区间一次读完。旧接口下若同一毫秒的连接数超过 1000，核对会报告失败并保留标记，需要提供游标接口。只有在丢失发生之后开始的完整读取成功，才清除丢失状态和 Redis 中的 `presence:connections:gap` 标记；读取期间再次丢失时保持未恢复并在下一轮重试。读取失败按 5 秒递增退避，最长 1 分钟。
 
 心跳按最多 256 条或 100 毫秒批量写入 Redis。内存接收队列最多 16384 条；Redis 不可写时，Device 继续接收事件，按设备合并为每台设备最新的一条，以 0.5 至 2 秒退避重试，最多缓存 262144 台设备。接收队列或合并缓存溢出时记为事件丢失，readiness 不通过：丢失的事件只有在线观测时，配置自动核对后完成核对即恢复，未配置时 150 秒后由心跳修正；丢失的事件带有上线 IP 时，必须完成核对才恢复。Redis 写入超过 5 秒没有进展或 MQTT 订阅失败也会使 readiness 不通过。MQTT 订阅或退订失败时，连接恢复任务以 1 至 30 秒有界退避重试，成功前 readiness 不通过，任务随连接关闭退出。心跳有效期按原始观测时间计算，重试不会延长过期心跳；应用服务器与 Redis 必须保持时钟同步。在线查询接口仍沿用现有 Redis 读取语义，不能把其他服务 Redis 可达等同于状态消费者健康；运维必须同时监控 Device readiness。
 
@@ -827,17 +831,21 @@ User 的服务状态实例包含解绑清理队列（`cleanup_outbox`）的 `met
 
 配置格式见各服务的 `config.yaml.example`。并发范围 1–10000，总预算范围 1 毫秒至 3 分钟，0 表示使用默认值。预算从进入应用开始，覆盖读取请求体、鉴权、数据库/Redis 连接池等待和下游调用；下游已有更短超时时使用较短值。健康接口、页面及静态资源不占用这些名额。外部代理的超时须覆盖所选预算。已知资源的必要补偿可能使用独立的短超时，例如 MCP 创建后的失败删除最多 5 秒；不会重新发起创建或付费识别。
 
+生产 Nginx 模板使用默认的请求体缓冲。经该入口上传知识库文件时，Nginx 先接收完整请求体，再把请求转给 AI，客户端上传时间主要消耗在代理侧。直连 AI 或关闭 `proxy_request_buffering` 时，读文件也计入 25 秒。按预期文件大小和最慢上传速率设置 AI 的 `server.request_limits.upload.timeout`，并给云端处理留出时间。用户 H5 的表单请求总时限为 60 秒。
+
 过载沿用业务错误 `50000`：Device/User/AI/Recognition 返回 HTTP 500，Call/VoIP 返回 HTTP 200；微信通知返回 HTTP 200、`errcode=10`。响应带 `Retry-After: 1`。上传或写请求失败不证明尚未提交，客户端先查询已有结果，不得盲目新建任务。处理中的超时由原业务错误映射返回。
 
 服务状态实例的 `request_<组>_active/limit` 表示当前并发和上限；`rejected_total`、`completed_total`、`deadline_exceeded_total`、`duration_ms_total` 为进程累计值。`sql_pool_wait_total` 和 `sql_pool_wait_ms_total` 表示 SQL 连接池等待次数和时间；`sql_pool_open/in_use/idle` 为连接数。Redis 使用 `redis_pool_connections/idle/timeouts_total/misses_total`。只在相同实例生命周期内计算增量，不把多个实例的累计值直接比较。
 
 具有下行能力的 User、VoIP、Call、Recognition 实例上报 `mqtt_ack_active`、`mqtt_ack_completed_total`、`mqtt_ack_failed_total`、`mqtt_ack_timeout_total`、`mqtt_ack_canceled_total` 和 `mqtt_ack_duration_ms_total`。这是从订阅、发布到收到设备 ACK 的完整调用统计，失败包括订阅和发布失败；它不证明媒体会话成功。Device 的 `presence_online_updates_total`、`presence_connection_updates_total` 统计 Redis 已确认的在线和连接快照有效更新；对应 `*_ignored_total` 包含同时间、旧时间及已过期的无效更新。网络中断而未收到脚本结果时不推测写入是否成功。
 
-Call 的 `remark_outbox` 和 `call_notification_outbox`、AI 的 `ai_cloud_outbox`、Recognition 的 `recognition_outbox` 在服务状态中报告积压健康，指标前缀分别为 `remark`、`call_notification`、`ai_cloud`、`recognition`：`*_pending`、`*_oldest_pending_age_ms`、`*_backlog_measured_at_ms`、`*_exhausted`。采样每 15 秒执行一次，查询最多 5 秒；一分钟没有有效样本、最老积压超过 15 分钟或存在耗尽重试的识别通知时，状态降级。排空并获得新样本后恢复；这些下游投递告警不摘除 HTTP readiness。
+Call 的 `remark_outbox` 和 `call_notification_outbox`、AI 的 `ai_cloud_outbox`、Recognition 的 `recognition_outbox` 在服务状态中报告积压健康，指标前缀分别为 `remark`、`call_notification`、`ai_cloud`、`recognition`：`*_pending`、`*_oldest_pending_age_ms`、`*_backlog_measured_at_ms`、`*_exhausted`。采样每 15 秒执行一次，查询最多 5 秒；一分钟没有有效样本、最老积压超过 15 分钟或最近 1 小时内有识别通知耗尽重试时，状态降级。排空并获得新样本后恢复，耗尽记录超过 1 小时后不再计入 `recognition_exhausted`；这些下游投递告警不摘除 HTTP readiness。
+
+User 的 `admin_user_commands` 探针按相同的采样周期和积压阈值上报 `admin_user_command_*`。待处理量包含未领取和已领取的管理员密码重置邮件，等待年龄从首次入队计起。投递最多尝试 5 次，耗尽的命令退出待处理队列，其 ID 在 `thingconnect:admin:user-commands:exhausted` 保留 1 小时，期间服务状态降级。恢复 SMTP 后可用该 ID 在管理员密码重置审计记录中核对目标用户，按需重新发起发送。邮件投递采用至少一次语义，进程在 SMTP 接受邮件后、Redis 确认前退出可能导致重复发送。
 
 一对一通话通知与房间状态在 Redis 中原子保存。`call_notification_pending` 按待发送消息计数，包含已领取与退避中的消息；同一房间按顺序发送，发布失败按不超过 256 秒的随机退避持续重试。应用重启后其他 Call 实例可继续领取；Redis 数据的重启保留能力取决于其持久化配置，部署时须配置并验证 Redis 持久化与备份。成功发布表示 Broker 已接受 QoS 1 消息，不代表设备已处理；旧房间或已拒接目标的待发来电在发送前丢弃。
 
-计数包含已领取及退避中的任务。AI 已完成的版本屏障记录不算积压，替换尚未完成的目标保留首次等待时间，已完成后重新入队开始新的计时周期。识别通知排除旧绑定生命周期和已交付记录，最多投递 8 次；耗尽后通过设备查询补偿并排查 Broker 权限，不能用单次发布成功代替收包验收。解绑清理、备注通知、AI 对账使用有上限的随机退避持续重试；不自动丢弃仍需完成的工作。通用 Redis 客户端不自动重放不确定的命令，由业务流程或持久队列负责恢复，避免跨层重试放大和重复计数。
+计数包含已领取及退避中的任务。AI 已完成的版本屏障记录不算积压，替换尚未完成的目标保留首次等待时间，已完成后重新入队开始新的计时周期。识别通知排除旧绑定生命周期和已交付记录，最多投递 8 次；耗尽的记录不再计入待处理数量和最老等待年龄，耗尽后通过设备查询补偿并排查 Broker 权限，不能用单次发布成功代替收包验收。解绑清理、备注通知、AI 对账使用有上限的随机退避持续重试；不自动丢弃仍需完成的工作。通用 Redis 客户端不自动重放不确定的命令，由业务流程或持久队列负责恢复，避免跨层重试放大和重复计数。
 
 部署需要 core 13 迁移，新增三个队列的首次入队时间列。旧记录没有可靠的首次入队时间，从迁移时开始计龄，不能据此推断升级前等待时长。迁移将旧识别通知中尚未尝试、受会话时区影响的未来时间归一到当前 UTC，不改动已领取的租约；后续首次投递和重试都遵守 `next_at`。迁移可重复执行，运行账号仍只需 DML；回滚遵循前文数据库备份恢复流程，不允许通过删除迁移记录启动旧二进制。
 

@@ -13,7 +13,7 @@ import (
 
 // cleanupOutboxStore leases cleanup_outbox rows without a schema change:
 // a claim moves next_attempt_at to the lease expiry and that value is the
-// claim snapshot. Re-enqueueing (CommitUnbindWithCleanup) resets it to NOW(),
+// claim snapshot. Re-enqueueing (CommitUnbindWithCleanup) allocates a new ID,
 // so an acknowledgement carrying the old snapshot cannot delete the new task.
 type cleanupOutboxStore struct {
 	db *sqlx.DB

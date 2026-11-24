@@ -60,7 +60,7 @@ unset DASHSCOPE_API_KEY RECOGNITION_LIVE_TEST
 
 ## MQTT 通知授权验收
 
-识别服务的 MQTT 账号需要发布 `device/+/notify`，并订阅公共 Broker adapter 使用的 `device/+/up` 和 `$SYS/brokers/+/clients/+/connected`、`$SYS/brokers/+/clients/+/disconnected`。用户名认证可将 [ACL 片段](../deploy/emqx/recognition-acl.conf) 中的用户名替换为管理后台实际值，合并到 EMQX 当前生效的文件授权源，并置于通用拒绝规则之前；固定 ClientID 认证则按该 ClientID 配置对应规则。
+识别服务的 MQTT 账号需要发布 `device/+/notify`。用户名认证可将 [ACL 片段](../deploy/emqx/recognition-acl.conf) 中的用户名替换为管理后台实际值，合并到 EMQX 当前生效的文件授权源，并置于通用拒绝规则之前；固定 ClientID 认证则按该 ClientID 配置对应规则。
 
 “连接成功”和 QoS1 发布确认不能替代授权验收。EMQX 使用 MQTT 3.1.1 且拒绝策略为 ignore 时，发布端可能收到确认，但消息被 ACL 丢弃。验收必须确认设备订阅的 notify topic 实际收到结果，并检查 Broker 日志不存在 `cannot_publish_to_topic_due_to_not_authorized`。Dashboard 管理过的文件授权源可能使用 `data/authz/acl.conf`，以运行配置为准，修改后热加载并清理该账号连接的授权缓存。
 

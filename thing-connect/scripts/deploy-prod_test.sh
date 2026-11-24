@@ -676,13 +676,19 @@ test_supervisor_boot_order_starts_admin_first() {
     grep -A1 '^\[program:recognition-server\]$' "$config" | grep -qx 'priority=30'
 }
 
-test_recognition_stop_wait_covers_model_call() {
+test_stop_wait_covers_background_delivery() {
     local root config local_wait
     root="$(cd "$(dirname "$0")/.." && pwd)"
     config="$root/deploy/supervisor/thing-connect.supervisor.conf"
     sed -n '/^\[program:recognition-server\]$/,/^$/p' "$config" | grep -qx 'stopwaitsecs=100'
     local_wait="$(bash -c 'source <(sed -n "/^stop_wait_seconds() {/,/^}/p" "$1"); stop_wait_seconds recognition-server' _ "$root/scripts/service-local.sh")"
     assert_eq "100" "$local_wait" "service-local must wait as long as Supervisor for recognition-server"
+    local program
+    for program in user-server user-server-2; do
+        sed 's/^;//' "$config" | awk -v header="[program:$program]" '/^\[/{inside=($0==header)} inside' | grep -qx 'stopwaitsecs=50'
+        local_wait="$(bash -c 'source <(sed -n "/^stop_wait_seconds() {/,/^}/p" "$1"); stop_wait_seconds "$2"' _ "$root/scripts/service-local.sh" "$program")"
+        assert_eq "50" "$local_wait" "allow in-flight $program mail and acknowledgement to finish"
+    done
 }
 
 test_activated_bundle_is_resolved_and_not_overwritten() (
@@ -872,6 +878,19 @@ test_service_instances_restart_one_at_a_time() (
     assert_eq "user-server-2" "$(service_extra_programs user-server)" "every business service may run extra instances"
     assert_eq "" "$(service_extra_programs "$ADMIN_SERVICE")" "Admin stays single-instance"
 
+    DEPLOY_ROOT="$TEST_ROOT/multi-restart"
+    mkdir -p "$DEPLOY_ROOT/admin-server"
+    service_config_path() { echo "$DEPLOY_ROOT/admin-server/config.yaml"; }
+    cat >"$DEPLOY_ROOT/admin-server/admin-server" <<'BASH'
+#!/usr/bin/env bash
+[[ "$*" == *"-check-service-config device-server -check-service-instances 3" ]] && [ "${DENY_MULTI:-0}" = 0 ]
+BASH
+    chmod +x "$DEPLOY_ROOT/admin-server/admin-server"
+    if DENY_MULTI=1 restart_one device-server >/dev/null; then
+        echo "FAIL: invalid multi-instance config allowed restart" >&2
+        exit 1
+    fi
+    assert_eq "" "$(cat "$capture")" "must reject config before restarting any program"
     restart_one device-server >/dev/null
     assert_eq "restart thing-connect:device-server|ready device-server|restart thing-connect:device-server-2|ready device-server-2|restart thing-connect:device-server-10|ready device-server-10" \
         "$(paste -sd '|' "$capture")" "instances must restart one at a time after readiness"
@@ -900,6 +919,62 @@ test_extra_instance_health_uses_process_port() (
     instance_health_url device-server-2 >/dev/null 2>&1 || result=$?
     kill "$FAKE_PID"
     assert_eq "1" "$result" "an instance without a port override must fail the readiness check"
+)
+
+test_unreachable_supervisor_never_hides_extra_instances() (
+    local capture="$TEST_ROOT/unreachable.capture" result=0
+    : >"$capture"
+    cat >"$TEST_ROOT/unreachable-supervisorctl" <<'BASH'
+#!/usr/bin/env bash
+if [ "$1" = status ] && [ "$#" -eq 1 ]; then
+    printf 'unix:///var/run/supervisor.sock refused connection\n'
+    exit 1
+fi
+printf '%s %s\n' "$1" "$2" >>"$SUPERVISOR_CAPTURE"
+BASH
+    chmod +x "$TEST_ROOT/unreachable-supervisorctl"
+    SUPERVISORCTL="$TEST_ROOT/unreachable-supervisorctl"
+    SUPERVISOR_CAPTURE="$capture"
+    export SUPERVISOR_CAPTURE
+    ACTIVE_SERVICE_MANAGER=supervisor
+    wait_for_readiness() { printf 'ready %s\n' "${2:-$1}" >>"$capture"; }
+    restart_one device-server >/dev/null 2>&1 || result=$?
+    assert_eq "1" "$result" "unreachable Supervisor must fail the rolling restart"
+    assert_eq "" "$(cat "$capture")" "no instance may restart from an unknown inventory"
+    result=0
+    stop_one device-server >/dev/null 2>&1 || result=$?
+    assert_eq "1" "$result" "unreachable Supervisor must fail stop"
+)
+
+test_supervisor_preflight_counts_every_instance() (
+    local capture="$TEST_ROOT/preflight-instances.capture"
+    : >"$capture"
+    write_fake_supervisorctl "$TEST_ROOT/fake-supervisorctl"
+    SUPERVISORCTL="$TEST_ROOT/fake-supervisorctl"
+    ACTIVE_SERVICE_MANAGER=supervisor
+    ACTIVE_BUSINESS_SERVICES=(device-server voip-server)
+    MIGRATIONS_PENDING=0
+    BUILD_DIR="$TEST_ROOT/preflight-build"
+    mkdir -p "$BUILD_DIR/bin"
+    cat >"$BUILD_DIR/bin/admin-server" <<'BASH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$PREFLIGHT_CAPTURE"
+BASH
+    chmod +x "$BUILD_DIR/bin/admin-server"
+    PREFLIGHT_CAPTURE="$capture"
+    export PREFLIGHT_CAPTURE
+    service_config_path() { printf '%s/admin.yaml\n' "$TEST_ROOT"; }
+    preflight_business_services >/dev/null
+    grep -q -- '-check-service-config device-server -check-service-instances 3$' "$capture" || {
+        echo "FAIL: Supervisor preflight did not count device-server instances" >&2
+        cat "$capture" >&2
+        exit 1
+    }
+    grep -q -- '-check-service-config voip-server$' "$capture" || {
+        echo "FAIL: single-instance service preflight changed" >&2
+        cat "$capture" >&2
+        exit 1
+    }
 )
 
 test_optional_services_are_not_treated_as_installed_without_config() (
@@ -1194,7 +1269,7 @@ test_running_admin_is_restarted_after_init
 test_initialize_admin_is_noninteractive_and_refreshes_running_service
 test_full_deploy_starts_admin_before_business_services
 test_supervisor_boot_order_starts_admin_first
-test_recognition_stop_wait_covers_model_call
+test_stop_wait_covers_background_delivery
 test_activated_bundle_is_resolved_and_not_overwritten
 test_file_publish_never_creates_configuration
 test_deploy_uses_catalog_static_directory
@@ -1213,6 +1288,8 @@ test_schema_change_failure_never_auto_starts_old_binaries
 test_daily_update_backs_up_files_before_database_migration
 test_service_instances_restart_one_at_a_time
 test_extra_instance_health_uses_process_port
+test_unreachable_supervisor_never_hides_extra_instances
+test_supervisor_preflight_counts_every_instance
 echo "PASS: deploy-prod.sh"
 
 

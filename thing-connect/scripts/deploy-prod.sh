@@ -978,6 +978,10 @@ preflight_business_services() {
             ports="$(DEPLOY_ROOT="$DEPLOY_ROOT" "$BUILD_DIR/scripts/service-local.sh" ports "$svc")" || return 1
             mapfile -t instance_ports <<<"$ports"
             instance_args=(-check-service-instances "${#instance_ports[@]}")
+        elif [ "$ACTIVE_SERVICE_MANAGER" = supervisor ]; then
+            ports="$(service_programs "$svc")" || return 1
+            mapfile -t instance_ports <<<"$ports"
+            [ "${#instance_ports[@]}" -le 1 ] || instance_args=(-check-service-instances "${#instance_ports[@]}")
         fi
         "$BUILD_DIR/bin/admin-server" -c "$cfg" -deploy-root "$DEPLOY_ROOT" \
             -check-service-config "$svc" "${instance_args[@]}" || return $?
@@ -1154,15 +1158,45 @@ service_health_url() {
 # 业务服务可在同一 Supervisor 组中增加 <服务>-2、<服务>-3 等程序并行运行，
 # 各程序用环境变量 THING_CONNECT_HTTP_PORT 指定端口。Admin 保持单实例；
 # local 模式由 service-local.sh 负责同一服务的全部实例。
+# supervisorctl status 在有程序未运行时退出码为 3，属于正常清单；其他非零
+# 退出码表示 supervisord 不可达，此时不能把额外实例当作不存在。
 service_extra_programs() {
-    local svc="$1"
+    local svc="$1" inventory status=0
     [ "$svc" != "$ADMIN_SERVICE" ] && [ "$ACTIVE_SERVICE_MANAGER" != local ] || return 0
-    { "$SUPERVISORCTL" status 2>/dev/null || true; } | awk -v prefix="$SUPERVISOR_GROUP:" -v svc="$svc" '
+    inventory="$("$SUPERVISORCTL" status 2>/dev/null)" || status=$?
+    if [ "$status" -ne 0 ] && [ "$status" -ne 3 ]; then
+        err "$svc: 无法读取 Supervisor 程序清单（supervisorctl status 退出码 $status），无法确认额外实例"
+        return 1
+    fi
+    awk -v prefix="$SUPERVISOR_GROUP:" -v svc="$svc" '
         index($1, prefix) == 1 {
             name = substr($1, length(prefix) + 1)
             suffix = substr(name, length(svc) + 1)
             if (index(name, svc "-") == 1 && suffix ~ /^-[0-9]+$/) print name
-        }' | sort -V
+        }' <<<"$inventory" | sort -V
+}
+
+# 输出主实例及全部额外实例；读取清单失败时返回非零，调用方须先取列表再循环。
+service_programs() {
+    local svc="$1" extras
+    extras="$(service_extra_programs "$svc")" || return 1
+    printf '%s\n' "$svc"
+    [ -z "$extras" ] || printf '%s\n' "$extras"
+}
+
+# Standalone start/restart uses the installed checker even without a source checkout.
+# Resolve the inventory once so preflight covers exactly the programs we start.
+supervisor_start_programs() {
+    local svc="$1" programs cfg
+    local -a instances
+    programs="$(service_programs "$svc")" || return 1
+    mapfile -t instances <<<"$programs"
+    if [ "${#instances[@]}" -gt 1 ]; then
+        cfg="$(service_config_path "$ADMIN_SERVICE")" || return 1
+        "$DEPLOY_ROOT/$ADMIN_SERVICE/$ADMIN_SERVICE" -c "$cfg" -deploy-root "$DEPLOY_ROOT" \
+            -check-service-config "$svc" -check-service-instances "${#instances[@]}" >&2 || return 1
+    fi
+    printf '%s\n' "$programs"
 }
 
 instance_health_url() {
@@ -1219,8 +1253,9 @@ stop_one() {
         return $?
     fi
 
-    local program
-    for program in "$svc" $(service_extra_programs "$svc"); do
+    local program programs
+    programs="$(service_programs "$svc")" || return 1
+    for program in $programs; do
         stop_program "$program" || return 1
     done
 }
@@ -1315,8 +1350,9 @@ start_one() {
         return 1
     fi
 
-    local program
-    for program in "$svc" $(service_extra_programs "$svc"); do
+    local program programs
+    programs="$(supervisor_start_programs "$svc")" || return 1
+    for program in $programs; do
         start_program "$svc" "$program" || return 1
     done
 }
@@ -1348,8 +1384,9 @@ restart_one() {
     fi
 
     # 多实例滚动重启：一台通过 readiness 后再重启下一台，其余实例继续服务。
-    local program
-    for program in "$svc" $(service_extra_programs "$svc"); do
+    local program programs
+    programs="$(supervisor_start_programs "$svc")" || return 1
+    for program in $programs; do
         require_supervisor_service "$program" || return 1
         log "重启 $program（Supervisor）..."
         "$SUPERVISORCTL" restart "$(supervisor_program "$program")" || return 1
@@ -1366,8 +1403,9 @@ status_one() {
         "$LOCAL_SERVICECTL" status "$SUPERVISOR_GROUP:$svc"
         return $?
     fi
-    local program
-    for program in "$svc" $(service_extra_programs "$svc"); do
+    local program programs
+    programs="$(service_programs "$svc")" || return 1
+    for program in $programs; do
         require_supervisor_service "$program" || return 1
         "$SUPERVISORCTL" status "$(supervisor_program "$program")" || return 1
     done

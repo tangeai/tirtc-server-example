@@ -13,6 +13,7 @@ import (
 
 	"thing-connect/internal/config"
 	"thing-connect/internal/deviceprofile"
+	"thing-connect/voip-server/wechat"
 )
 
 type MQTTPublisher interface {
@@ -28,6 +29,7 @@ type Unbinder interface {
 }
 
 type Server struct {
+	refresh  wechat.RefreshGate
 	cleanup  Unbinder
 	mu       sync.RWMutex
 	cfg      *config.Config
@@ -45,8 +47,11 @@ func (s *Server) Config() *config.Config {
 }
 func (s *Server) UpdateConfig(cfg *config.Config) { s.mu.Lock(); s.cfg = cfg; s.mu.Unlock() }
 
-func NewServer(cfg *config.Config, db *sqlx.DB, rdb *redis.Client, broker MQTTPublisher, profiles *deviceprofile.Service, cleanup Unbinder) *Server {
-	return &Server{cfg: cfg, db: db, rdb: rdb, broker: broker, profiles: profiles, cleanup: cleanup}
+func NewServer(cfg *config.Config, db *sqlx.DB, rdb *redis.Client, broker MQTTPublisher, profiles *deviceprofile.Service, cleanup Unbinder, refresh wechat.RefreshGate) *Server {
+	if refresh == nil {
+		panic("voip server requires WeChat refresh gate")
+	}
+	return &Server{refresh: refresh, cfg: cfg, db: db, rdb: rdb, broker: broker, profiles: profiles, cleanup: cleanup}
 }
 
 // IsDeviceOnline allows the WeChat callback path to reject a call before

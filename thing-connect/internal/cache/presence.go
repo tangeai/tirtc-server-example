@@ -17,6 +17,10 @@ const connectionPendingSinceKey = "presence:connections:pending_since"
 
 const connectionGapKey = "presence:connections:gap"
 
+// connectionGapClearedKey holds the start (unix ms) of the latest completed
+// broker listing that cleared the gap marker.
+const connectionGapClearedKey = "presence:connections:gap_cleared"
+
 // PresenceStore uses a dedicated, deadline-aware Redis client. Online values
 // retain the public key/format/TTL contract. Pending IP snapshots have no TTL.
 // Multi-key scripts require the existing single-endpoint Redis deployment.
@@ -165,15 +169,29 @@ func (s *PresenceStore) Ack(ctx context.Context, batch []presence.Observation) e
 }
 
 // MarkGap records the latest loss time. Legacy markers hold "1", which
-// ClearGap treats as older than any reconciliation.
+// ClearGap treats as older than any reconciliation. A loss older than the
+// start of the latest completed listing (from any instance) is already
+// resolved, so a late write cannot resurrect a cleared marker.
 func (s *PresenceStore) MarkGap(ctx context.Context, lostAt time.Time) error {
-	return s.Client.Eval(ctx, `local v=tonumber(redis.call('GET',KEYS[1]) or '0') or 0;if v<tonumber(ARGV[1]) then redis.call('SET',KEYS[1],ARGV[1]) end;return 1`, []string{connectionGapKey}, lostAt.UnixMilli()).Err()
+	return s.Client.Eval(ctx, `
+local lost = tonumber(ARGV[1])
+local covered = tonumber(redis.call('GET', KEYS[2])) or 0
+if lost < covered then return 0 end
+local previous = tonumber(redis.call('GET', KEYS[1])) or 0
+if previous < lost then redis.call('SET', KEYS[1], ARGV[1]) end
+return 1`, []string{connectionGapKey, connectionGapClearedKey}, lostAt.UnixMilli()).Err()
 }
 
 // ClearGap removes the marker only when the loss happened before a completed
 // broker listing started; a loss during reconciliation keeps the marker.
 func (s *PresenceStore) ClearGap(ctx context.Context, listedFrom time.Time) error {
-	return s.Client.Eval(ctx, `local v=redis.call('GET',KEYS[1]);if v and (tonumber(v) or 0)<tonumber(ARGV[1]) then return redis.call('DEL',KEYS[1]) end;return 0`, []string{connectionGapKey}, listedFrom.UnixMilli()).Err()
+	return s.Client.Eval(ctx, `
+local started = tonumber(ARGV[1])
+local covered = tonumber(redis.call('GET', KEYS[2])) or 0
+if covered < started then redis.call('SET', KEYS[2], ARGV[1]) end
+local gap = redis.call('GET', KEYS[1])
+if gap and (tonumber(gap) or 0) < started then return redis.call('DEL', KEYS[1]) end
+return 0`, []string{connectionGapKey, connectionGapClearedKey}, listedFrom.UnixMilli()).Err()
 }
 func (s *PresenceStore) HasGap(ctx context.Context) (bool, error) {
 	n, err := s.Client.Exists(ctx, connectionGapKey).Result()

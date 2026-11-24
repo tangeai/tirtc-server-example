@@ -142,13 +142,15 @@ func (l *Limiter) Verify(ctx context.Context, userID int64, check func() error, 
 		return &LockedError{RetryAfter: retry}
 	}
 	checkErr := check()
+	finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
 	if checkErr == nil || !counts(checkErr) {
-		if err := l.store.Release(ctx, userID); err != nil {
+		if err := l.store.Release(finishCtx, userID); err != nil {
 			slog.WarnContext(ctx, "bind attempt refund failed", "user_id", userID, "err", err)
 		}
 		return checkErr
 	}
-	retry, err = l.store.Fail(ctx, userID, p)
+	retry, err = l.store.Fail(finishCtx, userID, p)
 	if err != nil {
 		slog.WarnContext(ctx, "bind attempt failure not recorded", "user_id", userID, "err", err)
 		return checkErr

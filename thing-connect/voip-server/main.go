@@ -78,7 +78,7 @@ func main() {
 	probes := map[string]servicestatus.DependencyProbe{"database": servicestatus.SQLProbe(sqlDB), "redis": servicestatus.RedisProbe(rdb), "mqtt": broker.Ping}
 	servicestatus.RegisterHealth(r, probes)
 
-	voipHTTP := handler.NewServer(cfg, sqlDB, rdb, broker, deviceprofile.NewService(mysqlstore.NewDeviceProfileStore(sqlDB)), voip.NewCleanup(mysqlstore.NewVoipCleanupStore(sqlDB), cache.NewVoipCallGuards(rdb), mqttc.NewVoipAuthNotifier(broker)))
+	voipHTTP := handler.NewServer(cfg, sqlDB, rdb, broker, deviceprofile.NewService(mysqlstore.NewDeviceProfileStore(sqlDB)), voip.NewCleanup(mysqlstore.NewVoipCleanupStore(sqlDB), cache.NewVoipCallGuards(rdb), mqttc.NewVoipAuthNotifier(broker)), cache.WeChatRefreshGate(rdb))
 	voipHTTP.Register(r)
 	dynamicClient, dynamicRefs, err := voipDynamicConfig(dynamicClient, cfg.Tirtc, voipHTTP)
 	if err != nil {

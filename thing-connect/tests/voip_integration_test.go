@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"thing-connect/internal/cache"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -24,7 +25,7 @@ func TestVoipDeviceCallSeparatesJWTAndBusinessErrors(t *testing.T) {
 	cfg := loadConfig(t)
 
 	router := gin.New()
-	voiphandler.NewServer(cfg, s.sqlDB, s.rdb, newFakeBroker(), deviceprofile.NewService(mysqlstore.NewDeviceProfileStore(s.sqlDB)), nil).Register(router)
+	voiphandler.NewServer(cfg, s.sqlDB, s.rdb, newFakeBroker(), deviceprofile.NewService(mysqlstore.NewDeviceProfileStore(s.sqlDB)), nil, cache.WeChatRefreshGate(s.rdb)).Register(router)
 	server := httptest.NewServer(router)
 	t.Cleanup(server.Close)
 
@@ -120,7 +121,7 @@ func TestVoipLegacyNameRejectedAndAuthRemarkIgnored(t *testing.T) {
 
 	router := gin.New()
 	broker := newFakeBroker()
-	voiphandler.NewServer(cfg, s.sqlDB, s.rdb, broker, deviceprofile.NewService(mysqlstore.NewDeviceProfileStore(s.sqlDB)), nil).Register(router)
+	voiphandler.NewServer(cfg, s.sqlDB, s.rdb, broker, deviceprofile.NewService(mysqlstore.NewDeviceProfileStore(s.sqlDB)), nil, cache.WeChatRefreshGate(s.rdb)).Register(router)
 	server := httptest.NewServer(router)
 	t.Cleanup(server.Close)
 
@@ -293,7 +294,7 @@ func TestVoipLegacyNameRejectedAndAuthRemarkIgnored(t *testing.T) {
 func TestVoipReleaseOutgoingCallGuards(t *testing.T) {
 	s := newSuite(t)
 	cfg := loadConfig(t)
-	server := voiphandler.NewServer(cfg, s.sqlDB, s.rdb, nil, deviceprofile.NewService(mysqlstore.NewDeviceProfileStore(s.sqlDB)), nil)
+	server := voiphandler.NewServer(cfg, s.sqlDB, s.rdb, nil, deviceprofile.NewService(mysqlstore.NewDeviceProfileStore(s.sqlDB)), nil, cache.WeChatRefreshGate(s.rdb))
 
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
 	deviceID := "guard-device-" + suffix
@@ -338,7 +339,7 @@ func TestVoipReleaseOutgoingCallGuards(t *testing.T) {
 func TestVoipNotificationDedupeTracksProcessingAndCompletion(t *testing.T) {
 	s := newSuite(t)
 	cfg := loadConfig(t)
-	server := voiphandler.NewServer(cfg, s.sqlDB, s.rdb, nil, deviceprofile.NewService(mysqlstore.NewDeviceProfileStore(s.sqlDB)), nil)
+	server := voiphandler.NewServer(cfg, s.sqlDB, s.rdb, nil, deviceprofile.NewService(mysqlstore.NewDeviceProfileStore(s.sqlDB)), nil, cache.WeChatRefreshGate(s.rdb))
 	ctx := context.Background()
 	wxAppID := "dedupe-app"
 	roomID := fmt.Sprintf("dedupe-room-%d", time.Now().UnixNano())
@@ -375,7 +376,7 @@ func TestVoipUserAuthListReturnsCurrentWechatRemarksForOwnedDevices(t *testing.T
 	cfg := loadConfig(t)
 
 	router := gin.New()
-	voiphandler.NewServer(cfg, s.sqlDB, s.rdb, nil, deviceprofile.NewService(mysqlstore.NewDeviceProfileStore(s.sqlDB)), nil).Register(router)
+	voiphandler.NewServer(cfg, s.sqlDB, s.rdb, nil, deviceprofile.NewService(mysqlstore.NewDeviceProfileStore(s.sqlDB)), nil, cache.WeChatRefreshGate(s.rdb)).Register(router)
 	server := httptest.NewServer(router)
 	t.Cleanup(server.Close)
 
@@ -527,7 +528,7 @@ func TestVoipContactsKeepsDeviceAndH5RoutesSeparate(t *testing.T) {
 	cfg := loadConfig(t)
 
 	router := gin.New()
-	voiphandler.NewServer(cfg, s.sqlDB, s.rdb, nil, deviceprofile.NewService(mysqlstore.NewDeviceProfileStore(s.sqlDB)), nil).Register(router)
+	voiphandler.NewServer(cfg, s.sqlDB, s.rdb, nil, deviceprofile.NewService(mysqlstore.NewDeviceProfileStore(s.sqlDB)), nil, cache.WeChatRefreshGate(s.rdb)).Register(router)
 	server := httptest.NewServer(router)
 	t.Cleanup(server.Close)
 

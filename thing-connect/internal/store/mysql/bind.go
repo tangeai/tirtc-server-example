@@ -371,11 +371,13 @@ func ApplyUnbindTx(ctx context.Context, tx *sqlx.Tx, deviceID string, userID int
 		return fmt.Errorf("bindStore.CommitUnbind log: %w", err)
 	}
 
+	// Allocate a fresh row ID for each unbind generation. Older workers
+	// acknowledge by ID and second-resolution lease, so resetting a lease
+	// on the same ID could let them confirm a newer task in the same second.
 	for _, target := range uniqueCleanupTargets(targets) {
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO cleanup_outbox (device_id,target,next_attempt_at)
-			VALUES (?,?,NOW())
-			ON DUPLICATE KEY UPDATE attempts=0,next_attempt_at=NOW(),last_error=''`, deviceID, target); err != nil {
+			INSERT INTO cleanup_outbox (device_id,target,next_attempt_at) VALUES (?,?,NOW())
+			ON DUPLICATE KEY UPDATE id=VALUES(id),attempts=0,next_attempt_at=NOW(),last_error=''`, deviceID, target); err != nil {
 			return fmt.Errorf("bindStore.CommitUnbind cleanup outbox %s: %w", target, err)
 		}
 	}

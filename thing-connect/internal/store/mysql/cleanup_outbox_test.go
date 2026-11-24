@@ -10,15 +10,9 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"thing-connect/internal/cleanup"
+	"thing-connect/internal/store"
 	mysqlstore "thing-connect/internal/store/mysql"
 )
-
-// reenqueueCleanup mirrors the upsert CommitUnbindWithCleanup performs when a
-// device is unbound again while its previous cleanup task is still pending.
-const reenqueueCleanup = `
-	INSERT INTO cleanup_outbox (device_id,target,next_attempt_at)
-	VALUES (?,?,NOW())
-	ON DUPLICATE KEY UPDATE attempts=0,next_attempt_at=NOW(),last_error=''`
 
 func openCleanupOutbox(t *testing.T) (*sqlx.DB, cleanup.Queue) {
 	t.Helper()
@@ -34,7 +28,7 @@ func seedCleanupTasks(t *testing.T, db *sqlx.DB, n int) {
 	t.Helper()
 	prefix := fmt.Sprintf("cleanup_%d", time.Now().UnixNano())
 	for i := 0; i < n; i++ {
-		if _, err := db.Exec(reenqueueCleanup, fmt.Sprintf("%s_%d", prefix, i), "voip"); err != nil {
+		if _, err := db.Exec(`INSERT INTO cleanup_outbox(device_id,target) VALUES(?,?)`, fmt.Sprintf("%s_%d", prefix, i), "voip"); err != nil {
 			t.Fatalf("seed cleanup task: %v", err)
 		}
 	}
@@ -79,6 +73,21 @@ func TestCleanupOutboxConcurrentClaimsDoNotOverlap(t *testing.T) {
 	}
 }
 
+// unbindAgain goes through the shared User/Admin transaction on a device
+// that was rebound while its first cleanup was pending.
+func unbindAgain(t *testing.T, db *sqlx.DB, device, target string) {
+	t.Helper()
+	user := seedUser(t, db)
+	if _, err := db.Exec(`INSERT INTO device_bind(device_id,user_id,bind_time) VALUES(?,?,NOW())`, device, user); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanBind(t, db, device) })
+	bindings := mysqlstore.NewBindStore(db).(store.UnbindCleanupStore)
+	if err := bindings.CommitUnbindWithCleanup(context.Background(), device, user, []string{target}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCleanupOutboxCompleteKeepsTaskReenqueuedDuringDelivery(t *testing.T) {
 	db, queue := openCleanupOutbox(t)
 	seedCleanupTasks(t, db, 1)
@@ -90,9 +99,14 @@ func TestCleanupOutboxCompleteKeepsTaskReenqueuedDuringDelivery(t *testing.T) {
 		t.Fatalf("leased task claimed again: %v err=%v", again, err)
 	}
 
-	if _, err := db.Exec(reenqueueCleanup, tasks[0].DeviceID, tasks[0].Target); err != nil {
-		t.Fatal(err)
+	unbindAgain(t, db, tasks[0].DeviceID, tasks[0].Target)
+	redo, err := queue.Claim(context.Background(), 10, time.Minute)
+	if err != nil || len(redo) != 1 || redo[0].ID == tasks[0].ID {
+		t.Fatalf("new unbind generation did not receive a distinct ID: old=%v new=%v err=%v", tasks, redo, err)
 	}
+	// Exercise the exact timestamp collision even if the test crossed a
+	// wall-clock second between claims.
+	tasks[0].Lease = redo[0].Lease
 	applied, err := queue.Complete(context.Background(), tasks[0])
 	if err != nil || applied {
 		t.Fatalf("stale Complete applied=%v err=%v, want not applied", applied, err)
@@ -102,10 +116,6 @@ func TestCleanupOutboxCompleteKeepsTaskReenqueuedDuringDelivery(t *testing.T) {
 		t.Fatalf("stale Retry applied=%v err=%v, want not applied", applied, err)
 	}
 
-	redo, err := queue.Claim(context.Background(), 10, time.Minute)
-	if err != nil || len(redo) != 1 || redo[0].ID != tasks[0].ID {
-		t.Fatalf("re-enqueued task not immediately claimable: %v err=%v", redo, err)
-	}
 	applied, err = queue.Complete(context.Background(), redo[0])
 	if err != nil || !applied {
 		t.Fatalf("current Complete applied=%v err=%v", applied, err)
@@ -174,9 +184,7 @@ func TestCleanupOutboxBacklogKeepsFirstEnqueueAge(t *testing.T) {
 	if _, err := db.Exec(`UPDATE cleanup_outbox SET created_at=DATE_SUB(NOW(), INTERVAL 20 MINUTE) WHERE device_id=?`, deviceID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(reenqueueCleanup, deviceID, "voip"); err != nil {
-		t.Fatal(err)
-	}
+	unbindAgain(t, db, deviceID, "voip")
 	backlog, err = queue.Backlog(context.Background())
 	if err != nil {
 		t.Fatal(err)

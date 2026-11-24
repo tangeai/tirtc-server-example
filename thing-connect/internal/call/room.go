@@ -4,9 +4,15 @@ package call
 
 import (
 	"context"
+	_ "embed"
 	"errors"
 	"time"
 )
+
+// RoomTransitions implements the atomic room policy for the Redis adapter.
+//
+//go:embed room_transitions.lua
+var RoomTransitions string
 
 var (
 	ErrNotFound  = errors.New("call: room not found")

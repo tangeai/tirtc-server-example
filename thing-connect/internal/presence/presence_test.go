@@ -292,6 +292,62 @@ func TestLossDuringReconcileStaysUnresolved(t *testing.T) {
 	}
 }
 
+func TestResolvedLossPersistedLateDoesNotResurrectGap(t *testing.T) {
+	projection := &memoryStore{}
+	p := New(projection, &failingConnections{}, nil)
+	// The writer has not persisted the loss yet when the listing completes.
+	p.lose(Observation{ClientID: "sn_a", IP: "192.0.2.1"})
+	time.Sleep(2 * time.Millisecond)
+	if err := p.Reconcile(context.Background(), &brokerList{pages: [][]Observation{{{ClientID: "sn_a"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.apply(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if gap, _ := projection.HasGap(context.Background()); gap {
+		t.Fatal("late persistence of a resolved loss resurrected the shared gap")
+	}
+	p.lose(Observation{ClientID: "sn_b", IP: "192.0.2.2"})
+	if err := p.apply(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if gap, _ := projection.HasGap(context.Background()); !gap {
+		t.Fatal("new loss after the listing was not persisted")
+	}
+}
+
+func TestRestartKeepsSharedGapUntilLastBrokerPageSucceeds(t *testing.T) {
+	ctx := context.Background()
+	projection := &memoryStore{}
+	if err := projection.MarkGap(ctx, time.Now().Add(-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	restarted := New(projection, &failingConnections{}, nil)
+	restarted.lastSuccess.Store(time.Now().UnixNano())
+	restarted.connections.healthy.Store(true)
+	list := &brokerList{pages: [][]Observation{{{ClientID: "sn_seen"}}}, err: errors.New("final page unavailable")}
+	if err := restarted.Reconcile(ctx, list); err == nil {
+		t.Fatal("partial listing cleared a shared gap")
+	}
+	if err := restarted.connections.flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !restarted.NeedsReconcile() || restarted.Ping(ctx) == nil {
+		t.Fatal("pre-restart gap unreported")
+	}
+	list.err = nil
+	list.pages = append(list.pages, []Observation{{ClientID: "sn_lost", IP: "192.0.2.8", ConnectedAt: time.Now().Add(-time.Hour)}})
+	if err := restarted.Reconcile(ctx, list); err != nil {
+		t.Fatal(err)
+	}
+	if err := restarted.connections.flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if restarted.NeedsReconcile() || restarted.Ping(ctx) != nil || projection.snapshot()["sn_lost"].IP != "192.0.2.8" {
+		t.Fatal("complete listing did not recover old connection and readiness")
+	}
+}
+
 func TestFailedReconcileKeepsLoss(t *testing.T) {
 	p := New(&memoryStore{}, nil, nil)
 	p.lose(Observation{ClientID: "sn_a"})

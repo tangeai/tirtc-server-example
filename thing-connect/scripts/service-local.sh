@@ -196,10 +196,11 @@ service_port() {
     printf '%s\n' "$((SERVICE_PORT[$service] + (index-1)*10))"
 }
 
-# 与 Supervisor 模板的 stopwaitsecs 保持一致；识别服务退出时会等待已发出的模型调用。
+# 与 Supervisor 的 stopwaitsecs 一致。User 等待邮件投递和确认，Recognition 等待在途模型调用。
 stop_wait_seconds() {
     case "$1" in
         recognition-server|recognition-server-*) echo 100 ;;
+        user-server|user-server-*) echo 50 ;;
         *) echo 15 ;;
     esac
 }

@@ -558,7 +558,11 @@ func (s *RecognitionStore) ClaimEvents(c context.Context, limit int, lease time.
 	return out, tx.Commit()
 }
 func (s *RecognitionStore) Deliver(c context.Context, v r.Event, ok bool) (bool, error) {
-	res, e := s.db.ExecContext(c, `UPDATE recognition_outbox SET delivered=?,next_at=IF(?,next_at,TIMESTAMPADD(SECOND,1+FLOOR(RAND()*LEAST(300,POW(2,attempts-1))),UTC_TIMESTAMP(6))) WHERE id=? AND delivered=FALSE AND next_at=?`, ok, ok, v.ID, v.Lease)
+	res, e := s.db.ExecContext(c, `UPDATE recognition_outbox SET delivered=?,next_at=CASE
+		WHEN ? THEN next_at
+		WHEN attempts>=8 THEN UTC_TIMESTAMP(6)
+		ELSE TIMESTAMPADD(SECOND,1+FLOOR(RAND()*LEAST(300,POW(2,attempts-1))),UTC_TIMESTAMP(6))
+		END WHERE id=? AND delivered=FALSE AND next_at=?`, ok, ok, v.ID, v.Lease)
 	if e != nil {
 		return false, e
 	}

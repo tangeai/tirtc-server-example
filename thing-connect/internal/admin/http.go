@@ -178,6 +178,7 @@ func (s *HTTPServer) RegisterInternal(r *gin.Engine, internalKey string) {
 }
 
 func (s *HTTPServer) serviceStatus(c *gin.Context) {
+	ctx := c.Request.Context()
 	services, err := s.statuses.List(c.Request.Context())
 	if err != nil {
 		apiresp.Internal(c, err.Error())
@@ -193,7 +194,7 @@ func (s *HTTPServer) serviceStatus(c *gin.Context) {
 		FailedAdminJobs int `db:"failed_admin_jobs" json:"failed_admin_jobs"`
 	}
 	var summary metrics
-	err = s.store.db.GetContext(c, &summary, `SELECT
+	err = s.store.db.GetContext(ctx, &summary, `SELECT
 		(SELECT COUNT(*) FROM users) user_count,
 		(SELECT COUNT(*) FROM device_bind WHERE user_id>0) bound_devices,
 		(SELECT COUNT(*) FROM device_pool p LEFT JOIN device_bind b ON b.device_id=p.device_id WHERE p.status=0 AND b.id IS NULL) available_pool,
@@ -215,7 +216,7 @@ func (s *HTTPServer) serviceStatus(c *gin.Context) {
 		CreatedAt    time.Time `db:"created_at" json:"created_at"`
 	}
 	var recent []recentAudit
-	_ = s.store.db.SelectContext(c, &recent, `SELECT l.id,l.admin_user_id,COALESCE(a.email,'') email,l.action,l.resource_type,l.resource_id,l.created_at FROM admin_audit_log l LEFT JOIN admin_users a ON a.id=l.admin_user_id ORDER BY l.id DESC LIMIT 5`)
+	_ = s.store.db.SelectContext(ctx, &recent, `SELECT l.id,l.admin_user_id,COALESCE(a.email,'') email,l.action,l.resource_type,l.resource_id,l.created_at FROM admin_audit_log l LEFT JOIN admin_users a ON a.id=l.admin_user_id ORDER BY l.id DESC LIMIT 5`)
 	apiresp.OK(c, gin.H{"services": services, "metrics": summary, "recent_audits": recent})
 }
 
@@ -518,12 +519,13 @@ func (s *HTTPServer) me(c *gin.Context) {
 }
 
 func (s *HTTPServer) changeOwnPassword(c *gin.Context) {
+	ctx := c.Request.Context()
 	var request struct {
 		CurrentPassword string `json:"current_password" binding:"required"`
 		NewPassword     string `json:"new_password" binding:"required"`
 	}
 	identity, _ := identityFromContext(c)
-	if c.ShouldBindJSON(&request) != nil || request.CurrentPassword == request.NewPassword || s.auth.VerifyPassword(c, identity.UserID, request.CurrentPassword) != nil {
+	if c.ShouldBindJSON(&request) != nil || request.CurrentPassword == request.NewPassword || s.auth.VerifyPassword(ctx, identity.UserID, request.CurrentPassword) != nil {
 		apiresp.BadParam(c, "当前密码不正确，或新密码与当前密码相同")
 		return
 	}
@@ -532,17 +534,17 @@ func (s *HTTPServer) changeOwnPassword(c *gin.Context) {
 		apiresp.BadParam(c, AdminPasswordPolicyMessage)
 		return
 	}
-	tx, err := s.store.db.BeginTxx(c, nil)
+	tx, err := s.store.db.BeginTxx(ctx, nil)
 	if err != nil {
 		apiresp.Internal(c, err.Error())
 		return
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(c, `UPDATE admin_users SET password=?,must_change_password=0,password_updated_at=NOW(),auth_revision=auth_revision+1 WHERE id=?`, hash, identity.UserID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE admin_users SET password=?,must_change_password=0,password_updated_at=NOW(),auth_revision=auth_revision+1 WHERE id=?`, hash, identity.UserID); err != nil {
 		apiresp.Internal(c, err.Error())
 		return
 	}
-	if _, err := tx.ExecContext(c, `UPDATE admin_sessions SET revoked_at=COALESCE(revoked_at,NOW()),revoked_reason='password changed' WHERE admin_user_id=?`, identity.UserID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE admin_sessions SET revoked_at=COALESCE(revoked_at,NOW()),revoked_reason='password changed' WHERE admin_user_id=?`, identity.UserID); err != nil {
 		apiresp.Internal(c, err.Error())
 		return
 	}
@@ -654,6 +656,7 @@ func (s *HTTPServer) validateConfig(c *gin.Context) {
 }
 
 func (s *HTTPServer) testConfig(c *gin.Context) {
+	ctx := c.Request.Context()
 	var request configWriteRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		apiresp.BadParamError(c, err)
@@ -680,7 +683,7 @@ func (s *HTTPServer) testConfig(c *gin.Context) {
 				s.writeConfigTestError(c, namespace, key, testErr)
 				return
 			}
-			_ = s.store.Audit(c, requestAudit(c, identity, "config.test", "config", definitionID(namespace, key), request.Reason, "", `{"connected":true}`))
+			_ = s.store.Audit(ctx, requestAudit(c, identity, "config.test", "config", definitionID(namespace, key), request.Reason, "", `{"connected":true}`))
 			apiresp.OK(c, result)
 			return
 		}
@@ -771,7 +774,7 @@ func (s *HTTPServer) testConfig(c *gin.Context) {
 		})
 		return
 	}
-	_ = s.store.Audit(c, requestAudit(c, identity, "config.test", "config", definitionID(namespace, key), request.Reason, "", `{"sent":true}`))
+	_ = s.store.Audit(ctx, requestAudit(c, identity, "config.test", "config", definitionID(namespace, key), request.Reason, "", `{"sent":true}`))
 	apiresp.OK(c, gin.H{"sent": true})
 }
 
@@ -820,7 +823,7 @@ func (s *HTTPServer) putConfig(c *gin.Context) {
 	identity, _ := identityFromContext(c)
 	isMFAPolicy := c.Param("namespace") == "system" && c.Param("config_key") == "mfa.policy"
 	if isMFAPolicy {
-		if !s.access.Enforce(identity.UserID, "security.mfa.write") || s.auth.VerifyPassword(c, identity.UserID, request.CurrentPassword) != nil {
+		if !s.access.Enforce(identity.UserID, "security.mfa.write") || s.auth.VerifyPassword(c.Request.Context(), identity.UserID, request.CurrentPassword) != nil {
 			apiresp.BadParam(c, "修改 MFA 策略需要权限、当前密码、原因和确认")
 			return
 		}

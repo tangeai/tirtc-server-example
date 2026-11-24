@@ -24,8 +24,12 @@ import (
 
 	devhandler "thing-connect/device-server/handler"
 	"thing-connect/internal/apiresp"
+	"thing-connect/internal/bindlimit"
+	"thing-connect/internal/cache"
+	"thing-connect/internal/captcha"
 	"thing-connect/internal/config"
 	"thing-connect/internal/deviceprofile"
+	"thing-connect/internal/service"
 	mysqlstore "thing-connect/internal/store/mysql"
 	mysqlmigrate "thing-connect/internal/store/mysql/migrate"
 	"thing-connect/internal/testenv"
@@ -45,6 +49,10 @@ type suite struct {
 	rdb    *redis.Client
 	sqlDB  *sqlx.DB
 }
+
+type testMailer struct{}
+
+func (testMailer) Send(context.Context, string, string, string) error { return nil }
 
 func newSuite(t *testing.T) *suite {
 	t.Helper()
@@ -68,12 +76,28 @@ func newSuite(t *testing.T) *suite {
 
 	// user-server (no MQTT for unit tests)
 	usrR := gin.New()
-	usrS := &usrhandler.Server{DB: sqlDB, RDB: rdb, MQTT: nil, JWTSecret: cfg.JWTSecret, RoleStore: mysqlstore.NewRoleBindingStore(sqlDB), UnbindCleanup: &usrhandler.UnbindCleanup{
-		DeleteLocalRole: func(ctx context.Context, deviceID string) error {
-			return mysqlstore.NewRoleBindingStore(sqlDB).DeleteDeviceRole(ctx, deviceID)
-		},
-	}}
-	usrS.Register(usrR)
+	service.RegisterErrors()
+	serviceCfg := service.DefaultServiceConfig()
+	cacheStore := mysqlstore.NewCacheStore(rdb)
+	userSvc := service.NewUserService(mysqlstore.NewUserStore(sqlDB), cacheStore, captcha.DevVerifier{}, testMailer{}, cfg.JWTSecret, serviceCfg)
+	mailQueue, err := service.NewInMemoryPasswordResetEmailQueue(userSvc.DeliverPasswordResetCode, cache.NewPasswordResetMailGate(rdb))
+	if err != nil {
+		t.Fatal(err)
+	}
+	userSvc.SetPasswordResetEmailQueue(mailQueue)
+	policy, err := cfg.BindAttempt.Policy()
+	if err != nil {
+		t.Fatal(err)
+	}
+	limiter, err := bindlimit.New(&cache.BindAttemptStore{Client: rdb}, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bindSvc := service.NewBindService(mysqlstore.NewBindStore(sqlDB), cacheStore, nil, limiter, serviceCfg)
+	usrhandler.NewServer(userSvc, bindSvc, nil, nil, usrhandler.JWTAuth(cfg.JWTSecret, rdb, sqlDB), nil).Register(usrR)
+	ctx, stop := context.WithCancel(context.Background())
+	mailDone := make(chan struct{})
+	go func() { defer close(mailDone); mailQueue.Run(ctx) }()
 
 	s := &suite{
 		devSrv: httptest.NewServer(devR),
@@ -85,7 +109,8 @@ func newSuite(t *testing.T) *suite {
 	t.Cleanup(func() {
 		s.devSrv.Close()
 		s.usrSrv.Close()
-		usrS.Close()
+		stop()
+		<-mailDone
 		rdb.Close()
 		sqlDB.Close()
 	})

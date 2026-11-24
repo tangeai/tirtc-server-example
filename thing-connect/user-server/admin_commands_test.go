@@ -47,7 +47,7 @@ func newCommandFixture(t *testing.T) (*redis.Client, string) {
 	client := testenv.OpenRedisOrSkip(t, cfg)
 	stream := fmt.Sprintf("thingconnect:test:user-commands:%d", time.Now().UnixNano())
 	t.Cleanup(func() {
-		_ = client.Del(context.Background(), stream).Err()
+		_ = client.Del(context.Background(), stream, stream+":exhausted").Err()
 		_ = client.Close()
 	})
 	if err := client.XGroupCreateMkStream(context.Background(), stream, adminUserCommandGroup, "0").Err(); err != nil {
@@ -96,12 +96,18 @@ func TestAdminUserCommandNotTakenOverWhileBeingDelivered(t *testing.T) {
 	}
 }
 
-func TestAdminUserCommandDroppedAfterMaxDeliveries(t *testing.T) {
+func TestAdminUserCommandExhaustionAndRecovery(t *testing.T) {
 	client, stream := newCommandFixture(t)
 	ctx := context.Background()
 	failing := &commandRecorder{err: errors.New("smtp down")}
 	consumer := &adminUserCommands{client: client, stream: stream, group: adminUserCommandGroup, consumer: "only", minIdle: time.Millisecond, deliver: failing.deliver}
+	if b, err := consumer.Backlog(ctx); err != nil || b.Pending != 1 || b.Exhausted != 0 {
+		t.Fatalf("unread backlog: %+v %v", b, err)
+	}
 	consumer.readOne(ctx, t)
+	if b, err := consumer.Backlog(ctx); err != nil || b.Pending != 1 || b.Exhausted != 0 {
+		t.Fatalf("inflight backlog: %+v %v", b, err)
+	}
 	for i := 0; i < adminUserCommandMaxDeliveries+2; i++ {
 		time.Sleep(5 * time.Millisecond)
 		consumer.reclaim(ctx)
@@ -111,5 +117,81 @@ func TestAdminUserCommandDroppedAfterMaxDeliveries(t *testing.T) {
 	}
 	if n, err := client.XPending(ctx, stream, adminUserCommandGroup).Result(); err != nil || n.Count != 0 {
 		t.Fatalf("exhausted command still pending: %+v err=%v", n, err)
+	}
+	b, err := consumer.Backlog(ctx)
+	if err != nil || b.Pending != 0 || b.Exhausted != 1 || b.OldestAge != 0 {
+		t.Fatalf("terminal backlog: %+v %v", b, err)
+	}
+	ids, err := client.ZRange(ctx, stream+":exhausted", 0, -1).Result()
+	if err != nil || len(ids) != 1 {
+		t.Fatalf("failure record: %v %v", ids, err)
+	}
+	if err := client.ZAdd(ctx, stream+":exhausted", redis.Z{Member: ids[0], Score: float64(time.Now().Add(-adminCommandFailureWindow - time.Minute).UnixMilli())}).Err(); err != nil {
+		t.Fatal(err)
+	}
+	b, err = consumer.Backlog(ctx)
+	if err != nil || b.Exhausted != 0 {
+		t.Fatalf("failure window remained active: %+v %v", b, err)
+	}
+
+}
+
+func TestAdminCommandOldestAgeIncludesUnreadAndFailedDelivery(t *testing.T) {
+	client, stream := newCommandFixture(t)
+	ctx := context.Background()
+	if err := client.Del(ctx, stream).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.XGroupCreateMkStream(ctx, stream, adminUserCommandGroup, "0").Err(); err != nil {
+		t.Fatal(err)
+	}
+	old := fmt.Sprintf("%d-0", time.Now().Add(-20*time.Minute).UnixMilli())
+	for _, id := range []string{old, "*"} {
+		if err := client.XAdd(ctx, &redis.XAddArgs{Stream: stream, ID: id, Values: map[string]any{"type": "password_reset_email", "email": "a@example.test"}}).Err(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	failing := &commandRecorder{err: errors.New("unavailable")}
+	c := &adminUserCommands{client: client, stream: stream, group: adminUserCommandGroup, consumer: "one", minIdle: time.Minute, deliver: failing.deliver}
+	for _, n := range []int64{2, 2, 1} {
+		b, err := c.Backlog(ctx)
+		if err != nil || b.Pending != n || b.OldestAge < 19*time.Minute {
+			t.Fatalf("pending %d: %+v %v", n, b, err)
+		}
+		if n == 1 {
+			break
+		}
+		c.readOne(ctx, t)
+		c.deliver = (&commandRecorder{}).deliver
+	}
+	other := &adminUserCommands{client: client, stream: stream, group: c.group, consumer: "restarted", minIdle: time.Millisecond, deliver: (&commandRecorder{}).deliver}
+	time.Sleep(5 * time.Millisecond)
+	other.reclaim(ctx)
+	b, err := other.Backlog(ctx)
+	if err != nil || b.Pending != 0 || b.OldestAge != 0 {
+		t.Fatalf("after recovery: %+v %v", b, err)
+	}
+}
+
+func TestAdminCommandStaleOwnerCannotFinishOrExhaustAfterTakeover(t *testing.T) {
+	client, stream := newCommandFixture(t)
+	ctx := context.Background()
+	group := adminUserCommandGroup
+	msgs, err := client.XReadGroup(ctx, &redis.XReadGroupArgs{Group: group, Consumer: "old", Streams: []string{stream, ">"}, Count: 1}).Result()
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := msgs[0].Messages[0].ID
+	if err := client.XClaim(ctx, &redis.XClaimArgs{Stream: stream, Group: group, Consumer: "new", Messages: []string{id}}).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := finishAdminCommand.Run(ctx, client, []string{stream}, group, id, "old").Int64(); err != nil || n != 0 {
+		t.Fatalf("late finish: %d %v", n, err)
+	}
+	if n, err := exhaustAdminCommand.Run(ctx, client, []string{stream, stream + ":exhausted"}, group, id, "old", 0, 1, adminCommandFailureWindow.Milliseconds()).Int64(); err != nil || n != 0 {
+		t.Fatalf("stale exhaustion: %d %v", n, err)
+	}
+	if n, err := finishAdminCommand.Run(ctx, client, []string{stream}, group, id, "new").Int64(); err != nil || n != 1 {
+		t.Fatalf("new owner: %d %v", n, err)
 	}
 }

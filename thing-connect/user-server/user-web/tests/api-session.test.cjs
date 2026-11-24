@@ -26,3 +26,13 @@ test('current-session 401 still logs out',async()=>{
 test('anonymous response is independent of account changes',async()=>{
  const f=fixture(),pending=f.api.request('/v1/config/navigation',{anonymous:true});f.values.set('token','new-session');f.respond(200,'public');assert.equal(await pending,'public');
 });
+
+for (const endpoint of ['bind', 'bind-by-id']) test(`binding rate limit preserves session for ${endpoint}`, async () => {
+ const f = fixture();
+ const pending = f.api.request('/v1/user/device/' + endpoint, {method: 'POST'});
+ f.respond(429, null, true);
+ f.json({code: 429, msg: '请求过于频繁，请稍后重试'});
+ await assert.rejects(pending, e => e.code === 429 && f.api.errorText(e) === '请求过于频繁，请稍后重试');
+ assert.equal(f.values.get('token'), 'old-session');
+ assert.deepEqual(f.redirects, []);
+});

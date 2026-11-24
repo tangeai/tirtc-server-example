@@ -396,7 +396,7 @@ func (s *Server) postDeviceCall(c *gin.Context) {
 		"listener_camera_status": req.WxListenerCameraStatus,
 		"payload":                wxPayload,
 	}
-	if err := wechat.CallWithAccessToken(c.Request.Context(), wxAppID, app.Secret, func(accessToken string) error {
+	if err := wechat.CallWithAccessToken(c.Request.Context(), wxAppID, app.Secret, s.refresh, func(accessToken string) error {
 		return wechat.IotVoipCall(c.Request.Context(), accessToken, payload)
 	}); err != nil {
 		var wxErr *wechat.APIError

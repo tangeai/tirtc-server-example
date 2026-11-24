@@ -116,3 +116,39 @@ func TestUpdateRejectsInvalidPolicy(t *testing.T) {
 		t.Fatal("nil store accepted")
 	}
 }
+
+type finishContextStore struct {
+	scriptedStore
+	t *testing.T
+}
+
+func (s *finishContextStore) check(ctx context.Context) {
+	s.t.Helper()
+	d, ok := ctx.Deadline()
+	if ctx.Err() != nil || !ok || time.Until(d) > 2*time.Second {
+		s.t.Fatalf("unusable bookkeeping context: %v %v", d, ctx.Err())
+	}
+}
+func (s *finishContextStore) Release(ctx context.Context, userID int64) error {
+	s.check(ctx)
+	return s.scriptedStore.Release(ctx, userID)
+}
+func (s *finishContextStore) Fail(ctx context.Context, userID int64, p Policy) (time.Duration, error) {
+	s.check(ctx)
+	return s.scriptedStore.Fail(ctx, userID, p)
+}
+func TestVerifyFinishesReservationsAfterClientDisconnect(t *testing.T) {
+	s := &finishContextStore{t: t}
+	l := newLimiter(t, s)
+	for _, result := range []error{nil, errGuess} {
+		ctx, cancel := context.WithCancel(context.Background())
+		err := l.Verify(ctx, 1, func() error { cancel(); return result }, counts)
+		cancel()
+		if !errors.Is(err, result) {
+			t.Fatal(err)
+		}
+	}
+	if s.released != 1 || s.failed != 1 {
+		t.Fatalf("refund=%d fail=%d", s.released, s.failed)
+	}
+}

@@ -755,3 +755,58 @@ func (f *fakeCacheStore) DiscardEmailCodeDelivery(ctx context.Context, email, de
 	}
 	return nil
 }
+
+func TestPasswordResetQueueWaitsForDeliveryAndGateReleaseOnStop(t *testing.T) {
+	entered := make(chan struct{})
+	finish := make(chan struct{})
+	defer func() {
+		select {
+		case <-finish:
+		default:
+			close(finish)
+		}
+	}()
+	gate := newMemoryMailGate()
+	q := newTestMailQueue(t, gate, func(ctx context.Context, _ string) error {
+		if _, ok := ctx.Deadline(); !ok {
+			t.Error("unbounded SMTP delivery")
+		}
+		close(entered)
+		select {
+		case <-finish:
+			return nil
+		case <-ctx.Done():
+			t.Error("interrupted active delivery")
+			return ctx.Err()
+		}
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := q.Enqueue(ctx, "a@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() { defer close(done); q.Run(ctx) }()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("worker did not start")
+	}
+	cancel()
+	select {
+	case <-done:
+		t.Fatal("queue exited during delivery")
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(finish)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("worker did not stop")
+	}
+	gate.mu.Lock()
+	defer gate.mu.Unlock()
+	if gate.released != 1 {
+		t.Fatalf("queue exited with %d gate releases", gate.released)
+	}
+}

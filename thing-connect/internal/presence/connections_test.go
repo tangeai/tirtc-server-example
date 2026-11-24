@@ -9,9 +9,10 @@ import (
 )
 
 type durableQueue struct {
-	mu    sync.Mutex
-	items map[string]Observation
-	gapAt time.Time
+	mu      sync.Mutex
+	items   map[string]Observation
+	gapAt   time.Time
+	cleared time.Time
 }
 
 func (q *durableQueue) Pending(context.Context) ([]Observation, error) {
@@ -36,6 +37,9 @@ func (q *durableQueue) Ack(_ context.Context, b []Observation) error {
 func (q *durableQueue) MarkGap(_ context.Context, at time.Time) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	if at.Before(q.cleared) {
+		return nil
+	}
 	if at.After(q.gapAt) {
 		q.gapAt = at
 	}
@@ -44,6 +48,10 @@ func (q *durableQueue) MarkGap(_ context.Context, at time.Time) error {
 func (q *durableQueue) ClearGap(_ context.Context, listedFrom time.Time) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	listedFrom = listedFrom.Truncate(time.Millisecond)
+	if listedFrom.After(q.cleared) {
+		q.cleared = listedFrom
+	}
 	if q.gapAt.Before(listedFrom) {
 		q.gapAt = time.Time{}
 	}

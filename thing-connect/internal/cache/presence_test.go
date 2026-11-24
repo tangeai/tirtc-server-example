@@ -268,14 +268,18 @@ func TestGapMarkerClearsOnlyLossesBeforeListing(t *testing.T) {
 	t.Cleanup(func() { _ = rdb.Close() })
 	ctx := context.Background()
 	const key = "presence:connections:gap"
-	previous, hadPrevious := rdb.Get(ctx, key).Val(), rdb.Exists(ctx, key).Val() == 1
-	t.Cleanup(func() {
-		if hadPrevious {
-			rdb.Set(context.Background(), key, previous, 0)
-		} else {
-			rdb.Del(context.Background(), key)
-		}
-	})
+	const clearedKey = "presence:connections:gap_cleared"
+	for _, k := range []string{key, clearedKey} {
+		previous, hadPrevious := rdb.Get(ctx, k).Val(), rdb.Exists(ctx, k).Val() == 1
+		t.Cleanup(func() {
+			if hadPrevious {
+				rdb.Set(context.Background(), k, previous, 0)
+			} else {
+				rdb.Del(context.Background(), k)
+			}
+		})
+	}
+	rdb.Del(ctx, clearedKey)
 	s := &cache.PresenceStore{Client: rdb}
 	listedFrom := time.Now()
 
@@ -304,5 +308,29 @@ func TestGapMarkerClearsOnlyLossesBeforeListing(t *testing.T) {
 	}
 	if gap, _ := s.HasGap(ctx); gap {
 		t.Fatal("later listing did not clear the marker")
+	}
+
+	// A writer that persists an already resolved loss after the clear (any
+	// instance) must not resurrect the shared marker.
+	if err := s.MarkGap(ctx, listedFrom.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if gap, _ := s.HasGap(ctx); gap {
+		t.Fatal("late write of a resolved loss resurrected the marker")
+	}
+	if err := s.ClearGap(ctx, listedFrom); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkGap(ctx, listedFrom.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if gap, _ := s.HasGap(ctx); gap {
+		t.Fatal("an older listing moved the cleared boundary backwards")
+	}
+	if err := s.MarkGap(ctx, listedFrom.Add(3*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if gap, _ := s.HasGap(ctx); !gap {
+		t.Fatal("loss after the latest listing was ignored")
 	}
 }

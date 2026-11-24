@@ -40,7 +40,7 @@ type dictItem struct {
 
 func (s *HTTPServer) listDictTypes(c *gin.Context) {
 	var items []dictType
-	if err := s.store.db.SelectContext(c, &items, `SELECT id,code,name,status,remark,created_at,updated_at FROM admin_dict_types ORDER BY id DESC`); err != nil {
+	if err := s.store.db.SelectContext(c.Request.Context(), &items, `SELECT id,code,name,status,remark,created_at,updated_at FROM admin_dict_types ORDER BY id DESC`); err != nil {
 		apiresp.Internal(c, err.Error())
 		return
 	}
@@ -56,19 +56,20 @@ type dictTypeRequest struct {
 }
 
 func (s *HTTPServer) createDictType(c *gin.Context) {
+	ctx := c.Request.Context()
 	var request dictTypeRequest
 	if c.ShouldBindJSON(&request) != nil || !stableCode.MatchString(request.Code) || (request.Status != 0 && request.Status != 1) {
 		apiresp.BadParam(c, "字典类型数据无效")
 		return
 	}
 	identity, _ := identityFromContext(c)
-	tx, err := s.store.db.BeginTxx(c, nil)
+	tx, err := s.store.db.BeginTxx(ctx, nil)
 	if err != nil {
 		apiresp.Internal(c, err.Error())
 		return
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(c, `INSERT INTO admin_dict_types (code,name,status,remark) VALUES (?,?,?,?)`, request.Code, strings.TrimSpace(request.Name), request.Status, strings.TrimSpace(request.Remark))
+	result, err := tx.ExecContext(ctx, `INSERT INTO admin_dict_types (code,name,status,remark) VALUES (?,?,?,?)`, request.Code, strings.TrimSpace(request.Name), request.Status, strings.TrimSpace(request.Remark))
 	if err != nil {
 		apiresp.BadParam(c, "字典编码已存在")
 		return
@@ -82,6 +83,7 @@ func (s *HTTPServer) createDictType(c *gin.Context) {
 }
 
 func (s *HTTPServer) updateDictType(c *gin.Context) {
+	ctx := c.Request.Context()
 	id, err := positiveID(c.Param("id"))
 	var request dictTypeRequest
 	if err != nil || c.ShouldBindJSON(&request) != nil || (request.Status != 0 && request.Status != 1) {
@@ -89,14 +91,14 @@ func (s *HTTPServer) updateDictType(c *gin.Context) {
 		return
 	}
 	identity, _ := identityFromContext(c)
-	tx, err := s.store.db.BeginTxx(c, nil)
+	tx, err := s.store.db.BeginTxx(ctx, nil)
 	if err != nil {
 		apiresp.Internal(c, err.Error())
 		return
 	}
 	defer tx.Rollback()
 	var before dictType
-	if err := tx.GetContext(c, &before, `SELECT id,code,name,status,remark,created_at,updated_at FROM admin_dict_types WHERE id=? FOR UPDATE`, id); err != nil {
+	if err := tx.GetContext(ctx, &before, `SELECT id,code,name,status,remark,created_at,updated_at FROM admin_dict_types WHERE id=? FOR UPDATE`, id); err != nil {
 		c.JSON(404, apiresp.JSON{Code: 404, Msg: "字典类型不存在"})
 		return
 	}
@@ -105,12 +107,12 @@ func (s *HTTPServer) updateDictType(c *gin.Context) {
 		apiresp.BadParam(c, "字典编码发布后不可修改")
 		return
 	}
-	if _, err := tx.ExecContext(c, `UPDATE admin_dict_types SET name=?,status=?,remark=? WHERE id=?`, strings.TrimSpace(request.Name), request.Status, strings.TrimSpace(request.Remark), id); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE admin_dict_types SET name=?,status=?,remark=? WHERE id=?`, strings.TrimSpace(request.Name), request.Status, strings.TrimSpace(request.Remark), id); err != nil {
 		apiresp.Internal(c, err.Error())
 		return
 	}
 	if request.Status == 0 {
-		_, _ = tx.ExecContext(c, `UPDATE admin_dict_items SET status=0 WHERE dict_type_code=?`, before.Code)
+		_, _ = tx.ExecContext(ctx, `UPDATE admin_dict_items SET status=0 WHERE dict_type_code=?`, before.Code)
 	}
 	if err := s.auditTx(c, tx, identity, "dictionary.type.update", "dict_type", before.Code, request.Reason, marshalSafe(before), marshalSafe(request)); err != nil || tx.Commit() != nil {
 		apiresp.Internal(c, "commit dictionary")
@@ -122,7 +124,7 @@ func (s *HTTPServer) updateDictType(c *gin.Context) {
 
 func (s *HTTPServer) listDictItems(c *gin.Context) {
 	var items []dictItem
-	if err := s.store.db.SelectContext(c, &items, `SELECT id,dict_type_code,label,value,sort_no,is_default,status,extra,remark,created_at,updated_at FROM admin_dict_items WHERE dict_type_code=? ORDER BY sort_no,id`, c.Param("code")); err != nil {
+	if err := s.store.db.SelectContext(c.Request.Context(), &items, `SELECT id,dict_type_code,label,value,sort_no,is_default,status,extra,remark,created_at,updated_at FROM admin_dict_items WHERE dict_type_code=? ORDER BY sort_no,id`, c.Param("code")); err != nil {
 		apiresp.Internal(c, err.Error())
 		return
 	}
@@ -150,13 +152,14 @@ func (s *HTTPServer) updateDictItem(c *gin.Context) {
 	s.saveDictItem(c, id, "")
 }
 func (s *HTTPServer) saveDictItem(c *gin.Context, id int64, code string) {
+	ctx := c.Request.Context()
 	var request dictItemRequest
 	if c.ShouldBindJSON(&request) != nil || (request.Status != 0 && request.Status != 1) || (request.IsDefault != 0 && request.IsDefault != 1) || !validExtra(request.Extra) {
 		apiresp.BadParam(c, "字典项数据无效")
 		return
 	}
 	identity, _ := identityFromContext(c)
-	tx, err := s.store.db.BeginTxx(c, nil)
+	tx, err := s.store.db.BeginTxx(ctx, nil)
 	if err != nil {
 		apiresp.Internal(c, err.Error())
 		return
@@ -165,7 +168,7 @@ func (s *HTTPServer) saveDictItem(c *gin.Context, id int64, code string) {
 	before := ""
 	if id > 0 {
 		var item dictItem
-		if err := tx.GetContext(c, &item, `SELECT id,dict_type_code,label,value,sort_no,is_default,status,extra,remark,created_at,updated_at FROM admin_dict_items WHERE id=? FOR UPDATE`, id); err != nil {
+		if err := tx.GetContext(ctx, &item, `SELECT id,dict_type_code,label,value,sort_no,is_default,status,extra,remark,created_at,updated_at FROM admin_dict_items WHERE id=? FOR UPDATE`, id); err != nil {
 			c.JSON(404, apiresp.JSON{Code: 404, Msg: "字典项不存在"})
 			return
 		}
@@ -177,12 +180,12 @@ func (s *HTTPServer) saveDictItem(c *gin.Context, id int64, code string) {
 		}
 	}
 	var typeStatus int8
-	if err := tx.GetContext(c, &typeStatus, `SELECT status FROM admin_dict_types WHERE code=? FOR UPDATE`, code); err != nil || typeStatus != 1 {
+	if err := tx.GetContext(ctx, &typeStatus, `SELECT status FROM admin_dict_types WHERE code=? FOR UPDATE`, code); err != nil || typeStatus != 1 {
 		apiresp.BadParam(c, "字典类型不存在或已停用")
 		return
 	}
 	if request.IsDefault == 1 && request.Status == 1 {
-		if _, err := tx.ExecContext(c, `UPDATE admin_dict_items SET is_default=0 WHERE dict_type_code=? AND id<>?`, code, id); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE admin_dict_items SET is_default=0 WHERE dict_type_code=? AND id<>?`, code, id); err != nil {
 			apiresp.Internal(c, err.Error())
 			return
 		}
@@ -192,14 +195,14 @@ func (s *HTTPServer) saveDictItem(c *gin.Context, id int64, code string) {
 		extra = "{}"
 	}
 	if id == 0 {
-		result, err := tx.ExecContext(c, `INSERT INTO admin_dict_items (dict_type_code,label,value,sort_no,is_default,status,extra,remark) VALUES (?,?,?,?,?,?,?,?)`, code, strings.TrimSpace(request.Label), request.Value, request.SortNo, request.IsDefault, request.Status, extra, strings.TrimSpace(request.Remark))
+		result, err := tx.ExecContext(ctx, `INSERT INTO admin_dict_items (dict_type_code,label,value,sort_no,is_default,status,extra,remark) VALUES (?,?,?,?,?,?,?,?)`, code, strings.TrimSpace(request.Label), request.Value, request.SortNo, request.IsDefault, request.Status, extra, strings.TrimSpace(request.Remark))
 		if err != nil {
 			apiresp.BadParam(c, "同一字典内的值必须唯一")
 			return
 		}
 		id, _ = result.LastInsertId()
 	} else {
-		if _, err := tx.ExecContext(c, `UPDATE admin_dict_items SET label=?,sort_no=?,is_default=?,status=?,extra=?,remark=? WHERE id=?`, strings.TrimSpace(request.Label), request.SortNo, request.IsDefault, request.Status, extra, strings.TrimSpace(request.Remark), id); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE admin_dict_items SET label=?,sort_no=?,is_default=?,status=?,extra=?,remark=? WHERE id=?`, strings.TrimSpace(request.Label), request.SortNo, request.IsDefault, request.Status, extra, strings.TrimSpace(request.Remark), id); err != nil {
 			apiresp.Internal(c, err.Error())
 			return
 		}
@@ -223,7 +226,7 @@ func (s *HTTPServer) activeDictionary(c *gin.Context) {
 		}
 	}
 	var items []dictItem
-	err := s.store.db.SelectContext(c, &items, `SELECT i.id,i.dict_type_code,i.label,i.value,i.sort_no,i.is_default,i.status,i.extra,i.remark,i.created_at,i.updated_at FROM admin_dict_items i JOIN admin_dict_types t ON t.code=i.dict_type_code WHERE i.dict_type_code=? AND i.status=1 AND t.status=1 ORDER BY i.sort_no,i.id`, code)
+	err := s.store.db.SelectContext(c.Request.Context(), &items, `SELECT i.id,i.dict_type_code,i.label,i.value,i.sort_no,i.is_default,i.status,i.extra,i.remark,i.created_at,i.updated_at FROM admin_dict_items i JOIN admin_dict_types t ON t.code=i.dict_type_code WHERE i.dict_type_code=? AND i.status=1 AND t.status=1 ORDER BY i.sort_no,i.id`, code)
 	if err != nil {
 		apiresp.Internal(c, err.Error())
 		return
@@ -234,6 +237,7 @@ func (s *HTTPServer) activeDictionary(c *gin.Context) {
 }
 
 func (s *HTTPServer) loginLogs(c *gin.Context) {
+	ctx := c.Request.Context()
 	page, size := pageParams(c)
 	where, args := ` WHERE 1=1`, []any{}
 	if q := strings.TrimSpace(c.Query("email")); q != "" {
@@ -250,7 +254,7 @@ func (s *HTTPServer) loginLogs(c *gin.Context) {
 	}
 	from := ` FROM admin_login_log l LEFT JOIN admin_users a ON a.id=l.admin_user_id`
 	var total int
-	_ = s.store.db.GetContext(c, &total, `SELECT COUNT(*)`+from+where, args...)
+	_ = s.store.db.GetContext(ctx, &total, `SELECT COUNT(*)`+from+where, args...)
 	type row struct {
 		ID          int64     `db:"id" json:"id"`
 		AdminUserID int64     `db:"admin_user_id" json:"admin_user_id"`
@@ -264,7 +268,7 @@ func (s *HTTPServer) loginLogs(c *gin.Context) {
 	var items []row
 	queryArgs := append(append([]any{}, args...), size, (page-1)*size)
 	query := `SELECT l.id,l.admin_user_id,COALESCE(NULLIF(l.email,''),a.email,'') email,l.client_ip,l.user_agent,l.status,l.message,l.created_at` + from + where + ` ORDER BY l.id DESC LIMIT ? OFFSET ?`
-	if err := s.store.db.SelectContext(c, &items, query, queryArgs...); err != nil {
+	if err := s.store.db.SelectContext(ctx, &items, query, queryArgs...); err != nil {
 		apiresp.Internal(c, err.Error())
 		return
 	}
@@ -272,6 +276,7 @@ func (s *HTTPServer) loginLogs(c *gin.Context) {
 }
 
 func (s *HTTPServer) auditLogs(c *gin.Context) {
+	ctx := c.Request.Context()
 	page, size := pageParams(c)
 	where, args := ` WHERE 1=1`, []any{}
 	if action := strings.TrimSpace(c.Query("action")); action != "" {
@@ -301,7 +306,7 @@ func (s *HTTPServer) auditLogs(c *gin.Context) {
 	}
 	from := ` FROM admin_audit_log l LEFT JOIN admin_users a ON a.id=l.admin_user_id`
 	var total int
-	_ = s.store.db.GetContext(c, &total, `SELECT COUNT(*)`+from+where, args...)
+	_ = s.store.db.GetContext(ctx, &total, `SELECT COUNT(*)`+from+where, args...)
 	type auditRow struct {
 		ID           int64     `db:"id" json:"id"`
 		AdminUserID  int64     `db:"admin_user_id" json:"admin_user_id"`
@@ -325,7 +330,7 @@ func (s *HTTPServer) auditLogs(c *gin.Context) {
 	}
 	var items []auditRow
 	queryArgs := append(append([]any{}, args...), size, (page-1)*size)
-	if err := s.store.db.SelectContext(c, &items, `SELECT l.id,l.admin_user_id,COALESCE(a.email,'') email,l.role_codes,l.request_id,l.method,l.path,l.http_status,l.latency_ms,l.action,l.resource_type,l.resource_id,l.reason,l.before_value,l.after_value,l.client_ip,l.success,l.error_message,l.created_at`+from+where+` ORDER BY l.id DESC LIMIT ? OFFSET ?`, queryArgs...); err != nil {
+	if err := s.store.db.SelectContext(ctx, &items, `SELECT l.id,l.admin_user_id,COALESCE(a.email,'') email,l.role_codes,l.request_id,l.method,l.path,l.http_status,l.latency_ms,l.action,l.resource_type,l.resource_id,l.reason,l.before_value,l.after_value,l.client_ip,l.success,l.error_message,l.created_at`+from+where+` ORDER BY l.id DESC LIMIT ? OFFSET ?`, queryArgs...); err != nil {
 		apiresp.Internal(c, err.Error())
 		return
 	}
@@ -346,6 +351,7 @@ type voipApp struct {
 }
 
 func (s *HTTPServer) voipApps(c *gin.Context) {
+	ctx := c.Request.Context()
 	entry, err := s.configs.Get(c, "voip-server", "wechat.apps", "global", "")
 	if err != nil {
 		apiresp.Internal(c, err.Error())
@@ -373,9 +379,9 @@ func (s *HTTPServer) voipApps(c *gin.Context) {
 	items := make([]voipApp, 0, len(value.Apps))
 	for appID, app := range value.Apps {
 		item := voipApp{AppID: appID, Enabled: app.Enabled, ModelID: app.ModelID, IsDefault: appID == value.DefaultAppID, SecretConfigured: strings.TrimSpace(secretValue.Apps[appID].Secret) != "", UpdatedAt: entry.UpdatedAt}
-		_ = s.store.db.GetContext(c, &item.DeviceCount, `SELECT COUNT(DISTINCT device_id) FROM voip_device_auth WHERE wx_app_id=?`, appID)
-		_ = s.store.db.GetContext(c, &item.ActiveAuthCount, `SELECT COUNT(*) FROM voip_device_auth WHERE wx_app_id=? AND auth_status='active'`, appID)
-		_ = s.store.db.GetContext(c, &item.InvalidAuthCount, `SELECT COUNT(*) FROM voip_device_auth WHERE wx_app_id=? AND auth_status='invalid'`, appID)
+		_ = s.store.db.GetContext(ctx, &item.DeviceCount, `SELECT COUNT(DISTINCT device_id) FROM voip_device_auth WHERE wx_app_id=?`, appID)
+		_ = s.store.db.GetContext(ctx, &item.ActiveAuthCount, `SELECT COUNT(*) FROM voip_device_auth WHERE wx_app_id=? AND auth_status='active'`, appID)
+		_ = s.store.db.GetContext(ctx, &item.InvalidAuthCount, `SELECT COUNT(*) FROM voip_device_auth WHERE wx_app_id=? AND auth_status='invalid'`, appID)
 		item.ConfigStatus = "disabled"
 		if item.Enabled && item.SecretConfigured && strings.TrimSpace(item.ModelID) != "" {
 			item.ConfigStatus = "healthy"
@@ -422,6 +428,7 @@ func (s *HTTPServer) voipApp(c *gin.Context) {
 }
 
 func (s *HTTPServer) voipAppDevices(c *gin.Context) {
+	ctx := c.Request.Context()
 	page, size := pageParams(c)
 	appID := c.Param("app_id")
 	where, args, err := voipAppDeviceFilter(c, appID)
@@ -434,7 +441,7 @@ func (s *HTTPServer) voipAppDevices(c *gin.Context) {
 		LEFT JOIN users u ON u.id=d.user_id
 		LEFT JOIN device_profile p ON p.device_id=a.device_id AND JSON_CONTAINS_PATH(p.profile,'one','$.voip')`
 	var total int
-	if err := s.store.db.GetContext(c, &total, `SELECT COUNT(*)`+from+where, args...); err != nil {
+	if err := s.store.db.GetContext(ctx, &total, `SELECT COUNT(*)`+from+where, args...); err != nil {
 		apiresp.Internal(c, err.Error())
 		return
 	}
@@ -457,7 +464,7 @@ func (s *HTTPServer) voipAppDevices(c *gin.Context) {
 	items := make([]row, 0)
 	queryArgs := append(append([]any{}, args...), size, (page-1)*size)
 	query := `SELECT a.id,a.device_id,a.wx_open_id,a.wx_model_id,a.remark,a.authorized_device_name,COALESCE(d.user_id,0) owner_user_id,COALESCE(u.email,'') owner_email,a.auth_status,a.invalid_reason,a.invalid_at,a.last_verified_at,p.updated_at profile_updated_at,a.created_at` + from + where + ` ORDER BY a.id DESC LIMIT ? OFFSET ?`
-	if err := s.store.db.SelectContext(c, &items, query, queryArgs...); err != nil {
+	if err := s.store.db.SelectContext(ctx, &items, query, queryArgs...); err != nil {
 		apiresp.Internal(c, err.Error())
 		return
 	}
@@ -497,7 +504,7 @@ func (s *HTTPServer) voipDeviceProfile(c *gin.Context) {
 		Profile   string    `db:"profile" json:"profile"`
 		UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
 	}
-	err := s.store.db.GetContext(c, &row, `SELECT device_id,profile,updated_at
+	err := s.store.db.GetContext(c.Request.Context(), &row, `SELECT device_id,profile,updated_at
 		FROM device_profile WHERE device_id=? AND JSON_CONTAINS_PATH(profile,'one','$.voip')`, c.Param("device_id"))
 	if errors.Is(err, sql.ErrNoRows) {
 		c.JSON(http.StatusNotFound, apiresp.JSON{Code: 404, Msg: "设备未上报 VoIP 属性"})

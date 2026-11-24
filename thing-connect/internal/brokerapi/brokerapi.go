@@ -11,6 +11,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -103,44 +105,107 @@ type clientPage struct {
 		IPAddress   string    `json:"ip_address"`
 		ConnectedAt time.Time `json:"connected_at"`
 	} `json:"data"`
-	Meta struct {
-		HasNext bool `json:"hasnext"`
+	Meta *struct {
+		HasNext *bool  `json:"hasnext"`
+		Cursor  string `json:"cursor"`
 	} `json:"meta"`
 }
 
-// ListConnected pages through every connected client. Concurrent connects can
-// shift pages; a missed device recovers through its next heartbeat.
+func (p clientPage) project(visit func([]presence.Observation) error) error {
+	now := time.Now()
+	batch := make([]presence.Observation, 0, len(p.Data))
+	for _, item := range p.Data {
+		if o, ok := presence.Connected(item.ClientID, item.IPAddress, item.ConnectedAt, now); ok {
+			batch = append(batch, o)
+		}
+	}
+	if len(batch) > 0 {
+		return visit(batch)
+	}
+	return nil
+}
+
+var errNoCursorAPI = errors.New("broker api: cursor endpoint unavailable")
+
+// ListConnected follows the broker's continuation across nodes. An offset
+// would change when another client disconnects between two requests.
 func (c *Client) ListConnected(ctx context.Context, visit func([]presence.Observation) error) error {
-	for page := 1; ; page++ {
-		body, err := c.page(ctx, page)
+	q := url.Values{"conn_state": {"connected"}, "limit": {strconv.Itoa(pageSize)}, "fields": {"clientid,ip_address,connected_at"}}
+	seen := make(map[string]struct{})
+	for {
+		page, err := c.page(ctx, "clients_v2", q)
+		if errors.Is(err, errNoCursorAPI) && len(seen) == 0 {
+			// Older EMQX releases only support the timestamp-filtered API.
+			return c.listWindow(ctx, q, 0, maxConnectionMS, visit)
+		}
 		if err != nil {
 			return err
 		}
-		now := time.Now()
-		batch := make([]presence.Observation, 0, len(body.Data))
-		for _, item := range body.Data {
-			if o, ok := presence.Connected(item.ClientID, item.IPAddress, item.ConnectedAt, now); ok {
-				batch = append(batch, o)
-			}
+		if err := page.project(visit); err != nil {
+			return err
 		}
-		if len(batch) > 0 {
-			if err := visit(batch); err != nil {
-				return err
+		cursor := page.Meta.Cursor
+		if cursor == "" {
+			if page.Meta.HasNext != nil && *page.Meta.HasNext {
+				return errors.New("broker api: missing continuation cursor")
 			}
-		}
-		if !body.Meta.HasNext {
 			return nil
 		}
+		if _, ok := seen[cursor]; ok {
+			return errors.New("broker api: repeated continuation cursor")
+		}
+		seen[cursor] = struct{}{}
+		q.Set("cursor", cursor)
 	}
 }
 
-func (c *Client) page(ctx context.Context, page int) (clientPage, error) {
-	q := url.Values{}
-	q.Set("conn_state", "connected")
-	q.Set("fields", "clientid,ip_address,connected_at")
-	q.Set("limit", fmt.Sprint(pageSize))
-	q.Set("page", fmt.Sprint(page))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/api/v5/clients?"+q.Encode(), nil)
+// Largest millisecond timestamp representable by EMQX's RFC3339 output.
+const maxConnectionMS int64 = 253402300799999
+
+// Split overflowing ranges into disjoint whole milliseconds. Each accepted
+// range is obtained in one request, so departures in a previous range do
+// not shift any unseen client. Never clear a loss on an unpageable range.
+func (c *Client) listWindow(ctx context.Context, q url.Values, lo, hi int64, visit func([]presence.Observation) error) error {
+	q.Set("page", "1")
+	q.Del("gte_connected_at")
+	q.Del("lte_connected_at")
+	if lo > 0 {
+		q.Set("gte_connected_at", strconv.FormatInt(lo, 10))
+	}
+	if hi < maxConnectionMS {
+		q.Set("lte_connected_at", strconv.FormatInt(hi, 10))
+	}
+	page, err := c.page(ctx, "clients", q)
+	if err != nil {
+		return err
+	}
+	if page.Meta.HasNext == nil {
+		return errors.New("broker api: missing pagination metadata")
+	}
+	if !*page.Meta.HasNext {
+		return page.project(visit)
+	}
+	if lo == hi || len(page.Data) == 0 {
+		return errors.New("broker api: a connection-time window exceeds one page; cursor API required")
+	}
+	timestamps := make([]int64, len(page.Data))
+	for i, row := range page.Data {
+		ms := row.ConnectedAt.UnixMilli()
+		if ms < lo || ms > hi {
+			return errors.New("broker api: invalid connection time in paginated results")
+		}
+		timestamps[i] = ms
+	}
+	slices.Sort(timestamps)
+	pivot := min(timestamps[len(timestamps)/2], hi-1)
+	if err := c.listWindow(ctx, q, lo, pivot, visit); err != nil {
+		return err
+	}
+	return c.listWindow(ctx, q, pivot+1, hi, visit)
+}
+
+func (c *Client) page(ctx context.Context, endpoint string, q url.Values) (clientPage, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/api/v5/"+endpoint+"?"+q.Encode(), nil)
 	if err != nil {
 		return clientPage{}, err
 	}
@@ -152,11 +217,17 @@ func (c *Client) page(ctx context.Context, page int) (clientPage, error) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-		return clientPage{}, fmt.Errorf("broker api: page %d status %d", page, resp.StatusCode)
+		if endpoint == "clients_v2" && resp.StatusCode == http.StatusNotFound {
+			return clientPage{}, errNoCursorAPI
+		}
+		return clientPage{}, fmt.Errorf("broker api: %s status %d", endpoint, resp.StatusCode)
 	}
 	var body clientPage
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 64<<20)).Decode(&body); err != nil {
-		return clientPage{}, fmt.Errorf("broker api: page %d: %w", page, err)
+		return clientPage{}, fmt.Errorf("broker api: %s: %w", endpoint, err)
+	}
+	if body.Data == nil || body.Meta == nil {
+		return clientPage{}, errors.New("broker api: incomplete listing response")
 	}
 	return body, nil
 }
