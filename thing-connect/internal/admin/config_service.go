@@ -520,6 +520,8 @@ func validateSecretShape(namespace, key string, object map[string]any) error {
 	switch definitionID(namespace, key) {
 	case "recognition-server/recognition.models":
 		allowed["api_key"] = true
+	case "device-server/mqtt.broker_api":
+		allowed["api_secret"] = true
 	case "device-server/mqtt.connection", "recognition-server/mqtt.connection", "user-server/mqtt.connection", "voip-server/mqtt.connection", "call-server/mqtt.connection":
 		allowed["password"] = true
 	case "user-server/smtp":
