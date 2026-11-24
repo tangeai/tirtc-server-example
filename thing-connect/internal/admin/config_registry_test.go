@@ -82,6 +82,15 @@ func TestRegistryDefinitionsAndUsableInitialValues(t *testing.T) {
 				t.Errorf("secret field in %s/%s is missing registry secret paths", definition.Namespace, definition.Key)
 			}
 		}
+		// wechat.apps keeps secrets in a nested per-app shape with its own test.
+		if definition.Key == "wechat.apps" {
+			continue
+		}
+		for _, path := range definition.SecretPaths {
+			if err := validateSecretShape(definition.Namespace, definition.Key, map[string]any{path: "secret"}); err != nil {
+				t.Errorf("registered secret %s of %s/%s rejected: %v", path, definition.Namespace, definition.Key, err)
+			}
+		}
 	}
 	for _, namespace := range []string{"device-server", "user-server", "voip-server", "ai-server", "call-server", "common", "system"} {
 		if len(registry.List(namespace)) == 0 {

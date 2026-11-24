@@ -77,6 +77,31 @@ func TestRecognitionModelSecretValidation(t *testing.T) {
 	}
 }
 
+func TestBrokerAPISecretValidation(t *testing.T) {
+	service := &ConfigService{registry: DefaultConfigRegistry()}
+	public := json.RawMessage(`{"url":"http://127.0.0.1:18083","api_key":"key"}`)
+	for _, tc := range []struct {
+		name, secret string
+		valid        bool
+	}{
+		{"api secret", `{"api_secret":"test-secret"}`, true},
+		{"unknown field", `{"password":"test-secret"}`, false},
+		{"null secret", `{"api_secret":null}`, false},
+		{"numeric secret", `{"api_secret":123}`, false},
+		{"masked secret", `{"api_secret":"******"}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := service.Validate("device-server", "mqtt.broker_api", public, json.RawMessage(tc.secret), true)
+			if (err == nil) != tc.valid {
+				t.Fatalf("valid=%t, error=%v", tc.valid, err)
+			}
+		})
+	}
+	if err := service.Validate("device-server", "mqtt.broker_api", public, nil, false); err != nil {
+		t.Fatalf("keeping existing secret rejected: %v", err)
+	}
+}
+
 func TestAllMQTTDefinitionsValidatePassword(t *testing.T) {
 	service := &ConfigService{registry: DefaultConfigRegistry()}
 	public := json.RawMessage(`{"broker":"mqtt://example.invalid:1883","auth_mode":"username","username":"service","client_id":""}`)
