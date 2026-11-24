@@ -2,6 +2,7 @@ package mysql_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -90,6 +91,38 @@ func TestAICloudTargetsClaimOnceAndParkWhenSettled(t *testing.T) {
 	}
 	if ids, err := store.ClaimCloud(ctx, 100, time.Minute); err != nil || len(ids) != 1 || ids[0] != devices[0] {
 		t.Fatalf("new target after settling not claimable: %v err=%v", ids, err)
+	}
+}
+
+func TestAICloudCleanupRejectsDeviceOutsidePool(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	store := mysqlstore.NewRoleLifecycleStore(db)
+	count := func(device string) (n int) {
+		t.Helper()
+		if err := db.Get(&n, `SELECT COUNT(*) FROM ai_cloud_role_target WHERE device_id=?`, device); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	unknown := uniqueDevID()
+	if _, err := store.CloudTarget(ctx, unknown, true); !errors.Is(err, ai.ErrDeviceUnknown) {
+		t.Fatalf("unknown device error = %v, want ErrDeviceUnknown", err)
+	}
+	if n := count(unknown); n != 0 {
+		t.Fatalf("unknown device persisted %d cloud targets", n)
+	}
+
+	// An unbound device that was provisioned still needs its cloud role cleared.
+	known, _ := seedPool(t, db)
+	t.Cleanup(func() { _, _ = db.Exec(`DELETE FROM ai_cloud_role_target WHERE device_id=?`, known) })
+	target, err := store.CloudTarget(ctx, known, true)
+	if err != nil || !target.Remove || target.DeviceID != known {
+		t.Fatalf("provisioned device target=%+v err=%v", target, err)
+	}
+	if n := count(known); n != 1 {
+		t.Fatalf("provisioned device has %d cloud targets, want 1", n)
 	}
 }
 

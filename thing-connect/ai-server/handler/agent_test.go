@@ -491,6 +491,29 @@ func TestInternalUnbind_InvalidKeyUsesInternalCredentialCode(t *testing.T) {
 	}
 }
 
+type unknownDeviceRoles struct{ ai.RoleOperations }
+
+func (unknownDeviceRoles) CleanupDevice(context.Context, string) error { return ai.ErrDeviceUnknown }
+
+func TestInternalUnbind_UnknownDeviceIsRejected(t *testing.T) {
+	h := &AgentHandler{internalKey: "expected-key"}
+	h.SetRoles(unknownDeviceRoles{})
+	router := setupTestRouter(h)
+	req := httptest.NewRequest(http.MethodPost, "/v1/ai/internal/unbind", strings.NewReader(`{"device_id":"missing"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Internal-Key", "expected-key")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("HTTP status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+	if resp := parseJSON(t, w); resp.Code != 40400 {
+		t.Fatalf("code = %d, want 40400", resp.Code)
+	}
+}
+
 func TestListRoles_Success(t *testing.T) {
 	api := &mockAgentAPI{
 		roles: map[string]*tirtcapi.Role{

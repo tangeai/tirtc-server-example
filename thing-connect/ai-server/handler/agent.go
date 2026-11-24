@@ -225,6 +225,10 @@ func (h *AgentHandler) internalUnbind(c *gin.Context) {
 		return
 	}
 	if err := h.roles.CleanupDevice(c.Request.Context(), body.DeviceID); err != nil {
+		if errors.Is(err, ai.ErrDeviceUnknown) {
+			apiresp.Fail(c, http.StatusNotFound, 40400, "设备不存在")
+			return
+		}
 		roleMutationError(c, err)
 		return
 	}

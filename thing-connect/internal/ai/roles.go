@@ -12,6 +12,10 @@ import (
 
 var ErrCleanupSuperseded = errors.New("设备已进入新的绑定周期")
 
+// ErrDeviceUnknown reports a device that was never provisioned. No cloud
+// target exists for it, so nothing is persisted or retried.
+var ErrDeviceUnknown = errors.New("设备不存在")
+
 var ErrRoleForbidden = errors.New("角色或设备不属于当前用户")
 var ErrRoleBusy = errors.New("角色正在使用或有未完成操作，请先解除设备关联")
 var ErrRoleDeleting = errors.New("角色删除尚未完成，请重试删除后再选择其他角色")

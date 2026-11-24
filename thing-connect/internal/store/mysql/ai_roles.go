@@ -223,6 +223,17 @@ func (s *aiRoleLifecycleStore) CloudTarget(ctx context.Context, device string, c
 		}
 		return target, ai.ErrCleanupSuperseded
 	}
+	if errors.Is(e, sql.ErrNoRows) && owner == 0 {
+		// Every device that was ever bound came from device_pool and pool rows are
+		// never deleted, so an absent row cannot have a cloud role to clean up.
+		var known int
+		if err = tx.GetContext(ctx, &known, `SELECT COUNT(*) FROM device_pool WHERE device_id=?`, device); err != nil {
+			return target, err
+		}
+		if known == 0 {
+			return target, ai.ErrDeviceUnknown
+		}
+	}
 	if e != nil || target.Revision != revision || target.UserID != owner {
 		target = ai.CloudTarget{DeviceID: device, UserID: owner, Revision: revision, Remove: true}
 		if _, err = tx.ExecContext(ctx, `INSERT INTO ai_cloud_role_target(device_id,user_id,binding_revision,role_id,remove_role,next_attempt_at) VALUES(?,?,?,'',1,NOW()) ON DUPLICATE KEY UPDATE pending_since=IF(next_attempt_at='9999-12-31 23:59:59',CURRENT_TIMESTAMP(6),pending_since),user_id=VALUES(user_id),binding_revision=VALUES(binding_revision),role_id='',remove_role=1,attempts=0,next_attempt_at=NOW()`, device, owner, revision); err != nil {
