@@ -195,3 +195,79 @@ func TestAdminCommandStaleOwnerCannotFinishOrExhaustAfterTakeover(t *testing.T) 
 		t.Fatalf("new owner: %d %v", n, err)
 	}
 }
+
+type cancelAfterCommand struct {
+	name   string
+	cancel context.CancelFunc
+}
+
+func (h cancelAfterCommand) DialHook(next redis.DialHook) redis.DialHook { return next }
+func (h cancelAfterCommand) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
+	return next
+}
+func (h cancelAfterCommand) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
+	return func(ctx context.Context, cmd redis.Cmder) error {
+		err := next(ctx, cmd)
+		if cmd.Name() == h.name {
+			h.cancel()
+		}
+		return err
+	}
+}
+
+func TestAdminCommandClaimedWhileStoppingIsStillAttempted(t *testing.T) {
+	client, stream := newCommandFixture(t)
+	if err := client.XReadGroup(context.Background(), &redis.XReadGroupArgs{Group: adminUserCommandGroup, Consumer: "crashed", Streams: []string{stream, ">"}, Count: 1}).Err(); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(5 * time.Millisecond)
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	client.AddHook(cancelAfterCommand{name: "xclaim", cancel: stop})
+	delivered := &commandRecorder{}
+	c := &adminUserCommands{client: client, stream: stream, group: adminUserCommandGroup, consumer: "stopping", minIdle: time.Millisecond, deliver: delivered.deliver}
+	c.reclaim(ctx)
+	if delivered.count() != 1 {
+		t.Fatalf("claimed command delivered %d times while stopping, want 1", delivered.count())
+	}
+	if n, err := client.XPending(context.Background(), stream, adminUserCommandGroup).Result(); err != nil || n.Count != 0 {
+		t.Fatalf("attempted command still pending: %+v err=%v", n, err)
+	}
+}
+
+func TestAdminCommandReclaimReachesEntriesBeyondFirstPage(t *testing.T) {
+	client, stream := newCommandFixture(t)
+	ctx := context.Background()
+	for i := 0; i < adminUserCommandReclaimPage; i++ {
+		if err := client.XAdd(ctx, &redis.XAddArgs{Stream: stream, Values: map[string]any{"type": "password_reset_email", "email": "a@example.test"}}).Err(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read, err := client.XReadGroup(ctx, &redis.XReadGroupArgs{Group: adminUserCommandGroup, Consumer: "crashed", Streams: []string{stream, ">"}, Count: adminUserCommandReclaimPage + 1}).Result()
+	if err != nil || len(read[0].Messages) != adminUserCommandReclaimPage+1 {
+		t.Fatalf("read %v err=%v", read, err)
+	}
+	messages := read[0].Messages
+	minIdle := 200 * time.Millisecond
+	time.Sleep(minIdle + 50*time.Millisecond)
+	// Keep the first page busy so only the entry after it is reclaimable.
+	busy := make([]string, 0, adminUserCommandReclaimPage)
+	for _, m := range messages[:adminUserCommandReclaimPage] {
+		busy = append(busy, m.ID)
+	}
+	if err := client.XClaimJustID(ctx, &redis.XClaimArgs{Stream: stream, Group: adminUserCommandGroup, Consumer: "busy", Messages: busy}).Err(); err != nil {
+		t.Fatal(err)
+	}
+	delivered := &commandRecorder{}
+	c := &adminUserCommands{client: client, stream: stream, group: adminUserCommandGroup, consumer: "recovering", minIdle: minIdle, deliver: delivered.deliver}
+	for i := 0; i < 2 && delivered.count() == 0; i++ {
+		c.reclaim(ctx)
+	}
+	if delivered.count() != 1 {
+		t.Fatalf("entry beyond the first pending page delivered %d times, want 1", delivered.count())
+	}
+	last := messages[adminUserCommandReclaimPage].ID
+	if p, err := client.XPendingExt(ctx, &redis.XPendingExtArgs{Stream: stream, Group: adminUserCommandGroup, Start: last, End: last, Count: 1}).Result(); err != nil || len(p) != 0 {
+		t.Fatalf("entry beyond the first page still pending: %+v err=%v", p, err)
+	}
+}

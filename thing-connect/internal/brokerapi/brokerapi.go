@@ -188,13 +188,11 @@ func (c *Client) listWindow(ctx context.Context, q url.Values, lo, hi int64, vis
 	if lo == hi || len(page.Data) == 0 {
 		return errors.New("broker api: a connection-time window exceeds one page; cursor API required")
 	}
+	// Times outside the window (second precision, missing field) are clamped:
+	// the pivot only has to stay inside [lo, hi) for the split to progress.
 	timestamps := make([]int64, len(page.Data))
 	for i, row := range page.Data {
-		ms := row.ConnectedAt.UnixMilli()
-		if ms < lo || ms > hi {
-			return errors.New("broker api: invalid connection time in paginated results")
-		}
-		timestamps[i] = ms
+		timestamps[i] = min(max(row.ConnectedAt.UnixMilli(), lo), hi)
 	}
 	slices.Sort(timestamps)
 	pivot := min(timestamps[len(timestamps)/2], hi-1)
@@ -215,18 +213,31 @@ func (c *Client) page(ctx context.Context, endpoint string, q url.Values) (clien
 		return clientPage{}, fmt.Errorf("broker api: %w", err)
 	}
 	defer resp.Body.Close()
+	// Releases without the cursor endpoint answer it with 404, 400 or 405, or
+	// with a non-listing body (dashboard fallback page). Authentication and
+	// server errors still fail so a misconfiguration is never masked.
+	cursorMissing := endpoint == "clients_v2"
 	if resp.StatusCode != http.StatusOK {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-		if endpoint == "clients_v2" && resp.StatusCode == http.StatusNotFound {
-			return clientPage{}, errNoCursorAPI
+		switch resp.StatusCode {
+		case http.StatusNotFound, http.StatusBadRequest, http.StatusMethodNotAllowed:
+			if cursorMissing {
+				return clientPage{}, fmt.Errorf("%w: status %d", errNoCursorAPI, resp.StatusCode)
+			}
 		}
 		return clientPage{}, fmt.Errorf("broker api: %s status %d", endpoint, resp.StatusCode)
 	}
 	var body clientPage
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 64<<20)).Decode(&body); err != nil {
+		if cursorMissing {
+			return clientPage{}, fmt.Errorf("%w: %v", errNoCursorAPI, err)
+		}
 		return clientPage{}, fmt.Errorf("broker api: %s: %w", endpoint, err)
 	}
 	if body.Data == nil || body.Meta == nil {
+		if cursorMissing {
+			return clientPage{}, fmt.Errorf("%w: incomplete listing response", errNoCursorAPI)
+		}
 		return clientPage{}, errors.New("broker api: incomplete listing response")
 	}
 	return body, nil

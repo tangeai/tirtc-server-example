@@ -1,9 +1,11 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -152,12 +154,14 @@ func (s *HTTPServer) updateUserStatus(c *gin.Context) {
 		apiresp.Internal(c, "commit user status")
 		return
 	}
+	effectCtx, cancel := committedEffectContext(ctx)
+	defer cancel()
 	key := fmt.Sprintf("thingconnect:user:disabled:%d", id)
-	_ = s.redis.Set(c, fmt.Sprintf("thingconnect:user:revoked_after:%d", id), strconv.FormatInt(time.Now().Unix(), 10), 0).Err()
+	_ = s.redis.Set(effectCtx, fmt.Sprintf("thingconnect:user:revoked_after:%d", id), strconv.FormatInt(time.Now().Unix(), 10), 0).Err()
 	if request.Status == 0 {
-		_ = s.redis.Set(c, key, "1", 0).Err()
+		_ = s.redis.Set(effectCtx, key, "1", 0).Err()
 	} else {
-		_ = s.redis.Del(c, key).Err()
+		_ = s.redis.Del(effectCtx, key).Err()
 	}
 	apiresp.OK(c, gin.H{"id": id, "status": request.Status})
 }
@@ -214,13 +218,17 @@ func (s *HTTPServer) sendPasswordResetEmail(c *gin.Context) {
 		c.JSON(http.StatusNotFound, apiresp.JSON{Code: 404, Msg: "可用用户不存在"})
 		return
 	}
-	commandID, err := s.redis.XAdd(c, &redis.XAddArgs{Stream: "thingconnect:admin:user-commands", Values: map[string]any{"type": "password_reset_email", "user_id": id, "email": email, "created_at": time.Now().Unix()}}).Result()
+	// The queued command and its audit row are reconciled by command_id, so
+	// neither may be abandoned when the client disconnects in between.
+	effectCtx, cancel := committedEffectContext(ctx)
+	defer cancel()
+	commandID, err := s.redis.XAdd(effectCtx, &redis.XAddArgs{Stream: "thingconnect:admin:user-commands", Values: map[string]any{"type": "password_reset_email", "user_id": id, "email": email, "created_at": time.Now().Unix()}}).Result()
 	if err != nil {
 		apiresp.Internal(c, err.Error())
 		return
 	}
 	identity, _ := identityFromContext(c)
-	_ = s.store.Audit(ctx, requestAudit(c, identity, "user.password_reset", "user", strconv.FormatInt(id, 10), request.Reason, "", fmt.Sprintf(`{"queued":true,"command_id":%q}`, commandID)))
+	_ = s.store.Audit(effectCtx, requestAudit(c, identity, "user.password_reset", "user", strconv.FormatInt(id, 10), request.Reason, "", fmt.Sprintf(`{"queued":true,"command_id":%q}`, commandID)))
 	c.JSON(http.StatusAccepted, apiresp.JSON{Code: 200, Msg: "ok", Data: gin.H{"queued": true}})
 }
 
@@ -381,6 +389,24 @@ func requestAudit(c *gin.Context, identity AccessIdentity, action, resource, res
 
 func (s *HTTPServer) auditTx(c *gin.Context, tx *sqlx.Tx, identity AccessIdentity, action, resource, resourceID, reason, before, after string) error {
 	return insertAuditTx(c.Request.Context(), tx, requestAudit(c, identity, action, resource, resourceID, reason, before, after))
+}
+
+const committedEffectTimeout = 5 * time.Second
+
+// committedEffectContext bounds work that must follow an already committed or
+// queued change even when the client disconnects before the response.
+func committedEffectContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), committedEffectTimeout)
+}
+
+// reloadAccess applies committed RBAC changes to this process. A failed reload
+// leaves the previous policy in effect, so it must be visible in logs.
+func (s *HTTPServer) reloadAccess(ctx context.Context) {
+	ctx, cancel := committedEffectContext(ctx)
+	defer cancel()
+	if err := s.access.Reload(ctx); err != nil {
+		slog.ErrorContext(ctx, "reload admin RBAC policy failed", "err", err)
+	}
 }
 
 func marshalSafe(value any) string {

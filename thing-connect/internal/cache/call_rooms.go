@@ -114,6 +114,9 @@ return answer_room(ARGV[1],ARGV[2],ARGV[3])
 var endCallRoom = redis.NewScript(callRoomPrelude + call.RoomTransitions + `
 return end_room(ARGV[1],ARGV[2],ARGV[3]=='1',ARGV[4])
 `)
+var endCurrentCallRoom = redis.NewScript(callRoomPrelude + call.RoomTransitions + `
+return end_owned_room(ARGV[1],ARGV[2])
+`)
 var rejectCallRoom = redis.NewScript(callRoomPrelude + call.RoomTransitions + `
 return reject_room(ARGV[1],ARGV[2],ARGV[3])
 `)
@@ -135,8 +138,8 @@ func (s *CallRooms) Create(ctx context.Context, r call.Room, offline []string, t
 	}
 	return createCallRoom.Run(ctx, s.client, []string{"room:" + r.RoomID}, body, rejected, ttl.Milliseconds()).Text()
 }
-func (s *CallRooms) read(ctx context.Context, script *redis.Script, id string) (*call.Room, error) {
-	raw, err := script.Run(ctx, s.client, nil, id).Text()
+func (s *CallRooms) read(ctx context.Context, script *redis.Script, args ...interface{}) (*call.Room, error) {
+	raw, err := script.Run(ctx, s.client, nil, args...).Text()
 	if err != nil {
 		return nil, err
 	}
@@ -185,6 +188,9 @@ func (s *CallRooms) End(ctx context.Context, id, self string, callerOnly bool, r
 		return nil, err
 	}
 	return &r, nil
+}
+func (s *CallRooms) EndCurrent(ctx context.Context, device, reason string) (*call.Room, error) {
+	return s.read(ctx, endCurrentCallRoom, device, reason)
 }
 func (s *CallRooms) Reject(ctx context.Context, id, self, reason string) (call.RejectResult, error) {
 	var out call.RejectResult

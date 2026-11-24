@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"slices"
 	"sync/atomic"
 	"thing-connect/internal/backoff"
 	"time"
@@ -49,26 +50,29 @@ type Task struct {
 	Lease    string
 }
 
-// Backlog is a sample of all pending tasks. OldestAge measures from the first
-// enqueue, so re-enqueueing a pending task keeps its waiting age.
+// Backlog is a sample of pending tasks for the configured targets. OldestAge
+// measures from the first enqueue, so re-enqueueing a pending task keeps its
+// waiting age. Unknown counts tasks whose target is no longer configured; they
+// wait for the target to be configured again or for operator removal.
 type Backlog struct {
 	Pending   int64
 	OldestAge time.Duration
+	Unknown   int64
 }
 
 // Queue is the durable task store behind the outbox. Unbind transactions
 // insert tasks; several user-server instances may drain it concurrently.
 type Queue interface {
-	// Claim leases up to limit due tasks that no other claimer holds. The
-	// lease time comes from the database clock.
-	Claim(ctx context.Context, limit int, lease time.Duration) ([]Task, error)
+	// Claim leases up to limit due tasks for targets that no other claimer
+	// holds. The lease time comes from the database clock.
+	Claim(ctx context.Context, targets []string, limit int, lease time.Duration) ([]Task, error)
 	// Complete deletes the task only if it still carries task.Lease. It
 	// reports false when the task was re-enqueued or re-claimed meanwhile.
 	Complete(ctx context.Context, task Task) (bool, error)
 	// Retry records the failure and schedules the next attempt only if the
 	// task still carries task.Lease.
 	Retry(ctx context.Context, task Task, delay time.Duration, lastError string) (bool, error)
-	Backlog(ctx context.Context) (Backlog, error)
+	Backlog(ctx context.Context, targets []string) (Backlog, error)
 }
 
 // Outbox delivers persisted cleanup notifications so transient failures,
@@ -77,9 +81,11 @@ type Outbox struct {
 	queue   Queue
 	client  *http.Client
 	targets map[string]Target
+	names   []string
 	now     func() time.Time
 
 	pending    atomic.Int64
+	unknown    atomic.Int64
 	oldestMS   atomic.Int64
 	measuredMS atomic.Int64
 }
@@ -94,7 +100,9 @@ func NewOutbox(queue Queue, targets []Target) (*Outbox, error) {
 			m[target.Name] = target
 		}
 	}
-	return &Outbox{queue: queue, client: &http.Client{Timeout: deliveryTimeout}, targets: m, now: time.Now}, nil
+	names := TargetNames(targets)
+	slices.Sort(names)
+	return &Outbox{queue: queue, client: &http.Client{Timeout: deliveryTimeout}, targets: m, names: names, now: time.Now}, nil
 }
 
 // TargetNames returns the configured, de-duplicated delivery targets. It is
@@ -148,7 +156,7 @@ func (o *Outbox) Run(ctx context.Context) {
 func (o *Outbox) process(ctx context.Context) {
 	deadline := o.now().Add(leaseDuration - leaseMargin)
 	claimCtx, cancel := context.WithTimeout(ctx, queueTimeout)
-	tasks, err := o.queue.Claim(claimCtx, batchSize, leaseDuration)
+	tasks, err := o.queue.Claim(claimCtx, o.names, batchSize, leaseDuration)
 	cancel()
 	if err != nil {
 		if ctx.Err() == nil {
@@ -191,12 +199,15 @@ func (o *Outbox) process(ctx context.Context) {
 func (o *Outbox) sampleBacklog(ctx context.Context) {
 	sampleCtx, cancel := context.WithTimeout(ctx, queueTimeout)
 	defer cancel()
-	backlog, err := o.queue.Backlog(sampleCtx)
+	backlog, err := o.queue.Backlog(sampleCtx, o.names)
 	if err != nil {
 		if ctx.Err() == nil {
 			slog.Warn("cleanup outbox backlog sample failed", "err", err)
 		}
 		return
+	}
+	if previous := o.unknown.Swap(backlog.Unknown); backlog.Unknown > 0 && backlog.Unknown != previous {
+		slog.Warn("cleanup outbox holds tasks for unconfigured targets; configure the target or remove the tasks", "count", backlog.Unknown, "configured_targets", o.names)
 	}
 	now := o.now()
 	o.pending.Store(backlog.Pending)
@@ -216,6 +227,7 @@ func (o *Outbox) Metrics() map[string]int64 {
 	}
 	return map[string]int64{
 		"cleanup_pending":                o.pending.Load(),
+		"cleanup_unknown_target":         o.unknown.Load(),
 		"cleanup_oldest_pending_age_ms":  age,
 		"cleanup_backlog_measured_at_ms": o.measuredMS.Load(),
 	}

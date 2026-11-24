@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -49,6 +50,9 @@ type suite struct {
 	rdb    *redis.Client
 	sqlDB  *sqlx.DB
 }
+
+// suiteCleanupTargets mirrors user-server with AI, VoIP and call URLs configured.
+var suiteCleanupTargets = []string{"ai", "voip", "call"}
 
 type testMailer struct{}
 
@@ -94,7 +98,7 @@ func newSuite(t *testing.T) *suite {
 		t.Fatal(err)
 	}
 	bindSvc := service.NewBindService(mysqlstore.NewBindStore(sqlDB), cacheStore, nil, limiter, serviceCfg)
-	usrhandler.NewServer(userSvc, bindSvc, nil, nil, usrhandler.JWTAuth(cfg.JWTSecret, rdb, sqlDB), nil).Register(usrR)
+	usrhandler.NewServer(userSvc, bindSvc, nil, nil, usrhandler.JWTAuth(cfg.JWTSecret, rdb, sqlDB), suiteCleanupTargets).Register(usrR)
 	ctx, stop := context.WithCancel(context.Background())
 	mailDone := make(chan struct{})
 	go func() { defer close(mailDone); mailQueue.Run(ctx) }()
@@ -554,6 +558,41 @@ func TestResetNotOwned(t *testing.T) {
 	r := s.usrDELETE(t, "/v1/user/device/reset", tok, map[string]string{"device_id": "nonexistent-device"})
 	if r.HTTPStatus != 404 && r.Code != 40400 {
 		t.Errorf("reset not-owned: want 404, got HTTP=%d biz=%d", r.HTTPStatus, r.Code)
+	}
+}
+
+// TC11b: reset — 解绑与清理任务在同一事务内落库，每个已配置目标一条
+func TestResetEnqueuesCleanupForConfiguredTargets(t *testing.T) {
+	s := newSuite(t)
+	email := uniqueEmail()
+	seedCode(t, s.rdb, email, "123456")
+	tok := dataString(t, s.usrPOST(t, "/v1/user/register", "", map[string]string{"email": email, "password": "pass1234", "code": "123456"}), "token")
+	var userID int64
+	var quotaBefore int
+	if err := s.sqlDB.QueryRow(`SELECT id,bind_quota FROM users WHERE email=?`, email).Scan(&userID, &quotaBefore); err != nil {
+		t.Fatal(err)
+	}
+	deviceID := sqlBind(t, s.sqlDB, uniqueMAC(), "", userID)
+	t.Cleanup(func() { s.sqlDB.Exec(`DELETE FROM cleanup_outbox WHERE device_id=?`, deviceID) })
+
+	r := s.usrDELETE(t, "/v1/user/device/reset", tok, map[string]string{"device_id": deviceID})
+	if r.Code != 200 {
+		t.Fatalf("reset owned device: want 200, got HTTP=%d biz=%d msg=%s", r.HTTPStatus, r.Code, r.Msg)
+	}
+	var owner int64
+	var quotaAfter int
+	if err := s.sqlDB.QueryRow(`SELECT b.user_id,u.bind_quota FROM device_bind b JOIN users u ON u.id=? WHERE b.device_id=?`, userID, deviceID).Scan(&owner, &quotaAfter); err != nil {
+		t.Fatal(err)
+	}
+	if owner != 0 || quotaAfter != quotaBefore {
+		t.Fatalf("after reset owner=%d quota=%d, want 0 and %d", owner, quotaAfter, quotaBefore)
+	}
+	var targets []string
+	if err := s.sqlDB.Select(&targets, `SELECT target FROM cleanup_outbox WHERE device_id=? ORDER BY target`, deviceID); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(targets, ",") != "ai,call,voip" {
+		t.Fatalf("cleanup targets=%v, want ai, call and voip", targets)
 	}
 }
 

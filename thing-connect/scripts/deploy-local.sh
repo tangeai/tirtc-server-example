@@ -392,6 +392,16 @@ local_gateway() {
     fi
     mkdir -p "$prefix/logs"
     local_gateway_config "$port" >"$prefix/nginx.conf.new" || return 1
+    local backend internal_port=""
+    if grep -q '^    listen 127.0.0.1:9100;' "$prefix/nginx.conf.new"; then internal_port=9100; fi
+    for backend in $internal_port $(grep -o 'server 127\.0\.0\.1:[0-9]* max_fails=0;' "$prefix/nginx.conf.new" | sed 's/.*:\([0-9]*\) .*/\1/'); do
+        [ "$backend" != "$port" ] || {
+            local_error "入口端口 $port 与实例或内网入口端口冲突；请用 GATEWAY_PORT 指定其他端口"; return 1;
+        }
+    done
+    if [ -n "$internal_port" ] && (exec 3<>"/dev/tcp/127.0.0.1/$internal_port") 2>/dev/null; then
+        local_error "多实例内网入口端口 $internal_port 已被其他进程占用"; return 1;
+    fi
     nginx -t -p "$prefix/" -c nginx.conf.new
     mv -f "$prefix/nginx.conf.new" "$prefix/nginx.conf"
     nginx -p "$prefix/" -c nginx.conf 9>&-

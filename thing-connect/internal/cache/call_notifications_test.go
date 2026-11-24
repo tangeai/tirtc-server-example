@@ -2,8 +2,10 @@ package cache_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
+	"strconv"
 	"testing"
 	"time"
 
@@ -436,4 +438,123 @@ func TestCallNotificationsExpiredRoomDoesNotRing(t *testing.T) {
 	if n := f.rdb.LLen(context.Background(), "call:outbox:room:"+r.RoomID).Val(); n != 0 {
 		t.Fatal("obsolete notification retained")
 	}
+}
+
+func TestCallNotificationsManyOrphansDoNotStarveLiveRoom(t *testing.T) {
+	f := newRoomFixture(t)
+	ctx := context.Background()
+	live := f.create(t, "behind-orphans", "caller", "callee")
+	for i := 0; i < 40; i++ {
+		orphan := f.prefix + "orphan-" + strconv.Itoa(i)
+		for _, key := range []string{"call:outbox:due", "call:outbox:age"} {
+			if err := f.rdb.ZAdd(ctx, key, redis.Z{Score: -1, Member: orphan}).Err(); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	sink := &callCapture{}
+	if err := call.NewService(f.store, sink).Dispatch(ctx, 32); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, e := range sink.events {
+		found = found || e.RoomID == live.RoomID
+	}
+	if !found {
+		t.Fatalf("orphan index entries starved live room: %+v", sink.events)
+	}
+}
+
+func TestCallNotificationsRecountConvergesUnderChurn(t *testing.T) {
+	f := newRoomFixture(t)
+	ctx := context.Background()
+	for i := 0; i < 300; i++ {
+		f.create(t, "recount-"+strconv.Itoa(i), "caller-"+strconv.Itoa(i), "callee-"+strconv.Itoa(i))
+	}
+	if err := f.rdb.Set(ctx, "call:outbox:recount", 1, 0).Err(); err != nil {
+		t.Fatal(err)
+	}
+	stop := make(chan struct{})
+	churned := make(chan struct{})
+	go func() {
+		defer close(churned)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			_, _ = f.rdb.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+				pipe.Incr(ctx, "call:outbox:count")
+				pipe.Decr(ctx, "call:outbox:count")
+				return nil
+			})
+		}
+	}()
+	for i := 0; i < 3; i++ {
+		if _, err := f.store.Backlog(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	close(stop)
+	<-churned
+	if f.rdb.Exists(ctx, "call:outbox:recount").Val() != 0 {
+		t.Fatal("recount marker never cleared under concurrent queue changes")
+	}
+	rooms, err := f.rdb.ZRange(ctx, "call:outbox:due", 0, -1).Result()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want int64
+	for _, room := range rooms {
+		want += f.rdb.LLen(ctx, "call:outbox:room:"+room).Val()
+	}
+	b, err := f.store.Backlog(ctx)
+	if err != nil || b.Pending != want {
+		t.Fatalf("pending=%+v want=%d err=%v", b, want, err)
+	}
+}
+
+func TestCallNotificationsExpiredSignalIsDroppedAndAlerts(t *testing.T) {
+	f := newRoomFixture(t)
+	ctx := context.Background()
+	r := f.create(t, "stale-signal", "caller", "callee")
+	key := "call:outbox:room:" + r.RoomID
+	var head call.Notification
+	if err := json.Unmarshal([]byte(f.rdb.LIndex(ctx, key, 0).Val()), &head); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-10 * time.Minute).UnixMilli()
+	head.CreatedAt = old
+	body, err := json.Marshal(head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.rdb.LSet(ctx, key, 0, body).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.rdb.ZAdd(ctx, "call:outbox:age", redis.Z{Score: float64(old), Member: r.RoomID}).Err(); err != nil {
+		t.Fatal(err)
+	}
+	sink := &callCapture{}
+	if err := call.NewService(f.store, sink).Dispatch(ctx, 1); err != nil {
+		t.Fatal(err)
+	}
+	if len(sink.events) != 0 {
+		t.Fatalf("stale call signaling delivered: %+v", sink.events)
+	}
+	if n := f.rdb.LLen(ctx, key).Val(); n != 0 {
+		t.Fatalf("stale notification retained: %d", n)
+	}
+	if !errors.Is(f.rdb.ZScore(ctx, "call:outbox:age", r.RoomID).Err(), redis.Nil) {
+		t.Fatal("dropped notification kept backlog age")
+	}
+	if score, err := f.rdb.ZScore(ctx, "call:outbox:expired", head.ID).Result(); err != nil || score <= 0 {
+		t.Fatalf("drop not recorded: %v %v", score, err)
+	}
+	b, err := f.store.Backlog(ctx)
+	if err != nil || b.Exhausted < 1 {
+		t.Fatalf("drop not reported: %+v %v", b, err)
+	}
+	f.rdb.ZRem(ctx, "call:outbox:expired", head.ID)
 }

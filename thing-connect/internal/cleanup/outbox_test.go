@@ -25,6 +25,7 @@ type fakeQueue struct {
 	backlogErr error
 	onComplete func()
 	deadlines  []bool
+	targets    [][]string
 }
 
 func (q *fakeQueue) recordDeadline(ctx context.Context) {
@@ -32,10 +33,11 @@ func (q *fakeQueue) recordDeadline(ctx context.Context) {
 	q.deadlines = append(q.deadlines, ok && time.Until(deadline) <= queueTimeout)
 }
 
-func (q *fakeQueue) Claim(ctx context.Context, _ int, _ time.Duration) ([]Task, error) {
+func (q *fakeQueue) Claim(ctx context.Context, targets []string, _ int, _ time.Duration) ([]Task, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	q.recordDeadline(ctx)
+	q.targets = append(q.targets, targets)
 	tasks := q.claimed
 	q.claimed = nil
 	return tasks, nil
@@ -60,10 +62,11 @@ func (q *fakeQueue) Retry(ctx context.Context, task Task, _ time.Duration, _ str
 	return !q.stale[task.ID], nil
 }
 
-func (q *fakeQueue) Backlog(ctx context.Context) (Backlog, error) {
+func (q *fakeQueue) Backlog(ctx context.Context, targets []string) (Backlog, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	q.recordDeadline(ctx)
+	q.targets = append(q.targets, targets)
 	return q.backlog, q.backlogErr
 }
 
@@ -248,5 +251,33 @@ func TestHealthTracksBacklogAgeAndRecovery(t *testing.T) {
 	o.process(context.Background())
 	if o.Health(context.Background()) == nil {
 		t.Fatal("a stale backlog sample should be unhealthy")
+	}
+}
+
+// A task for a target removed from configuration cannot be delivered; it must
+// not hold the configured backlog unhealthy forever, yet stay observable.
+func TestUnconfiguredTargetTasksAreReportedSeparately(t *testing.T) {
+	queue := &fakeQueue{backlog: Backlog{Pending: 1, OldestAge: time.Minute, Unknown: 2}}
+	o, _ := newTestOutbox(t, queue, func(*http.Request) (int, string) { return 200, `{"code":0}` })
+	o.sampleBacklog(context.Background())
+	o.process(context.Background())
+	for _, targets := range queue.targets {
+		if strings.Join(targets, ",") != "ai,voip" {
+			t.Fatalf("queue scoped to %v, want the configured targets", targets)
+		}
+	}
+	if len(queue.targets) != 2 {
+		t.Fatalf("scoped queue calls=%d, want backlog and claim", len(queue.targets))
+	}
+	if err := o.Health(context.Background()); err != nil {
+		t.Fatalf("unconfigured-target tasks degraded health: %v", err)
+	}
+	if metrics := o.Metrics(); metrics["cleanup_unknown_target"] != 2 || metrics["cleanup_pending"] != 1 {
+		t.Fatalf("metrics=%v", metrics)
+	}
+	queue.backlog = Backlog{}
+	o.sampleBacklog(context.Background())
+	if got := o.Metrics()["cleanup_unknown_target"]; got != 0 {
+		t.Fatalf("cleanup_unknown_target=%d after removal, want 0", got)
 	}
 }

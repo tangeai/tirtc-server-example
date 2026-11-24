@@ -417,7 +417,16 @@ func (b *Broker) removeACKWaiter(topic string, ch chan struct{}) {
 	}
 	b.mu.Unlock()
 	if last {
-		b.client.Unsubscribe(topic)
+		// The command session is persistent, so a lost UNSUBSCRIBE leaves the
+		// topic subscribed on the broker; report it instead of hiding it.
+		tok := b.client.Unsubscribe(topic)
+		go func() {
+			if !tok.WaitTimeout(2 * time.Second) {
+				slog.Warn("mqtt ack unsubscribe timed out", "topic", topic)
+			} else if err := tok.Error(); err != nil {
+				slog.Warn("mqtt ack unsubscribe failed", "topic", topic, "err", err)
+			}
+		}()
 	}
 }
 

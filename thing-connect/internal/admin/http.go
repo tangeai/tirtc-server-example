@@ -683,7 +683,9 @@ func (s *HTTPServer) testConfig(c *gin.Context) {
 				s.writeConfigTestError(c, namespace, key, testErr)
 				return
 			}
-			_ = s.store.Audit(ctx, requestAudit(c, identity, "config.test", "config", definitionID(namespace, key), request.Reason, "", `{"connected":true}`))
+			auditCtx, cancel := committedEffectContext(ctx)
+			defer cancel()
+			_ = s.store.Audit(auditCtx, requestAudit(c, identity, "config.test", "config", definitionID(namespace, key), request.Reason, "", `{"connected":true}`))
 			apiresp.OK(c, result)
 			return
 		}
@@ -774,7 +776,9 @@ func (s *HTTPServer) testConfig(c *gin.Context) {
 		})
 		return
 	}
-	_ = s.store.Audit(ctx, requestAudit(c, identity, "config.test", "config", definitionID(namespace, key), request.Reason, "", `{"sent":true}`))
+	auditCtx, cancelAudit := committedEffectContext(c.Request.Context())
+	defer cancelAudit()
+	_ = s.store.Audit(auditCtx, requestAudit(c, identity, "config.test", "config", definitionID(namespace, key), request.Reason, "", `{"sent":true}`))
 	apiresp.OK(c, gin.H{"sent": true})
 }
 

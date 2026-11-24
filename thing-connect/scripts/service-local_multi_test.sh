@@ -147,6 +147,22 @@ else
 fi
 "$CONTROLLER" stop-all
 [ "$("$CONTROLLER" status user-server | grep -c STOPPED)" = 2 ] || fail 'stop-all missed secondary'
+if command -v nginx >/dev/null; then
+    # Stopped instances free their ports, so the gateway must still refuse them.
+    if (
+        source "$SCRIPTS/deploy-local.sh"
+        LOCAL_SOURCE_ROOT="$(cd "$SCRIPTS/../.." && pwd)"
+        GATEWAY_PORT="$((PORT+10))" local_gateway gateway
+    ) >"$TEST_ROOT/gateway-conflict.log" 2>&1; then
+        fail 'gateway accepted an instance port'
+    fi
+    grep -q '冲突' "$TEST_ROOT/gateway-conflict.log" || fail 'gateway conflict not explained'
+fi
 "$CONTROLLER" instances user-server 1
 [ "$("$CONTROLLER" ports user-server)" = "$PORT" ] || fail 'scale down failed'
+cp "$DEPLOY_ROOT/service-catalog.tsv" "$TEST_ROOT/catalog.saved"
+sed -i "s/user-server\t$PORT\t/user-server\t9090\t/" "$DEPLOY_ROOT/service-catalog.tsv"
+if "$CONTROLLER" instances user-server 2 >"$TEST_ROOT/reserved.log" 2>&1; then fail 'instance took the internal gateway port'; fi
+grep -q 内网入口 "$TEST_ROOT/reserved.log" || fail 'internal gateway conflict not explained'
+cp "$TEST_ROOT/catalog.saved" "$DEPLOY_ROOT/service-catalog.tsv"
 echo 'PASS: local multi-instance lifecycle and gateway'

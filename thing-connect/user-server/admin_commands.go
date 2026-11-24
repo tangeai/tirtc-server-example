@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"log/slog"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -19,6 +20,7 @@ const (
 	adminUserCommandDeliveryTimeout = 30 * time.Second
 	adminUserCommandMinIdle         = adminUserCommandDeliveryTimeout + 30*time.Second
 	adminUserCommandMaxDeliveries   = 5
+	adminUserCommandReclaimPage     = 100
 	adminCommandFailureWindow       = time.Hour
 )
 
@@ -27,6 +29,9 @@ type adminUserCommands struct {
 	stream, group, consumer string
 	minIdle                 time.Duration
 	deliver                 func(context.Context, string) error
+	// pendingCursor is the last pending ID inspected; each reclaim tick reads
+	// one page after it so entries beyond the first page are not starved.
+	pendingCursor string
 }
 
 func newAdminUserCommands(client *redis.Client, deliver func(context.Context, string) error) *adminUserCommands {
@@ -83,12 +88,20 @@ redis.call('XDEL',KEYS[1],id)
 return 1`)
 
 func (c *adminUserCommands) reclaim(ctx context.Context) {
-	pending, err := c.client.XPendingExt(ctx, &redis.XPendingExtArgs{Stream: c.stream, Group: c.group, Start: "-", End: "+", Count: 100}).Result()
+	start := "-"
+	if c.pendingCursor != "" {
+		start = nextStreamID(c.pendingCursor)
+	}
+	pending, err := c.client.XPendingExt(ctx, &redis.XPendingExtArgs{Stream: c.stream, Group: c.group, Start: start, End: "+", Count: adminUserCommandReclaimPage}).Result()
 	if err != nil {
 		if ctx.Err() == nil {
 			log.Printf("list pending admin user commands: %v", err)
 		}
 		return
+	}
+	c.pendingCursor = ""
+	if len(pending) == adminUserCommandReclaimPage {
+		c.pendingCursor = pending[len(pending)-1].ID
 	}
 	for _, p := range pending {
 		if ctx.Err() != nil {
@@ -119,6 +132,17 @@ func (c *adminUserCommands) reclaim(ctx context.Context) {
 	}
 }
 
+// nextStreamID returns the smallest ID after id; Redis 6.0 has no exclusive
+// "(" range bound.
+func nextStreamID(id string) string {
+	ms, seq, _ := strings.Cut(id, "-")
+	if n, err := strconv.ParseUint(seq, 10, 64); err == nil && n < math.MaxUint64 {
+		return ms + "-" + strconv.FormatUint(n+1, 10)
+	}
+	n, _ := strconv.ParseUint(ms, 10, 64)
+	return strconv.FormatUint(n+1, 10) + "-0"
+}
+
 var finishAdminCommand = redis.NewScript(`
 local id=ARGV[2]
 local p=redis.call('XPENDING',KEYS[1],ARGV[1],id,id,1)
@@ -126,10 +150,9 @@ if #p==0 or p[1][2]~=ARGV[3] then return 0 end
 redis.call('XACK',KEYS[1],ARGV[1],id)
 return redis.call('XDEL',KEYS[1],id)`)
 
+// process attempts a message that XREADGROUP or XCLAIM already counted as a
+// delivery, even while stopping; skipping it would burn one of its deliveries.
 func (c *adminUserCommands) process(ctx context.Context, message redis.XMessage) {
-	if ctx.Err() != nil {
-		return
-	}
 	commandType, _ := message.Values["type"].(string)
 	email, _ := message.Values["email"].(string)
 	if commandType == "password_reset_email" && email != "" {

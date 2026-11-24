@@ -120,6 +120,11 @@ type callSuite struct {
 
 func newCallSuite(t *testing.T) *callSuite {
 	t.Helper()
+	return newCallSuiteWithRooms(t, func(r *cache.CallRooms) callservice.Rooms { return r })
+}
+
+func newCallSuiteWithRooms(t *testing.T, rooms func(*cache.CallRooms) callservice.Rooms) *callSuite {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 
 	cfg := loadConfig(t)
@@ -133,7 +138,7 @@ func newCallSuite(t *testing.T) *callSuite {
 	devStore := mysqlstore.NewDeviceStore(sqlDB)
 
 	r := gin.New()
-	contactHTTP := callhandler.NewServer(cfg, sqlDB, callservice.NewService(cache.NewCallRooms(rdb), mqttc.NewCallNotifier(broker)), broker, devStore)
+	contactHTTP := callhandler.NewServer(cfg, sqlDB, callservice.NewService(rooms(cache.NewCallRooms(rdb)), mqttc.NewCallNotifier(broker)), broker, devStore)
 	contactHTTP.SetContactNames(mysqlstore.NewContactNamesStore(sqlDB))
 	contactHTTP.SetRemarks(voip.NewRemarks(mysqlstore.NewVoipRemarkStore(sqlDB), mqttc.NewRemarkNotifier(broker)))
 	contactHTTP.Register(r)
@@ -904,6 +909,78 @@ func TestContacts_InternalUnbindHardDeletesAndRebindRestoresAuto(t *testing.T) {
 	}
 	if restored.Status != 1 || restored.Source != "auto" {
 		t.Fatalf("restored contact=%+v, want accepted auto", restored)
+	}
+}
+
+// unbindRaceRooms answers a second call for the unbinding device right after
+// the handler's first room-store access, as a concurrent request would.
+type unbindRaceRooms struct {
+	*cache.CallRooms
+	once     sync.Once
+	switchTo func()
+}
+
+func (r *unbindRaceRooms) Current(ctx context.Context, device string) (*callservice.Room, error) {
+	room, err := r.CallRooms.Current(ctx, device)
+	r.once.Do(r.switchTo)
+	return room, err
+}
+
+func (r *unbindRaceRooms) EndCurrent(ctx context.Context, device, reason string) (*callservice.Room, error) {
+	r.once.Do(r.switchTo)
+	return r.CallRooms.EndCurrent(ctx, device, reason)
+}
+
+func TestCall_InternalUnbindEndsRoomAnsweredDuringUnbind(t *testing.T) {
+	prefix := "unbind-race-" + fmt.Sprint(time.Now().UnixNano()) + "-"
+	device, oldCaller, newCaller := prefix+"device", prefix+"old-caller", prefix+"new-caller"
+	oldRoom := callservice.Room{RoomID: prefix + "old", Caller: oldCaller, Targets: []string{device}, CallType: "audio", CreatedAt: time.Now().UTC().Format(time.RFC3339)}
+	newRoom := callservice.Room{RoomID: prefix + "new", Caller: newCaller, Targets: []string{device}, CallType: "audio", CreatedAt: time.Now().UTC().Format(time.RFC3339)}
+	var store *cache.CallRooms
+	race := &unbindRaceRooms{}
+	race.switchTo = func() {
+		if _, err := store.Answer(context.Background(), newRoom.RoomID, newCaller, device); err != nil {
+			t.Errorf("concurrent answer: %v", err)
+		}
+	}
+	cs := newCallSuiteWithRooms(t, func(r *cache.CallRooms) callservice.Rooms {
+		store, race.CallRooms = r, r
+		return race
+	})
+	ctx := context.Background()
+	t.Cleanup(func() {
+		for _, id := range []string{oldRoom.RoomID, newRoom.RoomID} {
+			n := cs.rdb.LLen(ctx, "call:outbox:room:"+id).Val()
+			cs.rdb.Del(ctx, "call:outbox:room:"+id, "room:"+id, "room:"+id+":answered", "room:"+id+":rejected_by")
+			cs.rdb.ZRem(ctx, "call:outbox:due", id)
+			cs.rdb.ZRem(ctx, "call:outbox:age", id)
+			cs.rdb.HDel(ctx, "call:outbox:leases", id)
+			cs.rdb.HDel(ctx, "call:outbox:attempts", id)
+			cs.rdb.DecrBy(ctx, "call:outbox:count", n)
+		}
+		cs.rdb.Del(ctx, "room:lock:"+device, "room:lock:"+oldCaller, "room:lock:"+newCaller)
+	})
+	for _, r := range []callservice.Room{oldRoom, newRoom} {
+		if existing, err := store.Create(ctx, r, nil, time.Hour); err != nil || existing != "" {
+			t.Fatalf("create %s: %q %v", r.RoomID, existing, err)
+		}
+	}
+	if _, err := store.Answer(ctx, oldRoom.RoomID, oldCaller, device); err != nil {
+		t.Fatal(err)
+	}
+
+	if r := cs.POSTInternal(t, "/v1/call/internal/unbind", map[string]any{"device_id": device}); r.Code != 200 {
+		t.Fatalf("internal unbind: %d %s", r.Code, r.Msg)
+	}
+	if current, err := store.Current(ctx, device); err != nil || current != nil {
+		t.Fatalf("unbound device still holds room %+v (err=%v)", current, err)
+	}
+	if got, err := store.Get(ctx, newRoom.RoomID); err != nil || got != nil {
+		t.Fatalf("room answered during unbind survived: %+v %v", got, err)
+	}
+	msg := cs.broker.findPublished("room_cancel", "sn_"+newCaller)
+	if msg == nil || msg.Msg["room_id"] != newRoom.RoomID || msg.Msg["reason"] != "unbound" {
+		t.Fatalf("new caller cancel=%+v", msg)
 	}
 }
 

@@ -1194,7 +1194,7 @@ supervisor_start_programs() {
     if [ "${#instances[@]}" -gt 1 ]; then
         cfg="$(service_config_path "$ADMIN_SERVICE")" || return 1
         "$DEPLOY_ROOT/$ADMIN_SERVICE/$ADMIN_SERVICE" -c "$cfg" -deploy-root "$DEPLOY_ROOT" \
-            -check-service-config "$svc" -check-service-instances "${#instances[@]}" >&2 || return 1
+            -check-service-config "$svc" -check-service-instances "${#instances[@]}" >&2 || return $?
     fi
     printf '%s\n' "$programs"
 }
@@ -1351,7 +1351,7 @@ start_one() {
     fi
 
     local program programs
-    programs="$(supervisor_start_programs "$svc")" || return 1
+    programs="$(supervisor_start_programs "$svc")" || return $?
     for program in $programs; do
         start_program "$svc" "$program" || return 1
     done
@@ -1385,7 +1385,7 @@ restart_one() {
 
     # 多实例滚动重启：一台通过 readiness 后再重启下一台，其余实例继续服务。
     local program programs
-    programs="$(supervisor_start_programs "$svc")" || return 1
+    programs="$(supervisor_start_programs "$svc")" || return $?
     for program in $programs; do
         require_supervisor_service "$program" || return 1
         log "重启 $program（Supervisor）..."
@@ -1436,9 +1436,9 @@ run_batch() {
     for svc in "$@"; do
         case "$action" in
             deploy) deploy_one "$svc" || return 1 ;;
-            start) start_one "$svc" || return 1 ;;
+            start) start_one "$svc" || return $? ;;
             stop) stop_one "$svc" || return 1 ;;
-            restart) restart_one "$svc" || return 1 ;;
+            restart) restart_one "$svc" || return $? ;;
             status) status_one "$svc" || return 1 ;;
         esac
     done

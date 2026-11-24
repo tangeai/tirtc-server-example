@@ -2,7 +2,9 @@ package cache_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -251,5 +253,73 @@ func TestCallRoomsLegacyDuplicateTargetsAndOrphanLock(t *testing.T) {
 	got, err := f.store.Current(ctx, r.Caller)
 	if err != nil || got != nil || f.lock(t, r.Caller) != "" {
 		t.Fatalf("orphan lock not recovered: %+v %v", got, err)
+	}
+}
+
+func roomCancels(t *testing.T, f *roomFixture, id string) map[string]string {
+	t.Helper()
+	rows, err := f.rdb.LRange(context.Background(), "call:outbox:room:"+id, 0, -1).Result()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, row := range rows {
+		var e call.Notification
+		if err := json.Unmarshal([]byte(row), &e); err != nil {
+			t.Fatal(err)
+		}
+		if e.Kind == "room_cancel" {
+			got[e.Target] = e.Payload["reason"]
+		}
+	}
+	return got
+}
+
+func TestCallRoomsEndCurrentMatchesUnboundEnd(t *testing.T) {
+	f := newRoomFixture(t)
+	ctx := context.Background()
+	if r, err := f.store.EndCurrent(ctx, f.prefix+"idle", "unbound"); err != nil || r != nil {
+		t.Fatalf("idle device: %+v %v", r, err)
+	}
+
+	ringing := f.create(t, "ringing", "caller", "a", "b")
+	ended, err := f.store.EndCurrent(ctx, ringing.Caller, "unbound")
+	if err != nil || ended == nil || ended.RoomID != ringing.RoomID {
+		t.Fatalf("caller unbind: %+v %v", ended, err)
+	}
+	want := map[string]string{ringing.Targets[0]: "unbound", ringing.Targets[1]: "unbound"}
+	if got := roomCancels(t, f, ringing.RoomID); !reflect.DeepEqual(got, want) {
+		t.Fatalf("caller unbind cancels=%v", got)
+	}
+
+	answered := f.create(t, "answered", "caller-2", "c", "d")
+	if _, err := f.store.Answer(ctx, answered.RoomID, answered.Caller, answered.Targets[0]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.EndCurrent(ctx, answered.Targets[0], "unbound"); err != nil {
+		t.Fatal(err)
+	}
+	if got := roomCancels(t, f, answered.RoomID); !reflect.DeepEqual(got, map[string]string{answered.Caller: "unbound", answered.Targets[1]: "accepted_by_other"}) {
+		t.Fatalf("callee unbind cancels=%v", got)
+	}
+	for _, device := range []string{answered.Caller, answered.Targets[0]} {
+		if r, err := f.store.Current(ctx, device); err != nil || r != nil {
+			t.Fatalf("%s kept room: %+v %v", device, r, err)
+		}
+	}
+
+	other := f.create(t, "other", "caller-3", "e")
+	stray := f.prefix + "stray"
+	if err := f.rdb.Set(ctx, "room:lock:"+stray, other.RoomID, time.Hour).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if r, err := f.store.EndCurrent(ctx, stray, "unbound"); err != nil || r != nil {
+		t.Fatalf("non-participant lock ended room: %+v %v", r, err)
+	}
+	if got, err := f.store.Get(ctx, other.RoomID); err != nil || got == nil {
+		t.Fatalf("unrelated room released: %v", err)
+	}
+	if f.rdb.Exists(ctx, "room:lock:"+stray).Val() != 0 {
+		t.Fatal("dangling lock retained")
 	}
 }

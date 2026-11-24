@@ -13,6 +13,8 @@ SERVICE_GROUP="${SERVICE_GROUP:-thing-connect}"
 STATE_DIR="$DEPLOY_ROOT/var/local-services"
 LOG_DIR="$DEPLOY_ROOT/logs"
 SETUP_PORT=9000
+# Nginx internal entry for ai/voip/call internal APIs (deploy/nginx template).
+INTERNAL_GATEWAY_PORT=9100
 SETUP_BIND="${SETUP_BIND:-0.0.0.0}"
 
 if [ "$(basename "$SCRIPT_DIR")" = "scripts" ]; then
@@ -48,13 +50,12 @@ load_instance_counts() {
 
 validate_instance_ports() {
     local service program port
-    local -A seen=()
+    local -A seen=([$INTERNAL_GATEWAY_PORT]=内网入口)
     for service in "${ALL_SERVICES[@]}"; do
         for program in $(service_programs "$service"); do
             port="$(service_port "$program")" || return 1
-            [ "$port" -le 65535 ] && [ -z "${seen[$port]+present}" ] || {
-                err "实例端口重复或超出范围: $program ($port)"; return 1;
-            }
+            [ "$port" -le 65535 ] || { err "实例端口超出范围: $program ($port)"; return 1; }
+            [ -z "${seen[$port]+present}" ] || { err "实例端口冲突: $program 与 ${seen[$port]} 都使用 $port"; return 1; }
             seen[$port]="$program"
         done
     done

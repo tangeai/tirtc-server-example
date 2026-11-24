@@ -14,6 +14,8 @@ import (
 	mysqlstore "thing-connect/internal/store/mysql"
 )
 
+var voipTarget = []string{"voip"}
+
 func openCleanupOutbox(t *testing.T) (*sqlx.DB, cleanup.Queue) {
 	t.Helper()
 	db := openTestDB(t)
@@ -46,7 +48,7 @@ func TestCleanupOutboxConcurrentClaimsDoNotOverlap(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for {
-				tasks, err := queue.Claim(context.Background(), 5, time.Minute)
+				tasks, err := queue.Claim(context.Background(), voipTarget, 5, time.Minute)
 				if err != nil {
 					t.Errorf("Claim: %v", err)
 					return
@@ -91,16 +93,16 @@ func unbindAgain(t *testing.T, db *sqlx.DB, device, target string) {
 func TestCleanupOutboxCompleteKeepsTaskReenqueuedDuringDelivery(t *testing.T) {
 	db, queue := openCleanupOutbox(t)
 	seedCleanupTasks(t, db, 1)
-	tasks, err := queue.Claim(context.Background(), 10, time.Minute)
+	tasks, err := queue.Claim(context.Background(), voipTarget, 10, time.Minute)
 	if err != nil || len(tasks) != 1 {
 		t.Fatalf("Claim: tasks=%v err=%v", tasks, err)
 	}
-	if again, err := queue.Claim(context.Background(), 10, time.Minute); err != nil || len(again) != 0 {
+	if again, err := queue.Claim(context.Background(), voipTarget, 10, time.Minute); err != nil || len(again) != 0 {
 		t.Fatalf("leased task claimed again: %v err=%v", again, err)
 	}
 
 	unbindAgain(t, db, tasks[0].DeviceID, tasks[0].Target)
-	redo, err := queue.Claim(context.Background(), 10, time.Minute)
+	redo, err := queue.Claim(context.Background(), voipTarget, 10, time.Minute)
 	if err != nil || len(redo) != 1 || redo[0].ID == tasks[0].ID {
 		t.Fatalf("new unbind generation did not receive a distinct ID: old=%v new=%v err=%v", tasks, redo, err)
 	}
@@ -129,7 +131,7 @@ func TestCleanupOutboxCompleteKeepsTaskReenqueuedDuringDelivery(t *testing.T) {
 func TestCleanupOutboxRetrySchedulesBackoff(t *testing.T) {
 	db, queue := openCleanupOutbox(t)
 	seedCleanupTasks(t, db, 1)
-	tasks, err := queue.Claim(context.Background(), 10, time.Minute)
+	tasks, err := queue.Claim(context.Background(), voipTarget, 10, time.Minute)
 	if err != nil || len(tasks) != 1 {
 		t.Fatalf("Claim: %v err=%v", tasks, err)
 	}
@@ -153,12 +155,12 @@ func TestCleanupOutboxRetrySchedulesBackoff(t *testing.T) {
 func TestCleanupOutboxExpiredLeaseIsTakenOver(t *testing.T) {
 	db, queue := openCleanupOutbox(t)
 	seedCleanupTasks(t, db, 1)
-	first, err := queue.Claim(context.Background(), 10, time.Second)
+	first, err := queue.Claim(context.Background(), voipTarget, 10, time.Second)
 	if err != nil || len(first) != 1 {
 		t.Fatalf("Claim: %v err=%v", first, err)
 	}
 	time.Sleep(2100 * time.Millisecond)
-	second, err := queue.Claim(context.Background(), 10, time.Minute)
+	second, err := queue.Claim(context.Background(), voipTarget, 10, time.Minute)
 	if err != nil || len(second) != 1 || second[0].ID != first[0].ID || second[0].Lease == first[0].Lease {
 		t.Fatalf("takeover claim=%v err=%v", second, err)
 	}
@@ -172,7 +174,7 @@ func TestCleanupOutboxExpiredLeaseIsTakenOver(t *testing.T) {
 
 func TestCleanupOutboxBacklogKeepsFirstEnqueueAge(t *testing.T) {
 	db, queue := openCleanupOutbox(t)
-	backlog, err := queue.Backlog(context.Background())
+	backlog, err := queue.Backlog(context.Background(), voipTarget)
 	if err != nil || backlog.Pending != 0 || backlog.OldestAge != 0 {
 		t.Fatalf("empty backlog=%+v err=%v", backlog, err)
 	}
@@ -185,11 +187,44 @@ func TestCleanupOutboxBacklogKeepsFirstEnqueueAge(t *testing.T) {
 		t.Fatal(err)
 	}
 	unbindAgain(t, db, deviceID, "voip")
-	backlog, err = queue.Backlog(context.Background())
+	backlog, err = queue.Backlog(context.Background(), voipTarget)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if backlog.Pending != 2 || backlog.OldestAge < 19*time.Minute || backlog.OldestAge > 21*time.Minute {
 		t.Fatalf("backlog=%+v, want 2 pending and about 20 minutes old", backlog)
+	}
+}
+
+func TestCleanupOutboxScopesClaimAndBacklogToConfiguredTargets(t *testing.T) {
+	db, queue := openCleanupOutbox(t)
+	seedCleanupTasks(t, db, 2)
+	device := fmt.Sprintf("cleanup_removed_%d", time.Now().UnixNano())
+	if _, err := db.Exec(`INSERT INTO cleanup_outbox(device_id,target,created_at) VALUES(?,?,DATE_SUB(NOW(), INTERVAL 20 MINUTE))`, device, "removed"); err != nil {
+		t.Fatal(err)
+	}
+	backlog, err := queue.Backlog(context.Background(), voipTarget)
+	if err != nil || backlog.Pending != 2 || backlog.Unknown != 1 || backlog.OldestAge > time.Minute {
+		t.Fatalf("backlog=%+v err=%v, want 2 recent configured tasks and 1 unknown", backlog, err)
+	}
+	tasks, err := queue.Claim(context.Background(), voipTarget, 10, time.Minute)
+	if err != nil || len(tasks) != 2 {
+		t.Fatalf("Claim: %v err=%v", tasks, err)
+	}
+	for _, task := range tasks {
+		if task.Target != "voip" {
+			t.Fatalf("claimed task for unconfigured target: %+v", task)
+		}
+	}
+	if none, err := queue.Claim(context.Background(), nil, 10, time.Minute); err != nil || len(none) != 0 {
+		t.Fatalf("Claim without targets: %v err=%v", none, err)
+	}
+	backlog, err = queue.Backlog(context.Background(), nil)
+	if err != nil || backlog.Pending != 0 || backlog.Unknown != 3 || backlog.OldestAge != 0 {
+		t.Fatalf("backlog without targets=%+v err=%v", backlog, err)
+	}
+	restored, err := queue.Backlog(context.Background(), []string{"removed", "voip"})
+	if err != nil || restored.Pending != 3 || restored.Unknown != 0 || restored.OldestAge < 19*time.Minute {
+		t.Fatalf("backlog after reconfiguring=%+v err=%v", restored, err)
 	}
 }

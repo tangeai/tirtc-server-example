@@ -946,6 +946,30 @@ BASH
     assert_eq "1" "$result" "unreachable Supervisor must fail stop"
 )
 
+test_multi_instance_restart_preserves_configuration_pause() (
+    local capture="$TEST_ROOT/restart-pause.capture" result=0
+    : >"$capture"
+    write_fake_supervisorctl "$TEST_ROOT/fake-supervisorctl"
+    SUPERVISORCTL="$TEST_ROOT/fake-supervisorctl"
+    SUPERVISOR_CAPTURE="$capture"
+    export SUPERVISOR_CAPTURE
+    ACTIVE_SERVICE_MANAGER=supervisor
+    DEPLOY_ROOT="$TEST_ROOT/restart-pause"
+    mkdir -p "$DEPLOY_ROOT/admin-server" "$DEPLOY_ROOT/device-server"
+    : >"$DEPLOY_ROOT/device-server/device-server"
+    service_config_path() { echo "$DEPLOY_ROOT/admin-server/config.yaml"; }
+    printf '#!/usr/bin/env bash\nexit 78\n' >"$DEPLOY_ROOT/admin-server/admin-server"
+    chmod +x "$DEPLOY_ROOT/admin-server/admin-server"
+    validate_services() { :; }
+    validate_service_manager() { :; }
+    run_batch restart device-server >/dev/null 2>&1 || result=$?
+    assert_eq "78" "$result" "configuration pause must stay distinguishable from a failure"
+    assert_eq "" "$(cat "$capture")" "no instance may restart while configuration is pending"
+    result=0
+    run_batch start device-server >/dev/null 2>&1 || result=$?
+    assert_eq "78" "$result" "start must preserve the configuration pause"
+)
+
 test_supervisor_preflight_counts_every_instance() (
     local capture="$TEST_ROOT/preflight-instances.capture"
     : >"$capture"
@@ -1290,6 +1314,7 @@ test_service_instances_restart_one_at_a_time
 test_extra_instance_health_uses_process_port
 test_unreachable_supervisor_never_hides_extra_instances
 test_supervisor_preflight_counts_every_instance
+test_multi_instance_restart_preserves_configuration_pause
 echo "PASS: deploy-prod.sh"
 
 

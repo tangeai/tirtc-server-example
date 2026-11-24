@@ -29,7 +29,16 @@ type NotificationQueue interface {
 	ClaimRoomNotification(context.Context, time.Duration, string) (Notification, bool, error)
 	CompleteNotification(context.Context, Notification) error
 	RetryNotification(context.Context, Notification, time.Duration) error
+	// ExpireNotification completes the message undelivered and reports the drop
+	// through the queue backlog for one hour.
+	ExpireNotification(context.Context, Notification) error
 }
+
+// MaxNotificationAge bounds delivery of call signaling. Devices ring for 30
+// seconds, so an older invitation, answer or cancel describes a session that
+// has already moved on; devices recover through GET /v1/call/room.
+const MaxNotificationAge = 2 * time.Minute
+
 type Publisher interface {
 	PublishCallNotification(context.Context, Notification) error
 }
@@ -40,13 +49,14 @@ type Publisher interface {
 type Service struct {
 	store     Rooms
 	publisher Publisher
+	now       func() time.Time
 }
 
 func NewService(store Rooms, publisher Publisher) *Service {
 	if store == nil || publisher == nil {
 		panic("call service requires room store and publisher")
 	}
-	return &Service{store: store, publisher: publisher}
+	return &Service{store: store, publisher: publisher, now: time.Now}
 }
 func (s *Service) Create(ctx context.Context, r Room, offline []string, ttl time.Duration) (string, error) {
 	existing, err := s.store.Create(ctx, r, offline, ttl)
@@ -85,6 +95,15 @@ func (s *Service) Reject(ctx context.Context, id, self, reason string) (RejectRe
 	return result, err
 }
 
+// Unbind ends whatever room the device holds when the unbind commits.
+func (s *Service) Unbind(ctx context.Context, device string) error {
+	r, err := s.store.EndCurrent(ctx, device, "unbound")
+	if err == nil && r != nil {
+		s.flush(ctx, r.RoomID)
+	}
+	return err
+}
+
 // flush delivers only the rooms changed by this request; the global backlog
 // belongs to Run so a slow broker cannot stall unrelated HTTP calls.
 func (s *Service) flush(ctx context.Context, rooms ...string) {
@@ -117,6 +136,17 @@ func (s *Service) dispatch(ctx context.Context, limit int, claim func(context.Co
 		}
 		if !found {
 			return nil
+		}
+		if age := s.now().Sub(time.UnixMilli(event.CreatedAt)); age > MaxNotificationAge {
+			slog.WarnContext(ctx, "call notification expired undelivered",
+				"room_id", event.RoomID, "kind", event.Kind, "age_ms", age.Milliseconds(), "attempts", event.Attempts)
+			finishCtx, finish := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+			err = s.store.ExpireNotification(finishCtx, event)
+			finish()
+			if err != nil {
+				return err
+			}
+			continue
 		}
 		deliveryCtx, stop := context.WithTimeout(ctx, 5*time.Second)
 		err = s.publish(deliveryCtx, event)

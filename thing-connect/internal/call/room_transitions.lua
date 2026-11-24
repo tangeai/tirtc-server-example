@@ -1,6 +1,15 @@
 -- Evaluated inside the room store's atomic operation. The adapter supplies
 -- the storage primitives. All participant, ownership and notification rules
 -- for a transition are defined here.
+--
+-- Primitives the adapter must define before this chunk (r is a decoded room
+-- table with room_id, caller, targets, status, answered_by, call_type):
+--   room(id) -> r | nil              owned_room(device) -> id | false
+--   room_winner(id) -> device | false  room_ttl(id) -> remaining ms
+--   insert_room(r, offline, ttl)     save_answer(id, device, ttl)
+--   release(r)                       unlock(device, id)
+--   add_rejection(id, device) -> bool  rejected_by(id, device) -> bool
+--   enqueue(r, target, kind, from, payload)
 local function contains(values, candidate)
     for _, value in ipairs(values) do
         if value == candidate then return true end
@@ -80,13 +89,30 @@ local function answer_room(id, caller, actor)
     return cjson.encode({room=r, previous=previous, first=true})
 end
 
+local function close_room(r, actor, caller_only, reason)
+    release(r)
+    notify_end(r, actor, reason, caller_only or (reason == 'unbound' and r.caller == actor))
+    return cjson.encode(r)
+end
+
 local function end_room(id, actor, caller_only, reason)
     local r = room(id)
     if not r then return 'not_found' end
     if r.caller ~= actor and (caller_only or r.answered_by ~= actor) then return 'forbidden' end
-    release(r)
-    notify_end(r, actor, reason, caller_only or (reason == 'unbound' and r.caller == actor))
-    return cjson.encode(r)
+    return close_room(r, actor, caller_only, reason)
+end
+
+-- Resolves the device's room at commit time, so a concurrent auto-switch
+-- cannot leave the device in the room it moved to.
+local function end_owned_room(actor, reason)
+    local id = owned_room(actor)
+    if not id then return '' end
+    local r = room(id)
+    if not r or (r.caller ~= actor and r.answered_by ~= actor) then
+        unlock(actor, id)
+        return ''
+    end
+    return close_room(r, actor, false, reason)
 end
 
 local function reject_room(id, actor, reason)

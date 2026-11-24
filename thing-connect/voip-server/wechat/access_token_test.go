@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -23,6 +24,8 @@ type fakeStableTokenServer struct {
 	token   string
 	forced  atomic.Int32
 	errcode int
+	// forceErrcode makes force_refresh fail without rotating the token.
+	forceErrcode int
 }
 
 func (f *fakeStableTokenServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -47,6 +50,10 @@ func (f *fakeStableTokenServer) ServeHTTP(w http.ResponseWriter, r *http.Request
 	f.issued.Add(1)
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if req.ForceRefresh && f.forceErrcode != 0 {
+		_ = json.NewEncoder(w).Encode(map[string]any{"errcode": f.forceErrcode, "errmsg": "system busy"})
+		return
+	}
 	if req.ForceRefresh {
 		f.token = "rotated"
 	}
@@ -60,6 +67,12 @@ func (f *fakeStableTokenServer) ServeHTTP(w http.ResponseWriter, r *http.Request
 func (f *fakeStableTokenServer) setToken(token string) {
 	f.mu.Lock()
 	f.token = token
+	f.mu.Unlock()
+}
+
+func (f *fakeStableTokenServer) setForceErrcode(code int) {
+	f.mu.Lock()
+	f.forceErrcode = code
 	f.mu.Unlock()
 }
 
@@ -183,7 +196,7 @@ func TestRejectionKeepsFresherToken(t *testing.T) {
 	if _, err := GetAccessToken(context.Background(), "wx-app", "secret"); err != nil {
 		t.Fatal(err)
 	}
-	token, err := getTokenState("wx-app", "secret").replacementToken(context.Background(), "wx-app", "secret", "stale", grantRefresh)
+	token, err := getTokenState("wx-app", "secret").token(context.Background(), "wx-app", "secret", "stale", grantRefresh)
 	if err != nil || token != "fresh" {
 		t.Fatalf("token=%q err=%v, want cached fresh", token, err)
 	}
@@ -242,7 +255,7 @@ func TestConcurrentInstancesRecoverOneRejectedToken(t *testing.T) {
 			defer workers.Done()
 			instance := tokenState{lock: make(chan struct{}, 1)}
 			<-start
-			token, err := instance.replacementToken(context.Background(), appID, "secret", "old", reserve)
+			token, err := instance.token(context.Background(), appID, "secret", "old", reserve)
 			if err != nil || token != "rotated" {
 				t.Errorf("expected rotated token: %v", err)
 			}
@@ -252,5 +265,182 @@ func TestConcurrentInstancesRecoverOneRejectedToken(t *testing.T) {
 	workers.Wait()
 	if got := fake.forced.Load(); got != 1 {
 		t.Fatalf("forced refreshes=%d, want 1", got)
+	}
+}
+
+func shortenRecovery(t *testing.T, backoffMin, backoffMax time.Duration, polls ...time.Duration) {
+	t.Helper()
+	prevMin, prevMax, prevPolls := recoveryBackoffMin, recoveryBackoffMax, peerRefreshPolls
+	recoveryBackoffMin, recoveryBackoffMax, peerRefreshPolls = backoffMin, backoffMax, polls
+	t.Cleanup(func() { recoveryBackoffMin, recoveryBackoffMax, peerRefreshPolls = prevMin, prevMax, prevPolls })
+}
+
+// memoryGate models the Redis gate: one grant per ttl window.
+type memoryGate struct {
+	mu     sync.Mutex
+	ttl    time.Duration
+	until  time.Time
+	grants atomic.Int32
+}
+
+func (g *memoryGate) reserve(context.Context, string) (bool, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if time.Now().Before(g.until) {
+		return false, nil
+	}
+	g.until = time.Now().Add(g.ttl)
+	g.grants.Add(1)
+	return true, nil
+}
+
+// rejectingCall fails with 40001 for bad and counts each use of bad.
+func rejectingCall(bad string, badUses *atomic.Int32) func(string) error {
+	return func(token string) error {
+		if token == bad {
+			badUses.Add(1)
+			return &APIError{Errcode: 40001, Errmsg: "invalid credential"}
+		}
+		return nil
+	}
+}
+
+func TestFailedForcedRefreshDoesNotReuseRejectedToken(t *testing.T) {
+	shortenRecovery(t, time.Hour, time.Hour, time.Millisecond)
+	fake := useFakeStableToken(t, "bad")
+	fake.setForceErrcode(-1)
+	gate := &memoryGate{ttl: time.Hour}
+	var badUses atomic.Int32
+	call := rejectingCall("bad", &badUses)
+	err := CallWithAccessToken(context.Background(), "wx-app", "secret", gate.reserve, call)
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.Errcode != -1 || fake.forced.Load() != 1 {
+		t.Fatalf("first call: err=%v forced=%d, want forced refresh error", err, fake.forced.Load())
+	}
+	issued := fake.issued.Load()
+	for i := 0; i < 20; i++ {
+		err := CallWithAccessToken(context.Background(), "wx-app", "secret", gate.reserve, call)
+		if !errors.As(err, &apiErr) || apiErr.Errcode != -1 {
+			t.Fatalf("call %d: err=%v, want the forced refresh error while backing off", i, err)
+		}
+	}
+	if got := badUses.Load(); got != 1 {
+		t.Fatalf("business calls with rejected token=%d, want 1", got)
+	}
+	if got := fake.issued.Load() - issued; got != 0 {
+		t.Fatalf("stable_token requests during backoff=%d, want 0", got)
+	}
+	if _, err := GetAccessToken(context.Background(), "wx-app", "secret"); err == nil {
+		t.Fatal("GetAccessToken returned a token during backoff")
+	}
+}
+
+func TestFailedForcedRefreshRetriesAfterWindow(t *testing.T) {
+	shortenRecovery(t, 10*time.Millisecond, 40*time.Millisecond, time.Millisecond)
+	fake := useFakeStableToken(t, "bad")
+	fake.setForceErrcode(-1)
+	gate := &memoryGate{ttl: 150 * time.Millisecond}
+	var badUses atomic.Int32
+	call := rejectingCall("bad", &badUses)
+	if err := CallWithAccessToken(context.Background(), "wx-app", "secret", gate.reserve, call); err == nil {
+		t.Fatal("first call succeeded despite failed forced refresh")
+	}
+	failedAt := time.Now()
+	issued := fake.issued.Load()
+	fake.setForceErrcode(0)
+	deadline := time.Now().Add(3 * time.Second)
+	attempts := 0
+	for {
+		attempts++
+		err := CallWithAccessToken(context.Background(), "wx-app", "secret", gate.reserve, call)
+		if err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no recovery after %d attempts: %v", attempts, err)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	if elapsed := time.Since(failedAt); elapsed < 100*time.Millisecond {
+		t.Fatalf("recovered after %v, before the refresh window expired", elapsed)
+	}
+	if got := fake.forced.Load(); got != 2 || gate.grants.Load() != 2 {
+		t.Fatalf("forced=%d grants=%d, want 2 each", got, gate.grants.Load())
+	}
+	if got := badUses.Load(); got != 1 {
+		t.Fatalf("business calls with rejected token=%d, want 1", got)
+	}
+	// Backoff caps stable reads at about one per 40ms, far fewer than attempts.
+	if got := fake.issued.Load() - issued; got > 15 || int(got) >= attempts {
+		t.Fatalf("stable_token requests=%d over %d attempts", got, attempts)
+	}
+}
+
+func TestPeerRotationAfterFailedRecoveryNeedsNoForce(t *testing.T) {
+	shortenRecovery(t, 30*time.Millisecond, 30*time.Millisecond, time.Millisecond, time.Millisecond)
+	fake := useFakeStableToken(t, "bad")
+	peerHolds := func(context.Context, string) (bool, error) { return false, nil }
+	var badUses atomic.Int32
+	call := rejectingCall("bad", &badUses)
+	err := CallWithAccessToken(context.Background(), "wx-app", "secret", peerHolds, call)
+	if !errors.Is(err, ErrTokenRefreshInProgress) {
+		t.Fatalf("err=%v, want ErrTokenRefreshInProgress", err)
+	}
+	issued := fake.issued.Load()
+	err = CallWithAccessToken(context.Background(), "wx-app", "secret", peerHolds, call)
+	if !errors.Is(err, ErrTokenRefreshInProgress) || fake.issued.Load() != issued {
+		t.Fatalf("err=%v stable requests=%d, want fast failure without requests", err, fake.issued.Load()-issued)
+	}
+	fake.setToken("from-peer")
+	time.Sleep(40 * time.Millisecond)
+	var used string
+	err = CallWithAccessToken(context.Background(), "wx-app", "secret", peerHolds, func(token string) error {
+		used = token
+		return call(token)
+	})
+	if err != nil || used != "from-peer" {
+		t.Fatalf("err=%v token=%q, want from-peer", err, used)
+	}
+	if fake.forced.Load() != 0 || badUses.Load() != 1 {
+		t.Fatalf("forced=%d bad uses=%d, want 0 and 1", fake.forced.Load(), badUses.Load())
+	}
+}
+
+func TestConcurrentInstancesForceOnceWhenRefreshFails(t *testing.T) {
+	cfg := testenv.LoadConfigOrSkip(t, "../../tests/testdata/config.yaml")
+	rdb := testenv.OpenRedisOrSkip(t, cfg)
+	t.Cleanup(func() { _ = rdb.Close() })
+	shortenRecovery(t, time.Millisecond, time.Millisecond, time.Millisecond)
+	fake := useFakeStableToken(t, "old")
+	fake.setForceErrcode(-1)
+	appID := uuid.NewString()
+	t.Cleanup(func() { _ = rdb.Del(context.Background(), "voip:wechat:refresh:"+appID).Err() })
+	reserve := cache.WeChatRefreshGate(rdb)
+	instances := make([]*tokenState, 12)
+	for i := range instances {
+		instances[i] = &tokenState{lock: make(chan struct{}, 1)}
+	}
+	run := func() {
+		start := make(chan struct{})
+		var workers sync.WaitGroup
+		for _, instance := range instances {
+			workers.Add(1)
+			go func(instance *tokenState) {
+				defer workers.Done()
+				<-start
+				if token, err := instance.token(context.Background(), appID, "secret", "old", reserve); err == nil {
+					t.Errorf("instance got token %q despite failed refresh", token)
+				}
+			}(instance)
+		}
+		close(start)
+		workers.Wait()
+	}
+	run()
+	fake.setForceErrcode(0)
+	time.Sleep(5 * time.Millisecond)
+	run()
+	if got := fake.forced.Load(); got != 1 {
+		t.Fatalf("forced refreshes=%d, want 1 within the gate window", got)
 	}
 }

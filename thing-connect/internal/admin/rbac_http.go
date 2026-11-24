@@ -123,7 +123,7 @@ func (s *HTTPServer) createRole(c *gin.Context) {
 		apiresp.Internal(c, "commit role")
 		return
 	}
-	_ = s.access.Reload(ctx)
+	s.reloadAccess(ctx)
 	apiresp.OK(c, gin.H{"id": id})
 }
 
@@ -178,7 +178,7 @@ func (s *HTTPServer) updateRole(c *gin.Context) {
 		apiresp.Internal(c, "commit role")
 		return
 	}
-	_ = s.access.Reload(ctx)
+	s.reloadAccess(ctx)
 	apiresp.OK(c, gin.H{"id": id})
 }
 
@@ -242,7 +242,7 @@ func (s *HTTPServer) updateRolePermissions(c *gin.Context) {
 		apiresp.Internal(c, "commit permissions")
 		return
 	}
-	_ = s.access.Reload(ctx)
+	s.reloadAccess(ctx)
 	apiresp.OK(c, gin.H{"id": id, "permissions": permissions})
 }
 
@@ -324,7 +324,7 @@ func (s *HTTPServer) createAdminUser(c *gin.Context) {
 		apiresp.Internal(c, "commit administrator")
 		return
 	}
-	_ = s.access.Reload(ctx)
+	s.reloadAccess(ctx)
 	apiresp.OK(c, gin.H{"id": id})
 }
 
@@ -416,7 +416,7 @@ func (s *HTTPServer) updateAdminUser(c *gin.Context) {
 		return
 	}
 	if rolesChanged {
-		_ = s.access.Reload(ctx)
+		s.reloadAccess(ctx)
 	}
 	apiresp.OK(c, gin.H{"id": id})
 }
@@ -466,7 +466,7 @@ func (s *HTTPServer) updateAdminRoles(c *gin.Context) {
 		return
 	}
 	if rolesChanged {
-		_ = s.access.Reload(ctx)
+		s.reloadAccess(ctx)
 	}
 	apiresp.OK(c, gin.H{"id": id, "role_ids": request.RoleIDs})
 }
@@ -486,8 +486,10 @@ func (s *HTTPServer) revokeAdminSessions(c *gin.Context) {
 		apiresp.Internal(c, err.Error())
 		return
 	}
-	_, _ = s.store.db.ExecContext(ctx, `UPDATE admin_users SET auth_revision=auth_revision+1 WHERE id=?`, id)
-	_ = s.store.Audit(ctx, requestAudit(c, identity, "admin.sessions.revoke", "admin_user", strconv.FormatInt(id, 10), request.Reason, "", `{"revoked":true}`))
+	effectCtx, cancel := committedEffectContext(ctx)
+	defer cancel()
+	_, _ = s.store.db.ExecContext(effectCtx, `UPDATE admin_users SET auth_revision=auth_revision+1 WHERE id=?`, id)
+	_ = s.store.Audit(effectCtx, requestAudit(c, identity, "admin.sessions.revoke", "admin_user", strconv.FormatInt(id, 10), request.Reason, "", `{"revoked":true}`))
 	apiresp.OK(c, gin.H{"revoked": true})
 }
 
@@ -552,7 +554,9 @@ func (s *HTTPServer) regenerateRecoveryCodes(c *gin.Context) {
 		apiresp.Internal(c, err.Error())
 		return
 	}
-	_ = s.store.Audit(ctx, requestAudit(c, identity, "admin.mfa.recovery.regenerate", "admin_user", strconv.FormatInt(identity.UserID, 10), request.Reason, `{"configured":true}`, `{"configured":true}`))
+	effectCtx, cancel := committedEffectContext(ctx)
+	defer cancel()
+	_ = s.store.Audit(effectCtx, requestAudit(c, identity, "admin.mfa.recovery.regenerate", "admin_user", strconv.FormatInt(identity.UserID, 10), request.Reason, `{"configured":true}`, `{"configured":true}`))
 	apiresp.OK(c, gin.H{"recovery_codes": codes})
 }
 

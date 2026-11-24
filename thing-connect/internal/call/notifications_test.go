@@ -3,7 +3,9 @@ package call
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
+	"time"
 )
 
 type notificationRoom struct {
@@ -47,5 +49,48 @@ func TestPendingNotificationUsesCurrentParticipants(t *testing.T) {
 				t.Fatalf("published=%t err=%v", called, err)
 			}
 		})
+	}
+}
+
+type expiryQueue struct {
+	Rooms
+	pending           []Notification
+	expired, complete []string
+}
+
+func (q *expiryQueue) ClaimNotification(context.Context, time.Duration) (Notification, bool, error) {
+	if len(q.pending) == 0 {
+		return Notification{}, false, nil
+	}
+	n := q.pending[0]
+	q.pending = q.pending[1:]
+	return n, true, nil
+}
+func (q *expiryQueue) CompleteNotification(_ context.Context, n Notification) error {
+	q.complete = append(q.complete, n.ID)
+	return nil
+}
+func (q *expiryQueue) ExpireNotification(_ context.Context, n Notification) error {
+	q.expired = append(q.expired, n.ID)
+	return nil
+}
+
+func TestDispatchDropsSignalingOlderThanMaxAge(t *testing.T) {
+	now := time.Now()
+	q := &expiryQueue{pending: []Notification{
+		{ID: "stale", Kind: "room_cancel", CreatedAt: now.Add(-MaxNotificationAge - time.Millisecond).UnixMilli()},
+		{ID: "fresh", Kind: "room_cancel", CreatedAt: now.Add(-MaxNotificationAge + time.Second).UnixMilli()},
+	}}
+	var published []string
+	s := NewService(q, publisherFunc(func(_ context.Context, n Notification) error {
+		published = append(published, n.ID)
+		return nil
+	}))
+	s.now = func() time.Time { return now }
+	if err := s.Dispatch(context.Background(), 10); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(published, []string{"fresh"}) || !slices.Equal(q.complete, []string{"fresh"}) || !slices.Equal(q.expired, []string{"stale"}) {
+		t.Fatalf("published=%v completed=%v expired=%v", published, q.complete, q.expired)
 	}
 }

@@ -145,6 +145,77 @@ func TestIncompleteListingsReturnErrors(t *testing.T) {
 	}
 }
 
+func TestCursorEndpointFallbackOnlyForMissingEndpoint(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		status   int
+		body     string
+		fallback bool
+	}{
+		{"not found", http.StatusNotFound, "", true},
+		{"bad request", http.StatusBadRequest, `{"code":"BAD_REQUEST"}`, true},
+		{"method not allowed", http.StatusMethodNotAllowed, "", true},
+		{"dashboard page", http.StatusOK, "<!doctype html><html></html>", true},
+		{"unauthorized", http.StatusUnauthorized, "", false},
+		{"forbidden", http.StatusForbidden, "", false},
+		{"unavailable", http.StatusServiceUnavailable, "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			legacy := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/v5/clients_v2" {
+					w.WriteHeader(tc.status)
+					fmt.Fprint(w, tc.body)
+					return
+				}
+				legacy++
+				fmt.Fprint(w, `{"data":[{"clientid":"sn_a","connected_at":"2026-01-01T00:00:00Z"}],"meta":{"hasnext":false}}`)
+			}))
+			defer server.Close()
+			c, _ := New(Config{URL: server.URL, APIKey: "key"})
+			err := c.ListConnected(context.Background(), func([]presence.Observation) error { return nil })
+			if tc.fallback && (err != nil || legacy != 1) {
+				t.Fatalf("fallback err=%v legacy=%d", err, legacy)
+			}
+			if !tc.fallback && (err == nil || legacy != 0) {
+				t.Fatalf("error masked by fallback: err=%v legacy=%d", err, legacy)
+			}
+		})
+	}
+}
+
+func TestLegacyListingSplitsSecondPrecisionTimes(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v5/clients_v2" {
+			http.NotFound(w, r)
+			return
+		}
+		q := r.URL.Query()
+		lo, hi := q.Get("gte_connected_at"), q.Get("lte_connected_at")
+		const second = "1767225601000"
+		switch {
+		case lo == "" && hi == "":
+			fmt.Fprint(w, `{"data":[{"clientid":"sn_a","connected_at":"2026-01-01T00:00:00Z"},{"clientid":"sn_b","connected_at":"2026-01-01T00:00:01Z"}],"meta":{"hasnext":true}}`)
+		case lo == "1767225601001" && hi == "":
+			// The window starts mid-second but the broker reports whole seconds.
+			fmt.Fprint(w, `{"data":[{"clientid":"sn_c","connected_at":"2026-01-01T00:00:01Z"},{"clientid":"sn_d","connected_at":"2026-01-01T00:00:01Z"}],"meta":{"hasnext":true}}`)
+		case lo == "" && hi == second, lo == "1767225601001" && hi == "1767225601001", lo == "1767225601002" && hi == "":
+			fmt.Fprint(w, `{"data":[{"clientid":"sn_part","connected_at":"2026-01-01T00:00:01Z"}],"meta":{"hasnext":false}}`)
+		default:
+			t.Errorf("unexpected interval %s", r.URL)
+		}
+	}))
+	defer server.Close()
+	c, _ := New(Config{URL: server.URL, APIKey: "key"})
+	n := 0
+	if err := c.ListConnected(context.Background(), func(b []presence.Observation) error { n += len(b); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if n != 3 {
+		t.Fatalf("listed %d sub-windows", n)
+	}
+}
+
 func TestSourceDisabledByEmptyURL(t *testing.T) {
 	var s Source
 	if s.Current() != nil {
