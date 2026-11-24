@@ -518,6 +518,7 @@ sudo /opt/thing-connect/service-local.sh restart thing-connect:admin-server
 - 每个进程设置稳定且唯一的 `SERVICE_INSTANCE_ID`；Username MQTT 模式依赖它生成不冲突的连接 ClientID。
 - 除 Admin 外，业务服务可以运行多个实例，条件和配置见[业务服务多实例](#multi-instance)。
 - 向进程发送 `SIGTERM` 并留出优雅退出时间，不使用强制终止作为正常重启方式。
+- 优雅退出时间不得短于后台投递的收尾时间：User 至少 50 秒，Recognition 至少 100 秒（Supervisor 的 `stopwaitsecs`，取值见 [Supervisor 模板](deploy/supervisor/thing-connect.supervisor.conf)）。沿用旧模板的 Supervisor 配置须同步这两项，否则超时后进程被强制终止，未完成的后台投递会被中断。
 - 对全部业务服务执行 readiness 检查；`/health/live` 不能替代 `/health/ready`。
 - 部署环境负责异常重启、开机自启、日志收集和日志轮转，且同一服务同一实例不能同时被两个进程管理器拉起。
 - 安装产物默认归 `root` 所有。改用非 `root` 运行账号时，只调整该账号必需的配置读取、日志和任务目录权限，并继续保护 `0600` 配置中的数据库与服务密钥。
@@ -663,7 +664,7 @@ sudo chmod 600 /opt/thing-connect/admin-server/migration-config.yaml
 
 手动部署未使用 `config-current` 时，从实际使用的 Admin `config.yaml` 复制。不要修改业务服务的运行账号，也不要把迁移配置指向其他数据库。安装页面填写的迁移密码不会自动保存成这个文件。
 
-存在待执行迁移时，脚本在停服前要求具备 DDL 权限的独立 `MIGRATION_CONFIG` 和可恢复的数据库备份。使用 `mysqldump` 生成完整备份，在隔离 MySQL 实例完成恢复演练，再把绝对路径和恢复验证声明传给更新命令：
+存在待执行迁移时，脚本在停服前要求具备 DDL 权限的独立 `MIGRATION_CONFIG` 和可恢复的数据库备份。使用 `mysqldump` 生成完整备份，在隔离 MySQL 实例完成恢复演练，再把绝对路径和恢复验证声明传给更新命令。使用 `--databases` 生成的备份含 `CREATE DATABASE` 和 `USE`，在生产实例上导入会直接覆盖生产库；恢复演练必须在隔离实例上进行，或先改写这两行的库名：
 
 ```bash
 sudo env \
@@ -744,7 +745,7 @@ Admin 功能、RBAC、配置中心和任务说明见 [Admin Server README](admin
 
 数据库迁移需包含 recognition 类型/任务/语音/用量/outbox 表及 device_bind.binding_revision 字段。按本文件既有备份、迁移和 readiness 流程执行；运行账号不需要 DDL 权限。配置模板在 recognition-server/config.yaml.example。
 
-Nginx 模板将 /v1/recognition/ 转发到9006并拒绝内部路径。/services 可通过 user-server 的 discovery.recognition_server_url 返回 recognition-srv；旧配置省略此字段时不影响原服务发现。统一代理部署下用户设备页面请求站点同源 /v1/recognition/。
+Nginx 模板将 /v1/recognition/ 转发到9006并拒绝内部路径。/services 可通过 user-server 的 discovery.recognition_server_url 返回 recognition-srv；旧配置省略此字段时不影响原服务发现。设备使用的服务发现若由静态文件或其他网关提供（例如按环境区分的 `/pre/services`、`/prod/services`），每个环境的响应都要包含 `recognition-srv`，值为设备可访问的识别服务根地址；缺少该字段时设备没有识别入口，也不会向识别服务发请求。统一代理部署下用户设备页面请求站点同源 /v1/recognition/。
 
 Admin 中配置识别服务 MQTT、千问默认 Key 及接口地域；只用音频识别无需配置 TiRTC 凭证。/health/ready 检查 MySQL、Redis 和 MQTT，缺少千问 Key 会拒绝新任务而不阻止配置管理。服务状态名称 recognition-server，动态模型配置 revision 随心跳上报。
 
@@ -843,6 +844,8 @@ User 的服务状态实例包含解绑清理队列（`cleanup_outbox`）的 `met
 具有下行能力的 User、VoIP、Call、Recognition 实例上报 `mqtt_ack_active`、`mqtt_ack_completed_total`、`mqtt_ack_failed_total`、`mqtt_ack_timeout_total`、`mqtt_ack_canceled_total` 和 `mqtt_ack_duration_ms_total`。这是从订阅、发布到收到设备 ACK 的完整调用统计，失败包括订阅和发布失败；它不证明媒体会话成功。Device 的 `presence_online_updates_total`、`presence_connection_updates_total` 统计 Redis 已确认的在线和连接快照有效更新；对应 `*_ignored_total` 包含同时间、旧时间及已过期的无效更新。网络中断而未收到脚本结果时不推测写入是否成功。
 
 Call 的 `remark_outbox` 和 `call_notification_outbox`、AI 的 `ai_cloud_outbox`、Recognition 的 `recognition_outbox` 在服务状态中报告积压健康，指标前缀分别为 `remark`、`call_notification`、`ai_cloud`、`recognition`：`*_pending`、`*_oldest_pending_age_ms`、`*_backlog_measured_at_ms`、`*_exhausted`。采样每 15 秒执行一次，查询最多 5 秒；一分钟没有有效样本、最老积压超过 15 分钟或最近 1 小时内有识别通知耗尽重试时，状态降级。排空并获得新样本后恢复，耗尽记录超过 1 小时后不再计入 `recognition_exhausted`；这些下游投递告警不摘除 HTTP readiness。
+
+AI 的 `ai_cloud_outbox` 降级且 `ai-server` 日志出现 TiRTC 错误 `16280032 device_product_not_belongs_to_customer(<设备ID>)` 时，说明该设备在 TiRTC 存在，但所属产品不属于当前配置的 TiRTC 账号。服务只把 `16280016`（设备不存在）视为云端角色已不存在，其余错误按退避持续重试，对应 `ai_cloud_role_target` 记录保持待处理，告警不会自行恢复。排查：核对 AI 服务配置的 TiRTC 账号与该设备所属产品是否一致；账号配置有误时修正后记录会自动完成。确认该设备不再需要云端角色清理时，由运维在核对后删除这条目标记录，下一次采样后恢复。永久失败的目标没有终止状态，这是当前限制。
 
 User 的 `admin_user_commands` 探针按相同的采样周期和积压阈值上报 `admin_user_command_*`。待处理量包含未领取和已领取的管理员密码重置邮件，等待年龄从首次入队计起。Admin 在同一事务内写入命令和审计，User 从 `admin_reset_mail_outbox` 领取邮件；升级期间也会排空已有的 Redis 命令。每条命令最多尝试 5 次，耗尽后保留 1 小时，期间服务状态降级。恢复 SMTP 后，在 MySQL 按 `attempts=5 AND next_at<=NOW(6)` 查询耗尽行，以 `mysql-<id>` 匹配密码重置审计的 `command_id`。Redis 历史命令按 `thingconnect:admin:user-commands:exhausted` 中的流 ID 匹配。核对用户后可重新发起发送。邮件采用至少一次投递；进程在 SMTP 接受邮件后、确认前退出可能导致重复发送。
 
