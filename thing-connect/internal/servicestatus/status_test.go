@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 	"thing-connect/internal/testenv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
@@ -130,4 +131,43 @@ func TestReporterPublishesMetricsThroughAggregator(t *testing.T) {
 		}
 	}
 	t.Fatal("reported instance missing")
+}
+
+func TestReporterDetectsLiveDuplicateInstanceID(t *testing.T) {
+	cfg := testenv.LoadConfigOrSkip(t, "../../tests/testdata/config.yaml")
+	client := testenv.OpenRedisOrSkip(t, cfg)
+	t.Cleanup(func() { _ = client.Close() })
+	t.Setenv("SERVICE_INSTANCE_ID", "duplicate-id-integration-test")
+	newReporter := func() *Reporter {
+		reporter, err := NewReporter(client, "device-server", nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return reporter
+	}
+	ctx := context.Background()
+	previous := newReporter()
+	t.Cleanup(func() { client.Del(ctx, previous.key); client.SRem(ctx, instanceIndex, previous.key) })
+	previous.report(ctx)
+
+	// A restarted process starts after its predecessor's last heartbeat.
+	time.Sleep(5 * time.Millisecond)
+	restarted := newReporter()
+	if restarted.instanceIDShared(ctx) {
+		t.Fatal("previous generation of the same instance reported as duplicate")
+	}
+	restarted.report(ctx)
+
+	// The predecessor is still alive and reports again: both sides see it.
+	if !previous.instanceIDShared(ctx) {
+		t.Fatal("older live process did not detect the newer process")
+	}
+	previous.report(ctx)
+	if !restarted.instanceIDShared(ctx) {
+		t.Fatal("newer process did not detect the older live process")
+	}
+	payload, err := client.Get(ctx, previous.key).Bytes()
+	if err != nil || !strings.Contains(string(payload), `"instance_id":"unhealthy"`) {
+		t.Fatalf("conflict not published as unhealthy dependency: %v %s", err, payload)
+	}
 }

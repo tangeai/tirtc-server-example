@@ -95,6 +95,11 @@ for service in "${ALL_SERVICES[@]}"; do
 done
 if [ "$full_build" = "1" ]; then
     full_commit="$(git rev-parse HEAD 2>/dev/null || printf 'unknown')"
+    # Artifacts built from a modified work tree must not pass a commit match
+    # after the modification is reverted; the suffix makes the marker differ.
+    if [ -n "$(git status --porcelain --untracked-files=normal 2>/dev/null)" ]; then
+        full_commit="$full_commit-dirty"
+    fi
     printf '%s\n' "$full_commit" >bin/.release-commit.tmp
     mv -f bin/.release-commit.tmp bin/.release-commit
 fi

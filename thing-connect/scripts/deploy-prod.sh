@@ -1189,13 +1189,14 @@ service_programs() {
 # The second argument "1" skips the check when restoring a release that already ran.
 supervisor_start_programs() {
     local svc="$1" skip_preflight="${2:-0}" programs cfg
-    local -a instances
+    local -a instances instance_args=()
     programs="$(service_programs "$svc")" || return 1
     mapfile -t instances <<<"$programs"
-    if [ "$skip_preflight" != 1 ] && [ "${#instances[@]}" -gt 1 ]; then
+    if [ "$skip_preflight" != 1 ] && [ "$svc" != "$ADMIN_SERVICE" ]; then
+        [ "${#instances[@]}" -le 1 ] || instance_args=(-check-service-instances "${#instances[@]}")
         cfg="$(service_config_path "$ADMIN_SERVICE")" || return 1
         "$DEPLOY_ROOT/$ADMIN_SERVICE/$ADMIN_SERVICE" -c "$cfg" -deploy-root "$DEPLOY_ROOT" \
-            -check-service-config "$svc" -check-service-instances "${#instances[@]}" >&2 || return $?
+            -check-service-config "$svc" "${instance_args[@]}" >&2 || return $?
     fi
     printf '%s\n' "$programs"
 }

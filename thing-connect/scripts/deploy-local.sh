@@ -364,6 +364,12 @@ local_gateway_config() {
     printf '}\n'
 }
 
+# Backend ports come only from rendered upstream lines; the template's
+# explanatory comments mention example ports that are not in use.
+local_gateway_backend_ports() {
+    grep '^upstream ' "$1" | grep -o 'server 127\.0\.0\.1:[0-9]* max_fails=0;' | sed 's/.*:\([0-9]*\) .*/\1/'
+}
+
 local_gateway() {
     local action="$1" port="${GATEWAY_PORT:-18080}" prefix="$LOCAL_DEPLOY_ROOT/nginx-local" pid args
     command -v nginx >/dev/null || { local_error '请先安装 nginx'; return 1; }
@@ -394,7 +400,7 @@ local_gateway() {
     local_gateway_config "$port" >"$prefix/nginx.conf.new" || return 1
     local backend internal_port=""
     if grep -q '^    listen 127.0.0.1:9100;' "$prefix/nginx.conf.new"; then internal_port=9100; fi
-    for backend in $internal_port $(grep -o 'server 127\.0\.0\.1:[0-9]* max_fails=0;' "$prefix/nginx.conf.new" | sed 's/.*:\([0-9]*\) .*/\1/'); do
+    for backend in $internal_port $(local_gateway_backend_ports "$prefix/nginx.conf.new"); do
         [ "$backend" != "$port" ] || {
             local_error "入口端口 $port 与实例或内网入口端口冲突；请用 GATEWAY_PORT 指定其他端口"; return 1;
         }

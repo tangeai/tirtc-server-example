@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"sort"
 	"strconv"
@@ -21,6 +22,10 @@ import (
 const (
 	instanceIndex = "thingconnect:services:instances"
 	heartbeatTTL  = 45 * time.Second
+	// DependencyInstanceID reports that another live process uses the same
+	// SERVICE_INSTANCE_ID. It degrades the instance without removing it from
+	// HTTP readiness, because the traffic path itself is unaffected.
+	DependencyInstanceID = "instance_id"
 )
 
 var ExpectedServices = []string{"device-server", "user-server", "voip-server", "ai-server", "call-server", "recognition-server"}
@@ -138,6 +143,10 @@ func (r *Reporter) report(ctx context.Context) {
 			dependencies[name] = "healthy"
 		}
 	}
+	if r.instanceIDShared(ctx) {
+		dependencies[DependencyInstanceID] = "unhealthy"
+		slog.Error("SERVICE_INSTANCE_ID 被另一个运行中的进程使用，请为每个进程设置唯一实例 ID", "service", r.instance.Service, "instance_id", r.instance.InstanceID)
+	}
 	instance := r.instance
 	instance.Dependencies = dependencies
 	instance.LastHeartbeat = time.Now().UTC()
@@ -156,6 +165,22 @@ func (r *Reporter) report(ctx context.Context) {
 		pipe.SAdd(ctx, instanceIndex, r.key)
 		return nil
 	})
+}
+
+// instanceIDShared reports whether the heartbeat key was written by another
+// process after this one started. A previous generation of the same instance
+// stopped reporting before this process started, so only a live duplicate can
+// leave a later heartbeat. Read failures never mark a conflict.
+func (r *Reporter) instanceIDShared(ctx context.Context) bool {
+	raw, err := r.client.Get(ctx, r.key).Bytes()
+	if err != nil {
+		return false
+	}
+	var existing Instance
+	if json.Unmarshal(raw, &existing) != nil {
+		return false
+	}
+	return !existing.StartedAt.Equal(r.instance.StartedAt) && existing.LastHeartbeat.After(r.instance.StartedAt)
 }
 
 type ServiceSummary struct {
