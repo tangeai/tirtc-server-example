@@ -61,7 +61,7 @@ class TiRtcRuntimeTests(unittest.TestCase):
         def stop():
             try:
                 runtime.stop()
-            except BaseException as exc:
+            except Exception as exc:
                 errors.append(exc)
 
         def stop_sdk():
@@ -103,7 +103,7 @@ class TiRtcRuntimeTests(unittest.TestCase):
         def stop():
             try:
                 runtime.stop()
-            except BaseException as exc:
+            except Exception as exc:
                 errors.append(exc)
 
         with mock.patch.object(tirtc_runtime.sdk, 'TiRtcStop', side_effect=stop_sdk), \
