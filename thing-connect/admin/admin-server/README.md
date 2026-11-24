@@ -98,7 +98,7 @@ TC-DEVICE-000001,replace-with-device-secret
 
 首次安装只启动 Admin，并为六个业务服务生成基础配置。Admin 不执行主机进程命令。服务状态页展示六个业务服务的版本、提交号、依赖状态、配置 revision、缺少的阻断配置和可复制的服务器启动或重启命令。
 
-服务器上的 `service-local.sh` 在业务服务启动前运行 Admin 只读预检，检查基础配置、阻断动态配置、MySQL schema、Redis 和对应 MQTT 账号。失败时服务保持停止，终端显示可操作建议。预检不执行数据库迁移或数据修改。
+服务器上的 `service-local.sh`，以及 Supervisor 部署下的 `deploy-prod.sh` 启动或重启命令，在业务服务启动前运行 Admin 只读预检，检查基础配置、阻断动态配置、MySQL schema、Redis 和对应 MQTT 账号。失败时服务保持停止，终端显示可操作建议。预检不执行数据库迁移或数据修改。
 
 常见检查：
 

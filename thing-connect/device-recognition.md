@@ -83,6 +83,15 @@ speech.url 是本识别服务的相对路径，必须相对 recognition-srv 请�
 
 管理后台“业务管理 → AI识别”提供设备用量、额度设置和识别记录；“服务配置 → AI识别”提供识别类型及 MQTT、模型连接配置。页签按管理员已有权限显示，菜单授权与接口权限分别检查。
 
+## 故障排查
+
+**设备提示“声音识别服务暂不可用”，用户已开启 AI识别**
+
+- 触发条件：设备取得服务发现响应后，响应中没有 `recognition-srv`。
+- 症状：设备不向识别服务发任何请求，识别服务和反向代理日志里没有该设备的 `/v1/recognition/config`；用户侧读取配置和策略状态均正常。
+- 排查：用设备日志里打印的服务发现地址执行 `curl -s <服务发现地址>`，检查响应是否含 `recognition-srv`；再用 `curl -s -o /dev/null -w '%{http_code}' <recognition-srv>/v1/recognition/config` 确认代理已转发，未带凭证时应返回 401。
+- 处理：在该环境的服务发现响应中补充 `recognition-srv`，设备重启后重新做服务发现并读取配置。
+
 ## 接口版本与验收边界
 
 请求字段、响应字段和通知示例见 [API Reference](api-reference.md#recognition-config)。单个任务的多类型结果使用 `results[]`，文字分析使用 `results[].result`，语音状态与下载信息使用 `results[].speech`；任务列表的 `data.items` 是多个任务的分页容器。
