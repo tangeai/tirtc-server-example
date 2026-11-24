@@ -9,8 +9,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jmoiron/sqlx"
-	"github.com/redis/go-redis/v9"
 
+	"thing-connect/internal/call"
 	"thing-connect/internal/config"
 	"thing-connect/internal/store"
 	"thing-connect/internal/voip"
@@ -29,15 +29,16 @@ type ContactNames interface {
 }
 
 type Server struct {
-	contactNames ContactNames
-	remarks      *voip.Remarks
-	intercom     interface {
+	cleanupContacts call.ContactCleanup
+	contactNames    ContactNames
+	remarks         *voip.Remarks
+	intercom        interface {
 		Unbind(context.Context, string) error
 	}
 	mu     sync.RWMutex
 	cfg    *config.Config
 	db     *sqlx.DB
-	rdb    *redis.Client
+	rooms  *call.Service
 	broker mqttBroker
 	dev    store.DeviceStore
 }
@@ -50,8 +51,11 @@ func (s *Server) Config() *config.Config {
 }
 func (s *Server) UpdateConfig(cfg *config.Config) { s.mu.Lock(); s.cfg = cfg; s.mu.Unlock() }
 
-func NewServer(cfg *config.Config, db *sqlx.DB, rdb *redis.Client, broker mqttBroker, dev store.DeviceStore) *Server {
-	return &Server{cfg: cfg, db: db, rdb: rdb, broker: broker, dev: dev}
+func NewServer(cfg *config.Config, db *sqlx.DB, rooms *call.Service, broker mqttBroker, dev store.DeviceStore, cleanupContacts call.ContactCleanup) *Server {
+	if cleanupContacts == nil {
+		panic("call server requires contact cleanup storage")
+	}
+	return &Server{cfg: cfg, db: db, cleanupContacts: cleanupContacts, rooms: rooms, broker: broker, dev: dev}
 }
 
 func (s *Server) SetRemarks(remarks *voip.Remarks) { s.remarks = remarks }

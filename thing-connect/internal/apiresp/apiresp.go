@@ -28,6 +28,7 @@ const (
 	CodeFingerprintMismatch = 6013  // 设备指纹不匹配（情况1）
 	CodeDeviceIDUntrusted   = 6014  // 设备ID不可信（情况3）
 	CodeMACDuplicateBinding = 6015  // 同MAC已绑定至本账号其它设备
+	CodeCleanupPending      = 6016  // 解绑清理尚未完成
 	CodeUserExists          = 4090  // 邮箱已注册
 	CodeInvalidCreds        = 4091  // 用户名或密码错误
 	CodeDeviceNotFound      = 4040  // 设备不存在

@@ -19,7 +19,7 @@ func TestVoipCleanupOnlyReleasesMatchingCall(t *testing.T) {
 	contacts := []voip.Contact{{AppID: id, OpenID: "same"}, {AppID: id, OpenID: "other"}}
 	keys := []string{"voip:device-call:" + id, "voip:contact-call:" + id + ":same", "voip:contact-call:" + id + ":other"}
 	ctx := context.Background()
-	t.Cleanup(func() { _ = client.Del(ctx, keys...).Err() })
+	t.Cleanup(func() { _ = client.Del(ctx, append(keys, "voip:unbound-revision:"+id)...).Err() })
 	for i, key := range keys {
 		call := "old-call"
 		if i == 2 {
@@ -31,7 +31,7 @@ func TestVoipCleanupOnlyReleasesMatchingCall(t *testing.T) {
 	}
 	guards := cache.NewVoipCallGuards(client)
 	for i := 0; i < 2; i++ {
-		if err := guards.ReleaseDevice(ctx, id, contacts); err != nil {
+		if err := guards.ReleaseDevice(ctx, id, 1, contacts); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -41,4 +41,14 @@ func TestVoipCleanupOnlyReleasesMatchingCall(t *testing.T) {
 	if value, err := client.Get(ctx, keys[2]).Result(); err != nil || value != "another-call" {
 		t.Fatalf("other call guard=%q err=%v", value, err)
 	}
+	if err := client.Set(ctx, keys[0], "new-call", time.Minute).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := guards.ReleaseDevice(ctx, id, 1, contacts); err != nil {
+		t.Fatal(err)
+	}
+	if got := client.Get(ctx, keys[0]).Val(); got != "new-call" {
+		t.Fatalf("duplicate cleanup removed new guard: %q", got)
+	}
+
 }

@@ -366,11 +366,6 @@ func (s *Server) postDeviceCall(c *gin.Context) {
 	}
 	guardKeys = append(guardKeys, contactGuardKey)
 
-	accessToken, err := wechat.GetAccessToken(c.Request.Context(), wxAppID, app.Secret)
-	if err != nil {
-		apiresp.Fail(c, apiresp.ErrWechatAPI, err.Error())
-		return
-	}
 	wxPayload := req.Payload
 	if strings.TrimSpace(wxPayload) == "" {
 		encoded, marshalErr := json.Marshal(map[string]string{
@@ -401,7 +396,9 @@ func (s *Server) postDeviceCall(c *gin.Context) {
 		"listener_camera_status": req.WxListenerCameraStatus,
 		"payload":                wxPayload,
 	}
-	if err := wechat.IotVoipCall(c.Request.Context(), accessToken, payload); err != nil {
+	if err := wechat.CallWithAccessToken(c.Request.Context(), wxAppID, app.Secret, s.refresh, func(accessToken string) error {
+		return wechat.IotVoipCall(c.Request.Context(), accessToken, payload)
+	}); err != nil {
 		var wxErr *wechat.APIError
 		if errors.As(err, &wxErr) && wxErr.Errcode == 9 {
 			if updateErr := s.invalidateDeviceAuth(

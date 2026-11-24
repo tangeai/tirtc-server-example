@@ -32,27 +32,9 @@ func (s *Server) postInternalUnbind(c *gin.Context) {
 		}
 	}
 
-	if roomID, err := s.rdb.Get(ctx, lockKey(body.DeviceID)).Result(); err == nil && roomID != "" {
-		if rm, err := s.getRoom(ctx, roomID); err == nil && rm != nil {
-			var notify []string
-			switch {
-			case rm.Caller == body.DeviceID:
-				notify = rm.Targets
-			case rm.AnsweredBy == body.DeviceID:
-				notify = []string{rm.Caller}
-			}
-			notify = removeString(notify, body.DeviceID)
-			_ = s.releaseRoom(ctx, rm, "unbound", notify)
-		}
-	}
-
-	peers, err := s.contactPeers(ctx, body.DeviceID)
+	peers, err := s.rooms.Unbind(ctx, body.DeviceID, s.cleanupContacts)
 	if err != nil {
-		apiresp.Fail(c, apiresp.ErrInternal, err.Error())
-		return
-	}
-	if err := s.deleteAllContacts(ctx, body.DeviceID); err != nil {
-		apiresp.Fail(c, apiresp.ErrInternal, err.Error())
+		s.callError(c, err)
 		return
 	}
 	for _, peer := range peers {

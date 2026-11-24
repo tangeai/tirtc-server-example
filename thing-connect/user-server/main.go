@@ -6,16 +6,20 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"maps"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
+	"thing-connect/internal/adminmail"
+	"thing-connect/internal/bindlimit"
 	"thing-connect/internal/boardcatalog"
 	"thing-connect/internal/cache"
 	captchapkg "thing-connect/internal/captcha"
@@ -27,6 +31,8 @@ import (
 	"thing-connect/internal/logging"
 	mailerpkg "thing-connect/internal/mailer"
 	"thing-connect/internal/mqttc"
+	"thing-connect/internal/queuehealth"
+	"thing-connect/internal/requestguard"
 	"thing-connect/internal/service"
 	"thing-connect/internal/servicestatus"
 	"thing-connect/internal/sitebrand"
@@ -93,15 +99,36 @@ func main() {
 	cacheStore := mysqlstore.NewCacheStore(rdb)
 
 	userSvc := service.NewUserService(userStore, cacheStore, captchapkg.DevVerifier{}, mailerpkg.DisabledMailer{}, cfg.JWTSecret, svcCfg)
-	passwordResetMailQueue := service.NewInMemoryPasswordResetEmailQueue(userSvc.DeliverPasswordResetCode)
+	passwordResetMailQueue, err := service.NewInMemoryPasswordResetEmailQueue(userSvc.DeliverPasswordResetCode, cache.NewPasswordResetMailGate(rdb))
+	if err != nil {
+		log.Fatalf("password reset email queue: %v", err)
+	}
 	userSvc.SetPasswordResetEmailQueue(passwordResetMailQueue)
 
-	bindSvc := service.NewBindService(bindStore, cacheStore, broker, svcCfg)
+	bindAttemptPolicy, err := cfg.BindAttempt.Policy()
+	if err != nil {
+		log.Fatalf("bind attempt config: %v", err)
+	}
+	bindAttempts, err := bindlimit.New(&cache.BindAttemptStore{Client: rdb}, bindAttemptPolicy)
+	if err != nil {
+		log.Fatalf("bind attempt limiter: %v", err)
+	}
+	bindSvc := service.NewBindService(bindStore, cacheStore, broker, bindAttempts, svcCfg)
 	profileSvc := deviceprofile.NewService(mysqlstore.NewDeviceProfileStore(sqlDB))
 	dynamicClient, dynamicRefs, err := userDynamicConfig(dynamicClient, cfg.Tirtc, userSvc, bindSvc)
 	if err != nil {
 		log.Fatalf("dynamic config: %v", err)
 	}
+	dynamicRefs = append(dynamicRefs, dynamicconfig.Ref{Namespace: "user-server", Key: "user.bind_attempt_policy", Apply: func(snapshot dynamicconfig.Snapshot) error {
+		if snapshot.Revision == 0 {
+			return bindAttempts.Update(bindAttemptPolicy)
+		}
+		policy, err := bindlimit.ParseConfig(snapshot.Value)
+		if err != nil {
+			return err
+		}
+		return bindAttempts.Update(policy)
+	}})
 	navigation, err := webnav.New(cfg.Navigation)
 	if err != nil {
 		log.Fatalf("navigation config: %v", err)
@@ -153,8 +180,6 @@ func main() {
 		log.Fatalf("user web build missing: run npm --prefix user-server/user-web run build: %v", err)
 	}
 
-	roleStore := mysqlstore.NewRoleBindingStore(sqlDB)
-
 	targets := []cleanupoutbox.Target{}
 	if cfg.Ai.ServerURL != "" {
 		targets = append(targets, cleanupoutbox.Target{Name: "ai", URL: strings.TrimRight(cfg.Ai.ServerURL, "/") + "/v1/ai/internal/unbind", InternalKey: cfg.Internal.Key})
@@ -168,27 +193,46 @@ func main() {
 	if len(targets) > 0 && cfg.Internal.Key == "" {
 		log.Fatal("config: internal.key must be set when cross-service cleanup URLs are configured")
 	}
-	outbox := cleanupoutbox.NewOutbox(sqlDB, targets)
-	cleanup := &usrhandler.UnbindCleanup{Targets: cleanupoutbox.TargetNames(targets)}
-	outboxCtx, outboxCancel := context.WithCancel(context.Background())
-	go outbox.Run(outboxCtx)
-	go passwordResetMailQueue.Run(outboxCtx)
-	go runAdminUserCommands(outboxCtx, rdb, userSvc)
-	go dynamicClient.Run(outboxCtx, dynamicRefs)
-	reporter, err := servicestatus.NewReporter(rdb, "user-server", probes, dynamicClient.Revisions)
+	outbox, err := cleanupoutbox.NewOutbox(mysqlstore.NewCleanupOutboxStore(sqlDB), targets)
+	if err != nil {
+		log.Fatalf("cleanup outbox: %v", err)
+	}
+	commands := newAdminUserCommands(rdb, userSvc.DeliverPasswordResetCode)
+	mailStore := mysqlstore.NewResetMailStore(sqlDB)
+	mailWorker := adminmail.NewWorker(mailStore, userSvc.DeliverPasswordResetCode)
+	commandBacklog := queuehealth.New("admin_user_command", adminmail.CombinedBacklog{Durable: mailStore, Legacy: commands})
+	// A cleanup backlog is reported as degraded status but must not fail
+	// /health/ready: draining user-server would not help a stuck target.
+	statusProbes := maps.Clone(probes)
+	statusProbes["cleanup_outbox"] = outbox.Health
+	statusProbes["admin_user_commands"] = commandBacklog.Health
+	guard, guardErr := requestguard.New(cfg.Server.RequestLimits)
+	if guardErr != nil {
+		log.Fatal(guardErr)
+	}
+	reporter, err := servicestatus.NewReporter(rdb, "user-server", statusProbes, dynamicClient.Revisions)
 	if err != nil {
 		log.Fatalf("service status: %v", err)
 	}
-	go reporter.Run(outboxCtx)
+	reporter.SetMetrics(servicestatus.MergeMetrics(broker.Metrics, outbox.Metrics, commandBacklog.Metrics, guard.Metrics, servicestatus.PoolMetrics(sqlDB, rdb)))
+	workerCtx, stopWorkers := context.WithCancel(context.Background())
+	var workers sync.WaitGroup
+	for _, run := range []func(context.Context){outbox.Run, passwordResetMailQueue.Run, commands.run, mailWorker.Run, commandBacklog.Run, reporter.Run, func(ctx context.Context) { dynamicClient.Run(ctx, dynamicRefs) }} {
+		workers.Add(1)
+		go func(work func(context.Context)) {
+			defer workers.Done()
+			work(workerCtx)
+		}(run)
+	}
 
-	usrhandler.NewServer(userSvc, bindSvc, profileSvc, broker, sqlDB, rdb, cfg.JWTSecret, cfg.Call.ServerURL, cfg.Internal.Key, roleStore, cleanup).Register(r)
+	usrhandler.NewServer(userSvc, bindSvc, profileSvc, broker, usrhandler.JWTAuth(cfg.JWTSecret, rdb, sqlDB), cleanupoutbox.TargetNames(targets)).Register(r)
 
 	addr := fmt.Sprintf(":%d", cfg.Server.HTTPPort)
 	srv := &http.Server{
-		Addr: addr, Handler: r,
+		Addr: addr, Handler: guard.Wrap(r),
 		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      60 * time.Second,
+		ReadTimeout:       max(30*time.Second, guard.MaxTimeout()),
+		WriteTimeout:      max(60*time.Second, guard.MaxTimeout()+5*time.Second),
 		IdleTimeout:       90 * time.Second,
 	}
 	go func() {
@@ -209,7 +253,8 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("user-server shutdown: %v", err)
 	}
-	outboxCancel()
+	stopWorkers()
+	workers.Wait()
 	broker.Close()
 	if err := rdb.Close(); err != nil {
 		log.Printf("user-server close redis: %v", err)

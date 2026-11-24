@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "type": "module",
   "engines": {
-    "node": "^20.19.0 || >=22.12.0",
+    "node": ">=22.12.0",
     "npm": ">=10"
   },
   "scripts": {
@@ -14,7 +14,8 @@
     "check": "npm run format:check && npm run check:ui && npm test && npm run build",
     "format": "prettier --write src scripts vite.config.ts",
     "format:check": "prettier --check src scripts vite.config.ts",
-    "check:ui": "node --test scripts/check-ui.test.mjs && node scripts/check-ui.mjs"
+    "check:ui": "node --test scripts/check-ui.test.mjs && node scripts/check-ui.mjs",
+    "test:browser": "node tests/run-browser.cjs"
   },
   "dependencies": {
     "@ant-design/icons": "5.6.1",

@@ -19,11 +19,43 @@ func TestRegistryRejectsUnknownAndBadValues(t *testing.T) {
 	}
 }
 
+func TestBindAttemptPolicyRegistration(t *testing.T) {
+	registry := DefaultConfigRegistry()
+	definition, ok := registry.Lookup("user-server", "user.bind_attempt_policy")
+	if !ok || definition.Reload != "runtime" || definition.Blocking || len(definition.SecretPaths) != 0 || len(definition.Fields) != 3 {
+		t.Fatalf("definition = %+v", definition)
+	}
+	if string(definition.Default) != `{"window":"10m","max_failures":10,"cooldown":"1h"}` {
+		t.Fatalf("default = %s", definition.Default)
+	}
+	for _, bad := range []string{`{"window":"10m","max_failures":10}`, `{"window":"10m","max_failures":0,"cooldown":"1h"}`, `{"window":"10m","max_failures":10,"cooldown":"1h","extra":true}`} {
+		if err := registry.Validate("user-server", "user.bind_attempt_policy", json.RawMessage(bad)); err == nil {
+			t.Errorf("accepted %s", bad)
+		}
+	}
+}
+
+func TestBrokerAPIRegistration(t *testing.T) {
+	registry := DefaultConfigRegistry()
+	definition, ok := registry.Lookup("device-server", "mqtt.broker_api")
+	if !ok || definition.Reload != "runtime" || definition.Blocking || len(definition.SecretPaths) != 1 || definition.SecretPaths[0] != "api_secret" || len(definition.Fields) != 3 {
+		t.Fatalf("definition = %+v", definition)
+	}
+	if err := registry.Validate("device-server", "mqtt.broker_api", json.RawMessage(`{"url":"http://127.0.0.1:18083","api_key":"k"}`)); err != nil {
+		t.Fatalf("valid value rejected: %v", err)
+	}
+	for _, bad := range []string{`{"url":"http://127.0.0.1:18083","api_key":""}`, `{"url":"tcp://127.0.0.1","api_key":"k"}`, `{"url":"","api_key":"","api_secret":"x"}`} {
+		if err := registry.Validate("device-server", "mqtt.broker_api", json.RawMessage(bad)); err == nil {
+			t.Errorf("accepted %s", bad)
+		}
+	}
+}
+
 func TestRegistryDefinitionsAndUsableInitialValues(t *testing.T) {
 	registry := DefaultConfigRegistry()
 	definitions := registry.List("")
-	if len(definitions) != 32 {
-		t.Fatalf("registered configuration count = %d, want 32", len(definitions))
+	if len(definitions) != 34 {
+		t.Fatalf("registered configuration count = %d, want 34", len(definitions))
 	}
 	for _, definition := range definitions {
 		value := definition.Default

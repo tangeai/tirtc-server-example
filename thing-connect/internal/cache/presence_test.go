@@ -21,7 +21,7 @@ func TestPresenceBatchRedisCompatibility(t *testing.T) {
 	t.Cleanup(func() { rdb.Del(ctx, key) })
 	store := cache.PresenceStore{Client: rdb}
 	now := time.Now().UTC()
-	online := presence.Observation{ClientID: id, At: now}
+	online := presence.Observation{ClientID: id, At: now, ExpiresAt: now.Add(presence.TTL)}
 	if err := store.Project(ctx, []presence.Observation{online}); err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +31,7 @@ func TestPresenceBatchRedisCompatibility(t *testing.T) {
 	if ttl := rdb.PTTL(ctx, key).Val(); ttl < 149*time.Second || ttl > presence.TTL {
 		t.Fatalf("ttl=%s", ttl)
 	}
-	offline := presence.Observation{ClientID: id, At: now, Offline: true}
+	offline := presence.Observation{ClientID: id, At: now, ExpiresAt: now.Add(presence.TTL), Offline: true}
 	if err := store.Project(ctx, []presence.Observation{offline, online}); err != nil {
 		t.Fatal(err)
 	}
@@ -44,12 +44,44 @@ func TestPresenceBatchRedisCompatibility(t *testing.T) {
 	if rdb.Exists(ctx, key).Val() != 1 {
 		t.Fatal("unversioned disconnect deleted current connection")
 	}
-	online.At = now.Add(-2 * presence.TTL)
-	if err := store.Project(ctx, []presence.Observation{online}); err != nil {
+	older := online
+	before := store.Metrics()
+	older.At = now.Add(-time.Minute)
+	older.ExpiresAt = older.At.Add(presence.TTL)
+	if err := store.Project(ctx, []presence.Observation{older}); err != nil {
+		t.Fatal(err)
+	}
+	if ttl := rdb.PTTL(ctx, key).Val(); ttl < 148*time.Second {
+		t.Fatalf("reordered observation shortened ttl to %s", ttl)
+	}
+	after := store.Metrics()
+	if after["presence_online_updates_total"] != before["presence_online_updates_total"] || after["presence_online_ignored_total"] != before["presence_online_ignored_total"]+1 {
+		t.Fatalf("old observation counted as update: before=%v after=%v", before, after)
+	}
+	expired := online
+	expired.At = now.Add(-2 * presence.TTL)
+	expired.ExpiresAt = expired.At.Add(presence.TTL)
+	if err := store.Project(ctx, []presence.Observation{expired}); err != nil {
+		t.Fatal(err)
+	}
+	if rdb.Exists(ctx, key).Val() != 1 {
+		t.Fatal("expired retry deleted a newer observation")
+	}
+	rdb.Del(ctx, key)
+	if err := store.Project(ctx, []presence.Observation{expired}); err != nil {
 		t.Fatal(err)
 	}
 	if rdb.Exists(ctx, key).Val() != 0 {
 		t.Fatal("retry revived expired observation")
+	}
+	if err := rdb.ScriptFlush(ctx).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Project(ctx, []presence.Observation{online}); err != nil {
+		t.Fatalf("script cache loss: %v", err)
+	}
+	if rdb.Exists(ctx, key).Val() != 1 {
+		t.Fatal("script reload skipped the batch")
 	}
 }
 
@@ -66,7 +98,7 @@ func TestPendingConnectionsSurviveRestartAndCompareAck(t *testing.T) {
 	})
 	first := &cache.PresenceStore{Client: rdb}
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	old := presence.Observation{ClientID: id, IP: "192.0.2.1", At: now, ConnectedAt: now}
+	old := presence.Observation{ClientID: id, IP: "192.0.2.1", At: now, ExpiresAt: now.Add(presence.TTL), ConnectedAt: now}
 	if err := first.Project(ctx, []presence.Observation{old}); err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +182,7 @@ func TestRedisProjectionProgressesWhileSQLIsBlocked(t *testing.T) {
 	})
 	adapter := &cache.PresenceStore{Client: rdb}
 	writer := &stalledConnectionWriter{}
-	projector := presence.New(adapter, writer)
+	projector := presence.New(adapter, writer, nil)
 	done := make(chan struct{})
 	go func() { projector.Run(ctx); close(done) }()
 	now := time.Now().UTC()
@@ -198,7 +230,7 @@ func TestConnectionBacklogAgeAndConditionalAcknowledgement(t *testing.T) {
 	})
 	s := &cache.PresenceStore{Client: rdb}
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	old := presence.Observation{ClientID: id, IP: "192.0.2.1", At: now, ConnectedAt: now}
+	old := presence.Observation{ClientID: id, IP: "192.0.2.1", At: now, ExpiresAt: now.Add(presence.TTL), ConnectedAt: now}
 	if err := s.Project(ctx, []presence.Observation{old}); err != nil {
 		t.Fatal(err)
 	}
@@ -227,5 +259,78 @@ func TestConnectionBacklogAgeAndConditionalAcknowledgement(t *testing.T) {
 	}
 	if _, err := rdb.ZScore(ctx, "presence:connections:pending_since", id).Result(); err == nil {
 		t.Fatal("successful ACK retained age index")
+	}
+}
+
+func TestGapMarkerClearsOnlyLossesBeforeListing(t *testing.T) {
+	cfg := testenv.LoadConfigOrSkip(t, "../../tests/testdata/config.yaml")
+	rdb := testenv.OpenRedisOrSkip(t, cfg)
+	t.Cleanup(func() { _ = rdb.Close() })
+	ctx := context.Background()
+	const key = "presence:connections:gap"
+	const clearedKey = "presence:connections:gap_cleared"
+	for _, k := range []string{key, clearedKey} {
+		previous, hadPrevious := rdb.Get(ctx, k).Val(), rdb.Exists(ctx, k).Val() == 1
+		t.Cleanup(func() {
+			if hadPrevious {
+				rdb.Set(context.Background(), k, previous, 0)
+			} else {
+				rdb.Del(context.Background(), k)
+			}
+		})
+	}
+	rdb.Del(ctx, clearedKey)
+	s := &cache.PresenceStore{Client: rdb}
+	listedFrom := time.Now()
+
+	rdb.Set(ctx, key, "1", 0)
+	if err := s.ClearGap(ctx, listedFrom); err != nil {
+		t.Fatal(err)
+	}
+	if gap, _ := s.HasGap(ctx); gap {
+		t.Fatal("legacy marker survived a completed listing")
+	}
+
+	if err := s.MarkGap(ctx, listedFrom.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkGap(ctx, listedFrom.Add(-time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ClearGap(ctx, listedFrom); err != nil {
+		t.Fatal(err)
+	}
+	if gap, _ := s.HasGap(ctx); !gap {
+		t.Fatal("loss during listing was cleared")
+	}
+	if err := s.ClearGap(ctx, listedFrom.Add(2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if gap, _ := s.HasGap(ctx); gap {
+		t.Fatal("later listing did not clear the marker")
+	}
+
+	// A writer that persists an already resolved loss after the clear (any
+	// instance) must not resurrect the shared marker.
+	if err := s.MarkGap(ctx, listedFrom.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if gap, _ := s.HasGap(ctx); gap {
+		t.Fatal("late write of a resolved loss resurrected the marker")
+	}
+	if err := s.ClearGap(ctx, listedFrom); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkGap(ctx, listedFrom.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if gap, _ := s.HasGap(ctx); gap {
+		t.Fatal("an older listing moved the cleared boundary backwards")
+	}
+	if err := s.MarkGap(ctx, listedFrom.Add(3*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if gap, _ := s.HasGap(ctx); !gap {
+		t.Fatal("loss after the latest listing was ignored")
 	}
 }

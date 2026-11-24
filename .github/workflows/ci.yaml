@@ -61,6 +61,7 @@ jobs:
           python3 scripts/check-api-docs.py
           python3 -m unittest discover -s scripts -p 'test_check_api_docs.py'
           python3 -m unittest discover -s scripts -p 'test_check_public_site.py'
+          python3 -m unittest discover -s tests -p 'test_scale_load.py'
       - name: Go tests
         working-directory: thing-connect
         env:
@@ -69,9 +70,14 @@ jobs:
       - name: Deployment script tests
         working-directory: thing-connect
         run: |
+          if ! command -v nginx >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install --yes nginx
+          fi
           bash scripts/ip-databases_test.sh
           bash scripts/install_test.sh
           bash scripts/service-local_test.sh
+          bash scripts/service-local_multi_test.sh
           bash scripts/deploy-prod_test.sh
           bash scripts/deploy-local_test.sh
           bash scripts/deployment-workflow_test.sh
@@ -91,11 +97,14 @@ jobs:
       - name: User browser acceptance
         working-directory: thing-connect/user-server/user-web
         run: npm run test:browser
-      - name: Preserve user browser acceptance results
+      - name: Admin browser acceptance
+        working-directory: thing-connect/admin/admin-web
+        run: npm run test:browser
+      - name: Preserve browser acceptance results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: user-browser-acceptance
+          name: browser-acceptance
           path: output/playwright/
           if-no-files-found: ignore
 

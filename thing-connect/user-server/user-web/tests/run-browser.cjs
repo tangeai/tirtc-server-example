@@ -2,6 +2,9 @@ const fs=require('node:fs'),path=require('node:path'),{spawnSync}=require('node:
 const root=path.resolve(__dirname,'../../../..'),out=path.join(root,'output/playwright');
 fs.mkdirSync(out,{recursive:true});
 const coverage={
+ 'device-dialogs':'设备弹窗、失败恢复、移动端与桌面交互',
+ 'role-types':'角色类型目录、预览与选择流程',
+ 'api-session':'多标签页切换账号后隔离旧成功/401响应，保留新登录状态',
  'captcha-language':'四种验证码跟随站点语言、切换后销毁旧实例与拦截迟到回调',
  'site-language':'用户页面、公开指南、法律页面的英文覆盖与语言切换',
  'auth-english':'英文注册/登录/找回密码：五种宽度、漏译、切换语言保留输入、校验及成功流程',

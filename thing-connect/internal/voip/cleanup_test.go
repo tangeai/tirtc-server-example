@@ -23,17 +23,18 @@ func (f *cleanupFake) step(ctx context.Context, name string) error {
 	}
 	return nil
 }
+func (f *cleanupFake) UnboundRevision(context.Context, string) (int64, error) { return 1, nil }
 func (f *cleanupFake) Contacts(ctx context.Context, _ string) ([]Contact, error) {
 	return f.contacts, f.step(ctx, "read")
 }
-func (f *cleanupFake) DeleteAuthorizations(ctx context.Context, _ string) error {
+func (f *cleanupFake) DeleteAuthorizations(ctx context.Context, _ string, _ int64) error {
 	if err := f.step(ctx, "delete"); err != nil {
 		return err
 	}
 	f.contacts = nil
 	return nil
 }
-func (f *cleanupFake) ReleaseDevice(ctx context.Context, _ string, contacts []Contact) error {
+func (f *cleanupFake) ReleaseDevice(ctx context.Context, _ string, _ int64, contacts []Contact) error {
 	if !reflect.DeepEqual(contacts, f.contacts) {
 		panic("lost contact keys")
 	}

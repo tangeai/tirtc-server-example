@@ -56,7 +56,7 @@ const server = http.createServer((req, res) => {
     const dialog = page.getByRole('dialog',{name:'编辑角色类型'});
     const save = async () => {
       await dialog.getByLabel('操作说明',{exact:true}).fill('自动化测试');
-      await dialog.getByRole('button',{name:'保存类型',exact:true}).click();
+      await dialog.getByRole('button',{name:/保存类型/}).click();
       await dialog.waitFor({state:'hidden'});
     };
     await open();
@@ -72,7 +72,7 @@ const server = http.createServer((req, res) => {
       });
       assert(bounds.bottom <= bounds.height && bounds.left >= 0 && bounds.right <= bounds.width, JSON.stringify(bounds));
       assert.equal(bounds.overflow,false,'editor must not scroll horizontally');
-      await dialog.getByRole('button',{name:'保存类型',exact:true}).waitFor();
+      await dialog.getByRole('button',{name:/保存类型/}).waitFor();
 
     }
     await page.setViewportSize({width:1280,height:800});

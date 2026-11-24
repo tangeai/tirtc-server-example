@@ -26,6 +26,14 @@ class MqttMessageTests(unittest.TestCase):
             device_flow.connect_mqtt_blocking('localhost', 1883, 'review', 'test', handler, stop, False)
         handler.on_device_call_incoming.assert_called_once_with({'room_id':'room-1'})
         self.assertEqual(client.publish.call_count, len(INVALID) + 1)
+        delays = client.reconnect_delay_set.call_args.kwargs
+        self.assertTrue(1 <= delays['min_delay'] <= 4 and 60 <= delays['max_delay'] <= 120)
+
+    def test_reconnect_delays_spread_devices(self):
+        pairs = {device_flow.mqtt_reconnect_delays(e) for e in range(1 << 16)}
+        self.assertEqual({p[0] for p in pairs}, {1, 2, 3, 4})
+        self.assertEqual(min(p[1] for p in pairs), 60)
+        self.assertEqual(max(p[1] for p in pairs), 120)
 
     def test_temporary_connection_ignores_bad_envelopes_and_credentials(self):
         client = mock.Mock()

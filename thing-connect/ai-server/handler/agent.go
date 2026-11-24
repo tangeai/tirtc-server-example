@@ -72,6 +72,19 @@ func failAIUpstream(c *gin.Context, action string, err error) {
 	apiresp.Fail(c, http.StatusBadGateway, 50200, action+"失败："+reason)
 }
 
+// failAIUpstreamSubmit is for requests that forward a user-submitted
+// configuration. Other operations can be refused for reasons the caller
+// cannot fix by editing input, so they stay on failAIUpstream.
+func failAIUpstreamSubmit(c *gin.Context, action string, err error) {
+	var httpErr *tirtcapi.HTTPError
+	if errors.As(err, &httpErr) && httpErr.Rejected() {
+		slog.WarnContext(c.Request.Context(), "AI upstream rejected request", "action", action, "err", err)
+		apiresp.Fail(c, http.StatusBadRequest, 40000, action+"失败：AI 云服务未接受提交的参数，请检查必填项和取值后重试")
+		return
+	}
+	failAIUpstream(c, action, err)
+}
+
 // agentAPI is the subset of tirtcapi.AgentAPIClient used by AgentHandler.
 type agentAPI interface {
 	ai.PluginNames
@@ -261,7 +274,7 @@ func (h *AgentHandler) createRole(c *gin.Context) {
 
 	created, err := h.api().CreateRole(c.Request.Context(), input)
 	if err != nil {
-		failAIUpstream(c, "创建角色", err)
+		failAIUpstreamSubmit(c, "创建角色", err)
 		return
 	}
 
@@ -325,7 +338,7 @@ func (h *AgentHandler) updateRole(c *gin.Context) {
 
 	role, err := h.api().UpdateRole(c.Request.Context(), roleID, input)
 	if err != nil {
-		failAIUpstream(c, "更新角色", err)
+		failAIUpstreamSubmit(c, "更新角色", err)
 		return
 	}
 	apiresp.OK(c, role)
@@ -720,7 +733,7 @@ func (h *AgentHandler) createAppMCPTool(c *gin.Context) {
 	}
 	item, err := h.api().CreateAppMCPTool(c.Request.Context(), req)
 	if err != nil {
-		failAIUpstream(c, "创建 MCP 工具", err)
+		failAIUpstreamSubmit(c, "创建 MCP 工具", err)
 		return
 	}
 	if err := h.userResourceStore.Add(c.Request.Context(), userID, model.ResourceTypeMCP, item.ID, req.Config.Name); err != nil {
@@ -773,7 +786,7 @@ func (h *AgentHandler) updateAppMCPTool(c *gin.Context) {
 	}
 	item, err := h.api().UpdateAppMCPTool(c.Request.Context(), id, req)
 	if err != nil {
-		failAIUpstream(c, "更新 MCP 工具", err)
+		failAIUpstreamSubmit(c, "更新 MCP 工具", err)
 		return
 	}
 	// Keep cached name in sync with cloud-side rename.
@@ -835,7 +848,7 @@ func (h *AgentHandler) createPlugin(c *gin.Context) {
 	}
 	item, err := h.api().CreateDevicePlugin(c.Request.Context(), req)
 	if err != nil {
-		failAIUpstream(c, "创建设备插件", err)
+		failAIUpstreamSubmit(c, "创建设备插件", err)
 		return
 	}
 	if err := h.userResourceStore.Add(c.Request.Context(), userID, model.ResourceTypeDevicePlugin, item.ID, req.Name); err != nil {
@@ -892,7 +905,7 @@ func (h *AgentHandler) updatePlugin(c *gin.Context) {
 	}
 	item, err := h.api().UpdateDevicePlugin(c.Request.Context(), id, req)
 	if err != nil {
-		failAIUpstream(c, "更新设备插件", err)
+		failAIUpstreamSubmit(c, "更新设备插件", err)
 		return
 	}
 	_ = h.userResourceStore.UpdateName(c.Request.Context(), userID, model.ResourceTypeDevicePlugin, id, req.Name)
@@ -954,7 +967,7 @@ func (h *AgentHandler) createKnowledgeIndex(c *gin.Context) {
 	}
 	item, err := h.api().CreateKnowledgeIndex(c.Request.Context(), req)
 	if err != nil {
-		failAIUpstream(c, "创建知识库", err)
+		failAIUpstreamSubmit(c, "创建知识库", err)
 		return
 	}
 	if err := h.userResourceStore.Add(c.Request.Context(), userID, model.ResourceTypeKB, item.IndexID, req.Name); err != nil {
@@ -1007,7 +1020,7 @@ func (h *AgentHandler) updateKnowledgeIndex(c *gin.Context) {
 	}
 	item, err := h.api().UpdateKnowledgeIndex(c.Request.Context(), id, req)
 	if err != nil {
-		failAIUpstream(c, "更新知识库", err)
+		failAIUpstreamSubmit(c, "更新知识库", err)
 		return
 	}
 	if req.Name != nil {

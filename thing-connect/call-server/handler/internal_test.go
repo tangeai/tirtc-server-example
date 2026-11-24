@@ -14,13 +14,7 @@ import (
 
 func TestInternalUnbindInvalidCredentialUsesBusinessCode(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	server := NewServer(
-		&config.Config{Internal: config.InternalCfg{Key: "expected-key"}},
-		nil,
-		nil,
-		nil,
-		nil,
-	)
+	server := &Server{cfg: &config.Config{Internal: config.InternalCfg{Key: "expected-key"}}}
 	router := gin.New()
 	router.POST("/", server.postInternalUnbind)
 	recorder := httptest.NewRecorder()

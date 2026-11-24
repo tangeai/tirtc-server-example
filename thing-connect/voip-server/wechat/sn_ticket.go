@@ -55,7 +55,7 @@ func GetSnTicket(ctx context.Context, accessToken, sn, modelID string) (string, 
 	}
 	if r.Errcode != 0 {
 		slog.WarnContext(ctx, "wechat getsnticket failed", "errcode", r.Errcode, "errmsg", r.Errmsg)
-		return "", fmt.Errorf("wechat err %d: %s", r.Errcode, r.Errmsg)
+		return "", &APIError{Errcode: r.Errcode, Errmsg: r.Errmsg}
 	}
 	if r.SnTicket == "" {
 		return "", fmt.Errorf("wechat: empty sn_ticket in response")

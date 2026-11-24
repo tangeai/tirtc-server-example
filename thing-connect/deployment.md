@@ -108,7 +108,7 @@ Nginx、HTTPS 和生产进程托管都不是首次安装页面的前置条件。
 )
 ```
 
-使用企业软件源或已有工具链时可跳过 `snap install`，但必须满足 Go 1.21+、Node.js 20.19+ 或 22.12+、npm 10+。验证：
+使用企业软件源或已有工具链时可跳过 `snap install`，但必须满足 Go 1.21+、Node.js 22.12+、npm 10+。验证：
 
 ```bash
 (
@@ -247,6 +247,13 @@ CREATE DATABASE thing_connect
 )
 ```
 
+Redis 保存设备在线状态和待写入 MySQL 的连接记录，选型和配置须满足：
+
+- 使用单一访问地址的单节点或主备高可用实例。阿里云选择 Redis 标准版（双副本 / 高可用），版本 7.0 及以上。
+- 不支持集群版和读写分离版：在线状态脚本在同一次执行中读写多个 key，集群版无法跨槽执行；从只读副本读取会读到滞后的在线状态。
+- 开启持久化（AOF 或 RDB 加 AOF），主备切换和重启后保留待写记录。
+- 内存淘汰策略设为 `noeviction`，并为在线 key 留足内存。被淘汰的在线 key 会让设备显示离线，被淘汰的待写记录会丢失上线 IP。
+
 MQTT 凭据在 Admin 安装完成后配置，Device、User、VoIP、Call、Recognition 各用一套。需要注意以下限制：
 
 - Username 模式会结合进程的 `SERVICE_INSTANCE_ID` 生成实际 ClientID。
@@ -260,7 +267,7 @@ TiRTC App ID、Access Key ID 和 Secret Key ID 同样没有可运行默认值。
 
 ### 3.1 下载并运行安装脚本
 
-以下命令只下载首次安装入口。脚本会把完整仓库克隆到 `/opt/thing-connect/tirtc-server-example`：
+以下命令只下载首次安装入口。脚本会把完整仓库克隆到 `/opt/thing-connect/tirtc-server-example`，默认使用仓库的默认分支 `main`，适合开发与集成验证。`main` 包含待发布改动；生产应选择稳定版 tag，并按该版本的发布说明或受控发布流程部署。当前安装脚本没有固定 tag 或自动选择最新稳定版的参数；仅修改脚本下载 URL 不能固定后续克隆的源码版本。
 
 ```bash
 (
@@ -509,10 +516,34 @@ sudo /opt/thing-connect/service-local.sh restart thing-connect:admin-server
 - Admin 先启动并达到 `/health/ready`，再预检并启动已启用的业务服务。
 - 每个进程使用安装器生成的对应 `config-current/<service>/config.yaml`，不要复制或手工拆分配置 revision。
 - 每个进程设置稳定且唯一的 `SERVICE_INSTANCE_ID`；Username MQTT 模式依赖它生成不冲突的连接 ClientID。
+- 除 Admin 外，业务服务可以运行多个实例，条件和配置见[业务服务多实例](#multi-instance)。
 - 向进程发送 `SIGTERM` 并留出优雅退出时间，不使用强制终止作为正常重启方式。
 - 对全部业务服务执行 readiness 检查；`/health/live` 不能替代 `/health/ready`。
 - 部署环境负责异常重启、开机自启、日志收集和日志轮转，且同一服务同一实例不能同时被两个进程管理器拉起。
 - 安装产物默认归 `root` 所有。改用非 `root` 运行账号时，只调整该账号必需的配置读取、日志和任务目录权限，并继续保护 `0600` 配置中的数据库与服务密钥。
+
+<a id="multi-instance"></a>
+
+#### 业务服务多实例
+
+Device、User、VoIP、AI、Call 和 Recognition 可以各自运行多个实例分担请求并互为备份；Admin 只运行一个实例。`service-local.sh` 支持本机多实例，配置步骤见[本机多实例联调](deployment-local.md#本机多实例联调)；生产也可使用 Supervisor 或其他进程管理器。启用前须满足：
+
+- 连接 MQTT 的服务（AI 以外）在 Admin 中把 `<服务>/mqtt.connection` 设为 Username 认证方式。ClientID 认证方式使用固定 ClientID，多个实例会互相挤掉连接，只能单实例运行。
+- 每个实例的 `SERVICE_INSTANCE_ID` 和 HTTP 端口不能重复。MQTT ClientID 由 Username 和实例 ID 组成，两个进程使用同一实例 ID 时，后连接的进程会挤掉前一个。同一服务的实例共用一个 `config.yaml`，用环境变量 `THING_CONNECT_HTTP_PORT` 覆盖 `server.http_port`。
+- 按全部实例重新核算 [MySQL 连接预算](#mysql-连接预算)：每个实例都有独立连接池，总量为各服务“实例数 × `max_open_conns`”之和。Redis 同样按实例数估算客户端连接。
+- 公网请求经 Nginx 分发，每个服务的 upstream 列出全部实例。
+- 运行多个 AI、VoIP 或 Call 实例时，User 调用它们内部接口的地址也要负载均衡：启用 Nginx 模板中注释掉的内网入口（只监听 `127.0.0.1:9100`，只转发 `/v1/{ai,voip,call}/internal/`），并把 User 启动配置（`config-current/user-server/config.yaml`）中的 `ai.server_url`、`voip.server_url`、`call.server_url` 改为 `http://127.0.0.1:9100`，然后重启 User。内网入口不得开放到公网，`internal.key` 不变。
+- 实例分布在多台机器时，所有机器须启用 NTP 时钟同步；Admin 上传的开发板图片保存在 Admin 部署根目录的 `var/board-images`，由 User 从本机读取，须把该目录挂载为共享存储，或只在与 Admin 同机的 User 实例上提供 `/v1/board-images/`。同机多实例只分担进程故障，不等于高可用。
+
+[Supervisor 模板](deploy/supervisor/thing-connect.supervisor.conf)中注释掉的 `device-server-2` 和 `user-server-2` 是第二个实例的写法，约定端口为主实例端口加 10（Device 9011、User 9012、VoIP 9013、AI 9014、Call 9015、Recognition 9016）。取消注释并修改程序名、目录、实例 ID 和端口，保留原程序的 `priority`，把新程序加入 `[group:thing-connect]` 的 `programs`，执行 `sudo supervisorctl reread && sudo supervisorctl update`。再在 [Nginx 模板](deploy/nginx/thing-connect.nginx.conf)对应 upstream 中加入 `server 127.0.0.1:<端口> max_fails=0;` 并重新加载 Nginx。已停止的实例拒绝连接时，Nginx 把请求转给下一个实例。每个 `server` 都须保留 `max_fails=0`：Nginx 默认在一次连接失败后把该实例排除 10 秒，刚重启完的实例仍被排除时再重启下一台，upstream 没有可用实例，请求返回 502。
+
+`deploy-prod.sh` 把 Supervisor 组中名为 `<服务>-<数字>` 的程序识别为该服务的额外实例，在启动或重启多实例服务前按清单数量预检 MQTT 配置，按进程环境中的 `THING_CONNECT_HTTP_PORT` 检查各自的 `/health/ready`。`restart` 逐台重启：上一台通过 readiness 后才重启下一台，其余实例继续服务。`update` 仍先停止全部服务再迁移和发布，避免新旧二进制在同一数据库结构上混跑。
+
+User 实例收到停止信号后先排空 HTTP，再等正在投递的邮件和队列确认完成。Supervisor 和本地控制器为每个 User 实例预留 50 秒退出时间。
+
+VoIP 使用微信稳定版接口凭据。微信拒绝缓存的 token 时，实例先读取微信当前凭据；若仍是被拒的值，通过 Redis 键 `voip:wechat:refresh:<appid>`（TTL 30 秒，不保存 token）协调同一 AppID 的强制刷新，所有实例合计每 30 秒最多一次；被拒的 token 在本实例 2 小时内不再使用。刷新失败期间，各实例按 1～5 秒退避重新读取微信当前凭据，期间相关接口返回微信接口调用失败，取得新 token 后自动恢复。业务调用最多重试一次。重置 AppSecret 后，应先在 Admin 发布新的密钥。
+
+验收时在 Broker 客户端列表确认每个实例各有一个连接且保持在线，ClientID 互不相同；逐个重启实例期间，经 Nginx 的请求不出现 502 或连接失败。
 
 ### 4.4 可选：配置 Nginx 单一入口
 
@@ -576,7 +607,7 @@ HTTP 会明文传输管理员登录信息和会话 Cookie。公网生产环境�
 
 ### 4.6 版本更新与数据库升级
 
-`build.sh` 为同一批服务注入统一的程序版本。通过 `BUILD_VERSION=v1.2.3 ./build.sh` 可指定发布版本号；未指定时，干净工作区且当前提交恰好对应 Git 标签则使用标签，否则使用精确到秒的 UTC 构建时间。后台将时间转换为浏览器本地时间展示，并保留 Git 提交号用于排查。构建时间不是服务启动时间；旧程序只有提交号时显示“历史构建（未记录时间）”，重新构建并部署后才会带上时间。配置修订号 `rN` 独立表示动态配置的发布次数，不作为程序版本。
+`build.sh` 为同一批服务注入统一的程序版本。通过 `BUILD_VERSION=v1.2.3 ./build.sh` 可指定发布版本号；未指定时使用 `git describe --tags --dirty`：干净工作区且当前提交恰好对应标签时为标签本身（如 `v1.0.0`），标签之后的开发构建为“最近标签-提交数-g提交号”（如 `v1.1.0-beta.1-3-g946320b`），有未提交修改时追加 `-dirty`；仓库没有任何标签时使用精确到秒的 UTC 构建时间，后台将其转换为浏览器本地时间展示。`deploy-local.sh` 按本地源码仓库计算版本号和提交号。后台同时显示 Git 提交号用于排查。构建时间不是服务启动时间；旧程序只有提交号时显示“历史构建（未记录时间）”，重新构建并部署后才会带上时间。配置修订号 `rN` 独立表示动态配置的发布次数，不作为程序版本。
 
 
 两个脚本用途不同：
@@ -588,7 +619,9 @@ HTTP 会明文传输管理员登录信息和会话 Cookie。公网生产环境�
 
 其他部署环境可以参考 `deploy-prod.sh` 的构建、迁移和发布流程，但要按自身目录、权限和服务管理方式调整，不要把它当作通用安装器。
 
-在符合该生产目录约定的环境中执行维护发布：
+`update` 快进拉取部署仓库当前分支所跟踪的上游，不自动选择稳定版 tag。当前分支为 `main` 时会部署主干最新提交，其中可能包含尚未发布的改动。生产使用前应由维护者明确控制待发布的源码提交与验证结果。切换到 tag 的 detached HEAD 后直接执行 `update` 不属于该脚本支持的固定版本发布方式。
+
+在符合该生产目录约定、且已确认待发布源码的环境中执行维护发布：
 
 ```bash
 sudo /opt/thing-connect/deploy-prod.sh update
@@ -677,6 +710,7 @@ Supervisor 部署在发布前执行 `supervisorctl reread` 和 `supervisorctl up
 - 数据库需要迁移时，先按正常发布流程停服、迁移和替换文件，再启动新版 Admin；业务配置未完成时，业务服务保持停止。
 - 登录新版 Admin，填写、测试并发布提示的配置，再执行同一条 `update` 命令完成发布。不要将 MQTT 连接的 ClientID 与仍运行的其他服务重复使用。
 - Admin 发布或就绪检查失败时执行对应回滚流程；数据库结构已变化时不自动恢复旧二进制。手动服务管理模式需由运维启动已更新的 Admin。
+- 回滚恢复旧版本时直接启动各实例，跳过启动前的配置与依赖预检；失败原因是依赖故障时，旧版本仍能恢复运行，随后由 readiness 判定是否可用。
 
 配置阶段不绕过业务服务的必填配置和依赖检查，也不会直接复制其他服务的 MQTT 身份。`deploy-local.sh update` 使用相同流程；若部署入口来自旧版本，应确保它打包的本地源码包含此发布流程。
 
@@ -715,25 +749,130 @@ Nginx 模板将 /v1/recognition/ 转发到9006并拒绝内部路径。/services 
 Admin 中配置识别服务 MQTT、千问默认 Key 及接口地域；只用音频识别无需配置 TiRTC 凭证。/health/ready 检查 MySQL、Redis 和 MQTT，缺少千问 Key 会拒绝新任务而不阻止配置管理。服务状态名称 recognition-server，动态模型配置 revision 随心跳上报。
 
 
+### 设备 MQTT 认证与授权
+
+公网设备连接 Broker 时同时依赖 JWT 认证和 Topic 授权，二者共同保证每台设备只能访问自己的 Topic。
+
+- **JWT 认证**：使用 HS256 和业务服务共享的 `jwt_secret`，从 Password 读取 token，`verify_claims` 至少包含 `device_id = "${username}"`。业务服务签发的临时 token 和正式 token 都带 `clientid` claim，值分别为 `temp_client_id` 和 `sn_{device_id}`。
+- **Topic 授权**：`deploy/emqx/acl.conf` 是完整的 EMQX 文件授权规则，可直接作为当前生效的文件授权源；服务账号用户名与 Admin 发布值不同时同步替换，`authorization.no_match` 设为 `deny`。服务账号使用与设备用户名互不重叠的专用用户名。设备直连或经同机 TLS 代理连接时，均按认证身份授权。规则按已认证的 Username 生成 Topic：正式连接只能订阅 `device/sn_{device_id}/cmd`、`device/sn_{device_id}/notify`，发布 `device/sn_{device_id}/ack`、`device/sn_{device_id}/up`；临时连接只能订阅自己的 `cmd`，发布自己的 `ack`、`up`。其他设备的 Topic 和通配订阅均被拒绝。使用数据库、HTTP 或云端授权源时配置等价规则。
+- **服务账号权限**：`acl.conf` 只给服务账号授予最小权限，不按来源 IP 放行本机连接：Device 订阅 `device/+/up` 和两个 `$SYS` 连接事件主题；User 发布 `device/+/cmd`、订阅 `device/+/ack`；VoIP 和 Call 发布 `device/+/cmd`、`device/+/notify`；Recognition 发布 `device/+/notify`；AI 不连接 MQTT。从按来源 IP 或 `#` 全量授权的旧规则切换到此文件前，逐个核对规则中的用户名与各服务在 Admin 发布的 MQTT 用户名一致，并为依赖本机全权限的运维工具改用 `dashboard` 账号或单独授权。Device 启动预检只核对 Device 的订阅授权；其他服务的发布被拒绝时 Broker 可能直接丢弃消息，不会让服务启动失败。切换后在 EMQX 授权统计中确认 `deny` 不增长，并验收一次设备绑定、VoIP 通知和设备间通话。
+- **ClientID 绑定**：在 `verify_claims` 中加入 `clientid = "${clientid}"` 后，Broker 拒绝使用其他设备 ClientID 的连接，防止合法设备冒用 ClientID 挤掉对方连接或伪造在线状态。不带 `clientid` claim 的 token 会被拒绝（CONNACK `0x86`），因此须在 Device 签发该 claim 后，至少等待一个 `device-server/device.token_policy` 的 `token_expiry`（期间调整过时取最大值）再启用，使旧 token 全部自然过期；启用前在 Broker 客户端列表确认所有 `sn_` 连接的 ClientID 都等于 `sn_` 加 Username。启用后如需回滚 Device 到不签发 `clientid` claim 的版本，先从 `verify_claims` 移除该项。
+
 ### 设备在线状态消费与升级验收
 
-Device 服务单实例订阅 `device/+/up`、`$SYS/brokers/+/clients/+/connected` 和 `disconnected`，维护 `online:{clientID}`，有效期为 150 秒。Broker 需要发布 EMQX 系统连接事件，并授权 Device 账号订阅；临时绑定连接依赖连接事件。User、VoIP、Call、Recognition 保留下行和 ACK 能力，通过 Redis 查询在线状态，不订阅全量设备心跳。
+Device 以共享订阅 `$share/thing-connect-presence/<主题>` 订阅 `device/+/up`、`$SYS/brokers/+/clients/+/connected` 和 `disconnected`，维护 `online:{clientID}`。运行多个 Device 实例时，每条事件只投递给其中一个实例。正式连接的有效期为 150 秒，由心跳续期；临时绑定连接不发心跳，有效期取 `device.code_policy` 的 `code_ttl`，且不短于 150 秒。Broker 需要发布 EMQX 系统连接事件，并授权 Device 账号订阅；临时绑定连接依赖连接事件。User、VoIP、Call、Recognition 保留下行和 ACK 能力，通过 Redis 查询在线状态，不订阅全量设备心跳。
 
-若 Device 启动日志出现 `presence subscription rejected`，表示 MQTT 连接认证成功但必需主题未获订阅授权。按日志中的 `topic` 检查 Broker 的实际授权源，为 Device 专用账号允许订阅 `device/+/up`、`$SYS/brokers/+/clients/+/connected`、`$SYS/brokers/+/clients/+/disconnected`。EMQX 文件授权示例见 `deploy/emqx/device-acl.conf`，规则需位于通用拒绝规则前；使用数据库、HTTP 或云端授权时在对应授权源配置相同权限。还须启用 Broker 系统连接事件发布。Device 启动预检验证三个主题的 SUBACK，权限不足时在停服前拒绝完整更新；仅在 Admin 中保存账号密码不代表主题权限已配置。
+若 Device 启动日志出现 `presence subscription rejected`，表示 MQTT 连接认证成功但必需主题未获订阅授权。EMQX 按共享订阅中的实际主题做授权检查，因此按日志中的 `topic` 为 Device 专用账号允许订阅 `device/+/up`、`$SYS/brokers/+/clients/+/connected`、`$SYS/brokers/+/clients/+/disconnected` 即可。EMQX 文件授权示例见 `deploy/emqx/device-acl.conf`，规则需位于通用拒绝规则前；使用数据库、HTTP 或云端授权时在对应授权源配置相同权限。还须启用 Broker 系统连接事件发布。Device 启动预检验证三个主题的 SUBACK，权限不足时在停服前拒绝完整更新；预检使用单独的共享组，不会分走运行中实例的事件。仅在 Admin 中保存账号密码不代表主题权限已配置。
 
-当前在线状态消费者要求 **Device 单实例**。不要直接复制 Device 进程来实现高可用；多消费者分片、接管和连接代次隔离需要另行实现和压测。现有设备心跳不带连接代次，因此不使用无法确认连接代次的断开事件删除在线记录，避免迟到断开误删新连接。离线由心跳 TTL 判定，最后一次有效观测后最多等待 150 秒；这不提供完整事件代次隔离，也不代表十万设备容量已经验收。
+在线状态只向后延长：每次写入只在新到期时间晚于现有记录时生效，连接 IP 记录按连接时间保留较新的一条。因此重复、乱序和多个 Device 实例并发写入都不会缩短在线时间，也不会让旧连接覆盖新连接。设备心跳不带连接代次，断开事件不删除在线记录，避免迟到的断开事件误删新连接；离线由心跳 TTL 判定，最后一次有效观测后最多等待 150 秒。
 
-升级前先执行 core 12 数据库迁移，再更新 Admin 并发布 `device-server/mqtt.connection`，确保 Device 账号具备上述订阅权限，再启动 Device 消费者并滚动更新其余 MQTT 服务。旧版本使用持久会话，账号和 ClientID 保持不变时，新进程会在每次连接后主动退订旧心跳和系统事件订阅；若同时更换身份，需在 Broker 管理端清理旧身份会话。验收应检查 Broker 中只有 Device 订阅全量设备状态，并确认正式设备心跳、临时绑定、下行 ACK 与断线状态处理正常。回滚消费归属时应按同样顺序保证至少一个消费者工作，避免全量停收窗口。数据库版本保护会拒绝直接启动只支持 core 11 的旧二进制；回滚需要保留 core 12 兼容性的构建，不能删除迁移记录来绕过检查。
+<a id="device-multi-instance"></a>
 
-心跳按最多 256 条或 100 毫秒批量写入 Redis；内存接收队列最多 16384 条，存储失败时有界等待并按原顺序重试。队列溢出、存储写入持续失败或 MQTT 订阅失败会使 Device readiness 不通过，并记录错误。MQTT 订阅或退订失败时，连接恢复任务以 1 至 30 秒有界退避重试，成功前 readiness 不通过，任务随连接关闭退出。心跳有效期按原始观测时间计算，重试不会延长过期心跳；应用服务器与 Redis 必须保持时钟同步。在线查询接口仍沿用现有 Redis 读取语义，不能把其他服务 Redis 可达等同于状态消费者健康；运维必须同时监控 Device readiness。
+#### Device 多实例
 
-设备最近上线 IP 由 Broker `connected` 事件中的 `ipaddress` 获取，仅记录正式 `sn_` 连接；`connected_at` 必须是有效的正数毫秒时间戳，且不超过应用当前时间一分钟，用于防止较旧连接覆盖较新记录。缺失或异常时间的连接事件仍更新在线观测，但不记录 IP，已有可靠 IP 保留。参考 [EMQX 系统主题定义](https://docs.emqx.com/en/emqx/latest/guides/observability/mqtt-system-topics.html)。IP 与连接时间先随在线状态原子写入 Redis 的 `presence:connections:pending` 哈希，每台设备只保留最新待写快照且不设 TTL。`presence:connections:pending_since` 有序集合保存首次待写时间，更新快照不重置等待年龄，确认写入时一并删除。独立任务批量写入 MySQL，提交成功后比较快照再删除，避免旧任务删除新记录；MySQL 故障或应用重启后可继续补写已进入 Redis 的快照。心跳不写 MySQL，SQL 等待不阻塞 Redis 更新。Redis 必须配置持久化并避免淘汰这些待写记录；当前多键脚本要求单节点或兼容单端点的部署，不支持原生 Redis Cluster 跨槽执行。
+Device 多实例除满足[业务服务多实例](#multi-instance)的通用条件外，还须配置 [Broker 管理接口](#device-broker-api)。多个实例共同分担在线事件：
 
-内存队列溢出且丢失连接 IP 时，Device readiness 持续报错，Redis 恢复可写后保存无 TTL 的 `presence:connections:gap` 标记，不因等待 150 秒自动恢复。处理时先停 Device，核对 Broker 连接记录并补齐或明确确认缺失范围，再清除此标记并启动验收。事件未送达、尚未写入 Redis 时进程异常退出或 Redis 数据丢失仍可能导致缺失；此字段表示最近观测到的上线来源，不是完整连接审计。部署前执行 core 12 迁移并按安装器清单授予运行账号 DML 权限。
+Device 的在线订阅连接断开时立即结束 MQTT 会话，Broker 把该实例未处理和新到的事件改派给组内其他实例。每次断线重连后，Device 都把断线期间记为事件缺口：配置了 Broker 管理接口时自动核对补齐，readiness 在核对完成或 150 秒内恢复；未配置时由后续心跳在 150 秒内修正在线状态，但断线期间新上线设备的 IP 要等它下次连接才会记录。
+
+<a id="device-broker-api"></a>
+
+#### Broker 管理接口与自动核对
+
+Admin 配置 `device-server/mqtt.broker_api` 填写 EMQX 管理接口地址（例如 `http://127.0.0.1:18083`）、API Key 和 API Secret。在 EMQX 控制台“系统设置 - API 密钥”创建密钥；EMQX 支持密钥角色时选择只读角色。地址留空表示不自动核对。未发布 Admin 配置时读取 Device `config.yaml` 的 `broker_api`，修改后运行时生效。管理接口只供 Device 从内网访问，不得开放公网。
+
+Device 启动时，以及发生事件丢失（接收队列溢出、待写缓冲溢出或订阅断线重连）后，分页读取 Broker 的全部在线连接：恢复 `sn_` 和 `tmp_` 设备的在线状态，用 Broker 记录的连接时间和地址补写正式设备的上线 IP。优先使用 EMQX 的 `/api/v5/clients_v2` 游标接口；若 Broker 仅提供 `/api/v5/clients`，则按连接时间拆分为互不重叠的区间，每个区间一次读完。旧接口下若同一毫秒的连接数超过 1000，核对会报告失败并保留标记，需要提供游标接口。只有 `clients_v2` 返回 404、400、405 或无法解析为游标响应时才改用旧接口；401、403 和 5xx 视为读取失败并重试，用于发现管理接口凭据或 Broker 故障。只有在丢失发生之后开始的完整读取成功，才清除丢失状态和 Redis 中的 `presence:connections:gap` 标记；读取期间再次丢失时保持未恢复并在下一轮重试。`presence:connections:gap` 记录最近一次丢失时间，`presence:connections:gap_cleared` 记录最近一次完成清除的读取开始时间，二者都无 TTL；任一 Device 实例完成读取后，早于该时间的迟到丢失记录不再重建标记。两个时间均取 Device 所在主机时钟，多实例部署需启用 NTP 同步。读取失败按 5 秒递增退避，最长 1 分钟。
+
+心跳按最多 256 条或 100 毫秒批量写入 Redis。内存接收队列最多 16384 条；Redis 不可写时，Device 继续接收事件，按设备合并为每台设备最新的一条，以 0.5 至 2 秒退避重试，最多缓存 262144 台设备。接收队列或合并缓存溢出时记为事件丢失，readiness 不通过：丢失的事件只有在线观测时，配置自动核对后完成核对即恢复，未配置时 150 秒后由心跳修正；丢失的事件带有上线 IP 时，必须完成核对才恢复。Redis 写入超过 5 秒没有进展或 MQTT 订阅失败也会使 readiness 不通过。MQTT 订阅或退订失败时，连接恢复任务以 1 至 30 秒有界退避重试，成功前 readiness 不通过，任务随连接关闭退出。心跳有效期按原始观测时间计算，重试不会延长过期心跳；应用服务器与 Redis 必须保持时钟同步。在线查询接口仍沿用现有 Redis 读取语义，不能把其他服务 Redis 可达等同于状态消费者健康；运维必须同时监控 Device readiness。
+
+升级前先执行 core 12 数据库迁移，再更新 Admin 并发布 `device-server/mqtt.connection`，确保 Device 账号具备上述订阅权限，再启动 Device 消费者并滚动更新其余 MQTT 服务。旧版本使用持久会话和普通订阅；新版本 Device 先加入共享订阅，再退订旧的普通订阅，命令客户端每次连接后也会退订旧订阅。新旧 Device 短暂同时运行时同一事件可能被处理两次，在线状态只向后延长，不受影响。若同时更换身份，需在 Broker 管理端清理旧身份会话。验收应检查 Broker 中只有 Device 的共享组订阅全量设备状态，并确认正式设备心跳、临时绑定、下行 ACK 与断线状态处理正常。数据库版本保护会拒绝直接启动只支持 core 11 的旧二进制；回滚需要保留 core 12 兼容性的构建，不能删除迁移记录来绕过检查。
+
+设备最近上线 IP 由 Broker `connected` 事件中的 `ipaddress` 获取，仅记录正式 `sn_` 连接；`connected_at` 必须是有效的正数毫秒时间戳，且不超过应用当前时间一分钟，用于防止较旧连接覆盖较新记录。缺失或异常时间的连接事件仍更新在线观测，但不记录 IP，已有可靠 IP 保留。参考 [EMQX 系统主题定义](https://docs.emqx.com/en/emqx/latest/guides/observability/mqtt-system-topics.html)。IP 与连接时间先随在线状态原子写入 Redis 的 `presence:connections:pending` 哈希，每台设备只保留最新待写快照且不设 TTL。`presence:connections:pending_since` 有序集合保存首次待写时间，更新快照不重置等待年龄，确认写入时一并删除。独立任务批量写入 MySQL，提交成功后比较快照再删除，避免旧任务删除新记录；MySQL 故障或应用重启后可继续补写已进入 Redis 的快照。心跳不写 MySQL，SQL 等待不阻塞 Redis 更新。Redis 选型和配置要求见 [2.4 验证 Redis](#24-验证-redis)。
+
+未配置 Broker 管理接口时，丢失连接 IP 后 Device readiness 持续报错，Redis 恢复可写后保存无 TTL 的 `presence:connections:gap` 标记，不因等待 150 秒自动恢复。此时需人工处理：先停 Device，核对 Broker 连接记录并补齐或明确确认缺失范围，再清除此标记并启动验收（保留 `presence:connections:gap_cleared`）；也可以配置 Broker 管理接口后启动 Device，由启动核对自动完成。事件未送达、尚未写入 Redis 时进程异常退出或 Redis 数据丢失仍可能导致缺失；此字段表示最近观测到的上线来源，不是完整连接审计。部署前执行 core 12 迁移并按安装器清单授予运行账号 DML 权限。
 
 注册 IP 和成功登录 IP 来自 HTTP 服务解析的客户端地址。反向代理部署必须设置 `server.trusted_proxies`；只有可信代理转发的来源头可参与解析。设备 IP 是 Broker 所见地址，NAT 或未透传原地址的 MQTT 代理可能使它显示出口或代理地址；不要用应用 HTTP 地址推测 MQTT 来源。
 
-Device 的服务状态实例包含 `metrics`：内存排队数 `presence_queued`、累计丢弃数 `presence_rejected_total`、累计投影失败数 `presence_write_failures_total`、待补写设备数 `connection_pending`、最老待写年龄 `connection_oldest_pending_age_ms` 和采样时间 `connection_backlog_measured_at_ms`。这些值通过 Admin 服务状态接口读取；采样时间用于区分旧快照。最老待写超过 150 秒时 presence readiness 不通过，排空后恢复，不以单次 SQL 写入成功掩盖积压。
+Device 的服务状态实例包含 `metrics`：
+
+| 指标 | 含义 |
+|---|---|
+| `presence_queued` | 内存接收队列中的事件数 |
+| `presence_pending_devices` | Redis 不可写期间合并缓存中的设备数 |
+| `presence_rejected_total` | 累计丢弃的事件数 |
+| `presence_write_failures_total` | 累计 Redis 写入失败次数 |
+| `presence_subscription_gaps_total` | 累计订阅断线重连次数 |
+| `presence_reconcile_last_ms` | 最近一次核对完成时间（毫秒时间戳） |
+| `presence_reconcile_clients` | 最近一次核对读到的设备连接数 |
+| `presence_reconcile_failures_total` | 累计核对失败次数 |
+| `connection_pending` | 待补写 MySQL 的设备数 |
+| `connection_oldest_pending_age_ms` | 最老待写记录的等待时长 |
+| `connection_backlog_measured_at_ms` | 待写积压的采样时间 |
+
+这些值通过 Admin 服务状态接口按实例读取；采样时间用于区分旧快照。最老待写超过 150 秒时 presence readiness 不通过，排空后恢复，不以单次 SQL 写入成功掩盖积压。
+
+User 的服务状态实例包含解绑清理队列（`cleanup_outbox`）的 `metrics`：
+
+| 指标 | 含义 |
+|---|---|
+| `cleanup_pending` | 待通知 AI、VoIP、呼叫服务清理的任务数 |
+| `cleanup_oldest_pending_age_ms` | 最老任务自首次入队起的等待时长；同一设备重新解绑不重置 |
+| `cleanup_unknown_target` | 目标服务未在当前 User 配置中（如移除了 `voip.server_url`）的清理任务数；这些任务不计入 `cleanup_pending` 和健康判定，恢复对应地址后继续投递，确认不再需要时由运维从 `cleanup_outbox` 删除。设备的清理任务全部完成后才能重新绑定；持续返回 6016 时，按设备号检查队列及目标服务 |
+| `cleanup_backlog_measured_at_ms` | 积压的采样时间 |
+
+最老任务等待超过 15 分钟，或积压超过 1 分钟未能采样时，服务状态中的 `cleanup_outbox` 依赖显示不健康，User 显示为降级；排空后自动恢复。该状态不影响 `/health/ready`，因为摘除 User 实例无法恢复下游清理。排查时检查对应目标服务的内部接口、`internal.key` 和 `last_error` 列。
+
+#### 请求预算与队列观测
+
+六个业务服务按进程独立执行 `server.request_limits`，修改 YAML 后重启生效，不通过 Admin 动态配置发布。省略时使用下表默认值；各组不共用并发名额，满额立即拒绝，不建立等待队列。
+
+| 组 | 范围 | 默认并发 | 默认总预算 |
+|---|---|---:|---:|
+| `token` | 设备 MQTT token、AI token、用户 RTC token、多人对讲 connect-token | 128 | 10 秒 |
+| `query` | 其余非 AI、非微信回调的 GET/HEAD JSON 请求 | 64 | 10 秒 |
+| `upload` | AI 知识库上传、识别音频提交 | 8 | 25 秒 |
+| `upstream` | 其余 AI 请求、微信回调及其他写请求 | 32 | 25 秒 |
+
+配置格式见各服务的 `config.yaml.example`。并发范围 1–10000，总预算范围 1 毫秒至 3 分钟，0 表示使用默认值。预算从进入应用开始，覆盖读取请求体、鉴权、数据库/Redis 连接池等待和下游调用；下游已有更短超时时使用较短值。健康接口、页面及静态资源不占用这些名额。外部代理的超时须覆盖所选预算。已知资源的必要补偿可能使用独立的短超时，例如 MCP 创建后的失败删除最多 5 秒；不会重新发起创建或付费识别。
+
+生产 Nginx 模板使用默认的请求体缓冲。经该入口上传知识库文件时，Nginx 先接收完整请求体，再把请求转给 AI，客户端上传时间主要消耗在代理侧。直连 AI 或关闭 `proxy_request_buffering` 时，读文件也计入 25 秒。按预期文件大小和最慢上传速率设置 AI 的 `server.request_limits.upload.timeout`，并给云端处理留出时间。用户 H5 的表单请求总时限为 60 秒。
+
+过载沿用业务错误 `50000`：Device/User/AI/Recognition 返回 HTTP 500，Call/VoIP 返回 HTTP 200；微信通知返回 HTTP 200、`errcode=10`。响应带 `Retry-After: 1`。上传或写请求失败不证明尚未提交，客户端先查询已有结果，不得盲目新建任务。处理中的超时由原业务错误映射返回。
+
+服务状态实例的 `request_<组>_active/limit` 表示当前并发和上限；`rejected_total`、`completed_total`、`deadline_exceeded_total`、`duration_ms_total` 为进程累计值。`sql_pool_wait_total` 和 `sql_pool_wait_ms_total` 表示 SQL 连接池等待次数和时间；`sql_pool_open/in_use/idle` 为连接数。Redis 使用 `redis_pool_connections/idle/timeouts_total/misses_total`。只在相同实例生命周期内计算增量，不把多个实例的累计值直接比较。
+
+具有下行能力的 User、VoIP、Call、Recognition 实例上报 `mqtt_ack_active`、`mqtt_ack_completed_total`、`mqtt_ack_failed_total`、`mqtt_ack_timeout_total`、`mqtt_ack_canceled_total` 和 `mqtt_ack_duration_ms_total`。这是从订阅、发布到收到设备 ACK 的完整调用统计，失败包括订阅和发布失败；它不证明媒体会话成功。Device 的 `presence_online_updates_total`、`presence_connection_updates_total` 统计 Redis 已确认的在线和连接快照有效更新；对应 `*_ignored_total` 包含同时间、旧时间及已过期的无效更新。网络中断而未收到脚本结果时不推测写入是否成功。
+
+Call 的 `remark_outbox` 和 `call_notification_outbox`、AI 的 `ai_cloud_outbox`、Recognition 的 `recognition_outbox` 在服务状态中报告积压健康，指标前缀分别为 `remark`、`call_notification`、`ai_cloud`、`recognition`：`*_pending`、`*_oldest_pending_age_ms`、`*_backlog_measured_at_ms`、`*_exhausted`。采样每 15 秒执行一次，查询最多 5 秒；一分钟没有有效样本、最老积压超过 15 分钟或最近 1 小时内有识别通知耗尽重试时，状态降级。排空并获得新样本后恢复，耗尽记录超过 1 小时后不再计入 `recognition_exhausted`；这些下游投递告警不摘除 HTTP readiness。
+
+User 的 `admin_user_commands` 探针按相同的采样周期和积压阈值上报 `admin_user_command_*`。待处理量包含未领取和已领取的管理员密码重置邮件，等待年龄从首次入队计起。Admin 在同一事务内写入命令和审计，User 从 `admin_reset_mail_outbox` 领取邮件；升级期间也会排空已有的 Redis 命令。每条命令最多尝试 5 次，耗尽后保留 1 小时，期间服务状态降级。恢复 SMTP 后，在 MySQL 按 `attempts=5 AND next_at<=NOW(6)` 查询耗尽行，以 `mysql-<id>` 匹配密码重置审计的 `command_id`。Redis 历史命令按 `thingconnect:admin:user-commands:exhausted` 中的流 ID 匹配。核对用户后可重新发起发送。邮件采用至少一次投递；进程在 SMTP 接受邮件后、确认前退出可能导致重复发送。
+
+一对一通话通知与房间状态在 Redis 中原子保存。`call_notification_pending` 按待发送消息计数，包含已领取与退避中的消息；同一房间按顺序发送，发布失败按不超过 256 秒的随机退避重试；自创建起超过 2 分钟（按 Redis 时钟计算，与实例时钟无关）仍未发布的通知直接丢弃并记录告警日志，设备通过 `GET /v1/call/room` 恢复状态。最近 1 小时内丢弃的数量计入 `call_notification_exhausted`，期间服务状态降级，丢弃记录满 1 小时后自动恢复。待发送计数需要重建且积压房间超过 10000 个时积压采样失败，样本过期后服务状态降级。应用重启后其他 Call 实例可继续领取；Redis 数据的重启保留能力取决于其持久化配置，部署时须配置并验证 Redis 持久化与备份。成功发布表示 Broker 已接受 QoS 1 消息，不代表设备已处理；旧房间或已拒接目标的待发来电在发送前丢弃。
+
+计数包含已领取及退避中的任务。AI 已完成的版本屏障记录不算积压，替换尚未完成的目标保留首次等待时间，已完成后重新入队开始新的计时周期。识别通知排除旧绑定生命周期和已交付记录，最多投递 8 次；耗尽的记录不再计入待处理数量和最老等待年龄，耗尽后通过设备查询补偿并排查 Broker 权限，不能用单次发布成功代替收包验收。解绑清理、备注通知、AI 对账使用有上限的随机退避持续重试；不自动丢弃仍需完成的工作。通用 Redis 客户端不自动重放不确定的命令，由业务流程或持久队列负责恢复，避免跨层重试放大和重复计数。
+
+部署需要 core 14 迁移，包含管理员重置邮件队列。三个队列的首次入队时间由 core 13 迁移维护。旧记录没有可靠的首次入队时间，从迁移时开始计龄，不能据此推断升级前等待时长。迁移将旧识别通知中尚未尝试、受会话时区影响的未来时间归一到当前 UTC，不改动已领取的租约；后续首次投递和重试都遵守 `next_at`。迁移可重复执行，运行账号仍只需 DML；回滚遵循前文数据库备份恢复流程，不允许通过删除迁移记录启动旧二进制。
+
+#### 容量验收与 Broker 调优
+
+分布式 token 压测、JSONL 汇总、72 小时稳态及故障验收步骤见[容量与故障验收](tests/scale-acceptance.md)。Device 的 `presence_projected_samples_total` 统计合并后成功提交 Redis 的观测数，`presence_projection_age_ms_total` 统计这些观测从接收到提交的累计年龄；`presence_projection_age_le_<阈值>ms_total` 为累计直方图（10、50、100、500、1000、5000 毫秒，另有 `presence_projection_age_le_inf_total`）。它们不是物理 Redis 写次数，也不包含设备到 Broker 的网络延迟；失败写入和被合并的旧观测不计为成功样本。
+
+`tests/presence-load` 用真实的共享订阅消费链路做容量验收：模拟设备连接测试 Broker 并发送心跳，在进程内启动多个与 Device 相同的消费者，每 5 秒输出 Redis 在线覆盖率和各消费者的队列、缓存、丢弃和核对指标。只能连接测试 Broker 和专用 Redis 库，工具退出时仅删除本次设备前缀对应的在线状态 key：
+
+```bash
+cd /opt/thing-connect/tirtc-server-example/thing-connect
+go run ./tests/presence-load -broker tcp://<测试Broker>:1883 -devices 10000 -consumers 2 \
+  -redis <测试Redis>:6379 -redis-db 15 -jwt-secret '<测试 jwt_secret>' \
+  -broker-api http://<测试Broker>:18083 -broker-api-key <key> -broker-api-secret <secret>
+```
+
+验收时重启 Broker 或停止一个消费者，覆盖率应在设备重连后回到 100%，`rejected` 不增长；只有订阅断线时 `gaps` 增长并随后完成核对。单台测试机到同一个 Broker 地址最多约 2.8 万个连接（受本地端口范围限制）；更多设备时给 Broker 开多个监听端口，用逗号分隔传给 `-broker`，设备轮流分配，消费者使用第一个地址。再大的规模需在多台机器上用不同 `-prefix` 并行运行。
+
+Broker 侧检查：
+
+- Device 账号保持默认共享订阅策略即可；在线状态与投递到哪个实例无关。
+- 在 EMQX 监控中关注 Device 客户端的 `messages.dropped` 和消息队列长度；持续增长说明 Device 处理不过来，应增加实例或排查 Redis。
+- EMQX 集群中共享订阅跨节点生效，系统连接事件来自各节点，管理接口返回全集群的连接，Device 无需按节点配置。
+- 设备按[接入指南](device-integration.md#token-生命周期)的指数退避加随机抖动重连，正式 token 的到期时间也被打散，Broker 重启后不会在同一秒集中重连。
 
 绑定与解绑通知不直接修改在线状态，也不保证强制断开 Broker 连接。设备处理 `auth_grant` 或 `unbind` 后自行转换连接；在线观测只由 Device 消费链路维护，离线按 TTL 收敛。
 

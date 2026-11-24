@@ -4,66 +4,171 @@ import (
 	"context"
 	"errors"
 	"log"
+	"log/slog"
+	"math"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
-
-	"thing-connect/internal/service"
 )
 
 const (
-	adminUserCommandStream = "thingconnect:admin:user-commands"
-	adminUserCommandGroup  = "user-server"
+	adminUserCommandStream          = "thingconnect:admin:user-commands"
+	adminUserCommandGroup           = "user-server"
+	adminUserCommandDeliveryTimeout = 30 * time.Second
+	adminUserCommandMinIdle         = adminUserCommandDeliveryTimeout + 30*time.Second
+	adminUserCommandMaxDeliveries   = 5
+	adminUserCommandReclaimPage     = 100
+	adminCommandFailureWindow       = time.Hour
 )
 
-func runAdminUserCommands(ctx context.Context, client *redis.Client, users *service.UserService) {
-	if err := client.XGroupCreateMkStream(ctx, adminUserCommandStream, adminUserCommandGroup, "0").Err(); err != nil && !isBusyGroup(err) {
-		log.Printf("admin command group: %v", err)
-		return
-	}
+type adminUserCommands struct {
+	client                  *redis.Client
+	stream, group, consumer string
+	minIdle                 time.Duration
+	deliver                 func(context.Context, string) error
+	// pendingCursor is the last pending ID inspected; each reclaim tick reads
+	// one page after it so entries beyond the first page are not starved.
+	pendingCursor string
+}
+
+func newAdminUserCommands(client *redis.Client, deliver func(context.Context, string) error) *adminUserCommands {
 	host, _ := os.Hostname()
-	consumer := host + "-" + strconv.Itoa(os.Getpid())
-	claimStart := "0-0"
-	for {
-		claimed, next, err := client.XAutoClaim(ctx, &redis.XAutoClaimArgs{Stream: adminUserCommandStream, Group: adminUserCommandGroup, Consumer: consumer, MinIdle: 30 * time.Second, Start: claimStart, Count: 20}).Result()
-		if err == nil {
-			for _, message := range claimed {
-				processAdminUserCommand(ctx, client, users, message)
+	return &adminUserCommands{client: client, stream: adminUserCommandStream, group: adminUserCommandGroup, consumer: host + "-" + strconv.Itoa(os.Getpid()), minIdle: adminUserCommandMinIdle, deliver: deliver}
+}
+
+func (c *adminUserCommands) run(ctx context.Context) {
+	for ctx.Err() == nil {
+		err := c.client.XGroupCreateMkStream(ctx, c.stream, c.group, "0").Err()
+		if err == nil || isBusyGroup(err) {
+			err = c.consume(ctx)
+		}
+		if ctx.Err() == nil {
+			log.Printf("admin user command stream: %v", err)
+			select {
+			case <-ctx.Done():
+			case <-time.After(time.Second):
 			}
-			claimStart = next
 		}
-		streams, err := client.XReadGroup(ctx, &redis.XReadGroupArgs{Group: adminUserCommandGroup, Consumer: consumer, Streams: []string{adminUserCommandStream, ">"}, Count: 20, Block: 5 * time.Second}).Result()
-		if errors.Is(err, context.Canceled) {
-			return
-		}
+	}
+}
+
+func (c *adminUserCommands) consume(ctx context.Context) error {
+	for ctx.Err() == nil {
+		c.reclaim(ctx)
+		streams, err := c.client.XReadGroup(ctx, &redis.XReadGroupArgs{Group: c.group, Consumer: c.consumer, Streams: []string{c.stream, ">"}, Count: 1, Block: time.Second}).Result()
 		if err != nil && !errors.Is(err, redis.Nil) {
-			log.Printf("read admin user commands: %v", err)
-			continue
+			return err
 		}
 		for _, stream := range streams {
 			for _, message := range stream.Messages {
-				processAdminUserCommand(ctx, client, users, message)
+				c.process(ctx, message)
 			}
+		}
+	}
+	return ctx.Err()
+}
+
+// Record a terminal failure only while the pending delivery snapshot is current.
+// Retain its stream ID for operators, without duplicating the email or reset code.
+var exhaustAdminCommand = redis.NewScript(`
+local id=ARGV[2]
+local p=redis.call('XPENDING',KEYS[1],ARGV[1],id,id,1)
+if #p==0 or p[1][2]~=ARGV[3] or p[1][3]<tonumber(ARGV[4]) or p[1][4]~=tonumber(ARGV[5]) then return 0 end
+local t=redis.call('TIME')
+local now=t[1]*1000+math.floor(t[2]/1000)
+local window=tonumber(ARGV[6])
+redis.call('ZREMRANGEBYSCORE',KEYS[2],'-inf',now-window)
+redis.call('ZADD',KEYS[2],now,id)
+redis.call('PEXPIRE',KEYS[2],window)
+redis.call('XACK',KEYS[1],ARGV[1],id)
+redis.call('XDEL',KEYS[1],id)
+return 1`)
+
+func (c *adminUserCommands) reclaim(ctx context.Context) {
+	start := "-"
+	if c.pendingCursor != "" {
+		start = nextStreamID(c.pendingCursor)
+	}
+	pending, err := c.client.XPendingExt(ctx, &redis.XPendingExtArgs{Stream: c.stream, Group: c.group, Start: start, End: "+", Count: adminUserCommandReclaimPage}).Result()
+	if err != nil {
+		if ctx.Err() == nil {
+			log.Printf("list pending admin user commands: %v", err)
+		}
+		return
+	}
+	c.pendingCursor = ""
+	if len(pending) == adminUserCommandReclaimPage {
+		c.pendingCursor = pending[len(pending)-1].ID
+	}
+	for _, p := range pending {
+		if ctx.Err() != nil {
+			return
+		}
+		if p.Idle < c.minIdle {
+			continue
+		}
+		if p.RetryCount >= adminUserCommandMaxDeliveries {
+			n, err := exhaustAdminCommand.Run(ctx, c.client, []string{c.stream, c.stream + ":exhausted"}, c.group, p.ID, p.Consumer, c.minIdle.Milliseconds(), p.RetryCount, adminCommandFailureWindow.Milliseconds()).Int64()
+			if err != nil {
+				log.Printf("record exhausted admin command: %v", err)
+			} else if n > 0 {
+				slog.Warn("admin user command exhausted", "id", p.ID, "deliveries", p.RetryCount)
+			}
+			continue
+		}
+		claimed, err := c.client.XClaim(ctx, &redis.XClaimArgs{Stream: c.stream, Group: c.group, Consumer: c.consumer, MinIdle: c.minIdle, Messages: []string{p.ID}}).Result()
+		if err != nil {
+			if ctx.Err() == nil {
+				log.Printf("claim admin user command: %v", err)
+			}
+			return
+		}
+		for _, message := range claimed {
+			c.process(ctx, message)
 		}
 	}
 }
 
-func processAdminUserCommand(ctx context.Context, client *redis.Client, users *service.UserService, message redis.XMessage) {
-	commandType, _ := message.Values["type"].(string)
-	email, _ := message.Values["email"].(string)
-	if commandType != "password_reset_email" || email == "" {
-		_ = client.XAck(ctx, adminUserCommandStream, adminUserCommandGroup, message.ID).Err()
-		return
+// nextStreamID returns the smallest ID after id; Redis 6.0 has no exclusive
+// "(" range bound.
+func nextStreamID(id string) string {
+	ms, seq, _ := strings.Cut(id, "-")
+	if n, err := strconv.ParseUint(seq, 10, 64); err == nil && n < math.MaxUint64 {
+		return ms + "-" + strconv.FormatUint(n+1, 10)
 	}
-	if err := users.DeliverPasswordResetCode(ctx, email); err != nil {
-		log.Printf("admin password reset email: %v", err)
-		return
-	}
-	_ = client.XAck(ctx, adminUserCommandStream, adminUserCommandGroup, message.ID).Err()
+	n, _ := strconv.ParseUint(ms, 10, 64)
+	return strconv.FormatUint(n+1, 10) + "-0"
 }
 
-func isBusyGroup(err error) bool {
-	return err != nil && len(err.Error()) >= 9 && err.Error()[:9] == "BUSYGROUP"
+var finishAdminCommand = redis.NewScript(`
+local id=ARGV[2]
+local p=redis.call('XPENDING',KEYS[1],ARGV[1],id,id,1)
+if #p==0 or p[1][2]~=ARGV[3] then return 0 end
+redis.call('XACK',KEYS[1],ARGV[1],id)
+return redis.call('XDEL',KEYS[1],id)`)
+
+// process attempts a message that XREADGROUP or XCLAIM already counted as a
+// delivery, even while stopping; skipping it would burn one of its deliveries.
+func (c *adminUserCommands) process(ctx context.Context, message redis.XMessage) {
+	commandType, _ := message.Values["type"].(string)
+	email, _ := message.Values["email"].(string)
+	if commandType == "password_reset_email" && email != "" {
+		deliverCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), adminUserCommandDeliveryTimeout)
+		err := c.deliver(deliverCtx, email)
+		cancel()
+		if err != nil {
+			slog.Warn("admin password reset email failed, will retry", "id", message.ID, "timeout", errors.Is(err, context.DeadlineExceeded))
+			return
+		}
+	}
+	ackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+	if err := finishAdminCommand.Run(ackCtx, c.client, []string{c.stream}, c.group, message.ID, c.consumer).Err(); err != nil {
+		slog.Warn("admin user command acknowledgement failed", "id", message.ID, "err", err)
+	}
 }
+
+func isBusyGroup(err error) bool { return err != nil && strings.HasPrefix(err.Error(), "BUSYGROUP") }

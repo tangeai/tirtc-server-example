@@ -27,6 +27,11 @@ func defaultConfigFields(namespace, key string) []ConfigFieldDefinition {
 		definitionID("device-server", "device.token_policy"): {
 			textConfigField("token_expiry", "设备登录有效期", "例如 168h 表示 7 天"),
 		},
+		definitionID("device-server", "mqtt.broker_api"): {
+			optionalConfigField(textConfigField("url", "EMQX 管理接口地址", "例如 http://127.0.0.1:18083；留空时不自动核对在线状态，丢失连接事件后需人工处理")),
+			optionalConfigField(textConfigField("api_key", "API Key", "EMQX 控制台“系统设置 - API 密钥”中创建，只需查看客户端的权限")),
+			optionalConfigField(secretConfigField("api_secret", "API Secret", "默认隐藏，点击眼睛查看原值")),
+		},
 		definitionID("device-server", "mqtt.ack_policy"): mqttACKFields(),
 		definitionID("user-server", "mqtt.ack_policy"):   mqttACKFields(),
 		definitionID("device-server", "mqtt.connection"): mqttConnectionFields(),
@@ -57,6 +62,11 @@ func defaultConfigFields(namespace, key string) []ConfigFieldDefinition {
 		},
 		definitionID("user-server", "user.default_bind_quota"): {
 			numberConfigField("quota", "每位新用户可绑定设备数"),
+		},
+		definitionID("user-server", "user.bind_attempt_policy"): {
+			textConfigField("window", "失败统计周期", "例如 10m；验证码绑定和设备 ID 绑定的失败次数合并统计"),
+			numberConfigField("max_failures", "周期内最多失败次数"),
+			textConfigField("cooldown", "冷却时间", "例如 1h；达到上限后该用户在冷却期内不能绑定设备"),
 		},
 		definitionID("user-server", "user.token_policy"): {
 			textConfigField("token_expiry", "用户登录有效期", "例如 168h 表示 7 天"),

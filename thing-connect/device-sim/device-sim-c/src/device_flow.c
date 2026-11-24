@@ -977,6 +977,12 @@ static void *_heartbeat_thread(void *arg) {
     return NULL;
 }
 
+void mqtt_reconnect_policy(unsigned int entropy,
+                           unsigned int *base_seconds, unsigned int *max_seconds) {
+    *base_seconds = 1 + entropy % 4;
+    *max_seconds = 60 + (entropy / 4) % 61;
+}
+
 int connect_mqtt_blocking(const char *host, int port,
                           const char *device_id, const char *mqtt_token,
                           const MqttMsgHandler *handler, void *ctx_ptr,
@@ -1007,6 +1013,15 @@ int connect_mqtt_blocking(const char *host, int port,
         mosquitto_lib_cleanup();
         return -1;
     }
+
+    unsigned char seed[2] = {0, 0};
+    if (device_security_random_bytes(seed, sizeof(seed)) != 0)
+        LOG_W("随机数不可用，使用固定重连间隔");
+    unsigned int reconnect_base = 0, reconnect_max = 0;
+    mqtt_reconnect_policy((unsigned int)seed[0] << 8 | seed[1],
+                          &reconnect_base, &reconnect_max);
+    /* libmosquitto grows the delay quadratically from base up to max. */
+    mosquitto_reconnect_delay_set(mq, reconnect_base, reconnect_max, true);
 
     mosquitto_connect_callback_set(mq, _perm_on_connect);
     mosquitto_disconnect_callback_set(mq, _perm_on_disconnect);

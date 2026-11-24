@@ -436,6 +436,17 @@ def connect_temp_mqtt(broker_host: str, broker_port: int,
         client.loop_stop()
 
 
+def mqtt_reconnect_delays(entropy: int | None = None) -> tuple[int, int]:
+    """每台设备随机选择重连起始间隔（1–4 秒）和上限（60–120 秒）。
+
+    paho 从起始间隔开始逐次翻倍到上限；不同设备的取值不同，Broker 重启后
+    不会在同一秒集中重连。
+    """
+    if entropy is None:
+        entropy = secrets.randbelow(1 << 16)
+    return 1 + entropy % 4, 60 + (entropy // 4) % 61
+
+
 def connect_mqtt_blocking(broker_host: str, broker_port: int,
                           device_id: str, mqtt_token: str,
                           handler,
@@ -563,6 +574,8 @@ def connect_mqtt_blocking(broker_host: str, broker_port: int,
     client.on_connect    = on_connect
     client.on_disconnect = on_disconnect
     client.on_message    = on_message
+    min_delay, max_delay = mqtt_reconnect_delays()
+    client.reconnect_delay_set(min_delay=min_delay, max_delay=max_delay)
     client.connect(broker_host, broker_port, keepalive=60)
     client.loop_start()
     heartbeat_thread = threading.Thread(

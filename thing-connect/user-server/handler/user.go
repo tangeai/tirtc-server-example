@@ -1,86 +1,33 @@
 package handler
 
 import (
-	"context"
 	"strings"
 	"sync"
 	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
-	"github.com/jmoiron/sqlx"
-	"github.com/redis/go-redis/v9"
 
 	"thing-connect/internal/apiresp"
 	"thing-connect/internal/captcha"
 	"thing-connect/internal/deviceprofile"
-	"thing-connect/internal/mqttc"
 	"thing-connect/internal/service"
-	"thing-connect/internal/store"
-	mysqlstore "thing-connect/internal/store/mysql"
 )
 
-// UnbindCleanup holds callbacks for cross-cutting cleanup after a device unbind.
-// Each callback is best-effort — failures are logged, never block the response.
-type UnbindCleanup struct {
-	// Targets are persisted with the unbind transaction, then delivered through
-	// the user-server outbox. They name remote services, never database tables.
-	Targets []string
-	// Enqueue persists all configured cross-service cleanup notifications.
-	// Kept for legacy/test wiring that does not use transactional outbox events.
-	Enqueue func(ctx context.Context, deviceID string) error
-	// DeleteLocalRole removes the ai_device_role row for this device.
-	DeleteLocalRole func(ctx context.Context, deviceID string) error
-	// DeleteCloudRoles calls the tange cloud to remove device-role bindings.
-	DeleteCloudRoles func(ctx context.Context, deviceID string) error
-	// NotifyVoIP tells the voip-server to clean up device profile/auth.
-	NotifyVoIP func(deviceID string)
-}
-
 type Server struct {
-	userSvc   *service.UserService
-	bindSvc   *service.BindService
-	mqtt      *mqttc.Broker
-	jwtSecret string
-
-	// profileSvc serves the public device capability snapshot used to enrich
-	// the rtc-token response. Nil disables the optional enrichment.
-	profileSvc *deviceprofile.Service
-
-	callServerURL string // call-server base URL for internal/unbind
-	internalKey   string // X-Internal-Key header value
-
-	// UnbindCleanup holds cross-cutting cleanup callbacks invoked after unbind.
-	UnbindCleanup *UnbindCleanup
-
-	// RoleStore is used by the legacy integration-test path.
-	RoleStore store.RoleBindingStore
-
-	// Legacy fields for integration test compatibility.
-	DB        *sqlx.DB
-	RDB       *redis.Client
-	MQTT      *mqttc.Broker
-	JWTSecret string
-
-	passwordResetMailQueueCancel context.CancelFunc
+	userSvc        *service.UserService
+	bindSvc        *service.BindService
+	profileSvc     *deviceprofile.Service
+	online         service.OnlineChecker
+	auth           gin.HandlerFunc
+	cleanupTargets []string
 }
 
-func NewServer(userSvc *service.UserService, bindSvc *service.BindService, profileSvc *deviceprofile.Service, mqtt *mqttc.Broker, db *sqlx.DB, redisClient *redis.Client, jwtSecret, callServerURL, internalKey string, roleStore store.RoleBindingStore, cleanup *UnbindCleanup) *Server {
-	return &Server{
-		userSvc: userSvc, bindSvc: bindSvc, mqtt: mqtt, jwtSecret: jwtSecret,
-		profileSvc: profileSvc, callServerURL: callServerURL, internalKey: internalKey,
-		RoleStore: roleStore, UnbindCleanup: cleanup, DB: db, RDB: redisClient,
+func NewServer(userSvc *service.UserService, bindSvc *service.BindService, profileSvc *deviceprofile.Service, online service.OnlineChecker, auth gin.HandlerFunc, cleanupTargets []string) *Server {
+	if userSvc == nil || bindSvc == nil || auth == nil {
+		panic("user handler requires user and bind services and authentication")
 	}
+	return &Server{userSvc: userSvc, bindSvc: bindSvc, profileSvc: profileSvc, online: online, auth: auth, cleanupTargets: cleanupTargets}
 }
-
-// noopCaptcha always passes — used in the legacy integration-test wiring path.
-type noopCaptcha struct{}
-
-func (noopCaptcha) Verify(_ context.Context, _ captcha.CaptchaToken) error { return nil }
-
-// noopMailer silently discards email — used in the legacy integration-test wiring path.
-type noopMailer struct{}
-
-func (noopMailer) Send(_ context.Context, _, _, _ string) error { return nil }
 
 // CaptchaConfig is the non-secret provider configuration exposed to clients.
 // CaptchaID is kept in the response during the API migration so current 易盾
@@ -102,27 +49,6 @@ func SetCaptchaConfig(cfg CaptchaConfig) {
 }
 
 func (s *Server) Register(r *gin.Engine) {
-	if s.userSvc == nil && s.DB != nil {
-		service.RegisterErrors()
-		userStore := mysqlstore.NewUserStore(s.DB)
-		bindStore := mysqlstore.NewBindStore(s.DB)
-		cacheStore := mysqlstore.NewCacheStore(s.RDB)
-		cfg := service.DefaultServiceConfig()
-		// In the legacy/test path captcha and mailer are noop stubs.
-		s.userSvc = service.NewUserService(userStore, cacheStore, &noopCaptcha{}, &noopMailer{}, s.JWTSecret, cfg)
-		passwordResetMailQueue := service.NewInMemoryPasswordResetEmailQueue(s.userSvc.DeliverPasswordResetCode)
-		s.userSvc.SetPasswordResetEmailQueue(passwordResetMailQueue)
-		queueCtx, queueCancel := context.WithCancel(context.Background())
-		s.passwordResetMailQueueCancel = queueCancel
-		go passwordResetMailQueue.Run(queueCtx)
-		var mqttPub service.MQTTPublisher
-		if s.MQTT != nil {
-			mqttPub = s.MQTT
-		}
-		s.bindSvc = service.NewBindService(bindStore, cacheStore, mqttPub, cfg)
-		s.mqtt = s.MQTT
-		s.jwtSecret = s.JWTSecret
-	}
 	v1 := r.Group("/v1")
 
 	// Public
@@ -151,7 +77,7 @@ func (s *Server) Register(r *gin.Engine) {
 	v1.POST("/user/password-reset", s.postPasswordReset)
 
 	// Authenticated
-	auth := v1.Group("", JWTAuth(s.jwtSecret, s.RDB, s.DB))
+	auth := v1.Group("", s.auth)
 	auth.GET("/user/quota", s.getQuota)
 	auth.GET("/user/device/list", s.getDeviceList)
 	auth.PUT("/user/device/name", s.putDeviceName)
@@ -159,15 +85,6 @@ func (s *Server) Register(r *gin.Engine) {
 	auth.POST("/user/device/bind-by-id", s.postBindByDeviceID)
 	auth.DELETE("/user/device/reset", s.deleteReset)
 	auth.GET("/user/device/rtc-token", s.getRtcToken)
-}
-
-// Close releases background workers created by the legacy integration path.
-// Production wiring owns and stops its queue in user-server/main.go.
-func (s *Server) Close() {
-	if s.passwordResetMailQueueCancel != nil {
-		s.passwordResetMailQueueCancel()
-		s.passwordResetMailQueueCancel = nil
-	}
 }
 
 type sendCodeReq struct {
@@ -298,11 +215,7 @@ func (s *Server) getQuota(c *gin.Context) {
 }
 
 func (s *Server) getDeviceList(c *gin.Context) {
-	var checker service.OnlineChecker
-	if s.mqtt != nil {
-		checker = s.mqtt
-	}
-	list, err := s.userSvc.DeviceList(c.Request.Context(), currentUserID(c), checker)
+	list, err := s.userSvc.DeviceList(c.Request.Context(), currentUserID(c), s.online)
 	if err != nil {
 		apiresp.FromError(c, err)
 		return

@@ -225,6 +225,8 @@ test_failed_setup_start_stops_admin_runner() (
 )
 
 test_install_flow_stays_short_and_publishes_daily_entry() (
+    # This orchestration fixture never starts a server; do not probe the real Admin port.
+    SETUP_PORT=0
     local capture="$TEST_ROOT/install-flow.capture"
     require_commands() { printf 'commands\n' >>"$capture"; }
     validate_empty_deployment() { printf 'empty\n' >>"$capture"; }

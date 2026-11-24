@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	driver "github.com/go-sql-driver/mysql"
 	"github.com/jmoiron/sqlx"
 	"github.com/redis/go-redis/v9"
 
@@ -193,21 +194,20 @@ func (s *bindStore) CommitBindByDeviceID(ctx context.Context, deviceID string, f
 		return fmt.Errorf("bindStore.CommitBindByDeviceID update pool: %w", err)
 	}
 
-	// INSERT OR skip if already bound
-	res, err = tx.ExecContext(ctx,
+	// Only CommitClaim may reuse an existing binding after cleanup.
+	_, err = tx.ExecContext(ctx,
 		`INSERT INTO device_bind (device_id, mac, chip_uid, device_rand, assign, user_id, last_user_id, bind_time)
-		 VALUES (?, ?, ?, ?, 'preburn', ?, ?, NOW())
-		 ON DUPLICATE KEY UPDATE
-		     user_id      = IF(user_id = 0, VALUES(user_id), user_id),
-		     last_user_id = IF(user_id = 0, VALUES(last_user_id), last_user_id),
-		     bind_time    = IF(user_id = 0, NOW(), bind_time),
-		     assign       = IF(user_id = 0, VALUES(assign), assign)`,
+		 VALUES (?, ?, ?, ?, 'preburn', ?, ?, NOW())`,
 		deviceID, fp.MAC, fp.ChipUID, fp.DeviceRand, userID, userID)
 	if err != nil {
-		return fmt.Errorf("bindStore.CommitBindByDeviceID upsert: %w", err)
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return store.ErrSlotConflict
+		var duplicate *driver.MySQLError
+		if errors.As(err, &duplicate) && duplicate.Number == 1062 {
+			if err := requireCleanupComplete(ctx, tx, deviceID); err != nil {
+				return err
+			}
+			return store.ErrSlotConflict
+		}
+		return fmt.Errorf("bindStore.CommitBindByDeviceID insert: %w", err)
 	}
 
 	if _, err := tx.ExecContext(ctx,
@@ -218,6 +218,18 @@ func (s *bindStore) CommitBindByDeviceID(ctx context.Context, deviceID string, f
 	}
 
 	return tx.Commit()
+}
+
+func requireCleanupComplete(ctx context.Context, tx *sqlx.Tx, deviceID string) error {
+	var id int64
+	err := tx.GetContext(ctx, &id, `SELECT id FROM cleanup_outbox WHERE device_id=? LIMIT 1 FOR SHARE`, deviceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return store.ErrCleanupPending
 }
 
 // CommitClaim implements cases D (scan re-claim) and G (transfer/board swap).
@@ -241,11 +253,17 @@ func (s *bindStore) CommitClaim(ctx context.Context, deviceID string, fp model.F
 
 	// Capture assign for log before the UPDATE overwrites (or row is claimed)
 	var oldAssign string
-	if err := tx.QueryRowContext(ctx, `SELECT assign FROM device_bind WHERE device_id=?`, deviceID).Scan(&oldAssign); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT assign FROM device_bind WHERE device_id=? FOR UPDATE`, deviceID).Scan(&oldAssign); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return store.ErrSlotConflict
 		}
 		return fmt.Errorf("bindStore.CommitClaim read assign: %w", err)
+	}
+
+	// The locked binding orders this read after the unbind transaction, which
+	// inserts every target before releasing the device for a new owner.
+	if err := requireCleanupComplete(ctx, tx, deviceID); err != nil {
+		return err
 	}
 
 	// Optimistic claim: only succeeds if still unowned
@@ -371,11 +389,13 @@ func ApplyUnbindTx(ctx context.Context, tx *sqlx.Tx, deviceID string, userID int
 		return fmt.Errorf("bindStore.CommitUnbind log: %w", err)
 	}
 
+	// Allocate a fresh row ID for each unbind generation. Older workers
+	// acknowledge by ID and second-resolution lease, so resetting a lease
+	// on the same ID could let them confirm a newer task in the same second.
 	for _, target := range uniqueCleanupTargets(targets) {
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO cleanup_outbox (device_id,target,next_attempt_at)
-			VALUES (?,?,NOW())
-			ON DUPLICATE KEY UPDATE attempts=0,next_attempt_at=NOW(),last_error=''`, deviceID, target); err != nil {
+			INSERT INTO cleanup_outbox (device_id,target,next_attempt_at) VALUES (?,?,NOW())
+			ON DUPLICATE KEY UPDATE id=VALUES(id),attempts=0,next_attempt_at=NOW(),last_error=''`, deviceID, target); err != nil {
 			return fmt.Errorf("bindStore.CommitUnbind cleanup outbox %s: %w", target, err)
 		}
 	}
@@ -425,7 +445,7 @@ func (s *bindStore) GetUserDevices(ctx context.Context, userID int64) ([]model.D
 
 type cacheStore struct{ rdb *redis.Client }
 
-func NewCacheStore(rdb *redis.Client) store.CacheStore { return &cacheStore{rdb} }
+func NewCacheStore(rdb *redis.Client) *cacheStore { return &cacheStore{rdb} }
 
 func (s *cacheStore) IncrReportAttempt(ctx context.Context, physHash string, window time.Duration) (int64, error) {
 	key := "rate:" + physHash
@@ -505,7 +525,7 @@ func (s *cacheStore) DelDeviceCodeLookup(ctx context.Context, code string) error
 }
 
 func (s *cacheStore) SetEmailCode(ctx context.Context, email, code string, ttl time.Duration) error {
-	if err := s.rdb.Set(ctx, "email_code:"+email, code, ttl).Err(); err != nil {
+	if err := s.rdb.Eval(ctx, `redis.call("SET",KEYS[1],ARGV[1],"PX",ARGV[2]);redis.call("DEL",KEYS[2]);return 1`, []string{"email_code:" + email, "email_code_delivery:" + email}, code, ttl.Milliseconds()).Err(); err != nil {
 		return fmt.Errorf("cacheStore.SetEmailCode: %w", err)
 	}
 	return nil
@@ -712,4 +732,16 @@ func (s *cacheStore) GetReportFingerprint(ctx context.Context, deviceID string) 
 func (s *cacheStore) DelReportFingerprint(ctx context.Context, deviceID string) error {
 	s.rdb.Del(ctx, "report_fp:"+deviceID) //nolint:errcheck
 	return nil
+}
+
+// SetEmailCodeDelivery preserves the existing email_code value/TTL contract;
+// a separate, equally-lived generation fences failure cleanup.
+func (s *cacheStore) SetEmailCodeDelivery(ctx context.Context, email, code, delivery string, ttl time.Duration) error {
+	if ttl.Milliseconds() <= 0 || delivery == "" {
+		return fmt.Errorf("invalid email code delivery")
+	}
+	return s.rdb.Eval(ctx, `redis.call('SET',KEYS[1],ARGV[1],'PX',ARGV[3]);redis.call('SET',KEYS[2],ARGV[2],'PX',ARGV[3]);return 1`, []string{"email_code:" + email, "email_code_delivery:" + email}, code, delivery, ttl.Milliseconds()).Err()
+}
+func (s *cacheStore) DiscardEmailCodeDelivery(ctx context.Context, email, delivery string) error {
+	return s.rdb.Eval(ctx, `if redis.call('GET',KEYS[2])==ARGV[1] then redis.call('DEL',KEYS[1],KEYS[2]) end;return 1`, []string{"email_code:" + email, "email_code_delivery:" + email}, delivery).Err()
 }

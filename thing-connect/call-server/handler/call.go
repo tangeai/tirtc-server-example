@@ -3,9 +3,10 @@ package handler
 import (
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/redis/go-redis/v9"
+	"thing-connect/internal/call"
 
 	"thing-connect/call-server/apiresp"
 )
@@ -28,6 +29,17 @@ func (s *Server) postCallRequest(c *gin.Context) {
 		return
 	}
 	ctx := c.Request.Context()
+	// Normalize once so permission checks, notifications and rejection counts
+	// all describe the same set of devices, preserving first-seen order.
+	targets := make([]string, 0, len(body.Targets))
+	seen := make(map[string]bool, len(body.Targets))
+	for _, target := range body.Targets {
+		if !seen[target] {
+			targets = append(targets, target)
+			seen[target] = true
+		}
+	}
+	body.Targets = targets
 
 	for _, target := range body.Targets {
 		if target == caller {
@@ -62,24 +74,9 @@ func (s *Server) postCallRequest(c *gin.Context) {
 		return
 	}
 
-	roomID := "d_roomid_" + strings.ReplaceAll(uuidv4(), "-", "")
-	ok, existingRoomID, err := s.acquireLock(ctx, caller, roomID)
-	if err != nil {
-		apiresp.Fail(c, apiresp.ErrInternal, err.Error())
-		return
-	}
-	if !ok {
-		apiresp.FailWithData(c, apiresp.ErrPeerBusy, "设备已在通话中", gin.H{"room_id": existingRoomID})
-		return
-	}
-
-	if err := s.createRoom(ctx, roomID, caller, body.Targets, body.CallType, offline); err != nil {
-		apiresp.Fail(c, apiresp.ErrInternal, err.Error())
-		return
-	}
-
-	callerName := caller
+	callerNames := make(map[string]string)
 	for _, target := range body.Targets {
+		callerName := caller
 		if !online[target] {
 			continue
 		}
@@ -88,7 +85,21 @@ func (s *Server) postCallRequest(c *gin.Context) {
 				callerName = remark
 			}
 		}
-		s.publishCallIncoming(target, roomID, caller, callerName, body.CallType)
+		callerNames[target] = callerName
+	}
+
+	roomID := "d_roomid_" + strings.ReplaceAll(uuidv4(), "-", "")
+	existingRoomID, err := s.rooms.Create(ctx, call.Room{
+		RoomID: roomID, Caller: caller, Targets: body.Targets, CallType: body.CallType, CallerNames: callerNames,
+		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+	}, offline, time.Duration(s.Config().Service.RoomTTLHours)*time.Hour)
+	if err != nil {
+		s.callError(c, err)
+		return
+	}
+	if existingRoomID != "" {
+		apiresp.FailWithData(c, apiresp.ErrPeerBusy, "设备已在通话中", gin.H{"room_id": existingRoomID})
+		return
 	}
 
 	apiresp.OK(c, gin.H{
@@ -118,7 +129,7 @@ func (s *Server) postDeviceInfo(c *gin.Context) {
 	}
 	ctx := c.Request.Context()
 
-	rm, err := s.getRoom(ctx, body.RoomID)
+	rm, err := s.rooms.Get(ctx, body.RoomID)
 	if err != nil {
 		apiresp.Fail(c, apiresp.ErrInternal, err.Error())
 		return
@@ -132,69 +143,17 @@ func (s *Server) postDeviceInfo(c *gin.Context) {
 		return
 	}
 
-	// Auto-switch: if self is locked to a different room, release it first —
-	// answering this call is an implicit hang-up of whatever self was in.
-	// No "busy" branch here: a device that doesn't want to switch should call
-	// /v1/call/reject on the incoming call instead of hitting this endpoint.
-	if existingRoomID, err := s.rdb.Get(ctx, lockKey(self)).Result(); err == nil && existingRoomID != "" && existingRoomID != body.RoomID {
-		oldRoom, err := s.getRoom(ctx, existingRoomID)
-		if err != nil {
-			apiresp.Fail(c, apiresp.ErrInternal, err.Error())
-			return
-		}
-		if oldRoom != nil {
-			notify := []string{oldRoom.Caller}
-			if oldRoom.AnsweredBy != "" && oldRoom.AnsweredBy != self {
-				notify = []string{oldRoom.AnsweredBy}
-			} else if oldRoom.Caller == self {
-				notify = oldRoom.Targets
-			}
-			notify = removeString(notify, self)
-			if err := s.releaseRoom(ctx, oldRoom, "caller_left", notify); err != nil {
-				apiresp.Fail(c, apiresp.ErrInternal, err.Error())
-				return
-			}
-		} else {
-			s.rdb.Del(ctx, lockKey(self))
-		}
-	}
-
-	answeredOK, err := s.setAnswered(ctx, body.RoomID, self)
-	if err != nil {
-		apiresp.Fail(c, apiresp.ErrInternal, err.Error())
-		return
-	}
-	if !answeredOK {
-		apiresp.Fail(c, apiresp.ErrAlreadyAnswered, "该通话已被接听")
-		return
-	}
-
-	if ok, _, err := s.acquireLock(ctx, self, body.RoomID); err != nil {
-		apiresp.Fail(c, apiresp.ErrInternal, err.Error())
-		return
-	} else if !ok {
-		// Shouldn't happen (we just released any existing lock above), but
-		// don't leave the room half-answered if it does.
-		s.rdb.Set(ctx, lockKey(self), body.RoomID, s.roomTTL())
-	}
-	if err := s.setAnsweredBy(ctx, body.RoomID, self); err != nil {
-		apiresp.Fail(c, apiresp.ErrInternal, err.Error())
-		return
-	}
-
-	// 通知主叫：被叫已接听（P2P 建连前的状态通知）
-	s.publishCalleeAnswered(rm.Caller, body.RoomID, self)
-
+	// Obtain credentials before committing any state or notifying peers. A
+	// failed lookup must leave both the pending call and any old call intact.
 	token, err := s.buildConnectToken(ctx, rm.Caller)
 	if err != nil {
-		apiresp.Fail(c, apiresp.ErrInternal, err.Error())
+		s.callError(c, err)
 		return
 	}
-
-	for _, target := range rm.Targets {
-		if target != self {
-			s.publishRoomCancel(target, body.RoomID, "accepted_by_other", 1)
-		}
+	_, err = s.rooms.Answer(ctx, body.RoomID, body.DeviceID, self)
+	if err != nil {
+		s.callError(c, err)
+		return
 	}
 
 	apiresp.OK(c, gin.H{"token": token, "device_id": rm.Caller})
@@ -213,24 +172,9 @@ func (s *Server) postCallCancel(c *gin.Context) {
 		apiresp.Fail(c, apiresp.ErrBadParam, "缺少 room_id")
 		return
 	}
-	ctx := c.Request.Context()
-
-	rm, err := s.getRoom(ctx, body.RoomID)
+	_, err := s.rooms.End(c.Request.Context(), body.RoomID, self, true, "cancel")
 	if err != nil {
-		apiresp.Fail(c, apiresp.ErrInternal, err.Error())
-		return
-	}
-	if rm == nil {
-		apiresp.Fail(c, apiresp.ErrNotFound, "通话房间不存在")
-		return
-	}
-	if rm.Caller != self {
-		apiresp.Fail(c, apiresp.ErrForbidden, "只有呼叫方可以取消通话")
-		return
-	}
-
-	if err := s.releaseRoom(ctx, rm, "cancel", rm.Targets); err != nil {
-		apiresp.Fail(c, apiresp.ErrInternal, err.Error())
+		s.callError(c, err)
 		return
 	}
 	apiresp.OK(c, nil)
@@ -248,33 +192,9 @@ func (s *Server) postCallHangup(c *gin.Context) {
 	if reason == "" {
 		reason = "hangup"
 	}
-	ctx := c.Request.Context()
-
-	rm, err := s.getRoom(ctx, body.RoomID)
+	_, err := s.rooms.End(c.Request.Context(), body.RoomID, self, false, reason)
 	if err != nil {
-		apiresp.Fail(c, apiresp.ErrInternal, err.Error())
-		return
-	}
-	if rm == nil {
-		apiresp.Fail(c, apiresp.ErrNotFound, "通话房间不存在")
-		return
-	}
-	if rm.Caller != self && rm.AnsweredBy != self {
-		apiresp.Fail(c, apiresp.ErrForbidden, "当前设备不属于该通话房间")
-		return
-	}
-
-	var notify []string
-	switch {
-	case rm.Caller == self && rm.AnsweredBy != "":
-		notify = []string{rm.AnsweredBy}
-	case rm.AnsweredBy == self:
-		notify = []string{rm.Caller}
-	default:
-		notify = rm.Targets
-	}
-	if err := s.releaseRoom(ctx, rm, reason, notify); err != nil {
-		apiresp.Fail(c, apiresp.ErrInternal, err.Error())
+		s.callError(c, err)
 		return
 	}
 	apiresp.OK(c, nil)
@@ -292,61 +212,24 @@ func (s *Server) postCallReject(c *gin.Context) {
 	if reason == "" {
 		reason = "decline"
 	}
-	ctx := c.Request.Context()
-
-	rm, err := s.getRoom(ctx, body.RoomID)
+	_, err := s.rooms.Reject(c.Request.Context(), body.RoomID, self, reason)
 	if err != nil {
-		apiresp.Fail(c, apiresp.ErrInternal, err.Error())
-		return
-	}
-	if rm == nil {
-		apiresp.Fail(c, apiresp.ErrNotFound, "通话房间不存在")
-		return
-	}
-	if !containsString(rm.Targets, self) {
-		apiresp.Fail(c, apiresp.ErrForbidden, "当前设备不是该通话的被叫方")
+		s.callError(c, err)
 		return
 	}
 
-	allRejected, err := s.addRejected(ctx, rm, self)
-	if err != nil {
-		apiresp.Fail(c, apiresp.ErrInternal, err.Error())
-		return
-	}
-	s.publishCallReject(rm.Caller, body.RoomID, self, reason)
-
-	if allRejected {
-		if err := s.releaseRoom(ctx, rm, "all_rejected", []string{rm.Caller}); err != nil {
-			apiresp.Fail(c, apiresp.ErrInternal, err.Error())
-			return
-		}
-	}
 	apiresp.OK(c, nil)
 }
 
 // GET /v1/call/room — 查询当前设备所在房间（崩溃恢复用）。
 func (s *Server) getDeviceRoom(c *gin.Context) {
 	self := currentDeviceID(c)
-	ctx := c.Request.Context()
-
-	roomID, err := s.rdb.Get(ctx, lockKey(self)).Result()
-	if errors.Is(err, redis.Nil) || roomID == "" {
-		apiresp.OK(c, nil)
-		return
-	}
+	rm, err := s.rooms.Current(c.Request.Context(), self)
 	if err != nil {
-		apiresp.Fail(c, apiresp.ErrInternal, err.Error())
-		return
-	}
-
-	rm, err := s.getRoom(ctx, roomID)
-	if err != nil {
-		apiresp.Fail(c, apiresp.ErrInternal, err.Error())
+		s.callError(c, err)
 		return
 	}
 	if rm == nil {
-		// lock 存在但 room hash 已过期，清理孤儿 lock
-		s.rdb.Del(ctx, lockKey(self))
 		apiresp.OK(c, nil)
 		return
 	}
@@ -373,12 +256,15 @@ func containsString(list []string, v string) bool {
 	return false
 }
 
-func removeString(list []string, v string) []string {
-	out := make([]string, 0, len(list))
-	for _, x := range list {
-		if x != v && x != "" {
-			out = append(out, x)
-		}
+func (s *Server) callError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, call.ErrNotFound):
+		apiresp.Fail(c, apiresp.ErrNotFound, "通话房间不存在")
+	case errors.Is(err, call.ErrForbidden):
+		apiresp.Fail(c, apiresp.ErrForbidden, "当前设备无权操作该通话房间")
+	case errors.Is(err, call.ErrAnswered):
+		apiresp.Fail(c, apiresp.ErrAlreadyAnswered, "该通话已被其他设备接听")
+	default:
+		apiresp.Fail(c, apiresp.ErrInternal, err.Error())
 	}
-	return out
 }

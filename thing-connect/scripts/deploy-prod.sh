@@ -972,8 +972,19 @@ preflight_business_services() {
     for svc in "${ACTIVE_BUSINESS_SERVICES[@]}"; do
         if [ "$svc" = recognition-server ] && [ "${DEFER_RECOGNITION_START:-0}" = 1 ]; then continue; fi
         log "停服前检查 $svc 必填配置及依赖连接..."
+        local ports
+        local -a instance_args=() instance_ports=()
+        if [ "$ACTIVE_SERVICE_MANAGER" = local ] && [ -e "$DEPLOY_ROOT/local-instances" ]; then
+            ports="$(DEPLOY_ROOT="$DEPLOY_ROOT" "$BUILD_DIR/scripts/service-local.sh" ports "$svc")" || return 1
+            mapfile -t instance_ports <<<"$ports"
+            instance_args=(-check-service-instances "${#instance_ports[@]}")
+        elif [ "$ACTIVE_SERVICE_MANAGER" = supervisor ]; then
+            ports="$(service_programs "$svc")" || return 1
+            mapfile -t instance_ports <<<"$ports"
+            [ "${#instance_ports[@]}" -le 1 ] || instance_args=(-check-service-instances "${#instance_ports[@]}")
+        fi
         "$BUILD_DIR/bin/admin-server" -c "$cfg" -deploy-root "$DEPLOY_ROOT" \
-            -check-service-config "$svc" || return $?
+            -check-service-config "$svc" "${instance_args[@]}" || return $?
     done
 }
 
@@ -1144,12 +1155,77 @@ service_health_url() {
     printf 'http://%s:%s/health/ready\n' "$HEALTH_HOST" "$port"
 }
 
+# 业务服务可在同一 Supervisor 组中增加 <服务>-2、<服务>-3 等程序并行运行，
+# 各程序用环境变量 THING_CONNECT_HTTP_PORT 指定端口。Admin 保持单实例；
+# local 模式由 service-local.sh 负责同一服务的全部实例。
+# supervisorctl status 在有程序未运行时退出码为 3，属于正常清单；其他非零
+# 退出码表示 supervisord 不可达，此时不能把额外实例当作不存在。
+service_extra_programs() {
+    local svc="$1" inventory status=0
+    [ "$svc" != "$ADMIN_SERVICE" ] && [ "$ACTIVE_SERVICE_MANAGER" != local ] || return 0
+    inventory="$("$SUPERVISORCTL" status 2>/dev/null)" || status=$?
+    if [ "$status" -ne 0 ] && [ "$status" -ne 3 ]; then
+        err "$svc: 无法读取 Supervisor 程序清单（supervisorctl status 退出码 $status），无法确认额外实例"
+        return 1
+    fi
+    awk -v prefix="$SUPERVISOR_GROUP:" -v svc="$svc" '
+        index($1, prefix) == 1 {
+            name = substr($1, length(prefix) + 1)
+            suffix = substr(name, length(svc) + 1)
+            if (index(name, svc "-") == 1 && suffix ~ /^-[0-9]+$/) print name
+        }' <<<"$inventory" | sort -V
+}
+
+# 输出主实例及全部额外实例；读取清单失败时返回非零，调用方须先取列表再循环。
+service_programs() {
+    local svc="$1" extras
+    extras="$(service_extra_programs "$svc")" || return 1
+    printf '%s\n' "$svc"
+    [ -z "$extras" ] || printf '%s\n' "$extras"
+}
+
+# Standalone start/restart uses the installed checker even without a source checkout.
+# Resolve the inventory once so preflight covers exactly the programs we start.
+# The second argument "1" skips the check when restoring a release that already ran.
+supervisor_start_programs() {
+    local svc="$1" skip_preflight="${2:-0}" programs cfg
+    local -a instances
+    programs="$(service_programs "$svc")" || return 1
+    mapfile -t instances <<<"$programs"
+    if [ "$skip_preflight" != 1 ] && [ "${#instances[@]}" -gt 1 ]; then
+        cfg="$(service_config_path "$ADMIN_SERVICE")" || return 1
+        "$DEPLOY_ROOT/$ADMIN_SERVICE/$ADMIN_SERVICE" -c "$cfg" -deploy-root "$DEPLOY_ROOT" \
+            -check-service-config "$svc" -check-service-instances "${#instances[@]}" >&2 || return $?
+    fi
+    printf '%s\n' "$programs"
+}
+
+instance_health_url() {
+    local program="$1" pid port
+    pid="$("$SUPERVISORCTL" pid "$(supervisor_program "$program")" 2>/dev/null || true)"
+    if [[ ! "$pid" =~ ^[1-9][0-9]*$ ]] || [ ! -r "/proc/$pid/environ" ]; then
+        err "$program: 无法读取进程环境"
+        return 1
+    fi
+    port="$(tr '\0' '\n' <"/proc/$pid/environ" | sed -n 's/^THING_CONNECT_HTTP_PORT=//p' | head -n 1)"
+    [[ "$port" =~ ^[1-9][0-9]*$ ]] || {
+        err "$program: Supervisor 程序缺少有效的 THING_CONNECT_HTTP_PORT"
+        return 1
+    }
+    printf 'http://%s:%s/health/ready\n' "$HEALTH_HOST" "$port"
+}
+
+# 第二个参数为额外实例的 Supervisor 程序名；省略时检查服务主实例。
 wait_for_readiness() {
-    local svc="$1" url elapsed=0 state
-    url="$(service_health_url "$svc")" || return 1
+    local svc="$1" program="${2:-$1}" url elapsed=0 state
+    if [ "$program" = "$svc" ]; then
+        url="$(service_health_url "$svc")" || return 1
+    else
+        url="$(instance_health_url "$program")" || return 1
+    fi
     while [ "$elapsed" -lt "$HEALTH_WAIT_SECONDS" ]; do
         if curl -fsS --max-time "$HEALTH_REQUEST_TIMEOUT_SECONDS" "$url" >/dev/null 2>&1; then
-            log "$svc readiness 检查通过"
+            log "$program readiness 检查通过"
             return
         fi
         if [ "$ACTIVE_SERVICE_MANAGER" = local ]; then
@@ -1157,15 +1233,15 @@ wait_for_readiness() {
             elapsed=$((elapsed + 1))
             continue
         fi
-        state="$(supervisor_state "$svc")"
+        state="$(supervisor_state "$program")"
         if [ "$state" != "RUNNING" ] && [ "$state" != "STARTING" ]; then
-            err "$svc readiness 检查期间 Supervisor 状态变为 ${state:-UNKNOWN}"
+            err "$program readiness 检查期间 Supervisor 状态变为 ${state:-UNKNOWN}"
             return 1
         fi
         sleep 1
         elapsed=$((elapsed + 1))
     done
-    err "$svc 在 ${HEALTH_WAIT_SECONDS}s 内未通过 $url"
+    err "$program 在 ${HEALTH_WAIT_SECONDS}s 内未通过 $url"
     curl -sS --max-time "$HEALTH_REQUEST_TIMEOUT_SECONDS" "$url" || true
     return 1
 }
@@ -1178,20 +1254,27 @@ stop_one() {
         return $?
     fi
 
-    log "停止 $svc ..."
+    local program programs
+    programs="$(service_programs "$svc")" || return 1
+    for program in $programs; do
+        stop_program "$program" || return 1
+    done
+}
 
-    local state
-    require_supervisor_service "$svc" || return 1
-    state="$(supervisor_state "$svc")"
+stop_program() {
+    local program="$1" state
+    log "停止 $program ..."
+    require_supervisor_service "$program" || return 1
+    state="$(supervisor_state "$program")"
     case "$state" in
         STOPPED|EXITED|FATAL|BACKOFF)
-            log "$svc 当前未运行（Supervisor: $state）"
+            log "$program 当前未运行（Supervisor: $state）"
             return
             ;;
     esac
-    "$SUPERVISORCTL" stop "$(supervisor_program "$svc")" || true
-    wait_for_supervisor_state "$svc" "STOPPED" || return 1
-    log "$svc 已停止（Supervisor）"
+    "$SUPERVISORCTL" stop "$(supervisor_program "$program")" || true
+    wait_for_supervisor_state "$program" "STOPPED" || return 1
+    log "$program 已停止（Supervisor）"
 }
 
 # ================== 发布 ==================
@@ -1243,14 +1326,17 @@ deploy_one() {
 }
 
 # ================== 启动 ==================
+# The second argument "1" restores a previous release without the start
+# preflight: a dependency outage that failed the update must not also keep the
+# last working instances stopped. Updates and ordinary starts always check.
 start_one() {
-    local svc="$1"
+    local svc="$1" skip_preflight="${2:-0}"
     if [ "$svc" = recognition-server ] && [ "${DEFER_RECOGNITION_START:-0}" = 1 ]; then
         log "识别服务等待 MQTT 配置发布，保持停止"
         return 0
     fi
     if [ "$ACTIVE_SERVICE_MANAGER" = local ]; then
-        "$LOCAL_SERVICECTL" start "$SUPERVISOR_GROUP:$svc" || return 1
+        THING_CONNECT_SKIP_START_PREFLIGHT="$skip_preflight" "$LOCAL_SERVICECTL" start "$SUPERVISOR_GROUP:$svc" || return $?
         wait_for_readiness "$svc"
         return $?
     fi
@@ -1268,35 +1354,50 @@ start_one() {
         return 1
     fi
 
-    local state
-    require_supervisor_service "$svc" || return 1
-    state="$(supervisor_state "$svc")"
+    local program programs
+    programs="$(supervisor_start_programs "$svc" "$skip_preflight")" || return $?
+    for program in $programs; do
+        start_program "$svc" "$program" || return 1
+    done
+}
+
+# 多实例逐台启动：上一台通过 readiness 后才处理下一台。
+start_program() {
+    local svc="$1" program="$2" state
+    require_supervisor_service "$program" || return 1
+    state="$(supervisor_state "$program")"
     if [ "$state" = "RUNNING" ]; then
-        wait_for_readiness "$svc" || return 1
-        log "$svc 已在运行且就绪（Supervisor）"
+        wait_for_readiness "$svc" "$program" || return 1
+        log "$program 已在运行且就绪（Supervisor）"
         return
     fi
-    log "启动 $svc（Supervisor）..."
-    "$SUPERVISORCTL" start "$(supervisor_program "$svc")" || return 1
-    wait_for_supervisor_state "$svc" "RUNNING" || return 1
-    wait_for_readiness "$svc" || return 1
-    log "$svc 启动成功（Supervisor）"
+    log "启动 $program（Supervisor）..."
+    "$SUPERVISORCTL" start "$(supervisor_program "$program")" || return 1
+    wait_for_supervisor_state "$program" "RUNNING" || return 1
+    wait_for_readiness "$svc" "$program" || return 1
+    log "$program 启动成功（Supervisor）"
 }
 
 # ================== 重启 ==================
 restart_one() {
     local svc="$1"
     if [ "$ACTIVE_SERVICE_MANAGER" = local ]; then
-        stop_one "$svc" && start_one "$svc"
+        "$LOCAL_SERVICECTL" restart "$SUPERVISOR_GROUP:$svc" || return $?
+        wait_for_readiness "$svc"
         return $?
     fi
 
-    require_supervisor_service "$svc" || return 1
-    log "重启 $svc（Supervisor）..."
-    "$SUPERVISORCTL" restart "$(supervisor_program "$svc")" || return 1
-    wait_for_supervisor_state "$svc" "RUNNING" || return 1
-    wait_for_readiness "$svc" || return 1
-    log "$svc 重启成功（Supervisor）"
+    # 多实例滚动重启：一台通过 readiness 后再重启下一台，其余实例继续服务。
+    local program programs
+    programs="$(supervisor_start_programs "$svc")" || return $?
+    for program in $programs; do
+        require_supervisor_service "$program" || return 1
+        log "重启 $program（Supervisor）..."
+        "$SUPERVISORCTL" restart "$(supervisor_program "$program")" || return 1
+        wait_for_supervisor_state "$program" "RUNNING" || return 1
+        wait_for_readiness "$svc" "$program" || return 1
+        log "$program 重启成功（Supervisor）"
+    done
 }
 
 # ================== 状态 ==================
@@ -1306,8 +1407,12 @@ status_one() {
         "$LOCAL_SERVICECTL" status "$SUPERVISOR_GROUP:$svc"
         return $?
     fi
-    require_supervisor_service "$svc" || return 1
-    "$SUPERVISORCTL" status "$(supervisor_program "$svc")" || return 1
+    local program programs
+    programs="$(service_programs "$svc")" || return 1
+    for program in $programs; do
+        require_supervisor_service "$program" || return 1
+        "$SUPERVISORCTL" status "$(supervisor_program "$program")" || return 1
+    done
 }
 
 # ================== 批量 ==================
@@ -1335,9 +1440,9 @@ run_batch() {
     for svc in "$@"; do
         case "$action" in
             deploy) deploy_one "$svc" || return 1 ;;
-            start) start_one "$svc" || return 1 ;;
+            start) start_one "$svc" || return $? ;;
             stop) stop_one "$svc" || return 1 ;;
-            restart) restart_one "$svc" || return 1 ;;
+            restart) restart_one "$svc" || return $? ;;
             status) status_one "$svc" || return 1 ;;
         esac
     done
@@ -1446,7 +1551,7 @@ rollback_release() {
             fi
         fi
         if [ -f "$backup/$svc" ] && [ "$ACTIVE_SERVICE_MANAGER" != "manual" ] && service_is_enabled "$svc"; then
-            if ! start_one "$svc"; then
+            if ! start_one "$svc" 1; then
                 err "$svc 回滚后启动失败，请人工处理"
                 rollback_failed=1
             fi

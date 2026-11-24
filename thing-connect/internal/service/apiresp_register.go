@@ -4,11 +4,14 @@ import (
 	"net/http"
 
 	"thing-connect/internal/apiresp"
+	"thing-connect/internal/bindlimit"
+	"thing-connect/internal/store"
 )
 
 func RegisterErrors() {
 	apiresp.RegisterError(ErrCodeExpired, http.StatusBadRequest, apiresp.CodeCodeExpired)
 	apiresp.RegisterError(ErrAlreadyBound, http.StatusConflict, apiresp.CodeDevBound)
+	apiresp.RegisterError(store.ErrCleanupPending, http.StatusConflict, apiresp.CodeCleanupPending)
 	apiresp.RegisterError(ErrBoundByOther, http.StatusConflict, apiresp.CodeDevOtherBound)
 	apiresp.RegisterError(ErrQuotaEmpty, http.StatusUnprocessableEntity, apiresp.CodeQuotaEmpty)
 	apiresp.RegisterError(ErrDeviceOffline, http.StatusServiceUnavailable, apiresp.CodeDevOffline)
@@ -31,4 +34,5 @@ func RegisterErrors() {
 	apiresp.RegisterError(ErrFingerprintMismatch, http.StatusForbidden, apiresp.CodeFingerprintMismatch)
 	apiresp.RegisterError(ErrDeviceIDUntrusted, http.StatusBadRequest, apiresp.CodeDeviceIDUntrusted)
 	apiresp.RegisterError(ErrMACDuplicateBinding, http.StatusConflict, apiresp.CodeMACDuplicateBinding)
+	apiresp.RegisterError(bindlimit.ErrLocked, http.StatusTooManyRequests, apiresp.CodeRateLimit)
 }

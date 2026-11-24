@@ -63,7 +63,7 @@ summary 为中文说明；alarm 表示模型按管理员分析目标判断是否
 
 父任务状态为 queued/processing/succeeded/partial_failed/failed/unknown/cancelled。queued 表示任务尚未开始；开始后等待语音或下一类型时保持 processing，直到进入终态。结合子项与语音状态显示进度。子项分析状态独立于 speech.status（pending/synthesizing/ready/failed/unknown/skipped）。明确失败后继续下一个类型；未知结果暂停，不自动重新调用模型。设备应展示失败或待确认，不能当作已经完成。
 
-MQTT topic 沿用 `device/sn_{device_id}/notify`，QoS1、retain=false，type=recognition_result、channel=recognition、event_id 为事件标识，payload 是固定响应信封。同一任务每次更新递增 status_revision，设备忽略旧版本。配置变化 type=recognition_config_changed，设备重新读取配置。通知最多尝试投递8次，失败后由查询补偿；MQTT 发布确认不代表设备收到或完成播放，当前没有设备结果 ACK 接口。文字随通知直接返回，语音就绪后通过 HTTP 下载。重连时逐个补查本地未完成任务；列表 cursor 只按任务创建顺序分页，不会因旧任务更新而变化。
+MQTT topic 沿用 `device/sn_{device_id}/notify`，QoS1、retain=false，type=recognition_result、channel=recognition、event_id 为事件标识，payload 是固定响应信封。同一任务每次更新递增 status_revision。服务端重试或多个实例投递时，同一版本可能重复到达，不同版本也可能乱序到达；设备按任务记录已处理的最大 status_revision，忽略不大于它的通知。配置变化 type=recognition_config_changed，设备重新读取配置。通知最多尝试投递8次，失败后由查询补偿；MQTT 发布确认不代表设备收到或完成播放，当前没有设备结果 ACK 接口。文字随通知直接返回，语音就绪后通过 HTTP 下载。重连时逐个补查本地未完成任务；列表 cursor 只按任务创建顺序分页，不会因旧任务更新而变化。
 
 speech.url 是本识别服务的相对路径，必须相对 recognition-srv 请求并附设备凭证，不能当作无需鉴权的公开下载地址。按任务编号和 item_id 去重播放，按 order 排队；不能因重复通知重播，也不能打断设备现有通话。硬件音频格式适配与会话仲裁由设备接入层实现；服务端提供 WAV 完整文件，不提供实时音频会话。
 
@@ -88,3 +88,11 @@ speech.url 是本识别服务的相对路径，必须相对 recognition-srv 请�
 请求字段、响应字段和通知示例见 [API Reference](api-reference.md#recognition-config)。单个任务的多类型结果使用 `results[]`，文字分析使用 `results[].result`，语音状态与下载信息使用 `results[].speech`；任务列表的 `data.items` 是多个任务的分页容器。
 
 验收分别覆盖仅文字、仅语音、文字＋语音；核对每个任务的 analysis/tts 调用记录、额度占用、重复请求不重复扣量、重复/乱序通知过滤，以及语音下载鉴权和设备实际播放。未知用量保留未知，不与0混淆。测试结果须区分模拟单元测试、真实 MySQL/Redis 集成、真实千问调用、MQTT 实际转发和设备播放，跳过的场景不视为验收通过。
+
+## 结果名称与完成状态
+
+`results[].name` 是任务受理时的发布版本名称，类型改名不改变历史任务。名称为空时可以回退显示 `scheme_id`。`results[].overall_status` 表示单个类型的整体状态；`results[].status` 只表示分析阶段，`speech.status` 表示语音阶段。HTTP 和 MQTT 的任务结构一致。
+
+分析成功但语音尚未完成时，整体状态为 `processing`。纯语音合成失败为 `failed`；文字＋语音合成失败但文字可读为 `partial_failed`。取消后已有可交付内容同样为 `partial_failed`，没有可交付内容为 `cancelled`。`unknown` 暂停后续处理，只补查原任务，不自动重复上传。播放始终等待 `speech.status=ready`，成功状态不代表设备播放完成。
+
+兼容旧服务或升级前的待投递消息时，允许 `name`、`overall_status` 缺失，使用已有分析、语音状态组合判断；不按新字段是否存在决定是否重新提交。详细聚合顺序见 [任务状态](api-reference.md#recognition-task)。

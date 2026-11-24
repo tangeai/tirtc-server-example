@@ -17,8 +17,25 @@ type LifecycleAPI interface {
 type roleCloud struct{ api LifecycleAPI }
 
 func NewRoleCloud(api LifecycleAPI) ai.RoleCloud { return &roleCloud{api: api} }
+
+// A device unknown to the cloud has no role binding. The batch error does not
+// say which device is unknown, so batches are retried one device at a time.
 func (c *roleCloud) Query(ctx context.Context, ids []string) ([]ai.CloudRoleBinding, error) {
 	rows, err := c.api.BatchQueryDeviceRoles(ctx, BatchDeviceRolesQueryRequest{DeviceIDs: ids})
+	if errors.Is(err, ErrDeviceNotFound) {
+		if len(ids) == 1 {
+			return nil, nil
+		}
+		var out []ai.CloudRoleBinding
+		for _, id := range ids {
+			found, e := c.Query(ctx, []string{id})
+			if e != nil {
+				return nil, e
+			}
+			out = append(out, found...)
+		}
+		return out, nil
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -32,7 +49,19 @@ func (c *roleCloud) Bind(ctx context.Context, ids []string, role string) error {
 	return c.api.BatchCreateDeviceRoles(ctx, BatchDeviceRolesRequest{DeviceIDs: ids, RoleID: role})
 }
 func (c *roleCloud) Unbind(ctx context.Context, ids []string, role string) error {
-	return c.api.BatchDeleteDeviceRoles(ctx, BatchDeviceRolesRequest{DeviceIDs: ids, RoleID: role})
+	err := c.api.BatchDeleteDeviceRoles(ctx, BatchDeviceRolesRequest{DeviceIDs: ids, RoleID: role})
+	if !errors.Is(err, ErrDeviceNotFound) {
+		return err
+	}
+	if len(ids) == 1 {
+		return nil
+	}
+	for _, id := range ids {
+		if e := c.Unbind(ctx, []string{id}, role); e != nil {
+			return e
+		}
+	}
+	return nil
 }
 func (c *roleCloud) Delete(ctx context.Context, role string) error {
 	err := c.api.DeleteRole(ctx, role)

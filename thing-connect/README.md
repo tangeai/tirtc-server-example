@@ -587,13 +587,15 @@ void on_call_connected(int err, tirtc_conn_t hconn, void *user) {
 
 ### H5 开发
 
-H5 页面由 user-server 提供静态文件。用户登录并获取 RTC token 后，通过 Web SDK 直连设备。完整页面见 [player.html](user-server/static/player.html)。画布根据 rtc-token 响应中的 `profiles.stream`（宽高比、缩放方式、旋转、镜像）自适应；设备未上报时保持 16:9 + contain。
+H5 页面由 user-server 提供静态文件。用户登录并获取 RTC token 后，通过 Web SDK 直连设备。播放器源码见 [Player.tsx](user-server/user-web/src/pages/Player.tsx)，媒体连接与释放逻辑见 [session.ts](user-server/user-web/src/media/session.ts)。画布根据 rtc-token 响应中的 `profiles.stream`（宽高比、缩放方式、旋转、镜像）自适应；设备未上报时保持 16:9 + contain。
 SDK 类、方法和参数以 [TiRTC Web API 参考](https://docs.tange.ai/products/tirtc/api-reference/web.html)
 为准。
 
-登录后可以在 [devices.html](user-server/static/devices.html) 管理设备。页面通过 [`GET /v1/user/device/list`](api-reference.md#get-v1userdevicelist) 获取当前用户绑定的设备；点击设备名称旁的“修改”，再调用 [`PUT /v1/user/device/name`](api-reference.md#put-v1userdevicename) 保存新名称。
+登录后在 `/devices` 管理设备，页面源码见 [Devices.tsx](user-server/user-web/src/pages/Devices.tsx)。页面通过 [`GET /v1/user/device/list`](api-reference.md#get-v1userdevicelist) 获取当前用户绑定的设备；点击设备名称旁的“修改”，再调用 [`PUT /v1/user/device/name`](api-reference.md#put-v1userdevicename) 保存新名称。
 
 列表还会显示设备在线状态，以及是否带摄像头、屏幕等能力。
+
+用户前端使用 React、TypeScript 和 Vite，开发、构建和测试步骤见[用户控制台说明](user-server/user-web/README.md)。在 `thing-connect/` 执行 `./build.sh user-server`，构建产物位于 `user-server/static/app/`。`/player`、`/devices` 等入口由 user-server 提供；旧 `/static/player.html`、`/static/devices.html` 地址用于兼容跳转，二次开发应修改 `user-server/user-web/src/`。
 
 页面按以下顺序接入：
 

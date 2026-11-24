@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strconv"
 	"sync"
@@ -42,6 +43,37 @@ func NewAccessController(ctx context.Context, db *sqlx.DB) (*AccessController, e
 }
 
 func (a *AccessController) Reload(ctx context.Context) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.reloadLocked(ctx)
+}
+
+// EnsureCurrent retries a failed publication before the next authenticated request.
+func (a *AccessController) EnsureCurrent(ctx context.Context) error {
+	a.mu.RLock()
+	ready := a.e != nil
+	a.mu.RUnlock()
+	if ready {
+		return nil
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.e != nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, committedEffectTimeout)
+	defer cancel()
+	return a.reloadLocked(ctx)
+}
+
+func (a *AccessController) reloadLocked(ctx context.Context) error {
+	// Invalidate the old snapshot even if loading its replacement fails.
+	a.e = nil
+	tx, err := a.db.BeginTxx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 	m, err := casbinmodel.NewModelFromString(rbacModel)
 	if err != nil {
 		return fmt.Errorf("parse RBAC model: %w", err)
@@ -55,7 +87,7 @@ func (a *AccessController) Reload(ctx context.Context) error {
 		Permission string `db:"permission_code"`
 	}
 	var permissions []permissionRow
-	if err := a.db.SelectContext(ctx, &permissions, `SELECT r.code AS role_code,p.permission_code FROM admin_roles r JOIN admin_role_permissions p ON p.role_id=r.id WHERE r.status=1`); err != nil {
+	if err := tx.SelectContext(ctx, &permissions, `SELECT r.code AS role_code,p.permission_code FROM admin_roles r JOIN admin_role_permissions p ON p.role_id=r.id WHERE r.status=1`); err != nil {
 		return fmt.Errorf("load role permissions: %w", err)
 	}
 	for _, row := range permissions {
@@ -68,7 +100,7 @@ func (a *AccessController) Reload(ctx context.Context) error {
 		RoleCode string `db:"role_code"`
 	}
 	var memberships []membershipRow
-	if err := a.db.SelectContext(ctx, &memberships, `SELECT ur.admin_user_id,r.code AS role_code FROM admin_user_roles ur JOIN admin_roles r ON r.id=ur.role_id WHERE r.status=1`); err != nil {
+	if err := tx.SelectContext(ctx, &memberships, `SELECT ur.admin_user_id,r.code AS role_code FROM admin_user_roles ur JOIN admin_roles r ON r.id=ur.role_id WHERE r.status=1`); err != nil {
 		return fmt.Errorf("load admin roles: %w", err)
 	}
 	for _, row := range memberships {
@@ -81,7 +113,7 @@ func (a *AccessController) Reload(ctx context.Context) error {
 		Parent string `db:"parent_code"`
 	}
 	var inheritance []inheritanceRow
-	if err := a.db.SelectContext(ctx, &inheritance, `SELECT child.code AS child_code,parent.code AS parent_code FROM admin_roles child JOIN admin_roles parent ON parent.id=child.parent_id WHERE child.status=1 AND parent.status=1`); err != nil {
+	if err := tx.SelectContext(ctx, &inheritance, `SELECT child.code AS child_code,parent.code AS parent_code FROM admin_roles child JOIN admin_roles parent ON parent.id=child.parent_id WHERE child.status=1 AND parent.status=1`); err != nil {
 		return fmt.Errorf("load role inheritance: %w", err)
 	}
 	for _, row := range inheritance {
@@ -89,9 +121,10 @@ func (a *AccessController) Reload(ctx context.Context) error {
 			return err
 		}
 	}
-	a.mu.Lock()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
 	a.e = e
-	a.mu.Unlock()
 	return nil
 }
 

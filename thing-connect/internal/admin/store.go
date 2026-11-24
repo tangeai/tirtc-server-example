@@ -453,3 +453,34 @@ func nullableText(value string) any {
 	}
 	return value
 }
+
+// QueuePasswordReset commits the command and its operator audit together.
+func (s *Store) QueuePasswordReset(ctx context.Context, userID int64, event AuditEvent) error {
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `INSERT INTO admin_reset_mail_outbox(user_id,email)
+		SELECT id,email FROM users WHERE id=? AND status=1`, userID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return sql.ErrNoRows
+	}
+	id, err := result.LastInsertId()
+	if err != nil {
+		return err
+	}
+	event.HTTPStatus = 202
+	event.After = fmt.Sprintf(`{"queued":true,"command_id":"mysql-%d"}`, id)
+	if err := insertAuditTx(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}

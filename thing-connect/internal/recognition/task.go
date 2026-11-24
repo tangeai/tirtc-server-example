@@ -6,60 +6,117 @@ import (
 )
 
 type Snapshot struct {
-	Task     Task      `json:"task"`
-	Schemes  []Scheme  `json:"schemes"`
-	Internal []*Result `json:"internal"`
+	// Cancelled records whole-task cancellation independently of partial output.
+	Cancelled bool      `json:"cancelled,omitempty"`
+	Task      Task      `json:"task"`
+	Schemes   []Scheme  `json:"schemes"`
+	Internal  []*Result `json:"internal"`
 }
 
+// PublicTask projects legacy snapshots without changing persisted data or
+// consulting the current type catalogue. HTTP and outbox use this projection.
 func (v Snapshot) PublicTask() Task {
-	t := v.Task
-	t.Results = append([]Item(nil), t.Results...)
-	for i := range t.Results {
-		if t.Results[i].OutputMode == "audio" {
-			t.Results[i].Result = nil
+	v.Task.Results = append([]Item(nil), v.Task.Results...)
+	if v.Cancelled || v.Task.Status == "cancelled" {
+		v.Cancelled = true
+		for i := range v.Task.Results {
+			v.cancelItem(i)
 		}
 	}
-	return t
+	v.Aggregate()
+	for i := range v.Task.Results {
+		x := &v.Task.Results[i]
+		if x.Name == "" {
+			for _, scheme := range v.Schemes {
+				if scheme.ID == x.SchemeID && scheme.Version == x.SchemeVersion {
+					x.Name = scheme.Name
+					break
+				}
+			}
+		}
+		if x.OutputMode == "audio" {
+			x.Result = nil
+		}
+	}
+	return v.Task
+}
+
+func (x Item) deliverable() bool {
+	return (x.OutputMode != "audio" && x.Result != nil) || x.Speech.Status == "ready"
+}
+
+func (x Item) overallStatus() string {
+	if x.Status == "unknown" || x.Speech.Status == "unknown" {
+		return "unknown"
+	}
+	if x.Status == "cancelled" || (x.Speech.Status == "skipped" && x.Speech.Error != nil && x.Speech.Error.Code == 40901) {
+		if x.deliverable() {
+			return "partial_failed"
+		}
+		return "cancelled"
+	}
+	if x.Status != "succeeded" {
+		return x.Status
+	}
+	if x.OutputMode == "text" || x.Speech.Status == "ready" {
+		return "succeeded"
+	}
+	switch x.Speech.Status {
+	case "pending", "synthesizing":
+		return "processing"
+	default:
+		if x.deliverable() {
+			return "partial_failed"
+		}
+		return "failed"
+	}
 }
 
 func (v *Snapshot) Aggregate() {
-	good, bad := 0, 0
-	started, pending := v.Task.Status == "processing", false
-	for _, x := range v.Task.Results {
-		if x.Status == "unknown" || x.Speech.Status == "unknown" {
-			v.Task.Status = "unknown"
-			return
+	good, bad, cancelled := 0, 0, 0
+	started, pending, unknown := v.Task.Status == "processing", false, false
+	wholeCancelled := v.Cancelled || v.Task.Status == "cancelled"
+	for i := range v.Task.Results {
+		x := &v.Task.Results[i]
+		x.OverallStatus = x.overallStatus()
+		if x.deliverable() {
+			good++
 		}
 		if x.Status == "processing" || x.Status == "succeeded" || x.Status == "failed" {
 			started = true
 		}
-		if x.Status == "queued" || x.Status == "processing" || x.Speech.Status == "pending" || x.Speech.Status == "synthesizing" {
+		switch x.OverallStatus {
+		case "unknown":
+			unknown = true
+		case "queued", "processing":
 			pending = true
-			continue
-		}
-		if x.Status == "succeeded" && (x.Speech.Status == "ready" || x.Speech.Status == "skipped") {
-			good++
-		} else {
-			if x.Status == "succeeded" {
-				good++
-			}
+		case "failed", "partial_failed":
 			bad++
+		case "cancelled":
+			cancelled++
 		}
 	}
-	if pending {
+	switch {
+	case wholeCancelled:
+		v.Task.Status = "cancelled"
+		if good > 0 {
+			v.Task.Status = "partial_failed"
+		}
+	case unknown:
+		v.Task.Status = "unknown"
+	case pending:
 		v.Task.Status = "queued"
 		if started {
 			v.Task.Status = "processing"
 		}
-		return
-	}
-	switch {
-	case bad == 0:
+	case bad == 0 && cancelled == 0:
 		v.Task.Status = "succeeded"
 	case good > 0:
 		v.Task.Status = "partial_failed"
-	default:
+	case bad > 0:
 		v.Task.Status = "failed"
+	default:
+		v.Task.Status = "cancelled"
 	}
 }
 
@@ -94,13 +151,13 @@ func NewSnapshot(device string, req Request, p Policy, schemes []Scheme, usage U
 	if usage.Used+int64(len(schemes)) > p.MonthlyLimit {
 		return Snapshot{}, ErrQuota
 	}
-	v := Snapshot{Task: Task{ID: req.ID, DeviceID: device, Status: "queued", Revision: 1, Results: []Item{}, CreatedAt: now}, Schemes: schemes, Internal: make([]*Result, len(schemes))}
+	v := Snapshot{Task: Task{ID: req.ID, DeviceID: device, Status: "queued", Revision: 1, Results: []Item{}, CreatedAt: now}, Schemes: append([]Scheme(nil), schemes...), Internal: make([]*Result, len(schemes))}
 	for i, x := range schemes {
 		speech := "pending"
 		if x.OutputMode == "text" {
 			speech = "skipped"
 		}
-		v.Task.Results = append(v.Task.Results, Item{ID: fmt.Sprintf("item_%d", i+1), Order: i + 1, SchemeID: x.ID, SchemeVersion: x.Version, OutputMode: x.OutputMode, Status: "queued", Speech: Speech{Status: speech}})
+		v.Task.Results = append(v.Task.Results, Item{Name: x.Name, OverallStatus: "queued", ID: fmt.Sprintf("item_%d", i+1), Order: i + 1, SchemeID: x.ID, SchemeVersion: x.Version, OutputMode: x.OutputMode, Status: "queued", Speech: Speech{Status: speech}})
 	}
 	return v, nil
 }
@@ -136,20 +193,28 @@ func (v *Snapshot) Complete(done Completion) string {
 }
 
 func (v *Snapshot) Cancel() {
-	v.Task.Status = "cancelled"
+	v.Cancelled = true
 	for i := range v.Task.Results {
-		if v.Task.Results[i].Status == "queued" {
-			v.Task.Results[i].Status = "cancelled"
-			v.Task.Results[i].Speech.Status = "skipped"
-		}
+		v.cancelItem(i)
+	}
+	v.Aggregate()
+}
+
+func (v *Snapshot) cancelItem(i int) {
+	x := &v.Task.Results[i]
+	failure := &Failure{Code: 40901, Message: "识别处理已取消"}
+	if x.Status == "queued" || x.Status == "processing" {
+		x.Status = "cancelled"
+		x.Error = failure
+	}
+	if x.Speech.Status == "pending" || x.Speech.Status == "synthesizing" {
+		x.Speech.Status = "skipped"
+		x.Speech.Error = failure
 	}
 }
 
 func (v *Snapshot) DisableItem(i int) {
-	x := &v.Task.Results[i]
-	x.Status = "cancelled"
-	x.Speech.Status = "skipped"
-	x.Error = &Failure{Code: 40901, Message: "识别类型已停用"}
+	v.cancelItem(i)
 	v.Aggregate()
 }
 
@@ -182,6 +247,9 @@ func (v *Snapshot) Expire() {
 
 // NextStage preserves the configured type order, including speech synthesis.
 func (v Snapshot) NextStage(i int) string {
+	if v.Cancelled || v.Task.Status == "cancelled" || v.Task.Status == "unknown" {
+		return ""
+	}
 	x := v.Task.Results[i]
 	if x.Status == "queued" {
 		return "analysis"

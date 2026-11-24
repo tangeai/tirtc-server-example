@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -24,8 +25,12 @@ import (
 
 	devhandler "thing-connect/device-server/handler"
 	"thing-connect/internal/apiresp"
+	"thing-connect/internal/bindlimit"
+	"thing-connect/internal/cache"
+	"thing-connect/internal/captcha"
 	"thing-connect/internal/config"
 	"thing-connect/internal/deviceprofile"
+	"thing-connect/internal/service"
 	mysqlstore "thing-connect/internal/store/mysql"
 	mysqlmigrate "thing-connect/internal/store/mysql/migrate"
 	"thing-connect/internal/testenv"
@@ -45,6 +50,13 @@ type suite struct {
 	rdb    *redis.Client
 	sqlDB  *sqlx.DB
 }
+
+// suiteCleanupTargets mirrors user-server with AI, VoIP and call URLs configured.
+var suiteCleanupTargets = []string{"ai", "voip", "call"}
+
+type testMailer struct{}
+
+func (testMailer) Send(context.Context, string, string, string) error { return nil }
 
 func newSuite(t *testing.T) *suite {
 	t.Helper()
@@ -68,12 +80,28 @@ func newSuite(t *testing.T) *suite {
 
 	// user-server (no MQTT for unit tests)
 	usrR := gin.New()
-	usrS := &usrhandler.Server{DB: sqlDB, RDB: rdb, MQTT: nil, JWTSecret: cfg.JWTSecret, RoleStore: mysqlstore.NewRoleBindingStore(sqlDB), UnbindCleanup: &usrhandler.UnbindCleanup{
-		DeleteLocalRole: func(ctx context.Context, deviceID string) error {
-			return mysqlstore.NewRoleBindingStore(sqlDB).DeleteDeviceRole(ctx, deviceID)
-		},
-	}}
-	usrS.Register(usrR)
+	service.RegisterErrors()
+	serviceCfg := service.DefaultServiceConfig()
+	cacheStore := mysqlstore.NewCacheStore(rdb)
+	userSvc := service.NewUserService(mysqlstore.NewUserStore(sqlDB), cacheStore, captcha.DevVerifier{}, testMailer{}, cfg.JWTSecret, serviceCfg)
+	mailQueue, err := service.NewInMemoryPasswordResetEmailQueue(userSvc.DeliverPasswordResetCode, cache.NewPasswordResetMailGate(rdb))
+	if err != nil {
+		t.Fatal(err)
+	}
+	userSvc.SetPasswordResetEmailQueue(mailQueue)
+	policy, err := cfg.BindAttempt.Policy()
+	if err != nil {
+		t.Fatal(err)
+	}
+	limiter, err := bindlimit.New(&cache.BindAttemptStore{Client: rdb}, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bindSvc := service.NewBindService(mysqlstore.NewBindStore(sqlDB), cacheStore, nil, limiter, serviceCfg)
+	usrhandler.NewServer(userSvc, bindSvc, nil, nil, usrhandler.JWTAuth(cfg.JWTSecret, rdb, sqlDB), suiteCleanupTargets).Register(usrR)
+	ctx, stop := context.WithCancel(context.Background())
+	mailDone := make(chan struct{})
+	go func() { defer close(mailDone); mailQueue.Run(ctx) }()
 
 	s := &suite{
 		devSrv: httptest.NewServer(devR),
@@ -85,7 +113,8 @@ func newSuite(t *testing.T) *suite {
 	t.Cleanup(func() {
 		s.devSrv.Close()
 		s.usrSrv.Close()
-		usrS.Close()
+		stop()
+		<-mailDone
 		rdb.Close()
 		sqlDB.Close()
 	})
@@ -170,6 +199,7 @@ func doPost(t *testing.T, url, jwt string, body any) *apiResp {
 
 type apiResp struct {
 	HTTPStatus int
+	Header     http.Header     `json:"-"`
 	Code       int             `json:"code"`
 	Msg        string          `json:"msg"`
 	Data       json.RawMessage `json:"data"`
@@ -188,6 +218,7 @@ func parseResp(t *testing.T, resp *http.Response) *apiResp {
 		t.Fatalf("parse json: %v  raw: %s", err, body)
 	}
 	r.HTTPStatus = resp.StatusCode
+	r.Header = resp.Header
 	return &r
 }
 
@@ -414,6 +445,50 @@ func TestBindCodeNotFound(t *testing.T) {
 	}
 }
 
+func TestBindFailuresStartSharedPerUserCooldown(t *testing.T) {
+	s := newSuite(t)
+	email := uniqueEmail()
+	seedCode(t, s.rdb, email, "123456")
+	tok := dataString(t, s.usrPOST(t, "/v1/user/register", "", map[string]string{"email": email, "password": "pass1234", "code": "123456"}), "token")
+	var userID int64
+	if err := s.sqlDB.QueryRow(`SELECT id FROM users WHERE email=?`, email).Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		tag := fmt.Sprintf("bind_attempt:{%d}", userID)
+		s.rdb.Del(context.Background(), tag+":count", tag+":lock")
+	})
+	for i := 1; i < 9; i++ {
+		if r := s.usrPOST(t, "/v1/user/device/bind", tok, map[string]string{"code": "000000"}); r.Code != 4002 {
+			t.Fatalf("failure %d: want 4002, got %d %s", i, r.Code, r.Msg)
+		}
+	}
+	if r := s.usrPOST(t, "/v1/user/device/bind-by-id", tok, map[string]string{"device_id": "NOT_IN_POOL_1"}); r.Code != 4040 {
+		t.Fatalf("failure 9: want 4040, got %d %s", r.Code, r.Msg)
+	}
+	attempts := []func() *apiResp{
+		func() *apiResp {
+			return s.usrPOST(t, "/v1/user/device/bind-by-id", tok, map[string]string{"device_id": "NOT_IN_POOL_2"})
+		},
+		func() *apiResp { return s.usrPOST(t, "/v1/user/device/bind", tok, map[string]string{"code": "000000"}) },
+	}
+	for i, attempt := range attempts {
+		r := attempt()
+		if r.HTTPStatus != 429 || r.Code != 429 || r.Msg != "绑定失败次数过多，请 60 分钟后重试" {
+			t.Fatalf("attempt %d: HTTP %d code %d msg %s", i, r.HTTPStatus, r.Code, r.Msg)
+		}
+		if retry, err := strconv.Atoi(r.Header.Get("Retry-After")); err != nil || retry <= 3500 || retry > 3600 {
+			t.Fatalf("attempt %d: Retry-After=%q", i, r.Header.Get("Retry-After"))
+		}
+	}
+	otherEmail := uniqueEmail()
+	seedCode(t, s.rdb, otherEmail, "123456")
+	other := dataString(t, s.usrPOST(t, "/v1/user/register", "", map[string]string{"email": otherEmail, "password": "pass1234", "code": "123456"}), "token")
+	if r := s.usrPOST(t, "/v1/user/device/bind", other, map[string]string{"code": "000000"}); r.Code != 4002 {
+		t.Fatalf("other user: want 4002, got %d %s", r.Code, r.Msg)
+	}
+}
+
 // TC09: bind — 验证码错误（device_code_lookup 存在但 code 不匹配），返回 4001
 func TestBindWrongCode(t *testing.T) {
 	s := newSuite(t)
@@ -484,6 +559,47 @@ func TestResetNotOwned(t *testing.T) {
 	if r.HTTPStatus != 404 && r.Code != 40400 {
 		t.Errorf("reset not-owned: want 404, got HTTP=%d biz=%d", r.HTTPStatus, r.Code)
 	}
+}
+
+// TC11b: reset — 解绑与清理任务在同一事务内落库，每个已配置目标一条
+func TestResetEnqueuesCleanupForConfiguredTargets(t *testing.T) {
+	s := newSuite(t)
+	email := uniqueEmail()
+	seedCode(t, s.rdb, email, "123456")
+	tok := dataString(t, s.usrPOST(t, "/v1/user/register", "", map[string]string{"email": email, "password": "pass1234", "code": "123456"}), "token")
+	var userID int64
+	var quotaBefore int
+	if err := s.sqlDB.QueryRow(`SELECT id,bind_quota FROM users WHERE email=?`, email).Scan(&userID, &quotaBefore); err != nil {
+		t.Fatal(err)
+	}
+	deviceID := sqlBind(t, s.sqlDB, uniqueMAC(), "", userID)
+	t.Cleanup(func() { s.sqlDB.Exec(`DELETE FROM cleanup_outbox WHERE device_id=?`, deviceID) })
+
+	r := s.usrDELETE(t, "/v1/user/device/reset", tok, map[string]string{"device_id": deviceID})
+	if r.Code != 200 {
+		t.Fatalf("reset owned device: want 200, got HTTP=%d biz=%d msg=%s", r.HTTPStatus, r.Code, r.Msg)
+	}
+	var owner int64
+	var quotaAfter int
+	if err := s.sqlDB.QueryRow(`SELECT b.user_id,u.bind_quota FROM device_bind b JOIN users u ON u.id=? WHERE b.device_id=?`, userID, deviceID).Scan(&owner, &quotaAfter); err != nil {
+		t.Fatal(err)
+	}
+	if owner != 0 || quotaAfter != quotaBefore {
+		t.Fatalf("after reset owner=%d quota=%d, want 0 and %d", owner, quotaAfter, quotaBefore)
+	}
+	var targets []string
+	if err := s.sqlDB.Select(&targets, `SELECT target FROM cleanup_outbox WHERE device_id=? ORDER BY target`, deviceID); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(targets, ",") != "ai,call,voip" {
+		t.Fatalf("cleanup targets=%v, want ai, call and voip", targets)
+	}
+	injectDeviceOnlineByID(t, s.rdb, deviceID)
+	again := s.usrPOST(t, "/v1/user/device/bind-by-id", tok, map[string]string{"device_id": deviceID})
+	if again.HTTPStatus != 409 || again.Code != 6016 || again.Msg != "设备解绑清理中，请稍后重新绑定" {
+		t.Fatalf("pending cleanup rebind: HTTP=%d code=%d msg=%q", again.HTTPStatus, again.Code, again.Msg)
+	}
+
 }
 
 // TC12: device/token — 缺少请求头，返回 6008

@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"thing-connect/internal/backoff"
 	"time"
 )
 
@@ -385,7 +386,7 @@ func (c *AgentAPIClient) listRoles(ctx context.Context, path, query string) ([]R
 		return nil, 0, err
 	}
 	if res.StatusCode != http.StatusOK {
-		return nil, 0, fmt.Errorf("agent: HTTP %d: %s", res.StatusCode, string(body))
+		return nil, 0, &HTTPError{Status: res.StatusCode, Body: string(body)}
 	}
 
 	var wrap roleResp
@@ -449,7 +450,7 @@ func (c *AgentAPIClient) doGet(ctx context.Context, path string) (*Role, error) 
 		return nil, err
 	}
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("agent: HTTP %d: %s", res.StatusCode, string(body))
+		return nil, &HTTPError{Status: res.StatusCode, Body: string(body)}
 	}
 
 	var wrap roleResp
@@ -510,7 +511,7 @@ func (c *AgentAPIClient) doCreate(ctx context.Context, path string, input RoleIn
 		return nil, err
 	}
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("agent: HTTP %d: %s", res.StatusCode, string(respBody))
+		return nil, &HTTPError{Status: res.StatusCode, Body: string(respBody)}
 	}
 
 	var wrap roleResp
@@ -570,7 +571,7 @@ func (c *AgentAPIClient) doUpdate(ctx context.Context, path string, input RoleIn
 		return nil, err
 	}
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("agent: HTTP %d: %s", res.StatusCode, string(respBody))
+		return nil, &HTTPError{Status: res.StatusCode, Body: string(respBody)}
 	}
 
 	var wrap roleResp
@@ -600,6 +601,20 @@ func (c *AgentAPIClient) doUpdate(ctx context.Context, path string, input RoleIn
 }
 
 var ErrRoleNotFound = errors.New("cloud role does not exist")
+
+// HTTPError is a non-200 agent API response. Body is unreviewed upstream text
+// and stays in server logs.
+type HTTPError struct {
+	Status int
+	Body   string
+}
+
+func (e *HTTPError) Error() string { return fmt.Sprintf("agent: HTTP %d: %s", e.Status, e.Body) }
+
+// Rejected reports whether the cloud refused the submitted parameters.
+func (e *HTTPError) Rejected() bool {
+	return e.Status == http.StatusBadRequest || e.Status == http.StatusUnprocessableEntity
+}
 
 // DeleteRole deletes a role.
 func (c *AgentAPIClient) DeleteRole(ctx context.Context, roleID string) error {
@@ -635,7 +650,7 @@ func (c *AgentAPIClient) doDelete(ctx context.Context, path string) error {
 	}
 	if res.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(res.Body)
-		return fmt.Errorf("agent: HTTP %d: %s", res.StatusCode, string(body))
+		return &HTTPError{Status: res.StatusCode, Body: string(body)}
 	}
 
 	// DELETE may not return JSON body; read but don't require parse.
@@ -655,6 +670,17 @@ func (c *AgentAPIClient) doDelete(ctx context.Context, path string) error {
 // ── V2 Device-Role binding ──
 
 const deviceRolesPath = "/v2/ai/device-roles"
+
+// ErrDeviceNotFound means the cloud has no record of a requested device, so it
+// also holds no role binding for it.
+var ErrDeviceNotFound = errors.New("cloud device does not exist")
+
+const cloudCodeDeviceNotFound = 16280016
+
+func deviceNotFound(body []byte) bool {
+	var wrap roleResp
+	return json.Unmarshal(body, &wrap) == nil && wrap.Code == cloudCodeDeviceNotFound
+}
 
 // BatchCreateDeviceRoles creates device-role bindings for multiple devices.
 func (c *AgentAPIClient) BatchCreateDeviceRoles(ctx context.Context, req BatchDeviceRolesRequest) error {
@@ -712,8 +738,11 @@ func (c *AgentAPIClient) doDeviceRoleWrite(ctx context.Context, method, path str
 	}
 	defer res.Body.Close()
 	respBody, _ := io.ReadAll(res.Body)
+	if deviceNotFound(respBody) {
+		return ErrDeviceNotFound
+	}
 	if res.StatusCode != http.StatusOK {
-		return fmt.Errorf("agent: HTTP %d: %s", res.StatusCode, string(respBody))
+		return &HTTPError{Status: res.StatusCode, Body: string(respBody)}
 	}
 	var wrap roleResp
 	if len(respBody) > 0 {
@@ -745,8 +774,11 @@ func (c *AgentAPIClient) doDeviceRoleQuery(ctx context.Context, req BatchDeviceR
 	if err != nil {
 		return nil, err
 	}
+	if deviceNotFound(respBody) {
+		return nil, ErrDeviceNotFound
+	}
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("agent: HTTP %d: %s", res.StatusCode, string(respBody))
+		return nil, &HTTPError{Status: res.StatusCode, Body: string(respBody)}
 	}
 	var wrap roleResp
 	if err := json.Unmarshal(respBody, &wrap); err != nil {
@@ -808,7 +840,7 @@ func (c *AgentAPIClient) doListVoices(ctx context.Context, language, model strin
 		return nil, err
 	}
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("agent: HTTP %d: %s", res.StatusCode, string(body))
+		return nil, &HTTPError{Status: res.StatusCode, Body: string(body)}
 	}
 	var wrap roleResp
 	if err := json.Unmarshal(body, &wrap); err != nil {
@@ -874,7 +906,7 @@ func (c *AgentAPIClient) doListMCPTools(ctx context.Context, path string) ([]MCP
 		return nil, err
 	}
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("agent: HTTP %d: %s", res.StatusCode, string(body))
+		return nil, &HTTPError{Status: res.StatusCode, Body: string(body)}
 	}
 	var wrap roleResp
 	if err := json.Unmarshal(body, &wrap); err != nil {
@@ -909,7 +941,7 @@ func (c *AgentAPIClient) doGetMCPTool(ctx context.Context, path string) (*MCPToo
 		return nil, err
 	}
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("agent: HTTP %d: %s", res.StatusCode, string(body))
+		return nil, &HTTPError{Status: res.StatusCode, Body: string(body)}
 	}
 	var wrap roleResp
 	if err := json.Unmarshal(body, &wrap); err != nil {
@@ -962,7 +994,7 @@ func (c *AgentAPIClient) doListAppMCPTools(ctx context.Context) ([]AppMCPTool, e
 		return nil, err
 	}
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("agent: HTTP %d: %s", res.StatusCode, string(body))
+		return nil, &HTTPError{Status: res.StatusCode, Body: string(body)}
 	}
 	var wrap roleResp
 	if err := json.Unmarshal(body, &wrap); err != nil {
@@ -1040,7 +1072,7 @@ func (c *AgentAPIClient) finishDisabledMCPCreate(ctx context.Context, created *A
 }
 
 func waitMCPRetry(ctx context.Context, delay time.Duration) bool {
-	timer := time.NewTimer(delay)
+	timer := time.NewTimer(backoff.Jitter(delay))
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
@@ -1132,7 +1164,7 @@ func (c *AgentAPIClient) doAppMCPWrite(ctx context.Context, method, path string,
 		return nil, err
 	}
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("agent: HTTP %d: %s", res.StatusCode, string(respBody))
+		return nil, &HTTPError{Status: res.StatusCode, Body: string(respBody)}
 	}
 	var wrap roleResp
 	if err := json.Unmarshal(respBody, &wrap); err != nil {
@@ -1168,7 +1200,7 @@ func (c *AgentAPIClient) doGetAppMCPTool(ctx context.Context, path string) (*App
 		return nil, err
 	}
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("agent: HTTP %d: %s", res.StatusCode, string(body))
+		return nil, &HTTPError{Status: res.StatusCode, Body: string(body)}
 	}
 	var wrap roleResp
 	if err := json.Unmarshal(body, &wrap); err != nil {
@@ -1201,7 +1233,7 @@ func (c *AgentAPIClient) doAppMCPDelete(ctx context.Context, path string) error 
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(res.Body)
-		return fmt.Errorf("agent: HTTP %d: %s", res.StatusCode, string(body))
+		return &HTTPError{Status: res.StatusCode, Body: string(body)}
 	}
 	var wrap roleResp
 	body, _ := io.ReadAll(res.Body)
@@ -1247,7 +1279,7 @@ func (c *AgentAPIClient) doListPlugins(ctx context.Context) ([]DevicePlugin, err
 		return nil, err
 	}
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("agent: HTTP %d: %s", res.StatusCode, string(body))
+		return nil, &HTTPError{Status: res.StatusCode, Body: string(body)}
 	}
 	var wrap roleResp
 	if err := json.Unmarshal(body, &wrap); err != nil {
@@ -1354,7 +1386,7 @@ func (c *AgentAPIClient) doPluginWrite(ctx context.Context, method, path string,
 		return nil, err
 	}
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("agent: HTTP %d: %s", res.StatusCode, string(respBody))
+		return nil, &HTTPError{Status: res.StatusCode, Body: string(respBody)}
 	}
 	var wrap roleResp
 	if err := json.Unmarshal(respBody, &wrap); err != nil {
@@ -1395,7 +1427,7 @@ func (c *AgentAPIClient) doGetPlugin(ctx context.Context, path string) (*DeviceP
 		return nil, nil //nolint:nilnil // Cloud-confirmed absence uses the existing not-found contract.
 	}
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("agent: HTTP %d: %s", res.StatusCode, string(body))
+		return nil, &HTTPError{Status: res.StatusCode, Body: string(body)}
 	}
 	if parseErr != nil {
 		return nil, fmt.Errorf("agent: parse response: %w", parseErr)
@@ -1438,7 +1470,7 @@ func (c *AgentAPIClient) doPluginDelete(ctx context.Context, path string) error 
 		return nil
 	}
 	if res.StatusCode != http.StatusOK {
-		return fmt.Errorf("agent: HTTP %d: %s", res.StatusCode, string(body))
+		return &HTTPError{Status: res.StatusCode, Body: string(body)}
 	}
 	if len(body) == 0 {
 		return nil // Retain compatibility with an empty HTTP 200 response.
@@ -1487,7 +1519,7 @@ func (c *AgentAPIClient) doListKnowledgeIndexes(ctx context.Context, page, pageS
 		return nil, 0, err
 	}
 	if res.StatusCode != http.StatusOK {
-		return nil, 0, fmt.Errorf("agent: HTTP %d: %s", res.StatusCode, string(body))
+		return nil, 0, &HTTPError{Status: res.StatusCode, Body: string(body)}
 	}
 	var wrap roleResp
 	if err := json.Unmarshal(body, &wrap); err != nil {
@@ -1582,7 +1614,7 @@ func (c *AgentAPIClient) doKnowledgeWrite(ctx context.Context, method, path stri
 		return nil, err
 	}
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("agent: HTTP %d: %s", res.StatusCode, string(respBody))
+		return nil, &HTTPError{Status: res.StatusCode, Body: string(respBody)}
 	}
 	var wrap roleResp
 	if err := json.Unmarshal(respBody, &wrap); err != nil {
@@ -1615,7 +1647,7 @@ func (c *AgentAPIClient) doGetKnowledge(ctx context.Context, path string) (*Know
 		return nil, err
 	}
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("agent: HTTP %d: %s", res.StatusCode, string(body))
+		return nil, &HTTPError{Status: res.StatusCode, Body: string(body)}
 	}
 	var wrap roleResp
 	if err := json.Unmarshal(body, &wrap); err != nil {
@@ -1668,7 +1700,7 @@ func (c *AgentAPIClient) doListKnowledgeDocuments(ctx context.Context, path stri
 		return nil, 0, err
 	}
 	if res.StatusCode != http.StatusOK {
-		return nil, 0, fmt.Errorf("agent: HTTP %d: %s", res.StatusCode, string(body))
+		return nil, 0, &HTTPError{Status: res.StatusCode, Body: string(body)}
 	}
 	var wrap roleResp
 	if err := json.Unmarshal(body, &wrap); err != nil {
@@ -1757,7 +1789,7 @@ func (c *AgentAPIClient) knowledgeFilesPage(ctx context.Context, cursor string) 
 		return nil, err
 	}
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("agent: HTTP %d: %s", res.StatusCode, string(body))
+		return nil, &HTTPError{Status: res.StatusCode, Body: string(body)}
 	}
 	var wrap roleResp
 	if err := json.Unmarshal(body, &wrap); err != nil {
@@ -1826,7 +1858,7 @@ func (c *AgentAPIClient) doUploadKnowledgeFile(ctx context.Context, fileName str
 		return nil, err
 	}
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("agent: HTTP %d: %s", res.StatusCode, string(respBody))
+		return nil, &HTTPError{Status: res.StatusCode, Body: string(respBody)}
 	}
 	var wrap roleResp
 	if err := json.Unmarshal(respBody, &wrap); err != nil {

@@ -113,7 +113,7 @@ MFA 用于登录及首次绑定确认。登录后的管理写操作和恢复码�
 | AI 角色类型 | `GET/POST /ai-role-types`、`GET /ai-role-types/voices`、`PUT /ai-role-types/:id`、`PUT /ai-role-types/:id/status` |
 | 开发板目录 | `GET/POST /boards`、`POST /boards/images`、`PUT/DELETE /boards/:id`、`PUT /boards/:id/status` |
 
-服务状态的 `instances[]` 可包含 `metrics` 整数映射。Device 实例提供 `presence_queued`、`presence_rejected_total`、`presence_write_failures_total`、`connection_pending`、`connection_oldest_pending_age_ms`、`connection_backlog_measured_at_ms`，分别表示内存队列长度、累计拒收数、累计投影失败数、待补写设备数、最老待写年龄（毫秒）和指标采样时间（Unix 毫秒）。旧实例或其他服务可以省略该字段。待写超过 150 秒会使 presence 依赖不健康，不能只凭数据库连接成功判定服务就绪。
+服务状态的 `instances[]` 可包含 `metrics` 整数映射。Device 实例提供 `presence_queued`、`presence_rejected_total`、`presence_write_failures_total`、`connection_pending`、`connection_oldest_pending_age_ms`、`connection_backlog_measured_at_ms`，分别表示内存队列长度、累计拒收数、累计投影失败数、待补写设备数、最老待写年龄（毫秒）和指标采样时间（Unix 毫秒）。User 实例提供 `cleanup_pending`、`cleanup_oldest_pending_age_ms`、`cleanup_backlog_measured_at_ms`，分别表示解绑清理待处理任务数、最老任务等待时长（毫秒，自首次入队起）和采样时间（Unix 毫秒）；最老任务超过 15 分钟或采样过期时 `cleanup_outbox` 依赖不健康，但不影响 User 的 `/health/ready`。旧实例或其他服务可以省略该字段。待写超过 150 秒会使 presence 依赖不健康，不能只凭数据库连接成功判定服务就绪。
 
 `GET /services/:service/status` 在实例状态外返回 `configuration_ready`、`required_configurations[]`、`start_command` 和 `restart_command`。`required_configurations[]` 列出未发布或无效的启动阻断项。命令仅用于管理员复制到部署服务器执行，Admin 不执行主机进程控制。
 
@@ -312,7 +312,8 @@ X-Internal-Key: <shared-internal-key>
 - 修改管理员昵称、备注或角色显示名称不撤销登录会话；密码、邮箱、账号状态、角色成员、角色继承和权限变化会撤销受影响管理员会话。
 - 更新 `jwt_secret` 会使所有使用该业务密钥的现有令牌失效。
 - 密钥原值只向具有对应密钥修改权限的管理员和持有 `internal.key` 的内部服务返回；所有相关响应均禁止缓存。
-- 管理员密码、MFA、角色、菜单、用户状态和设备解绑等操作写入审计日志。
+- 管理员密码、MFA、角色、菜单、用户状态和设备解绑等操作写入审计日志。密码重置邮件返回 HTTP 202 时，命令及关联审计均已提交，可通过审计中的 `command_id` 核对投递。
+- 角色或权限变更已保存、权限快照暂时无法加载时返回 HTTP 503。稍后刷新查看结果；服务重新读到已提交的策略后恢复受保护操作。
 
 ## AI识别
 
@@ -325,6 +326,8 @@ X-Internal-Key: <shared-internal-key>
 | GET | `/v1/admin/recognition/requests?device_id=...` | recognition.read | 最近50条任务及逐次 calls；设备可省略 |
 | GET | `/v1/admin/devices/:device_id/recognition` | device.read | 用户选择、开关与月用量 |
 | PUT | `/v1/admin/devices/:device_id/recognition` | device.recognition.write | 管理许可与月额度 |
+
+任务记录中的 `task` 使用与[设备识别任务](../../api-reference.md#recognition-task)一致的公开结果结构，包含发布版本名称 `results[].name`、类型整体状态 `results[].overall_status`；纯语音类型不返回内部分析文字。`calls` 单独保留逐阶段调用状态和用量，不以任务整体状态代替计费记录。
 
 类型写入体为 scheme、action（save/publish/status）、expected_revision、reason。scheme 包含 scheme_id（新建为空）、name、description、media_type=audio、model、prompt、output_mode=text/audio/text_audio、voice、limits.max_file_bytes、limits.max_audio_seconds、enabled。publish 使用已保存草稿，生成不可变版本；status 使用 scheme_id 和 enabled，不编辑发布内容。错误40000表示字段不合法，40901表示编辑版本冲突，40400表示资源不存在。
 

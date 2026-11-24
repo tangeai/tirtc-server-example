@@ -26,10 +26,12 @@
 
 | 版本 | 状态 | 获取方式 |
 |---|---|---|
-| [v1.0.0](../../releases/tag/v1.0.0) | **稳定版**，当前线上版本 | `main` 分支或 `v1.0.0` 标签 |
-| 1.1.0 | **开发中**，测试版 [v1.1.0-beta.1](../../releases/tag/v1.1.0-beta.1)，未正式发布 | `develop` 分支 |
+| [v1.0.0](../../releases/tag/v1.0.0) | **稳定版** | `v1.0.0` 标签 |
+| 1.1.0 | **开发中**，测试版 [v1.1.0-beta.3](../../releases/tag/v1.1.0-beta.3)，未正式发布 | `main` 分支 |
 
-生产部署使用稳定版。`develop` 分支和带 `-beta`、`-rc` 后缀的测试版用于开发与验收，接口和配置仍可能变化。1.0.x 的修复版本从 `release/1.0` 分支发布。
+生产部署使用稳定版本标签。`main` 分支和带 `-beta`、`-rc` 后缀的测试版用于开发与验收，接口和配置仍可能变化。发布从经过验证的 `main` 提交打 Tag，历史维护分支不作为当前发布入口。
+
+参与开发时，从最新 `main` 创建功能或修复分支，通过 Pull Request 和 CI 检查后合并。分支约定、测试要求与提交步骤见 [贡献指南](CONTRIBUTING.md)。
 
 ---
 
@@ -46,7 +48,7 @@
 ### 步骤 1：准备环境和测试素材
 
 ```bash
-git clone https://github.com/tange-ai/tirtc-server-example.git
+git clone https://github.com/tangeai/tirtc-server-example.git
 cd tirtc-server-example/thing-connect/device-sim/device-sim-py
 # Ubuntu/Debian（CPython 3.10–3.14、x86_64）：安装 Python
 sudo apt update

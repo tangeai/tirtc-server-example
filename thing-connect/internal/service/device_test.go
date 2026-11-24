@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
+
 	"thing-connect/internal/model"
 	"thing-connect/internal/physid"
 	"thing-connect/internal/store"
@@ -167,7 +169,7 @@ func TestDeviceService_AuthorizeTTS(t *testing.T) {
 		verify:     map[string][]byte{physHash: record},
 	}
 	svc := NewDeviceService(nil, cache, secret, DefaultServiceConfig())
-	token, err := issueMQTTToken(clientID, secret, time.Minute)
+	token, err := issueMQTTToken(clientID, clientID, secret, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +178,7 @@ func TestDeviceService_AuthorizeTTS(t *testing.T) {
 		t.Fatalf("matching code/token should pass: %v", err)
 	}
 
-	otherToken, _ := issueMQTTToken("tmp_other", secret, time.Minute)
+	otherToken, _ := issueMQTTToken("tmp_other", "tmp_other", secret, time.Minute)
 	if err := svc.AuthorizeTTS(context.Background(), code, otherToken); !errors.Is(err, ErrInvalidCode) {
 		t.Fatalf("token from another report: want ErrInvalidCode, got %v", err)
 	}
@@ -277,6 +279,30 @@ func TestDeviceService_Report_Unbound_ReturnsCodeAndToken(t *testing.T) {
 	}
 	if result.TempToken == "" {
 		t.Error("want non-empty TempToken")
+	}
+}
+
+func brokerIdentity(t *testing.T, token string) (username, clientID string) {
+	t.Helper()
+	tok, err := jwt.Parse(token, func(*jwt.Token) (any, error) { return []byte("secret"), nil })
+	if err != nil {
+		t.Fatalf("parse token: %v", err)
+	}
+	claims := tok.Claims.(jwt.MapClaims)
+	username, _ = claims["device_id"].(string)
+	clientID, _ = claims["clientid"].(string)
+	return username, clientID
+}
+
+func TestDeviceService_Report_TempTokenBindsTempClientID(t *testing.T) {
+	svc := NewDeviceService(&fakeDeviceStore{}, &fakeCacheForDevice{verifyOK: true}, "secret", DefaultServiceConfig())
+	result, err := svc.Report(context.Background(), testIP, noHdr, "AA:BB:CC:DD:EE:FF", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	username, clientID := brokerIdentity(t, result.TempToken)
+	if username != result.TempClientID || clientID != result.TempClientID {
+		t.Fatalf("temp token identity = (%q, %q), want both %q", username, clientID, result.TempClientID)
 	}
 }
 
@@ -655,9 +681,30 @@ func TestDeviceService_Token_SameMACOnlySelf_OK(t *testing.T) {
 	ts := strconv.FormatInt(time.Now().Unix(), 10)
 	nonce := "tokself1"
 	sig := computeHMAC("key-xyz", "dev-001"+ts+nonce)
-	_, err := svc.Token(context.Background(), "dev-001", ts, nonce, sig, "AA:AA")
+	tok, err := svc.Token(context.Background(), "dev-001", ts, nonce, sig, "AA:AA")
 	if err != nil {
 		t.Fatalf("want nil, got %v", err)
+	}
+	if username, clientID := brokerIdentity(t, tok); username != "dev-001" || clientID != "sn_dev-001" {
+		t.Fatalf("mqtt token identity = (%q, %q), want (dev-001, sn_dev-001)", username, clientID)
+	}
+}
+
+func TestSpreadExpiryStaysWithinConfiguredLifetime(t *testing.T) {
+	const lifetime = 168 * time.Hour
+	lowest, highest := lifetime, time.Duration(0)
+	for i := 0; i < 2000; i++ {
+		got := spreadExpiry(lifetime)
+		if got > lifetime || got < lifetime*9/10 {
+			t.Fatalf("expiry %s outside [%s, %s]", got, lifetime*9/10, lifetime)
+		}
+		lowest, highest = min(lowest, got), max(highest, got)
+	}
+	if highest-lowest < lifetime/20 {
+		t.Fatalf("expiries not spread: %s..%s", lowest, highest)
+	}
+	if spreadExpiry(0) != 0 {
+		t.Fatal("zero lifetime changed")
 	}
 }
 

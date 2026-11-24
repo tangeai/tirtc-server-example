@@ -2,9 +2,9 @@ package handler
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -24,6 +24,7 @@ type fetchFn func(ctx context.Context, deviceID, roleID string) (peerID, token s
 // Server holds handler dependencies.
 type Server struct {
 	mu            sync.RWMutex
+	generation    uint64
 	jwtSecret     string
 	defaultRoleID string
 	roleStore     store.RoleBindingStore
@@ -34,6 +35,7 @@ type Server struct {
 func (s *Server) UpdateRuntime(defaultRoleID, baseURL, accessKeyID, appID, secretKeyID string) {
 	client := &http.Client{Timeout: 10 * time.Second}
 	s.mu.Lock()
+	s.generation++
 	s.defaultRoleID = defaultRoleID
 	s.fetch = func(ctx context.Context, deviceID, roleID string) (string, string, int32, string, error) {
 		return aichatapi.PostTokenAichat(ctx, client, baseURL, accessKeyID, appID, secretKeyID, deviceID, roleID)
@@ -42,10 +44,10 @@ func (s *Server) UpdateRuntime(defaultRoleID, baseURL, accessKeyID, appID, secre
 	s.mu.Unlock()
 }
 
-func (s *Server) runtime() (string, fetchFn) {
+func (s *Server) runtime() (string, fetchFn, uint64) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.defaultRoleID, s.fetch
+	return s.defaultRoleID, s.fetch, s.generation
 }
 
 // NewServer creates a production Server wired to the real upstream.
@@ -76,12 +78,9 @@ func (s *Server) getAIToken(c *gin.Context) {
 	}
 	tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
 
-	tok, err := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
-		}
+	tok, err := jwt.Parse(tokenStr, func(*jwt.Token) (interface{}, error) {
 		return []byte(s.jwtSecret), nil
-	})
+	}, jwt.WithValidMethods([]string{"HS256"}), jwt.WithExpirationRequired())
 	if err != nil || !tok.Valid {
 		apiresp.Unauthorized(c)
 		return
@@ -93,18 +92,18 @@ func (s *Server) getAIToken(c *gin.Context) {
 		return
 	}
 	deviceID, _ := claims["device_id"].(string)
-	if deviceID == "" {
+	if deviceID == "" || len(deviceID) > 64 || strings.HasPrefix(deviceID, "tmp_") || claims["user_id"] != nil {
 		apiresp.Unauthorized(c)
 		return
 	}
 
-	roleID, fetch := s.runtime()
+	roleID, fetch, generation := s.runtime()
 	if s.roleStore != nil {
 		if bound, err := s.roleStore.GetDeviceRole(c.Request.Context(), deviceID); err == nil && bound != "" {
 			roleID = bound
 		}
 	}
-	cacheKey := deviceID + ":" + roleID
+	cacheKey := strconv.FormatUint(generation, 10) + ":" + deviceID + ":" + roleID
 
 	if cached, found := s.cache.Get(cacheKey); found {
 		c.JSON(http.StatusOK, cached)
@@ -134,6 +133,12 @@ func (s *Server) getAIToken(c *gin.Context) {
 			"role_id": roleID,
 		},
 	}
-	s.cache.Set(cacheKey, resp, gocache.DefaultExpiration)
+	// Runtime replacement and cache publication share the same lock. A late
+	// result may finish its original request but cannot restore old credentials.
+	s.mu.RLock()
+	if s.generation == generation {
+		s.cache.Set(cacheKey, resp, gocache.DefaultExpiration)
+	}
+	s.mu.RUnlock()
 	c.JSON(http.StatusOK, resp)
 }

@@ -95,6 +95,25 @@ class RecognitionTest(unittest.TestCase):
         self.assertIn('recognize audio task1', output.getvalue())
         http.assert_not_called()
 
+    def test_extended_result_fields_keep_ready_gate_and_revision_filter(self):
+        schedule = MagicMock()
+        client = AudioRecognition('', '', '.', device_id='dev', audio_ready=schedule)
+        output = io.StringIO()
+        with redirect_stdout(output):
+            for revision, overall, speech in [(3, 'processing', 'pending'),
+                                               (5, 'succeeded', 'ready'),
+                                               (1, 'queued', 'pending'),
+                                               (5, 'succeeded', 'ready')]:
+                client.on_notification({'type': 'recognition_result', 'channel': 'recognition',
+                    'payload': {'code': 200, 'data': {'device_id': 'dev', 'request_id': 'task',
+                    'status_revision': revision, 'status': overall, 'results': [{
+                    'item_id': 'item_1', 'name': '历史名称', 'overall_status': overall,
+                    'status': 'succeeded', 'speech': {'status': speech}}]}}})
+        self.assertEqual(output.getvalue().count('异步识别结果'), 2)
+        self.assertIn('历史名称', output.getvalue())
+        schedule.assert_called_once_with('task', 'item_1')
+        self.assertEqual(client._revisions['task'], 5)
+
     def test_mqtt_invalid_or_foreign_result_is_ignored(self):
         client = AudioRecognition('', '', '.', device_id='dev')
         output = io.StringIO()

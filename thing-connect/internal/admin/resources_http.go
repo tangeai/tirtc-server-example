@@ -1,9 +1,12 @@
 package admin
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -11,7 +14,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
-	"github.com/redis/go-redis/v9"
 
 	"thing-connect/internal/apiresp"
 	"thing-connect/internal/logging"
@@ -125,6 +127,7 @@ type statusRequest struct {
 }
 
 func (s *HTTPServer) updateUserStatus(c *gin.Context) {
+	ctx := c.Request.Context()
 	id, err := positiveID(c.Param("id"))
 	var request statusRequest
 	if err != nil || c.ShouldBindJSON(&request) != nil || (request.Status != 0 && request.Status != 1) {
@@ -132,13 +135,13 @@ func (s *HTTPServer) updateUserStatus(c *gin.Context) {
 		return
 	}
 	identity, _ := identityFromContext(c)
-	tx, err := s.store.db.BeginTxx(c, nil)
+	tx, err := s.store.db.BeginTxx(ctx, nil)
 	if err != nil {
 		apiresp.Internal(c, err.Error())
 		return
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(c, `UPDATE users SET status=?,disabled_at=IF(?=0,NOW(),NULL),auth_revision=auth_revision+1 WHERE id=? AND status=?`, request.Status, request.Status, id, *request.ExpectedStatus)
+	result, err := tx.ExecContext(ctx, `UPDATE users SET status=?,disabled_at=IF(?=0,NOW(),NULL),auth_revision=auth_revision+1 WHERE id=? AND status=?`, request.Status, request.Status, id, *request.ExpectedStatus)
 	if err != nil {
 		apiresp.Internal(c, err.Error())
 		return
@@ -151,12 +154,14 @@ func (s *HTTPServer) updateUserStatus(c *gin.Context) {
 		apiresp.Internal(c, "commit user status")
 		return
 	}
+	effectCtx, cancel := committedEffectContext(ctx)
+	defer cancel()
 	key := fmt.Sprintf("thingconnect:user:disabled:%d", id)
-	_ = s.redis.Set(c, fmt.Sprintf("thingconnect:user:revoked_after:%d", id), strconv.FormatInt(time.Now().Unix(), 10), 0).Err()
+	_ = s.redis.Set(effectCtx, fmt.Sprintf("thingconnect:user:revoked_after:%d", id), strconv.FormatInt(time.Now().Unix(), 10), 0).Err()
 	if request.Status == 0 {
-		_ = s.redis.Set(c, key, "1", 0).Err()
+		_ = s.redis.Set(effectCtx, key, "1", 0).Err()
 	} else {
-		_ = s.redis.Del(c, key).Err()
+		_ = s.redis.Del(effectCtx, key).Err()
 	}
 	apiresp.OK(c, gin.H{"id": id, "status": request.Status})
 }
@@ -168,6 +173,7 @@ type quotaRequest struct {
 }
 
 func (s *HTTPServer) updateUserQuota(c *gin.Context) {
+	ctx := c.Request.Context()
 	id, err := positiveID(c.Param("id"))
 	var request quotaRequest
 	if err != nil || c.ShouldBindJSON(&request) != nil || request.BindQuota < 0 || request.ExpectedQuota < 0 {
@@ -175,13 +181,13 @@ func (s *HTTPServer) updateUserQuota(c *gin.Context) {
 		return
 	}
 	identity, _ := identityFromContext(c)
-	tx, err := s.store.db.BeginTxx(c, nil)
+	tx, err := s.store.db.BeginTxx(ctx, nil)
 	if err != nil {
 		apiresp.Internal(c, err.Error())
 		return
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(c, `UPDATE users SET bind_quota=? WHERE id=? AND bind_quota=?`, request.BindQuota, id, request.ExpectedQuota)
+	result, err := tx.ExecContext(ctx, `UPDATE users SET bind_quota=? WHERE id=? AND bind_quota=?`, request.BindQuota, id, request.ExpectedQuota)
 	if err != nil {
 		apiresp.Internal(c, err.Error())
 		return
@@ -198,6 +204,7 @@ func (s *HTTPServer) updateUserQuota(c *gin.Context) {
 }
 
 func (s *HTTPServer) sendPasswordResetEmail(c *gin.Context) {
+	ctx := c.Request.Context()
 	id, err := positiveID(c.Param("id"))
 	var request struct {
 		Reason string `json:"reason" binding:"required"`
@@ -206,17 +213,16 @@ func (s *HTTPServer) sendPasswordResetEmail(c *gin.Context) {
 		apiresp.BadParam(c, "请求无效")
 		return
 	}
-	var email string
-	if err := s.store.db.GetContext(c, &email, `SELECT email FROM users WHERE id=? AND status=1`, id); err != nil {
-		c.JSON(http.StatusNotFound, apiresp.JSON{Code: 404, Msg: "可用用户不存在"})
-		return
-	}
-	if err := s.redis.XAdd(c, &redis.XAddArgs{Stream: "thingconnect:admin:user-commands", MaxLen: 10000, Approx: true, Values: map[string]any{"type": "password_reset_email", "user_id": id, "email": email, "created_at": time.Now().Unix()}}).Err(); err != nil {
-		apiresp.Internal(c, err.Error())
-		return
-	}
 	identity, _ := identityFromContext(c)
-	_ = s.store.Audit(c, requestAudit(c, identity, "user.password_reset", "user", strconv.FormatInt(id, 10), request.Reason, "", `{"queued":true}`))
+	event := requestAudit(c, identity, "user.password_reset", "user", strconv.FormatInt(id, 10), request.Reason, "", "")
+	if err := s.store.QueuePasswordReset(ctx, id, event); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			c.JSON(http.StatusNotFound, apiresp.JSON{Code: 404, Msg: "可用用户不存在"})
+		} else {
+			apiresp.Internal(c, "queue password reset")
+		}
+		return
+	}
 	c.JSON(http.StatusAccepted, apiresp.JSON{Code: 200, Msg: "ok", Data: gin.H{"queued": true}})
 }
 
@@ -244,6 +250,7 @@ type managedPoolDevice struct {
 }
 
 func (s *HTTPServer) listDevicePool(c *gin.Context) {
+	ctx := c.Request.Context()
 	page, size := pageParams(c)
 	keyword := strings.TrimSpace(c.Query("keyword"))
 	state := strings.TrimSpace(c.Query("state"))
@@ -276,7 +283,7 @@ func (s *HTTPServer) listDevicePool(c *gin.Context) {
 		) imported ON imported.resource_id=p.device_id
 		LEFT JOIN admin_jobs j ON j.id=imported.job_id`
 	var total int
-	if err := s.store.db.GetContext(c, &total, `SELECT COUNT(*)`+joins+where, args...); err != nil {
+	if err := s.store.db.GetContext(ctx, &total, `SELECT COUNT(*)`+joins+where, args...); err != nil {
 		apiresp.Internal(c, err.Error())
 		return
 	}
@@ -286,7 +293,7 @@ func (s *HTTPServer) listDevicePool(c *gin.Context) {
 		COALESCE(b.user_id,0) current_user_id,COALESCE(u.email,'') current_user_email,
 		COALESCE(b.assign,'') assign,COALESCE(j.id,0) import_job_id,
 		COALESCE(j.source_name,'') import_source_name,p.created_at,p.updated_at` + joins + where + ` ORDER BY p.id DESC LIMIT ? OFFSET ?`
-	if err := s.store.db.SelectContext(c, &items, query, queryArgs...); err != nil {
+	if err := s.store.db.SelectContext(ctx, &items, query, queryArgs...); err != nil {
 		apiresp.Internal(c, err.Error())
 		return
 	}
@@ -303,9 +310,10 @@ func (s *HTTPServer) getDevice(c *gin.Context) {
 }
 
 func (s *HTTPServer) deviceBindLogs(c *gin.Context) {
+	ctx := c.Request.Context()
 	page, size := pageParams(c)
 	var total int
-	_ = s.store.db.GetContext(c, &total, `SELECT COUNT(*) FROM device_bind_log WHERE device_id=?`, c.Param("device_id"))
+	_ = s.store.db.GetContext(ctx, &total, `SELECT COUNT(*) FROM device_bind_log WHERE device_id=?`, c.Param("device_id"))
 	var items []struct {
 		ID        int64     `db:"id" json:"id"`
 		DeviceID  string    `db:"device_id" json:"device_id"`
@@ -315,7 +323,7 @@ func (s *HTTPServer) deviceBindLogs(c *gin.Context) {
 		Assign    string    `db:"assign" json:"assign"`
 		CreatedAt time.Time `db:"created_at" json:"created_at"`
 	}
-	if err := s.store.db.SelectContext(c, &items, `SELECT id,device_id,user_id,action,mac,assign,created_at FROM device_bind_log WHERE device_id=? ORDER BY id DESC LIMIT ? OFFSET ?`, c.Param("device_id"), size, (page-1)*size); err != nil {
+	if err := s.store.db.SelectContext(ctx, &items, `SELECT id,device_id,user_id,action,mac,assign,created_at FROM device_bind_log WHERE device_id=? ORDER BY id DESC LIMIT ? OFFSET ?`, c.Param("device_id"), size, (page-1)*size); err != nil {
 		apiresp.Internal(c, err.Error())
 		return
 	}
@@ -374,7 +382,27 @@ func requestAudit(c *gin.Context, identity AccessIdentity, action, resource, res
 }
 
 func (s *HTTPServer) auditTx(c *gin.Context, tx *sqlx.Tx, identity AccessIdentity, action, resource, resourceID, reason, before, after string) error {
-	return insertAuditTx(c, tx, requestAudit(c, identity, action, resource, resourceID, reason, before, after))
+	return insertAuditTx(c.Request.Context(), tx, requestAudit(c, identity, action, resource, resourceID, reason, before, after))
+}
+
+const committedEffectTimeout = 5 * time.Second
+
+// committedEffectContext bounds work that must follow an already committed or
+// queued change even when the client disconnects before the response.
+func committedEffectContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), committedEffectTimeout)
+}
+
+// publishCommittedAccess publishes committed RBAC changes independently of the caller.
+func (s *HTTPServer) publishCommittedAccess(c *gin.Context) bool {
+	ctx, cancel := committedEffectContext(c.Request.Context())
+	defer cancel()
+	if err := s.access.Reload(ctx); err != nil {
+		slog.ErrorContext(ctx, "reload admin RBAC policy failed", "err", err)
+		c.JSON(http.StatusServiceUnavailable, apiresp.JSON{Code: 503, Msg: "更改已保存，权限同步暂时不可用，请稍后刷新"})
+		return false
+	}
+	return true
 }
 
 func marshalSafe(value any) string {

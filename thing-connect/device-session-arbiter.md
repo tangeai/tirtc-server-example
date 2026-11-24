@@ -1,6 +1,6 @@
 # 多业务会话并发控制与产品实现参考
 
-这份文档说明一台设备同时承载 H5 实时、微信 VoIP、AI 对讲和设备互呼时，如何通过统一仲裁器处理并发、取消、超时和迟到回调。文中的 Linux C 代码只适用于 `device-sim-c`；其他操作系统或芯片需要独立移植并重新验证。
+这份文档说明一台设备同时承载 H5 实时、微信 VoIP、AI 对讲、设备互呼和多人对讲时，如何通过统一仲裁器处理并发、取消、超时和迟到回调。文中的 Linux C 代码只适用于 `device-sim-c`；其他操作系统或芯片需要独立移植并重新验证。
 
 > 业务接入顺序和协议字段分别见 [设备接入总览](device-integration.md)、[H5 实时](device-h5-live.md)、[微信 VoIP](device-voip.md)、[AI 对讲](device-ai.md) 和 [设备互呼](device-call.md)。这里讨论的只是设备端并发控制，不改变任何 HTTP、MQTT 或 TiRTC 对外接口。
 
@@ -42,7 +42,7 @@ SDK 回调 ───┘                         └<── 生命周期事件队
 | `SessionRouter` | 校验消息、按 `type + channel` 分发 | 直接 Stop/Start SDK |
 | `SessionArbiter` | pending、owner、session_id、generation、冲突策略 | HTTP、媒体帧、硬件 IO |
 | `SessionCoordinator` | 串行 Stop 当前适配器、Start 目标适配器、恢复 STREAM | 判断业务优先级 |
-| `STREAM/VOIP/AI/CALL` | 自己的 HTTP、信令和局部状态 | 查询其它业务来拼冲突条件 |
+| `STREAM/ROOM/VOIP/AI/CALL` | 自己的 HTTP、信令和局部状态 | 查询其它业务来拼冲突条件 |
 | 生命周期队列 | 将回调线程的结束事件送到安全任务 | 决定事件是否仍有效 |
 
 保持这个边界后，新增业务只需要注册新的 kind 和生命周期适配器，不需要修改旧业务的互斥判断。
@@ -68,6 +68,8 @@ struct arbiter_state {
 |---|---|---|
 | `NONE` | `STREAM` | 正常空闲，H5 实时工作 |
 | `NONE` + pending | `STREAM` | 来电等待用户决定，H5 继续工作 |
+| `ROOM` | `ROOM` | 多人对讲持有资源，可被前台业务抢占 |
+| `ROOM` + pending | `ROOM` | 等待接听期间继续收听，接听后切换 |
 | `VOIP` | `VOIP` | 微信通话独占资源 |
 | `AI` | `AI` | AI 对讲独占资源 |
 | `CALL` | `CALL` | 设备互呼独占资源 |
@@ -87,9 +89,11 @@ CALL: IDLE -> OUTGOING/PENDING -> CONNECTING -> IN_CALL -> IDLE
 
 ## 4. 默认冲突策略
 
-C/Python 参考实现采用确定性的非抢占策略：
+C/Python 参考实现中，VOIP、AI、CALL 之间互不抢占，ROOM 采用较低优先级：
 
 - H5 实时是后台基线，前台业务开始时暂停，结束后恢复。
+- ROOM 占用共享 RTC 时暂停 STREAM；VOIP、AI、CALL 可抢占 ROOM，ROOM 不能越过它们或 pending。
+- 前台业务结束后，协调器先恢复 STREAM；ROOM 同步当前关系与 `assignment_version`，申请新连接租约后恢复收听。恢复时 PTT 保持关闭，详见 [多人对讲](device-room.md)。
 - 全局只有一个待接槽位，first-wins。
 - 已有 pending 时，后来的 VoIP 或设备来电直接 busy 拒绝。
 - 已有 `VOIP/AI/CALL` owner 时，任何其它前台业务都不能开始。
@@ -115,7 +119,7 @@ C/Python 参考实现采用确定性的非抢占策略：
 offer_pending(kind, room_id, ttl):
     lock
     清理已超时的待接记录
-    如果 owner != NONE 或 pending 已存在: BUSY
+    如果 owner 不属于 {NONE, ROOM} 或 pending 已存在: BUSY
     pending = {kind, room_id, pending_generation++, deadline}
     unlock
 ```
@@ -176,7 +180,7 @@ generation 使用 64 位无符号整数。产品不应在设备重启后持久�
 启动操作分为三步：
 
 1. 仲裁器在锁内预留 owner 和 generation。
-2. 协调器停止 STREAM 并启动目标 SDK 适配器。
+2. 协调器停止当前 STREAM 或可被抢占的 ROOM，并启动目标 SDK 适配器。
 3. 业务执行 HTTP/WHIP/Connect action。
 
 任何一步失败都必须：
@@ -337,11 +341,11 @@ ISR 中不能运行仲裁器，只能使用 ISR-safe queue 投递简化事件。
 开发和现场诊断时持续检查：
 
 1. `owner == NONE` 时，Coordinator 最终应为 STREAM 或系统正在关闭。
-2. `owner != NONE` 时不能存在新的待接记录。
+2. `owner` 为 VOIP、AI、CALL 时不能存在新的待接记录；ROOM 允许 pending，但不能在 pending 存在时重新取得资源。
 3. 同一时刻最多一个业务 adapter 处于 started。
 4. terminal generation 小于当前 generation 时不能改变状态。
 5. 所有 CONNECTING/WAITING 状态都有非零 deadline。
-6. deadline 到期后，有限时间内 owner 必须归还。
+6. 有 deadline 的阶段到期后，有限时间内 owner 必须归还；ROOM 常驻收听不以通话时长超时结束。
 7. SDK Uninit 前 callback count 和媒体 worker count 必须归零。
 
 建议日志至少包含：

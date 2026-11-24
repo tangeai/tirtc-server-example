@@ -18,11 +18,14 @@ import (
 
 	callhandler "thing-connect/call-server/handler"
 	"thing-connect/internal/cache"
+	callservice "thing-connect/internal/call"
 	"thing-connect/internal/config"
 	"thing-connect/internal/db"
 	"thing-connect/internal/dynamicconfig"
 	"thing-connect/internal/logging"
 	"thing-connect/internal/mqttc"
+	"thing-connect/internal/queuehealth"
+	"thing-connect/internal/requestguard"
 	"thing-connect/internal/room"
 	roomsignals "thing-connect/internal/room/signals"
 	"thing-connect/internal/servicestatus"
@@ -82,7 +85,9 @@ func main() {
 	probes := map[string]servicestatus.DependencyProbe{"database": servicestatus.SQLProbe(sqlDB), "redis": servicestatus.RedisProbe(rdb), "mqtt": broker.Ping}
 	servicestatus.RegisterHealth(r, probes)
 
-	callHTTP := callhandler.NewServer(cfg, sqlDB, rdb, broker, devStore)
+	callRooms := cache.NewCallRooms(rdb)
+	calls := callservice.NewService(callRooms, mqttc.NewCallNotifier(broker))
+	callHTTP := callhandler.NewServer(cfg, sqlDB, calls, broker, devStore, mysqlstore.NewCallCleanupStore(sqlDB))
 	remarks := voip.NewRemarks(mysqlstore.NewVoipRemarkStore(sqlDB), mqttc.NewRemarkNotifier(broker))
 	callHTTP.SetRemarks(remarks)
 	callHTTP.SetContactNames(mysqlstore.NewContactNamesStore(sqlDB))
@@ -133,6 +138,8 @@ func main() {
 	dynamicRefs = append(dynamicRefs, roomRefs...)
 	callHTTP.SetIntercom(rooms)
 	callhandler.RegisterIntercom(r, cfg.JWTSecret, rooms)
+	callDone := make(chan struct{})
+	go func() { defer close(callDone); calls.Run(statusCtx) }()
 	remarksDone := make(chan struct{})
 	go func() { defer close(remarksDone); remarks.Run(statusCtx) }()
 	roomDone := make(chan struct{})
@@ -141,18 +148,35 @@ func main() {
 		rooms.Run(statusCtx, func(e error) { log.Printf("room worker: %v", e) })
 	}()
 	go dynamicClient.Run(statusCtx, dynamicRefs)
-	reporter, err := servicestatus.NewReporter(rdb, "call-server", probes, dynamicClient.Revisions)
+	backlog := queuehealth.New("remark", mysqlstore.NewRemarkBacklog(sqlDB))
+	callBacklog := queuehealth.New("call_notification", callRooms)
+	statusProbes := make(map[string]servicestatus.DependencyProbe, len(probes)+2)
+	for name, probe := range probes {
+		statusProbes[name] = probe
+	}
+	statusProbes["remark_outbox"] = backlog.Health
+	statusProbes["call_notification_outbox"] = callBacklog.Health
+	guard, guardErr := requestguard.New(cfg.Server.RequestLimits)
+	if guardErr != nil {
+		log.Fatal(guardErr)
+	}
+	reporter, err := servicestatus.NewReporter(rdb, "call-server", statusProbes, dynamicClient.Revisions)
 	if err != nil {
 		log.Fatalf("service status: %v", err)
 	}
+	reporter.SetMetrics(servicestatus.MergeMetrics(broker.Metrics, backlog.Metrics, callBacklog.Metrics, guard.Metrics, servicestatus.PoolMetrics(sqlDB, rdb)))
+	backlogDone := make(chan struct{})
+	go func() { defer close(backlogDone); backlog.Run(statusCtx) }()
+	callBacklogDone := make(chan struct{})
+	go func() { defer close(callBacklogDone); callBacklog.Run(statusCtx) }()
 	go reporter.Run(statusCtx)
 
 	addr := fmt.Sprintf(":%d", cfg.Server.HTTPPort)
 	srv := &http.Server{
-		Addr: addr, Handler: r,
+		Addr: addr, Handler: guard.Wrap(r),
 		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      60 * time.Second,
+		ReadTimeout:       max(30*time.Second, guard.MaxTimeout()),
+		WriteTimeout:      max(60*time.Second, guard.MaxTimeout()+5*time.Second),
 		IdleTimeout:       90 * time.Second,
 	}
 	go func() {
@@ -174,6 +198,9 @@ func main() {
 		log.Printf("call-server shutdown: %v", err)
 	}
 	statusCancel()
+	<-backlogDone
+	<-callBacklogDone
+	<-callDone
 	<-roomDone
 	<-remarksDone
 	broker.Close()

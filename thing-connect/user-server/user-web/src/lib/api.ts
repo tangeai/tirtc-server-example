@@ -32,15 +32,21 @@ export async function request<T>(path: string, options: {
   method?: string; headers?: Record<string, string>; body?: unknown; form?: FormData; signal?: AbortSignal; anonymous?: boolean;
 } = {}): Promise<T> {
   const headers: Record<string, string> = { ...options.headers };
-  if (!options.anonymous) headers.Authorization = 'Bearer ' + (sessionToken() ?? '');
+  const requestToken = options.anonymous ? null : sessionToken();
+  const checkSession = () => {
+    if (!options.anonymous && sessionToken() !== requestToken) throw new ApiError(-2, '账号已切换，请重新打开页面');
+  };
+  if (!options.anonymous) headers.Authorization = 'Bearer ' + (requestToken ?? '');
   if (options.body !== undefined) headers['Content-Type'] = 'application/json';
   const signal = options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(options.form ? 60000 : 15000)]) : AbortSignal.timeout(options.form ? 60000 : 15000);
   const response = await fetch(path, { method: options.method ?? 'GET', headers, signal, cache: 'no-store',
     body: options.form ?? (options.body === undefined ? undefined : JSON.stringify(options.body)) });
+  checkSession();
   // A proxy may return an HTML or empty 401 response. Authentication expiry
   // must not depend on successful JSON parsing.
   if (!options.anonymous && response.status === 401) expireSession();
   const result = await response.json() as Envelope<T>;
+  checkSession();
   if (!options.anonymous && (response.status === 401 || result.code === 401)) {
     expireSession();
   }

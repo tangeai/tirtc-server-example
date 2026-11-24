@@ -72,3 +72,13 @@ test('邮箱缓存读取失败时使用空值，写入失败不影响成功登�
   assert.doesNotThrow(() => h.api.signIn('new-session', 'test@example.invalid'));
   assert.equal(h.session(), 'new-session');
 });
+
+for (const endpoint of ['bind', 'bind-by-id']) test(`${endpoint} 限流时保留登录并显示重试提示`, async () => {
+  const h = harness();
+  const pending = h.api.request('/v1/user/device/' + endpoint, 'POST', {});
+  h.pending[0].resolve({ statusCode: 429, data: { code: 429, msg: '请求过于频繁，请稍后重试' } });
+  await assert.rejects(pending, (e: any) => e.code === 429 && h.api.errorText(e) === '请求过于频繁，请稍后重试');
+  assert.equal(h.session(), 'account-A');
+  assert.equal(h.redirects.length, 0);
+  assert.equal(h.calls.length, 1);
+});

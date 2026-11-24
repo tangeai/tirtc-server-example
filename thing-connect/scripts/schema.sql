@@ -487,6 +487,17 @@ CREATE TABLE IF NOT EXISTS board_resources (
     KEY idx_board_resources_public (publish_status, sort_order, name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='官网开发板资料';
 
+CREATE TABLE IF NOT EXISTS admin_reset_mail_outbox (
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT '管理员邮件命令编号，与操作审计关联',
+    user_id BIGINT NOT NULL COMMENT '目标用户编号',
+    email VARCHAR(255) NOT NULL COMMENT '接受命令时的目标邮箱',
+    attempts INT NOT NULL DEFAULT 0 COMMENT '累计领取次数，作为租约确认快照',
+    next_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '下次领取或当前租约到期时间',
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '首次等待时间',
+    PRIMARY KEY (id),
+    KEY idx_reset_mail_due (next_at,id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='管理员密码重置邮件待发送命令';
+
 INSERT IGNORE INTO schema_migrations (component, version) VALUES
     ('core', 2),
     ('core', 3),
@@ -496,7 +507,7 @@ INSERT IGNORE INTO schema_migrations (component, version) VALUES
     ('core', 7),
     ('core', 8),
     ('core', 9),
-    ('core', 10), ('core', 11), ('core', 12);
+    ('core', 10), ('core', 11), ('core', 12), ('core', 13), ('core', 14);
 CREATE TABLE IF NOT EXISTS ai_recognition_policy (
  device_id VARCHAR(64) NOT NULL COMMENT '设备标识',
  enabled BOOLEAN NOT NULL DEFAULT FALSE COMMENT '是否启用媒体识别',
@@ -579,6 +590,7 @@ CREATE TABLE IF NOT EXISTS recognition_call (
  UNIQUE KEY uq_recognition_call(task_id,item_id,stage)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='每次分析或语音合成的实际调用账本';
 CREATE TABLE IF NOT EXISTS recognition_outbox (
+ pending_since TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '连续待处理周期的首次入队时间',
  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '记录主键',
  device_id VARCHAR(64) NOT NULL COMMENT '设备标识',
  bind_id VARCHAR(128) NOT NULL COMMENT '绑定记录主键与生命周期版本',
@@ -591,6 +603,7 @@ CREATE TABLE IF NOT EXISTS recognition_outbox (
 
 
 CREATE TABLE IF NOT EXISTS voip_remark_outbox (
+ pending_since TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '连续待处理周期的首次入队时间',
     id BIGINT NOT NULL AUTO_INCREMENT COMMENT '通知事件ID',
     device_id VARCHAR(20) NOT NULL COMMENT '需刷新联系人缓存的设备ID',
     peer_id VARCHAR(64) NOT NULL COMMENT '微信联系人OpenID',
@@ -610,6 +623,7 @@ CREATE TABLE IF NOT EXISTS ai_cloud_role_ref (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='云端角色关联的持久化删除保护';
 
 CREATE TABLE IF NOT EXISTS ai_cloud_role_target (
+ pending_since TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '连续待处理周期的首次入队时间',
  device_id VARCHAR(64) NOT NULL PRIMARY KEY COMMENT '设备 ID',
  user_id BIGINT NOT NULL COMMENT '目标所属用户',
  binding_revision BIGINT NOT NULL COMMENT '设备归属代次',

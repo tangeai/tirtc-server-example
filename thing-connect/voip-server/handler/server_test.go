@@ -38,7 +38,7 @@ func (b *onlineCheckingBroker) IsOnline(_ context.Context, clientID string) bool
 
 func TestIsDeviceOnlineUsesFormalMQTTClientID(t *testing.T) {
 	broker := &onlineCheckingBroker{online: true}
-	server := NewServer(nil, nil, nil, broker, nil, nil)
+	server := NewServer(nil, nil, nil, broker, nil, nil, unusedRefreshGate)
 
 	if !server.IsDeviceOnline(context.Background(), "TIR123") {
 		t.Fatal("expected configured online checker result")
@@ -153,7 +153,7 @@ func TestInternalUnbindInvalidCredentialUsesBusinessCode(t *testing.T) {
 		nil,
 		nil,
 		nil,
-		nil)
+		nil, unusedRefreshGate)
 	router := gin.New()
 	router.POST("/", server.postInternalUnbind)
 	recorder := httptest.NewRecorder()
@@ -242,7 +242,7 @@ func TestVideoUIProfile(t *testing.T) {
 }
 
 func TestPostDeviceProfileRejectsNonObject(t *testing.T) {
-	server := NewServer(nil, nil, nil, nil, nil, nil)
+	server := NewServer(nil, nil, nil, nil, nil, nil, unusedRefreshGate)
 	router := gin.New()
 	router.POST("/", func(c *gin.Context) {
 		c.Set("device_id", "device-1")
@@ -355,3 +355,5 @@ func contains(s, sub string) bool {
 			return false
 		}())
 }
+
+func unusedRefreshGate(context.Context, string) (bool, error) { panic("unexpected WeChat refresh") }

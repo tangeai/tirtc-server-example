@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -16,12 +17,17 @@ const connectionPendingSinceKey = "presence:connections:pending_since"
 
 const connectionGapKey = "presence:connections:gap"
 
+// connectionGapClearedKey holds the start (unix ms) of the latest completed
+// broker listing that cleared the gap marker.
+const connectionGapClearedKey = "presence:connections:gap_cleared"
+
 // PresenceStore uses a dedicated, deadline-aware Redis client. Online values
 // retain the public key/format/TTL contract. Pending IP snapshots have no TTL.
 // Multi-key scripts require the existing single-endpoint Redis deployment.
 type PresenceStore struct {
-	Client *redis.Client
-	cursor uint64 // owned exclusively by the connection persistence worker
+	onlineUpdates, onlineIgnored, connectionUpdates, connectionIgnored atomic.Int64
+	Client                                                             *redis.Client
+	cursor                                                             uint64 // owned exclusively by the connection persistence worker
 }
 
 type connectionSnapshot struct {
@@ -35,36 +41,91 @@ func connectionJSON(o presence.Observation) string {
 	return string(data)
 }
 
-const writePresence = `
-redis.call('SET',KEYS[1],ARGV[1])
-redis.call('PEXPIREAT',KEYS[1],ARGV[2])
-if ARGV[3] ~= '' then
- local old=redis.call('HGET',KEYS[2],ARGV[3])
- if not old or cjson.decode(old).at_ms < tonumber(ARGV[5]) then
-  redis.call('HSET',KEYS[2],ARGV[3],ARGV[4])
-  redis.call('ZADD',KEYS[3],'NX',ARGV[6],ARGV[3])
+// writePresence only moves an online expiry forward, so retries, reordering
+// and concurrent Device instances cannot shorten a newer observation. PTTL
+// keeps the comparison compatible with Redis 6.
+var writePresence = redis.NewScript(`
+local exp=tonumber(ARGV[2])
+local now=tonumber(ARGV[6])
+local result=2
+if exp>now then
+ local ttl=redis.call('PTTL',KEYS[1])
+ if ttl<0 or now+ttl<exp then
+  redis.call('SET',KEYS[1],ARGV[1])
+  redis.call('PEXPIREAT',KEYS[1],exp)
+  result=1
  end
 end
-return 1`
+if ARGV[3]~='' then
+ local old=redis.call('HGET',KEYS[2],ARGV[3])
+ if not old or cjson.decode(old).at_ms<tonumber(ARGV[5]) then
+  redis.call('HSET',KEYS[2],ARGV[3],ARGV[4])
+  redis.call('ZADD',KEYS[3],'NX',ARGV[6],ARGV[3])
+  result=result+4
+ else
+  result=result+8
+ end
+end
+return result`)
+
+// Metrics counts only acknowledged script results, not writes whose reply was lost.
+// Ignored observations include equal, older and expired observations.
+func (s *PresenceStore) Metrics() map[string]int64 {
+	return map[string]int64{"presence_online_updates_total": s.onlineUpdates.Load(), "presence_online_ignored_total": s.onlineIgnored.Load(), "presence_connection_updates_total": s.connectionUpdates.Load(), "presence_connection_ignored_total": s.connectionIgnored.Load()}
+}
 
 func (s *PresenceStore) Project(ctx context.Context, batch []presence.Observation) error {
 	if len(batch) == 0 {
 		return s.Client.Ping(ctx).Err()
 	}
+	err := s.project(ctx, batch)
+	if err != nil && redis.HasErrorPrefix(err, "NOSCRIPT") {
+		// A restarted or failed-over Redis loses its script cache. Replaying
+		// the batch is safe because every write is monotonic.
+		if err := writePresence.Load(ctx, s.Client).Err(); err != nil {
+			return err
+		}
+		err = s.project(ctx, batch)
+	}
+	return err
+}
+
+func (s *PresenceStore) project(ctx context.Context, batch []presence.Observation) error {
+	now := time.Now().UnixMilli()
 	pipe := s.Client.Pipeline()
+	commands := make([]*redis.Cmd, 0, len(batch))
 	for _, o := range batch {
 		// Unversioned SYS disconnects cannot safely delete a current connection.
 		// Heartbeat expiration is authoritative; late disconnects are harmless.
 		if o.Offline {
 			continue
 		}
-		if o.IP == "" {
-			pipe.Eval(ctx, `redis.call('SET',KEYS[1],ARGV[1]);redis.call('PEXPIREAT',KEYS[1],ARGV[2]);return 1`, []string{"online:" + o.ClientID}, o.At.UTC().Format(time.RFC3339Nano), o.At.Add(presence.TTL).UnixMilli())
-		} else {
-			pipe.Eval(ctx, writePresence, []string{"online:" + o.ClientID, connectionPendingKey, connectionPendingSinceKey}, o.At.UTC().Format(time.RFC3339Nano), o.At.Add(presence.TTL).UnixMilli(), o.ClientID, connectionJSON(o), o.ConnectedAt.UnixMilli(), time.Now().UnixMilli())
+		pendingID, snapshot := "", ""
+		if o.IP != "" {
+			pendingID, snapshot = o.ClientID, connectionJSON(o)
 		}
+		commands = append(commands, writePresence.EvalSha(ctx, pipe, []string{"online:" + o.ClientID, connectionPendingKey, connectionPendingSinceKey}, o.At.UTC().Format(time.RFC3339Nano), o.ExpiresAt.UnixMilli(), pendingID, snapshot, o.ConnectedAt.UnixMilli(), now))
+	}
+	if pipe.Len() == 0 {
+		return nil
 	}
 	_, err := pipe.Exec(ctx)
+	for _, command := range commands {
+		if result, readErr := command.Int64(); readErr == nil {
+			if result&1 != 0 {
+				s.onlineUpdates.Add(1)
+			}
+			if result&2 != 0 {
+				s.onlineIgnored.Add(1)
+			}
+			if result&4 != 0 {
+				s.connectionUpdates.Add(1)
+			}
+			if result&8 != 0 {
+				s.connectionIgnored.Add(1)
+			}
+		}
+	}
 	return err
 }
 func (s *PresenceStore) Pending(ctx context.Context) ([]presence.Observation, error) {
@@ -106,8 +167,31 @@ func (s *PresenceStore) Ack(ctx context.Context, batch []presence.Observation) e
 	_, err := pipe.Exec(ctx)
 	return err
 }
-func (s *PresenceStore) MarkGap(ctx context.Context) error {
-	return s.Client.Set(ctx, connectionGapKey, "1", 0).Err()
+
+// MarkGap records the latest loss time. Legacy markers hold "1", which
+// ClearGap treats as older than any reconciliation. A loss older than the
+// start of the latest completed listing (from any instance) is already
+// resolved, so a late write cannot resurrect a cleared marker.
+func (s *PresenceStore) MarkGap(ctx context.Context, lostAt time.Time) error {
+	return s.Client.Eval(ctx, `
+local lost = tonumber(ARGV[1])
+local covered = tonumber(redis.call('GET', KEYS[2])) or 0
+if lost < covered then return 0 end
+local previous = tonumber(redis.call('GET', KEYS[1])) or 0
+if previous < lost then redis.call('SET', KEYS[1], ARGV[1]) end
+return 1`, []string{connectionGapKey, connectionGapClearedKey}, lostAt.UnixMilli()).Err()
+}
+
+// ClearGap removes the marker only when the loss happened before a completed
+// broker listing started; a loss during reconciliation keeps the marker.
+func (s *PresenceStore) ClearGap(ctx context.Context, listedFrom time.Time) error {
+	return s.Client.Eval(ctx, `
+local started = tonumber(ARGV[1])
+local covered = tonumber(redis.call('GET', KEYS[2])) or 0
+if covered < started then redis.call('SET', KEYS[2], ARGV[1]) end
+local gap = redis.call('GET', KEYS[1])
+if gap and (tonumber(gap) or 0) < started then return redis.call('DEL', KEYS[1]) end
+return 0`, []string{connectionGapKey, connectionGapClearedKey}, listedFrom.UnixMilli()).Err()
 }
 func (s *PresenceStore) HasGap(ctx context.Context) (bool, error) {
 	n, err := s.Client.Exists(ctx, connectionGapKey).Result()

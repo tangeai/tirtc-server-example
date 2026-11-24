@@ -41,10 +41,18 @@ type OnlineChecker interface {
 	IsOnline(ctx context.Context, clientID string) bool
 }
 
+// UserCache keeps code publication and failed-delivery cleanup in one adapter.
+// Delivery IDs distinguish overlapping sends even if their six-digit codes match.
+type UserCache interface {
+	store.CacheStore
+	SetEmailCodeDelivery(context.Context, string, string, string, time.Duration) error
+	DiscardEmailCodeDelivery(context.Context, string, string) error
+}
+
 // UserService handles user registration, login, and quota.
 type UserService struct {
 	user                    store.UserStore
-	cache                   store.CacheStore
+	cache                   UserCache
 	captcha                 captcha.Verifier
 	mailer                  mailer.Mailer
 	passwordResetEmailQueue PasswordResetEmailQueue
@@ -81,67 +89,102 @@ const (
 	defaultEmailSendMaxPerIP    = 20
 )
 
+// PasswordResetMailGate admits at most one pending reset delivery per email
+// across all user-server instances, so concurrent requests do not send
+// several mails whose codes overwrite each other.
+type PasswordResetMailGate interface {
+	// Acquire reserves email for ttl; acquired=false means a delivery is
+	// already pending. The token identifies this reservation for Release.
+	Acquire(ctx context.Context, email string, ttl time.Duration) (token string, acquired bool, err error)
+	// Release drops the reservation only while it still carries token.
+	Release(ctx context.Context, email, token string) error
+}
+
+const (
+	// passwordResetMailPendingTTL bounds how long a crashed instance can
+	// block new reset mails for one address.
+	passwordResetMailPendingTTL  = 2 * time.Minute
+	passwordResetMailGateTimeout = 5 * time.Second
+)
+
+type passwordResetMailJob struct {
+	email string
+	token string
+}
+
 // InMemoryPasswordResetEmailQueue keeps the public request path independent
 // of account lookup and SMTP without adding persistent application state. A
 // user can safely request a new code if a process restart drops a queued job.
 type InMemoryPasswordResetEmailQueue struct {
-	jobs    chan string
+	jobs    chan passwordResetMailJob
 	deliver func(context.Context, string) error
-
-	mu      sync.Mutex
-	pending map[string]struct{}
+	gate    PasswordResetMailGate
 }
 
 func NewInMemoryPasswordResetEmailQueue(
 	deliver func(context.Context, string) error,
-) *InMemoryPasswordResetEmailQueue {
-	return &InMemoryPasswordResetEmailQueue{
-		jobs:    make(chan string, passwordResetMailQueueSize),
-		deliver: deliver,
-		pending: make(map[string]struct{}),
+	gate PasswordResetMailGate,
+) (*InMemoryPasswordResetEmailQueue, error) {
+	if deliver == nil || gate == nil {
+		return nil, errors.New("password reset email queue requires a delivery function and a gate")
 	}
+	return &InMemoryPasswordResetEmailQueue{
+		jobs:    make(chan passwordResetMailJob, passwordResetMailQueueSize),
+		deliver: deliver,
+		gate:    gate,
+	}, nil
 }
 
 func (q *InMemoryPasswordResetEmailQueue) Enqueue(ctx context.Context, email string) error {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	if _, ok := q.pending[email]; ok {
+	token, acquired, err := q.gate.Acquire(ctx, email, passwordResetMailPendingTTL)
+	if err != nil {
+		return fmt.Errorf("password reset mail gate: %w", err)
+	}
+	if !acquired {
 		return nil
 	}
-	q.pending[email] = struct{}{}
 	select {
-	case q.jobs <- email:
+	case q.jobs <- passwordResetMailJob{email: email, token: token}:
 		return nil
-	case <-ctx.Done():
-		delete(q.pending, email)
-		return ctx.Err()
 	default:
-		delete(q.pending, email)
+		q.release(passwordResetMailJob{email: email, token: token})
 		return ErrPasswordResetMailQueueFull
+	}
+}
+
+func (q *InMemoryPasswordResetEmailQueue) release(job passwordResetMailJob) {
+	ctx, cancel := context.WithTimeout(context.Background(), passwordResetMailGateTimeout)
+	defer cancel()
+	if err := q.gate.Release(ctx, job.email, job.token); err != nil {
+		slog.Warn("password reset mail gate release failed", "err", err)
 	}
 }
 
 // Run processes password-reset email jobs until ctx is cancelled. Delivery
 // errors are logged; users can request another verification code to retry.
 func (q *InMemoryPasswordResetEmailQueue) Run(ctx context.Context) {
+	var workers sync.WaitGroup
 	for i := 0; i < passwordResetMailWorkers; i++ {
-		go q.runWorker(ctx)
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			q.runWorker(ctx)
+		}()
 	}
-	<-ctx.Done()
+	workers.Wait()
 }
 
 func (q *InMemoryPasswordResetEmailQueue) runWorker(ctx context.Context) {
-	for {
+	for ctx.Err() == nil {
 		select {
 		case <-ctx.Done():
 			return
-		case email := <-q.jobs:
-			deliveryCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			err := q.deliver(deliveryCtx, email)
+		case job := <-q.jobs:
+			// Finish an admitted SMTP operation before releasing its gate on shutdown.
+			deliveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+			err := q.deliver(deliveryCtx, job.email)
 			cancel()
-			q.mu.Lock()
-			delete(q.pending, email)
-			q.mu.Unlock()
+			q.release(job)
 			if err != nil {
 				slog.Warn("password reset email delivery failed", "err", err)
 			}
@@ -151,7 +194,7 @@ func (q *InMemoryPasswordResetEmailQueue) runWorker(ctx context.Context) {
 
 func NewUserService(
 	user store.UserStore,
-	cache store.CacheStore,
+	cache UserCache,
 	captcha captcha.Verifier,
 	mailer mailer.Mailer,
 	jwtSecret string,
@@ -302,15 +345,20 @@ func (s *UserService) sendEmailCode(
 		return fmt.Errorf("service.SendCode rand: %w", err)
 	}
 	code := fmt.Sprintf("%06d", n.Int64())
+	generation := make([]byte, 16)
+	if _, err := rand.Read(generation); err != nil {
+		return fmt.Errorf("email delivery generation: %w", err)
+	}
+	delivery := fmt.Sprintf("%x", generation)
 	_, activeMailer, cfg, templates, _, _, _ := s.runtimeSnapshot()
-	if err := s.cache.SetEmailCode(ctx, cacheKey, code, cfg.CodeTTL); err != nil {
+	if err := s.cache.SetEmailCodeDelivery(ctx, cacheKey, code, delivery, cfg.CodeTTL); err != nil {
 		return fmt.Errorf("service.SendCode SetEmailCode: %w", err)
 	}
 
 	message := buildMessage(code, cfg.CodeTTL)
 	if template, ok := templates[templateKey]; ok {
 		if !template.Enabled {
-			_ = s.cache.DelEmailCode(ctx, cacheKey)
+			_ = s.cache.DiscardEmailCodeDelivery(ctx, cacheKey, delivery)
 			return errors.New("email template is disabled")
 		}
 		message = renderEmailTemplate(template, code, cfg.CodeTTL)
@@ -322,7 +370,7 @@ func (s *UserService) sendEmailCode(
 		sendErr = activeMailer.Send(ctx, email, message.subject, message.body)
 	}
 	if sendErr != nil {
-		_ = s.cache.DelEmailCode(ctx, cacheKey)
+		_ = s.cache.DiscardEmailCodeDelivery(ctx, cacheKey, delivery)
 		return fmt.Errorf("service.SendCode Send: %w", sendErr)
 	}
 	return nil

@@ -12,7 +12,7 @@
 
 与其他业务服务共享 jwt_secret 和 internal.key。Admin 使用独立令牌。识别 Key 支持 YAML 回退：Admin 无已发布配置时使用 recognition 段，发布后原子应用并上报配置 revision。未配置 Key 时服务仍可管理配置，但拒绝新模型任务。MQTT 配置与现有服务一样为重启生效配置。
 
-接收 SIGTERM 后停止 worker 和动态配置轮询，完成有界状态写入、等待后台任务退出，再关闭依赖。音频分析使用90秒超时，数据库领取租约为120秒。任务、原始媒体、完整语音、逐次用量与通知保存在 MySQL；运维应将识别表纳入备份、访问控制和容量监控。原始音频在父任务终止后清除，历史文字及合成文件保留，需按业务保留要求规划存储。
+接收 SIGTERM 后停止领取新任务和动态配置轮询；已发出的模型调用继续完成并写入结果，再关闭依赖。单次模型调用使用90秒超时，数据库领取租约为120秒。进程管理的停止等待时间须不少于100秒（Supervisor 模板与 `service-local.sh` 均为100秒），否则滚动重启时被强制结束的任务会在租约到期后标记 unknown。任务、原始媒体、完整语音、逐次用量与通知保存在 MySQL；运维应将识别表纳入备份、访问控制和容量监控。原始音频在父任务终止后清除，历史文字及合成文件保留，需按业务保留要求规划存储。
 
 一期支持 PCM S16LE 原始音频、PCM WAV 和千问；媒体类型与提供商 adapter 分离，为后续图片、视频保留扩展边界，但当前接口拒绝这些输入。服务不依赖 TiRTC AI 通话会话。
 
@@ -60,7 +60,7 @@ unset DASHSCOPE_API_KEY RECOGNITION_LIVE_TEST
 
 ## MQTT 通知授权验收
 
-识别服务的 MQTT 账号需要发布 `device/+/notify`，并订阅公共 Broker adapter 使用的 `device/+/up` 和 `$SYS/brokers/+/clients/+/connected`、`$SYS/brokers/+/clients/+/disconnected`。用户名认证可将 [ACL 片段](../deploy/emqx/recognition-acl.conf) 中的用户名替换为管理后台实际值，合并到 EMQX 当前生效的文件授权源，并置于通用拒绝规则之前；固定 ClientID 认证则按该 ClientID 配置对应规则。
+识别服务的 MQTT 账号需要发布 `device/+/notify`。用户名认证可将 [ACL 片段](../deploy/emqx/recognition-acl.conf) 中的用户名替换为管理后台实际值，合并到 EMQX 当前生效的文件授权源，并置于通用拒绝规则之前；固定 ClientID 认证则按该 ClientID 配置对应规则。
 
 “连接成功”和 QoS1 发布确认不能替代授权验收。EMQX 使用 MQTT 3.1.1 且拒绝策略为 ignore 时，发布端可能收到确认，但消息被 ACL 丢弃。验收必须确认设备订阅的 notify topic 实际收到结果，并检查 Broker 日志不存在 `cannot_publish_to_topic_due_to_not_authorized`。Dashboard 管理过的文件授权源可能使用 `data/authz/acl.conf`，以运行配置为准，修改后热加载并清理该账号连接的授权缓存。
 
