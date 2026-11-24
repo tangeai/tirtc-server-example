@@ -815,7 +815,7 @@ User 的服务状态实例包含解绑清理队列（`cleanup_outbox`）的 `met
 |---|---|
 | `cleanup_pending` | 待通知 AI、VoIP、呼叫服务清理的任务数 |
 | `cleanup_oldest_pending_age_ms` | 最老任务自首次入队起的等待时长；同一设备重新解绑不重置 |
-| `cleanup_unknown_target` | 目标服务未在当前 User 配置中（如移除了 `voip.server_url`）的清理任务数；这些任务不计入 `cleanup_pending` 和健康判定，恢复对应地址后继续投递，确认不再需要时由运维从 `cleanup_outbox` 删除 |
+| `cleanup_unknown_target` | 目标服务未在当前 User 配置中（如移除了 `voip.server_url`）的清理任务数；这些任务不计入 `cleanup_pending` 和健康判定，恢复对应地址后继续投递，确认不再需要时由运维从 `cleanup_outbox` 删除。设备的清理任务全部完成后才能重新绑定；持续返回 6016 时，按设备号检查队列及目标服务 |
 | `cleanup_backlog_measured_at_ms` | 积压的采样时间 |
 
 最老任务等待超过 15 分钟，或积压超过 1 分钟未能采样时，服务状态中的 `cleanup_outbox` 依赖显示不健康，User 显示为降级；排空后自动恢复。该状态不影响 `/health/ready`，因为摘除 User 实例无法恢复下游清理。排查时检查对应目标服务的内部接口、`internal.key` 和 `last_error` 列。
@@ -843,13 +843,13 @@ User 的服务状态实例包含解绑清理队列（`cleanup_outbox`）的 `met
 
 Call 的 `remark_outbox` 和 `call_notification_outbox`、AI 的 `ai_cloud_outbox`、Recognition 的 `recognition_outbox` 在服务状态中报告积压健康，指标前缀分别为 `remark`、`call_notification`、`ai_cloud`、`recognition`：`*_pending`、`*_oldest_pending_age_ms`、`*_backlog_measured_at_ms`、`*_exhausted`。采样每 15 秒执行一次，查询最多 5 秒；一分钟没有有效样本、最老积压超过 15 分钟或最近 1 小时内有识别通知耗尽重试时，状态降级。排空并获得新样本后恢复，耗尽记录超过 1 小时后不再计入 `recognition_exhausted`；这些下游投递告警不摘除 HTTP readiness。
 
-User 的 `admin_user_commands` 探针按相同的采样周期和积压阈值上报 `admin_user_command_*`。待处理量包含未领取和已领取的管理员密码重置邮件，等待年龄从首次入队计起。投递最多尝试 5 次，耗尽的命令退出待处理队列，其 ID 在 `thingconnect:admin:user-commands:exhausted` 保留 1 小时，期间服务状态降级。恢复 SMTP 后可用该 ID 在管理员密码重置审计记录中核对目标用户，按需重新发起发送。邮件投递采用至少一次语义，进程在 SMTP 接受邮件后、Redis 确认前退出可能导致重复发送。
+User 的 `admin_user_commands` 探针按相同的采样周期和积压阈值上报 `admin_user_command_*`。待处理量包含未领取和已领取的管理员密码重置邮件，等待年龄从首次入队计起。Admin 在同一事务内写入命令和审计，User 从 `admin_reset_mail_outbox` 领取邮件；升级期间也会排空已有的 Redis 命令。每条命令最多尝试 5 次，耗尽后保留 1 小时，期间服务状态降级。恢复 SMTP 后，在 MySQL 按 `attempts=5 AND next_at<=NOW(6)` 查询耗尽行，以 `mysql-<id>` 匹配密码重置审计的 `command_id`。Redis 历史命令按 `thingconnect:admin:user-commands:exhausted` 中的流 ID 匹配。核对用户后可重新发起发送。邮件采用至少一次投递；进程在 SMTP 接受邮件后、确认前退出可能导致重复发送。
 
 一对一通话通知与房间状态在 Redis 中原子保存。`call_notification_pending` 按待发送消息计数，包含已领取与退避中的消息；同一房间按顺序发送，发布失败按不超过 256 秒的随机退避重试；自创建起超过 2 分钟仍未发布的通知直接丢弃并记录告警日志，设备通过 `GET /v1/call/room` 恢复状态。最近 1 小时内丢弃的数量计入 `call_notification_exhausted`，期间服务状态降级，丢弃记录满 1 小时后自动恢复。待发送计数需要重建且积压房间超过 10000 个时积压采样失败，样本过期后服务状态降级。应用重启后其他 Call 实例可继续领取；Redis 数据的重启保留能力取决于其持久化配置，部署时须配置并验证 Redis 持久化与备份。成功发布表示 Broker 已接受 QoS 1 消息，不代表设备已处理；旧房间或已拒接目标的待发来电在发送前丢弃。
 
 计数包含已领取及退避中的任务。AI 已完成的版本屏障记录不算积压，替换尚未完成的目标保留首次等待时间，已完成后重新入队开始新的计时周期。识别通知排除旧绑定生命周期和已交付记录，最多投递 8 次；耗尽的记录不再计入待处理数量和最老等待年龄，耗尽后通过设备查询补偿并排查 Broker 权限，不能用单次发布成功代替收包验收。解绑清理、备注通知、AI 对账使用有上限的随机退避持续重试；不自动丢弃仍需完成的工作。通用 Redis 客户端不自动重放不确定的命令，由业务流程或持久队列负责恢复，避免跨层重试放大和重复计数。
 
-部署需要 core 13 迁移，新增三个队列的首次入队时间列。旧记录没有可靠的首次入队时间，从迁移时开始计龄，不能据此推断升级前等待时长。迁移将旧识别通知中尚未尝试、受会话时区影响的未来时间归一到当前 UTC，不改动已领取的租约；后续首次投递和重试都遵守 `next_at`。迁移可重复执行，运行账号仍只需 DML；回滚遵循前文数据库备份恢复流程，不允许通过删除迁移记录启动旧二进制。
+部署需要 core 14 迁移，包含管理员重置邮件队列。三个队列的首次入队时间由 core 13 迁移维护。旧记录没有可靠的首次入队时间，从迁移时开始计龄，不能据此推断升级前等待时长。迁移将旧识别通知中尚未尝试、受会话时区影响的未来时间归一到当前 UTC，不改动已领取的租约；后续首次投递和重试都遵守 `next_at`。迁移可重复执行，运行账号仍只需 DML；回滚遵循前文数据库备份恢复流程，不允许通过删除迁移记录启动旧二进制。
 
 #### 容量验收与 Broker 调优
 

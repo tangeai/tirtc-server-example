@@ -160,6 +160,9 @@ func (s *BindService) Bind(ctx context.Context, userID int64, code string) (stri
 	// Case D: own unowned device (last_user_id == self)
 	if row != nil && row.UserID == 0 && row.LastUserID == userID {
 		if err := s.bind.CommitClaim(ctx, row.DeviceID, fp, userID); err != nil {
+			if errors.Is(err, store.ErrCleanupPending) {
+				return "", store.ErrCleanupPending
+			}
 			if errors.Is(err, store.ErrSlotConflict) {
 				return "", ErrBoundByOther
 			}
@@ -330,6 +333,9 @@ func (s *BindService) bindByDeviceIDInternal(ctx context.Context, userID int64, 
 			if errors.Is(err, store.ErrQuotaEmpty) {
 				return ErrQuotaEmpty
 			}
+			if errors.Is(err, store.ErrCleanupPending) {
+				return store.ErrCleanupPending
+			}
 			if errors.Is(err, store.ErrSlotConflict) {
 				return ErrBoundByOther
 			}
@@ -378,6 +384,9 @@ func (s *BindService) bindByDeviceIDInternal(ctx context.Context, userID int64, 
 		if err := s.bind.CommitClaim(ctx, deviceID, claimFP, userID); err != nil {
 			if errors.Is(err, store.ErrQuotaEmpty) {
 				return ErrQuotaEmpty
+			}
+			if errors.Is(err, store.ErrCleanupPending) {
+				return store.ErrCleanupPending
 			}
 			if errors.Is(err, store.ErrSlotConflict) {
 				return ErrBoundByOther

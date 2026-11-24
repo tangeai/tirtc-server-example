@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	driver "github.com/go-sql-driver/mysql"
 	"github.com/jmoiron/sqlx"
 	"github.com/redis/go-redis/v9"
 
@@ -193,21 +194,20 @@ func (s *bindStore) CommitBindByDeviceID(ctx context.Context, deviceID string, f
 		return fmt.Errorf("bindStore.CommitBindByDeviceID update pool: %w", err)
 	}
 
-	// INSERT OR skip if already bound
-	res, err = tx.ExecContext(ctx,
+	// Only CommitClaim may reuse an existing binding after cleanup.
+	_, err = tx.ExecContext(ctx,
 		`INSERT INTO device_bind (device_id, mac, chip_uid, device_rand, assign, user_id, last_user_id, bind_time)
-		 VALUES (?, ?, ?, ?, 'preburn', ?, ?, NOW())
-		 ON DUPLICATE KEY UPDATE
-		     user_id      = IF(user_id = 0, VALUES(user_id), user_id),
-		     last_user_id = IF(user_id = 0, VALUES(last_user_id), last_user_id),
-		     bind_time    = IF(user_id = 0, NOW(), bind_time),
-		     assign       = IF(user_id = 0, VALUES(assign), assign)`,
+		 VALUES (?, ?, ?, ?, 'preburn', ?, ?, NOW())`,
 		deviceID, fp.MAC, fp.ChipUID, fp.DeviceRand, userID, userID)
 	if err != nil {
-		return fmt.Errorf("bindStore.CommitBindByDeviceID upsert: %w", err)
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return store.ErrSlotConflict
+		var duplicate *driver.MySQLError
+		if errors.As(err, &duplicate) && duplicate.Number == 1062 {
+			if err := requireCleanupComplete(ctx, tx, deviceID); err != nil {
+				return err
+			}
+			return store.ErrSlotConflict
+		}
+		return fmt.Errorf("bindStore.CommitBindByDeviceID insert: %w", err)
 	}
 
 	if _, err := tx.ExecContext(ctx,
@@ -218,6 +218,18 @@ func (s *bindStore) CommitBindByDeviceID(ctx context.Context, deviceID string, f
 	}
 
 	return tx.Commit()
+}
+
+func requireCleanupComplete(ctx context.Context, tx *sqlx.Tx, deviceID string) error {
+	var id int64
+	err := tx.GetContext(ctx, &id, `SELECT id FROM cleanup_outbox WHERE device_id=? LIMIT 1 FOR SHARE`, deviceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return store.ErrCleanupPending
 }
 
 // CommitClaim implements cases D (scan re-claim) and G (transfer/board swap).
@@ -241,11 +253,17 @@ func (s *bindStore) CommitClaim(ctx context.Context, deviceID string, fp model.F
 
 	// Capture assign for log before the UPDATE overwrites (or row is claimed)
 	var oldAssign string
-	if err := tx.QueryRowContext(ctx, `SELECT assign FROM device_bind WHERE device_id=?`, deviceID).Scan(&oldAssign); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT assign FROM device_bind WHERE device_id=? FOR UPDATE`, deviceID).Scan(&oldAssign); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return store.ErrSlotConflict
 		}
 		return fmt.Errorf("bindStore.CommitClaim read assign: %w", err)
+	}
+
+	// The locked binding orders this read after the unbind transaction, which
+	// inserts every target before releasing the device for a new owner.
+	if err := requireCleanupComplete(ctx, tx, deviceID); err != nil {
+		return err
 	}
 
 	// Optimistic claim: only succeeds if still unowned

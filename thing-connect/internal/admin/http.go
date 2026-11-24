@@ -280,6 +280,11 @@ func (s *HTTPServer) AuthMiddleware() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
+		if err := s.access.EnsureCurrent(c.Request.Context()); err != nil {
+			c.JSON(http.StatusServiceUnavailable, apiresp.JSON{Code: 503, Msg: "权限信息暂时不可用，请稍后重试"})
+			c.Abort()
+			return
+		}
 		c.Set(identityKey, identity)
 		c.Next()
 	}

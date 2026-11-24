@@ -87,7 +87,7 @@ func main() {
 
 	callRooms := cache.NewCallRooms(rdb)
 	calls := callservice.NewService(callRooms, mqttc.NewCallNotifier(broker))
-	callHTTP := callhandler.NewServer(cfg, sqlDB, calls, broker, devStore)
+	callHTTP := callhandler.NewServer(cfg, sqlDB, calls, broker, devStore, mysqlstore.NewCallCleanupStore(sqlDB))
 	remarks := voip.NewRemarks(mysqlstore.NewVoipRemarkStore(sqlDB), mqttc.NewRemarkNotifier(broker))
 	callHTTP.SetRemarks(remarks)
 	callHTTP.SetContactNames(mysqlstore.NewContactNamesStore(sqlDB))

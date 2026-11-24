@@ -594,6 +594,12 @@ func TestResetEnqueuesCleanupForConfiguredTargets(t *testing.T) {
 	if strings.Join(targets, ",") != "ai,call,voip" {
 		t.Fatalf("cleanup targets=%v, want ai, call and voip", targets)
 	}
+	injectDeviceOnlineByID(t, s.rdb, deviceID)
+	again := s.usrPOST(t, "/v1/user/device/bind-by-id", tok, map[string]string{"device_id": deviceID})
+	if again.HTTPStatus != 409 || again.Code != 6016 || again.Msg != "设备解绑清理中，请稍后重新绑定" {
+		t.Fatalf("pending cleanup rebind: HTTP=%d code=%d msg=%q", again.HTTPStatus, again.Code, again.Msg)
+	}
+
 }
 
 // TC12: device/token — 缺少请求头，返回 6008

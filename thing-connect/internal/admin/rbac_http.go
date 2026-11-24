@@ -123,7 +123,9 @@ func (s *HTTPServer) createRole(c *gin.Context) {
 		apiresp.Internal(c, "commit role")
 		return
 	}
-	s.reloadAccess(ctx)
+	if !s.publishCommittedAccess(c) {
+		return
+	}
 	apiresp.OK(c, gin.H{"id": id})
 }
 
@@ -178,7 +180,9 @@ func (s *HTTPServer) updateRole(c *gin.Context) {
 		apiresp.Internal(c, "commit role")
 		return
 	}
-	s.reloadAccess(ctx)
+	if !s.publishCommittedAccess(c) {
+		return
+	}
 	apiresp.OK(c, gin.H{"id": id})
 }
 
@@ -242,7 +246,9 @@ func (s *HTTPServer) updateRolePermissions(c *gin.Context) {
 		apiresp.Internal(c, "commit permissions")
 		return
 	}
-	s.reloadAccess(ctx)
+	if !s.publishCommittedAccess(c) {
+		return
+	}
 	apiresp.OK(c, gin.H{"id": id, "permissions": permissions})
 }
 
@@ -324,7 +330,9 @@ func (s *HTTPServer) createAdminUser(c *gin.Context) {
 		apiresp.Internal(c, "commit administrator")
 		return
 	}
-	s.reloadAccess(ctx)
+	if !s.publishCommittedAccess(c) {
+		return
+	}
 	apiresp.OK(c, gin.H{"id": id})
 }
 
@@ -415,8 +423,8 @@ func (s *HTTPServer) updateAdminUser(c *gin.Context) {
 		apiresp.Internal(c, "commit administrator")
 		return
 	}
-	if rolesChanged {
-		s.reloadAccess(ctx)
+	if rolesChanged && !s.publishCommittedAccess(c) {
+		return
 	}
 	apiresp.OK(c, gin.H{"id": id})
 }
@@ -465,8 +473,8 @@ func (s *HTTPServer) updateAdminRoles(c *gin.Context) {
 		apiresp.Internal(c, "commit roles")
 		return
 	}
-	if rolesChanged {
-		s.reloadAccess(ctx)
+	if rolesChanged && !s.publishCommittedAccess(c) {
+		return
 	}
 	apiresp.OK(c, gin.H{"id": id, "role_ids": request.RoleIDs})
 }

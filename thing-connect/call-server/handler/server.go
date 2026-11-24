@@ -29,9 +29,10 @@ type ContactNames interface {
 }
 
 type Server struct {
-	contactNames ContactNames
-	remarks      *voip.Remarks
-	intercom     interface {
+	cleanupContacts call.ContactCleanup
+	contactNames    ContactNames
+	remarks         *voip.Remarks
+	intercom        interface {
 		Unbind(context.Context, string) error
 	}
 	mu     sync.RWMutex
@@ -50,8 +51,11 @@ func (s *Server) Config() *config.Config {
 }
 func (s *Server) UpdateConfig(cfg *config.Config) { s.mu.Lock(); s.cfg = cfg; s.mu.Unlock() }
 
-func NewServer(cfg *config.Config, db *sqlx.DB, rooms *call.Service, broker mqttBroker, dev store.DeviceStore) *Server {
-	return &Server{cfg: cfg, db: db, rooms: rooms, broker: broker, dev: dev}
+func NewServer(cfg *config.Config, db *sqlx.DB, rooms *call.Service, broker mqttBroker, dev store.DeviceStore, cleanupContacts call.ContactCleanup) *Server {
+	if cleanupContacts == nil {
+		panic("call server requires contact cleanup storage")
+	}
+	return &Server{cfg: cfg, db: db, cleanupContacts: cleanupContacts, rooms: rooms, broker: broker, dev: dev}
 }
 
 func (s *Server) SetRemarks(remarks *voip.Remarks) { s.remarks = remarks }

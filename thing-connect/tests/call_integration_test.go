@@ -138,7 +138,7 @@ func newCallSuiteWithRooms(t *testing.T, rooms func(*cache.CallRooms) callservic
 	devStore := mysqlstore.NewDeviceStore(sqlDB)
 
 	r := gin.New()
-	contactHTTP := callhandler.NewServer(cfg, sqlDB, callservice.NewService(rooms(cache.NewCallRooms(rdb)), mqttc.NewCallNotifier(broker)), broker, devStore)
+	contactHTTP := callhandler.NewServer(cfg, sqlDB, callservice.NewService(rooms(cache.NewCallRooms(rdb)), mqttc.NewCallNotifier(broker)), broker, devStore, mysqlstore.NewCallCleanupStore(sqlDB))
 	contactHTTP.SetContactNames(mysqlstore.NewContactNamesStore(sqlDB))
 	contactHTTP.SetRemarks(voip.NewRemarks(mysqlstore.NewVoipRemarkStore(sqlDB), mqttc.NewRemarkNotifier(broker)))
 	contactHTTP.Register(r)
@@ -147,6 +147,7 @@ func newCallSuiteWithRooms(t *testing.T, rooms func(*cache.CallRooms) callservic
 	cs := &callSuite{callSrv: srv, sqlDB: sqlDB, rdb: rdb, cfg: cfg, broker: broker}
 	t.Cleanup(func() {
 		for _, deviceID := range cs.devices {
+			_ = rdb.Del(context.Background(), "room:unbound-revision:"+deviceID).Err()
 			_, _ = sqlDB.Exec(`DELETE FROM call_contact WHERE device_id_a=? OR device_id_b=?`, deviceID, deviceID)
 			_, _ = sqlDB.Exec(`DELETE FROM voip_device_auth WHERE device_id=?`, deviceID)
 			_, _ = sqlDB.Exec(`DELETE FROM device_bind WHERE device_id=?`, deviceID)
@@ -926,9 +927,9 @@ func (r *unbindRaceRooms) Current(ctx context.Context, device string) (*callserv
 	return room, err
 }
 
-func (r *unbindRaceRooms) EndCurrent(ctx context.Context, device, reason string) (*callservice.Room, error) {
+func (r *unbindRaceRooms) EndCurrent(ctx context.Context, device string, revision int64) (*callservice.Room, error) {
 	r.once.Do(r.switchTo)
-	return r.CallRooms.EndCurrent(ctx, device, reason)
+	return r.CallRooms.EndCurrent(ctx, device, revision)
 }
 
 func TestCall_InternalUnbindEndsRoomAnsweredDuringUnbind(t *testing.T) {
@@ -947,6 +948,7 @@ func TestCall_InternalUnbindEndsRoomAnsweredDuringUnbind(t *testing.T) {
 		store, race.CallRooms = r, r
 		return race
 	})
+	cs.seedDevice(t, device, 0)
 	ctx := context.Background()
 	t.Cleanup(func() {
 		for _, id := range []string{oldRoom.RoomID, newRoom.RoomID} {
@@ -981,6 +983,48 @@ func TestCall_InternalUnbindEndsRoomAnsweredDuringUnbind(t *testing.T) {
 	msg := cs.broker.findPublished("room_cancel", "sn_"+newCaller)
 	if msg == nil || msg.Msg["room_id"] != newRoom.RoomID || msg.Msg["reason"] != "unbound" {
 		t.Fatalf("new caller cancel=%+v", msg)
+	}
+}
+
+func TestDelayedUnbindPreservesReboundCallAndContacts(t *testing.T) {
+	cs := newCallSuite(t)
+	ctx := context.Background()
+	device, peer := uniqueDeviceID(t), uniqueDeviceID(t)
+	cs.seedDevice(t, device, 0)
+	cs.seedDevice(t, peer, 8172)
+	store := cache.NewCallRooms(cs.rdb)
+	calls := callservice.NewService(store, mqttc.NewCallNotifier(cs.broker))
+	room := callservice.Room{RoomID: "cleanup-" + uniqueDeviceID(t), Caller: device, Targets: []string{peer}, CallType: "audio", CreatedAt: time.Now().UTC().Format(time.RFC3339)}
+	notify := func() {
+		t.Helper()
+		if got := cs.POSTInternal(t, "/v1/call/internal/unbind", map[string]any{"device_id": device}); got.Code != 200 {
+			t.Fatal(got)
+		}
+	}
+	notify()
+	if _, err := cs.sqlDB.Exec(`UPDATE device_bind SET user_id=8173 WHERE device_id=?`, device); err != nil {
+		t.Fatal(err)
+	}
+	cs.seedContact(t, device, peer, 8173, 8172, 1)
+	if existing, err := calls.Create(ctx, room, nil, time.Minute); err != nil || existing != "" {
+		t.Fatalf("new room %q: %v", existing, err)
+	}
+	defer func() { _, _ = calls.End(ctx, room.RoomID, device, true, "hangup") }()
+	notify()
+	// An earlier request might already hold the obsolete SQL snapshot.
+	if stale, err := store.EndCurrent(ctx, device, 1); err != nil || stale != nil {
+		t.Fatalf("stale room cleanup: %+v %v", stale, err)
+	}
+	if _, err := mysqlstore.NewCallCleanupStore(cs.sqlDB).DeleteUnboundContacts(ctx, device, 1); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.Current(ctx, device)
+	if err != nil || got == nil || got.RoomID != room.RoomID {
+		t.Fatalf("new room lost: %+v %v", got, err)
+	}
+	var count int
+	if err := cs.sqlDB.Get(&count, `SELECT COUNT(*) FROM call_contact WHERE device_id_a=? AND device_id_b=?`, minTestStr(device, peer), maxTestStr(device, peer)); err != nil || count != 1 {
+		t.Fatalf("new contact count=%d err=%v", count, err)
 	}
 }
 

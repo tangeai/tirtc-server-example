@@ -425,3 +425,36 @@ func TestCommitBindFromPool_ConcurrentSameMACSameUser(t *testing.T) {
 		t.Fatalf("want 1 success + 1 ErrMACAlreadyBound, got success=%d alreadybound=%d", ok, already)
 	}
 }
+
+func TestRebindWaitsForEveryUnbindTarget(t *testing.T) {
+	db := openTestDB(t)
+	id, _ := seedPool(t, db)
+	defer cleanBind(t, db, id)
+	a, b := seedUser(t, db), seedUser(t, db)
+	ctx := context.Background()
+	binds := mysqlstore.NewBindStore(db)
+	fp := model.Fingerprint{MAC: "AA:BB:CC:00:EF:99"}
+	if err := binds.CommitBindByDeviceID(ctx, id, fp, a); err != nil {
+		t.Fatal(err)
+	}
+	if err := binds.(store.UnbindCleanupStore).CommitUnbindWithCleanup(ctx, id, a, []string{"voip", "call"}); err != nil {
+		t.Fatal(err)
+	}
+	defer db.Exec(`DELETE FROM cleanup_outbox WHERE device_id=?`, id)
+	for _, target := range []string{"voip", "call"} {
+		for _, claim := range []func(context.Context, string, model.Fingerprint, int64) error{binds.CommitClaim, binds.CommitBindByDeviceID} {
+			if err := claim(ctx, id, fp, b); !errors.Is(err, store.ErrCleanupPending) {
+				t.Fatalf("rebind while %s pending: %v", target, err)
+			}
+		}
+		if _, err := db.Exec(`DELETE FROM cleanup_outbox WHERE device_id=? AND target=?`, id, target); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := binds.CommitClaim(ctx, id, fp, b); err != nil {
+		t.Fatal(err)
+	}
+	if q, err := mysqlstore.NewUserStore(db).GetQuota(ctx, b); err != nil || q != 1 {
+		t.Fatalf("quota=%d err=%v", q, err)
+	}
+}

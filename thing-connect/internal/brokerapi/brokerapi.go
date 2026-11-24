@@ -188,14 +188,20 @@ func (c *Client) listWindow(ctx context.Context, q url.Values, lo, hi int64, vis
 	if lo == hi || len(page.Data) == 0 {
 		return errors.New("broker api: a connection-time window exceeds one page; cursor API required")
 	}
-	// Times outside the window (second precision, missing field) are clamped:
-	// the pivot only has to stay inside [lo, hi) for the split to progress.
+	// Prefer the observed median. Whole-second output can place it just
+	// below the lower bound: bisect the remainder of that second. Without
+	// a useful timestamp, bisect the full interval. Both halves are visited.
 	timestamps := make([]int64, len(page.Data))
 	for i, row := range page.Data {
-		timestamps[i] = min(max(row.ConnectedAt.UnixMilli(), lo), hi)
+		timestamps[i] = row.ConnectedAt.UnixMilli()
 	}
 	slices.Sort(timestamps)
-	pivot := min(timestamps[len(timestamps)/2], hi-1)
+	pivot := timestamps[len(timestamps)/2]
+	if pivot > 0 && pivot%1000 == 0 && pivot <= lo && lo < pivot+999 {
+		pivot = lo + (min(hi, pivot+999)-lo)/2
+	} else if pivot <= lo || pivot >= hi {
+		pivot = lo + (hi-lo)/2
+	}
 	if err := c.listWindow(ctx, q, lo, pivot, visit); err != nil {
 		return err
 	}
@@ -230,7 +236,7 @@ func (c *Client) page(ctx context.Context, endpoint string, q url.Values) (clien
 	var body clientPage
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 64<<20)).Decode(&body); err != nil {
 		if cursorMissing {
-			return clientPage{}, fmt.Errorf("%w: %v", errNoCursorAPI, err)
+			return clientPage{}, fmt.Errorf("%w: %w", errNoCursorAPI, err)
 		}
 		return clientPage{}, fmt.Errorf("broker api: %s: %w", endpoint, err)
 	}

@@ -32,18 +32,9 @@ func (s *Server) postInternalUnbind(c *gin.Context) {
 		}
 	}
 
-	if err := s.rooms.Unbind(ctx, body.DeviceID); err != nil {
-		s.callError(c, err)
-		return
-	}
-
-	peers, err := s.contactPeers(ctx, body.DeviceID)
+	peers, err := s.rooms.Unbind(ctx, body.DeviceID, s.cleanupContacts)
 	if err != nil {
-		apiresp.Fail(c, apiresp.ErrInternal, err.Error())
-		return
-	}
-	if err := s.deleteAllContacts(ctx, body.DeviceID); err != nil {
-		apiresp.Fail(c, apiresp.ErrInternal, err.Error())
+		s.callError(c, err)
 		return
 	}
 	for _, peer := range peers {

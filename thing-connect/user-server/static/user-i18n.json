@@ -208,6 +208,7 @@
   "设置设备名称": "Set device name",
   "识别设置暂不可用": "Recognition settings are temporarily unavailable",
   "该场景能力未上报": "No capabilities reported for this scenario",
+  "设备解绑清理中，请稍后重新绑定": "Device cleanup is still in progress. Try binding again shortly.",
   "该设备已绑定，请勿重复添加": "This device is already bound. Do not add it again.",
   "该设备已被其他账号绑定，若需使用请联系管理员重置": "This device belongs to another account. Contact an administrator to reset it.",
   "语音": "Audio",

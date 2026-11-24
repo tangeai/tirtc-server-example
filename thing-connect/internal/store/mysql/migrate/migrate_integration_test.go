@@ -70,7 +70,7 @@ func TestMigrateNewTables(t *testing.T) {
 	if err := sqlDB.Get(&count, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='admin_users'`); err != nil || count == 0 {
 		t.Errorf("admin_users table missing: n=%d err=%v", count, err)
 	}
-	if err := sqlDB.Get(&count, `SELECT COUNT(*) FROM schema_migrations WHERE component IN ('core','admin')`); err != nil || count != 20 {
+	if err := sqlDB.Get(&count, `SELECT COUNT(*) FROM schema_migrations WHERE component IN ('core','admin')`); err != nil || count != migrate.CurrentMigrationVersions()["core"]+migrate.CurrentMigrationVersions()["admin"] {
 		t.Errorf("schema_migrations entries: n=%d err=%v", count, err)
 	}
 	if err := sqlDB.Get(&count, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='call_requests'`); err != nil || count != 0 {
@@ -155,7 +155,8 @@ func TestQueueObservationUpgradePreservesRowsAndActiveLeases(t *testing.T) {
 		}
 	}
 	for _, q := range []string{
-		`DELETE FROM schema_migrations WHERE component='core' AND version=13`,
+		`DROP TABLE admin_reset_mail_outbox`,
+		`DELETE FROM schema_migrations WHERE component='core' AND version>=13`,
 		`INSERT INTO recognition_outbox(device_id,bind_id,payload,attempts,next_at) VALUES('upgrade','1:1','{}',0,DATE_ADD(UTC_TIMESTAMP(6),INTERVAL 8 HOUR)),('leased','1:1','{}',1,DATE_ADD(UTC_TIMESTAMP(6),INTERVAL 1 HOUR))`,
 		`INSERT INTO voip_remark_outbox(device_id,peer_id) VALUES('upgrade','peer')`,
 		`INSERT INTO ai_cloud_role_target(device_id,user_id,binding_revision,role_id) VALUES('upgrade',1,1,'role')`,

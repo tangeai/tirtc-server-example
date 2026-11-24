@@ -95,13 +95,25 @@ func (s *Service) Reject(ctx context.Context, id, self, reason string) (RejectRe
 	return result, err
 }
 
-// Unbind ends whatever room the device holds when the unbind commits.
-func (s *Service) Unbind(ctx context.Context, device string) error {
-	r, err := s.store.EndCurrent(ctx, device, "unbound")
-	if err == nil && r != nil {
+// ContactCleanup compares the binding lifecycle inside the contact deletion transaction.
+type ContactCleanup interface {
+	UnboundRevision(context.Context, string) (int64, error)
+	DeleteUnboundContacts(context.Context, string, int64) ([]string, error)
+}
+
+func (s *Service) Unbind(ctx context.Context, device string, contacts ContactCleanup) ([]string, error) {
+	revision, err := contacts.UnboundRevision(ctx, device)
+	if err != nil || revision == 0 {
+		return nil, err
+	}
+	r, err := s.store.EndCurrent(ctx, device, revision)
+	if err != nil {
+		return nil, err
+	}
+	if r != nil {
 		s.flush(ctx, r.RoomID)
 	}
-	return err
+	return contacts.DeleteUnboundContacts(ctx, device, revision)
 }
 
 // flush delivers only the rooms changed by this request; the global backlog

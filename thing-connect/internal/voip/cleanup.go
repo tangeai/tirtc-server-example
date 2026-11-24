@@ -13,12 +13,13 @@ type Contact struct {
 }
 
 type CleanupStore interface {
+	UnboundRevision(context.Context, string) (int64, error)
 	Contacts(context.Context, string) ([]Contact, error)
-	DeleteAuthorizations(context.Context, string) error
+	DeleteAuthorizations(context.Context, string, int64) error
 }
 
 type CallGuards interface {
-	ReleaseDevice(context.Context, string, []Contact) error
+	ReleaseDevice(context.Context, string, int64, []Contact) error
 }
 
 type AuthNotifier interface {
@@ -40,16 +41,20 @@ func NewCleanup(store CleanupStore, guards CallGuards, notifier AuthNotifier) *C
 func (s *Cleanup) Unbind(ctx context.Context, deviceID string) error {
 	ctx, cancel := context.WithTimeout(ctx, 4*time.Second)
 	defer cancel()
+	revision, err := s.store.UnboundRevision(ctx, deviceID)
+	if err != nil || revision == 0 {
+		return err
+	}
 	contacts, err := s.store.Contacts(ctx, deviceID)
 	if err != nil {
 		return fmt.Errorf("read VoIP cleanup contacts: %w", err)
 	}
 	// Keep contacts durable until their guards are released; deleting first loses
 	// the contact keys when Redis fails and the request is retried.
-	if err := s.guards.ReleaseDevice(ctx, deviceID, contacts); err != nil {
+	if err := s.guards.ReleaseDevice(ctx, deviceID, revision, contacts); err != nil {
 		return fmt.Errorf("release VoIP cleanup guards: %w", err)
 	}
-	if err := s.store.DeleteAuthorizations(ctx, deviceID); err != nil {
+	if err := s.store.DeleteAuthorizations(ctx, deviceID, revision); err != nil {
 		return fmt.Errorf("delete VoIP authorizations: %w", err)
 	}
 	if err := s.notifier.AuthChanged(ctx, deviceID); err != nil {

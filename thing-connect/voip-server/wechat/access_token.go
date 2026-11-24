@@ -36,10 +36,7 @@ type cachedToken struct {
 // WeChat rejected and this instance may not force a refresh right now.
 var ErrTokenRefreshInProgress = errors.New("wechat: token refresh in progress")
 
-const (
-	rejectedTokenTTL  = 2 * time.Hour
-	maxRejectedTokens = 8
-)
+const rejectedTokenTTL = 2 * time.Hour
 
 // Variables so tests can shorten the waits.
 var (
@@ -51,12 +48,13 @@ var (
 // tokenState 每个 appID 一个锁，持锁期间进行 fetch，后续并发请求等待同一结果。
 // 获取失败后在 retryAt 前直接返回 retryErr，使每个实例的 stable_token 读取有界。
 type tokenState struct {
-	lock     chan struct{}
-	cache    cachedToken
-	rejected map[string]time.Time
-	retryAt  time.Time
-	retryErr error
-	failures int
+	lock       chan struct{}
+	cache      cachedToken
+	rejectedMu sync.Mutex
+	rejected   map[string]time.Time
+	retryAt    time.Time
+	retryErr   error
+	failures   int
 }
 
 var (
@@ -144,6 +142,9 @@ type RefreshGate func(ctx context.Context, appID string) (bool, error)
 // just refused: it is dropped from the cache and never accepted again until
 // rejectedTokenTTL. A nil reserve never forces a refresh.
 func (st *tokenState) token(ctx context.Context, appID, secret, rejected string, reserve RefreshGate) (string, error) {
+	if rejected != "" {
+		st.markRejected(rejected, time.Now())
+	}
 	select {
 	case st.lock <- struct{}{}:
 	case <-ctx.Done():
@@ -151,10 +152,7 @@ func (st *tokenState) token(ctx context.Context, appID, secret, rejected string,
 	}
 	defer func() { <-st.lock }()
 	now := time.Now()
-	if rejected != "" {
-		st.markRejected(rejected, now)
-	}
-	if st.cache.token != "" && now.Add(5*time.Minute).Before(st.cache.expiresAt) {
+	if st.cache.token != "" && now.Add(5*time.Minute).Before(st.cache.expiresAt) && !st.isRejected(st.cache.token, now) {
 		return st.cache.token, nil
 	}
 	st.cache = cachedToken{}
@@ -236,6 +234,8 @@ func (st *tokenState) fail(ctx context.Context, err error) error {
 }
 
 func (st *tokenState) markRejected(token string, now time.Time) {
+	st.rejectedMu.Lock()
+	defer st.rejectedMu.Unlock()
 	if st.rejected == nil {
 		st.rejected = map[string]time.Time{}
 	}
@@ -244,22 +244,12 @@ func (st *tokenState) markRejected(token string, now time.Time) {
 			delete(st.rejected, t)
 		}
 	}
-	if len(st.rejected) >= maxRejectedTokens {
-		var oldest string
-		for t, until := range st.rejected {
-			if oldest == "" || until.Before(st.rejected[oldest]) {
-				oldest = t
-			}
-		}
-		delete(st.rejected, oldest)
-	}
 	st.rejected[token] = now.Add(rejectedTokenTTL)
-	if st.cache.token == token {
-		st.cache = cachedToken{}
-	}
 }
 
 func (st *tokenState) isRejected(token string, now time.Time) bool {
+	st.rejectedMu.Lock()
+	defer st.rejectedMu.Unlock()
 	until, ok := st.rejected[token]
 	return ok && now.Before(until)
 }
@@ -298,5 +288,9 @@ func CallWithAccessToken(ctx context.Context, appID, secret string, reserve Refr
 	if err != nil {
 		return err
 	}
-	return call(token)
+	err = call(token)
+	if tokenRejected(err) {
+		st.markRejected(token, time.Now())
+	}
+	return err
 }

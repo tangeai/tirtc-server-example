@@ -387,34 +387,6 @@ func (s *Server) deleteContact(ctx context.Context, self, peer string) error {
 	return nil
 }
 
-// contactPeers returns every device that has a non-deleted contact
-// relationship with deviceID — used to fan out callers_update on unbind.
-func (s *Server) contactPeers(ctx context.Context, deviceID string) ([]string, error) {
-	var rows []deviceContact
-	if err := s.db.SelectContext(ctx, &rows,
-		`SELECT * FROM call_contact WHERE (device_id_a=? OR device_id_b=?) AND status<>?`,
-		deviceID, deviceID, contactStatusDeleted); err != nil {
-		return nil, fmt.Errorf("contactPeers: %w", err)
-	}
-	peers := make([]string, 0, len(rows))
-	for _, row := range rows {
-		peers = append(peers, row.peer(deviceID))
-	}
-	return peers, nil
-}
-
-// deleteAllContacts permanently removes every contact row touching deviceID.
-// This is reserved for device unbind; the normal contact-delete API keeps its
-// soft-delete behavior so a manually removed relationship can be re-added.
-func (s *Server) deleteAllContacts(ctx context.Context, deviceID string) error {
-	if _, err := s.db.ExecContext(ctx,
-		`DELETE FROM call_contact WHERE device_id_a=? OR device_id_b=?`,
-		deviceID, deviceID); err != nil {
-		return fmt.Errorf("deleteAllContacts: %w", err)
-	}
-	return nil
-}
-
 // voipContact represents a WeChat mini-program user authorized to call a device.
 type voipContact struct {
 	ID        int64  `db:"id"`

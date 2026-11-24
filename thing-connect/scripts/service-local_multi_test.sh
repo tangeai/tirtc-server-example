@@ -41,6 +41,7 @@ sed -i "s/user-server\t9002\t/user-server\t$PORT\t/" "$DEPLOY_ROOT/service-catal
 cat >"$DEPLOY_ROOT/admin-server/admin-server" <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$DEPLOY_ROOT/preflight.log"
+exit "${TEST_PREFLIGHT_STATUS:-0}"
 SH
 chmod +x "$DEPLOY_ROOT/admin-server/admin-server"
 cat >"$DEPLOY_ROOT/user-server/user-server" <<'PY'
@@ -63,6 +64,11 @@ for args in 'admin-server 2' 'user-server 0' 'user-server 33' 'user-server-2 2';
 done
 "$CONTROLLER" instances user-server 2
 [ "$("$CONTROLLER" ports user-server)" = "$(printf '%s\n%s' "$PORT" "$((PORT+10))")" ] || fail ports
+for action in start restart; do
+    status=0
+    TEST_PREFLIGHT_STATUS=78 "$CONTROLLER" "$action" user-server >"$TEST_ROOT/pause.log" 2>&1 || status=$?
+    [ "$status" = 78 ] || fail "$action returned $status for a configuration pause"
+done
 "$CONTROLLER" start user-server
 grep -q -- '-check-service-instances 2' "$DEPLOY_ROOT/preflight.log" || fail 'missing multi-instance preflight'
 [ "$(curl -fsS "http://127.0.0.1:$PORT/health/ready")" = local-user-server ] || fail 'primary identity'

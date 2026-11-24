@@ -5,11 +5,13 @@ import (
 
 	"thing-connect/internal/apiresp"
 	"thing-connect/internal/bindlimit"
+	"thing-connect/internal/store"
 )
 
 func RegisterErrors() {
 	apiresp.RegisterError(ErrCodeExpired, http.StatusBadRequest, apiresp.CodeCodeExpired)
 	apiresp.RegisterError(ErrAlreadyBound, http.StatusConflict, apiresp.CodeDevBound)
+	apiresp.RegisterError(store.ErrCleanupPending, http.StatusConflict, apiresp.CodeCleanupPending)
 	apiresp.RegisterError(ErrBoundByOther, http.StatusConflict, apiresp.CodeDevOtherBound)
 	apiresp.RegisterError(ErrQuotaEmpty, http.StatusUnprocessableEntity, apiresp.CodeQuotaEmpty)
 	apiresp.RegisterError(ErrDeviceOffline, http.StatusServiceUnavailable, apiresp.CodeDevOffline)

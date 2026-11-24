@@ -182,11 +182,14 @@ preflight_service() {
         return 1
     }
     echo "检查 $service 的基础配置、必填配置和依赖连接..." >&2
-    if ! "$checker" -c "$DEPLOY_ROOT/$ADMIN_SERVICE/config.yaml" \
+    if "$checker" -c "$DEPLOY_ROOT/$ADMIN_SERVICE/config.yaml" \
         -deploy-root "$DEPLOY_ROOT" -check-service-config "$service" "${instance_args[@]}"; then
+        return 0
+    else
+        local status=$?
         err "$service 启动前检查失败，未启动服务"
         err "处理建议：登录 Admin 完成页面列出的必填配置；修复后重新执行 $DEPLOY_ROOT/service-local.sh start $SERVICE_GROUP:$service"
-        return 1
+        return "$status"
     fi
 }
 
@@ -298,7 +301,7 @@ start_one() (
     [ -x "$binary" ] || { err "服务尚未发布: $binary"; return 1; }
     if [ "$service" != "$ADMIN_SERVICE" ]; then
         config_exists "$base" || { err "$service 配置不存在"; return 1; }
-        [ "$prechecked" = "1" ] || preflight_service "$service" || return 1
+        [ "$prechecked" = "1" ] || preflight_service "$service" || return $?
     fi
     port="$(service_port "$service")" || return 1
     if port_in_use "$port"; then
@@ -394,11 +397,11 @@ control_service() {
             start|restart)
                 if [ "$action" = restart ]; then
                     # Preflight before disrupting a healthy instance.
-                    [ "$base" = "$ADMIN_SERVICE" ] || preflight_service "$base" || return 1
+                    [ "$base" = "$ADMIN_SERVICE" ] || preflight_service "$base" || return $?
                     stop_one "$program" >/dev/null || return 1
-                    start_one "$program" 1 || return 1
+                    start_one "$program" 1 || return $?
                 else
-                    start_one "$program" || return 1
+                    start_one "$program" || return $?
                 fi
                 # Preserve asynchronous single-instance start compatibility.
                 # Multi-instance starts and restarts advance only after readiness.
@@ -423,7 +426,7 @@ start_all() {
         service_is_enabled "$service" || continue
         if [ "$service" = recognition-server ] && [ "${DEFER_RECOGNITION_START:-0}" = 1 ]; then continue; fi
         if config_exists "$service"; then
-            preflight_service "$service" || return 1
+            preflight_service "$service" || return $?
         elif [ -f "$DEPLOY_ROOT/enabled-services" ]; then
             err "$service 已启用但配置不存在；请配置后重试，或停用该可选服务"
             return 1
@@ -434,7 +437,7 @@ start_all() {
         if [ "$service" = recognition-server ] && [ "${DEFER_RECOGNITION_START:-0}" = 1 ]; then continue; fi
         if config_exists "$service"; then
             for program in $(service_programs "$service"); do
-                start_one "$program" 1 || return 1
+                start_one "$program" 1 || return $?
                 port="$(service_port "$program")" || return 1
                 if ! wait_ready "$program" "$port"; then
                     stop_one "$program" >/dev/null || true

@@ -114,8 +114,12 @@ return answer_room(ARGV[1],ARGV[2],ARGV[3])
 var endCallRoom = redis.NewScript(callRoomPrelude + call.RoomTransitions + `
 return end_room(ARGV[1],ARGV[2],ARGV[3]=='1',ARGV[4])
 `)
-var endCurrentCallRoom = redis.NewScript(callRoomPrelude + call.RoomTransitions + `
-return end_owned_room(ARGV[1],ARGV[2])
+var endCurrentCallRoom = redis.NewScript(callRoomPrelude + call.RoomTransitions + unbindRevisionCheck + `
+local key='room:unbound-revision:'..ARGV[1]
+if already_cleaned(key,ARGV[2]) then return '' end
+local result=end_owned_room(ARGV[1],'unbound')
+redis.call('SET',key,ARGV[2])
+return result
 `)
 var rejectCallRoom = redis.NewScript(callRoomPrelude + call.RoomTransitions + `
 return reject_room(ARGV[1],ARGV[2],ARGV[3])
@@ -189,8 +193,8 @@ func (s *CallRooms) End(ctx context.Context, id, self string, callerOnly bool, r
 	}
 	return &r, nil
 }
-func (s *CallRooms) EndCurrent(ctx context.Context, device, reason string) (*call.Room, error) {
-	return s.read(ctx, endCurrentCallRoom, device, reason)
+func (s *CallRooms) EndCurrent(ctx context.Context, device string, revision int64) (*call.Room, error) {
+	return s.read(ctx, endCurrentCallRoom, device, revision)
 }
 func (s *CallRooms) Reject(ctx context.Context, id, self, reason string) (call.RejectResult, error) {
 	var out call.RejectResult

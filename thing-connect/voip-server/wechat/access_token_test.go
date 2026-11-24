@@ -175,6 +175,22 @@ func TestCallWithAccessTokenRetriesOnlyOnce(t *testing.T) {
 	}
 }
 
+func TestSecondRejectedTokenCannotBeReused(t *testing.T) {
+	useFakeStableToken(t, "old")
+	ctx := context.Background()
+	var used []string
+	err := CallWithAccessToken(ctx, "wx-app", "secret", grantRefresh, func(token string) error {
+		used = append(used, token)
+		return &APIError{Errcode: 40014}
+	})
+	if !tokenRejected(err) || len(used) != 2 || used[0] == used[1] {
+		t.Fatalf("tokens=%v err=%v", used, err)
+	}
+	if token, err := GetAccessToken(ctx, "wx-app", "secret"); token != "" || !errors.Is(err, ErrTokenRefreshInProgress) {
+		t.Fatalf("stable endpoint still serves the rejected replacement: token=%q err=%v", token, err)
+	}
+}
+
 func TestCallWithAccessTokenDoesNotRetryOtherErrors(t *testing.T) {
 	fake := useFakeStableToken(t, "token")
 	calls := 0

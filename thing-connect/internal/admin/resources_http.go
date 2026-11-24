@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,7 +14,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
-	"github.com/redis/go-redis/v9"
 
 	"thing-connect/internal/apiresp"
 	"thing-connect/internal/logging"
@@ -213,22 +213,16 @@ func (s *HTTPServer) sendPasswordResetEmail(c *gin.Context) {
 		apiresp.BadParam(c, "请求无效")
 		return
 	}
-	var email string
-	if err := s.store.db.GetContext(ctx, &email, `SELECT email FROM users WHERE id=? AND status=1`, id); err != nil {
-		c.JSON(http.StatusNotFound, apiresp.JSON{Code: 404, Msg: "可用用户不存在"})
-		return
-	}
-	// The queued command and its audit row are reconciled by command_id, so
-	// neither may be abandoned when the client disconnects in between.
-	effectCtx, cancel := committedEffectContext(ctx)
-	defer cancel()
-	commandID, err := s.redis.XAdd(effectCtx, &redis.XAddArgs{Stream: "thingconnect:admin:user-commands", Values: map[string]any{"type": "password_reset_email", "user_id": id, "email": email, "created_at": time.Now().Unix()}}).Result()
-	if err != nil {
-		apiresp.Internal(c, err.Error())
-		return
-	}
 	identity, _ := identityFromContext(c)
-	_ = s.store.Audit(effectCtx, requestAudit(c, identity, "user.password_reset", "user", strconv.FormatInt(id, 10), request.Reason, "", fmt.Sprintf(`{"queued":true,"command_id":%q}`, commandID)))
+	event := requestAudit(c, identity, "user.password_reset", "user", strconv.FormatInt(id, 10), request.Reason, "", "")
+	if err := s.store.QueuePasswordReset(ctx, id, event); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			c.JSON(http.StatusNotFound, apiresp.JSON{Code: 404, Msg: "可用用户不存在"})
+		} else {
+			apiresp.Internal(c, "queue password reset")
+		}
+		return
+	}
 	c.JSON(http.StatusAccepted, apiresp.JSON{Code: 200, Msg: "ok", Data: gin.H{"queued": true}})
 }
 
@@ -399,14 +393,16 @@ func committedEffectContext(ctx context.Context) (context.Context, context.Cance
 	return context.WithTimeout(context.WithoutCancel(ctx), committedEffectTimeout)
 }
 
-// reloadAccess applies committed RBAC changes to this process. A failed reload
-// leaves the previous policy in effect, so it must be visible in logs.
-func (s *HTTPServer) reloadAccess(ctx context.Context) {
-	ctx, cancel := committedEffectContext(ctx)
+// publishCommittedAccess publishes committed RBAC changes independently of the caller.
+func (s *HTTPServer) publishCommittedAccess(c *gin.Context) bool {
+	ctx, cancel := committedEffectContext(c.Request.Context())
 	defer cancel()
 	if err := s.access.Reload(ctx); err != nil {
 		slog.ErrorContext(ctx, "reload admin RBAC policy failed", "err", err)
+		c.JSON(http.StatusServiceUnavailable, apiresp.JSON{Code: 503, Msg: "更改已保存，权限同步暂时不可用，请稍后刷新"})
+		return false
 	}
+	return true
 }
 
 func marshalSafe(value any) string {

@@ -38,7 +38,7 @@ func TestAccountStateAcrossCallAndVoipHTTP(t *testing.T) {
 	r := gin.New()
 	r.Use(userauth.EnforceState(cs.sqlDB, cs.cfg.JWTSecret))
 	calls := callservice.NewService(cache.NewCallRooms(cs.rdb), mqttc.NewCallNotifier(cs.broker))
-	callhandler.NewServer(cs.cfg, cs.sqlDB, calls, cs.broker, mysqlstore.NewDeviceStore(cs.sqlDB)).Register(r)
+	callhandler.NewServer(cs.cfg, cs.sqlDB, calls, cs.broker, mysqlstore.NewDeviceStore(cs.sqlDB), mysqlstore.NewCallCleanupStore(cs.sqlDB)).Register(r)
 	voiphandler.NewServer(cs.cfg, cs.sqlDB, cs.rdb, cs.broker, deviceprofile.NewService(mysqlstore.NewDeviceProfileStore(cs.sqlDB)), nil, cache.WeChatRefreshGate(cs.rdb)).Register(r)
 	server := httptest.NewServer(r)
 	defer server.Close()

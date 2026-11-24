@@ -1332,7 +1332,7 @@ start_one() {
         return 0
     fi
     if [ "$ACTIVE_SERVICE_MANAGER" = local ]; then
-        "$LOCAL_SERVICECTL" start "$SUPERVISOR_GROUP:$svc" || return 1
+        "$LOCAL_SERVICECTL" start "$SUPERVISOR_GROUP:$svc" || return $?
         wait_for_readiness "$svc"
         return $?
     fi
@@ -1378,7 +1378,7 @@ start_program() {
 restart_one() {
     local svc="$1"
     if [ "$ACTIVE_SERVICE_MANAGER" = local ]; then
-        "$LOCAL_SERVICECTL" restart "$SUPERVISOR_GROUP:$svc" || return 1
+        "$LOCAL_SERVICECTL" restart "$SUPERVISOR_GROUP:$svc" || return $?
         wait_for_readiness "$svc"
         return $?
     fi

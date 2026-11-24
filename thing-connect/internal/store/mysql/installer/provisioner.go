@@ -38,7 +38,7 @@ var managedTableNames = []string{
 	"admin_users", "admin_roles", "admin_user_roles", "admin_role_permissions",
 	"admin_menus", "admin_role_menus", "admin_sessions", "admin_mfa_factors",
 	"admin_mfa_recovery_codes", "admin_login_log", "admin_dict_types", "admin_dict_items",
-	"admin_audit_log", "admin_jobs", "admin_job_items", "config_entries",
+	"admin_reset_mail_outbox", "admin_audit_log", "admin_jobs", "admin_job_items", "config_entries",
 	"config_publish_outbox", "thingconnect_installation_state",
 }
 

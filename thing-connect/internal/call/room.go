@@ -63,7 +63,7 @@ type Rooms interface {
 	End(context.Context, string, string, bool, string) (*Room, error)
 	// EndCurrent ends the room the device holds at commit time, as End would for
 	// that room. It returns nil when the device holds no room.
-	EndCurrent(context.Context, string, string) (*Room, error)
+	EndCurrent(context.Context, string, int64) (*Room, error)
 	// Reject cannot release an answered room and counts distinct targets.
 	Reject(context.Context, string, string, string) (RejectResult, error)
 }

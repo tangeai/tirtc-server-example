@@ -5,6 +5,8 @@ import "errors"
 // ErrSlotConflict is returned by CommitClaim when a concurrent request claimed the device first.
 var ErrSlotConflict = errors.New("设备已被并发认领，请重试")
 
+var ErrCleanupPending = errors.New("设备解绑清理中，请稍后重新绑定")
+
 // ErrDeviceNotFound is returned when a transactional device mutation cannot
 // find the requested device row.
 var ErrDeviceNotFound = errors.New("设备不存在")

@@ -18,6 +18,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"thing-connect/internal/adminmail"
 	"thing-connect/internal/bindlimit"
 	"thing-connect/internal/boardcatalog"
 	"thing-connect/internal/cache"
@@ -197,7 +198,9 @@ func main() {
 		log.Fatalf("cleanup outbox: %v", err)
 	}
 	commands := newAdminUserCommands(rdb, userSvc.DeliverPasswordResetCode)
-	commandBacklog := queuehealth.New("admin_user_command", commands)
+	mailStore := mysqlstore.NewResetMailStore(sqlDB)
+	mailWorker := adminmail.NewWorker(mailStore, userSvc.DeliverPasswordResetCode)
+	commandBacklog := queuehealth.New("admin_user_command", adminmail.CombinedBacklog{Durable: mailStore, Legacy: commands})
 	// A cleanup backlog is reported as degraded status but must not fail
 	// /health/ready: draining user-server would not help a stuck target.
 	statusProbes := maps.Clone(probes)
@@ -214,7 +217,7 @@ func main() {
 	reporter.SetMetrics(servicestatus.MergeMetrics(broker.Metrics, outbox.Metrics, commandBacklog.Metrics, guard.Metrics, servicestatus.PoolMetrics(sqlDB, rdb)))
 	workerCtx, stopWorkers := context.WithCancel(context.Background())
 	var workers sync.WaitGroup
-	for _, run := range []func(context.Context){outbox.Run, passwordResetMailQueue.Run, commands.run, commandBacklog.Run, reporter.Run, func(ctx context.Context) { dynamicClient.Run(ctx, dynamicRefs) }} {
+	for _, run := range []func(context.Context){outbox.Run, passwordResetMailQueue.Run, commands.run, mailWorker.Run, commandBacklog.Run, reporter.Run, func(ctx context.Context) { dynamicClient.Run(ctx, dynamicRefs) }} {
 		workers.Add(1)
 		go func(work func(context.Context)) {
 			defer workers.Done()

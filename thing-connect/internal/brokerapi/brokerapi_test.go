@@ -185,34 +185,55 @@ func TestCursorEndpointFallbackOnlyForMissingEndpoint(t *testing.T) {
 }
 
 func TestLegacyListingSplitsSecondPrecisionTimes(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v5/clients_v2" {
-			http.NotFound(w, r)
-			return
-		}
-		q := r.URL.Query()
-		lo, hi := q.Get("gte_connected_at"), q.Get("lte_connected_at")
-		const second = "1767225601000"
-		switch {
-		case lo == "" && hi == "":
-			fmt.Fprint(w, `{"data":[{"clientid":"sn_a","connected_at":"2026-01-01T00:00:00Z"},{"clientid":"sn_b","connected_at":"2026-01-01T00:00:01Z"}],"meta":{"hasnext":true}}`)
-		case lo == "1767225601001" && hi == "":
-			// The window starts mid-second but the broker reports whole seconds.
-			fmt.Fprint(w, `{"data":[{"clientid":"sn_c","connected_at":"2026-01-01T00:00:01Z"},{"clientid":"sn_d","connected_at":"2026-01-01T00:00:01Z"}],"meta":{"hasnext":true}}`)
-		case lo == "" && hi == second, lo == "1767225601001" && hi == "1767225601001", lo == "1767225601002" && hi == "":
-			fmt.Fprint(w, `{"data":[{"clientid":"sn_part","connected_at":"2026-01-01T00:00:01Z"}],"meta":{"hasnext":false}}`)
-		default:
-			t.Errorf("unexpected interval %s", r.URL)
-		}
-	}))
-	defer server.Close()
-	c, _ := New(Config{URL: server.URL, APIKey: "key"})
-	n := 0
-	if err := c.ListConnected(context.Background(), func(b []presence.Observation) error { n += len(b); return nil }); err != nil {
-		t.Fatal(err)
-	}
-	if n != 3 {
-		t.Fatalf("listed %d sub-windows", n)
+	for _, tc := range []struct {
+		name, timeField string
+		maxRequests     int
+	}{
+		{"whole second", `,"connected_at":"2026-01-01T00:00:01Z"`, 25},
+		{"missing", "", 110},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const second = int64(1767225601000)
+			requests := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/v5/clients_v2" {
+					http.NotFound(w, r)
+					return
+				}
+				requests++
+				if requests > tc.maxRequests {
+					http.Error(w, "too many listing requests", http.StatusServiceUnavailable)
+					return
+				}
+				q := r.URL.Query()
+				lo, _ := strconv.ParseInt(q.Get("gte_connected_at"), 10, 64)
+				hi := maxConnectionMS
+				if q.Has("lte_connected_at") {
+					hi, _ = strconv.ParseInt(q.Get("lte_connected_at"), 10, 64)
+				}
+				clients := make([]string, 0, 1200)
+				for i := 0; i < 1200; i++ {
+					ms := second + 899 + int64(i/600)
+					if lo <= ms && ms <= hi {
+						clients = append(clients, fmt.Sprintf(`{"clientid":"sn_%d"%s}`, i, tc.timeField))
+					}
+				}
+				fmt.Fprintf(w, `{"data":[%s],"meta":{"hasnext":%t}}`, strings.Join(clients[:min(len(clients), pageSize)], ","), len(clients) > pageSize)
+			}))
+			defer server.Close()
+			c, _ := New(Config{URL: server.URL, APIKey: "key"})
+			got := make(map[string]bool)
+			err := c.ListConnected(context.Background(), func(batch []presence.Observation) error {
+				for _, o := range batch {
+					got[o.ClientID] = true
+				}
+				return nil
+			})
+			t.Logf("listed %d devices in %d legacy requests", len(got), requests)
+			if err != nil || len(got) != 1200 {
+				t.Fatalf("devices=%d requests=%d err=%v", len(got), requests, err)
+			}
+		})
 	}
 }
 

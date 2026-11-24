@@ -45,7 +45,7 @@ func newRoomFixture(t *testing.T) *roomFixture {
 				rdb.DecrBy(ctx, "call:outbox:count", n)
 			}
 		}
-		for _, pattern := range []string{"room:" + f.prefix + "*", "room:lock:" + f.prefix + "*"} {
+		for _, pattern := range []string{"room:" + f.prefix + "*", "room:lock:" + f.prefix + "*", "room:unbound-revision:" + f.prefix + "*"} {
 			var cursor uint64
 			for {
 				keys, next, err := rdb.Scan(ctx, cursor, pattern, 100).Result()
@@ -278,12 +278,12 @@ func roomCancels(t *testing.T, f *roomFixture, id string) map[string]string {
 func TestCallRoomsEndCurrentMatchesUnboundEnd(t *testing.T) {
 	f := newRoomFixture(t)
 	ctx := context.Background()
-	if r, err := f.store.EndCurrent(ctx, f.prefix+"idle", "unbound"); err != nil || r != nil {
+	if r, err := f.store.EndCurrent(ctx, f.prefix+"idle", 1); err != nil || r != nil {
 		t.Fatalf("idle device: %+v %v", r, err)
 	}
 
 	ringing := f.create(t, "ringing", "caller", "a", "b")
-	ended, err := f.store.EndCurrent(ctx, ringing.Caller, "unbound")
+	ended, err := f.store.EndCurrent(ctx, ringing.Caller, 1)
 	if err != nil || ended == nil || ended.RoomID != ringing.RoomID {
 		t.Fatalf("caller unbind: %+v %v", ended, err)
 	}
@@ -296,7 +296,7 @@ func TestCallRoomsEndCurrentMatchesUnboundEnd(t *testing.T) {
 	if _, err := f.store.Answer(ctx, answered.RoomID, answered.Caller, answered.Targets[0]); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.store.EndCurrent(ctx, answered.Targets[0], "unbound"); err != nil {
+	if _, err := f.store.EndCurrent(ctx, answered.Targets[0], 1); err != nil {
 		t.Fatal(err)
 	}
 	if got := roomCancels(t, f, answered.RoomID); !reflect.DeepEqual(got, map[string]string{answered.Caller: "unbound", answered.Targets[1]: "accepted_by_other"}) {
@@ -313,7 +313,7 @@ func TestCallRoomsEndCurrentMatchesUnboundEnd(t *testing.T) {
 	if err := f.rdb.Set(ctx, "room:lock:"+stray, other.RoomID, time.Hour).Err(); err != nil {
 		t.Fatal(err)
 	}
-	if r, err := f.store.EndCurrent(ctx, stray, "unbound"); err != nil || r != nil {
+	if r, err := f.store.EndCurrent(ctx, stray, 1); err != nil || r != nil {
 		t.Fatalf("non-participant lock ended room: %+v %v", r, err)
 	}
 	if got, err := f.store.Get(ctx, other.RoomID); err != nil || got == nil {
