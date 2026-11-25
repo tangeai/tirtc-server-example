@@ -24,7 +24,8 @@ func TestPublicPagesRenderCatalogAndMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	router := gin.New()
-	boards := []boardcatalog.Board{{Name: "第一块开发板", DetailSlug: "first-board", Summary: "真实开发板介绍", Chip: "ESP32", Capabilities: []string{"实时音视频"}, FirmwareURL: "https://files.example/firmware", FlashingGuideURL: "https://docs.example/flash"}, {Name: "第二块"}, {Name: "第三块"}, {Name: "第四块"}}
+	flashURL := "https://flash.example/first"
+	boards := []boardcatalog.Board{{WebFlasherURL: &flashURL, RepositoryURL: "https://github.com/example/first", Name: "第一块开发板", DetailSlug: "first-board", Summary: "真实开发板介绍", Chip: "ESP32", Capabilities: []string{"实时音视频"}, FirmwareURL: "https://files.example/firmware", FlashingGuideURL: "https://docs.example/flash"}, {Name: "第二块"}, {Name: "第三块"}, {Name: "第四块"}}
 	if err := RegisterPublicPages(router, "../static", state, boardcatalog.New(boardReaderStub{boards: boards})); err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +47,7 @@ func TestPublicPagesRenderCatalogAndMetadata(t *testing.T) {
 		if response.Code != 200 {
 			t.Fatalf("%s: %d %s", path, response.Code, html)
 		}
-		for _, expected := range []string{"自定义 &lt;站点&gt;", "第一块开发板", "https://files.example/firmware", "https://docs.example/flash", `rel="canonical" href="https://public.example` + path + `"`} {
+		for _, expected := range []string{"自定义 &lt;站点&gt;", "第一块开发板", `href="https://flash.example/first"`, `href="https://github.com/example/first"`, `href="https://docs.example/flash"`, `rel="canonical" href="https://public.example` + path + `"`} {
 			if !strings.Contains(html, expected) {
 				t.Errorf("%s missing %s", path, expected)
 			}
@@ -118,7 +119,8 @@ func TestPublicContentDiscoveryAndStructuredAnswers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reader := &publicCatalogStub{boards: []boardcatalog.Board{{Name: "测试开发板", DetailSlug: "test-board", Model: "Test-1", Chip: "ESP32-S3", Vendor: "测试厂商", Summary: "开发板的真实说明", ImageURL: "/v1/board-images/" + strings.Repeat("a", 64) + ".png", UpdatedAt: time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC), AdaptationStatus: "adapting", Capabilities: []string{"音视频"}, FirmwareURL: "https://files.example/test.bin"}}}
+	flashURL := "https://flash.example/test-board"
+	reader := &publicCatalogStub{boards: []boardcatalog.Board{{WebFlasherURL: &flashURL, Name: "测试开发板", DetailSlug: "test-board", Model: "Test-1", Chip: "ESP32-S3", Vendor: "测试厂商", Summary: "开发板的真实说明", ImageURL: "/v1/board-images/" + strings.Repeat("a", 64) + ".png", UpdatedAt: time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC), AdaptationStatus: "adapting", Capabilities: []string{"音视频"}, FirmwareURL: "https://files.example/test.bin"}}}
 	router := gin.New()
 	if err := RegisterPublicPages(router, "../static", state, boardcatalog.New(reader)); err != nil {
 		t.Fatal(err)
@@ -194,7 +196,7 @@ func TestPublicContentDiscoveryAndStructuredAnswers(t *testing.T) {
 			}
 		}
 		if path == "/boards/test-board" {
-			for _, expected := range []string{"Test-1", "ESP32-S3", "适配中", "开发板的真实说明", `datetime="2026-10-01T12:00:00Z"`, `content="https://public.example/v1/board-images/` + strings.Repeat("a", 64) + `.png"`, `href="https://files.example/test.bin"`} {
+			for _, expected := range []string{"Test-1", "ESP32-S3", "适配中", "开发板的真实说明", `datetime="2026-10-01T12:00:00Z"`, `content="https://public.example/v1/board-images/` + strings.Repeat("a", 64) + `.png"`, `href="https://flash.example/test-board"`} {
 				if !strings.Contains(html, expected) {
 					t.Errorf("detail missing %s", expected)
 				}

@@ -129,8 +129,9 @@
     );
     const actions = element("div", "catalog-actions");
     for (const [field, label, className] of [
-      ["firmware_url", "landing.firmware", "primary"],
+      ["web_flasher_url", "landing.flashNow", "primary"],
       ["flashing_guide_url", "landing.flashGuide", "guide-link"],
+      ["repository_url", "landing.repository", "repo-link"],
     ]) {
       const url = resourceURL(board[field]);
       if (!url) continue;

@@ -8,9 +8,9 @@
   <link rel="icon" href="/static/favicon.svg?v=20261110" type="image/svg+xml">
   <link rel="stylesheet" href="/static/css/site-header.css?v=5">
   <link rel="stylesheet" href="/static/css/brand.css?v=4">
-  <link rel="stylesheet" href="/static/css/public-guide.css?v=3">
+  <link rel="stylesheet" href="/static/css/public-guide.css?v=4">
   <script src="/v1/config/language.js"></script>
-  <script src="/static/public-guide-i18n.js?v=1"></script>
+  <script src="/static/public-guide-i18n.js?v=2"></script>
   <!-- public:metadata -->
 </head>
 <body data-guide-copy>
@@ -38,7 +38,7 @@
         <span class="status {{.AdaptationStatus}}"><i></i>{{if eq .AdaptationStatus "ready"}}已适配{{else if eq .AdaptationStatus "adapting"}}适配中{{else}}计划中{{end}}</span>
         {{if .Capabilities}}<ul class="capability-tags" aria-label="核心能力">{{range .Capabilities}}<li data-user-content>{{.}}</li>{{end}}</ul>{{end}}
         <dl class="product-specs"><div><dt>完整型号</dt><dd data-user-content>{{.Model}}</dd></div><div><dt>芯片平台</dt><dd data-user-content>{{.Chip}}</dd></div><div><dt>厂商</dt><dd data-user-content>{{.Vendor}}</dd></div></dl>
-        <div class="product-actions">{{if .FirmwareURL}}<a class="button primary" href="{{.FirmwareURL}}">下载固件 <span aria-hidden="true">↓</span></a>{{end}}{{if .FlashingGuideURL}}<a class="button secondary" href="{{.FlashingGuideURL}}">查看烧录指南 <span aria-hidden="true">↗</span></a>{{end}}</div>
+        <div class="product-actions">{{if .WebFlasherURL}}<a class="button primary" href="{{.WebFlasherURL}}" target="_blank" rel="noopener noreferrer">立即烧录 <span aria-hidden="true">↗</span></a>{{end}}{{if .FlashingGuideURL}}<a class="button secondary" href="{{.FlashingGuideURL}}" target="_blank" rel="noopener noreferrer">烧录指南 <span aria-hidden="true">↗</span></a>{{end}}{{if .RepositoryURL}}<a class="repo-link" href="{{.RepositoryURL}}" target="_blank" rel="noopener noreferrer">GitHub 仓库 ↗</a>{{end}}</div>
         <p class="fine-print">请核对完整型号后烧录，实际能力以固件与服务配置为准。</p>
         {{if $.BoardUpdated}}<p class="fine-print">资料更新：<time datetime="{{$.BoardUpdated}}">{{.UpdatedAt.UTC.Format "2006-01-02"}} UTC</time> · 该时间表示目录资料更新，不代表硬件测试日期。</p>{{end}}
       </div>

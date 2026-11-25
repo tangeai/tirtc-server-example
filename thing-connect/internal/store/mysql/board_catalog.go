@@ -12,7 +12,7 @@ import (
 	"thing-connect/internal/boardcatalog"
 )
 
-const boardColumns = `id,vendor,name,model,chip,summary,capabilities,adaptation_status,image_url,purchase_url,repository_url,firmware_url,flashing_guide_url,effect_video_url,detail_slug,sort_order,publish_status,revision,published_at,created_by,updated_by,created_at,updated_at`
+const boardColumns = `id,vendor,name,model,chip,summary,capabilities,adaptation_status,image_url,purchase_url,repository_url,firmware_url,web_flasher_url,flashing_guide_url,effect_video_url,detail_slug,sort_order,publish_status,revision,published_at,created_by,updated_by,created_at,updated_at`
 
 type boardRow struct {
 	boardcatalog.Board

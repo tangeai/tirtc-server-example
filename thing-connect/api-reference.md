@@ -1704,6 +1704,7 @@ Authorization: Bearer <user_jwt>
         "purchase_url": "https://shop.example.com/board-s3-01", // HTTPS 购买地址；未配置时不返回
         "repository_url": "https://github.com/example/board-s3-01", // HTTPS 源码仓库地址；未配置时不返回
         "firmware_url": "https://downloads.example.com/board-s3-01.bin", // HTTPS 固件下载地址；未配置时不返回
+        "web_flasher_url": "https://flash.example.com/board-s3-01", // HTTPS 板型专用在线烧录地址；未配置时不返回
         "flashing_guide_url": "https://docs.example.com/board-s3-01", // HTTPS 烧录指南地址；未配置时不返回
         "effect_video_url": "https://video.example.com/board-s3-01", // HTTPS 效果视频地址；未配置时不返回
         "detail_slug": "board-s3-01", // 详情地址标识，用于 /boards#<detail_slug> 和详情接口
@@ -1735,6 +1736,7 @@ Authorization: Bearer <user_jwt>
 | `data.boards[].purchase_url` | string | HTTPS 购买地址；未配置时不返回 |
 | `data.boards[].repository_url` | string | HTTPS 源码仓库地址；未配置时不返回 |
 | `data.boards[].firmware_url` | string | HTTPS 固件下载地址；未配置时不返回 |
+| `data.boards[].web_flasher_url` | string | HTTPS 板型专用在线烧录地址；未配置时不返回 |
 | `data.boards[].flashing_guide_url` | string | HTTPS 烧录指南地址；未配置时不返回 |
 | `data.boards[].effect_video_url` | string | HTTPS 效果视频地址；未配置时不返回 |
 | `data.boards[].detail_slug` | string | 详情地址标识，用于 `/boards#<detail_slug>` 和详情接口 |
@@ -1785,6 +1787,7 @@ Authorization: Bearer <user_jwt>
     "purchase_url": "https://shop.example.com/board-s3-01", // HTTPS 购买地址；未配置时不返回
     "repository_url": "https://github.com/example/board-s3-01", // HTTPS 源码仓库地址；未配置时不返回
     "firmware_url": "https://downloads.example.com/board-s3-01.bin", // HTTPS 固件下载地址；未配置时不返回
+    "web_flasher_url": "https://flash.example.com/board-s3-01", // HTTPS 板型专用在线烧录地址；未配置时不返回
     "flashing_guide_url": "https://docs.example.com/board-s3-01", // HTTPS 烧录指南地址；未配置时不返回
     "effect_video_url": "https://video.example.com/board-s3-01", // HTTPS 效果视频地址；未配置时不返回
     "detail_slug": "board-s3-01", // 详情地址标识，用于 /boards#<detail_slug> 和详情接口

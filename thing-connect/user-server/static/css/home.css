@@ -2466,3 +2466,12 @@ html[lang="en"] .chat-line {
   height: 30px;
   display: block;
 }
+
+.catalog-actions .repo-link {
+  align-self: center;
+  color: #56666a;
+  font-size: 12px;
+  font-weight: 400;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}

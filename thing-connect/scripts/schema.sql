@@ -470,6 +470,7 @@ CREATE TABLE IF NOT EXISTS board_resources (
     purchase_url VARCHAR(2048) NOT NULL DEFAULT '' COMMENT '购买地址',
     repository_url VARCHAR(2048) NOT NULL DEFAULT '' COMMENT '源码仓库地址',
     firmware_url VARCHAR(2048) NOT NULL DEFAULT '' COMMENT '固件下载地址',
+    web_flasher_url TEXT NULL COMMENT '板型专用在线烧录地址',
     flashing_guide_url VARCHAR(2048) NOT NULL DEFAULT '' COMMENT '烧录指南地址',
     effect_video_url VARCHAR(2048) NOT NULL DEFAULT '' COMMENT '效果视频地址',
     detail_slug VARCHAR(80) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL COMMENT '详情地址标识',
@@ -507,7 +508,7 @@ INSERT IGNORE INTO schema_migrations (component, version) VALUES
     ('core', 7),
     ('core', 8),
     ('core', 9),
-    ('core', 10), ('core', 11), ('core', 12), ('core', 13), ('core', 14);
+    ('core', 10), ('core', 11), ('core', 12), ('core', 13), ('core', 14), ('core', 15);
 CREATE TABLE IF NOT EXISTS ai_recognition_policy (
  device_id VARCHAR(64) NOT NULL COMMENT '设备标识',
  enabled BOOLEAN NOT NULL DEFAULT FALSE COMMENT '是否启用媒体识别',

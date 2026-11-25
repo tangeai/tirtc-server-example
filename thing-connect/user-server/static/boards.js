@@ -72,6 +72,7 @@
     const element = document.querySelector(id);
     element.hidden = !url;
     if (url) element.href = url;
+    else element.removeAttribute('href');
   };
   function openDetail(board) {
     const detailImage = document.querySelector('#detail-image');
@@ -89,7 +90,7 @@
     setLink('#detail-video', board.effect_video_url);
     setLink('#detail-buy', board.purchase_url);
     setLink('#detail-repo', board.repository_url);
-    setLink('#detail-firmware', board.firmware_url);
+    setLink('#detail-flash', board.web_flasher_url);
     setLink('#detail-guide', board.flashing_guide_url);
     document.querySelector('#merchant-note').hidden = !board.purchase_url;
     history.replaceState(null, '', `/boards#${encodeURIComponent(board.detail_slug)}`);
