@@ -141,6 +141,7 @@ window.WebI18n?.addMessages({
   "下载固件": "Download firmware",
   "立即烧录": "Flash now",
   "烧录指南": "Flashing guide",
+  "获取最新固件 ↗": "Get latest firmware ↗",
   "GitHub 仓库 ↗": "GitHub repository ↗",
   "查看烧录指南": "Flashing guide",
   "请核对完整型号后烧录，实际能力以固件与服务配置为准。": "Check the full model before flashing. Capabilities depend on firmware and service configuration.",

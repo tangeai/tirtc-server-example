@@ -40,24 +40,19 @@
     }
     return heading;
   };
-  const interactive = (element, board) => {
-    element.tabIndex = 0;
-    element.setAttribute('role', 'button');
-    element.addEventListener('click', (event) => { if (!event.target.closest('a,button')) openDetail(board); });
-    element.addEventListener('keydown', (event) => {
-      if (event.target === element && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); openDetail(board); }
-    });
-    return element;
-  };
   const featuredCard = (board) => {
     const card = document.createElement('article');
     card.className = 'featured-card';
-    card.append(image(board));
+    const photo = text('div', 'board-photo', '');
+    photo.append(image(board));
+    window.BoardResources.enableVideo(photo, board.effect_video_url, board.name);
+    card.append(photo);
     const identity = document.createElement('div');
     identity.append(text('small', '', board.vendor), detailHeading(board), text('code', '', board.model));
     if (board.capabilities?.length) identity.append(text('p', 'board-capabilities', board.capabilities.join(' · ')));
     card.append(identity, status(board), detailButton(board));
-    return interactive(card, board);
+    card.append(window.BoardResources.actions(board, i18n.t));
+    return card;
   };
   const boardRow = (board) => {
     const row = document.createElement('article');
@@ -66,7 +61,8 @@
     identity.className = 'identity';
     identity.append(text('small', '', board.vendor), detailHeading(board));
     row.append(identity, text('code', 'model', board.model), text('b', 'chip', board.chip), text('span', 'capabilities', (board.capabilities || []).join(' · ')), status(board), detailButton(board));
-    return interactive(row, board);
+    row.append(window.BoardResources.actions(board, i18n.t));
+    return row;
   };
   const setLink = (id, url) => {
     const element = document.querySelector(id);
@@ -77,6 +73,8 @@
   function openDetail(board) {
     const detailImage = document.querySelector('#detail-image');
     detailImage.src = board.image_url || fallbackImage;
+    const photo = detailImage.parentElement;
+    window.BoardResources.enableVideo(photo, board.effect_video_url, board.name);
     detailImage.alt = i18n.t('boards.productImage', { name: board.name });
     detailImage.onerror = () => { detailImage.src = fallbackImage; };
     document.querySelector('#detail-vendor').textContent = board.vendor;
@@ -89,6 +87,7 @@
     setLink('#detail-page', board.detail_slug ? `/boards/${encodeURIComponent(board.detail_slug)}` : '');
     setLink('#detail-video', board.effect_video_url);
     setLink('#detail-buy', board.purchase_url);
+    setLink('#detail-firmware', board.firmware_url);
     setLink('#detail-repo', board.repository_url);
     setLink('#detail-flash', board.web_flasher_url);
     setLink('#detail-guide', board.flashing_guide_url);

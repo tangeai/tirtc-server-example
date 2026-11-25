@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="/static/css/brand.css?v=4">
   <link rel="stylesheet" href="/static/css/site-header.css?v=5">
 <!-- public:metadata -->
+  <link rel="stylesheet" href="/static/css/board-resources.css?v=1">
 </head>
 <body>
   <header class="site-header">
@@ -57,19 +58,20 @@
   <dialog id="detail-dialog" class="detail-dialog" aria-labelledby="detail-name">
     <button class="dialog-close" type="button" aria-label="关闭详情" data-i18n-aria-label="boards.close">×</button>
     <div class="detail-layout">
-    <div class="detail-image"><img id="detail-image" alt=""><a id="detail-video" class="detail-video" target="_blank" rel="noreferrer"><span>▶</span> <span data-i18n="boards.playVideo">播放效果视频</span></a></div>
+    <div class="detail-image"><div class="board-photo"><img id="detail-image" alt=""></div><a id="detail-video" class="detail-video" target="_blank" rel="noreferrer"><span>▶</span> <span data-i18n="boards.playVideo">播放效果视频</span></a></div>
     <div class="detail-content">
       <small id="detail-vendor"></small><h2 id="detail-name"></h2><p id="detail-summary"></p><div id="detail-caps"></div>
       <dl><div><dt data-i18n="boards.model">完整型号</dt><dd id="detail-model"></dd></div><div><dt data-i18n="boards.chip">芯片</dt><dd id="detail-chip"></dd></div><div><dt data-i18n="boards.vendor">厂商</dt><dd id="detail-maker"></dd></div></dl>
-      <div class="detail-links"><a id="detail-flash" target="_blank" rel="noreferrer" data-i18n="landing.flashNow">立即烧录 ↗</a><a id="detail-guide" target="_blank" rel="noreferrer" data-i18n="boards.flashingGuide">烧录指南 ↗</a><a id="detail-repo" target="_blank" rel="noreferrer" data-i18n="landing.repository">GitHub 仓库 ↗</a><a id="detail-buy" target="_blank" rel="noreferrer" data-i18n="boards.buy">购买开发板 ↗</a></div>
+      <div class="detail-links"><a id="detail-flash" target="_blank" rel="noreferrer" data-i18n="landing.flashNow">立即烧录 ↗</a><a id="detail-guide" target="_blank" rel="noreferrer" data-i18n="boards.flashingGuide">烧录指南 ↗</a><a id="detail-firmware" target="_blank" rel="noreferrer" data-i18n="landing.latestFirmware">获取最新固件 ↗</a><a id="detail-repo" target="_blank" rel="noreferrer" data-i18n="landing.repository">GitHub 仓库 ↗</a><a id="detail-buy" target="_blank" rel="noreferrer" data-i18n="boards.buy">购买开发板 ↗</a></div>
       <a id="detail-page" class="detail-page">查看完整详情 →</a>
       <p id="merchant-note" class="merchant-note" data-i18n="boards.merchantNote">购买由第三方商家提供，商品、订单及售后问题请联系对应商家。小钛仅提供信息指引，与商家不存在合作、代理或担保关系。</p>
     </div>
     </div>
   </dialog>
   <!-- public:bootstrap -->
-<script src="/static/site-i18n.js?v=11"></script>
+<script src="/static/site-i18n.js?v=12"></script>
 <script src="/static/site-brand.js?v=1"></script>
-  <script src="/static/boards.js?v=5" defer></script>
+  <script src="/static/board-resources.js?v=2"></script>
+  <script src="/static/boards.js?v=6" defer></script>
 </body>
 </html>

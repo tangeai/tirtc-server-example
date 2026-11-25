@@ -66,7 +66,7 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
    await page.screenshot({path:root+'/../output/playwright/state-'+name+'-'+width+'.png'});await page.keyboard.press('Escape');
    const discard=page.getByRole('dialog',{name:'修改尚未保存',exact:true});if(await discard.isVisible())await discard.getByRole('button',{name:'放弃修改',exact:true}).click();
   }
-  await page.goto(base+'/boards');await page.locator('.featured-card').first().click();await captureDialog('开发板详情');
+  await page.goto(base+'/boards');await page.locator('.featured-card .detail').first().click();await captureDialog('开发板详情');
   await page.evaluate(()=>{localStorage.setItem('token','test');sessionStorage.clear();});await page.goto(base+'/devices');await page.getByText('设备一',{exact:true}).waitFor();
   const first=page.locator('[data-device-id="one"]');
   for(const label of ['设备信息','修改名称','解绑设备']){await first.getByText('更多 ▾').click();await page.getByRole('menuitem',{name:label,exact:true}).click();await page.locator('.ant-dropdown:visible').waitFor({state:'hidden'});await captureDialog(label);}
