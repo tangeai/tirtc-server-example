@@ -655,7 +655,7 @@ func (f *fakeCacheStore) GetReportFingerprint(_ context.Context, _ string) (stri
 func (f *fakeCacheStore) DelReportFingerprint(_ context.Context, _ string) error { return nil }
 
 func (f *fakeCacheStore) DeviceOnline(context.Context, []string) (map[string]bool, error) {
-	return nil, nil
+	return map[string]bool{}, nil
 }
 
 func TestUserServiceDeviceListNestsVoIPProfile(t *testing.T) {
