@@ -15,8 +15,9 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  const page=await browser.newPage({reducedMotion:'reduce'});page.on('pageerror',e=>errors.push(e.message));
  let failed=false;
  await page.route('**/v1/config/site',route=>route.fulfill({json:{code:200,data:{name:'自定义站点',name_en:'Custom site'}}}));
- const sampleBoard={name:'小钛开发板完整型号与名称检查',model:'ESP32-S3-DISPLAY-LONG-MODEL-NUMBER',vendor:'测试厂商',chip:'ESP32-S3',adaptation_status:'ready',summary:'用于浏览器交互验证的测试开发板。',detail_slug:'sample',capabilities:['AI 对话','实时音视频','设备对讲'],firmware_url:'https://example.test/firmware',flashing_guide_url:'https://example.test/guide'};
- await page.route('**/v1/boards',route=>{const home=new URL(route.request().headers().referer||base).pathname==='/';const boards=home?Array.from({length:4},(_,i)=>({...sampleBoard,name:sampleBoard.name+' '+(i+1),detail_slug:'sample-'+i})): [sampleBoard];return route.fulfill({json:failed?{code:50000,msg:'目录加载失败'}:{code:200,data:{boards}}});});
+ const sampleBoard={name:'小钛开发板完整型号与名称检查',model:'ESP32-S3-DISPLAY-LONG-MODEL-NUMBER',vendor:'测试厂商',chip:'ESP32-S3',adaptation_status:'ready',summary:'用于浏览器交互验证的测试开发板。',detail_slug:'sample',capabilities:['AI 对话','实时音视频','设备对讲'],effect_video_url:'https://www.bilibili.com/video/BV1qrJ166EEv/',web_flasher_url:'https://example.test/flash',repository_url:'https://github.com/example/sample',firmware_url:'https://example.test/firmware',flashing_guide_url:'https://example.test/guide'};
+ await page.route('**/v1/boards',route=>{const home=new URL(route.request().headers().referer||base).pathname==='/';const boards=home?Array.from({length:4},(_,i)=>({...sampleBoard,name:sampleBoard.name+' '+(i+1),detail_slug:'sample-'+i,effect_video_url:i===0?sampleBoard.effect_video_url:''})): [sampleBoard];return route.fulfill({json:failed?{code:50000,msg:'目录加载失败'}:{code:200,data:{boards}}});});
+ await page.route('https://player.bilibili.com/**',route=>route.fulfill({contentType:'text/html',body:'Video player fixture'}));
  for(const width of [320,390,768,1024,1100,1200,1280,1440,1920]){
   await page.setViewportSize({width,height:900});
   for(const url of ['/','/boards']){
@@ -26,6 +27,17 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
     if(await page.locator('html').getAttribute('lang')!==language)await page.locator('[data-site-language-toggle]').click();
     assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),url+' overflow '+width+' '+language+' '+JSON.stringify(await page.evaluate(()=>[...document.querySelectorAll('body *')].map(e=>({tag:e.tagName,cls:e.className,x:e.getBoundingClientRect().x,right:e.getBoundingClientRect().right})).filter(e=>e.right>innerWidth+1||e.x< -1).slice(0,12))));
     if(width<=768){const menu=page.locator('.menu-button');const menuBox=await menu.boundingBox();assert(menuBox.width>=43.99&&menuBox.height>=43.99,JSON.stringify({url,width,language,menuBox}));await menu.click();await page.keyboard.press('Escape');assert.equal(await menu.getAttribute('aria-expanded'),'false');assert(await menu.evaluate(e=>e===document.activeElement));await menu.click();await page.mouse.click(2,850);assert.equal(await menu.getAttribute('aria-expanded'),'false');}
+    const card=page.locator(url==='/'?'.catalog-card':'.featured-card').first();
+    assert.deepEqual(await card.locator('.catalog-actions a').evaluateAll(links=>links.map(a=>a.href)),[sampleBoard.web_flasher_url,sampleBoard.flashing_guide_url,sampleBoard.firmware_url,sampleBoard.repository_url]);
+    if(width===390){
+     await card.locator('.board-video-play').click();
+     assert.equal(new URL(await page.locator('.board-video-dialog iframe').getAttribute('src')).searchParams.get('bvid'),'BV1qrJ166EEv');
+     await page.keyboard.press('Escape');await page.locator('.board-video-dialog').waitFor({state:'detached'});
+     if(url==='/'){
+      await page.locator('.product-art').nth(1).click();
+      assert.equal(await page.locator('.board-video-dialog').count(),0);
+     }
+    }
     if(url==='/'){
      assert.equal(await page.locator('.catalog-card .board-status,.catalog-card .board-capabilities').count(),0,'homepage cards omit repeated status and capabilities');
      assert.equal(await page.locator('.catalog-card').count(),3,'homepage shows three boards from a larger catalog');

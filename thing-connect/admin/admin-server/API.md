@@ -226,7 +226,11 @@ MFA 用于登录及首次绑定确认。登录后的管理写操作和恢复码�
 
 上架或下架请求为 `{"status":"published","expected_revision":2,"reason":"资料验证完成"}`，`status` 只接受 `published` 或 `offline`。删除请求为 `{"expected_revision":2,"reason":"型号停止维护"}`。每次成功修改后 `revision` 加 1；旧版本请求返回冲突，客户端应刷新列表后重新操作。
 
-产品图片可以使用 HTTPS 地址，也可以先调用 `POST /boards/images` 上传。购买、仓库、固件、烧录指南和视频地址只接受 HTTPS。`detail_slug` 只允许小写字母、数字和连字符，且目录内唯一；`model` 在数据库中忽略大小写唯一。最多允许 100 条记录同时处于 `published` 状态。
+产品图片可以使用 HTTPS 地址，也可以先调用 `POST /boards/images` 上传。购买、仓库、固件、在线烧录、烧录指南和视频地址只接受 HTTPS。
+
+`web_flasher_url` 是该型号的在线烧录工具地址，`flashing_guide_url` 是该型号的操作指南。编辑时省略 `web_flasher_url` 会保留原值，传空字符串可移除在线烧录入口。
+
+`detail_slug` 只允许小写字母、数字和连字符，且目录内唯一；`model` 在数据库中忽略大小写唯一。最多允许 100 条记录同时处于 `published` 状态。
 
 图片上传请求使用 `multipart/form-data`，文件字段名为 `file`。支持 JPG、PNG 和 WebP，单张不超过 5 MB。服务端按图片内容生成稳定文件名，相同内容重复上传返回相同地址。
 

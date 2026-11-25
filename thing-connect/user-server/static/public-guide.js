@@ -36,6 +36,13 @@
     updateGuideLanguage();
     i18n.onChange(updateGuideLanguage);
   }
+  const gallery = document.querySelector('.product-gallery[data-video]');
+  if (gallery) {
+    const name = document.querySelector('.product-intro h1').textContent;
+    const updateVideo = () => window.BoardResources.enableVideo(gallery, gallery.dataset.video, name);
+    updateVideo();
+    i18n?.onChange(updateVideo);
+  }
   const menu = document.querySelector('.guide-mobile');
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && menu?.open) {

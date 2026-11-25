@@ -8,10 +8,11 @@
   <link rel="icon" href="/static/favicon.svg?v=20261110" type="image/svg+xml">
   <link rel="stylesheet" href="/static/css/site-header.css?v=5">
   <link rel="stylesheet" href="/static/css/brand.css?v=4">
-  <link rel="stylesheet" href="/static/css/public-guide.css?v=3">
+  <link rel="stylesheet" href="/static/css/public-guide.css?v=4">
   <script src="/v1/config/language.js"></script>
-  <script src="/static/public-guide-i18n.js?v=1"></script>
+  <script src="/static/public-guide-i18n.js?v=3"></script>
   <!-- public:metadata -->
+  <link rel="stylesheet" href="/static/css/board-resources.css?v=1">
 </head>
 <body data-guide-copy>
   <header class="site-header">
@@ -31,14 +32,14 @@
     <nav class="breadcrumb" aria-label="面包屑"><a href="/">首页</a><span aria-hidden="true">/</span>{{if .Board}}<a href="/boards">开发板</a><span aria-hidden="true">/</span><span data-user-content>{{.Board.Name}}</span>{{else if .Tutorial}}<a href="/getting-started">接入指南</a><span aria-hidden="true">/</span><span>{{.Tutorial.Title}}</span>{{else}}<span>{{if eq .Kind "/faq"}}常见问题{{else}}接入指南{{end}}</span>{{end}}</nav>
     {{if .Board}}{{with .Board}}
     <article class="product-hero">
-      <div class="product-gallery"><span class="gallery-label" data-user-content>{{.Vendor}} · {{.Chip}}</span>{{if .ImageURL}}<img src="{{.ImageURL}}" alt="{{.Name}}" width="640" height="480">{{else}}<span class="product-placeholder" data-user-content>{{.Chip}}</span>{{end}}<span class="gallery-caption">开发板 / <span data-user-content>{{.Model}}</span></span></div>
+      <div class="product-gallery" data-video="{{.EffectVideoURL}}"><span class="gallery-label" data-user-content>{{.Vendor}} · {{.Chip}}</span>{{if .ImageURL}}<img src="{{.ImageURL}}" alt="{{.Name}}" width="640" height="480">{{else}}<span class="product-placeholder" data-user-content>{{.Chip}}</span>{{end}}<span class="gallery-caption">开发板 / <span data-user-content>{{.Model}}</span></span></div>
       <div class="product-intro">
         <span class="eyebrow"><i></i> 开发板与固件</span>
         <h1 data-user-content>{{.Name}}</h1><p class="lead" data-user-content>{{.Summary}}</p>
         <span class="status {{.AdaptationStatus}}"><i></i>{{if eq .AdaptationStatus "ready"}}已适配{{else if eq .AdaptationStatus "adapting"}}适配中{{else}}计划中{{end}}</span>
         {{if .Capabilities}}<ul class="capability-tags" aria-label="核心能力">{{range .Capabilities}}<li data-user-content>{{.}}</li>{{end}}</ul>{{end}}
         <dl class="product-specs"><div><dt>完整型号</dt><dd data-user-content>{{.Model}}</dd></div><div><dt>芯片平台</dt><dd data-user-content>{{.Chip}}</dd></div><div><dt>厂商</dt><dd data-user-content>{{.Vendor}}</dd></div></dl>
-        <div class="product-actions">{{if .FirmwareURL}}<a class="button primary" href="{{.FirmwareURL}}">下载固件 <span aria-hidden="true">↓</span></a>{{end}}{{if .FlashingGuideURL}}<a class="button secondary" href="{{.FlashingGuideURL}}">查看烧录指南 <span aria-hidden="true">↗</span></a>{{end}}</div>
+        <div class="product-actions">{{if .WebFlasherURL}}<a class="button primary" href="{{.WebFlasherURL}}" target="_blank" rel="noopener noreferrer">立即烧录 <span aria-hidden="true">↗</span></a>{{end}}{{if .FlashingGuideURL}}<a class="button secondary" href="{{.FlashingGuideURL}}" target="_blank" rel="noopener noreferrer">烧录指南 <span aria-hidden="true">↗</span></a>{{end}}{{if or .FirmwareURL .RepositoryURL}}<span class="board-resource-links">{{if .FirmwareURL}}<a class="repo-link" href="{{.FirmwareURL}}" target="_blank" rel="noopener noreferrer">获取最新固件 ↗</a>{{end}}{{if .RepositoryURL}}<a class="repo-link" href="{{.RepositoryURL}}" target="_blank" rel="noopener noreferrer">GitHub 仓库 ↗</a>{{end}}</span>{{end}}</div>
         <p class="fine-print">请核对完整型号后烧录，实际能力以固件与服务配置为准。</p>
         {{if $.BoardUpdated}}<p class="fine-print">资料更新：<time datetime="{{$.BoardUpdated}}">{{.UpdatedAt.UTC.Format "2006-01-02"}} UTC</time> · 该时间表示目录资料更新，不代表硬件测试日期。</p>{{end}}
       </div>
@@ -84,6 +85,7 @@
     <section class="help-banner"><div><span class="eyebrow">一起把设备接起来</span><h2>下一步，从你的开发板开始。</h2><p>查看适配型号、固件和烧录资料，找到适合你的起点。</p></div><a class="button primary" href="/boards">浏览开发板 <span aria-hidden="true">↗</span></a></section>
   </main>
   <footer class="guide-footer"><div class="shell footer-main"><div class="footer-identity"><a class="brand" href="/"><span class="brand-mark" aria-hidden="true"></span><span data-brand-zh="{{.Site.Name}}" data-brand-en="{{.Site.NameEN}}">{{.Site.Name}}</span></a><p>让硬件连接 AI 与实时音视频。</p><a href="mailto:openapi@tange.ai">openapi@tange.ai</a></div><nav aria-label="相关资源"><a href="/getting-started">接入指南</a><a href="/faq">常见问题</a><a href="/boards">开发板与固件</a><a href="https://github.com/tangeai/tirtc-server-example">开源代码 ↗</a><a href="https://community.tange-ai.com">开放社区 ↗</a></nav><div class="footer-support"><img src="/static/images/wecom-support.png" width="88" height="88" alt="企业客服二维码" loading="lazy"><div><strong>商务合作与技术咨询</strong><p>微信扫码添加企业客服</p></div></div></div><div class="shell footer-bottom"><span>© <span data-brand-zh="{{.Site.Name}}" data-brand-en="{{.Site.NameEN}}">{{.Site.Name}}</span></span><span>具体能力以设备型号、固件与服务配置为准。</span><a href="https://beian.miit.gov.cn/" rel="noopener noreferrer" target="_blank">粤ICP备19005025号-19</a></div></footer>
-  <script src="/static/public-guide.js?v=2" defer></script>
+  <script src="/static/board-resources.js?v=2"></script>
+  <script src="/static/public-guide.js?v=3" defer></script>
 </body>
 </html>

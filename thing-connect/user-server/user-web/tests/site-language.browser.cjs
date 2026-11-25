@@ -58,8 +58,10 @@ const server = http.createServer((req, res) => {
    if(pages[url.split('#')[0]] && url!=='/' && url!=='/boards') {
     await page.evaluate(()=>WebI18n.setLanguage('zh-CN'));
     assert.equal(await page.locator('html').getAttribute('lang'),'zh-CN');
+    if(url==='/boards/demo')assert.equal(await page.locator('.board-video-play').getAttribute('aria-label'),'播放演示视频 · Fixture board');
     await page.evaluate(()=>WebI18n.setLanguage('en'));await english(url+' after switching back');
-    for(const width of [390,1440]) {
+    if(url==='/boards/demo')assert.equal(await page.locator('.board-video-play').getAttribute('aria-label'),'Play demo video · Fixture board');
+    for(const width of [320,390,1440]) {
      await page.setViewportSize({width,height:900});
      assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),url+' English overflow at '+width);
      assert(await page.locator('[data-language-toggle]').isVisible(),url+' language switch at '+width);

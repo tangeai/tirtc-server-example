@@ -23,7 +23,12 @@ func (catalog) PublishedBySlug(context.Context, string) (boardcatalog.Board, err
 	return board(), nil
 }
 func board() boardcatalog.Board {
-	return boardcatalog.Board{Name: "Fixture board", Model: "Demo", Chip: "ESP32", Vendor: "Fixture", Summary: "Published catalog content", DetailSlug: "demo", AdaptationStatus: "ready", Capabilities: []string{"Audio"}, UpdatedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
+	flash := "https://example.test/demo/flash"
+	return boardcatalog.Board{
+		WebFlasherURL: &flash, FlashingGuideURL: "https://example.test/demo/guide",
+		FirmwareURL: "https://example.test/demo/releases", RepositoryURL: "https://example.test/demo/source",
+		EffectVideoURL: "https://www.bilibili.com/video/BV1qrJ166EEv/",
+		Name:           "Fixture board", Model: "Demo", Chip: "ESP32", Vendor: "Fixture", Summary: "Published catalog content", DetailSlug: "demo", AdaptationStatus: "ready", Capabilities: []string{"Audio"}, UpdatedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
 }
 func main() {
 	gin.SetMode(gin.ReleaseMode)

@@ -31,6 +31,7 @@ type Board struct {
 	PurchaseURL      string     `db:"purchase_url" json:"purchase_url,omitempty"`
 	RepositoryURL    string     `db:"repository_url" json:"repository_url,omitempty"`
 	FirmwareURL      string     `db:"firmware_url" json:"firmware_url,omitempty"`
+	WebFlasherURL    *string    `db:"web_flasher_url" json:"web_flasher_url,omitempty"`
 	FlashingGuideURL string     `db:"flashing_guide_url" json:"flashing_guide_url,omitempty"`
 	EffectVideoURL   string     `db:"effect_video_url" json:"effect_video_url,omitempty"`
 	DetailSlug       string     `db:"detail_slug" json:"detail_slug"`
@@ -56,6 +57,10 @@ func Normalize(board Board) Board {
 	board.PurchaseURL = strings.TrimSpace(board.PurchaseURL)
 	board.RepositoryURL = strings.TrimSpace(board.RepositoryURL)
 	board.FirmwareURL = strings.TrimSpace(board.FirmwareURL)
+	if board.WebFlasherURL != nil {
+		trimmed := strings.TrimSpace(*board.WebFlasherURL)
+		board.WebFlasherURL = &trimmed
+	}
 	board.FlashingGuideURL = strings.TrimSpace(board.FlashingGuideURL)
 	board.EffectVideoURL = strings.TrimSpace(board.EffectVideoURL)
 	board.DetailSlug = strings.ToLower(strings.TrimSpace(board.DetailSlug))
@@ -94,6 +99,9 @@ func Validate(board Board) error {
 	}
 	if !validHTTPS(board.ImageURL) && !managedImagePattern.MatchString(board.ImageURL) {
 		return errors.New("产品图片只允许后台上传地址或有效的 HTTPS 地址")
+	}
+	if board.WebFlasherURL != nil && *board.WebFlasherURL != "" && !validHTTPS(*board.WebFlasherURL) {
+		return errors.New("在线烧录链接只允许有效的 HTTPS 地址")
 	}
 	for _, link := range []string{board.PurchaseURL, board.RepositoryURL, board.FirmwareURL, board.FlashingGuideURL, board.EffectVideoURL} {
 		if link != "" && !validHTTPS(link) {

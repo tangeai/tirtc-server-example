@@ -14,7 +14,7 @@ import (
 	"thing-connect/internal/boardcatalog"
 )
 
-const boardColumns = `id,vendor,name,model,chip,summary,capabilities,adaptation_status,image_url,purchase_url,repository_url,firmware_url,flashing_guide_url,effect_video_url,detail_slug,sort_order,publish_status,revision,published_at,created_by,updated_by,created_at,updated_at`
+const boardColumns = `id,vendor,name,model,chip,summary,capabilities,adaptation_status,image_url,purchase_url,repository_url,firmware_url,web_flasher_url,flashing_guide_url,effect_video_url,detail_slug,sort_order,publish_status,revision,published_at,created_by,updated_by,created_at,updated_at`
 
 type boardRow struct {
 	boardcatalog.Board
@@ -41,12 +41,12 @@ func (s *BoardCommandStore) Create(ctx context.Context, mutation adminapp.BoardM
 	defer tx.Rollback()
 	capabilities, _ := json.Marshal(mutation.Board.Capabilities)
 	_, err = tx.ExecContext(ctx, `INSERT INTO board_resources
-		(id,vendor,name,model,chip,summary,capabilities,adaptation_status,image_url,purchase_url,repository_url,firmware_url,flashing_guide_url,effect_video_url,detail_slug,sort_order,publish_status,revision,created_by,updated_by)
-		VALUES (?,?,?,?,?,?,CAST(? AS JSON),?,?,?,?,?,?,?,?,?,'draft',1,?,?)`,
+		(id,vendor,name,model,chip,summary,capabilities,adaptation_status,image_url,purchase_url,repository_url,firmware_url,web_flasher_url,flashing_guide_url,effect_video_url,detail_slug,sort_order,publish_status,revision,created_by,updated_by)
+		VALUES (?,?,?,?,?,?,CAST(? AS JSON),?,?,?,?,?,NULLIF(?,''),?,?,?,?,'draft',1,?,?)`,
 		mutation.Board.ID, mutation.Board.Vendor, mutation.Board.Name, mutation.Board.Model, mutation.Board.Chip,
 		mutation.Board.Summary, string(capabilities), mutation.Board.AdaptationStatus, mutation.Board.ImageURL,
 		mutation.Board.PurchaseURL, mutation.Board.RepositoryURL, mutation.Board.FirmwareURL,
-		mutation.Board.FlashingGuideURL, mutation.Board.EffectVideoURL, mutation.Board.DetailSlug,
+		mutation.Board.WebFlasherURL, mutation.Board.FlashingGuideURL, mutation.Board.EffectVideoURL, mutation.Board.DetailSlug,
 		mutation.Board.SortOrder, mutation.Board.CreatedBy, mutation.Board.UpdatedBy)
 	if err != nil {
 		return boardcatalog.Board{}, boardWriteError(err)
@@ -78,10 +78,10 @@ func (s *BoardCommandStore) Update(ctx context.Context, mutation adminapp.BoardM
 		return boardcatalog.Board{}, adminapp.ErrConflict
 	}
 	capabilities, _ := json.Marshal(mutation.Board.Capabilities)
-	result, err := tx.ExecContext(ctx, `UPDATE board_resources SET vendor=?,name=?,model=?,chip=?,summary=?,capabilities=CAST(? AS JSON),adaptation_status=?,image_url=?,purchase_url=?,repository_url=?,firmware_url=?,flashing_guide_url=?,effect_video_url=?,detail_slug=?,sort_order=?,updated_by=?,revision=revision+1 WHERE id=? AND revision=?`,
+	result, err := tx.ExecContext(ctx, `UPDATE board_resources SET vendor=?,name=?,model=?,chip=?,summary=?,capabilities=CAST(? AS JSON),adaptation_status=?,image_url=?,purchase_url=?,repository_url=?,firmware_url=?,web_flasher_url=NULLIF(COALESCE(?,web_flasher_url),''),flashing_guide_url=?,effect_video_url=?,detail_slug=?,sort_order=?,updated_by=?,revision=revision+1 WHERE id=? AND revision=?`,
 		mutation.Board.Vendor, mutation.Board.Name, mutation.Board.Model, mutation.Board.Chip, mutation.Board.Summary,
 		string(capabilities), mutation.Board.AdaptationStatus, mutation.Board.ImageURL, mutation.Board.PurchaseURL,
-		mutation.Board.RepositoryURL, mutation.Board.FirmwareURL, mutation.Board.FlashingGuideURL,
+		mutation.Board.RepositoryURL, mutation.Board.FirmwareURL, mutation.Board.WebFlasherURL, mutation.Board.FlashingGuideURL,
 		mutation.Board.EffectVideoURL, mutation.Board.DetailSlug, mutation.Board.SortOrder, mutation.Board.UpdatedBy,
 		mutation.Board.ID, mutation.ExpectedRevision)
 	if err != nil {

@@ -127,19 +127,8 @@
       ),
       heading,
     );
-    const actions = element("div", "catalog-actions");
-    for (const [field, label, className] of [
-      ["firmware_url", "landing.firmware", "primary"],
-      ["flashing_guide_url", "landing.flashGuide", "guide-link"],
-    ]) {
-      const url = resourceURL(board[field]);
-      if (!url) continue;
-      const link = element("a", className, t(label));
-      link.href = url;
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
-      actions.append(link);
-    }
+    window.BoardResources.enableVideo(art, board.effect_video_url, board.name);
+    const actions = window.BoardResources.actions(board, t);
     if (!actions.childElementCount)
       actions.append(
         element("span", "board-pending", t("landing.pendingLinks")),

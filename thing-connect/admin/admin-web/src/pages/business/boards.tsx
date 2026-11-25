@@ -54,6 +54,7 @@ type Board = {
   purchase_url?: string;
   repository_url?: string;
   firmware_url?: string;
+  web_flasher_url?: string;
   flashing_guide_url?: string;
   effect_video_url?: string;
   detail_slug: string;
@@ -158,6 +159,7 @@ export function BoardsPage() {
         image_url: '',
       } as Board);
     setEditing(draft);
+    form.resetFields();
     form.setFieldsValue({ ...draft, capabilities: draft.capabilities?.join('、') || '' });
   };
   const saveEditor = async (values: BoardForm) => {
@@ -166,6 +168,7 @@ export function BoardsPage() {
     const board: Board = {
       ...editing,
       ...values,
+      web_flasher_url: values.web_flasher_url?.trim() || '',
       id: editing.id,
       capabilities: (values.capabilities || '')
         .split(/[、,，]/)
@@ -455,6 +458,11 @@ export function BoardsPage() {
             <Col xs={24} md={12}>
               <Form.Item name="firmware_url" label="固件链接" rules={[httpsRule]}>
                 <Input placeholder="https://..." />
+              </Form.Item>
+            </Col>
+            <Col xs={24} md={12}>
+              <Form.Item name="web_flasher_url" label="在线烧录链接" rules={[httpsRule]}>
+                <Input placeholder="当前型号的 HTTPS 烧录地址" />
               </Form.Item>
             </Col>
             <Col xs={24} md={12}>
