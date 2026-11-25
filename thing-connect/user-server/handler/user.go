@@ -23,8 +23,8 @@ type Server struct {
 }
 
 func NewServer(userSvc *service.UserService, bindSvc *service.BindService, profileSvc *deviceprofile.Service, online service.OnlineChecker, auth gin.HandlerFunc, cleanupTargets []string) *Server {
-	if userSvc == nil || bindSvc == nil || auth == nil {
-		panic("user handler requires user and bind services and authentication")
+	if userSvc == nil || bindSvc == nil || online == nil || auth == nil {
+		panic("user handler requires user and bind services, online status and authentication")
 	}
 	return &Server{userSvc: userSvc, bindSvc: bindSvc, profileSvc: profileSvc, online: online, auth: auth, cleanupTargets: cleanupTargets}
 }

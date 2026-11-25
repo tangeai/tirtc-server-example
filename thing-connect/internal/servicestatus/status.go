@@ -286,6 +286,28 @@ func RedisProbe(client *redis.Client) DependencyProbe {
 	return func(ctx context.Context) error { return client.Ping(ctx).Err() }
 }
 
+// DeviceHeartbeatKeys returns only registered Device instances, including any
+// index members whose heartbeat may expire before the caller reads it.
+func DeviceHeartbeatKeys(ctx context.Context, client *redis.Client) ([]string, error) {
+	keys, err := client.SMembers(ctx, instanceIndex).Result()
+	if err != nil {
+		return nil, err
+	}
+	device := keys[:0]
+	for _, key := range keys {
+		if strings.HasPrefix(key, heartbeatKey("device-server", "")) {
+			device = append(device, key)
+		}
+	}
+	return device, nil
+}
+
+// CurrentAt checks the same freshness window used by the Redis heartbeat.
+func (i Instance) CurrentAt(now time.Time) bool {
+	age := now.Sub(i.LastHeartbeat)
+	return age >= 0 && age < heartbeatTTL
+}
+
 func heartbeatKey(service, instance string) string {
 	return "thingconnect:service:instance:" + service + ":" + instance
 }

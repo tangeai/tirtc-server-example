@@ -14,14 +14,15 @@ func (e *detailedError) Error() string { return e.msg }
 func (e *detailedError) Unwrap() error { return e.parent }
 
 var (
-	ErrCodeExpired   = errors.New("验证码已过期或不存在")
-	ErrAlreadyBound  = errors.New("设备已绑定至当前账号")
-	ErrBoundByOther  = errors.New("设备已被其他用户绑定")
-	ErrQuotaEmpty    = errors.New("可用额度已耗尽")
-	ErrDeviceOffline = errors.New("设备离线")
-	ErrMQTTTimeout   = errors.New("MQTT消息下发超时")
-	ErrCloneAttack   = errors.New("硬件物理标识不匹配，疑似克隆设备攻击")
-	ErrSigFail       = errors.New("签名校验失败")
+	ErrCodeExpired         = errors.New("验证码已过期或不存在")
+	ErrAlreadyBound        = errors.New("设备已绑定至当前账号")
+	ErrBoundByOther        = errors.New("设备已被其他用户绑定")
+	ErrQuotaEmpty          = errors.New("可用额度已耗尽")
+	ErrPresenceUnavailable = errors.New("设备在线状态暂不可用，请稍后刷新")
+	ErrDeviceOffline       = errors.New("设备离线")
+	ErrMQTTTimeout         = errors.New("MQTT消息下发超时")
+	ErrCloneAttack         = errors.New("硬件物理标识不匹配，疑似克隆设备攻击")
+	ErrSigFail             = errors.New("签名校验失败")
 	// Timestamp errors still wrap ErrSigFail so existing clients continue to
 	// receive HTTP 401 / code 6008 while msg provides an actionable reason.
 	ErrSigTimestampInvalid = fmt.Errorf(

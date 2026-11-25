@@ -38,7 +38,7 @@ type DeviceInfo struct {
 
 // OnlineChecker allows service to check device online status without importing mqttc.
 type OnlineChecker interface {
-	IsOnline(ctx context.Context, clientID string) bool
+	DeviceOnline(ctx context.Context, deviceIDs []string) (map[string]bool, error)
 }
 
 // UserCache keeps code publication and failed-delivery cleanup in one adapter.
@@ -608,6 +608,17 @@ func (s *UserService) DeviceList(ctx context.Context, userID int64, checker Onli
 	if err != nil {
 		return nil, fmt.Errorf("service.DeviceList: %w", err)
 	}
+	ids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if row.DeviceID != "" {
+			ids = append(ids, row.DeviceID)
+		}
+	}
+	online, err := checker.DeviceOnline(ctx, ids)
+	if err != nil {
+		slog.WarnContext(ctx, "device list presence unavailable", "err", err)
+		return nil, ErrPresenceUnavailable
+	}
 	result := make([]DeviceInfo, 0, len(rows))
 	for _, r := range rows {
 		metadata := deviceprofile.PublicMetadata(r.Profiles)
@@ -616,15 +627,11 @@ func (s *UserService) DeviceList(ctx context.Context, userID int64, checker Onli
 			Hardware:        metadata.Hardware,
 			FirmwareVersion: metadata.FirmwareVersion,
 			DeviceID:        r.DeviceID,
+			Online:          online[r.DeviceID],
 			DeviceName:      r.DeviceName,
 			Status:          r.Status,
 			MAC:             r.MAC,
 			BindTime:        r.BindTime,
-		}
-		if checker != nil {
-			if r.DeviceID != "" {
-				di.Online = checker.IsOnline(ctx, "sn_"+r.DeviceID)
-			}
 		}
 		result = append(result, di)
 	}
