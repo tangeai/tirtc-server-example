@@ -31,6 +31,7 @@ import (
 	"thing-connect/internal/logging"
 	mailerpkg "thing-connect/internal/mailer"
 	"thing-connect/internal/mqttc"
+	"thing-connect/internal/presence/redisview"
 	"thing-connect/internal/queuehealth"
 	"thing-connect/internal/requestguard"
 	"thing-connect/internal/service"
@@ -225,7 +226,7 @@ func main() {
 		}(run)
 	}
 
-	usrhandler.NewServer(userSvc, bindSvc, profileSvc, broker, usrhandler.JWTAuth(cfg.JWTSecret, rdb, sqlDB), cleanupoutbox.TargetNames(targets)).Register(r)
+	usrhandler.NewServer(userSvc, bindSvc, profileSvc, redisview.DeviceList{Client: rdb}, usrhandler.JWTAuth(cfg.JWTSecret, rdb, sqlDB), cleanupoutbox.TargetNames(targets)).Register(r)
 
 	addr := fmt.Sprintf(":%d", cfg.Server.HTTPPort)
 	srv := &http.Server{

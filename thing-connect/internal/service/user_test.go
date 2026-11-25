@@ -654,12 +654,16 @@ func (f *fakeCacheStore) GetReportFingerprint(_ context.Context, _ string) (stri
 }
 func (f *fakeCacheStore) DelReportFingerprint(_ context.Context, _ string) error { return nil }
 
+func (f *fakeCacheStore) DeviceOnline(context.Context, []string) (map[string]bool, error) {
+	return nil, nil
+}
+
 func TestUserServiceDeviceListNestsVoIPProfile(t *testing.T) {
 	profile := `{"hardware":{"chip_model":"任意芯片值","board_model":"任意开发板值"},"firmware_version":"任意版本值","voip":{"up_video_mt":"h264","down_video_mt":"mjpeg","down_audio_mt":"amr","audio_rate":8000,"no_video":false}}`
 	svc := newSvc(&fakeUserStore{deviceRows: []model.UserDeviceRow{{
 		DeviceID: "device-1", DeviceName: "书房设备", Status: 1, Profiles: &profile,
 	}}}, newFakeCache(), false)
-	devices, err := svc.DeviceList(context.Background(), 1, nil)
+	devices, err := svc.DeviceList(context.Background(), 1, newFakeCache())
 	if err != nil || len(devices) != 1 {
 		t.Fatalf("DeviceList: devices=%v err=%v", devices, err)
 	}

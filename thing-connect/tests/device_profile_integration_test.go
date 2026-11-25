@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"testing"
@@ -71,6 +72,16 @@ func TestDeviceProfileReportToUserDeviceList(t *testing.T) {
 			t.Fatalf("report attempt %d: %+v", i, r)
 		}
 	}
+	// With no Device consumer in this suite a missing projection is unknown.
+	unknown := s.usrGET(t, "/v1/user/device/list", ownerToken)
+	if unknown.HTTPStatus != 503 || unknown.Code != 503 || len(unknown.Data) != 0 {
+		t.Fatalf("unknown presence exposed as a list: %+v", unknown)
+	}
+	key := "online:sn_" + device
+	if err := s.rdb.Set(context.Background(), key, "1", time.Minute).Err(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.rdb.Del(context.Background(), key) })
 	rows := list(ownerToken)
 	if len(rows) != 1 || rows[0].DeviceID != device {
 		t.Fatalf("owner devices=%+v", rows)

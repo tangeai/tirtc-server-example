@@ -30,6 +30,7 @@ import (
 	"thing-connect/internal/captcha"
 	"thing-connect/internal/config"
 	"thing-connect/internal/deviceprofile"
+	"thing-connect/internal/presence/redisview"
 	"thing-connect/internal/service"
 	mysqlstore "thing-connect/internal/store/mysql"
 	mysqlmigrate "thing-connect/internal/store/mysql/migrate"
@@ -98,7 +99,7 @@ func newSuite(t *testing.T) *suite {
 		t.Fatal(err)
 	}
 	bindSvc := service.NewBindService(mysqlstore.NewBindStore(sqlDB), cacheStore, nil, limiter, serviceCfg)
-	usrhandler.NewServer(userSvc, bindSvc, nil, nil, usrhandler.JWTAuth(cfg.JWTSecret, rdb, sqlDB), suiteCleanupTargets).Register(usrR)
+	usrhandler.NewServer(userSvc, bindSvc, nil, redisview.DeviceList{Client: rdb}, usrhandler.JWTAuth(cfg.JWTSecret, rdb, sqlDB), suiteCleanupTargets).Register(usrR)
 	ctx, stop := context.WithCancel(context.Background())
 	mailDone := make(chan struct{})
 	go func() { defer close(mailDone); mailQueue.Run(ctx) }()
@@ -1042,6 +1043,12 @@ func TestBindByDeviceID_Success(t *testing.T) {
 		t.Errorf("response device_id mismatch: want %s, got %s", deviceID, got)
 	}
 
+	// Simulate the newly bound device establishing its formal MQTT session.
+	key := "online:sn_" + deviceID
+	if err := s.rdb.Set(context.Background(), key, "1", time.Minute).Err(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.rdb.Del(context.Background(), key) })
 	// 绑定后设备出现在列表中
 	listR := s.usrGET(t, "/v1/user/device/list", tok)
 	if listR.Code != 200 {

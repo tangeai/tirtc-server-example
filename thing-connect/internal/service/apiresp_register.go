@@ -14,6 +14,7 @@ func RegisterErrors() {
 	apiresp.RegisterError(store.ErrCleanupPending, http.StatusConflict, apiresp.CodeCleanupPending)
 	apiresp.RegisterError(ErrBoundByOther, http.StatusConflict, apiresp.CodeDevOtherBound)
 	apiresp.RegisterError(ErrQuotaEmpty, http.StatusUnprocessableEntity, apiresp.CodeQuotaEmpty)
+	apiresp.RegisterError(ErrPresenceUnavailable, http.StatusServiceUnavailable, http.StatusServiceUnavailable)
 	apiresp.RegisterError(ErrDeviceOffline, http.StatusServiceUnavailable, apiresp.CodeDevOffline)
 	apiresp.RegisterError(ErrMQTTTimeout, http.StatusGatewayTimeout, apiresp.CodeMQTTTimeout)
 	apiresp.RegisterError(ErrCloneAttack, http.StatusForbidden, apiresp.CodeCloneAttack)
