@@ -737,7 +737,7 @@ static void _usage(const char *prog) {
     printf("  --ai-up-audio-format FMT  AI request audio format (default: --up-audio-format)\n");
     printf("  The stock adapter records AI audio and discards other downlink media; a product sink replaces this behavior.\n\n");
     printf("Other:\n");
-    printf("  --endpoint     URL      service discovery entry (default: http://ep-open.tangeopen.com)\n");
+    printf("  --endpoint     URL      service discovery entry (default: https://ep-open.tangeopen.com)\n");
     printf("  --log-level    LEVEL    debug|info|warn|error (default: debug)\n");
     printf("  --help                  Show this help\n");
 }
@@ -783,7 +783,7 @@ int device_reference_run(int argc, char *argv[]) {
     const char *device_key  = "";
     const char *mac         = "AA:BB:CC:DD:EE:FF";
     int         timeout     = 190;
-    const char *services_base = "http://ep-open.tangeopen.com"; /* service discovery entry */
+    const char *services_base = "https://ep-open.tangeopen.com"; /* service discovery entry */
     const char *log_level   = "debug";
     const char *creds_file  = "device_creds.json";
     const char *ca_cert     = "../assets/ca-certificates.crt";

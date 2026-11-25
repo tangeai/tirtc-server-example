@@ -159,7 +159,7 @@ Linux ARM、MIPS 或其他架构必须使用与 CPU、ABI 和 libc 匹配的 TiR
 | `--device-key` | `$DEVICE_KEY` | 设备密钥 |
 | `--creds-file` | `device_creds.json` | Linux 测试凭证文件 |
 | `--mac` | `AA:BB:CC:DD:EE:FF` | 未绑定流程中上报的 MAC |
-| `--endpoint` | `http://ep-open.tangeopen.com` | 服务发现入口 |
+| `--endpoint` | `https://ep-open.tangeopen.com` | 服务发现入口 |
 | `--timeout` | `190` | 等待 `auth_grant` 的秒数 |
 | `--log-level` | `debug` | `debug` / `info` / `warn` / `error` |
 | `--up-audio-file` | `../assets/audio.g711a` | 四类业务共用的上行编码音频文件 |
