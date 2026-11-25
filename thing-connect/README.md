@@ -251,7 +251,7 @@ static int process_rtc_start(const char *endpoint, const char *device_key,
     rc = TiRtcInit();
     if (rc != 0) return rc;
 
-    /* endpoint 必须取 GET http://ep-open.tangeopen.com/services 的 tirtc-srv。
+    /* endpoint 必须取 GET https://ep-open.tangeopen.com/services 的 tirtc-srv。
        空值只作防御性处理：不设置 option，也不在设备端固化替代地址。 */
     if (endpoint && endpoint[0]) {
         rc = TiRtcSetOption(TIRTC_OPT_SERVICE_ENDPOINT, endpoint, (uint32_t)strlen(endpoint));
@@ -345,7 +345,7 @@ Linux C 参考实现通过 [session_arbiter.c](device-sim/device-sim-c/src/sessi
 #include "device_flow.h"
 
 DeviceServices svc;
-fetch_services(&svc, "http://ep-open.tangeopen.com");   /* 阶段 0：服务发现，拿到各 server 地址 + tirtc_endpoint */
+fetch_services(&svc, "https://ep-open.tangeopen.com");   /* 阶段 0：服务发现，拿到各 server 地址 + tirtc_endpoint */
 
 /* 阶段 1：未绑定设备 → report 拿 6 位验证码 → 临时 MQTT 等用户在 H5 输码绑定 */
 ReportResult rep;
