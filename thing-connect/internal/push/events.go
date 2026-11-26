@@ -39,21 +39,12 @@ func (e Event) Validate() error {
 }
 
 type Config struct {
-	ServerURL  string `yaml:"server_url"`
-	TemplateID string `yaml:"template_id"`
-	Location   string `yaml:"location"`
-	Crying     string `yaml:"crying"`
-	Quarrel    string `yaml:"quarrel"`
-}
-
-func (c Config) Hint(kind string) string {
-	switch kind {
-	case "crying":
-		return c.Crying
-	case "quarrel":
-		return c.Quarrel
-	}
-	return ""
+	Notifications *Policy `yaml:"notifications"`
+	ServerURL     string  `yaml:"server_url"`
+	TemplateID    string  `yaml:"template_id"`
+	Location      string  `yaml:"location"`
+	Crying        string  `yaml:"crying"`
+	Quarrel       string  `yaml:"quarrel"`
 }
 
 // UnmarshalJSON permits legacy missing or malformed display times. The producer
@@ -76,6 +67,11 @@ func (e *Event) UnmarshalJSON(data []byte) error {
 }
 
 func (c Config) Validate() error {
+	if c.Notifications != nil {
+		if err := c.Notifications.Validate(); err != nil {
+			return err
+		}
+	}
 	if c.ServerURL != "" {
 		u, err := url.Parse(c.ServerURL)
 		if err != nil || u.Hostname() == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" {

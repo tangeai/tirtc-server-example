@@ -11,7 +11,9 @@ import (
 )
 
 func TestAlarmTemplateFieldsAndDeliveryResults(t *testing.T) {
-	ch := Channel{Config: push.Config{Crying: "测试提示", Location: "测试位置"}}
+	p := push.DefaultPolicy()
+	p.Crying.Hint, p.Crying.Location = "测试提示", "测试位置"
+	ch := Channel{Config: p}
 	d := push.Delivery{Device: "D123", Open: "openid", Template: push.AlarmTemplate, Reference: "test-ref", Time: "2026-11-26 09:00:00", Kind: "crying"}
 	for _, tc := range []struct {
 		reply string
@@ -36,5 +38,31 @@ func TestAlarmTemplateFieldsAndDeliveryResults(t *testing.T) {
 		if err != nil || got != tc.want {
 			t.Fatalf("reply=%s: %s %v", tc.reply, got, err)
 		}
+	}
+}
+
+func TestConfiguredFieldNamesAndOptionalPage(t *testing.T) {
+	policy := push.DefaultPolicy()
+	policy.Page = ""
+	policy.Quarrel = push.Template{ID: "other-id", Enabled: true, HintKey: "thing7", Hint: "争吵", DeviceKey: "character_string8"}
+	ch := Channel{Config: policy}
+	d := push.Delivery{Device: "device", Kind: "quarrel", Template: "other-id"}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var msg struct {
+			Page     *string
+			Template string `json:"template_id"`
+			Data     map[string]struct{ Value string }
+		}
+		if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
+			t.Error(err)
+		}
+		if msg.Page != nil || msg.Template != d.Template || len(msg.Data) != 2 || msg.Data["thing7"].Value != "争吵" || msg.Data["character_string8"].Value != "device" {
+			t.Errorf("unexpected configured message %+v", msg)
+		}
+		fmt.Fprint(w, `{"errcode":0}`)
+	}))
+	defer server.Close()
+	if result, err := ch.send(context.Background(), server.Client(), server.URL, "test", d); err != nil || result != push.Accepted {
+		t.Fatal(result, err)
 	}
 }

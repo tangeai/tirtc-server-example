@@ -14,19 +14,19 @@ import (
 
 type Channel struct {
 	AppID, Secret string
-	Config        push.Config
+	Config        push.Policy
 	Refresh       wechat.RefreshGate
 }
 
 func (c Channel) Ready(kind string) bool {
-	return c.AppID != "" && c.Secret != "" && c.Config.TemplateID != "" && c.Config.Location != "" && c.Config.Hint(kind) != ""
+	return c.AppID != "" && c.Secret != "" && c.Config.Template(kind).Enabled
 }
 func (c Channel) Login(ctx context.Context, code string) (string, error) {
 	return wechat.Jscode2session(ctx, c.AppID, c.Secret, code)
 }
 
 func (c Channel) Send(ctx context.Context, d push.Delivery) push.Result {
-	if !c.Ready(d.Kind) || d.Template != c.Config.TemplateID {
+	if !c.Ready(d.Kind) || d.AppID != c.AppID || d.Template != c.Config.Template(d.Kind).ID {
 		return push.Failed
 	}
 	result := push.Retry
@@ -44,13 +44,18 @@ func (c Channel) send(ctx context.Context, client *http.Client, endpoint, token 
 	type field struct {
 		Value string `json:"value"`
 	}
-	data := map[string]field{
-		"time1":             {d.Time},
-		"enum_string3":      {c.Config.Hint(d.Kind)},
-		"enum_string2":      {c.Config.Location},
-		"character_string4": {d.Device},
+	t := c.Config.Template(d.Kind)
+	data := map[string]field{}
+	for _, mapping := range []struct{ key, value string }{{t.TimeKey, d.Time}, {t.HintKey, t.Hint}, {t.LocationKey, t.Location}, {t.DeviceKey, d.Device}} {
+		if mapping.key != "" {
+			data[mapping.key] = field{mapping.value}
+		}
 	}
-	body, err := json.Marshal(map[string]any{"touser": d.Open, "template_id": d.Template, "page": "pages/notifications/index?ref=" + url.QueryEscape(d.Reference), "data": data})
+	message := map[string]any{"touser": d.Open, "template_id": d.Template, "data": data}
+	if c.Config.Page != "" {
+		message["page"] = c.Config.Page + "?ref=" + url.QueryEscape(d.Reference)
+	}
+	body, err := json.Marshal(message)
 	if err != nil {
 		return push.Failed, nil
 	}

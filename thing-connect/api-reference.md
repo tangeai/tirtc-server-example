@@ -7653,9 +7653,9 @@ speech.url 为识别服务相对路径，相对 recognition-srv 解析，并携�
 | 方法与路径（相对 /v1/push/user） | 请求和响应 |
 |---|---|
 | GET /capabilities | 返回 crying、quarrel 两个布尔值，表示当前小程序是否已配置对应提醒模板及枚举 |
-| GET /preferences/:device/:kind | 返回 interval_seconds（未设置为 null）及 enabled。kind 取 crying 或 quarrel |
+| GET /preferences/:device/:kind | 返回 interval_seconds（未设置为 null）、enabled、template_id 和 suggested_seconds。仅对已启用事件展示授权入口，相同模板 ID 合并为一次订阅。kind 取 crying 或 quarrel |
 | PUT /preferences/:device/:kind | 提交整数 interval_seconds，范围 0 至 86400。0 表示每次提醒 |
-| DELETE /preferences/:device/:kind | 恢复未设置。客户端预填建议值 60，保存后生效 |
+| DELETE /preferences/:device/:kind | 恢复未设置。客户端按 suggested_seconds 预填（默认 60），保存后生效 |
 | POST /subscriptions | 提交 app_id、wx.login 取得的 code 和 event_type，返回 session_id、replace、template_id。会话有效 5 分钟 |
 | POST /subscriptions/:id/confirm | 提交 replace 布尔值。发生关联冲突须先让用户确认；取消时结束交互。确认成功后由用户点击打开微信订阅弹窗 |
 | POST /subscriptions/:id/result | 提交 decision（accept、reject、cancel）。同一会话重复回报复用结果。长期订阅按微信身份和模板生效 |

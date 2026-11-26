@@ -14,7 +14,7 @@ declare const wx: {
 
 const kinds = ['crying', 'quarrel'] as const;
 type Kind = typeof kinds[number];
-type Preference = { interval_seconds: number | null; enabled: boolean };
+type Preference = { interval_seconds: number | null; enabled: boolean; template_id?: string; suggested_seconds?: number };
 type Session = { session_id: string; replace: boolean; template_id: string };
 const titles = { crying: '疑似哭声', quarrel: '疑似争吵声' };
 const base = '/v1/push/user';
@@ -57,7 +57,7 @@ export default function Notifications() {
     setDevice(id);
     const [crying, quarrel] = await Promise.all(kinds.map(kind => request<Preference>(path(id, kind))));
     setPrefs({ crying, quarrel });
-    setValues({ crying: String(crying.interval_seconds ?? 60), quarrel: String(quarrel.interval_seconds ?? 60) });
+    setValues({ crying: String(crying.interval_seconds ?? crying.suggested_seconds ?? 60), quarrel: String(quarrel.interval_seconds ?? quarrel.suggested_seconds ?? 60) });
   }); });
 
   async function save(kind: Kind, reset: boolean) {
@@ -65,14 +65,14 @@ export default function Notifications() {
     if (!reset && (!/^\d+$/.test(values[kind]) || !Number.isInteger(seconds) || seconds > 86400)) throw new ApiError(40000, '请输入 0 至 86400 的整数秒');
     const p = await request<Preference>(path(device, kind), reset ? 'DELETE' : 'PUT', reset ? undefined : { interval_seconds: seconds });
     setPrefs(old => ({ ...old, [kind]: p }));
-    setValues(old => ({ ...old, [kind]: String(p.interval_seconds ?? 60) }));
+    setValues(old => ({ ...old, [kind]: String(p.interval_seconds ?? p.suggested_seconds ?? 60) }));
     setMessage('提醒间隔已保存');
   }
-  async function prepare() {
+  async function prepare(kind: Kind) {
     const login = await Taro.login({ timeout: 10000 });
     const prepared = await request<Session>(base + '/subscriptions', 'POST', {
       app_id: Taro.getAccountInfoSync().miniProgram.appId, code: login.code,
-      event_type: prefs.crying?.enabled ? 'crying' : 'quarrel',
+      event_type: kind,
     });
     if (prepared.replace) {
       const choice = await Taro.showModal({ title: '替换接收微信', content: '此微信或本账号已有接收关联。替换后，旧关联中等待发送的提醒将终止。' });
@@ -94,6 +94,8 @@ export default function Notifications() {
     setSession(undefined); setReport({ session: s, decision });
     await finish(s, decision);
   }
+  const sharedTemplate = prefs.crying?.enabled && prefs.quarrel?.enabled && prefs.crying.template_id === prefs.quarrel.template_id;
+  const subscriptionKinds = kinds.filter(kind => prefs[kind]?.enabled && !(sharedTemplate && kind === 'quarrel'));
   return <View className='page'>
     <Notice error>{error}</Notice><Notice>{message}</Notice>
     {device && <Text>设备 {device}</Text>}
@@ -103,8 +105,10 @@ export default function Notifications() {
       <Action disabled={busy} onClick={() => void run(() => save(kind, false))}>保存间隔（秒）</Action>
       <Action disabled={busy} onClick={() => void run(() => save(kind, true))}>恢复每次提醒</Action>
     </View>)}
-    {(prefs.crying?.enabled || prefs.quarrel?.enabled) && <Action primary disabled={busy} onClick={() => void run(() => report ? finish(report.session, report.decision) : session ? authorize(session) : prepare())}>
-      {report ? '重试保存订阅结果' : session ? '确认订阅微信提醒' : '订阅设备提醒'}
-    </Action>}
+    {session || report ? <Action primary disabled={busy} onClick={() => void run(() => report ? finish(report.session, report.decision) : authorize(session!))}>
+      {report ? '重试保存订阅结果' : '确认订阅微信提醒'}
+    </Action> : subscriptionKinds.map(kind => <Action key={kind} primary disabled={busy} onClick={() => void run(() => prepare(kind))}>
+      {sharedTemplate ? '订阅设备提醒' : '订阅' + titles[kind] + '提醒'}
+    </Action>)}
   </View>;
 }

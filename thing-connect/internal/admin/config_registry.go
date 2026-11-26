@@ -11,6 +11,7 @@ import (
 	"strings"
 	"thing-connect/internal/bindlimit"
 	"thing-connect/internal/brokerapi"
+	"thing-connect/internal/push"
 	"thing-connect/internal/recognition"
 	"thing-connect/internal/room"
 	"thing-connect/internal/sitebrand"
@@ -21,7 +22,7 @@ import (
 
 var validNamespaces = map[string]bool{
 	"device-server": true, "user-server": true, "voip-server": true,
-	"recognition-server": true, "ai-server": true, "call-server": true, "common": true, "system": true,
+	"push-server": true, "recognition-server": true, "ai-server": true, "call-server": true, "common": true, "system": true,
 }
 
 type ConfigDefinition struct {
@@ -67,7 +68,9 @@ type ConfigFieldDefinition struct {
 type ConfigRegistry struct{ definitions map[string]ConfigDefinition }
 
 func DefaultConfigRegistry() *ConfigRegistry {
+	defaultPush, _ := json.Marshal(push.DefaultPolicy())
 	definitions := []ConfigDefinition{
+		def("push-server", "wechat.notifications", "wechat", "微信长期订阅提醒", string(defaultPush), []string{"app_secret"}, []string{"push-server"}, func(raw json.RawMessage) error { _, err := push.ParsePolicy(raw); return err }),
 		def("user-server", "web.site", "web", "站点名称", sitebrand.DefaultJSON, nil, []string{"user-server"}, func(raw json.RawMessage) error { _, err := sitebrand.Parse(raw); return err }),
 		def("user-server", "web.language", "web", "站点语言", weblanguage.DefaultJSON, nil, []string{"user-server"}, func(raw json.RawMessage) error { _, err := weblanguage.Parse(raw); return err }),
 		def("ai-server", "web.language", "web", "站点语言", weblanguage.DefaultJSON, nil, []string{"ai-server"}, func(raw json.RawMessage) error { _, err := weblanguage.Parse(raw); return err }),

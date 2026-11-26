@@ -300,6 +300,8 @@ Device、User、VoIP、Call、Recognition 的 `mqtt.connection` 支持连接测�
 
 `user-server/captcha` 的 `provider` 在 `yidun`、`geetest`、`aliyun` 和 `tencent` 之间切换。Provider 发生变化时，写请求必须同时提交新供应商要求的完整 `secrets`；服务端不会合并或复用旧供应商的密钥。Provider 不变时，留空的密钥字段继续保留原值。
 
+`push-server/wechat.notifications` 作用域为 global，目标为 push-server，发布后运行时应用。公开值包含 `app_id`、`page`、`suggested_seconds`（0–86400）、`max_attempts`（1–10）和 `backlog_seconds`（1–86400）。`crying` 与 `quarrel` 分别包含 `enabled`、`template_id`、`time_key`、`device_key`、`hint_key`、`hint`、`location_key`、`location`。空字段名省略该字段；同一模板配置内字段名应唯一。密钥字段为 `secrets.app_secret`。变更 AppID 时，启用的提醒需要同时提供新密钥。首次发布前服务使用本地 YAML 回退值。
+
 内部读取接口为：
 
 ```http

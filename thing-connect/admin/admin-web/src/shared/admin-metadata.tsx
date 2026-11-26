@@ -156,6 +156,7 @@ export const routeNames: Record<string, string> = {
   '/configs/user-server': '用户服务',
   '/configs/voip-server': 'VoIP 服务',
   '/configs/ai-server': 'AI 服务',
+  '/configs/push-server': '推送服务',
   '/configs/call-server': '呼叫服务',
   '/configs/common': '通用配置',
   '/admin-users': '管理员',

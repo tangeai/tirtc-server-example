@@ -90,6 +90,7 @@ var defaultMenus = []menuSeed{
 	{Code: "ai-config", Name: "AI 服务", Path: "/configs/ai-server", Permission: "config.read", Sort: 40, ParentCode: "service-config", MenuType: 2},
 	{Code: "recognition", Name: "AI识别", Path: "/recognition", Permission: "recognition.read", Sort: 40, ParentCode: "business", MenuType: 2},
 	{Code: "recognition-config", Name: "AI识别", Path: "/configs/recognition-server", Permission: "config.read", Sort: 46, ParentCode: "service-config", MenuType: 2},
+	{Code: "push-config", Name: "推送服务", Path: "/configs/push-server", Permission: "config.read", Sort: 48, ParentCode: "service-config", MenuType: 2},
 	{Code: "call-config", Name: "呼叫服务", Path: "/configs/call-server", Permission: "config.read", Sort: 50, ParentCode: "service-config", MenuType: 2},
 	{Code: "common-config", Name: "通用配置", Path: "/configs/common", Permission: "config.read", Sort: 60, ParentCode: "service-config", MenuType: 2},
 	{Code: "admin-users", Name: "管理员", Path: "/admin-users", Permission: "admin.read", Sort: 10, ParentCode: "system-management", MenuType: 2},

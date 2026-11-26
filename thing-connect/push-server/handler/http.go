@@ -35,7 +35,7 @@ func write(c *gin.Context, data any, err error) {
 	}
 	c.JSON(status, apiresp.JSON{Code: code, Msg: msg})
 }
-func Register(engine *gin.Engine, s *push.Service, key, secret string) {
+func Register(engine *gin.Engine, current func() *push.Service, key, secret string) {
 	g := engine.Group("/v1/push", func(c *gin.Context) {
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 8192)
 		c.Header("Cache-Control", "no-store")
@@ -50,7 +50,7 @@ func Register(engine *gin.Engine, s *push.Service, key, secret string) {
 			write(c, nil, push.ErrInvalid)
 			return
 		}
-		outcome, err := s.Receive(c.Request.Context(), e)
+		outcome, err := current().Receive(c.Request.Context(), e)
 		write(c, gin.H{"outcome": outcome}, err)
 	})
 	u := g.Group("/user", func(c *gin.Context) {
@@ -76,6 +76,7 @@ func Register(engine *gin.Engine, s *push.Service, key, secret string) {
 		c.Set("user", int64(id))
 	})
 	u.GET("/capabilities", func(c *gin.Context) {
+		s := current()
 		apiresp.OK(c, gin.H{"crying": s.Enabled("crying"), "quarrel": s.Enabled("quarrel")})
 	})
 	for _, method := range []string{"GET", "PUT", "DELETE"} {
@@ -92,8 +93,9 @@ func Register(engine *gin.Engine, s *push.Service, key, secret string) {
 				write(c, nil, push.ErrInvalid)
 				return
 			}
+			s := current()
 			val, err := s.Preference(c.Request.Context(), c.GetInt64("user"), c.Param("device"), kind, c.Request.Method != "GET", input.Seconds)
-			write(c, gin.H{"interval_seconds": val, "enabled": s.Enabled(kind)}, err)
+			write(c, gin.H{"interval_seconds": val, "enabled": s.Enabled(kind), "suggested_seconds": s.SuggestedSeconds(), "template_id": s.TemplateID(kind)}, err)
 		})
 	}
 	u.POST("/subscriptions", func(c *gin.Context) {
@@ -106,8 +108,9 @@ func Register(engine *gin.Engine, s *push.Service, key, secret string) {
 			write(c, nil, push.ErrInvalid)
 			return
 		}
+		s := current()
 		id, replace, err := s.Subscribe(c.Request.Context(), c.GetInt64("user"), b.App, b.Code, b.Kind)
-		write(c, gin.H{"session_id": id, "replace": replace, "template_id": s.TemplateID()}, err)
+		write(c, gin.H{"session_id": id, "replace": replace, "template_id": s.TemplateID(b.Kind)}, err)
 	})
 	u.POST("/subscriptions/:id/confirm", func(c *gin.Context) {
 		var b struct {
@@ -117,7 +120,7 @@ func Register(engine *gin.Engine, s *push.Service, key, secret string) {
 			write(c, nil, push.ErrInvalid)
 			return
 		}
-		write(c, nil, s.Confirm(c.Request.Context(), c.GetInt64("user"), c.Param("id"), b.Replace))
+		write(c, nil, current().Confirm(c.Request.Context(), c.GetInt64("user"), c.Param("id"), b.Replace))
 	})
 	u.POST("/subscriptions/:id/result", func(c *gin.Context) {
 		var b struct {
@@ -127,10 +130,10 @@ func Register(engine *gin.Engine, s *push.Service, key, secret string) {
 			write(c, nil, push.ErrInvalid)
 			return
 		}
-		write(c, nil, s.Report(c.Request.Context(), c.GetInt64("user"), c.Param("id"), b.Decision))
+		write(c, nil, current().Report(c.Request.Context(), c.GetInt64("user"), c.Param("id"), b.Decision))
 	})
 	u.GET("/references/:id", func(c *gin.Context) {
-		device, err := s.Reference(c.Request.Context(), c.GetInt64("user"), c.Param("id"))
+		device, err := current().Reference(c.Request.Context(), c.GetInt64("user"), c.Param("id"))
 		write(c, gin.H{"device_id": device}, err)
 	})
 }

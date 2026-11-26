@@ -10,6 +10,8 @@ import (
 var ErrQueueEmpty = errors.New("通知队列暂无可领取任务")
 
 type Delivery struct {
+	AppID     string
+	Attempts  int
 	ID        int64
 	Lease     string
 	Open      string

@@ -76,7 +76,10 @@ func TestFirstTierCapacity(t *testing.T) {
 	ch := new(capacityChannel)
 	gin.SetMode(gin.ReleaseMode)
 	engine := gin.New()
-	handler.Register(engine, push.New(store, ch, "app", push.AlarmTemplate), "capacity-key", "capacity-secret")
+	policy := push.DefaultPolicy()
+	policy.AppID = "app"
+	service := push.New(store, ch, policy)
+	handler.Register(engine, func() *push.Service { return service }, "capacity-key", "capacity-secret")
 	guard, err := requestguard.New(cfg.Server.RequestLimits)
 	if err != nil {
 		t.Fatal(err)

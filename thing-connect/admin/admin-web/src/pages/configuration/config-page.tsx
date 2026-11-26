@@ -69,6 +69,7 @@ const namespaceNames: Record<string, string> = {
   'user-server': '用户服务',
   'voip-server': 'VoIP 服务',
   'ai-server': 'AI 服务',
+  'push-server': '推送服务',
   'call-server': '呼叫服务',
   'recognition-server': 'AI识别',
   common: '通用配置',
