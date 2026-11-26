@@ -8,13 +8,18 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/jmoiron/sqlx"
+	"log/slog"
+	"sync/atomic"
 	r "thing-connect/internal/recognition"
 	"time"
 )
 
-type RecognitionStore struct{ db *sqlx.DB }
+type RecognitionStore struct {
+	db              *sqlx.DB
+	alarm, unmapped atomic.Int64
+}
 
-func NewRecognitionStore(db *sqlx.DB) *RecognitionStore { return &RecognitionStore{db} }
+func NewRecognitionStore(db *sqlx.DB) *RecognitionStore { return &RecognitionStore{db: db} }
 func recID() string {
 	var b [16]byte
 	if _, e := rand.Read(b[:]); e != nil {
@@ -471,6 +476,16 @@ func (s *RecognitionStore) Complete(c context.Context, done r.Completion) error 
 		}
 	}
 	status := v.Complete(done)
+	kinds := v.NotificationTypes(done.Work.ItemIndex, done.Work.Stage)
+	for _, kind := range kinds {
+		_, err := tx.ExecContext(c, `INSERT INTO recognition_user_event_outbox
+   (device_id,bind_id,source_event_id,event_type,occurred_at,registered_at,next_at)
+   VALUES(?,?,?,?,?,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))
+   ON DUPLICATE KEY UPDATE id=id`, v.Task.DeviceID, row.Bind, v.Task.ID+":"+kind, kind, v.Task.CreatedAt.UTC().Format("2006-01-02 15:04:05.000000"))
+		if err != nil {
+			return err
+		}
+	}
 	_, e = tx.ExecContext(c, `UPDATE recognition_call SET status=?,usage_json=?,finished_at=UTC_TIMESTAMP(6) WHERE task_id=? AND item_id=? AND stage=?`, status, recJSON(done.Usage), row.ID, x.ID, done.Work.Stage)
 	if e != nil {
 		return e
@@ -483,7 +498,21 @@ func (s *RecognitionStore) Complete(c context.Context, done r.Completion) error 
 			return e
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if done.Work.Stage == "analysis" && status == "succeeded" && done.Result != nil && done.Result.Alarm {
+		s.alarm.Add(1)
+		if len(kinds) == 0 {
+			s.unmapped.Add(1)
+		}
+		slog.InfoContext(c, "识别提醒标签判定", "scheme_id", x.SchemeID, "scheme_version", x.SchemeVersion, "matched_types", len(kinds))
+	}
+	return nil
+}
+
+func (s *RecognitionStore) NotificationMetrics() map[string]int64 {
+	return map[string]int64{"recognition_alarm_total": s.alarm.Load(), "recognition_alarm_unmapped_total": s.unmapped.Load()}
 }
 func (s *RecognitionStore) Recover(c context.Context) error {
 	tx, e := s.db.BeginTxx(c, claimTx)

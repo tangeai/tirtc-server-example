@@ -15,6 +15,7 @@ export const serviceNames: Record<string, string> = {
   'ai-server': 'AI 服务',
   'call-server': '呼叫服务',
   'recognition-server': 'AI识别服务',
+  'push-server': '设备提醒服务',
   'admin-server': '管理服务',
 };
 export const dependencyNames: Record<string, string> = {

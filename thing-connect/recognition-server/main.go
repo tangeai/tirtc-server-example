@@ -65,7 +65,8 @@ func main() {
 		log.Fatal(e)
 	}
 	defer broker.Close()
-	service := recognition.New(mysqlstore.NewRecognitionStore(sqlDB), recognitionprovider.New(), cfg.Recognition)
+	store := mysqlstore.NewRecognitionStore(sqlDB)
+	service := recognition.New(store, recognitionprovider.New(), cfg.Recognition)
 	service.SetNotifier(notifier{broker})
 	refs := []dynamicconfig.Ref{{Namespace: "recognition-server", Key: "recognition.models", Apply: func(s dynamicconfig.Snapshot) error {
 		if s.Revision == 0 {
@@ -119,11 +120,20 @@ func main() {
 	if e != nil {
 		log.Fatal(e)
 	}
-	reporter.SetMetrics(servicestatus.MergeMetrics(broker.Metrics, backlog.Metrics, guard.Metrics, servicestatus.PoolMetrics(sqlDB, rdb)))
+	userBacklog := queuehealth.NewWithMaxAge("recognition_user_event", mysqlstore.NewPushBacklog(sqlDB, true), 5*time.Minute)
+	statusProbes["recognition_user_event_outbox"] = userBacklog.Health
+	reporter.SetMetrics(servicestatus.MergeMetrics(store.NotificationMetrics, userBacklog.Metrics, broker.Metrics, backlog.Metrics, guard.Metrics, servicestatus.PoolMetrics(sqlDB, rdb)))
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	var wg sync.WaitGroup
-	for _, run := range []func(context.Context){service.Run, reporter.Run, backlog.Run, func(c context.Context) { dc.Run(c, refs) }} {
+	runners := []func(context.Context){service.Run, reporter.Run, backlog.Run, userBacklog.Run, func(c context.Context) { dc.Run(c, refs) }}
+	if cfg.Push.ServerURL != "" {
+		publisher := recognition.Publisher{Queue: store, BaseURL: cfg.Push.ServerURL, InternalKey: cfg.Internal.Key}
+		for i := 0; i < 2; i++ {
+			runners = append(runners, publisher.Run)
+		}
+	}
+	for _, run := range runners {
 		wg.Add(1)
 		go func(f func(context.Context)) { defer wg.Done(); f(ctx) }(run)
 	}

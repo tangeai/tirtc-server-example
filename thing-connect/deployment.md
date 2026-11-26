@@ -38,7 +38,7 @@ flowchart TB
 
     subgraph Host["ThingConnect 应用服务器"]
         direction LR
-        Services["服务进程<br/>Admin 先运行 / 六个业务服务后启动"]
+        Services["服务进程<br/>Admin 先运行 / 七个业务服务后启动"]
         Config["config-current/&lt;service&gt;/config.yaml<br/>各服务启动配置"]
         Services <-->|"安装器写入 / 服务启动读取"| Config
     end
@@ -81,7 +81,7 @@ Nginx、HTTPS 和生产进程托管都不是首次安装页面的前置条件。
 | `call-server` | 9005 | 生成基础配置，完成 MQTT、TiRTC 后启动 |
 | `recognition-server` | 9006 | 生成基础配置，完成 MQTT 后启动；受理识别任务还需配置千问 Key |
 
-首次安装会构建服务清单中的全部服务，并为 Admin 与六个业务服务生成基础配置。安装结束时只有 Admin 运行；安装器和 Admin 都不会自动启动业务服务。管理员按需完成配置并启用业务服务，`start-all` 只启动启用清单中的服务。
+首次安装会构建服务清单中的全部服务，并为 Admin 与七个业务服务生成基础配置。安装结束时只有 Admin 运行；安装器和 Admin 都不会自动启动业务服务。管理员按需完成配置并启用业务服务，`start-all` 只启动启用清单中的服务。
 
 应用端口使用上表默认值。安装页面只填写 MySQL、Redis 及部署访问地址，不在首次安装中任意重排应用端口。业务服务必须在 Admin 就绪且启动前检查通过后启动。
 
@@ -228,7 +228,7 @@ CREATE DATABASE thing_connect
 
 每个服务进程都有独立连接池。启动 YAML 的 `database.max_open_conns` 默认是 `50`（省略或 `0`），`database.max_idle_conns` 默认是 `10`，且不超过连接上限；显式设置空闲连接为 `0` 表示不保留空闲连接。负数或空闲连接大于连接上限会导致启动失败。修改后重启对应服务；这些参数不在 Admin 动态配置中管理。
 
-按所有服务实例的连接池上限之和计算容量，并为迁移、管理、监控和并发测试预留连接。例如，七个服务各设置 `max_open_conns: 10`、`max_idle_conns: 2`，最多占用 70 个连接；MySQL 上限为 100 时剩余 30 个连接供其他任务使用。该示例适用于小型测试环境，生产参数应结合实例数、并发负载和数据库内存评估。
+按所有服务实例的连接池上限之和计算容量，并为迁移、管理、监控和并发测试预留连接。例如，八个服务各设置 `max_open_conns: 10`、`max_idle_conns: 2`，最多占用 80 个连接；MySQL 上限为 100 时剩余 20 个连接供其他任务使用。该示例适用于小型测试环境，生产参数应结合实例数、并发负载和数据库内存评估。
 
 运维时检查 MySQL 的 `max_connections`、账号连接限制，以及 `Threads_connected`、`Max_used_connections`。出现连接耗尽时同时排查连接池总预算、长事务和连接未释放；不要仅提高数据库上限。
 
@@ -327,7 +327,7 @@ http://127.0.0.1:9000/admin/
 3. 首个管理员账号。
 4. 统一对外访问地址、可信代理和 HTTPS Cookie。生产环境即使稍后才配置 Nginx，也应填写最终的 `https://` 地址并勾选 HTTPS Cookie；只做本机或可信内网直连验收时可以留空并关闭 HTTPS Cookie。同机 Nginx 使用默认可信代理 `127.0.0.1`。
 
-页面不要求 MQTT、TiRTC 或业务服务选择。安装器始终生成六个业务服务的基础配置，但只启动 Admin。
+页面不要求 MQTT、TiRTC 或业务服务选择。安装器始终生成七个业务服务的基础配置，但只启动 Admin。
 
 先执行“连接检查并生成安装计划”，核对数据库动作，再确认安装：
 
@@ -824,7 +824,7 @@ User 的服务状态实例包含解绑清理队列（`cleanup_outbox`）的 `met
 
 #### 请求预算与队列观测
 
-六个业务服务按进程独立执行 `server.request_limits`，修改 YAML 后重启生效，不通过 Admin 动态配置发布。省略时使用下表默认值；各组不共用并发名额，满额立即拒绝，不建立等待队列。
+七个业务服务按进程独立执行 `server.request_limits`，修改 YAML 后重启生效，不通过 Admin 动态配置发布。省略时使用下表默认值；各组不共用并发名额，满额立即拒绝，不建立等待队列。
 
 | 组 | 范围 | 默认并发 | 默认总预算 |
 |---|---|---:|---:|
@@ -882,3 +882,11 @@ Broker 侧检查：
 ## Admin 离线 IP 库
 
 中文 IP 归属地使用三个离线库。发布前将库放到源码的 `thing-connect/resources/ipdb/`，安装与更新脚本只复制指定库文件到私有的 `admin-server/ipdb/`。库文件独立于 Git 传输，具体目录、打包与重启步骤见 [Admin IP 中文归属地](admin/admin-server/README.md#ip-中文归属地)。
+
+### 小程序设备提醒服务
+
+push-server 为可选服务，默认端口 9007。安装器先执行 core 数据迁移，再发布 push-server 和 recognition-server。八个服务各配置 10 个 MySQL 连接时，总预算为 80 个连接，另留迁移、管理和监控余量。公网 Nginx 转发 /v1/push/，拒绝 /v1/push/internal/。recognition-server 的 push.server_url 指向推送服务内网地址，两者共享 internal.key。小程序沿用 API_ORIGIN。
+
+在 push-server 的私有配置中填写 wechat.default_app_id、该 AppID 对应的 wechat.apps 凭证，以及 push.template_id。模板 27919 使用长期订阅。push.crying 和 push.quarrel 填提示说明字段允许的枚举，push.location 填所在位置字段允许的枚举。时间字段按北京时间展示，设备编号使用原设备 ID。缺少某事件类型的配置时，对应能力返回关闭。修改 YAML 后重启受影响服务。管理后台发布包含对应提示词、匹配标签的识别类型，由设备用户选择已发布的版本。
+
+小程序在设备页打开“设备提醒”，完成微信身份关联后点击确认订阅。哭声和争吵共用微信模板，各自保存间隔。受理顺序决定窗口内首条；微信受理结果未知时冻结任务。push_delivery 与 recognition_user_event 队列分别上报积压数量、最老等待时间与采样时间。相关渠道降级可在服务状态中排查，设置接口仍可访问。用户事件有效期为 72 小时，终态微信投递记录保留 7 天。

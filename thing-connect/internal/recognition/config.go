@@ -44,6 +44,16 @@ func DecodeConfig(raw []byte) (Config, error) {
 	return c, c.Validate()
 }
 func ValidateScheme(s Scheme) error {
+	for kind, labels := range s.EventLabels {
+		if kind != "crying" && kind != "quarrel" || len(labels) > 32 {
+			return ErrInvalid
+		}
+		for _, label := range labels {
+			if strings.TrimSpace(label) == "" || strings.TrimSpace(label) != label || len([]rune(label)) > 64 {
+				return ErrInvalid
+			}
+		}
+	}
 	if strings.TrimSpace(s.Name) == "" || len([]rune(s.Name)) > 50 || len(s.Description) > 1000 || s.MediaType != "audio" || strings.TrimSpace(s.Prompt) == "" || len(s.Prompt) > 8000 || strings.TrimSpace(s.Model) == "" || len(s.Model) > 128 || s.Limits.MaxFileBytes < 1 || s.Limits.MaxFileBytes > 5<<20 || s.Limits.MaxAudioSeconds < 1 || s.Limits.MaxAudioSeconds > 60 {
 		return ErrInvalid
 	}
@@ -55,4 +65,4 @@ func ValidateScheme(s Scheme) error {
 	}
 	return nil
 }
-func PublicScheme(s Scheme) Scheme { s.Prompt = ""; return s }
+func PublicScheme(s Scheme) Scheme { s.Prompt = ""; s.EventLabels = nil; return s }

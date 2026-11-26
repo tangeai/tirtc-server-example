@@ -1,0 +1,35 @@
+server:
+  # Per-instance request budgets; restart after changing. Omitted classes use these defaults.
+  request_limits:
+    token: {concurrency: 128, timeout: 10s}
+    query: {concurrency: 64, timeout: 10s}
+    upload: {concurrency: 8, timeout: 25s}
+    upstream: {concurrency: 32, timeout: 25s}
+  http_port: 9007
+  trusted_proxies: []
+log:
+  level: info
+  format: text
+database:
+  # Per-process pool limits; changes require a restart. Budget across all instances.
+  max_open_conns: 50
+  max_idle_conns: 10
+  dsn: "root:password@tcp(127.0.0.1:3306)/thing_connect?parseTime=true&charset=utf8mb4&loc=Local"
+redis:
+  addr: "127.0.0.1:6379"
+  password: ""
+  db: 0
+jwt_secret: "replace-with-same-secret-as-device-server"
+internal:
+  key: "replace-with-an-internal-key-at-least-32-characters"
+admin:
+  server_url: "http://127.0.0.1:9000"
+wechat:
+  default_app_id: ""
+  apps: {}
+push:
+  template_id: "rqexMc0m1O7rVv08lXnQ-txMF_Z9v8E4VPsXeP6XxrY"
+  # 填写目标模板允许的提示说明及所在位置枚举
+  crying: ""
+  quarrel: ""
+  location: ""

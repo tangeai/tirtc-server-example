@@ -33,7 +33,8 @@ export async function request<T>(path: string, method: 'GET' | 'POST' | 'PUT' | 
   } catch (error) {
     if (!isPublic && error instanceof ApiError && error.code === 401 && token() === requestToken && !redirecting) {
       redirecting = true; signOut();
-      void Taro.reLaunch({ url: '/pages/login/index?expired=1' }).finally(() => { redirecting = false; });
+      const notification = /^\/v1\/push\/user\/references\/([0-9a-f-]{36})$/.exec(path)?.[1];
+      void Taro.reLaunch({ url: '/pages/login/index?expired=1' + (notification ? '&notification=' + notification : '') }).finally(() => { redirecting = false; });
     }
     throw error;
   }

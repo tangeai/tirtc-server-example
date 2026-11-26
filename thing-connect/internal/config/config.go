@@ -16,6 +16,7 @@ import (
 	"thing-connect/internal/bindlimit"
 	"thing-connect/internal/brokerapi"
 	"thing-connect/internal/model"
+	"thing-connect/internal/push"
 	"thing-connect/internal/recognition"
 	"thing-connect/internal/requestguard"
 	"thing-connect/internal/room"
@@ -214,6 +215,7 @@ type WebCfg struct {
 }
 
 type Config struct {
+	Push        push.Config        `yaml:"push"`
 	Web         WebCfg             `yaml:"web"`
 	Recognition recognition.Config `yaml:"recognition"`
 	Navigation  webnav.Config      `yaml:"navigation"`
@@ -289,6 +291,12 @@ func LoadFile(path string) (*Config, error) {
 	}
 	if _, _, err := cfg.Database.ConnectionLimits(); err != nil {
 		return nil, err
+	}
+	if err := cfg.Push.Validate(); err != nil {
+		return nil, fmt.Errorf("config: push: %w", err)
+	}
+	if cfg.Push.ServerURL != "" && cfg.Internal.Key == "" {
+		return nil, fmt.Errorf("config: push.server_url requires internal.key")
 	}
 	if err := cfg.Recognition.Validate(); err != nil {
 		return nil, fmt.Errorf("config: recognition: %w", err)

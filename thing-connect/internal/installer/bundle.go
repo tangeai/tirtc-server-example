@@ -238,6 +238,10 @@ func renderBundle(draft Draft, secrets generatedSecrets, options Options) (map[s
 	}
 	for _, service := range services {
 		switch service.Name {
+		case "push-server":
+			if recognition, ok := configs["recognition-server"]; ok {
+				recognition["push"] = map[string]any{"server_url": fmt.Sprintf("http://127.0.0.1:%d", service.HTTPPort)}
+			}
 		case "call-server":
 			configs["user-server"]["call"] = map[string]any{"server_url": fmt.Sprintf("http://127.0.0.1:%d", service.HTTPPort)}
 		case "ai-server":

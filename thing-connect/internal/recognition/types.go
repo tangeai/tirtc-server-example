@@ -31,18 +31,19 @@ type Limits struct {
 	MaxAudioSeconds int   `json:"max_audio_seconds"`
 }
 type Scheme struct {
-	ID          string `json:"scheme_id"`
-	Version     int64  `json:"scheme_version"`
-	Revision    int64  `json:"revision"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	MediaType   string `json:"media_type"`
-	Model       string `json:"model"`
-	Prompt      string `json:"prompt,omitempty"`
-	OutputMode  string `json:"output_mode"`
-	Voice       string `json:"voice"`
-	Limits      Limits `json:"limits"`
-	Enabled     bool   `json:"enabled"`
+	EventLabels map[string][]string `json:"event_labels,omitempty"`
+	ID          string              `json:"scheme_id"`
+	Version     int64               `json:"scheme_version"`
+	Revision    int64               `json:"revision"`
+	Name        string              `json:"name"`
+	Description string              `json:"description"`
+	MediaType   string              `json:"media_type"`
+	Model       string              `json:"model"`
+	Prompt      string              `json:"prompt,omitempty"`
+	OutputMode  string              `json:"output_mode"`
+	Voice       string              `json:"voice"`
+	Limits      Limits              `json:"limits"`
+	Enabled     bool                `json:"enabled"`
 }
 type Binding struct {
 	ID      string `json:"scheme_id"`

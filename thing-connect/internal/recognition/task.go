@@ -2,6 +2,8 @@ package recognition
 
 import (
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 )
 
@@ -190,6 +192,27 @@ func (v *Snapshot) Complete(done Completion) string {
 	}
 	v.Aggregate()
 	return status
+}
+
+// NotificationTypes classifies a completed analysis using its published scheme snapshot.
+func (v Snapshot) NotificationTypes(index int, stage string) []string {
+	if stage != "analysis" || index < 0 || index >= len(v.Task.Results) || index >= len(v.Schemes) || index >= len(v.Internal) || v.Task.Results[index].Status != "succeeded" {
+		return nil
+	}
+	result := v.Internal[index]
+	if result == nil || !result.Alarm {
+		return nil
+	}
+	var kinds []string
+	for _, kind := range []string{"crying", "quarrel"} {
+		for _, label := range result.Labels {
+			if slices.Contains(v.Schemes[index].EventLabels[kind], strings.TrimSpace(label)) {
+				kinds = append(kinds, kind)
+				break
+			}
+		}
+	}
+	return kinds
 }
 
 func (v *Snapshot) Cancel() {

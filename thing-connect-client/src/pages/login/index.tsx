@@ -10,6 +10,7 @@ import brandRobot from '../../generated/auth-logo.json';
 
 type Mode = 'login' | 'register' | 'reset';
 export default function Login() {
+  const notification = useRef('');
   const [mode, setMode] = useState<Mode>('login');
   const [email, setEmail] = useState(''), [password, setPassword] = useState(''), [confirm, setConfirm] = useState(''), [code, setCode] = useState('');
   const [consent, setConsent] = useState(false), [visible, setVisible] = useState(false), [busy, setBusy] = useState(false), [cooldown, setCooldown] = useState(0);
@@ -30,6 +31,7 @@ export default function Login() {
     finally { configPending.current = false; if (alive.current) setConfigLoading(false); }
   }
   useLoad(options => {
+    if (options.notification && /^[0-9a-f-]{36}$/.test(options.notification)) notification.current = options.notification;
     if (options.mode === 'reset') setMode('reset');
     else if (token()) { void Taro.switchTab({ url: '/pages/devices/index' }); return; }
     setEmail(rememberedEmail());
@@ -60,7 +62,7 @@ export default function Login() {
         const result = await request<{ token: string }>(path, 'POST', { ...payload, password, ...(mode !== 'login' ? { code } : {}) });
         if (!alive.current) return;
         if (mode === 'reset') { signOut(); setMode('login'); setPassword(''); setConfirm(''); setCode(''); setNotice('密码已重置，请使用新密码登录'); }
-        else { if (!result?.token) throw new ApiError(-1, '登录响应异常，请重试'); signIn(result.token, email); await Taro.reLaunch({ url: '/pages/devices/index' }); }
+        else { if (!result?.token) throw new ApiError(-1, '登录响应异常，请重试'); signIn(result.token, email); await Taro.reLaunch({ url: notification.current ? '/pages/notifications/index?ref=' + encodeURIComponent(notification.current) : '/pages/devices/index' }); }
       }
     } catch (e) { if (alive.current) setError(errorText(e)); }
     finally { lock.current = false; if (alive.current) setBusy(false); }

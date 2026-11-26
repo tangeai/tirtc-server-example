@@ -17,17 +17,6 @@ type iotVoipCallResp struct {
 	Errmsg  string `json:"errmsg"`
 }
 
-// APIError preserves the WeChat business error code so callers can apply
-// targeted recovery (notably errcode=9 for an invalid device authorization).
-type APIError struct {
-	Errcode int
-	Errmsg  string
-}
-
-func (e *APIError) Error() string {
-	return fmt.Sprintf("wechat err %d: %s", e.Errcode, e.Errmsg)
-}
-
 func parseIotVoipCallResponse(statusCode int, body []byte) error {
 	var r iotVoipCallResp
 	if err := json.Unmarshal(body, &r); err != nil {

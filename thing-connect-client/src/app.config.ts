@@ -1,5 +1,5 @@
 export default defineAppConfig({
-  pages: ['pages/login/index', 'pages/devices/index', 'pages/account/index', 'pages/contacts/index', 'pages/bind/index', 'pages/legal/index', 'pages/playback/index', 'pages/recognition/index', 'pages/room/index', 'pages/history/index', 'pages/roles/index'],
+  pages: ['pages/login/index', 'pages/devices/index', 'pages/account/index', 'pages/contacts/index', 'pages/bind/index', 'pages/legal/index', 'pages/playback/index', 'pages/recognition/index', 'pages/room/index', 'pages/history/index', 'pages/roles/index', 'pages/notifications/index'],
   tabBar: { color: '#939b96', selectedColor: '#07b75b', backgroundColor: '#ffffff', borderStyle: 'white', list: [
     { pagePath: 'pages/devices/index', text: '设备', iconPath: 'assets/tab/devices.png', selectedIconPath: 'assets/tab/devices-active.png' },
     { pagePath: 'pages/account/index', text: '我的', iconPath: 'assets/tab/account.png', selectedIconPath: 'assets/tab/account-active.png' },

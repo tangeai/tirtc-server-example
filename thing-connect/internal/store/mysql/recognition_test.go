@@ -36,6 +36,10 @@ func TestRecognitionDurableOrderQuotaAndOwnership(t *testing.T) {
 			mode = "audio"
 		}
 		s := r.Scheme{ID: typ, Version: 1, Revision: 1, Name: "声音分析", MediaType: "audio", Model: "qwen3-omni-flash", Prompt: "分析声音", OutputMode: mode, Voice: "Cherry", Enabled: true, Limits: r.Limits{MaxFileBytes: 5 << 20, MaxAudioSeconds: 15}}
+		s.EventLabels = map[string][]string{"crying": {"crying"}}
+		if i == 1 {
+			s.EventLabels["quarrel"] = []string{"arguing"}
+		}
 		raw, _ := json.Marshal(s)
 		if _, e = db.Exec(`INSERT INTO recognition_scheme(id,revision,version,enabled,draft) VALUES(?,1,1,TRUE,?)`, typ, string(raw)); e != nil {
 			t.Fatal(e)
@@ -48,6 +52,7 @@ func TestRecognitionDurableOrderQuotaAndOwnership(t *testing.T) {
 		db.Exec(`DELETE a FROM recognition_audio a JOIN recognition_task t ON t.id=a.task_id WHERE t.device_id=?`, id)
 		db.Exec(`DELETE c FROM recognition_call c JOIN recognition_task t ON t.id=c.task_id WHERE t.device_id=?`, id)
 		db.Exec(`DELETE FROM recognition_task WHERE device_id=?`, id)
+		db.Exec(`DELETE FROM recognition_user_event_outbox WHERE device_id=?`, id)
 		db.Exec(`DELETE FROM recognition_outbox WHERE device_id=?`, id)
 		db.Exec(`DELETE FROM recognition_device WHERE device_id=?`, id)
 		for _, typ := range ids {
@@ -187,7 +192,7 @@ func TestRecognitionDurableOrderQuotaAndOwnership(t *testing.T) {
 	if t.Failed() {
 		return
 	}
-	result := &r.Result{Summary: "疑似哭声", Alarm: true, Labels: []string{"crying"}, Details: map[string]any{}}
+	result := &r.Result{Summary: "疑似哭声", Alarm: true, Labels: []string{"crying", "arguing"}, Details: map[string]any{}}
 	if e = store.Complete(ctx, r.Completion{Work: *w, Result: result}); e != nil {
 		t.Fatal(e)
 	}
@@ -344,6 +349,31 @@ func TestRecognitionDurableOrderQuotaAndOwnership(t *testing.T) {
 	if _, e = store.Get(ctx, r.Actor{DeviceID: id}, id, "same-request"); !errors.Is(e, r.ErrNotFound) {
 		t.Fatal("old ownership leaked", e)
 	}
+	t.Run("completed alarm events keep original binding after rebind", func(t *testing.T) {
+		kinds := map[string]bool{}
+		for i := 0; i < 2; i++ {
+			batch, err := store.ClaimUserEvents(ctx, 1)
+			if err != nil || len(batch) != 1 {
+				t.Fatal(batch, err)
+			}
+			ev := batch[0].Event
+			if ev.Device != id || ev.ID != "same-request:"+ev.Kind || ev.Occurred.IsZero() || ev.Bind == "" || ev.Validate() != nil {
+				t.Fatal(ev)
+			}
+			batch[0].Outcome = "stale_binding"
+			if err := store.FinishUserEvents(ctx, batch); err != nil {
+				t.Fatal(err)
+			}
+			kinds[ev.Kind] = true
+		}
+		if !kinds["crying"] || !kinds["quarrel"] {
+			t.Fatal(kinds)
+		}
+		extra, err := store.ClaimUserEvents(ctx, 1)
+		if len(extra) != 0 || err != nil {
+			t.Fatal(extra, err)
+		}
+	})
 	state, e = store.State(ctx, actor, id)
 	if e != nil || state.Policy.Enabled {
 		t.Fatal("new binding not reset", e)
