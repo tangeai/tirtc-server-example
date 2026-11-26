@@ -67,7 +67,7 @@ func TestFirstTierCapacity(t *testing.T) {
 	exec("INSERT INTO push_subscription(generation,template_id,grant_id) SELECT generation,?,'grant' FROM push_recipient", push.AlarmTemplate)
 	for batch := 0; batch < 30; batch++ {
 		exec(`INSERT INTO push_event(device_id,bind_id,source_event_id,registered_at,received_at,outcome)
- SELECT CONCAT('CAP',n),'history',CONCAT('hist',?,':crying'),UTC_TIMESTAMP(6),
+ SELECT CONCAT('CAP',n),'history',CONCAT('hist',?,':alarm'),UTC_TIMESTAMP(6),
  TIMESTAMPADD(SECOND,-(?*8640+MOD(n,8640)),UTC_TIMESTAMP(6)),'interval' FROM capacity_seq`, batch, batch)
 	}
 	t.Log("seeded 3M events and 100k device bindings")
@@ -115,7 +115,7 @@ func TestFirstTierCapacity(t *testing.T) {
 		for left := count; left > 0; {
 			n := min(left, 100000-offset)
 			exec(`INSERT INTO recognition_user_event_outbox(device_id,bind_id,source_event_id,event_type,occurred_at,registered_at,next_at)
- SELECT b.device_id,CONCAT(b.id,':',b.binding_revision),CONCAT('cap',?+s.n,':crying'),'crying',UTC_TIMESTAMP(6),UTC_TIMESTAMP(6),UTC_TIMESTAMP(6)
+ SELECT b.device_id,CONCAT(b.id,':',b.binding_revision),CONCAT('cap',?+s.n,':alarm'),'alarm',UTC_TIMESTAMP(6),UTC_TIMESTAMP(6),UTC_TIMESTAMP(6)
  FROM capacity_seq s JOIN device_bind b ON b.device_id=CONCAT('CAP',s.n) WHERE s.n>=? AND s.n<?`, total-offset, offset, offset+n)
 			total += n
 			left -= n

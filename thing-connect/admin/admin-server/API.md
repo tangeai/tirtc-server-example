@@ -300,7 +300,7 @@ Device、User、VoIP、Call、Recognition 的 `mqtt.connection` 支持连接测�
 
 `user-server/captcha` 的 `provider` 在 `yidun`、`geetest`、`aliyun` 和 `tencent` 之间切换。Provider 发生变化时，写请求必须同时提交新供应商要求的完整 `secrets`；服务端不会合并或复用旧供应商的密钥。Provider 不变时，留空的密钥字段继续保留原值。
 
-`push-server/wechat.notifications` 作用域为 global，目标为 push-server，发布后运行时应用。公开值包含 `app_id`、`page`、`suggested_seconds`（0–86400）、`max_attempts`（1–10）和 `backlog_seconds`（1–86400）。`crying` 与 `quarrel` 分别包含 `enabled`、`template_id`、`time_key`、`device_key`、`hint_key`、`hint`、`location_key`、`location`。空字段名省略该字段；同一模板配置内字段名应唯一。密钥字段为 `secrets.app_secret`。变更 AppID 时，启用的提醒需要同时提供新密钥。首次发布前服务使用本地 YAML 回退值。
+`push-server/wechat.notifications` 作用域为 global，目标为 push-server，发布后运行时应用。公开值包含 `app_id`、`page`、`suggested_seconds`（0–86400）、`max_attempts`（1–10）和 `backlog_seconds`（1–86400）。`alarm` 为 AI 异常提醒配置，包含可选的自由文本标签字段名 `label_key` 以及 `enabled`、`template_id`、`time_key`、`device_key`、`hint_key`、`hint`、`location_key`、`location`。空字段名省略该字段；同一模板配置内字段名应唯一。密钥字段为 `secrets.app_secret`。变更 AppID 时，启用的提醒需要同时提供新密钥。首次发布前服务使用本地 YAML 回退值。
 
 内部读取接口为：
 
@@ -333,7 +333,7 @@ X-Internal-Key: <shared-internal-key>
 | GET | `/v1/admin/devices/:device_id/recognition` | device.read | 用户选择、开关与月用量 |
 | PUT | `/v1/admin/devices/:device_id/recognition` | device.recognition.write | 管理许可与月额度 |
 
-识别类型的可选字段 `scheme.event_labels` 以 `crying`、`quarrel` 为键，每项最多 32 个非空标签，每个最多 64 字。分析成功且报警时按发布版本的标签精确匹配。省略或留空表示该类型不产生对应用户事件。
+成功的分析子项以内部结果的 `alarm=true` 触发异常提醒。模型标签用于通知内容。旧识别类型的 `scheme.event_labels` 仅供兼容读取。
 
 任务记录中的 `task` 使用与[设备识别任务](../../api-reference.md#recognition-task)一致的公开结果结构，包含发布版本名称 `results[].name`、类型整体状态 `results[].overall_status`；纯语音类型不返回内部分析文字。`calls` 单独保留逐阶段调用状态和用量，不以任务整体状态代替计费记录。
 

@@ -51,6 +51,14 @@ func (c Channel) send(ctx context.Context, client *http.Client, endpoint, token 
 			data[mapping.key] = field{mapping.value}
 		}
 	}
+	if t.LabelKey != "" {
+		text := []rune(d.LabelText)
+		value := "异常提醒"
+		if len(text) > 0 {
+			value = string(text[:min(len(text), 20)])
+		}
+		data[t.LabelKey] = field{value}
+	}
 	message := map[string]any{"touser": d.Open, "template_id": d.Template, "data": data}
 	if c.Config.Page != "" {
 		message["page"] = c.Config.Page + "?ref=" + url.QueryEscape(d.Reference)

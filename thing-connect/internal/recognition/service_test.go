@@ -46,7 +46,7 @@ func TestSchemaValidationAndDefaultDisabled(t *testing.T) {
 	if DefaultPolicy().Enabled || len(DefaultPolicy().Schemes) > 0 {
 		t.Fatal("recognition must be opt-in")
 	}
-	for _, raw := range []string{`{"summary":"ok","labels":[],"details":{}}`, `{"summary":"","alarm":false,"labels":[],"details":{}}`, `{"summary":"ok","alarm":false,"labels":null,"details":{}}`} {
+	for _, raw := range []string{`{"summary":"ok","labels":[],"details":{}}`, `{"summary":"","alarm":false,"labels":[],"details":{}}`, `{"summary":"ok","alarm":null,"labels":[],"details":{}}`} {
 		if _, e := ValidateResult([]byte(raw)); e == nil {
 			t.Fatal("invalid result accepted")
 		}

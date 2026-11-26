@@ -45,7 +45,6 @@ type Scheme = {
   media_type: string;
   model: string;
   prompt: string;
-  event_labels?: { crying?: string[]; quarrel?: string[] };
   output_mode: string;
   voice: string;
   limits: { max_file_bytes: number; max_audio_seconds: number };
@@ -146,8 +145,6 @@ export function RecognitionPage({ mode = 'business' }: { mode?: 'business' | 'co
     setEdit(v);
     form.setFieldsValue({
       ...v,
-      crying: s?.event_labels?.crying || [],
-      quarrel: s?.event_labels?.quarrel || [],
       outputs: v.output_mode === 'text_audio' ? ['text', 'audio'] : [v.output_mode],
       file_mib: v.limits.max_file_bytes / 1048576,
       seconds: v.limits.max_audio_seconds,
@@ -490,7 +487,6 @@ export function RecognitionPage({ mode = 'business' }: { mode?: 'business' | 'co
               description: v.description,
               model: v.model,
               prompt: v.prompt,
-              event_labels: { crying: v.crying, quarrel: v.quarrel },
               voice: v.voice,
               output_mode: v.outputs.length === 2 ? 'text_audio' : v.outputs[0],
               limits: {
@@ -515,12 +511,6 @@ export function RecognitionPage({ mode = 'business' }: { mode?: 'business' | 'co
           </Form.Item>
           <Form.Item name="prompt" label="提示词" rules={[{ required: true, whitespace: true }]}>
             <Input.TextArea rows={5} maxLength={8000} />
-          </Form.Item>
-          <Form.Item name="crying" label="哭声通知匹配标签">
-            <Select mode="tags" placeholder="输入模型标签并按回车，留空关闭" />
-          </Form.Item>
-          <Form.Item name="quarrel" label="争吵声通知匹配标签">
-            <Select mode="tags" placeholder="输入模型标签并按回车，留空关闭" />
           </Form.Item>
           <Form.Item
             name="outputs"

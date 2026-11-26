@@ -205,13 +205,17 @@ func (s *Service) step(ctx context.Context) error {
 }
 func ValidateResult(raw []byte) (Result, error) {
 	var wire struct {
-		Summary string         `json:"summary"`
-		Alarm   *bool          `json:"alarm"`
-		Labels  []string       `json:"labels"`
-		Details map[string]any `json:"details"`
+		Summary string          `json:"summary"`
+		Alarm   *bool           `json:"alarm"`
+		Labels  json.RawMessage `json:"labels"`
+		Details map[string]any  `json:"details"`
 	}
-	if len(raw) > 16000 || json.Unmarshal(raw, &wire) != nil || wire.Summary == "" || len([]rune(wire.Summary)) > 500 || wire.Alarm == nil || wire.Labels == nil || wire.Details == nil || len(wire.Labels) > 32 {
+	if len(raw) > 16000 || json.Unmarshal(raw, &wire) != nil || wire.Summary == "" || len([]rune(wire.Summary)) > 500 || wire.Alarm == nil || wire.Details == nil {
 		return Result{}, ErrInvalid
 	}
-	return Result{wire.Summary, *wire.Alarm, wire.Labels, wire.Details}, nil
+	labels := []string{}
+	if err := json.Unmarshal(wire.Labels, &labels); err != nil || labels == nil {
+		labels = []string{}
+	}
+	return Result{wire.Summary, *wire.Alarm, labels[:min(len(labels), 32)], wire.Details}, nil
 }

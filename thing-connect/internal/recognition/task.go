@@ -194,25 +194,24 @@ func (v *Snapshot) Complete(done Completion) string {
 	return status
 }
 
-// NotificationTypes classifies a completed analysis using its published scheme snapshot.
-func (v Snapshot) NotificationTypes(index int, stage string) []string {
-	if stage != "analysis" || index < 0 || index >= len(v.Task.Results) || index >= len(v.Schemes) || index >= len(v.Internal) || v.Task.Results[index].Status != "succeeded" {
-		return nil
+// AlarmNotification returns the display text from the first successful abnormal analysis.
+func (v Snapshot) AlarmNotification(index int, stage string) (string, bool) {
+	if stage != "analysis" || index < 0 || index >= len(v.Task.Results) || index >= len(v.Internal) || v.Task.Results[index].Status != "succeeded" {
+		return "", false
 	}
 	result := v.Internal[index]
 	if result == nil || !result.Alarm {
-		return nil
+		return "", false
 	}
-	var kinds []string
-	for _, kind := range []string{"crying", "quarrel"} {
-		for _, label := range result.Labels {
-			if slices.Contains(v.Schemes[index].EventLabels[kind], strings.TrimSpace(label)) {
-				kinds = append(kinds, kind)
-				break
-			}
+	var labels []string
+	for _, label := range result.Labels {
+		text := strings.Join(strings.Fields(label), " ")
+		if text != "" && !slices.Contains(labels, text) {
+			labels = append(labels, text)
 		}
 	}
-	return kinds
+	display := []rune(strings.Join(labels, "、"))
+	return string(display[:min(len(display), 256)]), true
 }
 
 func (v *Snapshot) Cancel() {

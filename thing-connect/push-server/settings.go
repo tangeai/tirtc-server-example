@@ -46,7 +46,7 @@ func (s *settings) apply(snapshot dynamicconfig.Snapshot) error {
 			}
 		}
 		secret = credentials.Secret
-		if (policy.Crying.Enabled || policy.Quarrel.Enabled) && strings.TrimSpace(secret) == "" {
+		if (policy.Alarm.Enabled || policy.Crying.Enabled || policy.Quarrel.Enabled) && strings.TrimSpace(secret) == "" {
 			return errors.New("启用微信推送需要 AppSecret")
 		}
 	}

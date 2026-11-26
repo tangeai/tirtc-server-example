@@ -7,13 +7,18 @@ import (
 
 var ErrUnavailable = errors.New("订阅模板尚未配置")
 
+type Reference struct {
+	Device    string `db:"device_id" json:"device_id"`
+	LabelText string `db:"label_text" json:"label_text"`
+}
+
 type Repository interface {
 	Admit(context.Context, Event, string, string) (string, error)
 	Preference(context.Context, int64, string, string, bool, *int) (*int, error)
 	Prepare(context.Context, int64, string, string, string) (string, bool, error)
 	Confirm(context.Context, int64, string, bool) error
 	Report(context.Context, int64, string, string) error
-	Reference(context.Context, int64, string) (string, error)
+	Reference(context.Context, int64, string) (Reference, error)
 }
 type IdentityProvider interface {
 	Ready(string) bool

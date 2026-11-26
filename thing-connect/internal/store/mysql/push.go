@@ -88,7 +88,7 @@ func (s *PushStore) Admit(ctx context.Context, e push.Event, app, template strin
 		Outcome string
 		Same    bool
 	}
-	err = tx.GetContext(ctx, &prior, `SELECT outcome,registered_at=? AS same FROM push_event WHERE device_id=? AND bind_id=? AND source_event_id=? FOR UPDATE`, e.Registered.UTC().Format("2006-01-02 15:04:05.000000"), e.Device, e.Bind, e.ID)
+	err = tx.GetContext(ctx, &prior, `SELECT outcome,(registered_at=? AND BINARY label_text=BINARY ?) AS same FROM push_event WHERE device_id=? AND bind_id=? AND source_event_id=? FOR UPDATE`, e.Registered.UTC().Format("2006-01-02 15:04:05.000000"), e.LabelText, e.Device, e.Bind, e.ID)
 	if err == nil {
 		if !prior.Same {
 			return "", push.ErrConflict
@@ -127,7 +127,7 @@ func (s *PushStore) Admit(ctx context.Context, e push.Event, app, template strin
 			return "", err
 		}
 	}
-	res, err := tx.ExecContext(ctx, `INSERT INTO push_event(device_id,bind_id,source_event_id,registered_at,received_at,outcome) VALUES(?,?,?,?,UTC_TIMESTAMP(6),?)`, e.Device, e.Bind, e.ID, e.Registered.UTC().Format("2006-01-02 15:04:05.000000"), outcome)
+	res, err := tx.ExecContext(ctx, `INSERT INTO push_event(device_id,bind_id,source_event_id,registered_at,received_at,outcome,label_text) VALUES(?,?,?,?,UTC_TIMESTAMP(6),?,?)`, e.Device, e.Bind, e.ID, e.Registered.UTC().Format("2006-01-02 15:04:05.000000"), outcome, e.LabelText)
 	if err != nil {
 		return "", err
 	}
@@ -152,11 +152,11 @@ func (s *PushStore) Admit(ctx context.Context, e push.Event, app, template strin
 	return outcome, tx.Commit()
 }
 
-func (s *PushStore) Reference(ctx context.Context, user int64, ref string) (string, error) {
-	var device string
-	err := s.db.GetContext(ctx, &device, `SELECT d.device_id FROM push_delivery d JOIN push_event e ON e.id=d.event_id JOIN device_bind b ON d.device_id=b.device_id AND d.bind_id=CONCAT(b.id,':',b.binding_revision) WHERE d.reference_id=? AND b.user_id=? AND d.user_id=? AND e.received_at>UTC_TIMESTAMP(6)-INTERVAL 72 HOUR`, ref, user, user)
+func (s *PushStore) Reference(ctx context.Context, user int64, ref string) (push.Reference, error) {
+	var refData push.Reference
+	err := s.db.GetContext(ctx, &refData, `SELECT d.device_id,e.label_text FROM push_delivery d JOIN push_event e ON e.id=d.event_id JOIN device_bind b ON d.device_id=b.device_id AND d.bind_id=CONCAT(b.id,':',b.binding_revision) WHERE d.reference_id=? AND b.user_id=? AND d.user_id=? AND e.received_at>UTC_TIMESTAMP(6)-INTERVAL 72 HOUR`, ref, user, user)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", push.ErrExpired
+		return refData, push.ErrExpired
 	}
-	return device, err
+	return refData, err
 }

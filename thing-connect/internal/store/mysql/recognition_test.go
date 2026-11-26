@@ -350,24 +350,17 @@ func TestRecognitionDurableOrderQuotaAndOwnership(t *testing.T) {
 		t.Fatal("old ownership leaked", e)
 	}
 	t.Run("completed alarm events keep original binding after rebind", func(t *testing.T) {
-		kinds := map[string]bool{}
-		for i := 0; i < 2; i++ {
-			batch, err := store.ClaimUserEvents(ctx, 1)
-			if err != nil || len(batch) != 1 {
-				t.Fatal(batch, err)
-			}
-			ev := batch[0].Event
-			if ev.Device != id || ev.ID != "same-request:"+ev.Kind || ev.Occurred.IsZero() || ev.Bind == "" || ev.Validate() != nil {
-				t.Fatal(ev)
-			}
-			batch[0].Outcome = "stale_binding"
-			if err := store.FinishUserEvents(ctx, batch); err != nil {
-				t.Fatal(err)
-			}
-			kinds[ev.Kind] = true
+		batch, err := store.ClaimUserEvents(ctx, 1)
+		if err != nil || len(batch) != 1 {
+			t.Fatal(batch, err)
 		}
-		if !kinds["crying"] || !kinds["quarrel"] {
-			t.Fatal(kinds)
+		ev := batch[0].Event
+		if ev.Kind != "alarm" || ev.LabelText != "crying、arguing" || ev.Device != id || ev.ID != "same-request:"+ev.Kind || ev.Occurred.IsZero() || ev.Bind == "" || ev.Validate() != nil {
+			t.Fatal(ev)
+		}
+		batch[0].Outcome = "stale_binding"
+		if err := store.FinishUserEvents(ctx, batch); err != nil {
+			t.Fatal(err)
 		}
 		extra, err := store.ClaimUserEvents(ctx, 1)
 		if len(extra) != 0 || err != nil {

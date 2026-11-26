@@ -11,6 +11,7 @@ import (
 // Template maps the four available data sources to fields on an approved long-term template.
 // An empty field name omits that source from the message.
 type Template struct {
+	LabelKey    string `json:"label_key,omitempty" yaml:"label_key"`
 	Enabled     bool   `json:"enabled" yaml:"enabled"`
 	ID          string `json:"template_id" yaml:"template_id"`
 	Hint        string `json:"hint" yaml:"hint"`
@@ -22,6 +23,7 @@ type Template struct {
 }
 
 type Policy struct {
+	Alarm            Template `json:"alarm" yaml:"alarm"`
 	AppID            string   `json:"app_id" yaml:"app_id"`
 	Crying           Template `json:"crying" yaml:"crying"`
 	Quarrel          Template `json:"quarrel" yaml:"quarrel"`
@@ -33,7 +35,7 @@ type Policy struct {
 
 func DefaultPolicy() Policy {
 	t := Template{ID: AlarmTemplate, TimeKey: "time1", HintKey: "enum_string3", LocationKey: "enum_string2", DeviceKey: "character_string4"}
-	return Policy{Crying: t, Quarrel: t, Page: "pages/notifications/index", SuggestedSeconds: 60, MaxAttempts: 5, BacklogSeconds: 300}
+	return Policy{Alarm: t, Crying: t, Quarrel: t, Page: "pages/notifications/index", SuggestedSeconds: 60, MaxAttempts: 5, BacklogSeconds: 300}
 }
 
 func (c Config) Policy(app string) Policy {
@@ -42,7 +44,7 @@ func (c Config) Policy(app string) Policy {
 	}
 	p := DefaultPolicy()
 	p.AppID = app
-	for t, hint := range map[*Template]string{&p.Crying: c.Crying, &p.Quarrel: c.Quarrel} {
+	for t, hint := range map[*Template]string{&p.Alarm: c.AlarmHint, &p.Crying: c.Crying, &p.Quarrel: c.Quarrel} {
 		t.ID, t.Hint, t.Location = c.TemplateID, hint, c.Location
 		t.Enabled = app != "" && t.ID != "" && hint != "" && t.Location != ""
 	}
@@ -51,6 +53,8 @@ func (c Config) Policy(app string) Policy {
 
 func (p Policy) Template(kind string) Template {
 	switch kind {
+	case "alarm":
+		return p.Alarm
 	case "crying":
 		return p.Crying
 	case "quarrel":
@@ -60,6 +64,7 @@ func (p Policy) Template(kind string) Template {
 }
 
 var templateIDPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,128}$`)
+var regexpThing = regexp.MustCompile(`^thing[1-9][0-9]{0,2}$`)
 var fieldPattern = regexp.MustCompile(`^[a-z][a-z_]{0,32}[1-9][0-9]{0,2}$`)
 var pagePattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+(/[a-zA-Z0-9_-]+)+$`)
 
@@ -73,12 +78,21 @@ func (p Policy) Validate() error {
 	if p.AppID != "" && (len(p.AppID) > 64 || !templateIDPattern.MatchString(p.AppID)) {
 		return errors.New("小程序 AppID 格式无效")
 	}
-	for _, t := range []Template{p.Crying, p.Quarrel} {
+	if p.Alarm.Enabled && p.Alarm.LabelKey == "" && p.Page == "" {
+		return errors.New("请配置显示识别标签的自由文本字段或提醒详情页")
+	}
+	if p.Alarm.ID == AlarmTemplate && p.Alarm.LabelKey != "" {
+		return errors.New("模板 27919 通过提醒详情页展示标签，请留空模型标签字段")
+	}
+	for _, t := range []Template{p.Alarm, p.Crying, p.Quarrel} {
 		if t.ID != "" && !templateIDPattern.MatchString(t.ID) {
 			return errors.New("微信模板 ID 格式无效")
 		}
+		if t.LabelKey != "" && !regexpThing.MatchString(t.LabelKey) {
+			return errors.New("模型标签只能使用自由文本字段，如 thing5")
+		}
 		seen := map[string]bool{}
-		for _, k := range []string{t.TimeKey, t.HintKey, t.LocationKey, t.DeviceKey} {
+		for _, k := range []string{t.TimeKey, t.HintKey, t.LocationKey, t.DeviceKey, t.LabelKey} {
 			if k == "" {
 				continue
 			}

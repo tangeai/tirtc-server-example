@@ -508,7 +508,7 @@ INSERT IGNORE INTO schema_migrations (component, version) VALUES
     ('core', 7),
     ('core', 8),
     ('core', 9),
-    ('core', 10), ('core', 11), ('core', 12), ('core', 13), ('core', 14), ('core', 15), ('core', 16), ('core', 17);
+    ('core', 10), ('core', 11), ('core', 12), ('core', 13), ('core', 14), ('core', 15), ('core', 16), ('core', 17), ('core', 18);
 CREATE TABLE IF NOT EXISTS ai_recognition_policy (
  device_id VARCHAR(64) NOT NULL COMMENT '设备标识',
  enabled BOOLEAN NOT NULL DEFAULT FALSE COMMENT '是否启用媒体识别',
@@ -1559,6 +1559,7 @@ INSERT INTO ai_role_types (id,name,voice_id,voice_model,prompt,sort_order,status
 INSERT IGNORE INTO schema_migrations (component, version) VALUES ('admin', 2),('admin', 3),('admin', 4),('admin', 5),('admin', 6),('admin', 7);
 
 CREATE TABLE IF NOT EXISTS recognition_user_event_outbox (
+ label_text VARCHAR(256) NOT NULL DEFAULT '' COMMENT '异常识别标签展示文本',
  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '来源事件记录',
  device_id VARCHAR(64) NOT NULL COMMENT '设备标识',
  bind_id VARCHAR(128) NOT NULL COMMENT '原任务绑定代次',
@@ -1575,6 +1576,7 @@ CREATE TABLE IF NOT EXISTS recognition_user_event_outbox (
  KEY idx_rec_user_queue (status,next_at,id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='识别用户通知待发送事件';
 CREATE TABLE IF NOT EXISTS push_event (
+ label_text VARCHAR(256) NOT NULL DEFAULT '' COMMENT '异常识别标签展示文本',
  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '记录编号',
  device_id VARCHAR(64) NOT NULL COMMENT '设备编号',
  bind_id VARCHAR(128) NOT NULL COMMENT '设备绑定代次',

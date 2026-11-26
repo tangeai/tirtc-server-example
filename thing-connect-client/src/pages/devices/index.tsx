@@ -25,8 +25,8 @@ export default function Devices() {
   useEffect(() => {
     let active = true;
     if (token() && typeof wx !== 'undefined') {
-      void request<{ crying: boolean; quarrel: boolean }>('/v1/push/user/capabilities')
-        .then(value => { if (active) setPushEnabled(value.crying || value.quarrel); }).catch(() => {});
+      void request<{ alarm: boolean }>('/v1/push/user/capabilities')
+        .then(value => { if (active) setPushEnabled(value.alarm); }).catch(() => {});
     }
     return () => { active = false; };
   }, []);

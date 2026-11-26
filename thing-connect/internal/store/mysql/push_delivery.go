@@ -23,7 +23,7 @@ func (s *PushStore) ClaimPush(ctx context.Context) (*push.Delivery, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = tx.QueryRowxContext(ctx, `SELECT r.open_id,r.app_id FROM push_delivery d JOIN device_bind b ON d.device_id=b.device_id AND b.user_id=d.user_id AND CONCAT(b.id,':',b.binding_revision)=d.bind_id JOIN push_recipient r ON r.user_id=d.user_id AND r.generation=d.generation JOIN push_subscription s ON s.generation=d.generation AND s.template_id=d.template_id WHERE d.id=? FOR SHARE`, d.ID).Scan(&d.Open, &d.AppID)
+	err = tx.QueryRowxContext(ctx, `SELECT r.open_id,r.app_id,e.label_text FROM push_delivery d JOIN push_event e ON e.id=d.event_id JOIN device_bind b ON d.device_id=b.device_id AND b.user_id=d.user_id AND CONCAT(b.id,':',b.binding_revision)=d.bind_id JOIN push_recipient r ON r.user_id=d.user_id AND r.generation=d.generation JOIN push_subscription s ON s.generation=d.generation AND s.template_id=d.template_id WHERE d.id=? FOR SHARE`, d.ID).Scan(&d.Open, &d.AppID, &d.LabelText)
 	if errors.Is(err, sql.ErrNoRows) {
 		_, err = tx.ExecContext(ctx, `UPDATE push_delivery SET status='cancelled',finished_at=UTC_TIMESTAMP(6) WHERE id=?`, d.ID)
 		if err != nil {

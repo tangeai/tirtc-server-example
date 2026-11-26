@@ -15,11 +15,11 @@ func (s *RecognitionStore) ClaimUserEvents(ctx context.Context, limit int) ([]r.
 	}
 	defer tx.Rollback()
 	var rows []struct {
-		ID                                               int64
-		Device, Bind, Source, Kind, Registered, Occurred string
-		Final                                            int
+		ID                                                          int64
+		Device, Bind, Source, Kind, Registered, Occurred, LabelText string
+		Final                                                       int
 	}
-	err = tx.SelectContext(ctx, &rows, `SELECT id,device_id AS device,bind_id AS bind,source_event_id AS source,event_type AS kind,
+	err = tx.SelectContext(ctx, &rows, `SELECT id,device_id AS device,bind_id AS bind,source_event_id AS source,event_type AS kind,label_text AS labeltext,
  DATE_FORMAT(registered_at,'%Y-%m-%dT%H:%i:%s.%fZ') AS registered,
  DATE_FORMAT(occurred_at,'%Y-%m-%dT%H:%i:%s.%fZ') AS occurred,
  IF(registered_at<=UTC_TIMESTAMP(6)-INTERVAL 24 HOUR,confirm_attempts+1,0) AS final
@@ -40,6 +40,7 @@ func (s *RecognitionStore) ClaimUserEvents(ctx context.Context, limit int) ([]r.
 		v.Event.Device = row.Device
 		v.Event.Bind = row.Bind
 		v.Event.Kind = row.Kind
+		v.Event.LabelText = row.LabelText
 		v.Event.Registered, err = time.Parse(time.RFC3339Nano, row.Registered)
 		if err != nil {
 			return nil, err

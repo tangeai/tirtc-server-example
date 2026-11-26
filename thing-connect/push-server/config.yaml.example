@@ -31,15 +31,13 @@ wechat:
 push:
   template_id: "rqexMc0m1O7rVv08lXnQ-txMF_Z9v8E4VPsXeP6XxrY"
   # 填写目标模板允许的提示说明及所在位置枚举
-  crying: ""
-  quarrel: ""
+  alarm_hint: ""
   location: ""
-  # 如需分别模板或自定义字段，在 push 下设置 notifications，覆盖上面的共用模板配置。
+  # 如需自定义字段，在 push 下设置 notifications，覆盖上面的共用模板配置。
   # notifications:
   #   app_id: ""           # 凭证按此 AppID 从 wechat.apps 读取
   #   suggested_seconds: 60
   #   max_attempts: 5
   #   backlog_seconds: 300
   #   page: "pages/notifications/index"
-  #   crying: {enabled: false, template_id: "", time_key: "time1", device_key: "character_string4", hint_key: "enum_string3", hint: "", location_key: "enum_string2", location: ""}
-  #   quarrel: {enabled: false}
+  #   alarm: {enabled: false, template_id: "", time_key: "time1", device_key: "character_string4", hint_key: "enum_string3", hint: "", location_key: "enum_string2", location: ""}

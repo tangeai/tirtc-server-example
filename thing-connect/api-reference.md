@@ -7652,15 +7652,15 @@ speech.url 为识别服务相对路径，相对 recognition-srv 解析，并携�
 
 | 方法与路径（相对 /v1/push/user） | 请求和响应 |
 |---|---|
-| GET /capabilities | 返回 crying、quarrel 两个布尔值，表示当前小程序是否已配置对应提醒模板及枚举 |
-| GET /preferences/:device/:kind | 返回 interval_seconds（未设置为 null）、enabled、template_id 和 suggested_seconds。仅对已启用事件展示授权入口，相同模板 ID 合并为一次订阅。kind 取 crying 或 quarrel |
+| GET /capabilities | alarm 表示 AI 异常提醒是否启用；crying、quarrel 兼容旧客户端 |
+| GET /preferences/:device/:kind | 返回 interval_seconds（未设置为 null）、enabled、template_id 和 suggested_seconds。AI 异常提醒的 kind 为 alarm，已启用时展示授权入口 |
 | PUT /preferences/:device/:kind | 提交整数 interval_seconds，范围 0 至 86400。0 表示每次提醒 |
 | DELETE /preferences/:device/:kind | 恢复未设置。客户端按 suggested_seconds 预填（默认 60），保存后生效 |
 | POST /subscriptions | 提交 app_id、wx.login 取得的 code 和 event_type，返回 session_id、replace、template_id。会话有效 5 分钟 |
 | POST /subscriptions/:id/confirm | 提交 replace 布尔值。发生关联冲突须先让用户确认；取消时结束交互。确认成功后由用户点击打开微信订阅弹窗 |
 | POST /subscriptions/:id/result | 提交 decision（accept、reject、cancel）。同一会话重复回报复用结果。长期订阅按微信身份和模板生效 |
-| GET /references/:id | 登录用户仍拥有原绑定设备且提醒未满 72 小时时返回 device_id；否则返回 410/41000 |
+| GET /references/:id | 登录用户仍拥有原绑定设备且提醒未满 72 小时时返回 device_id、label_text（模型标签展示文本，可能为空）；否则返回 410/41000 |
 
 错误包括 400/40000 参数无效、401/401 登录无效、403/40300 无权访问设备、409/40901 关联或会话状态变化、410/41000 引用或会话过期、503/50300 微信订阅暂不可用。
 
-识别服务经内网 POST /v1/push/internal/events，使用 X-Internal-Key。请求字段为 source_event_id（request_id:事件类型）、device_id、bind_id、event_type、registered_at、occurred_at。时间采用 RFC 3339。响应 data.outcome 为 queued、interval、unsubscribed 或 unconfigured。重报复用首次结果。来源代次失效为 410/6006，首次登记满 24 小时的未受理事件为 410/41000，幂等内容冲突为 409/40901。公网代理拒绝内部入口。
+识别服务经内网 POST /v1/push/internal/events，使用 X-Internal-Key。请求字段为 source_event_id（request_id:事件类型）、device_id、bind_id、event_type、registered_at、occurred_at 和可选 label_text（最多 256 字）。新事件类型为 alarm，编号为 request_id:alarm。一次请求仅登记首个成功且 alarm=true 的分析子项，标签只用于展示。时间采用 RFC 3339。响应 data.outcome 为 queued、interval、unsubscribed 或 unconfigured。重报复用首次结果。来源代次失效为 410/6006，首次登记满 24 小时的未受理事件为 410/41000，幂等内容冲突为 409/40901。公网代理拒绝内部入口。

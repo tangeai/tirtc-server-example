@@ -81,7 +81,7 @@ func main() {
 		return backlog.HealthWithMaxAge(ctx, time.Duration(live.current.Load().channel.Config.BacklogSeconds)*time.Second)
 	}, "wechat": func(context.Context) error {
 		channel := live.current.Load().channel
-		if !channel.Ready("crying") && !channel.Ready("quarrel") {
+		if !channel.Ready("alarm") {
 			return errors.New("微信模板未配置")
 		}
 		return metrics.Health(context.Background())

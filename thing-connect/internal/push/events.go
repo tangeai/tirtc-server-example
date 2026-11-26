@@ -17,9 +17,10 @@ var ErrForbidden = errors.New("无权访问此设备")
 var ErrConflict = errors.New("事件内容冲突")
 var ErrExpired = errors.New("事件已过期")
 var ErrBinding = errors.New("绑定关系已变化")
-var sourceID = regexp.MustCompile("^[A-Za-z0-9_-]{1,64}:(crying|quarrel)$")
+var sourceID = regexp.MustCompile("^[A-Za-z0-9_-]{1,64}:(alarm|crying|quarrel)$")
 
 type Event struct {
+	LabelText  string    `json:"label_text,omitempty"`
 	ID         string    `json:"source_event_id" db:"source_event_id"`
 	Device     string    `json:"device_id" db:"device_id"`
 	Bind       string    `json:"bind_id" db:"bind_id"`
@@ -29,7 +30,7 @@ type Event struct {
 }
 
 func (e Event) Validate() error {
-	if !sourceID.MatchString(e.ID) || len(e.Device) == 0 || len(e.Device) > 64 || len(e.Bind) == 0 || len(e.Bind) > 128 || e.Registered.IsZero() {
+	if len([]rune(e.LabelText)) > 256 || !sourceID.MatchString(e.ID) || len(e.Device) == 0 || len(e.Device) > 64 || len(e.Bind) == 0 || len(e.Bind) > 128 || e.Registered.IsZero() {
 		return ErrInvalid
 	}
 	if !strings.HasSuffix(e.ID, ":"+e.Kind) {
@@ -39,6 +40,7 @@ func (e Event) Validate() error {
 }
 
 type Config struct {
+	AlarmHint     string  `yaml:"alarm_hint"`
 	Notifications *Policy `yaml:"notifications"`
 	ServerURL     string  `yaml:"server_url"`
 	TemplateID    string  `yaml:"template_id"`
@@ -78,7 +80,7 @@ func (c Config) Validate() error {
 			return ErrInvalid
 		}
 	}
-	for _, value := range []string{c.TemplateID, c.Location, c.Crying, c.Quarrel} {
+	for _, value := range []string{c.TemplateID, c.Location, c.Crying, c.Quarrel, c.AlarmHint} {
 		if strings.TrimSpace(value) != value || len([]rune(value)) > 128 {
 			return ErrInvalid
 		}

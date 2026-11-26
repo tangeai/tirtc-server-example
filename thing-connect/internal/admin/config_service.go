@@ -623,7 +623,7 @@ func validateExistingSecretRequirement(namespace, key string, value json.RawMess
 		if err != nil {
 			return err
 		}
-		if p.Crying.Enabled || p.Quarrel.Enabled {
+		if p.Alarm.Enabled || p.Crying.Enabled || p.Quarrel.Enabled {
 			return errors.New("启用提醒前请填写小程序 AppSecret")
 		}
 	}
@@ -698,7 +698,7 @@ func validateRequiredSecrets(namespace, key string, value, secrets json.RawMessa
 			return err
 		}
 		secret, _ := secretObject["app_secret"].(string)
-		if (policy.Crying.Enabled || policy.Quarrel.Enabled) && strings.TrimSpace(secret) == "" {
+		if (policy.Alarm.Enabled || policy.Crying.Enabled || policy.Quarrel.Enabled) && strings.TrimSpace(secret) == "" {
 			return errors.New("启用提醒前请填写小程序 AppSecret")
 		}
 	case "common/tirtc":

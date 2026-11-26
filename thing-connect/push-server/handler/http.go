@@ -77,12 +77,12 @@ func Register(engine *gin.Engine, current func() *push.Service, key, secret stri
 	})
 	u.GET("/capabilities", func(c *gin.Context) {
 		s := current()
-		apiresp.OK(c, gin.H{"crying": s.Enabled("crying"), "quarrel": s.Enabled("quarrel")})
+		apiresp.OK(c, gin.H{"alarm": s.Enabled("alarm"), "crying": s.Enabled("crying"), "quarrel": s.Enabled("quarrel")})
 	})
 	for _, method := range []string{"GET", "PUT", "DELETE"} {
 		u.Handle(method, "/preferences/:device/:kind", func(c *gin.Context) {
 			kind := c.Param("kind")
-			if kind != "crying" && kind != "quarrel" {
+			if kind != "alarm" && kind != "crying" && kind != "quarrel" {
 				write(c, nil, push.ErrInvalid)
 				return
 			}
@@ -134,6 +134,6 @@ func Register(engine *gin.Engine, current func() *push.Service, key, secret stri
 	})
 	u.GET("/references/:id", func(c *gin.Context) {
 		device, err := current().Reference(c.Request.Context(), c.GetInt64("user"), c.Param("id"))
-		write(c, gin.H{"device_id": device}, err)
+		write(c, device, err)
 	})
 }

@@ -33,7 +33,7 @@ func TestPushLongSubscriptionLifecycle(t *testing.T) {
 		db.Exec("DELETE FROM push_session WHERE user_id=?", user)
 	})
 	ctx := context.Background()
-	e := push.Event{ID: "one:crying", Device: device, Bind: bind, Kind: "crying", Registered: time.Now().UTC().Truncate(time.Microsecond), Occurred: time.Now().UTC()}
+	e := push.Event{ID: "one:alarm", Device: device, Bind: bind, Kind: "alarm", LabelText: "哭泣、陌生词", Registered: time.Now().UTC().Truncate(time.Microsecond), Occurred: time.Now().UTC()}
 	admit := func(v push.Event, want string) {
 		t.Helper()
 		got, err := s.Admit(ctx, v, "app", push.AlarmTemplate)
@@ -42,7 +42,7 @@ func TestPushLongSubscriptionLifecycle(t *testing.T) {
 		}
 	}
 	n := 60
-	if _, err := s.Preference(ctx, user, device, "crying", true, &n); err != nil {
+	if _, err := s.Preference(ctx, user, device, "alarm", true, &n); err != nil {
 		t.Fatal(err)
 	}
 	admit(e, "unsubscribed")
@@ -59,7 +59,7 @@ func TestPushLongSubscriptionLifecycle(t *testing.T) {
 		}
 	}
 	admit(e, "unsubscribed")
-	e.ID = "two:crying"
+	e.ID = "two:alarm"
 	var wg sync.WaitGroup
 	for i := 0; i < 2; i++ {
 		wg.Add(1)
@@ -72,7 +72,7 @@ func TestPushLongSubscriptionLifecycle(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	e.ID = "three:crying"
+	e.ID = "three:alarm"
 	admit(e, "interval")
 	e.Kind = "quarrel"
 	e.ID = "two:quarrel"
@@ -80,6 +80,10 @@ func TestPushLongSubscriptionLifecycle(t *testing.T) {
 	d, err := s.ClaimPush(ctx)
 	if err != nil || d == nil {
 		t.Fatalf("claim: %v", err)
+	}
+	detail, err := s.Reference(ctx, user, d.Reference)
+	if err != nil || detail.LabelText != e.LabelText || d.LabelText != e.LabelText || detail.Device != device {
+		t.Fatal(detail, d, err)
 	}
 	if err = s.FinishPush(ctx, *d, push.Unknown); err != nil {
 		t.Fatal(err)
