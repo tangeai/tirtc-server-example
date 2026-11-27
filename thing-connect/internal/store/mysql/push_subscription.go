@@ -49,6 +49,7 @@ func (s *PushStore) Prepare(ctx context.Context, user int64, app, open, template
 }
 
 type subscriptionSession struct {
+	Seq        int64
 	App        string
 	Open       string
 	Template   string
@@ -60,7 +61,7 @@ type subscriptionSession struct {
 
 func lockSession(ctx context.Context, tx *sqlx.Tx, user int64, id string) (subscriptionSession, error) {
 	var v subscriptionSession
-	err := tx.GetContext(ctx, &v, `SELECT app_id AS app,open_id AS open,template_id AS template,old_generation AS old,other_generation AS other,generation,decision FROM push_session WHERE id=? AND user_id=? AND expires_at>UTC_TIMESTAMP(6) FOR UPDATE`, id, user)
+	err := tx.GetContext(ctx, &v, `SELECT session_seq AS seq,app_id AS app,open_id AS open,template_id AS template,old_generation AS old,other_generation AS other,generation,decision FROM push_session WHERE id=? AND user_id=? AND expires_at>UTC_TIMESTAMP(6) FOR UPDATE`, id, user)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = push.ErrExpired
 	}
@@ -99,7 +100,7 @@ func (s *PushStore) Confirm(ctx context.Context, user int64, id string, replace 
 			if r.User == 0 {
 				continue
 			}
-			if _, err = tx.ExecContext(ctx, `UPDATE push_delivery SET status='cancelled',finished_at=UTC_TIMESTAMP(6) WHERE generation=? AND status='pending'`, r.Generation); err != nil {
+			if _, err = tx.ExecContext(ctx, `UPDATE push_delivery SET status='cancelled',finished_at=UTC_TIMESTAMP(6) WHERE generation=? AND status IN ('leased','pending')`, r.Generation); err != nil {
 				return err
 			}
 			if _, err = tx.ExecContext(ctx, `DELETE FROM push_subscription WHERE generation=?`, r.Generation); err != nil {
@@ -144,14 +145,23 @@ func (s *PushStore) Report(ctx context.Context, user int64, id, decision string)
 	if v.Generation == "" || cur.Generation != v.Generation {
 		return push.ErrConflict
 	}
-	switch decision {
-	case "accept":
-		_, err = tx.ExecContext(ctx, `INSERT INTO push_subscription(generation,template_id,grant_id) VALUES(?,?,?) ON DUPLICATE KEY UPDATE grant_id=VALUES(grant_id)`, v.Generation, v.Template, id)
-	case "reject":
-		_, err = tx.ExecContext(ctx, `DELETE s FROM push_subscription s LEFT JOIN push_session previous ON previous.id=s.grant_id JOIN push_session reporting ON reporting.id=? WHERE s.generation=? AND s.template_id=? AND (previous.id IS NULL OR previous.expires_at<=reporting.expires_at)`, id, v.Generation, v.Template)
+	if decision == "accept" || decision == "reject" {
+		// Keep a rejection as a watermark even after the short-lived session is cleaned.
+		_, err = tx.ExecContext(ctx, `INSERT INTO push_subscription(generation,template_id,grant_id,decision_seq,granted) VALUES(?,?,?,?,?)
+ ON DUPLICATE KEY UPDATE grant_id=IF(decision_seq<VALUES(decision_seq),VALUES(grant_id),grant_id),
+ granted=IF(decision_seq<VALUES(decision_seq),VALUES(granted),granted),decision_seq=GREATEST(decision_seq,VALUES(decision_seq))`, v.Generation, v.Template, id, v.Seq, decision == "accept")
+		if err != nil {
+			return err
+		}
 	}
-	if err != nil {
+	// The recipient row serializes first reports for this generation. Cancel
+	// compares against the latest grant decision without advancing its sequence.
+	var newer bool
+	if err = tx.GetContext(ctx, &newer, `SELECT EXISTS(SELECT 1 FROM push_subscription WHERE generation=? AND template_id=? AND decision_seq>?)`, v.Generation, v.Template, v.Seq); err != nil {
 		return err
+	}
+	if newer {
+		return push.ErrConflict
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE push_session SET decision=? WHERE id=?`, decision, id)
 	if err != nil {

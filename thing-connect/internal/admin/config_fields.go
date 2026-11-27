@@ -13,6 +13,9 @@ func defaultConfigFields(namespace, key string) []ConfigFieldDefinition {
 		return notificationFields()
 	}
 	fields := map[string][]ConfigFieldDefinition{
+		definitionID("push-server", "event.delivery_policy"): {
+			booleanConfigField("enabled", "启用异常事件", "关闭后旧事件不会补发。"), numberConfigField("event_ttl_seconds", "报警有效期（30–600 秒）"), numberConfigField("source_capacity", "来源待发容量（32–1000000）"), numberConfigField("delivery_capacity", "微信待发容量（32–1000000）"), numberConfigField("wechat_requests_per_second", "每个 AppID 每秒发送预算（1–10000）"), numberConfigField("source_max_attempts", "来源投递次数（1–10，含首次）"),
+		},
 		definitionID("user-server", "web.site"): {
 			textConfigField("name", "站点名称", "最多 40 个字符，用于首页与开发板页面的品牌名称。"),
 			optionalConfigField(textConfigField("name_en", "英文站点名称", "留空时沿用站点名称；发布后在下次打开页面时生效。")),

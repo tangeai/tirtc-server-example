@@ -15,8 +15,10 @@ import (
 )
 
 type RecognitionStore struct {
-	db    *sqlx.DB
-	alarm atomic.Int64
+	outcomes outcomeCounts
+	db       *sqlx.DB
+	alarm    atomic.Int64
+	source   atomic.Pointer[sourcePolicy]
 }
 
 func NewRecognitionStore(db *sqlx.DB) *RecognitionStore { return &RecognitionStore{db: db} }
@@ -452,7 +454,7 @@ func (s *RecognitionStore) Claim(c context.Context) (*r.Work, error) {
 	return nil, r.ErrNotFound
 }
 func (s *RecognitionStore) Complete(c context.Context, done r.Completion) error {
-	tx, e := s.db.BeginTxx(c, nil)
+	tx, e := s.db.BeginTxx(c, claimTx)
 	if e != nil {
 		return e
 	}
@@ -477,12 +479,10 @@ func (s *RecognitionStore) Complete(c context.Context, done r.Completion) error 
 	}
 	status := v.Complete(done)
 	text, alarm := v.AlarmNotification(done.Work.ItemIndex, done.Work.Stage)
+	var disposition string
 	if alarm {
-		_, err := tx.ExecContext(c, `INSERT INTO recognition_user_event_outbox
-   (device_id,bind_id,source_event_id,event_type,label_text,occurred_at,registered_at,next_at)
-   VALUES(?,?,?,?,?,?,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))
-   ON DUPLICATE KEY UPDATE id=id`, v.Task.DeviceID, row.Bind, v.Task.ID+":alarm", "alarm", text, v.Task.CreatedAt.UTC().Format("2006-01-02 15:04:05.000000"))
-		if err != nil {
+		var err error
+		if disposition, err = s.recordAlarm(c, tx, v.Task.DeviceID, row.Bind, v.Task.ID+":alarm", text, v.Task.CreatedAt); err != nil {
 			return err
 		}
 	}
@@ -503,12 +503,17 @@ func (s *RecognitionStore) Complete(c context.Context, done r.Completion) error 
 	}
 	if alarm {
 		s.alarm.Add(1)
+		if disposition != "" {
+			s.outcomes.add("produced_"+disposition, 1)
+		}
 	}
 	return nil
 }
 
 func (s *RecognitionStore) NotificationMetrics() map[string]int64 {
-	return map[string]int64{"recognition_alarm_total": s.alarm.Load()}
+	m := s.outcomes.metrics("recognition_notification_")
+	m["recognition_alarm_total"] = s.alarm.Load()
+	return m
 }
 func (s *RecognitionStore) Recover(c context.Context) error {
 	tx, e := s.db.BeginTxx(c, claimTx)

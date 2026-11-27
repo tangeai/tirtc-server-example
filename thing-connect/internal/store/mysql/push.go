@@ -4,13 +4,30 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"sync/atomic"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"thing-connect/internal/push"
 )
 
-type PushStore struct{ db *sqlx.DB }
+type PushStore struct {
+	db       *sqlx.DB
+	policy   atomic.Pointer[push.DeliveryPolicy]
+	claims   atomic.Uint64
+	outcomes outcomeCounts
+}
+
+func (s *PushStore) SetDeliveryPolicy(p push.DeliveryPolicy) { s.policy.Store(&p) }
+func (s *PushStore) Lookup(ctx context.Context, e push.Event) (string, error) {
+	var outcome string
+	err := s.db.GetContext(ctx, &outcome, `SELECT outcome FROM push_event WHERE device_id=? AND bind_id=? AND source_event_id=?`, e.Device, e.Bind, e.ID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return outcome, err
+}
 
 func NewPushStore(db *sqlx.DB) *PushStore { return &PushStore{db: db} }
 
@@ -93,16 +110,44 @@ func (s *PushStore) Admit(ctx context.Context, e push.Event, app, template strin
 		if !prior.Same {
 			return "", push.ErrConflict
 		}
+		if prior.Outcome == "expired" {
+			return "", push.ErrExpired
+		}
 		return prior.Outcome, tx.Commit()
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return "", err
 	}
+	policy := push.DefaultDeliveryPolicy()
+	if configured := s.policy.Load(); configured != nil {
+		policy = *configured
+	}
+	if e.Expires.IsZero() {
+		e.Expires = e.Occurred.Add(time.Duration(policy.TTLSeconds) * time.Second)
+	}
+	if e.Occurred.IsZero() {
+		return "", push.ErrExpired
+	}
+	ttl := e.Expires.Sub(e.Occurred)
+	if ttl < 30*time.Second || ttl > 600*time.Second {
+		return "", push.ErrInvalid
+	}
+	if e.MaxAttempts == 0 {
+		e.MaxAttempts = push.DefaultPolicy().MaxAttempts
+	}
 	var expired bool
-	if err = tx.GetContext(ctx, &expired, `SELECT TIMESTAMPADD(HOUR,24,?)<=UTC_TIMESTAMP(6)`, e.Registered.UTC().Format("2006-01-02 15:04:05.000000")); err != nil {
+	if err = tx.GetContext(ctx, &expired, `SELECT ?<=UTC_TIMESTAMP(6)`, e.Expires.UTC().Format("2006-01-02 15:04:05.000000")); err != nil {
 		return "", err
 	}
 	if expired {
+		_, err = tx.ExecContext(ctx, `INSERT INTO push_event(device_id,bind_id,source_event_id,registered_at,received_at,outcome,label_text) VALUES(?,?,?,?,UTC_TIMESTAMP(6),'expired',?)`, e.Device, e.Bind, e.ID, utcStamp(e.Registered), e.LabelText)
+		if err != nil {
+			return "", err
+		}
+		if err = tx.Commit(); err != nil {
+			return "", err
+		}
+		s.outcomes.add("expired", 1)
 		return "", push.ErrExpired
 	}
 	if ownerErr != nil || b.Owner <= 0 || b.Bind != e.Bind {
@@ -120,11 +165,29 @@ func (s *PushStore) Admit(ctx context.Context, e push.Event, app, template strin
 	case template == "":
 		outcome = "unconfigured"
 	default:
-		err = tx.GetContext(ctx, &target, `SELECT r.generation,s.grant_id AS grantid FROM push_recipient r JOIN push_subscription s ON s.generation=r.generation AND s.template_id=? WHERE r.user_id=? AND r.app_id=? FOR UPDATE`, template, b.Owner, app)
+		err = tx.GetContext(ctx, &target, `SELECT r.generation,s.grant_id AS grantid FROM push_recipient r JOIN push_subscription s ON s.granted AND s.generation=r.generation AND s.template_id=? WHERE r.user_id=? AND r.app_id=? FOR UPDATE`, template, b.Owner, app)
 		if errors.Is(err, sql.ErrNoRows) {
 			outcome = "unsubscribed"
 		} else if err != nil {
 			return "", err
+		}
+	}
+	bucket := eventBucket(e.Device, e.ID)
+	if outcome == "queued" {
+		room, err := queueRoom(ctx, tx, false, bucket, policy.DeliveryCapacity)
+		if err != nil {
+			return "", err
+		}
+		if !room {
+			outcome = "skipped_overload"
+		}
+	}
+	if outcome == "queued" {
+		if err = tx.GetContext(ctx, &expired, `SELECT ?<=UTC_TIMESTAMP(6)`, utcStamp(e.Expires)); err != nil {
+			return "", err
+		}
+		if expired {
+			outcome = "expired"
 		}
 	}
 	res, err := tx.ExecContext(ctx, `INSERT INTO push_event(device_id,bind_id,source_event_id,registered_at,received_at,outcome,label_text) VALUES(?,?,?,?,UTC_TIMESTAMP(6),?,?)`, e.Device, e.Bind, e.ID, e.Registered.UTC().Format("2006-01-02 15:04:05.000000"), outcome, e.LabelText)
@@ -140,7 +203,7 @@ func (s *PushStore) Admit(ctx context.Context, e push.Event, app, template strin
 		if !e.Occurred.IsZero() {
 			occurred = e.Occurred.UTC().Format("2006-01-02 15:04:05.000000")
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO push_delivery(event_id,user_id,device_id,device_name,bind_id,event_type,generation,template_id,grant_id,occurred_at,reference_id,started_at,status,next_at) VALUES(?,?,?,?,?,?,?,?,?,COALESCE(?,UTC_TIMESTAMP(6)),?,UTC_TIMESTAMP(6),'pending',UTC_TIMESTAMP(6))`, id, b.Owner, e.Device, b.Name, b.Bind, e.Kind, target.Generation, template, target.GrantID, occurred, uuid.NewString())
+		_, err = tx.ExecContext(ctx, `INSERT INTO push_delivery(event_id,user_id,device_id,device_name,bind_id,event_type,generation,template_id,grant_id,occurred_at,reference_id,expires_at,max_attempts,bucket,started_at,status,next_at) VALUES(?,?,?,?,?,?,?,?,?,COALESCE(?,UTC_TIMESTAMP(6)),?,?,?,?,UTC_TIMESTAMP(6),'pending',UTC_TIMESTAMP(6))`, id, b.Owner, e.Device, b.Name, b.Bind, e.Kind, target.Generation, template, target.GrantID, occurred, uuid.NewString(), utcStamp(e.Expires), e.MaxAttempts, bucket)
 		if err != nil {
 			return "", err
 		}
@@ -149,7 +212,14 @@ func (s *PushStore) Admit(ctx context.Context, e push.Event, app, template strin
 			return "", err
 		}
 	}
-	return outcome, tx.Commit()
+	if err = tx.Commit(); err != nil {
+		return "", err
+	}
+	s.outcomes.add(outcome, 1)
+	if outcome == "expired" {
+		return "", push.ErrExpired
+	}
+	return outcome, nil
 }
 
 func (s *PushStore) Reference(ctx context.Context, user int64, ref string) (push.Reference, error) {
@@ -160,3 +230,5 @@ func (s *PushStore) Reference(ctx context.Context, user int64, ref string) (push
 	}
 	return refData, err
 }
+
+func (s *PushStore) NotificationMetrics() map[string]int64 { return s.outcomes.metrics("push_") }

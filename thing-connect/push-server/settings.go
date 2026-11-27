@@ -21,6 +21,7 @@ type settingsSnapshot struct {
 
 type settings struct {
 	loaded   chan struct{}
+	reserve  func(context.Context, push.Delivery) (bool, error)
 	first    sync.Once
 	current  atomic.Pointer[settingsSnapshot]
 	repo     push.Repository
@@ -50,7 +51,7 @@ func (s *settings) apply(snapshot dynamicconfig.Snapshot) error {
 			return errors.New("启用微信推送需要 AppSecret")
 		}
 	}
-	ch := pushwechat.Channel{Config: policy, AppID: policy.AppID, Secret: secret, Refresh: s.gate}
+	ch := pushwechat.Channel{Config: policy, AppID: policy.AppID, Secret: secret, Refresh: s.gate, Reserve: s.reserve}
 	s.current.Store(&settingsSnapshot{push.New(s.repo, ch, policy), ch})
 	s.first.Do(func() { close(s.loaded) })
 	return nil
@@ -60,12 +61,13 @@ func (s *settings) service() *push.Service { return s.current.Load().service }
 
 func (s *settings) Send(ctx context.Context, d push.Delivery) push.Result {
 	ch := s.current.Load().channel
-	if d.Attempts > ch.Config.MaxAttempts {
+	if d.MaxAttempts == 0 {
+		d.MaxAttempts = ch.Config.MaxAttempts
+	}
+	if d.Attempts >= d.MaxAttempts {
 		return push.Failed
 	}
 	result := ch.Send(ctx, d)
-	if result == push.Retry && d.Attempts >= ch.Config.MaxAttempts {
-		return push.Failed
-	}
+
 	return result
 }

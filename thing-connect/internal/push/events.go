@@ -20,13 +20,15 @@ var ErrBinding = errors.New("绑定关系已变化")
 var sourceID = regexp.MustCompile("^[A-Za-z0-9_-]{1,64}:(alarm|crying|quarrel)$")
 
 type Event struct {
-	LabelText  string    `json:"label_text,omitempty"`
-	ID         string    `json:"source_event_id" db:"source_event_id"`
-	Device     string    `json:"device_id" db:"device_id"`
-	Bind       string    `json:"bind_id" db:"bind_id"`
-	Kind       string    `json:"event_type" db:"event_type"`
-	Registered time.Time `json:"registered_at" db:"registered_at"`
-	Occurred   time.Time `json:"occurred_at" db:"occurred_at"`
+	Expires     time.Time `json:"expires_at,omitempty"`
+	MaxAttempts int       `json:"-"`
+	LabelText   string    `json:"label_text,omitempty"`
+	ID          string    `json:"source_event_id" db:"source_event_id"`
+	Device      string    `json:"device_id" db:"device_id"`
+	Bind        string    `json:"bind_id" db:"bind_id"`
+	Kind        string    `json:"event_type" db:"event_type"`
+	Registered  time.Time `json:"registered_at" db:"registered_at"`
+	Occurred    time.Time `json:"occurred_at" db:"occurred_at"`
 }
 
 func (e Event) Validate() error {
@@ -40,17 +42,18 @@ func (e Event) Validate() error {
 }
 
 type Config struct {
-	AlarmHint     string  `yaml:"alarm_hint"`
-	Notifications *Policy `yaml:"notifications"`
-	ServerURL     string  `yaml:"server_url"`
-	TemplateID    string  `yaml:"template_id"`
-	Location      string  `yaml:"location"`
-	Crying        string  `yaml:"crying"`
-	Quarrel       string  `yaml:"quarrel"`
+	DeliveryPolicy *DeliveryPolicy `yaml:"delivery_policy"`
+	AlarmHint      string          `yaml:"alarm_hint"`
+	Notifications  *Policy         `yaml:"notifications"`
+	ServerURL      string          `yaml:"server_url"`
+	TemplateID     string          `yaml:"template_id"`
+	Location       string          `yaml:"location"`
+	Crying         string          `yaml:"crying"`
+	Quarrel        string          `yaml:"quarrel"`
 }
 
 // UnmarshalJSON permits legacy missing or malformed display times. The producer
-// registration time remains mandatory for deduplication and the retry deadline.
+// registration time remains mandatory for deduplication and reconciliation.
 func (e *Event) UnmarshalJSON(data []byte) error {
 	type rawEvent Event
 	var v struct {
@@ -69,6 +72,11 @@ func (e *Event) UnmarshalJSON(data []byte) error {
 }
 
 func (c Config) Validate() error {
+	if c.DeliveryPolicy != nil {
+		if err := c.DeliveryPolicy.Validate(); err != nil {
+			return err
+		}
+	}
 	if c.Notifications != nil {
 		if err := c.Notifications.Validate(); err != nil {
 			return err

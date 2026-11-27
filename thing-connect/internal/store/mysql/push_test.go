@@ -175,6 +175,7 @@ func TestPushExpiryAndLateAck(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.Registered = time.Now().UTC().Add(-time.Hour)
+	e.Occurred = time.Now().UTC()
 	e.ID = "one:crying"
 	if v, err := s.Admit(ctx, e, "app", push.AlarmTemplate); err != nil || v != "unsubscribed" {
 		t.Fatal(v, err)
@@ -188,7 +189,7 @@ func TestPushExpiryAndLateAck(t *testing.T) {
 		t.Fatal(v, err)
 	}
 	for i, status := range []string{"pending", "sending"} {
-		res, err := db.Exec(`INSERT INTO push_delivery(event_id,user_id,device_id,device_name,bind_id,event_type,generation,grant_id,template_id,occurred_at,reference_id,started_at,status,next_at,lease) VALUES(?,?,?,?,?,'crying','generation','grant','template',UTC_TIMESTAMP(),?,UTC_TIMESTAMP()-INTERVAL 11 MINUTE,?,UTC_TIMESTAMP()-INTERVAL 1 MINUTE,'lease')`, time.Now().UnixMicro()+int64(i), user, dev, "test", bind, uniqueDevID(), status)
+		res, err := db.Exec(`INSERT INTO push_delivery(event_id,user_id,device_id,device_name,bind_id,event_type,generation,grant_id,template_id,occurred_at,reference_id,started_at,status,next_at,lease) VALUES(?,?,?,?,?,'crying','generation','grant','template',UTC_TIMESTAMP()-INTERVAL 11 MINUTE,?,UTC_TIMESTAMP(),?,UTC_TIMESTAMP()-INTERVAL 1 MINUTE,'lease')`, time.Now().UnixMicro()+int64(i), user, dev, "test", bind, uniqueDevID(), status)
 		if err != nil {
 			t.Fatal(err)
 		}

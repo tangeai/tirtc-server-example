@@ -280,7 +280,8 @@ func LoadFile(path string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("config: read %s: %w", path, err)
 	}
-	cfg := Config{Web: WebCfg{Language: weblanguage.DefaultConfig(), Site: sitebrand.DefaultConfig()}, Room: room.DefaultConfig(), BindAttempt: bindlimit.DefaultConfig(), Recognition: recognition.DefaultConfig()}
+	delivery := push.DefaultDeliveryPolicy()
+	cfg := Config{Push: push.Config{DeliveryPolicy: &delivery}, Web: WebCfg{Language: weblanguage.DefaultConfig(), Site: sitebrand.DefaultConfig()}, Room: room.DefaultConfig(), BindAttempt: bindlimit.DefaultConfig(), Recognition: recognition.DefaultConfig()}
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&cfg); err != nil {

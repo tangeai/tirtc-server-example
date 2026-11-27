@@ -23,9 +23,16 @@ import (
 
 // Exclusively for a fresh capacity_test database. Use a separate database for
 // each run so historical measurements and retention batches remain comparable.
-type capacityChannel struct{ sent atomic.Int64 }
+type capacityChannel struct {
+	sent  atomic.Int64
+	store *mysql.PushStore
+}
 
-func (c *capacityChannel) Send(context.Context, push.Delivery) push.Result {
+func (c *capacityChannel) Send(ctx context.Context, d push.Delivery) push.Result {
+	ok, err := c.store.ReserveSend(ctx, d)
+	if !ok || err != nil {
+		return push.Retry
+	}
 	c.sent.Add(1)
 	return push.Accepted
 }
@@ -73,7 +80,10 @@ func TestFirstTierCapacity(t *testing.T) {
 	t.Log("seeded 3M events and 100k device bindings")
 	store := mysql.NewPushStore(db)
 	source := mysql.NewRecognitionStore(db)
-	ch := new(capacityChannel)
+	if err := source.ConfigureSource(context.Background(), push.DefaultDeliveryPolicy(), 0, true); err != nil {
+		t.Fatal(err)
+	}
+	ch := &capacityChannel{store: store}
 	gin.SetMode(gin.ReleaseMode)
 	engine := gin.New()
 	policy := push.DefaultPolicy()
@@ -114,8 +124,8 @@ func TestFirstTierCapacity(t *testing.T) {
 		offset := total % 100000
 		for left := count; left > 0; {
 			n := min(left, 100000-offset)
-			exec(`INSERT INTO recognition_user_event_outbox(device_id,bind_id,source_event_id,event_type,occurred_at,registered_at,next_at)
- SELECT b.device_id,CONCAT(b.id,':',b.binding_revision),CONCAT('cap',?+s.n,':alarm'),'alarm',UTC_TIMESTAMP(6),UTC_TIMESTAMP(6),UTC_TIMESTAMP(6)
+			exec(`INSERT INTO recognition_user_event_outbox(device_id,bind_id,source_event_id,event_type,occurred_at,registered_at,next_at,expires_at)
+ SELECT b.device_id,CONCAT(b.id,':',b.binding_revision),CONCAT('cap',?+s.n,':alarm'),'alarm',UTC_TIMESTAMP(6),UTC_TIMESTAMP(6),UTC_TIMESTAMP(6),UTC_TIMESTAMP(6)+INTERVAL 120 SECOND
  FROM capacity_seq s JOIN device_bind b ON b.device_id=CONCAT('CAP',s.n) WHERE s.n>=? AND s.n<?`, total-offset, offset, offset+n)
 			total += n
 			left -= n

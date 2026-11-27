@@ -10,21 +10,27 @@ import (
 var ErrQueueEmpty = errors.New("通知队列暂无可领取任务")
 
 type Delivery struct {
-	LabelText string
-	AppID     string
-	Attempts  int
-	ID        int64
-	Lease     string
-	Open      string
-	Device    string
-	Kind      string
-	Template  string
-	Reference string
-	Time      string
+	Occurred    time.Time
+	Expires     time.Time
+	MaxAttempts int
+	LabelText   string
+	AppID       string
+	Attempts    int
+	ID          int64
+	Lease       string
+	Open        string
+	Device      string
+	Kind        string
+	Template    string
+	Reference   string
+	Time        string
 }
 type Result string
 
 const (
+	Expired      Result = "expired"
+	Deferred     Result = "deferred"
+	Limited      Result = "limited"
 	Accepted     Result = "accepted"
 	Unknown      Result = "unknown"
 	Failed       Result = "failed"
@@ -45,10 +51,15 @@ func RunDelivery(ctx context.Context, q DeliveryQueue, ch Channel, metrics *Deli
 	for ctx.Err() == nil {
 		d, err := q.ClaimPush(ctx)
 		if err == nil && d != nil {
-			send, cancel := context.WithTimeout(ctx, 15*time.Second)
-			result := ch.Send(send, *d)
+			send, cancel := context.WithTimeout(ctx, min(15*time.Second, time.Until(d.Expires)))
+			started := time.Now()
+			result := Expired
+			if started.Before(d.Expires) {
+				result = ch.Send(send, *d)
+			}
 			cancel()
 			metrics.Observe(result)
+			metrics.observeLatency(*d, result, time.Since(started))
 			err = finishDelivery(ctx, q, *d, result)
 		}
 		if err != nil && !errors.Is(err, ErrQueueEmpty) && ctx.Err() == nil {

@@ -302,6 +302,8 @@ Device、User、VoIP、Call、Recognition 的 `mqtt.connection` 支持连接测�
 
 `push-server/wechat.notifications` 作用域为 global，目标为 push-server，发布后运行时应用。公开值包含 `app_id`、`page`、`suggested_seconds`（0–86400）、`max_attempts`（1–10）和 `backlog_seconds`（1–86400）。`alarm` 为 AI 异常提醒配置，包含可选的自由文本标签字段名 `label_key` 以及 `enabled`、`template_id`、`time_key`、`device_key`、`hint_key`、`hint`、`location_key`、`location`。空字段名省略该字段；同一模板配置内字段名应唯一。密钥字段为 `secrets.app_secret`。变更 AppID 时，启用的提醒需要同时提供新密钥。首次发布前服务使用本地 YAML 回退值。
 
+`push-server/event.delivery_policy` 为无密钥 global 配置，识别与推送服务运行时应用。`enabled` 控制来源，`event_ttl_seconds` 为 30–600 秒，`source_max_attempts` 为 1–10 次（含首次）。`source_capacity` 和 `delivery_capacity` 均为 32–1000000，`wechat_requests_per_second` 为 1–10000。已有任务沿用登记时的截止和次数上限。
+
 内部读取接口为：
 
 ```http

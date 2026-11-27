@@ -53,11 +53,24 @@ func main() {
 	if app.Enabled != nil && !*app.Enabled {
 		app.Secret = ""
 	}
-	live := &settings{loaded: make(chan struct{}), repo: store, gate: cache.WeChatRefreshGate(redis), fallback: policy, secret: app.Secret}
+	live := &settings{loaded: make(chan struct{}), repo: store, reserve: store.ReserveSend, gate: cache.WeChatRefreshGate(redis), fallback: policy, secret: app.Secret}
 	live.current.Store(&settingsSnapshot{service: push.AwaitingPolicy(store), channel: pushwechat.Channel{Config: push.DefaultPolicy()}})
 	var dc *dynamicconfig.Client
 	var revisions func() map[string]int64
 	refs := []dynamicconfig.Ref{{Namespace: "push-server", Key: "wechat.notifications", Apply: live.apply}}
+	store.SetDeliveryPolicy(cfg.Push.Delivery())
+	refs = append(refs, dynamicconfig.Ref{Namespace: "push-server", Key: "event.delivery_policy", Apply: func(s dynamicconfig.Snapshot) error {
+		p := cfg.Push.Delivery()
+		if s.Revision != 0 {
+			var err error
+			p, err = push.ParseDeliveryPolicy(s.Value)
+			if err != nil {
+				return err
+			}
+		}
+		store.SetDeliveryPolicy(p)
+		return nil
+	}})
 	if cfg.Admin.ServerURL != "" {
 		dc, err = dynamicconfig.New(cfg.Admin.ServerURL, cfg.Internal.Key, redis)
 		if err != nil {
@@ -72,12 +85,13 @@ func main() {
 		log.Fatal(err)
 	}
 	router.Use(gin.Recovery(), logging.RequestID("push"), userauth.EnforceState(database, cfg.JWTSecret))
-	probes := map[string]servicestatus.DependencyProbe{"database": servicestatus.SQLProbe(database)}
+	probes := map[string]servicestatus.DependencyProbe{"database": servicestatus.SQLProbe(database), "redis": servicestatus.RedisProbe(redis)}
 	servicestatus.RegisterHealth(router, probes)
 	handler.Register(router, live.service, cfg.Internal.Key, cfg.JWTSecret)
-	backlog := queuehealth.NewWithMaxAge("push_delivery", mysql.NewPushBacklog(database, false), 5*time.Minute)
+	queueSample := mysql.NewPushBacklog(database, false)
+	backlog := queuehealth.NewWithMaxAge("push_delivery", queueSample, 5*time.Minute)
 	metrics := new(push.DeliveryMetrics)
-	status := map[string]servicestatus.DependencyProbe{"database": probes["database"], "delivery": func(ctx context.Context) error {
+	status := map[string]servicestatus.DependencyProbe{"database": probes["database"], "redis": probes["redis"], "delivery_deadline": queueSample.TimeBudgetHealth, "delivery": func(ctx context.Context) error {
 		return backlog.HealthWithMaxAge(ctx, time.Duration(live.current.Load().channel.Config.BacklogSeconds)*time.Second)
 	}, "wechat": func(context.Context) error {
 		channel := live.current.Load().channel
@@ -94,7 +108,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	reporter.SetMetrics(servicestatus.MergeMetrics(guard.Metrics, metrics.Metrics, backlog.Metrics, servicestatus.PoolMetrics(database, redis)))
+	reporter.SetMetrics(servicestatus.MergeMetrics(guard.Metrics, metrics.Metrics, queueSample.Metrics, store.NotificationMetrics, backlog.Metrics, servicestatus.PoolMetrics(database, redis)))
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	var wg sync.WaitGroup

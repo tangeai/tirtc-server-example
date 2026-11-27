@@ -29,6 +29,7 @@ wechat:
   apps: {}
 # 常规运营配置在 Admin 的“服务配置 → 推送服务”发布；下方为无发布记录时的回退。
 push:
+  delivery_policy: {enabled: true, event_ttl_seconds: 120, source_max_attempts: 3, source_capacity: 32000, delivery_capacity: 6400, wechat_requests_per_second: 50}
   template_id: "rqexMc0m1O7rVv08lXnQ-txMF_Z9v8E4VPsXeP6XxrY"
   # 填写目标模板允许的提示说明及所在位置枚举
   alarm_hint: ""
@@ -37,7 +38,7 @@ push:
   # notifications:
   #   app_id: ""           # 凭证按此 AppID 从 wechat.apps 读取
   #   suggested_seconds: 60
-  #   max_attempts: 5
+  #   max_attempts: 3
   #   backlog_seconds: 300
   #   page: "pages/notifications/index"
   #   alarm: {enabled: false, template_id: "", time_key: "time1", device_key: "character_string4", hint_key: "enum_string3", hint: "", location_key: "enum_string2", location: ""}

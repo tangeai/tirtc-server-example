@@ -52,7 +52,7 @@ func TestEmbeddedMigrationFilesAreNonEmpty(t *testing.T) {
 }
 
 func TestCurrentMigrationCatalogVersions(t *testing.T) {
-	want := map[string]int{"core": 18, "admin": 7}
+	want := map[string]int{"core": 20, "admin": 7}
 	if got := CurrentMigrationVersions(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("versions=%v want=%v", got, want)
 	}
@@ -353,7 +353,7 @@ func TestEmbeddedMigrationsAndBootstrapSchemaHaveSameObjects(t *testing.T) {
 	}
 	patterns := []*regexp.Regexp{
 		regexp.MustCompile(`CREATE TABLE IF NOT EXISTS [a-z_]+`),
-		regexp.MustCompile(`(?m)^[ \t]*(?:UNIQUE KEY|KEY|INDEX) [A-Za-z0-9_]+`),
+		regexp.MustCompile(`(?m)(?:^[ \t]*| ADD )(?:UNIQUE KEY|KEY|INDEX) [A-Za-z0-9_]+`),
 	}
 	embeddedShape, err := CurrentSchemaShape()
 	if err != nil {
@@ -395,7 +395,7 @@ func TestEmbeddedMigrationsAndBootstrapSchemaHaveSameObjects(t *testing.T) {
 func matchSet(pattern *regexp.Regexp, value string) map[string]bool {
 	result := map[string]bool{}
 	for _, match := range pattern.FindAllString(value, -1) {
-		match = strings.TrimSpace(match)
+		match = strings.TrimPrefix(strings.TrimSpace(match), "ADD ")
 		if strings.HasPrefix(match, "INDEX ") {
 			match = "KEY " + strings.TrimPrefix(match, "INDEX ")
 		}

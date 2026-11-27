@@ -13,6 +13,7 @@ type Reference struct {
 }
 
 type Repository interface {
+	Lookup(context.Context, Event) (string, error)
 	Admit(context.Context, Event, string, string) (string, error)
 	Preference(context.Context, int64, string, string, bool, *int) (*int, error)
 	Prepare(context.Context, int64, string, string, string) (string, bool, error)
@@ -50,6 +51,7 @@ func (s *Service) Receive(ctx context.Context, e Event) (string, error) {
 	if s.wechat.Ready(e.Kind) {
 		template = s.policy.Template(e.Kind).ID
 	}
+	e.MaxAttempts = s.policy.MaxAttempts
 	return s.Admit(ctx, e, s.policy.AppID, template)
 }
 func (s *Service) Enabled(kind string) bool { return s.wechat != nil && s.wechat.Ready(kind) }

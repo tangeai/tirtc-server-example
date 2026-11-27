@@ -40,17 +40,37 @@ func Register(engine *gin.Engine, current func() *push.Service, key, secret stri
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 8192)
 		c.Header("Cache-Control", "no-store")
 	})
-	g.POST("/internal/events", func(c *gin.Context) {
+	internal := g.Group("/internal", func(c *gin.Context) {
 		if key == "" || subtle.ConstantTimeCompare([]byte(c.GetHeader("X-Internal-Key")), []byte(key)) != 1 {
-			c.JSON(403, apiresp.JSON{Code: 40301, Msg: "内部身份无效"})
+			c.AbortWithStatusJSON(403, apiresp.JSON{Code: 40301, Msg: "内部身份无效"})
 			return
 		}
+	})
+	internal.GET("/auth", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+	internal.GET("/events", func(c *gin.Context) {
+		e := push.Event{Device: c.Query("device_id"), Bind: c.Query("bind_id"), ID: c.Query("source_event_id")}
+		if e.Device == "" || e.Bind == "" || e.ID == "" {
+			write(c, nil, push.ErrInvalid)
+			return
+		}
+		outcome, err := current().Lookup(c.Request.Context(), e)
+		if err == nil && outcome == "" {
+			c.JSON(404, apiresp.JSON{Code: 40400, Msg: "未查到事件"})
+			return
+		}
+		write(c, gin.H{"outcome": outcome}, err)
+	})
+	internal.POST("/events", func(c *gin.Context) {
 		var e push.Event
 		if c.ShouldBindJSON(&e) != nil {
 			write(c, nil, push.ErrInvalid)
 			return
 		}
 		outcome, err := current().Receive(c.Request.Context(), e)
+		if err == nil && outcome == "skipped_overload" {
+			c.JSON(http.StatusTooManyRequests, apiresp.JSON{Code: 42921, Msg: "通知队列已满，此事件已跳过", Data: gin.H{"outcome": outcome}})
+			return
+		}
 		write(c, gin.H{"outcome": outcome}, err)
 	})
 	u := g.Group("/user", func(c *gin.Context) {

@@ -5,17 +5,24 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
+	"time"
+
 	"thing-connect/internal/push"
 	"thing-connect/internal/wechat"
 )
+
+var messageClient = &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 
 type Channel struct {
 	AppID, Secret string
 	Config        push.Policy
 	Refresh       wechat.RefreshGate
+	Reserve       func(context.Context, push.Delivery) (bool, error)
 }
 
 func (c Channel) Ready(kind string) bool {
@@ -31,8 +38,19 @@ func (c Channel) Send(ctx context.Context, d push.Delivery) push.Result {
 	}
 	result := push.Retry
 	err := wechat.CallWithAccessToken(ctx, c.AppID, c.Secret, c.Refresh, func(token string) error {
+		if c.Reserve != nil {
+			ok, err := c.Reserve(ctx, d)
+			if err != nil || !ok {
+				result = push.Deferred
+				return nil
+			}
+		}
+		if !d.Expires.IsZero() && !time.Now().Before(d.Expires) {
+			result = push.Expired
+			return nil
+		}
 		var channelErr error
-		result, channelErr = c.send(ctx, http.DefaultClient, "https://api.weixin.qq.com/cgi-bin/message/subscribe/send", token, d)
+		result, channelErr = c.send(ctx, messageClient, "https://api.weixin.qq.com/cgi-bin/message/subscribe/send", token, d)
 		return channelErr
 	})
 	if err != nil {
@@ -72,8 +90,15 @@ func (c Channel) send(ctx context.Context, client *http.Client, endpoint, token 
 		return push.Failed, nil
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if !d.Expires.IsZero() && !time.Now().Before(d.Expires) {
+		return push.Expired, nil
+	}
 	resp, err := client.Do(req)
 	if err != nil {
+		var op *net.OpError
+		if errors.As(err, &op) && op.Op == "dial" {
+			return push.Retry, nil
+		}
 		return push.Unknown, nil
 	}
 	defer resp.Body.Close()
@@ -88,7 +113,9 @@ func (c Channel) send(ctx context.Context, client *http.Client, endpoint, token 
 		return push.Accepted, nil
 	case 43101:
 		return push.Unsubscribed, nil
-	case -1, 45009, 45011:
+	case 45009, 45011:
+		return push.Limited, nil
+	case -1:
 		return push.Retry, nil
 	case 40001, 40014, 42001:
 		return push.Retry, &wechat.APIError{Errcode: *reply.Code}

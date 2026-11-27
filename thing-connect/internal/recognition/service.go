@@ -201,7 +201,17 @@ func (s *Service) step(ctx context.Context) error {
 	// A received malformed response is a definite failure; transport loss is unknown.
 	finishCtx, finishCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer finishCancel()
-	return s.store.Complete(finishCtx, done)
+	for attempt := 1; ; attempt++ {
+		err := s.store.Complete(finishCtx, done)
+		if err == nil || attempt >= 3 || errors.Is(err, ErrConflict) || errors.Is(err, ErrNotFound) {
+			return err
+		}
+		select {
+		case <-finishCtx.Done():
+			return err
+		case <-time.After(time.Duration(attempt) * 100 * time.Millisecond):
+		}
+	}
 }
 func ValidateResult(raw []byte) (Result, error) {
 	var wire struct {

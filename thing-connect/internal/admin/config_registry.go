@@ -68,8 +68,10 @@ type ConfigFieldDefinition struct {
 type ConfigRegistry struct{ definitions map[string]ConfigDefinition }
 
 func DefaultConfigRegistry() *ConfigRegistry {
+	deliveryPolicy, _ := json.Marshal(push.DefaultDeliveryPolicy())
 	defaultPush, _ := json.Marshal(push.DefaultPolicy())
 	definitions := []ConfigDefinition{
+		def("push-server", "event.delivery_policy", "push", "异常提醒投递时效", string(deliveryPolicy), nil, []string{"recognition-server", "push-server"}, func(raw json.RawMessage) error { _, err := push.ParseDeliveryPolicy(raw); return err }),
 		def("push-server", "wechat.notifications", "wechat", "微信长期订阅提醒", string(defaultPush), []string{"app_secret"}, []string{"push-server"}, func(raw json.RawMessage) error { _, err := push.ParsePolicy(raw); return err }),
 		def("user-server", "web.site", "web", "站点名称", sitebrand.DefaultJSON, nil, []string{"user-server"}, func(raw json.RawMessage) error { _, err := sitebrand.Parse(raw); return err }),
 		def("user-server", "web.language", "web", "站点语言", weblanguage.DefaultJSON, nil, []string{"user-server"}, func(raw json.RawMessage) error { _, err := weblanguage.Parse(raw); return err }),

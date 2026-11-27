@@ -13,6 +13,12 @@ declare const wx: {
 };
 
 type Preference = { interval_seconds: number | null; enabled: boolean; template_id?: string; suggested_seconds?: number };
+const decisionMessages = {
+  accept: '设备提醒已订阅',
+  reject: '已拒绝设备提醒',
+  cancel: '已取消本次订阅操作，原有提醒状态不变',
+};
+type Decision = keyof typeof decisionMessages;
 type Session = { session_id: string; replace: boolean; template_id: string };
 const base = '/v1/push/user';
 const path = (device: string) => base + '/preferences/' + encodeURIComponent(device) + '/alarm';
@@ -23,7 +29,7 @@ export default function Notifications() {
   const [labelText,setLabelText]=useState<string>();
   const [value,setValue]=useState('60');
   const [session, setSession] = useState<Session>();
-  const [report, setReport] = useState<{ session: Session; decision: string }>();
+  const [report, setReport] = useState<{ session: Session; decision: Decision }>();
   const [message, setMessage] = useState(''), [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const lock = useRef(false);
@@ -83,16 +89,36 @@ export default function Notifications() {
     await request(base + '/subscriptions/' + prepared.session_id + '/confirm', 'POST', { replace: prepared.replace });
     setSession(prepared);
   }
-  async function finish(s: Session, decision: string) {
-    await request(base + '/subscriptions/' + s.session_id + '/result', 'POST', { decision });
+  async function finish(s: Session, decision: Decision) {
+    try {
+      await request(base + '/subscriptions/' + s.session_id + '/result', 'POST', { decision });
+    } catch (e) {
+      if (e instanceof ApiError && (e.code === 41000 || e.code === 40901)) {
+        setReport(undefined);
+        setSession(undefined);
+        throw new ApiError(e.code, '订阅会话已失效，请重新订阅');
+      }
+      throw e;
+    }
     setReport(undefined);
-    setMessage(decision === 'accept' ? '设备提醒已订阅' : '未开通设备提醒');
+    setMessage(decisionMessages[decision]);
   }
   async function authorize(s: Session) {
-    const result = await new Promise<Record<string, string>>((resolve, reject) =>
-      wx.requestSubscribeMessage({ tmplIds: [s.template_id], success: resolve, fail: () => reject(new ApiError(-1, '微信订阅未完成，请重试')) })
+    const decision = await new Promise<Decision>((resolve, reject) =>
+      wx.requestSubscribeMessage({
+        tmplIds: [s.template_id],
+        success(result) {
+          const value = result[s.template_id];
+          if (value === 'accept') resolve('accept');
+          else if (value === 'reject' || value === 'ban') resolve('reject');
+          else resolve('cancel');
+        },
+        fail(error) {
+          if (/^requestSubscribeMessage:fail (?:user )?cancel$/i.test(error.errMsg.trim())) resolve('cancel');
+          else reject(new ApiError(-1, '微信订阅未完成，请重试'));
+        },
+      })
     );
-    const decision = result[s.template_id] === 'accept' ? 'accept' : result[s.template_id] === 'reject' || result[s.template_id] === 'ban' ? 'reject' : 'cancel';
     setSession(undefined); setReport({ session: s, decision });
     await finish(s, decision);
   }

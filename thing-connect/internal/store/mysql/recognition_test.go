@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"thing-connect/internal/push"
 	r "thing-connect/internal/recognition"
 	m "thing-connect/internal/store/mysql"
 	adminmysql "thing-connect/internal/store/mysql/admin"
@@ -24,6 +25,9 @@ func TestRecognitionDurableOrderQuotaAndOwnership(t *testing.T) {
 	}
 	defer cleanBind(t, db, id)
 	store := m.NewRecognitionStore(db)
+	if err := store.ConfigureSource(context.Background(), push.DefaultDeliveryPolicy(), 0, true); err != nil {
+		t.Fatal(err)
+	}
 	actor := r.Actor{UserID: uid}
 	state, e := store.State(ctx, actor, id)
 	if e != nil || state.Policy.Enabled {
@@ -67,19 +71,7 @@ func TestRecognitionDurableOrderQuotaAndOwnership(t *testing.T) {
 	if _, e = db.Exec(`UPDATE recognition_device SET policy=JSON_SET(policy,'$.monthly_limit',2) WHERE device_id=?`, id); e != nil {
 		t.Fatal(e)
 	}
-	audio := make([]byte, 16044)
-	copy(audio, "RIFF")
-	binary.LittleEndian.PutUint32(audio[4:], 16036)
-	copy(audio[8:], "WAVEfmt ")
-	binary.LittleEndian.PutUint32(audio[16:], 16)
-	binary.LittleEndian.PutUint16(audio[20:], 1)
-	binary.LittleEndian.PutUint16(audio[22:], 1)
-	binary.LittleEndian.PutUint32(audio[24:], 8000)
-	binary.LittleEndian.PutUint32(audio[28:], 16000)
-	binary.LittleEndian.PutUint16(audio[32:], 2)
-	binary.LittleEndian.PutUint16(audio[34:], 16)
-	copy(audio[36:], "data")
-	binary.LittleEndian.PutUint32(audio[40:], 16000)
+	audio := recognitionTestAudio()
 	req := r.Request{ID: "same-request", Revision: state.Policy.Revision, MediaType: "audio", Data: audio}
 	t.Run("concurrent retries create and charge once", func(t *testing.T) {
 		var wg sync.WaitGroup
@@ -546,4 +538,21 @@ func TestRecognitionUnboundDeviceAndForeignUserErrors(t *testing.T) {
 	if _, err := store.State(ctx, r.Actor{DeviceID: id}, id+"other"); !errors.Is(err, r.ErrForbidden) {
 		t.Fatal(err)
 	}
+}
+
+func recognitionTestAudio() []byte {
+	audio := make([]byte, 16044)
+	copy(audio, "RIFF")
+	binary.LittleEndian.PutUint32(audio[4:], 16036)
+	copy(audio[8:], "WAVEfmt ")
+	binary.LittleEndian.PutUint32(audio[16:], 16)
+	binary.LittleEndian.PutUint16(audio[20:], 1)
+	binary.LittleEndian.PutUint16(audio[22:], 1)
+	binary.LittleEndian.PutUint32(audio[24:], 8000)
+	binary.LittleEndian.PutUint32(audio[28:], 16000)
+	binary.LittleEndian.PutUint16(audio[32:], 2)
+	binary.LittleEndian.PutUint16(audio[34:], 16)
+	copy(audio[36:], "data")
+	binary.LittleEndian.PutUint32(audio[40:], 16000)
+	return audio
 }

@@ -54,8 +54,8 @@ func TestBrokerAPIRegistration(t *testing.T) {
 func TestRegistryDefinitionsAndUsableInitialValues(t *testing.T) {
 	registry := DefaultConfigRegistry()
 	definitions := registry.List("")
-	if len(definitions) != 35 {
-		t.Fatalf("registered configuration count = %d, want 35", len(definitions))
+	if len(definitions) != 36 {
+		t.Fatalf("registered configuration count = %d, want 36", len(definitions))
 	}
 	for _, definition := range definitions {
 		value := definition.Default

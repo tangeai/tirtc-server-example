@@ -35,7 +35,7 @@ type Policy struct {
 
 func DefaultPolicy() Policy {
 	t := Template{ID: AlarmTemplate, TimeKey: "time1", HintKey: "enum_string3", LocationKey: "enum_string2", DeviceKey: "character_string4"}
-	return Policy{Alarm: t, Crying: t, Quarrel: t, Page: "pages/notifications/index", SuggestedSeconds: 60, MaxAttempts: 5, BacklogSeconds: 300}
+	return Policy{Alarm: t, Crying: t, Quarrel: t, Page: "pages/notifications/index", SuggestedSeconds: 60, MaxAttempts: 3, BacklogSeconds: 300}
 }
 
 func (c Config) Policy(app string) Policy {

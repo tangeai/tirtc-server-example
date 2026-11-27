@@ -18,7 +18,7 @@ func TestAlarmTemplateFieldsAndDeliveryResults(t *testing.T) {
 	for _, tc := range []struct {
 		reply string
 		want  push.Result
-	}{{"{\"errcode\":0}", push.Accepted}, {"{}", push.Unknown}, {"{\"errcode\":43101}", push.Unsubscribed}, {"{\"errcode\":47003}", push.Failed}, {"{\"errcode\":45009}", push.Retry}} {
+	}{{"{\"errcode\":0}", push.Accepted}, {"{}", push.Unknown}, {"{\"errcode\":43101}", push.Unsubscribed}, {"{\"errcode\":47003}", push.Failed}, {"{\"errcode\":45009}", push.Limited}} {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var v struct {
 				Data     map[string]struct{ Value string }

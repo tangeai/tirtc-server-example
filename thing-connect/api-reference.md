@@ -7461,7 +7461,7 @@ text 类型成功时 speech.status=skipped；audio 类型的 result=null，内�
 
 响应 data 为 `{ "items": [], "next_cursor": null }`；items 中每项为上述任务对象，另带 cursor。满50条时 next_cursor 为最后一项的 cursor；不满50条时为 null。满页不保证确有下一页，继续请求可能为空。
 
-**这不是状态更新游标**：旧任务完成时不会获得新 cursor。不能只保留最后一个 cursor 来补齐所有结果变化。设备应持久化未完成 request_id，MQTT 重连后逐个 GET 原任务；不知道任务号时才通过列表寻找。没有固定定时轮询要求。
+**这不是状态更新游标**：旧任务完成时不会获得新 cursor。不能只保留最后一个 cursor 来补齐所有结果变化。需要在设备端获取识别结果的客户端应持久化未完成 request_id，MQTT 重连后逐个 GET 原任务；不知道任务号时才通过列表寻找。没有固定定时轮询要求。
 
 <a id="recognition-audio"></a>
 
@@ -7648,6 +7648,8 @@ speech.url 为识别服务相对路径，相对 recognition-srv 解析，并携�
 
 ## 小程序设备提醒
 
+仅使用小程序提醒的设备通过现有识别接口提交音频即可。识别服务在分析完成事务中直接读取内部结果并登记异常事件，随后异步投递。设备查询任务或接收 MQTT 结果均为独立流程。用户从微信通知打开小程序时，页面凭 ref 请求提醒详情。
+
 小程序通过同源 `/v1/push/user` 调用通知服务。以下入口均使用当前用户 JWT，成功响应沿用 code=200 的标准信封。首次订阅依次执行身份识别、确认关联、微信订阅弹窗和结果登记。
 
 | 方法与路径（相对 /v1/push/user） | 请求和响应 |
@@ -7661,6 +7663,8 @@ speech.url 为识别服务相对路径，相对 recognition-srv 解析，并携�
 | POST /subscriptions/:id/result | 提交 decision（accept、reject、cancel）。同一会话重复回报复用结果。长期订阅按微信身份和模板生效 |
 | GET /references/:id | 登录用户仍拥有原绑定设备且提醒未满 72 小时时返回 device_id、label_text（模型标签展示文本，可能为空）；否则返回 410/41000 |
 
-错误包括 400/40000 参数无效、401/401 登录无效、403/40300 无权访问设备、409/40901 关联或会话状态变化、410/41000 引用或会话过期、503/50300 微信订阅暂不可用。
+同一接收身份和模板以较新会话提交的同意或拒绝为准。取消只登记本次会话，保留当前长期授权及其决定序号。较旧会话首次回报取消时，若较新会话已有同意或拒绝决定，返回 409/40901。在会话有效期内重报已经保存的相同决定返回成功。回报遇到 409/40901（身份或决定已变化）或 410/41000（会话已过期）时，重新发起订阅。临时网络错误可重试原会话回报。其他错误包括 400/40000 参数无效、401/401 登录无效、403/40300 无权访问设备、503/50300 微信订阅暂不可用。
 
-识别服务经内网 POST /v1/push/internal/events，使用 X-Internal-Key。请求字段为 source_event_id（request_id:事件类型）、device_id、bind_id、event_type、registered_at、occurred_at 和可选 label_text（最多 256 字）。新事件类型为 alarm，编号为 request_id:alarm。一次请求仅登记首个成功且 alarm=true 的分析子项，标签只用于展示。时间采用 RFC 3339。响应 data.outcome 为 queued、interval、unsubscribed 或 unconfigured。重报复用首次结果。来源代次失效为 410/6006，首次登记满 24 小时的未受理事件为 410/41000，幂等内容冲突为 409/40901。公网代理拒绝内部入口。
+识别服务经内网 POST /v1/push/internal/events，使用 X-Internal-Key。请求字段为 source_event_id（request_id:事件类型）、device_id、bind_id、event_type、registered_at、occurred_at 和可选 label_text（最多 256 字）。新事件类型为 alarm，编号为 request_id:alarm。一次请求仅登记首个成功且 alarm=true 的分析子项，标签只用于展示。时间采用 RFC 3339。响应 data.outcome 为 queued、interval、unsubscribed 或 unconfigured。来源传递 expires_at（RFC 3339）；旧请求从 occurred_at 和回退有效期计算截止。重报复用首次结果。来源代次失效为 410/6006，按音频受理时刻计算已过发送截止的未受理事件为 410/41000，幂等内容冲突为 409/40901。公网代理拒绝内部入口。
+
+来源事件进入只读核对状态时，发布器通过内部 GET /v1/push/internal/events 查询 push 是否已经登记该事件。使用同一 X-Internal-Key 和查询字段 device_id、bind_id、source_event_id；成功返回 data.outcome，未登记返回 404/40400。该查询不创建任务。创建型 POST 达到硬容量上限时返回 HTTP 429、业务码 42921 和 outcome=skipped_overload，调用方按终态收尾。GET 核对同一处置返回 200。GET /v1/push/internal/auth 使用相同鉴权，凭证有效返回 204。两条路径均仅供内网。
