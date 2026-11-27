@@ -12,6 +12,7 @@
 | 查询官网开发板及固件资源 | [user-server](#user-server) | 官网 `/boards` 页面 |
 | 微信 VoIP 呼叫与授权 | [voip-server](#voip-server) | [微信 VoIP](device-voip.md) |
 | 音频分析与识别结果 | [recognition-server](#recognition-server音频分析) | [音频识别接入](device-recognition.md) |
+| 订阅 AI 异常提醒、设置提醒间隔 | [小程序设备提醒](#小程序设备提醒) | [推送服务部署](deployment.md#小程序设备提醒服务) |
 | AI 对话、角色与知识库 | [ai-server](#ai-server) | [AI 接入](device-ai.md) |
 | 设备互呼、联系人管理 | [call-server](#call-server) | [设备互呼](device-call.md) |
 | 创建对讲房间、加入和续租 | [多人对讲](#多人对讲call-server) | [多人对讲接入](device-room.md) |
@@ -145,6 +146,7 @@ HTTPS 接入使用 HTTPS 入口，返回 HTTPS 业务服务地址和 MQTT TLS �
 | user-server | 200 | `"ok"` | 实际状态码 | 同上 |
 | ai-server | 200 | `"ok"` | 通常为实际状态码 | `/v1/ai/token` 的上游错误例外使用 HTTP 200，见该接口错误表 |
 | recognition-server | 200 | `"ok"` | 实际状态码 | 新任务受理为 HTTP 202；查询和幂等重试为 HTTP 200 |
+| push-server | 200 | `"ok"` | 实际状态码 | 内网鉴权探测成功返回 HTTP 204，响应体为空 |
 | voip-server | 0 | `"ok"` | 200（鉴权 401 除外） | 错误通过 body `code` 字段区分 |
 | call-server | 200 | `"ok"` | 200（鉴权 401 除外） | 成功码为 200；业务错误仍返回 HTTP 200，以 body `code` 判断 |
 
@@ -7650,7 +7652,7 @@ speech.url 为识别服务相对路径，相对 recognition-srv 解析，并携�
 
 仅使用小程序提醒的设备通过现有识别接口提交音频即可。识别服务在分析完成事务中直接读取内部结果并登记异常事件，随后异步投递。设备查询任务或接收 MQTT 结果均为独立流程。用户从微信通知打开小程序时，页面凭 ref 请求提醒详情。
 
-小程序通过同源 `/v1/push/user` 调用通知服务。以下入口均使用当前用户 JWT，成功响应沿用 code=200 的标准信封。首次订阅依次执行身份识别、确认关联、微信订阅弹窗和结果登记。
+小程序通过同源 `/v1/push/user` 调用通知服务。用户接口使用当前用户 JWT，成功响应沿用 code=200 的标准信封。识别服务使用共享的 `X-Internal-Key` 访问内网接口。首次订阅依次执行身份识别、确认关联、微信订阅弹窗和结果登记。
 
 同一接收身份和模板以较新会话提交的同意或拒绝为准。取消只登记本次会话，保留当前长期授权及其决定序号。较旧会话首次回报取消时，若较新会话已有同意或拒绝决定，返回 409/40901。在会话有效期内重报已经保存的相同决定返回成功。回报遇到 409/40901（身份或决定已变化）或 410/41000（会话已过期）时，重新发起订阅。临时网络错误可重试原会话回报。其他错误包括 400/40000 参数无效、401/401 登录无效、403/40300 无权访问设备、503/50300 微信订阅暂不可用。
 
@@ -7676,7 +7678,7 @@ speech.url 为识别服务相对路径，相对 recognition-srv 解析，并携�
 
 **调用方**：小程序。
 
-alarm 表示 AI 异常提醒是否启用；crying、quarrel 兼容旧客户端
+`alarm` 为布尔值，表示当前渠道配置支持 AI 异常提醒。个人授权通过订阅会话登记。`crying`、`quarrel` 供旧客户端使用。
 
 <a id="push-get-user-preferences-device-kind"></a>
 
@@ -7691,7 +7693,7 @@ alarm 表示 AI 异常提醒是否启用；crying、quarrel 兼容旧客户端
 | `device` | 设备编号 |
 | `kind` | 提醒类型，AI 异常提醒使用 alarm |
 
-返回 interval_seconds（未设置为 null）、enabled、template_id 和 suggested_seconds。AI 异常提醒的 kind 为 alarm，已启用时展示授权入口
+返回 interval_seconds（未设置为 null）、enabled、template_id 和 suggested_seconds。AI 异常提醒的 kind 为 alarm，已启用时展示授权入口。
 
 <a id="push-put-user-preferences-device-kind"></a>
 
@@ -7706,7 +7708,7 @@ alarm 表示 AI 异常提醒是否启用；crying、quarrel 兼容旧客户端
 | `device` | 设备编号 |
 | `kind` | 提醒类型，AI 异常提醒使用 alarm |
 
-提交整数 interval_seconds，范围 0 至 86400。0 表示每次提醒
+提交整数 interval_seconds，范围 0 至 86400。0 表示每个新事件均通过间隔检查，发送仍需有效订阅、剩余时效和队列容量。
 
 <a id="push-delete-user-preferences-device-kind"></a>
 
@@ -7721,7 +7723,7 @@ alarm 表示 AI 异常提醒是否启用；crying、quarrel 兼容旧客户端
 | `device` | 设备编号 |
 | `kind` | 提醒类型，AI 异常提醒使用 alarm |
 
-恢复未设置。客户端按 suggested_seconds 预填（默认 60），保存后生效
+删除成功后 `interval_seconds` 为 null，后续新事件立即按每次提醒判断。客户端按 `suggested_seconds` 预填（默认 60 秒），用户另行保存才启用该间隔。
 
 <a id="push-post-user-subscriptions"></a>
 
@@ -7731,7 +7733,7 @@ alarm 表示 AI 异常提醒是否启用；crying、quarrel 兼容旧客户端
 
 **调用方**：小程序。
 
-提交 app_id、wx.login 取得的 code 和 event_type，返回 session_id、replace、template_id。会话有效 5 分钟
+提交 app_id、wx.login 取得的 code 和 event_type，返回 session_id、replace、template_id。会话有效 5 分钟。
 
 <a id="push-post-user-subscriptions-id-confirm"></a>
 
@@ -7745,7 +7747,7 @@ alarm 表示 AI 异常提醒是否启用；crying、quarrel 兼容旧客户端
 |---|---|
 | `id` | 创建订阅会话时返回的 session_id |
 
-提交 replace 布尔值。发生关联冲突须先让用户确认；取消时结束交互。确认成功后由用户点击打开微信订阅弹窗
+提交 replace 布尔值。发生关联冲突须先让用户确认；取消时结束交互。确认成功后由用户点击打开微信订阅弹窗。
 
 <a id="push-post-user-subscriptions-id-result"></a>
 
@@ -7759,7 +7761,7 @@ alarm 表示 AI 异常提醒是否启用；crying、quarrel 兼容旧客户端
 |---|---|
 | `id` | 创建订阅会话时返回的 session_id |
 
-提交 decision（accept、reject、cancel）。同一会话重复回报复用结果。长期订阅按微信身份和模板生效
+提交 decision（accept、reject、cancel）。同一会话重复回报复用结果。长期订阅按微信身份和模板生效。
 
 <a id="push-get-user-references-id"></a>
 
@@ -7773,7 +7775,7 @@ alarm 表示 AI 异常提醒是否启用；crying、quarrel 兼容旧客户端
 |---|---|
 | `id` | 通知跳转参数 ref |
 
-登录用户仍拥有原绑定设备且提醒未满 72 小时时返回 device_id、label_text（模型标签展示文本，可能为空）；否则返回 410/41000
+登录用户仍拥有原绑定设备且提醒未满 72 小时时返回 device_id、label_text（模型标签展示文本，可能为空）；否则返回 410/41000。
 
 <a id="push-post-internal-events"></a>
 
@@ -7783,7 +7785,7 @@ alarm 表示 AI 异常提醒是否启用；crying、quarrel 兼容旧客户端
 
 **调用方**：内部服务。
 
-识别服务经内网 POST /v1/push/internal/events，使用 X-Internal-Key。请求字段为 source_event_id（request_id:事件类型）、device_id、bind_id、event_type、registered_at、occurred_at 和可选 label_text（最多 256 字）。新事件类型为 alarm，编号为 request_id:alarm。一次请求仅登记首个成功且 alarm=true 的分析子项，标签只用于展示。时间采用 RFC 3339。响应 data.outcome 为 queued、interval、unsubscribed 或 unconfigured。来源传递 expires_at（RFC 3339）；旧请求从 occurred_at 和回退有效期计算截止。重报复用首次结果。来源代次失效为 410/6006，按音频受理时刻计算已过发送截止的未受理事件为 410/41000，幂等内容冲突为 409/40901。公网代理拒绝内部入口。 达到硬容量上限返回 HTTP 429、业务码 42921 和 outcome=skipped_overload。
+识别服务经内网 POST /v1/push/internal/events，使用 X-Internal-Key。请求字段为 source_event_id（request_id:事件类型）、device_id、bind_id、event_type、registered_at、occurred_at 和可选 label_text（最多 256 字）。新事件类型为 alarm，编号为 request_id:alarm。一次请求仅登记首个成功且 alarm=true 的分析子项，标签只用于展示。时间采用 RFC 3339。响应 data.outcome 为 queued、interval、unsubscribed 或 unconfigured。来源传递 expires_at（RFC 3339）；旧请求从 occurred_at 和回退有效期计算截止。重报复用首次结果。来源代次失效为 410/6006，按音频受理时刻计算已过发送截止的未受理事件为 410/41000，幂等内容冲突为 409/40901。投递队列容量不足时，push 登记 `skipped_overload`，返回 HTTP 429、业务码 42921。公网代理拒绝内部入口。
 
 <a id="push-get-internal-events"></a>
 
