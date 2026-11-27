@@ -508,7 +508,7 @@ INSERT IGNORE INTO schema_migrations (component, version) VALUES
     ('core', 7),
     ('core', 8),
     ('core', 9),
-    ('core', 10), ('core', 11), ('core', 12), ('core', 13), ('core', 14), ('core', 15);
+    ('core', 10), ('core', 11), ('core', 12), ('core', 13), ('core', 14), ('core', 15), ('core', 16), ('core', 17), ('core', 18), ('core', 19), ('core', 20);
 CREATE TABLE IF NOT EXISTS ai_recognition_policy (
  device_id VARCHAR(64) NOT NULL COMMENT '设备标识',
  enabled BOOLEAN NOT NULL DEFAULT FALSE COMMENT '是否启用媒体识别',
@@ -1557,3 +1557,145 @@ INSERT INTO ai_role_types (id,name,voice_id,voice_model,prompt,sort_order,status
 INSERT INTO ai_role_types (id,name,voice_id,voice_model,prompt,sort_order,status,revision,language,source_voice_id,match_kind) SELECT 'catalog-189','中文（中国）知音 · 星语189','','cosyvoice-v3-flash','',1189,'offline',2,'zh','zh-CN-XiaoyouMultilingualNeural','missing' WHERE NOT EXISTS (SELECT 1 FROM ai_role_types WHERE id='catalog-189' OR name='中文（中国）知音 · 星语189');
 
 INSERT IGNORE INTO schema_migrations (component, version) VALUES ('admin', 2),('admin', 3),('admin', 4),('admin', 5),('admin', 6),('admin', 7);
+
+CREATE TABLE IF NOT EXISTS recognition_user_event_outbox (
+ label_text VARCHAR(256) NOT NULL DEFAULT '' COMMENT '异常识别标签展示文本',
+ id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '来源事件记录',
+ device_id VARCHAR(64) NOT NULL COMMENT '设备标识',
+ bind_id VARCHAR(128) NOT NULL COMMENT '原任务绑定代次',
+ source_event_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '请求编号与事件类型',
+ event_type VARCHAR(24) NOT NULL COMMENT '通知类型',
+ occurred_at DATETIME(6) NOT NULL COMMENT '音频受理时间 UTC',
+ registered_at DATETIME(6) NOT NULL COMMENT '首次登记时间 UTC',
+ next_at DATETIME(6) NOT NULL COMMENT '下次可领取时间 UTC',
+ status VARCHAR(32) NOT NULL DEFAULT 'pending' COMMENT '来源投递状态',
+ attempts INT NOT NULL DEFAULT 0 COMMENT '已尝试次数',
+ confirm_attempts INT NOT NULL DEFAULT 0 COMMENT '到期确认次数',
+ lease VARCHAR(64) NOT NULL DEFAULT '' COMMENT '当前领取凭证',
+ expires_at DATETIME(6) NULL COMMENT '来源发送截止 UTC',
+ max_attempts INT NOT NULL DEFAULT 3 COMMENT '业务投递预算',
+ policy_revision BIGINT NOT NULL DEFAULT 0 COMMENT '来源策略版本',
+ generation BIGINT NOT NULL DEFAULT 0 COMMENT '来源关闭代次',
+ reserved BOOLEAN NOT NULL DEFAULT FALSE COMMENT '本次领取预占业务次数',
+ bucket INT NOT NULL DEFAULT 0 COMMENT '容量分片',
+ KEY idx_source_bucket (bucket,status,id),
+ KEY idx_source_retention (registered_at,id),
+ KEY idx_source_deadline (status,expires_at,id),
+ UNIQUE KEY uq_rec_user_event (device_id,bind_id,source_event_id),
+ KEY idx_rec_user_queue (status,next_at,id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='识别用户通知待发送事件';
+CREATE TABLE IF NOT EXISTS push_event (
+ label_text VARCHAR(256) NOT NULL DEFAULT '' COMMENT '异常识别标签展示文本',
+ id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '记录编号',
+ device_id VARCHAR(64) NOT NULL COMMENT '设备编号',
+ bind_id VARCHAR(128) NOT NULL COMMENT '设备绑定代次',
+ source_event_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '来源事件编号',
+ registered_at DATETIME(6) NOT NULL COMMENT '来源首次登记时间',
+ received_at DATETIME(6) NOT NULL COMMENT '通知首次受理时间',
+ outcome VARCHAR(32) NOT NULL COMMENT '准入结果',
+ UNIQUE KEY uq_push_event (device_id,bind_id,source_event_id),
+ KEY idx_push_retention (received_at,id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户通知事件与准入结果';
+
+CREATE TABLE IF NOT EXISTS push_window (
+ user_id BIGINT NOT NULL COMMENT '当前账号',
+ device_id VARCHAR(64) NOT NULL COMMENT '设备编号',
+ bind_id VARCHAR(128) NOT NULL COMMENT '设备绑定代次',
+ event_type VARCHAR(24) NOT NULL COMMENT '设备事件类型',
+ interval_seconds INT NULL COMMENT '同类提醒间隔秒数',
+ last_admitted DATETIME(6) NULL COMMENT '最近准入时间',
+ PRIMARY KEY (user_id,device_id,bind_id,event_type)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='事件间隔偏好及最近准入时间';
+
+CREATE TABLE IF NOT EXISTS push_recipient (
+ user_id BIGINT NOT NULL PRIMARY KEY COMMENT '当前账号',
+ app_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '小程序编号',
+ open_id VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '微信接收身份',
+ generation VARCHAR(36) NOT NULL COMMENT '接收身份关联代次',
+ UNIQUE KEY uq_push_recipient (app_id,open_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户当前接收微信身份';
+
+CREATE TABLE IF NOT EXISTS push_subscription (
+ decision_seq BIGINT NOT NULL DEFAULT 0 COMMENT '最后生效会话序号',
+ granted BOOLEAN NOT NULL DEFAULT TRUE COMMENT '当前同意订阅',
+ generation VARCHAR(36) NOT NULL COMMENT '接收身份关联代次',
+ template_id VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '订阅模板标识',
+ grant_id VARCHAR(36) NOT NULL COMMENT '本次授权会话编号',
+ PRIMARY KEY (generation,template_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='当前身份已同意的长期订阅';
+
+CREATE TABLE IF NOT EXISTS push_session (
+ session_seq BIGINT NOT NULL AUTO_INCREMENT COMMENT '订阅会话创建顺序',
+ id VARCHAR(36) NOT NULL PRIMARY KEY COMMENT '记录编号',
+ user_id BIGINT NOT NULL COMMENT '当前账号',
+ app_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '小程序编号',
+ open_id VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '微信接收身份',
+ template_id VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '订阅模板标识',
+ old_generation VARCHAR(36) NOT NULL COMMENT '原接收身份代次',
+ other_generation VARCHAR(36) NOT NULL COMMENT '另一账号原关联代次',
+ generation VARCHAR(36) NOT NULL DEFAULT '' COMMENT '接收身份关联代次',
+ decision VARCHAR(16) NOT NULL DEFAULT '' COMMENT '订阅操作结果',
+ expires_at DATETIME(6) NOT NULL COMMENT '到期时间',
+ UNIQUE KEY uq_push_session_seq (session_seq),
+ KEY idx_push_session_expiry (expires_at,id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='订阅操作及身份替换确认';
+
+CREATE TABLE IF NOT EXISTS push_delivery (
+ id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '记录编号',
+ event_id BIGINT NOT NULL COMMENT '通知事件编号',
+ user_id BIGINT NOT NULL COMMENT '当前账号',
+ device_id VARCHAR(64) NOT NULL COMMENT '设备编号',
+ device_name VARCHAR(64) NOT NULL COMMENT '受理时设备名称',
+ bind_id VARCHAR(128) NOT NULL COMMENT '设备绑定代次',
+ event_type VARCHAR(24) NOT NULL COMMENT '设备事件类型',
+ generation VARCHAR(36) NOT NULL COMMENT '接收身份关联代次',
+ template_id VARCHAR(128) NOT NULL COMMENT '订阅模板标识',
+ grant_id VARCHAR(36) NOT NULL COMMENT '首次预检的授权会话编号',
+ occurred_at DATETIME(6) NOT NULL COMMENT '报警展示时间',
+ reference_id VARCHAR(36) NOT NULL COMMENT '通知点击引用',
+ started_at DATETIME(6) NOT NULL COMMENT '投递准入时间',
+ status VARCHAR(32) NOT NULL COMMENT '投递状态',
+ attempts INT NOT NULL DEFAULT 0 COMMENT '发送尝试数',
+ lease VARCHAR(36) NOT NULL DEFAULT '' COMMENT '工作领取凭证',
+ next_at DATETIME(6) NOT NULL COMMENT '下次处理时间',
+ finished_at DATETIME(6) NULL COMMENT '终态时间',
+ expires_at DATETIME(6) NULL COMMENT '微信发送截止 UTC',
+ max_attempts INT NOT NULL DEFAULT 3 COMMENT '微信调用预算',
+ bucket INT NOT NULL DEFAULT 0 COMMENT '容量分片',
+ KEY idx_delivery_bucket (bucket,status,id),
+ KEY idx_delivery_deadline (status,expires_at,id),
+ UNIQUE KEY uq_push_delivery_event (event_id),
+ UNIQUE KEY uq_push_delivery_reference (reference_id),
+ KEY idx_push_delivery_queue (status,next_at,id),
+ KEY idx_push_delivery_expiry (status,started_at,id),
+ KEY idx_push_delivery_recipient (generation,status),
+ KEY idx_push_delivery_cleanup (finished_at,id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='微信订阅通知投递任务';
+
+CREATE TABLE IF NOT EXISTS recognition_push_target (
+ target VARCHAR(64) NOT NULL PRIMARY KEY COMMENT '逻辑推送目标',
+ generation BIGINT NOT NULL DEFAULT 0 COMMENT '生产代次',
+ revision BIGINT NOT NULL DEFAULT 0 COMMENT '策略版本',
+ enabled BOOLEAN NOT NULL DEFAULT TRUE COMMENT '允许生产',
+ paused BOOLEAN NOT NULL DEFAULT FALSE COMMENT '鉴权暂停',
+ auth_epoch BIGINT NOT NULL DEFAULT 0 COMMENT '鉴权拒绝代次',
+ probe_epoch BIGINT NOT NULL DEFAULT 0 COMMENT '探测取得的代次',
+ probe_lease VARCHAR(64) NOT NULL DEFAULT '' COMMENT '探测凭证',
+ probe_at DATETIME(6) NULL COMMENT '下次探测时间',
+ failures INT NOT NULL DEFAULT 0 COMMENT '连续探测失败次数'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='识别推送目标状态';
+
+CREATE TABLE IF NOT EXISTS push_channel_limit (
+ cooldown_seconds INT NOT NULL DEFAULT 0 COMMENT '连续限流退避',
+ probe_lease VARCHAR(64) NOT NULL DEFAULT '' COMMENT '恢复探测凭证',
+ recovered_at DATETIME(6) NULL COMMENT '渐进恢复开始时间',
+ app_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL PRIMARY KEY COMMENT '微信应用',
+ available_at DATETIME(6) NULL COMMENT '速率预算下一可用时间',
+ next_at DATETIME(6) NOT NULL COMMENT '下次允许调用时间'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='微信渠道共享限速';
+
+CREATE TABLE IF NOT EXISTS push_queue_bucket (
+ queue_name VARCHAR(16) NOT NULL COMMENT '队列名称',
+ bucket INT NOT NULL COMMENT '分片编号',
+ PRIMARY KEY (queue_name,bucket)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='事务内准入容量锁';

@@ -17,6 +17,7 @@ import (
 	"thing-connect/internal/dynamicconfig"
 	"thing-connect/internal/logging"
 	"thing-connect/internal/mqttc"
+	"thing-connect/internal/push"
 	"thing-connect/internal/queuehealth"
 	"thing-connect/internal/recognition"
 	"thing-connect/internal/recognitionprovider"
@@ -50,13 +51,21 @@ func main() {
 		log.Fatal(e)
 	}
 	defer func() { _ = rdb.Close() }()
-	dc, e := dynamicconfig.New(cfg.Admin.ServerURL, cfg.Internal.Key, rdb)
-	if e != nil {
-		log.Fatal(e)
+	var dc *dynamicconfig.Client
+	var revisions func() map[string]int64
+	mqttCfg := cfg.MQTT
+	if cfg.Admin.ServerURL != "" {
+		dc, e = dynamicconfig.New(cfg.Admin.ServerURL, cfg.Internal.Key, rdb)
+		if e != nil {
+			log.Fatal(e)
+		}
+		revisions = dc.Revisions
+		startup, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		mqttCfg, _, e = dynamicconfig.ResolveMQTT(startup, dc, "recognition-server", cfg.MQTT)
+		cancel()
+	} else {
+		e = dynamicconfig.ValidateMQTT(mqttCfg)
 	}
-	startup, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	mqttCfg, _, e := dynamicconfig.ResolveMQTT(startup, dc, "recognition-server", cfg.MQTT)
-	cancel()
 	if e != nil {
 		log.Fatal(e)
 	}
@@ -65,7 +74,8 @@ func main() {
 		log.Fatal(e)
 	}
 	defer broker.Close()
-	service := recognition.New(mysqlstore.NewRecognitionStore(sqlDB), recognitionprovider.New(), cfg.Recognition)
+	store := mysqlstore.NewRecognitionStore(sqlDB)
+	service := recognition.New(store, recognitionprovider.New(), cfg.Recognition)
 	service.SetNotifier(notifier{broker})
 	refs := []dynamicconfig.Ref{{Namespace: "recognition-server", Key: "recognition.models", Apply: func(s dynamicconfig.Snapshot) error {
 		if s.Revision == 0 {
@@ -86,11 +96,33 @@ func main() {
 		v.APIKey = secret.APIKey
 		return service.Configure(v)
 	}}}
-	startup, cancel = context.WithTimeout(context.Background(), 10*time.Second)
-	e = dc.ApplyInitial(startup, refs)
-	cancel()
-	if e != nil {
-		log.Fatal(e)
+	if dc != nil {
+		startup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		e = dc.ApplyInitial(startup, refs)
+		cancel()
+		if e != nil {
+			log.Fatal(e)
+		}
+	}
+	refs = append(refs, dynamicconfig.Ref{Namespace: "push-server", Key: "event.delivery_policy", Apply: func(s dynamicconfig.Snapshot) error {
+		p := cfg.Push.Delivery()
+		if s.Revision != 0 {
+			var err error
+			p, err = push.ParseDeliveryPolicy(s.Value)
+			if err != nil {
+				return err
+			}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return store.ConfigureSource(ctx, p, s.Revision, cfg.Push.ServerURL != "")
+	}})
+	if dc == nil {
+		for _, ref := range refs {
+			if e = ref.Apply(dynamicconfig.Snapshot{}); e != nil {
+				log.Fatal(e)
+			}
+		}
 	}
 	router := gin.New()
 	if e = router.SetTrustedProxies(cfg.Server.TrustedProxies); e != nil {
@@ -115,15 +147,44 @@ func main() {
 	if guardErr != nil {
 		log.Fatal(guardErr)
 	}
-	reporter, e := servicestatus.NewReporter(rdb, "recognition-server", statusProbes, dc.Revisions)
+	queueSample := mysqlstore.NewPushBacklog(sqlDB, true)
+	userBacklog := queuehealth.NewWithMaxAge("recognition_user_event", queueSample, 5*time.Minute)
+	statusProbes["source_target"] = store.SourceHealth
+	statusProbes["source_deadline"] = queueSample.TimeBudgetHealth
+	statusProbes["recognition_user_event_outbox"] = userBacklog.Health
+	reporter, e := servicestatus.NewReporter(rdb, "recognition-server", statusProbes, revisions)
 	if e != nil {
 		log.Fatal(e)
 	}
-	reporter.SetMetrics(servicestatus.MergeMetrics(broker.Metrics, backlog.Metrics, guard.Metrics, servicestatus.PoolMetrics(sqlDB, rdb)))
+	reporter.SetMetrics(servicestatus.MergeMetrics(store.NotificationMetrics, queueSample.Metrics, userBacklog.Metrics, broker.Metrics, backlog.Metrics, guard.Metrics, servicestatus.PoolMetrics(sqlDB, rdb)))
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	var wg sync.WaitGroup
-	for _, run := range []func(context.Context){service.Run, reporter.Run, backlog.Run, func(c context.Context) { dc.Run(c, refs) }} {
+	runners := []func(context.Context){service.Run, reporter.Run, backlog.Run, userBacklog.Run}
+	if dc != nil {
+		runners = append(runners, func(c context.Context) { dc.Run(c, refs) })
+	}
+	runners = append(runners, func(ctx context.Context) {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for ctx.Err() == nil {
+			if err := store.CleanUserEvents(ctx); err != nil {
+				log.Print("来源队列维护失败")
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	})
+	if cfg.Push.ServerURL != "" {
+		publisher := recognition.Publisher{Queue: store, BaseURL: cfg.Push.ServerURL, InternalKey: cfg.Internal.Key}
+		for i := 0; i < 2; i++ {
+			runners = append(runners, publisher.Run)
+		}
+	}
+	for _, run := range runners {
 		wg.Add(1)
 		go func(f func(context.Context)) { defer wg.Done(); f(ctx) }(run)
 	}

@@ -28,16 +28,21 @@ type sample struct {
 
 type Monitor struct {
 	source Source
+	maxAge time.Duration
 	prefix string
 	latest atomic.Pointer[sample]
 	now    func() time.Time
 }
 
 func New(prefix string, source Source) *Monitor {
-	if prefix == "" || source == nil {
+	return NewWithMaxAge(prefix, source, 15*time.Minute)
+}
+
+func NewWithMaxAge(prefix string, source Source, maxAge time.Duration) *Monitor {
+	if prefix == "" || source == nil || maxAge <= 0 {
 		panic("queue health requires a name and source")
 	}
-	return &Monitor{source: source, prefix: prefix, now: time.Now}
+	return &Monitor{source: source, prefix: prefix, now: time.Now, maxAge: maxAge}
 }
 
 func (m *Monitor) Run(ctx context.Context) {
@@ -77,7 +82,10 @@ func (m *Monitor) Metrics() map[string]int64 {
 
 // Health is a service-status probe, not a readiness gate: removing healthy
 // delivery workers from traffic does not repair their downstream dependencies.
-func (m *Monitor) Health(context.Context) error {
+func (m *Monitor) Health(ctx context.Context) error { return m.HealthWithMaxAge(ctx, m.maxAge) }
+
+// HealthWithMaxAge evaluates the latest sample against the current published threshold.
+func (m *Monitor) HealthWithMaxAge(_ context.Context, maxAge time.Duration) error {
 	s := m.latest.Load()
 	if s == nil || m.now().Sub(s.at) > time.Minute {
 		return errors.New("queue backlog sample is stale")
@@ -85,8 +93,8 @@ func (m *Monitor) Health(context.Context) error {
 	if s.Exhausted > 0 {
 		return errors.New("queue delivery attempts exhausted")
 	}
-	if s.Pending > 0 && s.OldestAge+m.now().Sub(s.at) > 15*time.Minute {
-		return errors.New("queue oldest pending age exceeds 15 minutes")
+	if s.Pending > 0 && s.OldestAge+m.now().Sub(s.at) > maxAge {
+		return errors.New("queue oldest pending age exceeds threshold")
 	}
 	return nil
 }

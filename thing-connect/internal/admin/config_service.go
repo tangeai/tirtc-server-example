@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"thing-connect/internal/push"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -244,6 +245,15 @@ func (s *ConfigService) Put(ctx context.Context, input ConfigWrite) (ConfigEntry
 		mfaPolicyChanged = beforeOK && afterOK && beforeEnabled != afterEnabled
 	}
 	providerChanged := !creating && definitionID(input.Namespace, input.ConfigKey) == "user-server/captcha" && captchaProvider(before.Value) != captchaProvider(string(input.Value))
+	if !creating && definitionID(input.Namespace, input.ConfigKey) == "push-server/wechat.notifications" {
+		var old, next struct {
+			App string `json:"app_id"`
+		}
+		if json.Unmarshal([]byte(before.Value), &old) != nil || json.Unmarshal(input.Value, &next) != nil {
+			return ConfigEntry{}, errors.New("小程序配置格式无效")
+		}
+		providerChanged = old.App != next.App
+	}
 	secretValue := before.SecretValue
 	if input.SecretsProvided {
 		mergedSecrets := input.Secrets
@@ -258,9 +268,7 @@ func (s *ConfigService) Put(ctx context.Context, input ConfigWrite) (ConfigEntry
 		}
 		secretValue = sql.NullString{String: string(mergedSecrets), Valid: true}
 	} else if providerChanged {
-		// Captcha vendors use overlapping field names for unrelated credentials.
-		// Never reuse the previous vendor's values after a provider
-		// switch; an enabled provider must receive its own complete credentials.
+		// Credentials belong to the original vendor or mini-program.
 		secretValue = sql.NullString{}
 		if err := validateExistingSecretRequirement(input.Namespace, input.ConfigKey, input.Value, false); err != nil {
 			return ConfigEntry{}, err
@@ -346,15 +354,23 @@ func captchaProvider(raw string) string {
 // and are returned only to trusted internal consumers or explicitly authorized
 // administrator handlers.
 func (s *ConfigService) Resolved(ctx context.Context, namespace, key, scopeType, scopeID string) (json.RawMessage, json.RawMessage, int64, error) {
-	entry, err := s.Get(ctx, namespace, key, scopeType, scopeID)
+	definition, ok := s.registry.Lookup(namespace, key)
+	if !ok {
+		return nil, nil, 0, ErrNotFound
+	}
+	scopeType, scopeID, err := normalizeScope(scopeType, scopeID)
 	if err != nil {
 		return nil, nil, 0, err
 	}
-	if entry.ID == 0 {
-		return entry.Value, nil, 0, nil
-	}
+	var value json.RawMessage
 	var stored sql.NullString
-	if err := s.db.GetContext(ctx, &stored, `SELECT secret_value FROM config_entries WHERE id=?`, entry.ID); err != nil {
+	var revision int64
+	// Keep the credentials and public settings from the same publication.
+	err = s.db.QueryRowxContext(ctx, `SELECT value,secret_value,revision FROM config_entries WHERE namespace=? AND config_key=? AND scope_type=? AND scope_id=?`, namespace, key, scopeType, scopeID).Scan(&value, &stored, &revision)
+	if errors.Is(err, sql.ErrNoRows) {
+		return cloneJSON(definition.Default), nil, 0, nil
+	}
+	if err != nil {
 		return nil, nil, 0, err
 	}
 	if stored.Valid {
@@ -362,9 +378,9 @@ func (s *ConfigService) Resolved(ctx context.Context, namespace, key, scopeType,
 		if json.Unmarshal([]byte(stored.String), &object) != nil || object == nil {
 			return nil, nil, 0, errors.New("已保存的配置密钥格式无效")
 		}
-		return entry.Value, json.RawMessage(stored.String), entry.Revision, nil
+		return value, json.RawMessage(stored.String), revision, nil
 	}
-	return entry.Value, nil, entry.Revision, nil
+	return value, nil, revision, nil
 }
 
 // PopulateSecrets adds the stored plaintext secret object to an administrator
@@ -518,6 +534,8 @@ func containsMaskedSecret(value any) bool {
 func validateSecretShape(namespace, key string, object map[string]any) error {
 	allowed := map[string]bool{}
 	switch definitionID(namespace, key) {
+	case "push-server/wechat.notifications":
+		allowed["app_secret"] = true
 	case "recognition-server/recognition.models":
 		allowed["api_key"] = true
 	case "device-server/mqtt.broker_api":
@@ -600,6 +618,15 @@ func mergeSecretObjects(target, updates map[string]any) {
 func validateExistingSecretRequirement(namespace, key string, value json.RawMessage, configured bool) error {
 	var public map[string]any
 	_ = json.Unmarshal(value, &public)
+	if definitionID(namespace, key) == "push-server/wechat.notifications" && !configured {
+		p, err := push.ParsePolicy(value)
+		if err != nil {
+			return err
+		}
+		if p.Alarm.Enabled || p.Crying.Enabled || p.Quarrel.Enabled {
+			return errors.New("启用提醒前请填写小程序 AppSecret")
+		}
+	}
 	if definitionID(namespace, key) == "common/tirtc" && !configured {
 		return errors.New("TiRTC 必须填写 Access Key ID 和 Secret Key ID")
 	}
@@ -664,6 +691,15 @@ func validateRequiredSecrets(namespace, key string, value, secrets json.RawMessa
 					return fmt.Errorf("%s小程序验证码 ID 需要配套的小程序密钥 mini_program_secret_key", spec.Label)
 				}
 			}
+		}
+	case "push-server/wechat.notifications":
+		policy, err := push.ParsePolicy(value)
+		if err != nil {
+			return err
+		}
+		secret, _ := secretObject["app_secret"].(string)
+		if (policy.Alarm.Enabled || policy.Crying.Enabled || policy.Quarrel.Enabled) && strings.TrimSpace(secret) == "" {
+			return errors.New("启用提醒前请填写小程序 AppSecret")
 		}
 	case "common/tirtc":
 		access, _ := secretObject["access_key_id"].(string)

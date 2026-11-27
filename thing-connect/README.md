@@ -1,6 +1,6 @@
 # ThingConnect 开发者文档
 
-ThingConnect 提供设备接入示例，覆盖 **H5 实时预览与对讲、AI 对讲、微信 IoT VoIP、设备互呼** 四类能力。仓库中包含 Linux C 参考实现、Python 模拟器、H5 和小程序前端，以及六个业务服务和一个 Admin Server。C 和 Python 示例用于说明协议和接入流程，不能直接当作量产设备实现。
+ThingConnect 提供设备接入示例，覆盖 **H5 实时预览与对讲、AI 对讲、微信 IoT VoIP、设备互呼** 四类能力。仓库中包含 Linux C 参考实现、Python 模拟器、H5 和小程序前端，以及七个业务服务和一个 Admin Server。C 和 Python 示例用于说明协议和接入流程，不能直接当作量产设备实现。
 
 第一次使用时，建议先按[项目快速体验](../README.md)跑通设备上线、绑定和 H5 出图，再根据产品需要接入其他对讲能力。下面给出最短接入路径和 TiRTC SDK 调用骨架；完整字段、错误码和排查方法可从各节进入对应专题文档查看。
 
@@ -129,7 +129,7 @@ Linux C 参考实现将签名过程封装在 `hmac_sha256_b64()` 中，代码见
 | Linux C 参考实现 | 上线、凭证、MQTT、TiRTC、会话控制，以及 `DeviceAdapterV1` 二次开发边界；默认使用文件媒体和 stdin 演示 |
 | 产品设备 | 平台与硬件适配、真实身份、采集编码、解码播放、视频显示、产品交互、资源仲裁、异常恢复和量产安全 |
 | H5、小程序 | 登录、绑定、获取 token、发起和接听通话 |
-| 服务端（六个业务服务和 Admin Server） | 身份、绑定、业务 token、MQTT 信令、微信回调、房间、配置与后台管理 |
+| 服务端（七个业务服务和 Admin Server） | 身份、绑定、业务 token、MQTT 信令、微信回调、房间、配置与后台管理 |
 | MQTT Broker | 设备长连接、来电与通知下发 |
 | TiRTC | 实时音视频传输 |
 
@@ -644,7 +644,7 @@ npm --prefix thing-connect-client run check
 
 ## 服务端：功能与部署
 
-六个业务服务和 Admin Server 共用 MySQL、Redis，需要 MQTT 的服务连接同一个 Broker。六个业务服务的 `jwt_secret` 必须一致，七个服务的 `internal.key` 也必须一致；Admin 使用独立的 `admin.jwt_secret`。
+七个业务服务和 Admin Server 共用 MySQL、Redis，需要 MQTT 的服务连接同一个 Broker。七个业务服务的 `jwt_secret` 必须一致，八个服务的 `internal.key` 也必须一致；Admin 使用独立的 `admin.jwt_secret`。
 
 `config.yaml` 保存数据库、Redis、MQTT、服务地址和进程认证密钥等启动引导参数。Admin 注册表中的业务配置使用数据库发布值；没有发布记录时，使用注册表默认值。
 
@@ -658,7 +658,8 @@ npm --prefix thing-connect-client run check
 | ai-server | 设备、H5 管理页 | AI 会话 token、AI 角色管理 |
 | call-server | 设备、H5 | 设备联系人、房间、设备互呼 token 与通知 |
 | recognition-server | 设备、H5 | 音频上传、异步识别、结果查询、通知与语音下载 |
-| admin-server | 管理员、六个业务服务 | Admin Web、RBAC、用户设备管理、动态配置、服务状态与审计 |
+| push-server（可选） | 小程序、识别服务 | 设备提醒订阅、同类事件间隔及微信长期订阅消息投递 |
+| admin-server | 管理员、业务服务 | Admin Web、RBAC、用户设备管理、动态配置、服务状态与审计 |
 
 安装器为全部服务生成基础配置，首次安装只启动 Admin；管理员完成相应配置后按需启动业务服务。服务器准备、MySQL 权限、首次 Web 安装、Supervisor、Nginx、验收、更新和迁移见[部署指南](deployment.md)。
 
@@ -670,7 +671,7 @@ Admin 功能和使用约束见 [Admin Server README](admin/admin-server/README.m
 
 HTTP 接口的请求和返回字段、成功码、业务错误码及微信回调错误码集中在以下两份文档中：
 
-- [api-reference.md](api-reference.md)：六个业务服务的接口与错误码。
+- [api-reference.md](api-reference.md)：七个业务服务的接口与错误码。
 - [admin/admin-server/API.md](admin/admin-server/API.md)：Admin 登录、RBAC、配置和运维接口。
 
 各专题文档末尾还有问题排查和协议速查，可用于定位常见错误。MQTT 断连原因码、TiRTC SDK 返回值约定见 [device-integration.md](device-integration.md)。

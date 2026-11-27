@@ -9,6 +9,7 @@ import { deviceRevision, devicesChanged } from '../../services/device-events';
 import type { Device, MediaIntent } from '../../domain/devices';
 import { cacheDeviceMedia, mediaCapabilities, performMedia, refreshAuthorizations, type DeviceAuthorization } from '../../platform/media';
 
+declare const wx: unknown;
 const unknownAuth: DeviceAuthorization = { state: 'unknown', serverSynced: false };
 function DeviceMenuItem({ title, description, icon, badge, danger, onClick }: { title: string; description: string; icon: string; badge?: string; danger?: boolean; onClick(): void }) {
   return <Button className={'device-menu-item' + (danger ? ' is-danger' : '')} onClick={onClick}><View className={'device-menu-icon menu-icon-' + icon} ariaHidden><View className='menu-icon-shape' /><Text className='menu-icon-mark'>{icon === 'auth' ? '✓' : icon === 'info' ? 'i' : ''}</Text></View><View className='device-menu-copy'><View className='device-menu-heading'><Text className='device-menu-title'>{title}</Text>{badge && <Text className='device-menu-badge'>{badge}</Text>}</View><Text className='device-menu-description'>{description}</Text></View>{!danger && <Text className='device-menu-chevron'>›</Text>}</Button>;
@@ -20,6 +21,15 @@ export default function Devices() {
   const [busy, setBusy] = useState(false), [editError, setEditError] = useState('');
   const authRevision = useRef(0), authActions = useRef<Record<string, number>>({});
   const alive = useRef(true), reading = useRef(false), writing = useRef(false), revision = useRef(0), loadedRevision = useRef(-1);
+  const [pushEnabled, setPushEnabled] = useState(false);
+  useEffect(() => {
+    let active = true;
+    if (token() && typeof wx !== 'undefined') {
+      void request<{ alarm: boolean }>('/v1/push/user/capabilities')
+        .then(value => { if (active) setPushEnabled(value.alarm); }).catch(() => {});
+    }
+    return () => { active = false; };
+  }, []);
   const capabilities = mediaCapabilities();
   const overlayOpen = !!(menu || editing || info);
   useEffect(() => {
@@ -125,7 +135,7 @@ export default function Devices() {
       {initialized && !devices.length && <View className='card empty'>{error ? '设备列表暂时无法加载，请下拉刷新重试' : '添加第一台设备，开始使用小钛'}</View>}
       {devices.map(device => <View className='card' key={device.device_id}><View className='device-head'><View className={'device-symbol ' + (device.online ? 'device-symbol-online' : 'device-symbol-offline')}><RobotIcon /><Text className='device-symbol-status'>{device.online ? '在线' : '离线'}</Text></View><View className='grow device-summary'><View className='device-title-row'>{device.device_name?.trim() ? <Text className='device-name'>{device.device_name}</Text> : <Button className='device-name-setup' disabled={busy} ariaLabel={'设置设备名称：' + device.device_id} onClick={() => openRename(device)}><Text>设置名称</Text><View className='device-name-edit-icon' ariaHidden /></Button>}</View><Text className='device-id'>ID: {device.device_id}</Text></View><Action disabled={busy} onClick={() => setMenu(device)}>⋯</Action></View>
         <View className='device-actions device-primary-actions'>{capabilities.platform === 'weapp' && <Action primary muted={!device.online && !needsAuthorization(device)} disabled={busy || loading} onClick={() => void media(needsAuthorization(device) ? 'authorize' : 'wechat-call', device)}><View className='device-primary-label'><View className={'device-action-icon ' + (needsAuthorization(device) ? 'device-action-shield' : 'device-action-phone')} ariaHidden />{callLabel(device)}</View></Action>}<Action muted={!device.online} disabled={busy || !capabilities.playback} onClick={() => void media('playback', device)}><View className='device-primary-label'><View className='device-action-icon device-action-play' ariaHidden />实时查看</View></Action></View>
-        <View className='device-feature-links'>{([['roles', 'AI 角色'], ['recognition', 'AI 识别'], ['contacts', '联系人']] as const).map(([page, title]) => <Action key={page} onClick={() => void Taro.navigateTo({ url: '/pages/' + page + '/index?device_id=' + encodeURIComponent(device.device_id) })}>{title}<Text className='device-link-arrow'>›</Text></Action>)}</View>
+        <View className='device-feature-links'>{pushEnabled && <Action onClick={() => void Taro.navigateTo({ url: '/pages/notifications/index?device_id=' + encodeURIComponent(device.device_id) })}>设备提醒<Text className='device-link-arrow'>›</Text></Action>}{([['roles', 'AI 角色'], ['recognition', 'AI 识别'], ['contacts', '联系人']] as const).map(([page, title]) => <Action key={page} onClick={() => void Taro.navigateTo({ url: '/pages/' + page + '/index?device_id=' + encodeURIComponent(device.device_id) })}>{title}<Text className='device-link-arrow'>›</Text></Action>)}</View>
       </View>)}
     {menu && <View className='mask device-more-mask' onClick={() => setMenu(undefined)}><View className='device-more-sheet' onClick={e => e.stopPropagation()}><View className='device-more-header'><Text className='device-more-title'>更多操作</Text><Text className='device-more-subtitle'>{menu.device_name || '未命名设备'}</Text></View><View className='device-more-scroll'>
       <View className='device-menu-list'>

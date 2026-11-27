@@ -33,3 +33,8 @@ recognition:
   api_key: ""
   tts_url: "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
   tts_model: "qwen3-tts-flash"
+
+push:
+  delivery_policy: {enabled: true, event_ttl_seconds: 120, source_max_attempts: 3, source_capacity: 32000, delivery_capacity: 6400, wechat_requests_per_second: 50}
+  # 启用识别通知时填写内网推送服务地址
+  server_url: ""

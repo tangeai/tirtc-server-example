@@ -2,6 +2,8 @@ package recognition
 
 import (
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 )
 
@@ -190,6 +192,26 @@ func (v *Snapshot) Complete(done Completion) string {
 	}
 	v.Aggregate()
 	return status
+}
+
+// AlarmNotification returns the display text from the first successful abnormal analysis.
+func (v Snapshot) AlarmNotification(index int, stage string) (string, bool) {
+	if stage != "analysis" || index < 0 || index >= len(v.Task.Results) || index >= len(v.Internal) || v.Task.Results[index].Status != "succeeded" {
+		return "", false
+	}
+	result := v.Internal[index]
+	if result == nil || !result.Alarm {
+		return "", false
+	}
+	var labels []string
+	for _, label := range result.Labels {
+		text := strings.Join(strings.Fields(label), " ")
+		if text != "" && !slices.Contains(labels, text) {
+			labels = append(labels, text)
+		}
+	}
+	display := []rune(strings.Join(labels, "、"))
+	return string(display[:min(len(display), 256)]), true
 }
 
 func (v *Snapshot) Cancel() {

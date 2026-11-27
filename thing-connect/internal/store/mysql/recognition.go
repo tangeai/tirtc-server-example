@@ -8,13 +8,20 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/jmoiron/sqlx"
+
+	"sync/atomic"
 	r "thing-connect/internal/recognition"
 	"time"
 )
 
-type RecognitionStore struct{ db *sqlx.DB }
+type RecognitionStore struct {
+	outcomes outcomeCounts
+	db       *sqlx.DB
+	alarm    atomic.Int64
+	source   atomic.Pointer[sourcePolicy]
+}
 
-func NewRecognitionStore(db *sqlx.DB) *RecognitionStore { return &RecognitionStore{db} }
+func NewRecognitionStore(db *sqlx.DB) *RecognitionStore { return &RecognitionStore{db: db} }
 func recID() string {
 	var b [16]byte
 	if _, e := rand.Read(b[:]); e != nil {
@@ -447,7 +454,7 @@ func (s *RecognitionStore) Claim(c context.Context) (*r.Work, error) {
 	return nil, r.ErrNotFound
 }
 func (s *RecognitionStore) Complete(c context.Context, done r.Completion) error {
-	tx, e := s.db.BeginTxx(c, nil)
+	tx, e := s.db.BeginTxx(c, claimTx)
 	if e != nil {
 		return e
 	}
@@ -471,6 +478,14 @@ func (s *RecognitionStore) Complete(c context.Context, done r.Completion) error 
 		}
 	}
 	status := v.Complete(done)
+	text, alarm := v.AlarmNotification(done.Work.ItemIndex, done.Work.Stage)
+	var disposition string
+	if alarm {
+		var err error
+		if disposition, err = s.recordAlarm(c, tx, v.Task.DeviceID, row.Bind, v.Task.ID+":alarm", text, v.Task.CreatedAt); err != nil {
+			return err
+		}
+	}
 	_, e = tx.ExecContext(c, `UPDATE recognition_call SET status=?,usage_json=?,finished_at=UTC_TIMESTAMP(6) WHERE task_id=? AND item_id=? AND stage=?`, status, recJSON(done.Usage), row.ID, x.ID, done.Work.Stage)
 	if e != nil {
 		return e
@@ -483,7 +498,22 @@ func (s *RecognitionStore) Complete(c context.Context, done r.Completion) error 
 			return e
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if alarm {
+		s.alarm.Add(1)
+		if disposition != "" {
+			s.outcomes.add("produced_"+disposition, 1)
+		}
+	}
+	return nil
+}
+
+func (s *RecognitionStore) NotificationMetrics() map[string]int64 {
+	m := s.outcomes.metrics("recognition_notification_")
+	m["recognition_alarm_total"] = s.alarm.Load()
+	return m
 }
 func (s *RecognitionStore) Recover(c context.Context) error {
 	tx, e := s.db.BeginTxx(c, claimTx)

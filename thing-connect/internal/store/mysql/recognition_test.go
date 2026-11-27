@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"thing-connect/internal/push"
 	r "thing-connect/internal/recognition"
 	m "thing-connect/internal/store/mysql"
 	adminmysql "thing-connect/internal/store/mysql/admin"
@@ -24,6 +25,9 @@ func TestRecognitionDurableOrderQuotaAndOwnership(t *testing.T) {
 	}
 	defer cleanBind(t, db, id)
 	store := m.NewRecognitionStore(db)
+	if err := store.ConfigureSource(context.Background(), push.DefaultDeliveryPolicy(), 0, true); err != nil {
+		t.Fatal(err)
+	}
 	actor := r.Actor{UserID: uid}
 	state, e := store.State(ctx, actor, id)
 	if e != nil || state.Policy.Enabled {
@@ -36,6 +40,10 @@ func TestRecognitionDurableOrderQuotaAndOwnership(t *testing.T) {
 			mode = "audio"
 		}
 		s := r.Scheme{ID: typ, Version: 1, Revision: 1, Name: "声音分析", MediaType: "audio", Model: "qwen3-omni-flash", Prompt: "分析声音", OutputMode: mode, Voice: "Cherry", Enabled: true, Limits: r.Limits{MaxFileBytes: 5 << 20, MaxAudioSeconds: 15}}
+		s.EventLabels = map[string][]string{"crying": {"crying"}}
+		if i == 1 {
+			s.EventLabels["quarrel"] = []string{"arguing"}
+		}
 		raw, _ := json.Marshal(s)
 		if _, e = db.Exec(`INSERT INTO recognition_scheme(id,revision,version,enabled,draft) VALUES(?,1,1,TRUE,?)`, typ, string(raw)); e != nil {
 			t.Fatal(e)
@@ -48,6 +56,7 @@ func TestRecognitionDurableOrderQuotaAndOwnership(t *testing.T) {
 		db.Exec(`DELETE a FROM recognition_audio a JOIN recognition_task t ON t.id=a.task_id WHERE t.device_id=?`, id)
 		db.Exec(`DELETE c FROM recognition_call c JOIN recognition_task t ON t.id=c.task_id WHERE t.device_id=?`, id)
 		db.Exec(`DELETE FROM recognition_task WHERE device_id=?`, id)
+		db.Exec(`DELETE FROM recognition_user_event_outbox WHERE device_id=?`, id)
 		db.Exec(`DELETE FROM recognition_outbox WHERE device_id=?`, id)
 		db.Exec(`DELETE FROM recognition_device WHERE device_id=?`, id)
 		for _, typ := range ids {
@@ -62,19 +71,7 @@ func TestRecognitionDurableOrderQuotaAndOwnership(t *testing.T) {
 	if _, e = db.Exec(`UPDATE recognition_device SET policy=JSON_SET(policy,'$.monthly_limit',2) WHERE device_id=?`, id); e != nil {
 		t.Fatal(e)
 	}
-	audio := make([]byte, 16044)
-	copy(audio, "RIFF")
-	binary.LittleEndian.PutUint32(audio[4:], 16036)
-	copy(audio[8:], "WAVEfmt ")
-	binary.LittleEndian.PutUint32(audio[16:], 16)
-	binary.LittleEndian.PutUint16(audio[20:], 1)
-	binary.LittleEndian.PutUint16(audio[22:], 1)
-	binary.LittleEndian.PutUint32(audio[24:], 8000)
-	binary.LittleEndian.PutUint32(audio[28:], 16000)
-	binary.LittleEndian.PutUint16(audio[32:], 2)
-	binary.LittleEndian.PutUint16(audio[34:], 16)
-	copy(audio[36:], "data")
-	binary.LittleEndian.PutUint32(audio[40:], 16000)
+	audio := recognitionTestAudio()
 	req := r.Request{ID: "same-request", Revision: state.Policy.Revision, MediaType: "audio", Data: audio}
 	t.Run("concurrent retries create and charge once", func(t *testing.T) {
 		var wg sync.WaitGroup
@@ -187,7 +184,7 @@ func TestRecognitionDurableOrderQuotaAndOwnership(t *testing.T) {
 	if t.Failed() {
 		return
 	}
-	result := &r.Result{Summary: "疑似哭声", Alarm: true, Labels: []string{"crying"}, Details: map[string]any{}}
+	result := &r.Result{Summary: "疑似哭声", Alarm: true, Labels: []string{"crying", "arguing"}, Details: map[string]any{}}
 	if e = store.Complete(ctx, r.Completion{Work: *w, Result: result}); e != nil {
 		t.Fatal(e)
 	}
@@ -344,6 +341,24 @@ func TestRecognitionDurableOrderQuotaAndOwnership(t *testing.T) {
 	if _, e = store.Get(ctx, r.Actor{DeviceID: id}, id, "same-request"); !errors.Is(e, r.ErrNotFound) {
 		t.Fatal("old ownership leaked", e)
 	}
+	t.Run("completed alarm events keep original binding after rebind", func(t *testing.T) {
+		batch, err := store.ClaimUserEvents(ctx, 1)
+		if err != nil || len(batch) != 1 {
+			t.Fatal(batch, err)
+		}
+		ev := batch[0].Event
+		if ev.Kind != "alarm" || ev.LabelText != "crying、arguing" || ev.Device != id || ev.ID != "same-request:"+ev.Kind || ev.Occurred.IsZero() || ev.Bind == "" || ev.Validate() != nil {
+			t.Fatal(ev)
+		}
+		batch[0].Outcome = "stale_binding"
+		if err := store.FinishUserEvents(ctx, batch); err != nil {
+			t.Fatal(err)
+		}
+		extra, err := store.ClaimUserEvents(ctx, 1)
+		if len(extra) != 0 || err != nil {
+			t.Fatal(extra, err)
+		}
+	})
 	state, e = store.State(ctx, actor, id)
 	if e != nil || state.Policy.Enabled {
 		t.Fatal("new binding not reset", e)
@@ -523,4 +538,21 @@ func TestRecognitionUnboundDeviceAndForeignUserErrors(t *testing.T) {
 	if _, err := store.State(ctx, r.Actor{DeviceID: id}, id+"other"); !errors.Is(err, r.ErrForbidden) {
 		t.Fatal(err)
 	}
+}
+
+func recognitionTestAudio() []byte {
+	audio := make([]byte, 16044)
+	copy(audio, "RIFF")
+	binary.LittleEndian.PutUint32(audio[4:], 16036)
+	copy(audio[8:], "WAVEfmt ")
+	binary.LittleEndian.PutUint32(audio[16:], 16)
+	binary.LittleEndian.PutUint16(audio[20:], 1)
+	binary.LittleEndian.PutUint16(audio[22:], 1)
+	binary.LittleEndian.PutUint32(audio[24:], 8000)
+	binary.LittleEndian.PutUint32(audio[28:], 16000)
+	binary.LittleEndian.PutUint16(audio[32:], 2)
+	binary.LittleEndian.PutUint16(audio[34:], 16)
+	copy(audio[36:], "data")
+	binary.LittleEndian.PutUint32(audio[40:], 16000)
+	return audio
 }

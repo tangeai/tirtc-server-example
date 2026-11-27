@@ -126,7 +126,7 @@ Python 模拟器支持设备上线、用户绑定、MQTT 长连接和实时音�
 
 #### [thing-connect/](./thing-connect)
 
-一套覆盖**远程实时查看、AI 对讲、微信 VoIP 呼叫、设备间互呼和后台管理**的 IoT 系统，包含六个业务服务及一个 Admin Server：
+一套覆盖**远程实时查看、AI 对讲、微信 VoIP 呼叫、设备间互呼、小程序异常提醒和后台管理**的 IoT 系统，包含七个业务服务及一个 Admin Server：
 
 | 子项目 | 说明 |
 |---|---|
@@ -136,9 +136,10 @@ Python 模拟器支持设备上线、用户绑定、MQTT 长连接和实时音�
 | **ai-server** | AI 对话服务：签发 TiRTC AI 连接 token，供设备接入 AI 语音对话 |
 | **call-server** | 设备间音视频通话服务：联系人、呼叫信令和房间管理 |
 | **recognition-server** | 音频识别服务：识别类型、异步分析、结果通知和语音合成 |
+| **push-server** | 将 AI 识别出的异常通过微信长期订阅消息通知设备主人 |
 | **admin-server/admin-web** | 用户、设备、权限、菜单、字典、动态配置、服务状态和审计管理 |
 
-七个服务共用 MySQL 和 Redis，需要 MQTT 的业务服务连接同一个 Broker。设备通过 MQTT 保持长连接，微信 VoIP 和设备互呼的来电通知通过 MQTT 下发；AI 对讲由设备从 `ai-server` 获取 token，再通过 TiRTC 主动建连。服务架构与接口详情见 [thing-connect/README.md](./thing-connect/README.md)，完整自托管步骤见 [部署指南](./thing-connect/deployment.md)。
+八个服务共用 MySQL 和 Redis，需要 MQTT 的业务服务连接同一个 Broker。设备通过 MQTT 保持长连接，微信 VoIP 和设备互呼的来电通知通过 MQTT 下发；AI 对讲由设备从 `ai-server` 获取 token，再通过 TiRTC 主动建连。服务架构与接口详情见 [thing-connect/README.md](./thing-connect/README.md)，完整自托管步骤见 [部署指南](./thing-connect/deployment.md)。
 
 ### 依赖平台
 

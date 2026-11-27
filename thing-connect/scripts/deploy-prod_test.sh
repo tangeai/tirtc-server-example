@@ -660,7 +660,7 @@ BASH
 )
 
 test_full_deploy_starts_admin_before_business_services() {
-    assert_eq "admin-server device-server user-server voip-server ai-server call-server recognition-server" "$(select_all)" \
+    assert_eq "admin-server device-server user-server voip-server ai-server call-server recognition-server push-server" "$(select_all)" \
         "full deploy must make Admin available before business service startup"
 }
 

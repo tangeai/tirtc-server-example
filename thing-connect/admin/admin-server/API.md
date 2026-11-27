@@ -27,7 +27,7 @@ Content-Type: application/json
 
 `draft.database` 必须同时提供迁移账号和运行账号的用户名、密码，允许两者使用同一账号。生产环境建议使用独立的 DML 运行账号。迁移账号只用于初始化不存在或无表的专用库。`preview` 在不选择目标数据库、不执行写入的情况下验证运行账号能否登录；安装阶段等表结构就绪后，再用零行语句验证 DML 权限。
 
-运行账号会写入生成的服务配置。安装器生成六个业务服务的基础配置，但不启动任何业务服务。`draft.optional_services` 和 `draft.mqtt` 只为旧客户端保留解码兼容，服务端会忽略其值。密码字段都是只写输入，不会出现在计划或状态响应中。
+运行账号会写入生成的服务配置。安装器生成七个业务服务的基础配置，但不启动任何业务服务。`draft.optional_services` 和 `draft.mqtt` 只为旧客户端保留解码兼容，服务端会忽略其值。密码字段都是只写输入，不会出现在计划或状态响应中。
 
 `GET /v1/setup/status` 的 `available_services[]` 来自服务清单，包含 `name`、`display_name`、`business`、`required` 和 `uses_mqtt`。页面将业务服务标记为“安装后配置”。
 
@@ -56,7 +56,7 @@ Redis 或 MySQL 连接预检失败时返回 `503`，`msg` 只标识失败依赖�
 }
 ```
 
-安装状态中的顶层 `problem` 使用相同结构。`services[]` 表示安装器为六个业务服务生成基础配置的进度，不表示它们已启动。原始进程输出和依赖错误不进入状态响应。
+安装状态中的顶层 `problem` 使用相同结构。`services[]` 表示安装器为七个业务服务生成基础配置的进度，不表示它们已启动。原始进程输出和依赖错误不进入状态响应。
 
 所有响应设置 `Cache-Control: no-store`。安装令牌、数据库/Redis 密码、首个管理员密码和生成密钥不出现在状态响应中。安装完成后写接口返回 `410`；重新授权只能在服务器本地执行部署流程，普通配置错误不会重新开放这些接口。
 
@@ -300,6 +300,10 @@ Device、User、VoIP、Call、Recognition 的 `mqtt.connection` 支持连接测�
 
 `user-server/captcha` 的 `provider` 在 `yidun`、`geetest`、`aliyun` 和 `tencent` 之间切换。Provider 发生变化时，写请求必须同时提交新供应商要求的完整 `secrets`；服务端不会合并或复用旧供应商的密钥。Provider 不变时，留空的密钥字段继续保留原值。
 
+`push-server/wechat.notifications` 作用域为 global，目标为 push-server，发布后运行时应用。公开值包含 `app_id`、`page`、`suggested_seconds`（0–86400）、`max_attempts`（1–10）和 `backlog_seconds`（1–86400）。`alarm` 为 AI 异常提醒配置，包含可选的自由文本标签字段名 `label_key` 以及 `enabled`、`template_id`、`time_key`、`device_key`、`hint_key`、`hint`、`location_key`、`location`。空字段名省略该字段；同一模板配置内字段名应唯一。密钥字段为 `secrets.app_secret`。变更 AppID 时，启用的提醒需要同时提供新密钥。首次发布前服务使用本地 YAML 回退值。
+
+`push-server/event.delivery_policy` 为无密钥 global 配置，识别与推送服务运行时应用。`enabled` 控制来源，`event_ttl_seconds` 为 30–600 秒，`source_max_attempts` 为 1–10 次（含首次）。`source_capacity` 和 `delivery_capacity` 均为 32–1000000，`wechat_requests_per_second` 为 1–10000。已有任务沿用登记时的截止和次数上限。
+
 内部读取接口为：
 
 ```http
@@ -330,6 +334,8 @@ X-Internal-Key: <shared-internal-key>
 | GET | `/v1/admin/recognition/requests?device_id=...` | recognition.read | 最近50条任务及逐次 calls；设备可省略 |
 | GET | `/v1/admin/devices/:device_id/recognition` | device.read | 用户选择、开关与月用量 |
 | PUT | `/v1/admin/devices/:device_id/recognition` | device.recognition.write | 管理许可与月额度 |
+
+成功的分析子项以内部结果的 `alarm=true` 触发异常提醒。模型标签用于通知内容。旧识别类型的 `scheme.event_labels` 仅供兼容读取。
 
 任务记录中的 `task` 使用与[设备识别任务](../../api-reference.md#recognition-task)一致的公开结果结构，包含发布版本名称 `results[].name`、类型整体状态 `results[].overall_status`；纯语音类型不返回内部分析文字。`calls` 单独保留逐阶段调用状态和用量，不以任务整体状态代替计费记录。
 

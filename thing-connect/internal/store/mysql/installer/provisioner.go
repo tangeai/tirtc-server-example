@@ -34,7 +34,8 @@ var managedTableNames = []string{
 	"board_resources", "ai_role_types",
 	"device_profile", "device_connection", "user_connection", "ai_recognition_policy", "ai_recognition_request",
 	"recognition_scheme", "recognition_scheme_version", "recognition_device",
-	"recognition_task", "recognition_audio", "recognition_call", "recognition_outbox",
+	"recognition_task", "recognition_audio", "recognition_call", "recognition_outbox", "recognition_user_event_outbox",
+	"push_event", "push_session", "push_recipient", "push_subscription", "push_window", "push_delivery", "push_channel_limit", "push_queue_bucket", "recognition_push_target",
 	"admin_users", "admin_roles", "admin_user_roles", "admin_role_permissions",
 	"admin_menus", "admin_role_menus", "admin_sessions", "admin_mfa_factors",
 	"admin_mfa_recovery_codes", "admin_login_log", "admin_dict_types", "admin_dict_items",
@@ -53,6 +54,7 @@ var optionalRuntimeServices = map[string]bool{
 	"ai-server":          true,
 	"call-server":        true,
 	"recognition-server": true,
+	"push-server":        true,
 }
 
 type Provisioner struct{}

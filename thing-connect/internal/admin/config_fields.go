@@ -9,7 +9,13 @@ func defaultConfigFields(namespace, key string) []ConfigFieldDefinition {
 			booleanConfigField("allow_switch", "允许用户切换语言", "开启时优先使用用户手动选择；关闭时使用本服务默认语言。发布后在下次打开页面时生效。"),
 		}
 	}
+	if namespace == "push-server" && key == "wechat.notifications" {
+		return notificationFields()
+	}
 	fields := map[string][]ConfigFieldDefinition{
+		definitionID("push-server", "event.delivery_policy"): {
+			booleanConfigField("enabled", "启用异常事件", "关闭后旧事件不会补发。"), numberConfigField("event_ttl_seconds", "报警有效期（30–600 秒）"), numberConfigField("source_capacity", "来源待发容量（32–1000000）"), numberConfigField("delivery_capacity", "微信待发容量（32–1000000）"), numberConfigField("wechat_requests_per_second", "每个 AppID 每秒发送预算（1–10000）"), numberConfigField("source_max_attempts", "来源投递次数（1–10，含首次）"),
+		},
 		definitionID("user-server", "web.site"): {
 			textConfigField("name", "站点名称", "最多 40 个字符，用于首页与开发板页面的品牌名称。"),
 			optionalConfigField(textConfigField("name_en", "英文站点名称", "留空时沿用站点名称；发布后在下次打开页面时生效。")),
@@ -235,4 +241,31 @@ func blockingConfigField(field ConfigFieldDefinition) ConfigFieldDefinition {
 func providerConfigField(field ConfigFieldDefinition, providers ...string) ConfigFieldDefinition {
 	field.Providers = providers
 	return field
+}
+
+func notificationFields() []ConfigFieldDefinition {
+	suggested := numberConfigField("suggested_seconds", "设置页建议间隔（秒）")
+	zero := float64(0)
+	suggested.Min = &zero
+	fields := []ConfigFieldDefinition{
+		optionalConfigField(textConfigField("app_id", "小程序 AppID", "填写接收提醒的小程序 AppID")),
+		secretConfigField("app_secret", "小程序 AppSecret", "仅在服务端使用，更换 AppID 时同步更换密钥"),
+		optionalConfigField(textConfigField("page", "通知跳转页", "填写已发布的小程序页面路径，服务端追加 ref 参数；留空则省略跳转页")),
+		suggested, numberConfigField("max_attempts", "明确可重试时最多尝试次数（1–10）"), numberConfigField("backlog_seconds", "投递积压告警阈值（秒）"),
+	}
+	prefix := "alarm."
+	fields = append(fields, booleanConfigField(prefix+"enabled", "启用 AI 异常提醒", "开启前请配置模板及字段"))
+	for _, f := range []struct{ id, label, help string }{
+		{"template_id", "长期模板 ID", "异常事件共用一个长期模板"},
+		{"label_key", "模型标签字段", "仅填写获批的自由文本字段（如 thing5）；模板 27919 留空，标签在提醒详情展示"},
+		{"time_key", "报警时间字段", "例如 time1，留空省略"},
+		{"device_key", "设备编号字段", "例如 character_string4，留空省略"},
+		{"hint_key", "提示说明字段", "例如 enum_string3，留空省略"},
+		{"hint", "提示说明值", "使用模板允许的值"},
+		{"location_key", "所在位置字段", "例如 enum_string2，留空省略"},
+		{"location", "所在位置值", "使用模板允许的值"},
+	} {
+		fields = append(fields, optionalConfigField(textConfigField(prefix+f.id, f.label, f.help)))
+	}
+	return fields
 }

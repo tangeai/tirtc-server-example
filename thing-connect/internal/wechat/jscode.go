@@ -62,6 +62,6 @@ func Jscode2session(ctx context.Context, appID, secret, code string) (openid str
 	if r.Openid == "" {
 		return "", fmt.Errorf("wechat: empty openid in response")
 	}
-	slog.DebugContext(ctx, "wechat jscode2session resp", "status", res.StatusCode, "openid", r.Openid)
+	slog.DebugContext(ctx, "wechat jscode2session resp", "status", res.StatusCode)
 	return r.Openid, nil
 }
