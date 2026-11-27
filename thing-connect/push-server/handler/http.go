@@ -99,25 +99,26 @@ func Register(engine *gin.Engine, current func() *push.Service, key, secret stri
 		s := current()
 		apiresp.OK(c, gin.H{"alarm": s.Enabled("alarm"), "crying": s.Enabled("crying"), "quarrel": s.Enabled("quarrel")})
 	})
-	for _, method := range []string{"GET", "PUT", "DELETE"} {
-		u.Handle(method, "/preferences/:device/:kind", func(c *gin.Context) {
-			kind := c.Param("kind")
-			if kind != "alarm" && kind != "crying" && kind != "quarrel" {
-				write(c, nil, push.ErrInvalid)
-				return
-			}
-			var input struct {
-				Seconds *int `json:"interval_seconds"`
-			}
-			if c.Request.Method == "PUT" && (c.ShouldBindJSON(&input) != nil || input.Seconds == nil || *input.Seconds < 0 || *input.Seconds > 86400) {
-				write(c, nil, push.ErrInvalid)
-				return
-			}
-			s := current()
-			val, err := s.Preference(c.Request.Context(), c.GetInt64("user"), c.Param("device"), kind, c.Request.Method != "GET", input.Seconds)
-			write(c, gin.H{"interval_seconds": val, "enabled": s.Enabled(kind), "suggested_seconds": s.SuggestedSeconds(), "template_id": s.TemplateID(kind)}, err)
-		})
+	preference := func(c *gin.Context) {
+		kind := c.Param("kind")
+		if kind != "alarm" && kind != "crying" && kind != "quarrel" {
+			write(c, nil, push.ErrInvalid)
+			return
+		}
+		var input struct {
+			Seconds *int `json:"interval_seconds"`
+		}
+		if c.Request.Method == "PUT" && (c.ShouldBindJSON(&input) != nil || input.Seconds == nil || *input.Seconds < 0 || *input.Seconds > 86400) {
+			write(c, nil, push.ErrInvalid)
+			return
+		}
+		s := current()
+		val, err := s.Preference(c.Request.Context(), c.GetInt64("user"), c.Param("device"), kind, c.Request.Method != "GET", input.Seconds)
+		write(c, gin.H{"interval_seconds": val, "enabled": s.Enabled(kind), "suggested_seconds": s.SuggestedSeconds(), "template_id": s.TemplateID(kind)}, err)
 	}
+	u.GET("/preferences/:device/:kind", preference)
+	u.PUT("/preferences/:device/:kind", preference)
+	u.DELETE("/preferences/:device/:kind", preference)
 	u.POST("/subscriptions", func(c *gin.Context) {
 		var b struct {
 			App  string `json:"app_id"`

@@ -7652,19 +7652,155 @@ speech.url 为识别服务相对路径，相对 recognition-srv 解析，并携�
 
 小程序通过同源 `/v1/push/user` 调用通知服务。以下入口均使用当前用户 JWT，成功响应沿用 code=200 的标准信封。首次订阅依次执行身份识别、确认关联、微信订阅弹窗和结果登记。
 
-| 方法与路径（相对 /v1/push/user） | 请求和响应 |
-|---|---|
-| GET /capabilities | alarm 表示 AI 异常提醒是否启用；crying、quarrel 兼容旧客户端 |
-| GET /preferences/:device/:kind | 返回 interval_seconds（未设置为 null）、enabled、template_id 和 suggested_seconds。AI 异常提醒的 kind 为 alarm，已启用时展示授权入口 |
-| PUT /preferences/:device/:kind | 提交整数 interval_seconds，范围 0 至 86400。0 表示每次提醒 |
-| DELETE /preferences/:device/:kind | 恢复未设置。客户端按 suggested_seconds 预填（默认 60），保存后生效 |
-| POST /subscriptions | 提交 app_id、wx.login 取得的 code 和 event_type，返回 session_id、replace、template_id。会话有效 5 分钟 |
-| POST /subscriptions/:id/confirm | 提交 replace 布尔值。发生关联冲突须先让用户确认；取消时结束交互。确认成功后由用户点击打开微信订阅弹窗 |
-| POST /subscriptions/:id/result | 提交 decision（accept、reject、cancel）。同一会话重复回报复用结果。长期订阅按微信身份和模板生效 |
-| GET /references/:id | 登录用户仍拥有原绑定设备且提醒未满 72 小时时返回 device_id、label_text（模型标签展示文本，可能为空）；否则返回 410/41000 |
-
 同一接收身份和模板以较新会话提交的同意或拒绝为准。取消只登记本次会话，保留当前长期授权及其决定序号。较旧会话首次回报取消时，若较新会话已有同意或拒绝决定，返回 409/40901。在会话有效期内重报已经保存的相同决定返回成功。回报遇到 409/40901（身份或决定已变化）或 410/41000（会话已过期）时，重新发起订阅。临时网络错误可重试原会话回报。其他错误包括 400/40000 参数无效、401/401 登录无效、403/40300 无权访问设备、503/50300 微信订阅暂不可用。
 
-识别服务经内网 POST /v1/push/internal/events，使用 X-Internal-Key。请求字段为 source_event_id（request_id:事件类型）、device_id、bind_id、event_type、registered_at、occurred_at 和可选 label_text（最多 256 字）。新事件类型为 alarm，编号为 request_id:alarm。一次请求仅登记首个成功且 alarm=true 的分析子项，标签只用于展示。时间采用 RFC 3339。响应 data.outcome 为 queued、interval、unsubscribed 或 unconfigured。来源传递 expires_at（RFC 3339）；旧请求从 occurred_at 和回退有效期计算截止。重报复用首次结果。来源代次失效为 410/6006，按音频受理时刻计算已过发送截止的未受理事件为 410/41000，幂等内容冲突为 409/40901。公网代理拒绝内部入口。
+| 接口 | 调用方 | 方法 | 路径 | 鉴权 |
+|---|---|---|---|---|
+| [查询提醒能力](#push-get-user-capabilities) | 小程序 | GET | `/v1/push/user/capabilities` | 用户 JWT |
+| [读取提醒间隔](#push-get-user-preferences-device-kind) | 小程序 | GET | `/v1/push/user/preferences/:device/:kind` | 用户 JWT |
+| [保存提醒间隔](#push-put-user-preferences-device-kind) | 小程序 | PUT | `/v1/push/user/preferences/:device/:kind` | 用户 JWT |
+| [重置提醒间隔](#push-delete-user-preferences-device-kind) | 小程序 | DELETE | `/v1/push/user/preferences/:device/:kind` | 用户 JWT |
+| [创建订阅会话](#push-post-user-subscriptions) | 小程序 | POST | `/v1/push/user/subscriptions` | 用户 JWT |
+| [确认接收身份](#push-post-user-subscriptions-id-confirm) | 小程序 | POST | `/v1/push/user/subscriptions/:id/confirm` | 用户 JWT |
+| [登记订阅决定](#push-post-user-subscriptions-id-result) | 小程序 | POST | `/v1/push/user/subscriptions/:id/result` | 用户 JWT |
+| [打开提醒详情](#push-get-user-references-id) | 小程序 | GET | `/v1/push/user/references/:id` | 用户 JWT |
+| [登记来源事件](#push-post-internal-events) | 内部服务 | POST | `/v1/push/internal/events` | X-Internal-Key |
+| [核对来源事件](#push-get-internal-events) | 内部服务 | GET | `/v1/push/internal/events` | X-Internal-Key |
+| [探测内部鉴权](#push-get-internal-auth) | 内部服务 | GET | `/v1/push/internal/auth` | X-Internal-Key |
 
-来源事件进入只读核对状态时，发布器通过内部 GET /v1/push/internal/events 查询 push 是否已经登记该事件。使用同一 X-Internal-Key 和查询字段 device_id、bind_id、source_event_id；成功返回 data.outcome，未登记返回 404/40400。该查询不创建任务。创建型 POST 达到硬容量上限时返回 HTTP 429、业务码 42921 和 outcome=skipped_overload，调用方按终态收尾。GET 核对同一处置返回 200。GET /v1/push/internal/auth 使用相同鉴权，凭证有效返回 204。两条路径均仅供内网。
+<a id="push-get-user-capabilities"></a>
+
+### 查询提醒能力
+
+**接口**：`GET /v1/push/user/capabilities`
+
+**调用方**：小程序。
+
+alarm 表示 AI 异常提醒是否启用；crying、quarrel 兼容旧客户端
+
+<a id="push-get-user-preferences-device-kind"></a>
+
+### 读取提醒间隔
+
+**接口**：`GET /v1/push/user/preferences/:device/:kind`
+
+**调用方**：小程序。
+
+| 路径参数 | 说明 |
+|---|---|
+| `device` | 设备编号 |
+| `kind` | 提醒类型，AI 异常提醒使用 alarm |
+
+返回 interval_seconds（未设置为 null）、enabled、template_id 和 suggested_seconds。AI 异常提醒的 kind 为 alarm，已启用时展示授权入口
+
+<a id="push-put-user-preferences-device-kind"></a>
+
+### 保存提醒间隔
+
+**接口**：`PUT /v1/push/user/preferences/:device/:kind`
+
+**调用方**：小程序。
+
+| 路径参数 | 说明 |
+|---|---|
+| `device` | 设备编号 |
+| `kind` | 提醒类型，AI 异常提醒使用 alarm |
+
+提交整数 interval_seconds，范围 0 至 86400。0 表示每次提醒
+
+<a id="push-delete-user-preferences-device-kind"></a>
+
+### 重置提醒间隔
+
+**接口**：`DELETE /v1/push/user/preferences/:device/:kind`
+
+**调用方**：小程序。
+
+| 路径参数 | 说明 |
+|---|---|
+| `device` | 设备编号 |
+| `kind` | 提醒类型，AI 异常提醒使用 alarm |
+
+恢复未设置。客户端按 suggested_seconds 预填（默认 60），保存后生效
+
+<a id="push-post-user-subscriptions"></a>
+
+### 创建订阅会话
+
+**接口**：`POST /v1/push/user/subscriptions`
+
+**调用方**：小程序。
+
+提交 app_id、wx.login 取得的 code 和 event_type，返回 session_id、replace、template_id。会话有效 5 分钟
+
+<a id="push-post-user-subscriptions-id-confirm"></a>
+
+### 确认接收身份
+
+**接口**：`POST /v1/push/user/subscriptions/:id/confirm`
+
+**调用方**：小程序。
+
+| 路径参数 | 说明 |
+|---|---|
+| `id` | 创建订阅会话时返回的 session_id |
+
+提交 replace 布尔值。发生关联冲突须先让用户确认；取消时结束交互。确认成功后由用户点击打开微信订阅弹窗
+
+<a id="push-post-user-subscriptions-id-result"></a>
+
+### 登记订阅决定
+
+**接口**：`POST /v1/push/user/subscriptions/:id/result`
+
+**调用方**：小程序。
+
+| 路径参数 | 说明 |
+|---|---|
+| `id` | 创建订阅会话时返回的 session_id |
+
+提交 decision（accept、reject、cancel）。同一会话重复回报复用结果。长期订阅按微信身份和模板生效
+
+<a id="push-get-user-references-id"></a>
+
+### 打开提醒详情
+
+**接口**：`GET /v1/push/user/references/:id`
+
+**调用方**：小程序。
+
+| 路径参数 | 说明 |
+|---|---|
+| `id` | 通知跳转参数 ref |
+
+登录用户仍拥有原绑定设备且提醒未满 72 小时时返回 device_id、label_text（模型标签展示文本，可能为空）；否则返回 410/41000
+
+<a id="push-post-internal-events"></a>
+
+### 登记来源事件
+
+**接口**：`POST /v1/push/internal/events`
+
+**调用方**：内部服务。
+
+识别服务经内网 POST /v1/push/internal/events，使用 X-Internal-Key。请求字段为 source_event_id（request_id:事件类型）、device_id、bind_id、event_type、registered_at、occurred_at 和可选 label_text（最多 256 字）。新事件类型为 alarm，编号为 request_id:alarm。一次请求仅登记首个成功且 alarm=true 的分析子项，标签只用于展示。时间采用 RFC 3339。响应 data.outcome 为 queued、interval、unsubscribed 或 unconfigured。来源传递 expires_at（RFC 3339）；旧请求从 occurred_at 和回退有效期计算截止。重报复用首次结果。来源代次失效为 410/6006，按音频受理时刻计算已过发送截止的未受理事件为 410/41000，幂等内容冲突为 409/40901。公网代理拒绝内部入口。 达到硬容量上限返回 HTTP 429、业务码 42921 和 outcome=skipped_overload。
+
+<a id="push-get-internal-events"></a>
+
+### 核对来源事件
+
+**接口**：`GET /v1/push/internal/events`
+
+**调用方**：内部服务。
+
+来源处于只读核对状态时，使用查询参数 device_id、bind_id、source_event_id 核对已登记处置。成功返回 data.outcome（含 skipped_overload），未登记返回 404/40400。查询不创建任务。
+
+<a id="push-get-internal-auth"></a>
+
+### 探测内部鉴权
+
+**接口**：`GET /v1/push/internal/auth`
+
+**调用方**：内部服务。
+
+识别服务在内部鉴权暂停期间使用此接口探测。凭证有效返回 HTTP 204，鉴权失败返回 403/40301。
