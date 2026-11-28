@@ -394,3 +394,9 @@ page,.h5-body,body{margin:0;background:#f7f7f7;color:#191919;font-family:-apple-
 
 .page .role-list-delete{flex-shrink:0;width:auto;margin:0;padding:0 8px;min-height:80px;border:0;background:transparent;color:#b43c37;font-size:26px;line-height:80px}
 .role-list-delete:after{border:0}
+
+.role-region-value{display:flex;align-items:center;min-height:72px;color:#525e56}
+.role-region-options{display:flex;align-items:stretch;min-height:72px;padding:4px;box-sizing:border-box;background:#e8ece9;border-radius:12px}
+.page .role-region-option{flex:1;min-width:0;width:auto;margin:0;padding:0 4px;background:transparent;border-radius:9px;color:#465249;font-size:26px;line-height:64px}
+.role-region-option:after{border:0}
+.page .role-region-option.selected{background:#fff;color:#175c39;font-weight:600;box-shadow:0 1px 4px #20382926}

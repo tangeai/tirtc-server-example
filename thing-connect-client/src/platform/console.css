@@ -180,4 +180,4 @@ body,.taro_page { background:#f4f6f5 }
   .devices-page .device-title-row .device-name-setup{font-size:14PX;gap:2PX}
 }
 
-.page .role-editor-toolbar{top:52PX;background:#f4f6f5}
+.page .role-editor-toolbar{top:0;background:#f4f6f5}
