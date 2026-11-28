@@ -37,7 +37,7 @@ export default function Recognition() {
         change={schemes => void save(schemes)} />
       <Text className='settings-footnote'>开启任一类型即可识别，全部关闭即停止。修改后自动保存。</Text>
     </View>
-      {conflict && <Notice error>设备配置已更新，请重新加载后再修改。</Notice>}
+      {conflict && <Notice error>设备配置已更新，点「刷新」后再修改。</Notice>}
       {process.env.TARO_ENV === 'weapp' && w.device && <RecognitionReminders key={w.device.device_id} device={w.device.device_id} enabled={w.value.config.policy.enabled} />}
       <View className='settings-section'><View className='card'><View className='row between'>
         <Text>本月识别用量</Text><Text className='recognition-usage-value'>{w.value.config.usage.used} / {w.value.config.policy.monthly_limit} 次</Text>

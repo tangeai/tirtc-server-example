@@ -312,3 +312,5 @@ page,.h5-body,body{margin:0;background:#f7f7f7;color:#191919;font-family:-apple-
 .settings-chevron{flex-shrink:0;width:11px;height:11px;border-top:3px solid #a5a6ad;border-right:3px solid #a5a6ad;transform:rotate(45deg)}
 .settings-page .reminder-page{margin:0}
 .settings-page .scheme-list,.settings-page .reminder-settings{gap:0}
+
+.settings-page .sheet>.title{min-width:0;white-space:normal;overflow-wrap:anywhere;word-break:break-all}

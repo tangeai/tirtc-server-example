@@ -11,7 +11,7 @@ interface Entry extends Role { id: string; preset?: boolean; unavailable?: boole
 interface Binding { role_id: string; default_role_id: string }
 interface Workspace { roles: Entry[]; binding: Binding; voices: Voice[] }
 export default function Roles() {
-  const [selected, setSelected] = useState<Entry>(), [draft, setDraft] = useState<RoleDraft>(), [search, setSearch] = useState(''), [notice, setNotice] = useState('');
+  const [selected, setSelected] = useState<Entry>(), [draft, setDraft] = useState<RoleDraft>(), [search, setSearch] = useState('');
   const w = useDeviceWorkspace<Workspace>(async id => {
     const [owned, binding, voices] = await Promise.all([request<{ items: Entry[] }>('/v1/ai/roles'), request<Binding>(url(id)), request<{ items: Voice[] }>('/v1/ai/voices')]);
     let roles = owned.items || [];
@@ -32,8 +32,16 @@ export default function Roles() {
   const active = w.value?.binding.role_id || w.value?.binding.default_role_id;
   async function edit(role?: Entry) {
     await w.run(async () => {
+      if (role) {
+        setSelected(role);
+        setDraft(undefined);
+      }
       const full: Entry = role ? role.preset ? role : { ...role, ...await request<Role>('/v1/ai/roles/' + encodeURIComponent(role.id)) } : { id: '', name: '' };
-      if (w.alive.current) { setSelected(full); setDraft(draftOf(full)); setNotice(''); void Taro.pageScrollTo({ scrollTop: 0, duration: 0 }); }
+      if (w.alive.current) {
+        setSelected(full);
+        setDraft(draftOf(full));
+        void Taro.pageScrollTo({ scrollTop: 0, duration: 0 });
+      }
     });
   }
   async function closeEditor() {
@@ -55,7 +63,7 @@ export default function Roles() {
       if (!id) throw new Error('保存结果暂不可用，请重新加载角色列表');
       const saved: Entry = { ...selected, ...payload, ...result, id };
       w.commit({ ...w.value!, roles: [...w.value!.roles.filter(r => r.id !== id), saved] }); devicesChanged();
-      if (w.alive.current) { setSelected(saved); setDraft(draftOf(saved)); setNotice('角色已保存'); }
+      if (w.alive.current) { setSelected(saved); setDraft(draftOf(saved)); void Taro.showToast({ title: '角色已保存', icon: 'success' }); }
     });
   }
   async function useRole(role: Entry) {
@@ -65,7 +73,6 @@ export default function Roles() {
       if (!answer.confirm || !w.alive.current) return;
       await request(url(w.device!.device_id), role.preset ? 'DELETE' : 'PUT', role.preset ? undefined : { role_id: role.id });
       w.commit({ ...w.value!, binding: { ...w.value!.binding, role_id: role.preset ? '' : role.id } }); devicesChanged();
-      if (w.alive.current) setNotice('设备角色已切换');
     });
   }
   async function remove(role: Entry) {
@@ -75,7 +82,7 @@ export default function Roles() {
       if (!answer.confirm || !w.alive.current) return;
       await request('/v1/ai/roles/' + encodeURIComponent(role.id), 'DELETE');
       w.commit({ ...w.value!, roles: w.value!.roles.filter(r => r.id !== role.id) }); devicesChanged();
-      if (w.alive.current) { setSelected(undefined); setDraft(undefined); setNotice('角色已删除'); }
+      if (w.alive.current) { setSelected(undefined); setDraft(undefined); void Taro.showToast({ title: '角色已删除', icon: 'success' }); }
     });
   }
   const dirty = !!selected && !!draft && !selected.preset && JSON.stringify(draft) !== JSON.stringify(draftOf(selected));
@@ -85,17 +92,27 @@ export default function Roles() {
     else void Taro.disableAlertBeforeUnload();
     return () => { void Taro.disableAlertBeforeUnload(); };
   }, [dirty]);
+  if (selected && !draft) return <View className='page content-page settings-page'>
+    <View className='row between settings-header'>
+      <Text className='title device-page-name'>{selected.name || '未命名角色'}</Text>
+      <Action disabled={w.busy} onClick={() => void closeEditor()}>返回角色列表</Action>
+    </View>
+    <Notice error>{w.error}</Notice>
+    {w.busy && <Notice>正在处理…</Notice>}
+    <Action disabled={w.busy} onClick={() => void edit(selected)}>重新加载角色详情</Action>
+    {!selected.preset && selected.id !== active && <Action danger disabled={w.busy} onClick={() => void remove(selected)}>删除角色</Action>}
+  </View>;
   if (selected && draft) return <View className={'page content-page settings-page role-editor-page' + (selected.preset ? ' role-readonly' : '')}>
     <View className='row between'><Action disabled={w.busy} onClick={() => void closeEditor()}>‹ 返回角色列表</Action><Text className='title'>{selected.preset ? '默认角色' : selected.id ? '编辑角色' : '创建角色'}</Text></View>
     <View className='role-device-context'><Text className='device-context-label'>当前设备</Text><Text className='device-context-name'>{w.device?.device_name || '设备信息待加载'}</Text></View>
-    <Notice error>{w.error}</Notice><Notice>{notice}</Notice>
-    <RoleEditor key={selected.id || 'new'} role={selected} draft={draft} voices={w.value?.voices || []} busy={w.busy} patch={value => { if (!w.busy && !selected.preset) { setDraft(current => current ? { ...current, ...value } : current); setNotice(''); } }} />
+    <Notice error>{w.error}</Notice>
+    <RoleEditor key={selected.id || 'new'} role={selected} draft={draft} voices={w.value?.voices || []} busy={w.busy} patch={value => { if (!w.busy && !selected.preset) { setDraft(current => current ? { ...current, ...value } : current); } }} />
     {!selected.preset && <View className='role-editor-actions'><Text className='muted'>保存影响共用设备；切换角色请返回列表。</Text><View className='row'><Action disabled={w.busy || !dirty} onClick={async () => { const answer = await Taro.showModal({ title: '放弃修改', content: '恢复到上次保存的角色设置？', confirmText: '放弃修改' }); if (answer.confirm && w.alive.current) setDraft(draftOf(selected)); }}>放弃修改</Action><Action primary disabled={w.busy || !dirty} onClick={() => void save()}>{w.busy ? '保存中…' : '保存角色'}</Action></View></View>}
     {selected.id && !selected.preset && selected.id !== active && <Action danger disabled={w.busy} onClick={() => void remove(selected)}>删除角色</Action>}
   </View>;
   return <View className='page content-page settings-page'>
     <View className='row between settings-header'><Text className='title device-page-name'>{w.device?.device_name || '当前设备'}</Text><Action disabled={w.busy} onClick={() => void w.refresh()}>刷新</Action></View>
-    <Notice error>{w.error}</Notice><Notice>{w.busy && !w.value ? '正在加载角色…' : notice}</Notice>
+    <Notice error>{w.error}</Notice><Notice>{w.busy && !w.value ? '正在加载角色…' : ''}</Notice>
     <SearchField value={search} onChange={setSearch} placeholder='搜索角色名称' />
     <View className='settings-section'>
       <View className='row between settings-section-title'><Text>我的角色{w.value ? ' · ' + filteredRoles.length : ''}</Text><Action disabled={w.busy || !w.value} onClick={() => void edit()}>＋ 创建角色</Action></View>
