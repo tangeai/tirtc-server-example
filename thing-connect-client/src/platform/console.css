@@ -120,26 +120,7 @@ body,.taro_page { background:#f4f6f5 }
 .contact-device-picker {display:flex;align-items:center;gap:10PX;margin-block:12PX;color:#53675d;font-size:14PX}
 .contact-device-picker select {min-width:0;max-width:70%;padding:6PX;border:1PX solid #ced9d2;border-radius:6PX;background:white;color:#203a2c;font:inherit}
 
-.devices-page .device-list-grid>.card {
-  display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-content:start;
-  gap:0 12PX;padding:18PX;border:1PX solid #dde5df;border-radius:14PX;background:white
-}
-.devices-page .device-head,.devices-page .device-room {grid-column:1/-1}
+.devices-page .device-list-grid>.card {padding:16PX;border:1PX solid #dde5df;border-radius:14PX;background:white}
 .devices-page .device-head {min-height:50PX}
-.devices-page .device-title-row {min-height:30PX}
-.devices-page .device-name-setup {min-height:30PX}
-.devices-page .device-room {grid-row:2;font-size:13PX;color:#52675a;margin-top:8PX}
-.devices-page .device-feature-links {display:contents}
-.devices-page .device-feature-links .action:nth-child(-n+2) {
-  grid-row:3;display:block;align-self:stretch;margin:14PX 0 12PX;padding:9PX 10PX;
-  border-radius:8PX;background:#f4f7f5;text-align:left;font-size:12PX;line-height:18PX;color:#4b6055
-}
-.devices-page .device-feature-links .action:nth-child(1) {grid-column:1}
-.devices-page .device-feature-links .action:nth-child(2) {grid-column:2}
-.devices-page .dashboard-role-name,.devices-page .dashboard-status {
-  display:block;font-size:14PX;line-height:21PX;font-weight:600;color:#22392c;overflow-wrap:anywhere;white-space:normal
-}
-.devices-page .device-primary-actions {grid-row:4;grid-column:2;align-self:end;justify-content:flex-end;margin:0}
-.devices-page .device-primary-actions .action {flex:none;padding:0 10PX;line-height:34PX;min-height:34PX}
-.devices-page .device-feature-links .action:nth-child(3) {grid-row:4;grid-column:1;justify-self:start;align-self:end;padding:0 2PX;line-height:34PX}
+.devices-page .device-title-row,.devices-page .device-name-setup {min-height:30PX}
 .devices-page .device-list-heading .title {margin:0}

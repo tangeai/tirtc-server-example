@@ -30,6 +30,8 @@ function harness(deviceName = '测试') {
     '@tarojs/taro': { __esModule: true, default: { stopPullDownRefresh() { stopped++; } }, useDidShow(fn: typeof show) { show = fn; }, usePullDownRefresh(fn: typeof pull) { pull = fn; } },
     '../../components/ui': { Action: 'action', Field: 'field', Notice: 'notice', Sheet: 'sheet' },
     '../../services/api': { token: () => 'account', errorText: () => '读取失败', request: (path: string, method: string, body: any) => { writes.push({ path, method, body }); return new Promise<void>(resolve => { resolveWrite = resolve; }); } },
+    '../services/api': { token: () => 'account' },
+    './api': { request: async () => ({ role_id: '', contacts: [], policy: { enabled: false } }) },
     '../../services/device-events': { deviceRevision: () => changed, devicesChanged: () => { changed++; } },
     '../../services/device-directory': { readDevices: async () => [device] },
     '../../platform/media': {

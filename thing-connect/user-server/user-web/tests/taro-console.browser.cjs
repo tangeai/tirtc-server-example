@@ -13,7 +13,7 @@ async function verify(browser, width) {
   let deviceReads = 0;
   let submitted;
   let registration;
-  const room = { desired_state: 'joined', state: 'room_closed', room_code: '123456' };
+  let recognitionEnabled = false;
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   try {
@@ -37,7 +37,7 @@ async function verify(browser, width) {
           return route.fulfill({ json: { code: 200, data: [device] } });
         }
         let data = { items: [] };
-        if (pathname === '/v1/call/group/web/device/fixture') data = room;
+        if (pathname === '/v1/call/user/contacts') data = { contacts: [] };
         if (pathname === '/v1/config/captcha') data = { enabled: false, provider: 'yidun' };
         if (pathname === '/v1/user/login') { submitted = route.request().postDataJSON(); data = { token: 'fixture' }; }
         if (pathname === '/v1/user/register') { registration = route.request().postDataJSON(); data = { token: 'fixture' }; }
@@ -47,7 +47,7 @@ async function verify(browser, width) {
         if (pathname.includes('/conversations')) data = { items: [], page: 1, has_more: false };
         if (pathname === '/v1/ai/roles') data = { items: [{ id: 'test-role', name: '测试角色' }] };
         if (pathname === '/v1/ai/roles/test-role') data = { id: 'test-role', name: '测试角色' };
-        if (pathname.endsWith('/config')) data = { policy: { enabled: false, monthly_limit: 100 }, usage: { used: 8 }, schemes: [] };
+        if (pathname.endsWith('/config')) data = { policy: { enabled: recognitionEnabled, monthly_limit: 100 }, usage: { used: 8 }, schemes: [] };
         if (pathname.endsWith('/mcp/tools')) data = { items: [{ id: 'map', name: '地图' }] };
         if (pathname.endsWith('/mcp/tools/map')) data = { id: 'map', name: '地图', description: '地图工具详情' };
         if (pathname === '/v1/config/navigation') data = { links: [{ enabled: true, name: '帮助', url: 'https://example.test/help' }] };
@@ -65,11 +65,11 @@ async function verify(browser, width) {
     assert.equal(await page.locator('.device-count').innerText(), '（1 台）');
     assert.equal(await page.evaluate(() => localStorage.getItem('token')), 'fixture');
     const states = page.locator('.device-list-grid>.card').first();
-    await states.waitFor();
-    assert.doesNotMatch(await states.innerText(), /123456|未加入|已解散/);
-    room.state = 'joined';
+    await states.locator('.device-link-status').filter({hasText:'已关闭'}).waitFor();
+    await states.getByText('0 位', { exact: true }).waitFor();
+    recognitionEnabled = true;
     await page.locator('.devices-page .action').filter({ hasText: /^刷新$/ }).click();
-    await states.getByText('房间号 123456').waitFor();
+    await states.locator('.device-link-status.active').filter({hasText:'已开启'}).waitFor();
     const readsBeforeLeaving = deviceReads;
     await page.goto(site + '/account');
     await page.goBack();
