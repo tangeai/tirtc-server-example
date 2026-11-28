@@ -77,8 +77,11 @@ export default function Notifications() {
     {pref && <>
       <DeviceAlarm key={device} device={device} />
       <View className='card reminder-section'>
-        <Text className='reminder-heading'>提醒频率</Text>
-        <Text>当前：{pref.interval_seconds ? '每 ' + pref.interval_seconds + ' 秒最多一次' : '每次异常都提醒'}</Text>
+        <View className='row between'>
+          <Text className='reminder-heading'>提醒间隔</Text>
+          <Text className='reminder-interval-value'>{(pref.interval_seconds ?? 0) + ' 秒'}</Text>
+        </View>
+        <Text className='muted'>{pref.interval_seconds ? '间隔内的重复异常只提醒一次' : '每次异常都提醒'}</Text>
         {editing ? <>
           <Text>最短间隔（秒）</Text>
           <Input className='input' type='number' maxlength={5} value={value} onInput={e => setValue(e.detail.value)} />
