@@ -2,68 +2,86 @@ import { Input, Text, View } from '@tarojs/components';
 import { useEffect, useRef, useState } from 'react';
 import { DeviceAlarm } from './alarm-subscription';
 import { Action, Notice } from './ui';
-import { ApiError, request, errorText } from '../services/api';
+import { request, errorText, token } from '../services/api';
 
-type Preference = { interval_seconds: number | null; enabled: boolean; suggested_seconds?: number };
-const base = '/v1/push/user';
-const path = (device: string) => base + '/preferences/' + encodeURIComponent(device) + '/alarm';
+type Preference = { interval_seconds: number | null };
 
 export function RecognitionReminders({ device, enabled }: { device: string; enabled: boolean }) {
-  const [pref, setPref] = useState<Preference>();
-  const [value,setValue]=useState('60');
-  const [editing, setEditing] = useState(false);
+  const path = '/v1/push/user/preferences/' + encodeURIComponent(device) + '/alarm';
+  const owner = token();
+  const [value, setValue] = useState<string>();
   const [message, setMessage] = useState(''), [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-  const lock = useRef(false);
+  const draft = useRef(''), saved = useRef<number>(), writing = useRef(false);
+  const timer = useRef<ReturnType<typeof setTimeout>>();
+  const mounted = useRef(false);
 
-  async function run(action: () => Promise<void>) {
-    if (lock.current) return;
-    lock.current = true; setBusy(true); setError(''); setMessage('');
-    try { await action(); } catch (e) { setError(errorText(e)); }
-    finally { lock.current = false; setBusy(false); }
+  async function load() {
+    setError('');
+    try {
+      const p = await request<Preference>(path);
+      if (!mounted.current) return;
+      saved.current = p.interval_seconds ?? 0;
+      draft.current = String(saved.current);
+      setValue(draft.current);
+    } catch (e) { if (mounted.current) setError(errorText(e)); }
   }
 
-  useEffect(() => { void run(loadPreferences); }, [device]);
-
-  async function loadPreferences() {
-    const p = await request<Preference>(path(device));
-    setPref(p);
-    setValue(String(p.interval_seconds ?? p.suggested_seconds ?? 60));
+  async function flush() {
+    clearTimeout(timer.current);
+    if (writing.current || token() !== owner) return;
+    const text = draft.current;
+    if (!/^\d{1,5}$/.test(text) || Number(text) > 86400) {
+      if (mounted.current) setError('请输入 0 至 86400 的整数秒');
+      return;
+    }
+    if (Number(text) === saved.current) return;
+    writing.current = true;
+    if (mounted.current) { setMessage('正在保存…'); setError(''); }
+    try {
+      const p = await request<Preference>(path, 'PUT', { interval_seconds: Number(text) });
+      saved.current = p.interval_seconds ?? 0;
+      if (mounted.current && draft.current === text) {
+        draft.current = String(saved.current);
+        setValue(draft.current); setMessage('间隔已保存');
+      }
+    } catch (e) {
+      saved.current = undefined; // A lost acknowledgement leaves the server value unknown.
+      if (mounted.current && draft.current === text) { setMessage(''); setError(errorText(e)); }
+    } finally {
+      writing.current = false;
+      if (draft.current !== text) void flush();
+    }
   }
 
-  async function save(reset: boolean) {
-    const seconds = Number(value);
-    if (!reset && (!/^\d+$/.test(value) || !Number.isInteger(seconds) || seconds > 86400)) throw new ApiError(40000, '请输入 0 至 86400 的整数秒');
-    const p = await request<Preference>(path(device), reset ? 'DELETE' : 'PUT', reset ? undefined : { interval_seconds: seconds });
-    setPref(p);
-    setValue(String(p.interval_seconds ?? p.suggested_seconds ?? 60));
-    setEditing(false); setMessage('提醒频率已保存');
-  }
-  return <View className='reminder-page'>
-    <View className='card reminder-settings'>
-      <DeviceAlarm device={device} enabled={enabled} />
-      <Notice error>{error}</Notice><Notice>{message}</Notice>
-      {!pref && busy && <Notice>正在加载提醒间隔…</Notice>}
-      {!pref && error && <Action disabled={busy} onClick={() => void run(loadPreferences)}>重新加载提醒间隔</Action>}
-      {pref && <View className='reminder-section'>
-        <Action ariaLabel={'设置提醒间隔，当前 ' + (pref.interval_seconds ?? 0) + ' 秒'} disabled={busy} onClick={() => {
-          if (editing) setEditing(false);
-          else { setValue(String(pref.interval_seconds ?? pref.suggested_seconds ?? 60)); setEditing(true); }
-        }}>
-          <View className='reminder-line'><View className='reminder-copy'><Text className='reminder-heading'>提醒间隔</Text>
-            <Text className='reminder-caption'>{pref.interval_seconds ? '间隔内的异常只提醒一次' : '每次异常都提醒'}</Text></View>
-            <Text className='reminder-interval-value'>{(pref.interval_seconds ?? 0) + ' 秒'}</Text><Text className='reminder-chevron' ariaHidden>›</Text>
-          </View>
-        </Action>
-        {editing && <View className='reminder-editor'>
-          <Text className='label'>最短间隔（秒）</Text>
-          <Input className='input' type='number' maxlength={5} value={value} onInput={e => setValue(e.detail.value)} />
-          <View className='reminder-editor-actions'><Action primary disabled={busy} onClick={() => void run(() => save(false))}>保存间隔</Action>
-          <Action disabled={busy} onClick={() => setEditing(false)}>取消</Action></View>
+  useEffect(() => {
+    mounted.current = true;
+    void load();
+    return () => {
+      mounted.current = false;
+      if (timer.current !== undefined) void flush();
+    };
+  }, [device]);
 
-          {!!pref.interval_seconds && <Action disabled={busy} onClick={() => void run(() => save(true))}>恢复每次提醒</Action>}
-        </View>}
-      </View>}
-    </View>
-  </View>;
+  function edit(text: string) {
+    draft.current = text;
+    setValue(text); setMessage(''); setError('');
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => void flush(), 700);
+  }
+
+  return <View className='reminder-page'><View className='card reminder-settings'>
+    <DeviceAlarm device={device} enabled={enabled} />
+    {value !== undefined && <View className='reminder-interval-row reminder-line'>
+      <View className='reminder-copy'><Text className='reminder-heading'>提醒间隔</Text>
+        <Text className='reminder-caption'>填 0 表示每次异常都提醒</Text></View>
+      <Input className='reminder-seconds-input' ariaLabel='提醒间隔（秒）' type='number' maxlength={5}
+        value={value} onInput={e => edit(e.detail.value)} onBlur={() => void flush()} onConfirm={() => void flush()} />
+      <Text>秒</Text>
+    </View>}
+    {value === undefined && !error && <Notice>正在加载提醒间隔…</Notice>}
+    <Notice error>{error}</Notice><Notice>{message}</Notice>
+    {error && value === undefined && <Action onClick={() => void load()}>重新加载提醒间隔</Action>}
+    {error && value !== undefined && /^\d{1,5}$/.test(value) && Number(value) <= 86400 &&
+      <Action onClick={() => void flush()}>重试保存间隔</Action>}
+  </View></View>;
 }

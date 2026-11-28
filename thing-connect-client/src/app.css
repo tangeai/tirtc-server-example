@@ -253,9 +253,8 @@ page,.h5-body,body{margin:0;background:#f7f7f7;color:#191919;font-family:-apple-
 .role-welcome-field>.muted{display:block}
 .page .textarea>.taro-textarea{box-sizing:border-box;width:100%;height:100%;background:transparent;font-family:inherit;font-size:inherit;line-height:inherit}
 
-.reminder-section{display:flex;flex-direction:column;gap:16px}
 .recognition-usage{margin-top:16px}
-.recognition-usage-value,.reminder-interval-value{font-size:32px;font-weight:600;font-variant-numeric:tabular-nums}
+.recognition-usage-value{font-size:32px;font-weight:600;font-variant-numeric:tabular-nums}
 .reminder-heading{font-size:32px;font-weight:600}
 .device-list-header{margin-bottom:24px}
 .device-list-tools{gap:10px;flex-wrap:nowrap}
@@ -274,9 +273,5 @@ page,.h5-body,body{margin:0;background:#f7f7f7;color:#191919;font-family:-apple-
 .reminder-active{color:#087a41}
 .reminder-channel{padding:28px 0}
 .reminder-page .reminder-channel .action{line-height:64px;font-size:26px;padding:0 18px}
-.reminder-section{border-top:1px solid #e8ece9;gap:0}
-.reminder-page .reminder-section>.action{padding:25px 0;background:transparent;width:100%;line-height:1.5;white-space:normal}
-.reminder-chevron{color:#89948c;font-size:32px}
-.reminder-editor{padding:0 0 24px}
-.reminder-editor-actions{display:flex;gap:16px;margin:16px 0}
-.reminder-page .reminder-editor-actions .action{flex:1}
+.reminder-interval-row{box-sizing:border-box;border-top:1px solid #e8ece9;padding:24px 0}
+.reminder-seconds-input{box-sizing:border-box;width:120px;height:68px;padding:0 14px;border-radius:12px;background:#f2f5f3;text-align:right;font-size:30px;font-variant-numeric:tabular-nums}
