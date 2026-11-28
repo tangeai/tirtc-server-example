@@ -9,6 +9,17 @@ Git 索引，也不拉取远程代码。它使用现有 Web 安装器创建数�
 使用统一 H5 入口时还需要 Nginx。完整依赖版本要求见 [部署指南](deployment.md)。
 本地 HTTP 联调在安装页关闭 HTTPS Cookie；开机自启、证书和日志轮转不属于本地脚本。
 
+## 在已有安装测试独立播放器
+
+首次从旧部署脚本升级，在仓库根目录执行以下命令。安装目录的 `local-player-entry` 只影响本地 user-server 的所有实例，每次启动都会读取；显式环境变量 `USER_PLAYER_ENTRY` 优先。使用 `legacy` 可在下次启动时恢复旧播放器。
+
+```bash
+printf '%s\n' new | sudo tee /opt/thing-connect/local-player-entry >/dev/null
+sudo bash thing-connect/scripts/deploy-local.sh update
+```
+
+更新成功后，使用 `/opt/thing-connect/deploy-local.sh` 执行后续更新。通过本地同源网关打开 `/devices`，登录并点击在线设备的「实时」。新版 `/player` 的 JS、CSS 地址以 `/static/player/assets/` 开头，其他控制台页面仍可使用 `/static/app/`。多实例本地网关需要一个内网入口；已有系统 Nginx 接管该端口时使用现有网关。
+
 ## 首次部署
 
 从当前源码仓库执行：

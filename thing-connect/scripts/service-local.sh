@@ -222,6 +222,11 @@ run_service() {
     if [ "$base" != "$service" ] && [ "${service##*-}" -gt "${LOCAL_INSTANCE_COUNT[$base]:-1}" ]; then
         err "$service 未配置，请先设置 $base 的实例数"; return 1
     fi
+    # Local entry preference survives start, update and multi-instance restarts.
+    if [ "$base" = user-server ] && [ -z "${USER_PLAYER_ENTRY:-}" ] && [ -f "$DEPLOY_ROOT/local-player-entry" ]; then
+        IFS= read -r USER_PLAYER_ENTRY <"$DEPLOY_ROOT/local-player-entry" || return 1
+        case "$USER_PLAYER_ENTRY" in new|legacy) export USER_PLAYER_ENTRY ;; *) err 'local-player-entry 必须为 new 或 legacy'; return 1 ;; esac
+    fi
     binary="$DEPLOY_ROOT/$base/$base"
     config="$DEPLOY_ROOT/$base/config.yaml"
     port="$(service_port "$service")" || return 1
