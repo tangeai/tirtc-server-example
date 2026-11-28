@@ -166,7 +166,9 @@ sudo /opt/thing-connect/deploy-local.sh gateway-stop
 sudo /opt/thing-connect/deploy-local.sh gateway
 ```
 
-更新先完成源码快照、构建和配置检查，再自动停止受管服务、迁移及发布，最后按 Admin 优先顺序启动并检查 readiness。构建或前置检查失败不停止原服务。
+更新先完成源码快照、构建和配置检查，再自动停止受管服务、迁移及发布，最后按 Admin 优先顺序启动并检查 readiness。报告成功前，脚本使用用户服务的 Redis 配置验证设备列表可读。整组 Device 冷启动且没有 Broker 管理接口时，离线判定通常需要等待约 150 秒；等待超时会返回失败，已启动的服务继续运行。构建或前置检查失败不停止原服务。
+
+使用自行维护的 Nginx 入口时，按 [Nginx 模板](deploy/nginx/thing-connect.nginx.conf) 将 `/v1/push/` 转发至推送服务，并保留 `/v1/push/internal` 及其子路径的公网 404 规则。匿名访问 `/v1/push/user/preferences/route-test/alarm` 应返回 401；若入口返回 404 而直接访问推送服务返回 401，请检查该域名实际使用的代理配置。
 
 本地脚本复用 `deploy-prod.sh` 的迁移失败处理；数据库结构发生变化后迁移失败时，不自动启动旧版本。
 需要保留重要联调数据时，应在更新前自行备份。生产环境的备份和恢复步骤见[部署指南](deployment.md)。

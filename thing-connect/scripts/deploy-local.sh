@@ -347,6 +347,10 @@ local_update() (
     chmod 0755 "$LOCAL_DEPLOY_ROOT/.deploy-local.sh.new"
     mv -f "$LOCAL_DEPLOY_ROOT/.deploy-local.sh.new" "$LOCAL_DEPLOY_ROOT/deploy-local.sh"
     printf '%s\n' "$LOCAL_SOURCE_ROOT" >"$LOCAL_DEPLOY_ROOT/local-source-path"
+    local user_config
+    user_config="$(service_config_path user-server)" || return 1
+    local_log '等待设备列表可读（设备服务全部冷启动时约需 150 秒）'
+    (cd "$BUILD_DIR" && go run ./scripts/local-presence-ready -config "$user_config") || return 1
     if [ "${LOCAL_RECOGNITION_PENDING:-0}" = 1 ]; then
         local_log '发布完成；recognition-server 待配置，发布 MQTT 后执行 deploy-local.sh start'
     else
