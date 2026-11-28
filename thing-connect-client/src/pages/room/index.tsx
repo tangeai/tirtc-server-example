@@ -2,7 +2,7 @@ import { tr, usePageLanguage } from '../../platform/translate';
 import Taro from '@tarojs/taro';
 import { Switch, Text, View } from '@tarojs/components';
 import { useState } from 'react';
-import { Action, Field, Notice } from '../../components/ui';
+import { Action, DevicePageHeading, Field, Notice } from '../../components/ui';
 import { useDeviceWorkspace } from '../../hooks/device-workspace';
 import { request } from '../../services/api';
 import { devicesChanged } from '../../services/device-events';
@@ -35,7 +35,7 @@ export default function Room() {
     });
   }
   const a = w.value?.assignment;
-  return <View className='page content-page'><View className='row between'><Text className='title device-page-name'>{w.device?.device_name || tr("当前设备")}</Text><Action disabled={w.busy} onClick={() => { setNotice(''); void w.refresh(); }}>{tr("刷新")}</Action></View><Text className='device-page-description'>{tr("让这台设备创建或加入对讲房间，与同一房间内的其他设备进行语音对讲。")}</Text><Notice error>{w.error}</Notice><Notice>{w.busy ? tr("正在处理…") : notice}</Notice>
+  return <View className='page content-page room-page'><View className='row between'><DevicePageHeading title='多人对讲' device={w.device} /><Action disabled={w.busy} onClick={() => { setNotice(''); void w.refresh(); }}>{tr("刷新")}</Action></View><Text className='device-page-description'>{tr("让这台设备创建或加入对讲房间，与同一房间内的其他设备进行语音对讲。")}</Text><Notice error>{w.error}</Notice><Notice>{w.busy ? tr("正在处理…") : notice}</Notice>
     {a && (a.desired_state === 'joined' ? <View className='card'><Text className='label'>{tr("当前房间 ·")}{a.password_set ? tr("已设置密码") : tr("无密码")}</Text><Text className='title' selectable>{a.room_code}</Text><Notice>{roomStates[a.state] || tr("状态待同步")}</Notice><Text className='muted'>{tr("在线设备：")}{w.value?.verified ? a.online_count ?? 0 : tr("待更新")}</Text><View className='wide'><Action danger disabled={w.busy} onClick={() => void change('leave')}>{tr("退出房间")}</Action></View></View> : <View className='card'><View className='tabs'><Action primary={mode === 'create'} disabled={w.busy} onClick={() => { setMode('create'); setPassword(''); }}>{tr("创建房间")}</Action><Action primary={mode === 'join'} disabled={w.busy} onClick={() => { setMode('join'); setPassword(''); }}>{tr("加入房间")}</Action></View>
       {mode === 'join' ? <Field label={tr("6 位房间号")} value={code} disabled={w.busy} numeric onChange={s => setCode(s.replace(/\D/g, '').slice(0, 6))} /> : <View className='row between'><Text>{tr("设置房间密码")}</Text><Switch color='#07c160' checked={protectedRoom} disabled={w.busy} onChange={e => { setProtectedRoom(e.detail.value); setPassword(''); }} /></View>}
       {(mode === 'join' || protectedRoom) && <Field label={mode === 'join' ? tr("4 位密码（无密码则留空）") : tr("4 位密码")} value={password} password disabled={w.busy} onChange={s => setPassword(s.replace(/\D/g, '').slice(0, 4))} />}

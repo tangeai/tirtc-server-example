@@ -92,3 +92,22 @@ body,.taro_page { background:#f4f6f5 }
 .console-nav details a span {color:#718079}
 .taro_page:has(.auth-page) {background:#f5f7f6}
 .auth-page .web-auth-title {display:block;margin:0 0 16PX;font-size:21PX;font-weight:600;line-height:1.35}
+
+/* Keep device workspaces aligned below the fixed browser header. */
+.taro_page:has(.page) {background:#f4f6f5}
+.page:not(.auth-page) {min-height:calc(100dvh - 54PX);background:transparent}
+.device-page-heading {flex:1;min-width:0}
+.device-page-heading .title {font-size:22PX;line-height:1.35}
+.device-page-context {display:block;margin-top:4PX;color:#58675f;font-size:14PX;overflow-wrap:anywhere}
+.page.bind-page .tabs .action,.page.room-page .tabs .action {background:transparent;color:#526159}
+.page.bind-page .tabs .primary,.page.room-page .tabs .primary {background:white;color:#174b34;box-shadow:0 1PX 4PX #23392a20}
+.page .code-input {max-width:326PX}
+.page.history-page .empty {padding:34PX 16PX;color:#617169}
+.page .device-info-json {display:block;white-space:pre-wrap;overflow-wrap:anywhere}
+@media (min-width:768PX) {
+  .page.content-page {max-width:800PX}
+  .page.role-editor-page {max-width:1040PX}
+  .page.bind-page,.page.room-page,.page.account-page {max-width:560PX;margin-inline:auto;padding:28PX 24PX 48PX}
+  .page.legal {max-width:820PX;padding:28PX 24PX 48PX}
+  .page.legal .card {padding:24PX}
+}

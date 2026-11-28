@@ -3,7 +3,7 @@ import Taro, { useLoad, usePullDownRefresh } from '@tarojs/taro';
 import { Button } from '../../platform/button';
 import { Text, View } from '@tarojs/components';
 import { useEffect, useRef, useState } from 'react';
-import { Action, Field, Notice, SearchField, Sheet } from '../../components/ui';
+import { Action, DevicePageHeading, Field, Notice, SearchField, Sheet } from '../../components/ui';
 import { ApiError, errorText, request } from '../../services/api';
 import { readDevices } from '../../services/device-directory';
 import type { Device } from '../../domain/devices';
@@ -91,7 +91,7 @@ export default function Contacts() {
   }
   const device = devices.find(d => d.device_id === deviceId), filtered = filterContacts(rows, search, filter);
   return <View className='page content-page settings-page'>
-    <View className='row'><Text className='title device-page-name'>{device?.device_name || tr("当前设备")}</Text></View>
+    <View className='row'><DevicePageHeading title='联系人' device={device} /></View>
     <Notice error>{error}</Notice>
     {error && <Action disabled={busy || loading} onClick={() => void load()}>{tr("重新加载联系人")}</Action>}
     <SearchField placeholder={tr("搜索名称或设备 ID")} value={search} onChange={setSearch} />

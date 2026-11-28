@@ -4,7 +4,7 @@ import Taro from '@tarojs/taro';
 import { Button } from '../../platform/button';
 import { Text, View } from '@tarojs/components';
 import { useEffect, useState } from 'react';
-import { Action, SearchField, Notice } from '../../components/ui';
+import { Action, DevicePageHeading, SearchField, Notice } from '../../components/ui';
 import { useDeviceWorkspace } from '../../hooks/device-workspace';
 import { request } from '../../services/api';
 import { devicesChanged } from '../../services/device-events';
@@ -112,14 +112,14 @@ export default function Roles() {
   </View>;
   if (selected && draft) return <View className={'page content-page settings-page role-editor-page' + (selected.preset ? ' role-readonly' : '')}>
     <View className='row between'><Action disabled={w.busy} onClick={() => void closeEditor()}>{tr("‹ 返回角色列表")}</Action><Text className='title'>{selected.preset ? tr("默认角色") : selected.id ? tr("编辑角色") : tr("创建角色")}</Text></View>
-    <View className='role-device-context'><Text className='device-context-label'>{tr("当前设备")}</Text><Text className='device-context-name'>{w.device?.device_name || tr("设备信息待加载")}</Text></View>
+    <View className='role-device-context'><Text className='device-context-label'>{tr("当前设备")}</Text><Text className='device-context-name'>{w.device?.device_name || w.device?.device_id || tr("设备信息待加载")}</Text></View>
     <Notice error>{w.error}</Notice>
     <RoleEditor key={selected.id || 'new'} role={selected} draft={draft} voices={w.value?.voices || []} busy={w.busy} patch={value => { if (!w.busy && !selected.preset) { setDraft(current => current ? { ...current, ...value } : current); } }} />
     {!selected.preset && <View className='role-editor-actions'><Text className='muted'>{tr("保存影响共用设备；切换角色请返回列表。")}</Text><View className='row'><Action disabled={w.busy || !dirty} onClick={async () => { const answer = await Taro.showModal({ title: tr("放弃修改"), content: tr("恢复到上次保存的角色设置？"), confirmText: tr("放弃修改") }); if (answer.confirm && w.alive.current) setDraft(draftOf(selected)); }}>{tr("放弃修改")}</Action><Action primary disabled={w.busy || !dirty} onClick={() => void save()}>{w.busy ? tr("保存中…") : tr("保存角色")}</Action></View></View>}
     {selected.id && !selected.preset && selected.id !== active && <Action danger disabled={w.busy} onClick={() => void remove(selected)}>{tr("删除角色")}</Action>}
   </View>;
   return <View className='page content-page settings-page'>
-    <View className='row'><Text className='title device-page-name'>{w.device?.device_name || tr("当前设备")}</Text></View>
+    <View className='row'><DevicePageHeading title='AI 角色' device={w.device} /></View>
     <Notice error>{w.error}</Notice><Notice>{w.busy && !w.value ? tr("正在加载角色…") : ''}</Notice>
     {w.error && <Action disabled={w.busy} onClick={() => void w.refresh()}>{tr("重新加载角色列表")}</Action>}
     <SearchField value={search} onChange={setSearch} placeholder={tr("搜索角色名称")} />

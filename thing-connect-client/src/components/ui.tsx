@@ -6,6 +6,14 @@ import type { PropsWithChildren } from 'react';
 export function Action({ children, onClick, disabled, primary, danger, muted, ariaLabel }: PropsWithChildren<{ onClick(): void; disabled?: boolean; primary?: boolean; danger?: boolean; muted?: boolean; ariaLabel?: string }>) {
   return <Button className={`action ${primary ? 'primary' : ''} ${danger ? 'danger' : ''} ${muted ? 'is-unavailable' : ''}`} ariaLabel={ariaLabel} disabled={disabled} onClick={onClick}>{children}</Button>;
 }
+export function DevicePageHeading({ title, device }: { title: string; device?: { device_name?: string; device_id: string } }) {
+  const name = device?.device_name?.trim() || device?.device_id;
+  if (process.env.TARO_ENV !== 'h5') return <Text className='title device-page-name'>{name || tr('当前设备')}</Text>;
+  return <View className='device-page-heading'><Text className='title'>{tr(title)}</Text>
+    {name && <Text className='device-page-context'>{tr('当前设备')} · {name}</Text>}
+  </View>;
+}
+
 export function Field({ label, value, onChange, password, numeric, disabled, placeholder, focus = false }: { label: string; value: string; onChange(value: string): void; password?: boolean; numeric?: boolean; disabled?: boolean; placeholder?: string; focus?: boolean }) {
   return <View className='field'><Text className='label'>{label}</Text><Input className='input field-input' value={value} password={password} type={numeric ? 'number' : 'text'} disabled={disabled} focus={focus} placeholder={placeholder || label} onInput={e => onChange(e.detail.value)} /></View>;
 }

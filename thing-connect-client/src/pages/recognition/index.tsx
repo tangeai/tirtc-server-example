@@ -3,7 +3,7 @@ import Taro from '@tarojs/taro';
 import { Text, View } from '@tarojs/components';
 import { useState } from 'react';
 import { RecognitionReminders } from '../../components/recognition-reminders';
-import { Action, Notice } from '../../components/ui';
+import { Action, DevicePageHeading, Notice } from '../../components/ui';
 import { useDeviceWorkspace } from '../../hooks/device-workspace';
 import { ApiError, errorText, request } from '../../services/api';
 import { devicesChanged } from '../../services/device-events';
@@ -41,7 +41,7 @@ export default function Recognition() {
     });
   }
   return <View className='page content-page settings-page'>
-    <View className='row'><Text className='title device-page-name'>{w.device?.device_name || tr("当前设备")}</Text></View>
+    <View className='row'><DevicePageHeading title='AI 识别' device={w.device} /></View>
     <Notice error>{w.error}</Notice>
     {!w.value && w.error && <Action disabled={w.busy} onClick={() => void w.refresh()}>{tr("重新加载识别设置")}</Action>}
     {w.busy && !w.value && <Notice>{tr("正在加载识别设置…")}</Notice>}
