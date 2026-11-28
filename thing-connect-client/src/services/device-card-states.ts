@@ -5,7 +5,6 @@ export interface CardState {
   roleName?: string;
   hasRole?: boolean;
   recognition?: boolean;
-  contacts?: number;
 }
 
 export async function readCardStates(devices: Device[], current: () => boolean, publish: (id: string, state: CardState) => void) {
@@ -25,8 +24,6 @@ export async function readCardStates(devices: Device[], current: () => boolean, 
         })(),
         request<{ policy: { enabled: boolean } }>('/v1/recognition/devices/' + id + '/config')
           .then(value => { state.recognition = value.policy.enabled; }),
-        request<{ contacts: unknown[] }>('/v1/call/user/contacts?device_id=' + id)
-          .then(value => { if (Array.isArray(value.contacts)) state.contacts = value.contacts.length; }),
       ]);
       if (current()) publish(device.device_id, state);
     }

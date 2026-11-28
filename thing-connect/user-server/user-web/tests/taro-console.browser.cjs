@@ -10,7 +10,7 @@ const device = { device_id: 'fixture', device_name: '客厅', status: 1, online:
 async function verify(browser, width) {
   const page = await browser.newPage({ viewport: { width, height: 860 }, locale: 'zh-CN' });
   let unavailable = true;
-  let deviceReads = 0;
+  let deviceReads = 0, contactReads = 0;
   let submitted;
   let registration;
   let recognitionEnabled = false;
@@ -37,7 +37,7 @@ async function verify(browser, width) {
           return route.fulfill({ json: { code: 200, data: [device] } });
         }
         let data = { items: [] };
-        if (pathname === '/v1/call/user/contacts') data = { contacts: [] };
+        if (pathname === '/v1/call/user/contacts') { contactReads++; data = { contacts: [] }; }
         if (pathname === '/v1/config/captcha') data = { enabled: false, provider: 'yidun' };
         if (pathname === '/v1/user/login') { submitted = route.request().postDataJSON(); data = { token: 'fixture' }; }
         if (pathname === '/v1/user/register') { registration = route.request().postDataJSON(); data = { token: 'fixture' }; }
@@ -66,7 +66,8 @@ async function verify(browser, width) {
     assert.equal(await page.evaluate(() => localStorage.getItem('token')), 'fixture');
     const states = page.locator('.device-list-grid>.card').first();
     await states.locator('.action').filter({hasText:'AI 识别'}).locator('.device-status-dot.off').waitFor();
-    await states.getByText('(0)', { exact: true }).waitFor();
+    await states.locator('.action').filter({hasText:'联系人'}).locator('.device-status-dot.on').waitFor();
+    assert.equal(contactReads, 0);
     recognitionEnabled = true;
     await page.locator('.devices-page .action').filter({ hasText: /^刷新$/ }).click();
     await states.locator('.action').filter({hasText:'AI 识别'}).locator('.device-status-dot.on').waitFor();

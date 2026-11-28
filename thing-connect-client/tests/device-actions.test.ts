@@ -42,7 +42,7 @@ test('设备入口顺序和更多菜单保留当前设备', () => {
   assert.match(buttons[0].props.children[0].props.className, /device-status-dot/);
   assert.equal(buttons[0].props.children[1], 'AI 角色');
   assert.match(buttons[1].props.children[0].props.className, /device-status-dot/);
-  assert.equal(buttons[2].props.children[2].props.className, 'device-contact-count');
+  assert.equal(buttons[2].props.children[0].props.className, 'device-status-dot on');
   for (const button of buttons) assert.equal(button.props.children.at(-1).props.children, '›');
   for (const button of buttons) button.props.onClick();
   assert.deepEqual(navigation, ['roles', 'recognition', 'contacts'].map(page => '/pages/' + page + '/index?device_id=device%2Fa'));

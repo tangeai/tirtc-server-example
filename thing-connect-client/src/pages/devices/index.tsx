@@ -158,7 +158,7 @@ export default function Devices() {
         const links = [
           { page: 'roles', title: 'AI 角色', active: summary?.hasRole, status: summary?.hasRole == null ? unknown : tr(summary.hasRole ? '使用中' : '未设置') },
           { page: 'recognition', title: 'AI 识别', active: summary?.recognition, status: summary?.recognition == null ? unknown : tr(summary.recognition ? '已开启' : '已关闭') },
-          { page: 'contacts', title: '联系人', status: summary?.contacts == null ? unknown : summary.contacts === 1 ? tr('1 位') : summary.contacts + tr(' 位') },
+          { page: 'contacts', title: '联系人', active: true, status: tr('可用') },
         ];
         return <View className='card' key={device.device_id}><View className='device-head'><View className={'device-symbol ' + (device.online ? 'device-symbol-online' : 'device-symbol-offline')}><RobotIcon /><Text className='device-symbol-status'>{device.online ? tr("在线") : tr("离线")}</Text></View><View className='grow device-summary'><View className='device-title-row'>{device.device_name?.trim() ? <Text className='device-name'>{device.device_name}</Text> : <Button className='device-name-setup' disabled={busy} ariaLabel={tr("设置设备名称：") + device.device_id} onClick={() => openRename(device)}><Text>{tr("设置名称")}</Text><View className='device-name-edit-icon' ariaHidden /></Button>}
           {summary?.roleName && <Text className='dashboard-role-name' ariaLabel={tr('AI 角色：') + summary.roleName}>{summary.roleName}</Text>}
@@ -167,8 +167,8 @@ export default function Devices() {
         <View className='device-feature-links'>
           {links.map(({ page, title, status, active }) => <Action key={page} ariaLabel={tr(title) + ' ' + status}
             onClick={() => void Taro.navigateTo({ url: '/pages/' + page + '/index?device_id=' + encodeURIComponent(device.device_id) })}>
-            {page !== 'contacts' && <Text ariaHidden className={'device-status-dot ' + (active == null ? 'unknown' : active ? 'on' : 'off')} />}
-            {tr(title)}{page === 'contacts' && <Text className='device-contact-count'>({summary?.contacts ?? '…'})</Text>}
+            <Text ariaHidden className={'device-status-dot ' + (active == null ? 'unknown' : active ? 'on' : 'off')} />
+            {tr(title)}
             <Text ariaHidden className='device-link-arrow'>›</Text>
           </Action>)}</View>
       </View>; })}</View>

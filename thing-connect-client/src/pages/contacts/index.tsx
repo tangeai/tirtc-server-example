@@ -5,7 +5,6 @@ import { Text, View } from '@tarojs/components';
 import { useEffect, useRef, useState } from 'react';
 import { Action, DevicePageHeading, Field, Notice, SearchField, Sheet } from '../../components/ui';
 import { ApiError, errorText, request } from '../../services/api';
-import { devicesChanged } from '../../services/device-events';
 import { readDevices } from '../../services/device-directory';
 import type { Device } from '../../domain/devices';
 import { canRemove, contactKey, contactName, defaultContactName, filterContacts, validateContactTarget, type Contact, type PendingContact } from '../../domain/contacts';
@@ -73,7 +72,6 @@ export default function Contacts() {
     await mutate(async () => {
       if (target === 'add') {
         const result = await request<{ status: string }>('/v1/call/user/contacts/request', 'POST', { device_id: deviceId, target_device_id: text });
-        if (result.status === 'accepted') devicesChanged();
         if (!alive.current) return;
         setSent(result.status === 'accepted' ? '已成为联系人，可以开始联系' : '申请已发送，等待对方同意');
         if (result.status === 'accepted') await load();
@@ -87,12 +85,11 @@ export default function Contacts() {
     if (busy || !canRemove(contact)) return;
     const { confirm } = await Taro.showModal({ title: tr("删除联系人？"), content: tr("删除后双方都不再是好友，需要重新申请并同意后才能恢复联系。"), confirmText: tr("删除"), confirmColor: '#fa5151' });
     if (!confirm || !alive.current) return;
-    await mutate(async () => { await request('/v1/call/user/contacts/' + contact.id, 'DELETE'); devicesChanged(); if (alive.current) { setRows(items => items.filter(c => contactKey(c) !== contactKey(contact))); setEditor(undefined); } }, true);
+    await mutate(async () => { await request('/v1/call/user/contacts/' + contact.id, 'DELETE'); if (alive.current) { setRows(items => items.filter(c => contactKey(c) !== contactKey(contact))); setEditor(undefined); } }, true);
   }
   async function respond(item: PendingContact, action: 'accept' | 'reject') {
     await mutate(async () => {
       await request('/v1/call/user/contacts/respond', 'POST', { id: item.id, action });
-      if (action === 'accept') devicesChanged();
       if (!alive.current) return;
       setPending(items => items.filter(p => p.id !== item.id));
       if (action === 'accept') await load();
