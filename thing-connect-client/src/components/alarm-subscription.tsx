@@ -89,6 +89,7 @@ export function useAlarmSubscription(device: string, enabled = true) {
       }
       if (version === revision.current && token() === owner) {
         setChannel(cap); setUnavailable(false); setNotice(''); setFailed(false);
+        return true;
       }
     } catch (error) {
       if (version === revision.current && token() === owner) {
@@ -115,8 +116,7 @@ export function useAlarmSubscription(device: string, enabled = true) {
       if (!work || work.owner !== owner) {
         const attempt = prepared.current;
         if (!attempt || attempt.owner !== owner || attempt.until <= Date.now()) {
-          await refresh(true);
-          setNotice(prepared.current ? '请点击订阅按钮确认微信授权' : '提醒暂未就绪，请重新检查');
+          if (await refresh(true) && prepared.current) setNotice('请再次点击右侧按钮确认微信授权');
           return;
         }
         // No awaits before the native prompt. Retries may only report this
@@ -136,7 +136,7 @@ export function useAlarmSubscription(device: string, enabled = true) {
         if (work.decision !== 'accept') {
           pending.current = undefined; setNotice('保留原接收微信'); return;
         }
-        const choice = await Taro.showModal({ title: '替换接收微信', content: '当前微信将用于接收本账号的提醒。它与其他账号的接收关联，以及本账号原有的接收关联，都将解除。原关联中等待发送的提醒将停止。' });
+        const choice = await Taro.showModal({ title: '替换接收微信', content: '当前微信将用于接收本账号的提醒。它与其他账号的接收关联、本账号原有的接收关联都将解除。本账号下其他已授权设备需要重新授权。原关联中等待发送的提醒将停止。' });
         if (!choice.confirm) { pending.current = undefined; setNotice('已保留原接收微信'); return; }
         work.replaceApproved = true;
       }
@@ -151,8 +151,8 @@ export function useAlarmSubscription(device: string, enabled = true) {
       pending.current = undefined;
       // A successful replay acknowledges this session even when a newer
       // session has since changed the account's grant.
-      await refresh();
-      if (work.decision !== 'accept') setNotice(work.decision === 'reject' ? '已拒绝设备提醒' : '已取消，保留原订阅状态');
+      const refreshed = await refresh();
+      if (refreshed && work.decision !== 'accept') setNotice(work.decision === 'reject' ? '已拒绝设备提醒' : '已取消，保留原订阅状态');
     } catch (error) {
       if (error instanceof ApiError && (error.code === 19720726 || error.code === 19720727)) {
         prepared.current = undefined;
@@ -190,6 +190,7 @@ export function DeviceAlarm({ device, enabled }: { device: string; enabled: bool
       {action}
     </Action>}</View>
     <Text className='reminder-caption'>识别到异常时，通过微信提醒我。{!enabled && '当前 AI 识别已关闭。'}</Text>
+    {subscribed && <Text className='reminder-caption'>更换接收微信可重新授权，取消接收可在微信设置中管理。</Text>}
     <Notice error={alarm.failed}>{alarm.notice}</Notice>
   </View>;
 }

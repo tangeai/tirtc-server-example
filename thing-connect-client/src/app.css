@@ -314,3 +314,9 @@ page,.h5-body,body{margin:0;background:#f7f7f7;color:#191919;font-family:-apple-
 .settings-page .scheme-list,.settings-page .reminder-settings{gap:0}
 
 .settings-page .sheet>.title{min-width:0;white-space:normal;overflow-wrap:anywhere;word-break:break-all}
+
+.interval-presets{display:flex;gap:10px;padding-bottom:20px}
+.reminder-settings .interval-preset{flex:1;min-width:0;margin:0;padding:0;background:#f2f2f6;color:#444;font-size:24px;line-height:64px}
+.interval-preset:after{border:0}
+.reminder-settings .interval-preset.active{color:#087a41;background:#e4f5ea}
+.interval-status{color:#656872;font-size:22px;font-weight:400}

@@ -1,11 +1,14 @@
 package pushwechat
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"thing-connect/internal/push"
 )
@@ -64,5 +67,29 @@ func TestConfiguredFieldNamesAndOptionalPage(t *testing.T) {
 	defer server.Close()
 	if result, err := ch.send(context.Background(), server.Client(), server.URL, "test", d); err != nil || result != push.Accepted {
 		t.Fatal(result, err)
+	}
+}
+
+func TestUnexpectedErrorLogsOnlySafeMetadata(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"errcode":47003,"errmsg":"argument invalid: recipient-secret token-secret"}`)
+	}))
+	defer server.Close()
+	d := push.Delivery{ID: 12, Kind: "alarm", Template: "template-id", Open: "recipient-secret"}
+	ch := Channel{Config: push.DefaultPolicy()}
+	result, err := ch.send(context.Background(), server.Client(), server.URL, "token-secret", d)
+	if result != push.Failed || err != nil {
+		t.Fatal(result, err)
+	}
+	var entry map[string]any
+	if err := json.Unmarshal(logs.Bytes(), &entry); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(logs.String(), "secret") || entry["errmsg"] != "argument invalid" || entry["errcode"] != float64(47003) || entry["delivery_id"] != float64(12) || entry["kind"] != "alarm" || entry["template_id"] != d.Template {
+		t.Fatal("unexpected log attributes")
 	}
 }

@@ -82,6 +82,8 @@ export function RecognitionTypes({ selected, catalog, locked, change }: Props) {
       {selected.length > 1 && <Button className='scheme-edit' disabled={locked}
         onClick={() => { cancel(); setEditingOrder(!sorting); }}>{sorting ? '完成' : '排序'}</Button>}
     </View>
+    {sorting && <Text className='reminder-caption'>拖动右侧图标或点击调整顺序</Text>}
+    {!sorting && selected.length >= 8 && <Text className='reminder-caption'>已达上限 8 项，关闭其他类型后可继续开启</Text>}
     {!selected.length && !others.length && <Text className='muted'>暂无可用类型</Text>}
     {(sorting ? selected : [...selected, ...others]).map((item, index) => {
       const on = index < selected.length;

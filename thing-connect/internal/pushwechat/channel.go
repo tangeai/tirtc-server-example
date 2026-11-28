@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"thing-connect/internal/push"
@@ -118,7 +120,8 @@ func (c Channel) send(ctx context.Context, client *http.Client, endpoint, token 
 	}
 	defer resp.Body.Close()
 	var reply struct {
-		Code *int `json:"errcode"`
+		Code    *int   `json:"errcode"`
+		Message string `json:"errmsg"`
 	}
 	if resp.StatusCode != 200 || json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&reply) != nil || reply.Code == nil {
 		return push.Unknown, nil
@@ -135,6 +138,17 @@ func (c Channel) send(ctx context.Context, client *http.Client, endpoint, token 
 	case 40001, 40014, 42001:
 		return push.Retry, &wechat.APIError{Errcode: *reply.Code}
 	default:
+		// WeChat may append recipient IDs or request data to its error text.
+		// Log only recognized phrases and discard all upstream-supplied detail.
+		reason := "redacted"
+		for _, phrase := range []string{"invalid template_id", "invalid openid", "argument invalid", "invalid parameter", "invalid page"} {
+			if strings.HasPrefix(reply.Message, phrase) {
+				reason = phrase
+				break
+			}
+		}
+		slog.WarnContext(ctx, "微信提醒发送失败", "errcode", *reply.Code, "errmsg", reason,
+			"kind", d.Kind, "delivery_id", d.ID, "template_id", d.Template)
 		return push.Failed, nil
 	}
 }

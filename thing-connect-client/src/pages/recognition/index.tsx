@@ -1,9 +1,10 @@
+import Taro from '@tarojs/taro';
 import { Text, View } from '@tarojs/components';
 import { useState } from 'react';
 import { RecognitionReminders } from '../../components/recognition-reminders';
 import { Action, Notice } from '../../components/ui';
 import { useDeviceWorkspace } from '../../hooks/device-workspace';
-import { ApiError, request } from '../../services/api';
+import { ApiError, errorText, request } from '../../services/api';
 import { devicesChanged } from '../../services/device-events';
 import { RecognitionTypes } from '../../components/recognition-types';
 import { recognitionPayload, type RecognitionConfig, type Scheme } from '../../domain/recognition';
@@ -28,7 +29,13 @@ export default function Recognition() {
         const config = await request<RecognitionConfig>(url(w.device!.device_id), 'PUT', payload);
         devicesChanged();
         w.commit({ ...w.value!, config });
-      } catch (e) { if (w.alive.current && e instanceof ApiError && e.code === 40901) setConflict(true); throw e; }
+      } catch (e) {
+        if (w.alive.current) {
+          if (e instanceof ApiError && e.code === 40901) setConflict(true);
+          void Taro.showToast({ title: errorText(e), icon: 'none' });
+        }
+        throw e;
+      }
     });
   }
   return <View className='page content-page settings-page'><View className='row between settings-header'><Text className='title device-page-name'>{w.device?.device_name || '当前设备'}</Text><Action disabled={w.busy} onClick={() => void w.refresh()}>刷新</Action></View><Notice error>{w.error}</Notice>{w.busy && !w.value && <Notice>正在加载识别设置…</Notice>}

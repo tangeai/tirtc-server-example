@@ -14,13 +14,14 @@ function render(state: string, online: boolean, menu = false) {
   const values = [[device], false, true, '', { [device.device_id]: { state, serverSynced: true } }, menu ? device : undefined];
   let cursor = 0;
   const navigation: string[] = [], intents: string[] = [], tabActions: string[] = [], toasts: string[] = [];
+  const confirmations: string[] = [];
   const cleanups: (() => void)[] = [];
   const jsx = (type: unknown, props: any) => ({ type, props });
   const source = loadSource(fileURLToPath(new URL('../src/pages/devices/index.tsx', import.meta.url)), {
     '../../components/alarm-subscription': { AccountAlarm: 'account-alarm' },
     'react/jsx-runtime': { jsx, jsxs: jsx },
     react: { useState: (initial: unknown) => [cursor < values.length ? values[cursor++] : (cursor++, initial), () => {}], useRef: (current: unknown) => ({ current }), useEffect: (fn: () => void | (() => void)) => { const cleanup = fn(); if (cleanup) cleanups.push(cleanup); } },
-    '@tarojs/taro': { __esModule: true, default: { showToast: ({ title }: { title: string }) => { toasts.push(title); }, hideTabBar: async () => { tabActions.push('hide'); }, showTabBar: async () => { tabActions.push('show'); }, navigateTo: ({ url }: { url: string }) => { navigation.push(url); } }, useDidShow() {}, usePullDownRefresh() {} },
+    '@tarojs/taro': { __esModule: true, default: { showModal: async ({ content }: { content: string }) => { confirmations.push(content); return { confirm: false }; }, showToast: ({ title }: { title: string }) => { toasts.push(title); }, hideTabBar: async () => { tabActions.push('hide'); }, showTabBar: async () => { tabActions.push('show'); }, navigateTo: ({ url }: { url: string }) => { navigation.push(url); } }, useDidShow() {}, usePullDownRefresh() {} },
     '@tarojs/components': { View: 'view', Text: 'text', Button: 'button' },
     '../../components/ui': { Action: 'action', Field: 'field', Notice: 'notice', Sheet: 'sheet' },
     '../../services/api': { token: () => 'fixture', errorText: () => '失败' },
@@ -28,7 +29,7 @@ function render(state: string, online: boolean, menu = false) {
     '../../services/device-events': { deviceRevision: () => 0 },
     '../../platform/media': { mediaCapabilities: () => ({ platform: 'weapp', playback: true }), performMedia: async (intent: string) => { intents.push(intent); }, refreshAuthorizations: async () => ({}) },
   });
-  return { tree: source.default(), navigation, intents, tabActions, cleanups, toasts };
+  return { tree: source.default(), navigation, intents, tabActions, cleanups, toasts, confirmations };
 }
 test('设备入口顺序和更多菜单保留当前设备', () => {
   const { tree, navigation } = render('authorized', true, true);
@@ -91,4 +92,12 @@ test('离线呼叫和播放显示轻提示但不启动媒体；授权和功能�
   const links = nodes(h.tree).find(n => n.props?.className === 'device-feature-links')!;
   for (const button of nodes(links).filter(n => n.type === 'action')) button.props.onClick();
   assert.equal(h.navigation.length, 3);
+});
+
+test('解绑菜单和确认弹窗均说明清除两种授权', () => {
+  const { tree, confirmations } = render('authorized', true, true);
+  const unbind = nodes(tree).find(n => n.props?.title === '解绑设备')!;
+  assert.match(unbind.props.description, /微信通话和异常提醒授权/);
+  unbind.props.onClick();
+  assert.match(confirmations[0], /微信通话和异常提醒授权/);
 });

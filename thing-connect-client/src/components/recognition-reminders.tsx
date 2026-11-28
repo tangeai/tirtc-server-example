@@ -1,4 +1,4 @@
-import { Input, Text, View } from '@tarojs/components';
+import { Button, Input, Text, View } from '@tarojs/components';
 import { useEffect, useRef, useState } from 'react';
 import { DeviceAlarm } from './alarm-subscription';
 import { Action, Notice } from './ui';
@@ -10,6 +10,7 @@ export function RecognitionReminders({ device, enabled }: { device: string; enab
   const path = '/v1/push/user/preferences/' + encodeURIComponent(device) + '/alarm';
   const owner = token();
   const [value, setValue] = useState<string>();
+  const [status, setStatus] = useState('');
   const [error, setError] = useState('');
   const draft = useRef(''), saved = useRef<number>(), writing = useRef(false);
   const timer = useRef<ReturnType<typeof setTimeout>>();
@@ -36,17 +37,17 @@ export function RecognitionReminders({ device, enabled }: { device: string; enab
     }
     if (Number(text) === saved.current) return;
     writing.current = true;
-    if (mounted.current) setError('');
+    if (mounted.current) { setError(''); setStatus('保存中…'); }
     try {
       const p = await request<Preference>(path, 'PUT', { interval_seconds: Number(text) });
       saved.current = p.interval_seconds ?? 0;
       if (mounted.current && draft.current === text) {
         draft.current = String(saved.current);
-        setValue(draft.current);
+        setValue(draft.current); setStatus('已保存');
       }
     } catch (e) {
       saved.current = undefined; // A lost acknowledgement leaves the server value unknown.
-      if (mounted.current && draft.current === text) setError(errorText(e));
+      if (mounted.current && draft.current === text) { setStatus(''); setError(errorText(e)); }
     } finally {
       writing.current = false;
       if (draft.current !== text) void flush();
@@ -62,21 +63,27 @@ export function RecognitionReminders({ device, enabled }: { device: string; enab
     };
   }, [device]);
 
-  function edit(text: string) {
+  function edit(text: string, immediate = false) {
     draft.current = text;
-    setValue(text); setError('');
+    setValue(text); setError(''); setStatus('');
     clearTimeout(timer.current);
+    if (immediate) { void flush(); return; }
     timer.current = setTimeout(() => void flush(), 700);
   }
 
   return <View className='reminder-page'><View className='card reminder-settings'>
     <DeviceAlarm device={device} enabled={enabled} />
     {value !== undefined && <View className='reminder-interval-row reminder-line'>
-      <View className='reminder-copy'><Text className='reminder-heading'>提醒间隔</Text>
-        <Text className='reminder-caption'>填 0 表示每次异常都提醒</Text></View>
+      <View className='reminder-copy'><Text className='reminder-heading'>提醒间隔 <Text className='interval-status'>{status}</Text></Text>
+        <Text className='reminder-caption'>填 0 表示每次异常都提醒。{!enabled && '开启 AI 识别后生效。'}</Text></View>
       <Input className='reminder-seconds-input' ariaLabel='提醒间隔（秒）' type='number' maxlength={5}
         value={value} onInput={e => edit(e.detail.value)} onBlur={() => void flush()} onConfirm={() => void flush()} />
       <Text>秒</Text>
+    </View>}
+    {value !== undefined && <View className='interval-presets'>
+      {([['每次', 0], ['1 分钟', 60], ['5 分钟', 300], ['30 分钟', 1800]] as const).map(([label, seconds]) =>
+        <Button key={seconds} className={'interval-preset' + (value !== '' && Number(value) === seconds ? ' active' : '')}
+          onClick={() => edit(String(seconds), true)}>{label}</Button>)}
     </View>}
     {value === undefined && !error && <Notice>正在加载提醒间隔…</Notice>}
     <Notice error>{error}</Notice>

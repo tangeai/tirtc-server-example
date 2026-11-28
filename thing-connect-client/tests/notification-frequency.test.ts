@@ -21,7 +21,7 @@ for (const [saved, suggested] of [[0, 60], [null, 0], [null, 60], [90, 60]] as c
         useEffect(fn: () => void) { onMount = fn; },
         useRef(current: unknown) { const i = cursor++; if (i >= state.length) state[i] = { current }; return state[i]; },
       },
-      '@tarojs/components': { Input: 'input', Text: 'text', View: 'view' },
+      '@tarojs/components': { Button: 'preset', Input: 'input', Text: 'text', View: 'view' },
       './alarm-subscription': { DeviceAlarm: 'device-alarm' },
       './ui': { Action: 'button', Notice: 'notice' },
       '../services/api': {
@@ -55,5 +55,13 @@ for (const [saved, suggested] of [[0, 60], [null, 0], [null, 60], [90, 60]] as c
     assert.deepEqual(writes.map(w => w.interval_seconds), [12,120,0,0]);
     edit('45'); await new Promise(r => setTimeout(r, 750));
     assert.equal(writes.at(-1)?.interval_seconds, 45);
+    const preset = () => render().find(n => n.type === 'preset' && n.props.children === '5 分钟');
+    preset().props.onClick();
+    assert.equal(writes.at(-1)?.interval_seconds, 300);
+    assert.equal(input().value, '300');
+    assert.match(preset().props.className, /active/);
+    assert.ok(render().some(n => n.props.children === '保存中…'));
+    await new Promise(r => setImmediate(r));
+    assert.ok(render().some(n => n.props.children === '已保存'));
   });
 }

@@ -6,7 +6,7 @@ import { loadSource } from './helpers/load-source.ts';
 type Options = {
   choice?: string; failure?: string; errCode?: number; code?: number; replace?: boolean; approve?: boolean;
   granted?: boolean; mismatch?: boolean; legacy?: boolean; prepareFailure?: boolean; holdPrompt?: boolean;
-  loseAcknowledgement?: boolean;
+  loseAcknowledgement?: boolean; refreshFailure?: boolean;
 };
 function harness(o: Options = {}) {
   let cursor = 0, mounted = false, sessions = 0, prompts = 0, confirms = 0, modal = 0, effects: (() => void)[] = [];
@@ -24,11 +24,12 @@ function harness(o: Options = {}) {
       useEffect(fn: () => void) { if (!mounted) effects.push(fn); },
     },
     '@tarojs/taro': { __esModule: true, default: { login: async () => ({ code: 'fixture' }), getAccountInfoSync: () => ({ miniProgram: { appId: 'app' } }), showModal: async (dialog: { content: string }) => {
-        assert.match(dialog.content, /其他账号/); assert.match(dialog.content, /本账号原有/); assert.match(dialog.content, /等待发送/);
+        assert.match(dialog.content, /其他账号/); assert.match(dialog.content, /本账号原有/); assert.match(dialog.content, /其他已授权设备需要重新授权/); assert.match(dialog.content, /等待发送/);
         modal++; return { confirm: o.approve };
       } } },
     '../services/api': { token: () => 'account', ApiError, errorText: (e: Error) => e.message, request: async (path: string, method: string, body?: {decision: string; device_id?: string; model_id?: string}) => {
       if (path.endsWith('/sn-ticket')) return { sn_ticket: 'ticket-' + ++ticketCount, model_id: 'model' };
+      if (path.endsWith('/capabilities?device_id=device-A') && o.refreshFailure && decisions.length) throw new ApiError(50300, '读取状态失败');
       if (path.endsWith('/capabilities?device_id=device-A')) return o.legacy ? { alarm: true } : { device_id: 'device-A', alarm: true, alarm_template_id: 'template', alarm_subscribed: granted };
       if (path.endsWith('/device-subscriptions')) {
         assert.equal(body?.device_id, 'device-A'); assert.equal(body?.model_id, 'model');
@@ -154,4 +155,11 @@ test('新票据仍未通过校验时显示配置排查提示', async () => {
   await flush(); await h.render().activate(); await h.render().activate();
   assert.equal(h.counts().sessions, 2); assert.equal(h.counts().confirms, 0);
   assert.equal(h.render().unavailable, true); assert.match(h.render().notice, /AppID/);
+});
+
+test('取消后回读失败显示真正的错误', async () => {
+  const h = harness({ choice: 'cancel', refreshFailure: true }); await flush();
+  await h.render().activate();
+  assert.equal(h.render().failed, true);
+  assert.equal(h.render().notice, '读取状态失败');
 });

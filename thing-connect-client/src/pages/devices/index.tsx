@@ -109,7 +109,7 @@ export default function Devices() {
     }, true);
   }
   async function unbind(device: Device) {
-    const result = await Taro.showModal({ title: '解绑设备', content: `解绑后无法查看或呼叫“${device.device_name || device.device_id}”，微信通话授权也会清除。是否继续？`, confirmText: '解绑', confirmColor: '#fa5151' });
+    const result = await Taro.showModal({ title: '解绑设备', content: `解绑后无法查看或呼叫“${device.device_name || device.device_id}”，微信通话和异常提醒授权也会清除。是否继续？`, confirmText: '解绑', confirmColor: '#fa5151' });
     if (!result.confirm || !alive.current) return;
     await mutate(async () => { await request('/v1/user/device/reset', 'DELETE', { device_id: device.device_id }); devicesChanged(); if (alive.current) { revision.current++; authRevision.current++; loadedRevision.current = deviceRevision(); setLoading(false); setDevices(rows => rows.filter(row => row.device_id !== device.device_id)); } });
   }
@@ -143,7 +143,7 @@ export default function Devices() {
         <DeviceMenuItem icon='edit' title='修改设备名称' description='为设备设置方便辨认的名称' onClick={() => openRename(menu)} />
         <DeviceMenuItem icon='info' title='设备信息' description='查看设备 ID 及播放、通话能力' onClick={() => { setInfo(menu); setMenu(undefined); }} />
       </View>
-      <View className='device-menu-danger'><DeviceMenuItem icon='remove' danger title='解绑设备' description='移除设备，同时清除微信通话授权' onClick={() => { const device = menu; setMenu(undefined); void unbind(device); }} /></View>
+      <View className='device-menu-danger'><DeviceMenuItem icon='remove' danger title='解绑设备' description='移除设备，同时清除微信通话和异常提醒授权' onClick={() => { const device = menu; setMenu(undefined); void unbind(device); }} /></View>
     </View><View className='device-more-footer'><Button className='device-more-cancel' onClick={() => setMenu(undefined)}>取消</Button></View></View></View>}
     {editing && <Sheet title='修改设备名称' busy={busy} onClose={() => setEditing(undefined)}><Field label='设备名称' value={name} onChange={setName} disabled={busy} /><Text className='muted'>最多 13 个字符，用于设备列表与微信通话授权。</Text><Notice error>{editError}</Notice><View className='wide'><Action primary disabled={busy} onClick={() => void rename()}>保存名称</Action></View></Sheet>}
     {info && <DeviceInfo key={info.device_id} device={info} onClose={() => setInfo(undefined)} />}
