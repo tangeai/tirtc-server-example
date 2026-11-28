@@ -86,7 +86,8 @@ for (const name of ['', '   ']) {
     assert.match(button.props.ariaLabel, /设置设备名称/);
     button.props.onClick();
     let tree = h.render();
-    assert.ok(nodes(tree).some(n => n.type === 'sheet' && n.props.title === '修改设备名称'));
+    assert.ok(nodes(button).some(n => n.props?.children === '未命名设备'));
+    assert.ok(nodes(tree).some(n => n.type === 'sheet' && n.props.title === '设置设备名称'));
     const field = () => nodes(h.render()).find(n => n.type === 'field' && n.props.label === '设备名称');
     const save = () => nodes(h.render()).find(n => n.type === 'action' && n.props.children === '保存名称').props.onClick();
     field().props.onChange('   '); save(); await flush();

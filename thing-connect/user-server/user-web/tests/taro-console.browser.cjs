@@ -71,6 +71,12 @@ async function verify(browser, width) {
     recognitionEnabled = true;
     await page.locator('.devices-page .action').filter({ hasText: /^刷新$/ }).click();
     await states.locator('.action').filter({hasText:'AI 识别'}).locator('.device-status-dot.on').waitFor();
+    await states.locator('.device-primary-actions .action').filter({hasText:'微信通话'}).click();
+    const guide = page.getByRole('dialog', {name:'在微信中通话'});
+    await guide.waitFor();
+    await guide.locator('img').evaluate(image => image.decode());
+    await page.keyboard.press('Escape');
+    await guide.waitFor({state:'hidden'});
     const readsBeforeLeaving = deviceReads;
     await page.goto(site + '/account');
     await page.goBack();

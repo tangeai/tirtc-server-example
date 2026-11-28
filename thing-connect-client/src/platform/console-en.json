@@ -249,5 +249,11 @@
   "可用": "Available",
   "待更新": "Pending",
   "已开启": "On",
-  "已关闭": "Off"
+  "已关闭": "Off",
+  "在微信中通话": "Call in WeChat",
+  "用微信扫一扫，打开「探鸽小钛」小程序。": "Scan with WeChat to open the 探鸽小钛 mini program.",
+  "探鸽小钛小程序码": "WeChat mini program code for 探鸽小钛",
+  "也可以在微信搜索「探鸽小钛」，登录同一账号，选择设备后点击「微信通话」。": "You can also search WeChat for 探鸽小钛. Sign in with the same account, select your device and tap WeChat call.",
+  "未命名设备": "Unnamed device",
+  "设置设备名称": "Set device name"
 }

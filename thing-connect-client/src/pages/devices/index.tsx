@@ -4,6 +4,7 @@ import Taro, { useDidShow, usePullDownRefresh } from '@tarojs/taro';
 import { Button } from '../../platform/button';
 import { Text, View } from '@tarojs/components';
 import { useEffect, useRef, useState } from 'react';
+import { WechatCallGuide } from '../../components/wechat-call-guide';
 import { DeviceInfo } from '../../components/device-info';
 import { Action, Field, Notice, RobotIcon, Sheet } from '../../components/ui';
 import { request, token, errorText } from '../../services/api';
@@ -22,6 +23,7 @@ export default function Devices() {
   const [authorizations, setAuthorizations] = useState<Record<string, DeviceAuthorization>>({});
   const [menu, setMenu] = useState<Device>(), [editing, setEditing] = useState<Device>(), [name, setName] = useState(''), [info, setInfo] = useState<Device>();
   const [busy, setBusy] = useState(false), [editError, setEditError] = useState('');
+  const [showCallGuide, setShowCallGuide] = useState(false);
   const authRevision = useRef(0), authActions = useRef<Record<string, number>>({});
   const alive = useRef(true), reading = useRef(false), writing = useRef(false), revision = useRef(0), loadedRevision = useRef(-1);
   const dashboard = useDeviceDashboard();
@@ -160,10 +162,12 @@ export default function Devices() {
           { page: 'recognition', title: 'AI 识别', active: summary?.recognition, status: summary?.recognition == null ? unknown : tr(summary.recognition ? '已开启' : '已关闭') },
           { page: 'contacts', title: '联系人', active: true, status: tr('可用') },
         ];
-        return <View className='card' key={device.device_id}><View className='device-head'><View className={'device-symbol ' + (device.online ? 'device-symbol-online' : 'device-symbol-offline')}><RobotIcon /><Text className='device-symbol-status'>{device.online ? tr("在线") : tr("离线")}</Text></View><View className='grow device-summary'><View className='device-title-row'>{device.device_name?.trim() ? <Text className='device-name'>{device.device_name}</Text> : <Button className='device-name-setup' disabled={busy} ariaLabel={tr("设置设备名称：") + device.device_id} onClick={() => openRename(device)}><Text>{tr("设置名称")}</Text><View className='device-name-edit-icon' ariaHidden /></Button>}
+        return <View className='card' key={device.device_id}><View className='device-head'><View className={'device-symbol ' + (device.online ? 'device-symbol-online' : 'device-symbol-offline')}><RobotIcon /><Text className='device-symbol-status'>{device.online ? tr("在线") : tr("离线")}</Text></View><View className='grow device-summary'><View className='device-title-row'>{device.device_name?.trim() ? <Text className='device-name'>{device.device_name}</Text> : <Button className='device-name-setup' disabled={busy} ariaLabel={tr("设置设备名称：") + device.device_id} onClick={() => openRename(device)}><Text className="device-placeholder-name">{tr("未命名设备")}</Text><View className='device-name-edit-icon' ariaHidden /></Button>}
           {summary?.roleName && <Text className='dashboard-role-name' ariaLabel={tr('AI 角色：') + summary.roleName}>{summary.roleName}</Text>}
         </View><Text className='device-id'>ID: {device.device_id}</Text></View><Action disabled={busy} onClick={() => setMenu(device)}>⋯</Action></View>
-        <View className='device-actions device-primary-actions'>{capabilities.platform === 'weapp' && <Action primary muted={!device.online && !needsAuthorization(device)} disabled={busy || loading} onClick={() => void media(needsAuthorization(device) ? 'authorize' : 'wechat-call', device)}><View className='device-primary-label'><View className={'device-action-icon ' + (needsAuthorization(device) ? 'device-action-shield' : 'device-action-phone')} ariaHidden />{callLabel(device)}</View></Action>}<Action muted={!device.online} disabled={busy || !capabilities.playback} onClick={() => void media('playback', device)}><View className='device-primary-label'><View className='device-action-icon device-action-play' ariaHidden />{tr("实时查看")}</View></Action></View>
+        <View className='device-actions device-primary-actions'>{capabilities.platform === 'h5' ? <Action primary onClick={() => setShowCallGuide(true)}>
+          <View className='device-primary-label'><View className='device-action-icon device-action-phone' ariaHidden />{tr('微信通话')}</View>
+        </Action> : <Action primary muted={!device.online && !needsAuthorization(device)} disabled={busy || loading} onClick={() => void media(needsAuthorization(device) ? 'authorize' : 'wechat-call', device)}><View className='device-primary-label'><View className={'device-action-icon ' + (needsAuthorization(device) ? 'device-action-shield' : 'device-action-phone')} ariaHidden />{callLabel(device)}</View></Action>}<Action muted={!device.online} disabled={busy || !capabilities.playback} onClick={() => void media('playback', device)}><View className='device-primary-label'><View className='device-action-icon device-action-play' ariaHidden />{tr("实时查看")}</View></Action></View>
         <View className='device-feature-links'>
           {links.map(({ page, title, status, active }) => <Action key={page} ariaLabel={tr(title) + ' ' + status}
             onClick={() => void Taro.navigateTo({ url: '/pages/' + page + '/index?device_id=' + encodeURIComponent(device.device_id) })}>
@@ -172,17 +176,18 @@ export default function Devices() {
             <Text ariaHidden className='device-link-arrow'>›</Text>
           </Action>)}</View>
       </View>; })}</View>
+    {showCallGuide && <WechatCallGuide onClose={() => setShowCallGuide(false)} />}
     {menu && <View className='mask device-more-mask' onClick={() => setMenu(undefined)}><View className='device-more-sheet' onClick={e => e.stopPropagation()}><View className='device-more-header'><Text className='device-more-title'>{tr("更多操作")}</Text><Text className='device-more-subtitle'>{menu.device_name || tr("未命名设备")}</Text></View><View className='device-more-scroll'>
       <View className='device-menu-list'>
         {capabilities.platform === 'weapp' && <DeviceMenuItem icon='auth' title={tr("微信通话授权")} badge={authLabel(menu)} description={tr("管理微信与设备的音视频通话授权")} onClick={() => { const device = menu; setMenu(undefined); void media('authorize', device); }} />}
         <DeviceMenuItem icon='group' title={tr("多人对讲")} description={tr("创建或加入房间，与多台设备语音对讲")} onClick={() => { const device = menu; setMenu(undefined); void Taro.navigateTo({ url: '/pages/room/index?device_id=' + encodeURIComponent(device.device_id) }); }} />
         <DeviceMenuItem icon='history' title={tr("AI 对话记录")} description={tr("查看设备与 AI 的历史文字对话")} onClick={() => { const device = menu; setMenu(undefined); void Taro.navigateTo({ url: '/pages/history/index?device_id=' + encodeURIComponent(device.device_id) }); }} />
-        <DeviceMenuItem icon='edit' title={tr("修改设备名称")} description={tr("为设备设置方便辨认的名称")} onClick={() => openRename(menu)} />
+        <DeviceMenuItem icon='edit' title={tr(menu.device_name?.trim() ? "修改设备名称" : "设置设备名称")} description={tr("为设备设置方便辨认的名称")} onClick={() => openRename(menu)} />
         <DeviceMenuItem icon='info' title={tr("设备信息")} description={tr("查看设备 ID 及播放、通话能力")} onClick={() => { setInfo(menu); setMenu(undefined); }} />
       </View>
       <View className='device-menu-danger'><DeviceMenuItem icon='remove' danger title={tr("解绑设备")} description={tr("移除设备，同时清除微信通话和异常提醒授权")} onClick={() => { const device = menu; setMenu(undefined); void unbind(device); }} /></View>
     </View><View className='device-more-footer'><Button className='device-more-cancel' onClick={() => setMenu(undefined)}>{tr("取消")}</Button></View></View></View>}
-    {editing && <Sheet title={tr("修改设备名称")} busy={busy} onClose={() => setEditing(undefined)}><Field label={tr("设备名称")} value={name} onChange={setName} disabled={busy} /><Text className='muted'>{tr("最多 13 个字符，用于设备列表与微信通话授权。")}</Text><Notice error>{editError}</Notice><View className='wide'><Action primary disabled={busy} onClick={() => void rename()}>{tr("保存名称")}</Action></View></Sheet>}
+    {editing && <Sheet title={tr(editing.device_name?.trim() ? "修改设备名称" : "设置设备名称")} busy={busy} onClose={() => setEditing(undefined)}><Field label={tr("设备名称")} value={name} onChange={setName} disabled={busy} /><Text className='muted'>{tr("最多 13 个字符，用于设备列表与微信通话授权。")}</Text><Notice error>{editError}</Notice><View className='wide'><Action primary disabled={busy} onClick={() => void rename()}>{tr("保存名称")}</Action></View></Sheet>}
     {info && <DeviceInfo key={info.device_id} device={info} onClose={() => setInfo(undefined)} />}
   </View>;
 }

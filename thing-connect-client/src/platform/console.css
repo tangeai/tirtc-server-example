@@ -129,3 +129,12 @@ body,.taro_page { background:#f4f6f5 }
 @media (hover:hover) {
   .devices-page .device-feature-links .action:hover {background:#edf5f0;color:#116341}
 }
+
+.wechat-call-guide {width:min(360PX,calc(100vw - 32PX));max-height:90vh;box-sizing:border-box;margin:auto;padding:0;border:0;border-radius:16PX;color:#1b3025;background:white;box-shadow:0 18PX 60PX #10231b30}
+.wechat-call-guide::backdrop {background:#13231b66}
+.wechat-call-guide section {padding:24PX;text-align:center}
+.wechat-call-guide h2 {margin:0;font:600 21PX/1.4 system-ui,sans-serif}
+.wechat-call-guide p {margin:10PX 0;color:#516257;font:14PX/1.65 system-ui,sans-serif}
+.wechat-call-code {width:190PX;max-width:100%;aspect-ratio:1;margin:18PX auto;overflow:hidden;border-radius:12PX}
+.wechat-call-code img {display:block;height:100%;width:auto;max-width:none}
+.wechat-call-close {width:100%;margin-top:12PX;padding:10PX;border:0;border-radius:8PX;background:#edf4ef;color:#205338;font:600 15PX/1.5 system-ui,sans-serif;cursor:pointer}
