@@ -161,7 +161,7 @@ func TestDeliveryRecoveryDropsStaleAndBoundsRealCalls(t *testing.T) {
 	app := "wx" + dev
 	gen := uniqueDevID()
 	exec("INSERT INTO push_recipient(user_id,app_id,open_id,generation) VALUES(?,?,?,?)", user, app, "open", gen)
-	exec("INSERT INTO push_subscription(generation,template_id,grant_id) VALUES(?,?,?)", gen, "template", "grant")
+	exec("INSERT INTO push_subscription(generation,template_id,grant_id,bind_id,model_id) VALUES(?,?,?,?,'model')", gen, "template", "grant", bind)
 	t.Cleanup(func() {
 		for _, table := range []string{"push_event", "push_delivery", "push_window"} {
 			db.Exec("DELETE FROM "+table+" WHERE device_id=?", dev)
@@ -232,7 +232,7 @@ func TestDeliveryOverloadDoesNotSpendWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 	exec("INSERT INTO push_recipient(user_id,app_id,open_id,generation) VALUES(?,?,?,?)", user, app, "open", gen)
-	exec("INSERT INTO push_subscription(generation,template_id,grant_id) VALUES(?,?,?)", gen, "template", "grant")
+	exec("INSERT INTO push_subscription(generation,template_id,grant_id,bind_id,model_id) VALUES(?,?,?,?,'model')", gen, "template", "grant", bind)
 	t.Cleanup(func() {
 		for _, table := range []string{"push_event", "push_delivery", "push_window"} {
 			db.Exec("DELETE FROM "+table+" WHERE device_id=?", dev)

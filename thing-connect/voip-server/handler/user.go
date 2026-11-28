@@ -122,7 +122,7 @@ func (s *Server) postSnTicket(c *gin.Context) {
 		apiresp.Fail(c, apiresp.ErrWechatAPI, err.Error())
 		return
 	}
-	apiresp.OK(c, gin.H{"sn_ticket": ticket, "device_name": deviceName})
+	apiresp.OK(c, gin.H{"sn_ticket": ticket, "device_name": deviceName, "model_id": app.ModelID})
 }
 
 // ── /v1/voip/user/wechat-mini-login ──────────────────────────────────────────

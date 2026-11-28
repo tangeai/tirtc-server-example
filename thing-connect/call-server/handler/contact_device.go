@@ -23,13 +23,32 @@ func (s *Server) getDeviceContacts(c *gin.Context) {
 		apiresp.Fail(c, apiresp.ErrInternal, err.Error())
 		return
 	}
+	var names map[string]string
+	if len(rows) > 0 && s.contactNames != nil {
+		bind, err := s.dev.GetBindByDeviceID(ctx, self)
+		if err != nil {
+			apiresp.Fail(c, apiresp.ErrInternal, "加载联系人名称失败")
+			return
+		}
+		if bind != nil && bind.UserID != 0 {
+			names, err = s.contactNames.VisibleContactNames(ctx, bind.UserID, self)
+			if err != nil {
+				apiresp.Fail(c, apiresp.ErrInternal, "加载联系人名称失败")
+				return
+			}
+		}
+	}
 	out := make([]gin.H, 0, len(rows))
 	for _, row := range rows {
 		peer := row.peer(self)
+		remark := row.remarkFor(self)
+		if remark == "" {
+			remark = names[peer]
+		}
 		out = append(out, gin.H{
 			"device_id": peer,
 			"type":      "device",
-			"remark":    row.remarkFor(self),
+			"remark":    remark,
 			"source":    row.Source,
 			"online":    s.isOnline(ctx, peer),
 		})
@@ -203,22 +222,6 @@ func (s *Server) putDeviceContactRemark(c *gin.Context) {
 	}
 	ctx := c.Request.Context()
 
-	// 先尝试设备联系人
-	row, err := s.getContactRow(ctx, self, body.PeerID)
-	if err != nil {
-		apiresp.Fail(c, apiresp.ErrInternal, err.Error())
-		return
-	}
-	if row != nil && row.Status == contactStatusAccepted {
-		if err := s.setRemark(ctx, self, body.PeerID, body.Remark); err != nil {
-			apiresp.Fail(c, contactErrCode(err), err.Error())
-			return
-		}
-		apiresp.OK(c, nil)
-		return
-	}
-
-	// 再尝试 VoIP 联系人（peer_id = wx_open_id）
 	if s.remarks == nil {
 		apiresp.Fail(c, apiresp.ErrInternal, "联系人备注服务不可用")
 		return

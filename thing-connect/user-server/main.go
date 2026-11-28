@@ -178,7 +178,7 @@ func main() {
 		log.Fatalf("service discovery: %v", err)
 	}
 	if err := registerUserPages(r, staticDir); err != nil {
-		log.Fatalf("user web build missing: run npm --prefix user-server/user-web run build: %v", err)
+		log.Fatalf("user page entry unavailable: %v", err)
 	}
 
 	targets := []cleanupoutbox.Target{}

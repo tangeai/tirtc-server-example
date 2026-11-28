@@ -1,40 +1,63 @@
-import { Switch, Text, View } from '@tarojs/components';
+import { tr, usePageLanguage } from '../../platform/translate';
+import Taro from '@tarojs/taro';
+import { Text, View } from '@tarojs/components';
 import { useState } from 'react';
-import { Action, Notice } from '../../components/ui';
+import { RecognitionReminders } from '../../components/recognition-reminders';
+import { Action, DevicePageHeading, Notice } from '../../components/ui';
 import { useDeviceWorkspace } from '../../hooks/device-workspace';
-import { ApiError, request } from '../../services/api';
+import { ApiError, errorText, request } from '../../services/api';
 import { devicesChanged } from '../../services/device-events';
-import { moveScheme, recognitionPayload, type RecognitionConfig, type Scheme } from '../../domain/recognition';
+import { RecognitionTypes } from '../../components/recognition-types';
+import { recognitionPayload, type RecognitionConfig, type Scheme } from '../../domain/recognition';
 
 export default function Recognition() {
-  const [selected, setSelected] = useState<Scheme[]>([]), [enabled, setEnabled] = useState(false), [conflict, setConflict] = useState(false), [notice, setNotice] = useState('');
+  usePageLanguage();
+  const [conflict, setConflict] = useState(false);
   const w = useDeviceWorkspace(async id => {
     const [config, catalog] = await Promise.all([request<RecognitionConfig>(url(id)), request<Scheme[]>('/v1/recognition/types')]);
-    if (w.alive.current) { setSelected(config.schemes); setEnabled(config.policy.enabled); setConflict(false); setNotice(''); }
+    if (w.alive.current) setConflict(false);
     return { config, catalog };
   });
   function url(id: string) { return '/v1/recognition/devices/' + encodeURIComponent(id) + '/config'; }
-  async function save() {
+  const selected = w.value?.config.policy.enabled ? w.value.config.schemes : [];
+  const locked = w.busy || conflict;
+  async function save(schemes: Scheme[]) {
     if (!w.value || !w.device) return;
     let payload;
-    try { payload = recognitionPayload(enabled, selected, w.value.config.policy.revision); }
+    try { payload = recognitionPayload(schemes.length > 0, schemes, w.value.config.policy.revision); }
     catch (e) { w.setError(e instanceof Error ? e.message : '请检查识别设置'); return; }
     await w.run(async () => {
-      setNotice('');
       try {
         const config = await request<RecognitionConfig>(url(w.device!.device_id), 'PUT', payload);
         devicesChanged();
         w.commit({ ...w.value!, config });
-        if (w.alive.current) { setSelected(config.schemes); setEnabled(config.policy.enabled); setConflict(false); setNotice('设置已保存'); }
-      } catch (e) { if (w.alive.current && e instanceof ApiError && e.code === 40901) setConflict(true); throw e; }
+      } catch (e) {
+        if (w.alive.current) {
+          if (e instanceof ApiError && e.code === 40901) setConflict(true);
+          void Taro.showToast({ title: errorText(e), icon: 'none' });
+        }
+        throw e;
+      }
     });
   }
-  return <View className='page content-page'><View className='row between'><Text className='title device-page-name'>{w.device?.device_name || '当前设备'}</Text><Action disabled={w.busy} onClick={() => void w.refresh()}>重新加载</Action></View><Text className='device-page-description'>为这台设备选择音频识别类型并调整执行顺序，识别结果可返回文字或语音。修改后请保存设置。</Text><Notice error>{w.error}</Notice><Notice>{w.busy ? '正在处理…' : notice}</Notice>
-    {w.value && <><View className='card'><View className='row between'><Text>开启 AI 识别</Text><Switch checked={enabled} disabled={w.busy} color='#07c160' onChange={e => setEnabled(e.detail.value)} /></View><Text className='muted'>同一段音频按下方顺序分析，保存后生效。</Text></View>
-      {selected.map((item, index) => <View className='card' key={item.scheme_id}><Text className='label'>{index + 1}. {item.name}</Text><Text className='muted'>{({ text: '文字', audio: '语音', text_audio: '文字＋语音' } as Record<string,string>)[item.output_mode] || item.output_mode}{item.description ? ' · ' + item.description : ''}</Text><View className='row'><Action disabled={w.busy || index === 0} onClick={() => setSelected(moveScheme(selected, index, -1))}>上移</Action><Action disabled={w.busy || index === selected.length - 1} onClick={() => setSelected(moveScheme(selected, index, 1))}>下移</Action><Action danger disabled={w.busy} onClick={() => setSelected(selected.filter(s => s.scheme_id !== item.scheme_id))}>移除</Action></View></View>)}
-      <View className='card'><Text className='label'>添加识别类型</Text>{w.value.catalog.filter(item => !selected.some(s => s.scheme_id === item.scheme_id)).map(item => <View className='contact row between' key={item.scheme_id}><Text className='grow'>{item.name}</Text><Action disabled={w.busy || selected.length >= 8} onClick={() => setSelected([...selected, item])}>添加</Action></View>)}{!w.value.catalog.length && <Text className='muted'>暂无可用类型</Text>}<Text className='muted'>已选 {selected.length} / 8 个类型</Text></View>
-      <Text className='muted'>本月已占用 {w.value.config.usage.used} / {w.value.config.policy.monthly_limit} 次，每个类型计一次。</Text>
-      {conflict && <Notice error>配置已变化，草稿已保留。请核对后重新加载，再保存；不会自动覆盖其他端的修改。</Notice>}
-      <View className='wide'><Action primary disabled={w.busy || conflict} onClick={() => void save()}>保存设置</Action></View></>}
+  return <View className='page content-page settings-page'>
+    <View className='row'><DevicePageHeading title='AI 识别' device={w.device} /></View>
+    <Notice error>{w.error}</Notice>
+    {!w.value && w.error && <Action disabled={w.busy} onClick={() => void w.refresh()}>{tr("重新加载识别设置")}</Action>}
+    {w.busy && !w.value && <Notice>{tr("正在加载识别设置…")}</Notice>}
+    {w.value && <><View className='settings-section'>
+      <RecognitionTypes selected={selected} catalog={w.value.catalog} locked={locked}
+        change={schemes => void save(schemes)} />
+      <Text className='settings-footnote'>{tr("开启任一类型即可识别，全部关闭即停止。修改后自动保存。")}</Text>
+    </View>
+      {conflict && <View className='card'>
+        <Notice error>{tr("设备配置已更新，载入最新设置后可继续修改。")}</Notice>
+        <Action disabled={w.busy} onClick={() => void w.refresh()}>{tr("载入最新设置")}</Action>
+      </View>}
+      {w.device && <RecognitionReminders key={w.device.device_id} device={w.device.device_id} enabled={w.value.config.policy.enabled} />}
+      <View className='settings-section'><View className='card'><View className='row between'>
+        <Text>{tr("本月识别用量")}</Text><Text className='recognition-usage-value'>{w.value.config.usage.used} / {w.value.config.policy.monthly_limit} {tr("次")}</Text>
+      </View></View><Text className='settings-footnote'>{tr("每执行一个识别类型计一次，按 UTC 自然月统计。")}</Text></View>
+    </>}
   </View>;
 }

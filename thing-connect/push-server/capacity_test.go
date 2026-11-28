@@ -71,7 +71,7 @@ func TestFirstTierCapacity(t *testing.T) {
 	}
 	exec("INSERT INTO device_bind(device_id,user_id) SELECT CONCAT('CAP',n),n+1 FROM capacity_seq")
 	exec("INSERT INTO push_recipient(user_id,app_id,open_id,generation) SELECT n+1,'app',CONCAT('wx',n),CONCAT('g',n) FROM capacity_seq WHERE MOD(n,10)=0")
-	exec("INSERT INTO push_subscription(generation,template_id,grant_id) SELECT generation,?,'grant' FROM push_recipient", push.AlarmTemplate)
+	exec("INSERT INTO push_subscription(generation,template_id,grant_id,bind_id,model_id) SELECT r.generation,?,'grant',CONCAT(b.id,':',b.binding_revision),'model' FROM push_recipient r JOIN device_bind b ON b.user_id=r.user_id", push.AlarmTemplate)
 	for batch := 0; batch < 30; batch++ {
 		exec(`INSERT INTO push_event(device_id,bind_id,source_event_id,registered_at,received_at,outcome)
  SELECT CONCAT('CAP',n),'history',CONCAT('hist',?,':alarm'),UTC_TIMESTAMP(6),

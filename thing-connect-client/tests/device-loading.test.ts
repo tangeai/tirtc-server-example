@@ -19,6 +19,7 @@ function harness(deviceName = '测试') {
   const writes: { path: string; method: string; body: any }[] = [];
   let resolveWrite = () => {}, changed = 0;
   const source = loadSource(fileURLToPath(new URL('../src/pages/devices/index.tsx', import.meta.url)), {
+    '../../components/alarm-subscription': { AccountAlarm: 'account-alarm' },
     'react/jsx-runtime': { jsx, jsxs: jsx },
     react: {
       useState(initial: unknown) { const i = cursor++; if (!mounted) state[i] = initial; return [state[i], (value: any) => { state[i] = typeof value === 'function' ? value(state[i]) : value; }]; },
@@ -29,6 +30,8 @@ function harness(deviceName = '测试') {
     '@tarojs/taro': { __esModule: true, default: { stopPullDownRefresh() { stopped++; } }, useDidShow(fn: typeof show) { show = fn; }, usePullDownRefresh(fn: typeof pull) { pull = fn; } },
     '../../components/ui': { Action: 'action', Field: 'field', Notice: 'notice', Sheet: 'sheet' },
     '../../services/api': { token: () => 'account', errorText: () => '读取失败', request: (path: string, method: string, body: any) => { writes.push({ path, method, body }); return new Promise<void>(resolve => { resolveWrite = resolve; }); } },
+    '../services/api': { token: () => 'account' },
+    './api': { request: async () => ({ role_id: '', contacts: [], policy: { enabled: false } }) },
     '../../services/device-events': { deviceRevision: () => changed, devicesChanged: () => { changed++; } },
     '../../services/device-directory': { readDevices: async () => [device] },
     '../../platform/media': {
@@ -83,7 +86,8 @@ for (const name of ['', '   ']) {
     assert.match(button.props.ariaLabel, /设置设备名称/);
     button.props.onClick();
     let tree = h.render();
-    assert.ok(nodes(tree).some(n => n.type === 'sheet' && n.props.title === '修改设备名称'));
+    assert.ok(nodes(button).some(n => n.props?.children === '未命名设备'));
+    assert.ok(nodes(tree).some(n => n.type === 'sheet' && n.props.title === '设置设备名称'));
     const field = () => nodes(h.render()).find(n => n.type === 'field' && n.props.label === '设备名称');
     const save = () => nodes(h.render()).find(n => n.type === 'action' && n.props.children === '保存名称').props.onClick();
     field().props.onChange('   '); save(); await flush();

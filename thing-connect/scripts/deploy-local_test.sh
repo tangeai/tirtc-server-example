@@ -211,3 +211,39 @@ bash -c '
     grep -qE "start recognition-server" "$TEST_ROOT/all-services.log"
 '
 echo 'PASS: controller defers only recognition and normal start includes its readiness checks'
+
+# A healthy service process can still return 503 for lists with offline devices.
+# Drive the update entry point with successful deployment and a failing list probe.
+bash -c '
+    source "$SCRIPTS/deploy-local.sh"
+    LOCAL_DEPLOY_ROOT="$TEST_ROOT/probe-deploy"
+    LOCAL_SNAPSHOT="$TEST_ROOT/probe-snapshot"
+    MIGRATION_CONFIG="$TEST_ROOT/migration.yaml"
+    build="$LOCAL_SNAPSHOT/repository/thing-connect"
+    mkdir -p "$build/bin" "$build/scripts" "$LOCAL_DEPLOY_ROOT"
+    cp "$SCRIPTS/deploy-local.sh" "$build/scripts/"
+    cp /bin/true "$build/bin/admin-server"
+    cat >"$build/scripts/deploy-prod.sh" <<"STUB"
+publish_service_catalog() { :; }
+publish_local_service_script() { :; }
+full_deploy() { :; }
+service_config_path() { echo "$DEPLOY_ROOT/$1/config.yaml"; }
+STUB
+    local_prepare() { :; }
+    local_prepare_recognition() { :; }
+    local_publish_recognition() { :; }
+    local_prepare_push() { :; }
+    local_start_updated() { :; }
+    supervisorctl() { :; }
+    go() {
+        test "$*" = "run ./scripts/local-presence-ready -config $LOCAL_DEPLOY_ROOT/user-server/config.yaml" || return 1
+        return "$probe_status"
+    }
+    probe_status=1
+    if local_update >"$TEST_ROOT/probe-failed.log"; then exit 1; fi
+    if grep -q "发布完成" "$TEST_ROOT/probe-failed.log"; then exit 1; fi
+    probe_status=0
+    local_update >"$TEST_ROOT/probe-ready.log"
+    grep -q "发布完成" "$TEST_ROOT/probe-ready.log"
+'
+echo 'PASS: update reports success only after the device-list probe passes'

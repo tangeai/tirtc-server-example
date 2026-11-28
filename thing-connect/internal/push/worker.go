@@ -13,6 +13,7 @@ type Delivery struct {
 	Occurred    time.Time
 	Expires     time.Time
 	MaxAttempts int
+	ModelID     string
 	LabelText   string
 	AppID       string
 	Attempts    int

@@ -1,3 +1,4 @@
+import { tr, usePageLanguage } from '../../platform/translate';
 import { CodeInput } from '../../components/code-input';
 import Taro from '@tarojs/taro';
 import { Text, View } from '@tarojs/components';
@@ -6,6 +7,7 @@ import { Action, Field, Notice } from '../../components/ui';
 import { request, errorText } from '../../services/api';
 import { devicesChanged } from '../../services/device-events';
 export default function Bind() {
+  usePageLanguage();
   const [mode, setMode] = useState('code'), [value, setValue] = useState(''), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const lock = useRef(false), alive = useRef(true);
   useEffect(() => () => { alive.current = false; }, []);
@@ -17,7 +19,7 @@ export default function Bind() {
     try {
       await request(mode === 'code' ? '/v1/user/device/bind' : '/v1/user/device/bind-by-id', 'POST', mode === 'code' ? { code: input } : { device_id: input });
       devicesChanged();
-      if (alive.current) { await Taro.showToast({ title: '绑定成功', icon: 'success' }); await Taro.navigateBack(); }
+      if (alive.current) { await Taro.showToast({ title: tr("绑定成功"), icon: 'success' }); if (process.env.TARO_ENV === 'h5') location.replace('/devices'); else await Taro.navigateBack(); }
     } catch (e) { if (alive.current) setError(errorText(e)); }
     finally { lock.current = false; if (alive.current) setBusy(false); }
   }
@@ -27,11 +29,11 @@ export default function Bind() {
       const raw = result.result.trim();
       const query = raw.match(/[?&](?:device_id|deviceid|sn|id)=([^&#]+)/i);
       let id = query ? decodeURIComponent(query[1]) : raw;
-      if (!id || /[/?=&]/.test(id)) { setError('未识别到设备 ID，请手动输入'); return; }
+      if (!id || /[/?=&]/.test(id)) { setError(tr("未识别到设备 ID，请手动输入")); return; }
       if (alive.current) setValue(id.toUpperCase());
     } catch { /* User cancellation leaves the input unchanged. */ }
   }
-  return <View className='page content-page'><View className='tabs'>{[['code', '验证码绑定'], ['id', '设备 ID 绑定']].map(([key, label]) => <Action key={key} primary={mode === key} disabled={busy} onClick={() => { setMode(key); setValue(''); setError(''); }}>{label}</Action>)}</View>
-    <View className='card'><Text className='title'>绑定你的设备</Text><Text className='muted'>{mode === 'code' ? '设备开机联网后，输入屏幕显示或语音播报的 6 位验证码。' : '输入设备 ID，或扫描设备二维码。'}</Text>{mode === 'code' ? <View className='field'><Text className='label'>6 位验证码</Text><CodeInput focus value={value} disabled={busy} onChange={setValue} label='6 位设备绑定码' /></View> : <Field focus label='设备 ID' value={value} disabled={busy} onChange={v => setValue(v.toUpperCase())} />}
-    {mode === 'id' && process.env.TARO_ENV === 'weapp' && <Action disabled={busy} onClick={() => void scan()}>扫码识别</Action>}<Notice error>{error}</Notice><View className='wide'><Action primary disabled={busy} onClick={() => void submit()}>{busy ? '绑定中…' : '绑定设备'}</Action></View></View></View>;
+  return <View className='page content-page bind-page'><View className='tabs'>{[['code', '验证码绑定'], ['id', '设备 ID 绑定']].map(([key, label]) => <Action key={key} primary={mode === key} disabled={busy} onClick={() => { setMode(key); setValue(''); setError(''); }}>{tr(label)}</Action>)}</View>
+    <View className='card'><Text className='title'>{tr("绑定你的设备")}</Text><Text className='muted'>{mode === 'code' ? tr("设备开机联网后，输入屏幕显示或语音播报的 6 位验证码。") : process.env.TARO_ENV === 'weapp' ? tr("输入设备 ID，或扫描设备二维码。") : tr("输入设备 ID。")}</Text>{mode === 'code' ? <View className='field bind-code-field'><Text className='label'>{tr("6 位验证码")}</Text><CodeInput focus value={value} disabled={busy} onChange={setValue} label={tr("6 位设备绑定码")} /></View> : <Field focus label={tr("设备 ID")} value={value} disabled={busy} onChange={v => setValue(v.toUpperCase())} />}
+    {mode === 'id' && process.env.TARO_ENV === 'weapp' && <Action disabled={busy} onClick={() => void scan()}>{tr("扫码识别")}</Action>}<Notice error>{error}</Notice><View className='wide'><Action primary disabled={busy} onClick={() => void submit()}>{busy ? tr("绑定中…") : tr("绑定设备")}</Action></View></View></View>;
 }

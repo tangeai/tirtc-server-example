@@ -110,6 +110,15 @@ func (s *userStore) UpdateDeviceName(
 		if _, err := tx.ExecContext(ctx, `UPDATE device_bind SET device_name=? WHERE device_id=? AND user_id=?`, deviceName, deviceID, userID); err != nil {
 			return false, fmt.Errorf("userStore.UpdateDeviceName: %w", err)
 		}
+		// Only peers inheriting this name need to reload their contact cache.
+		_, err = tx.ExecContext(ctx, `INSERT INTO voip_remark_outbox(device_id,peer_id,contact_type)
+            SELECT device_id_b,device_id_a,'device' FROM call_contact
+              WHERE device_id_a=? AND user_id_a=? AND status=1 AND remark_b=''
+            UNION ALL SELECT device_id_a,device_id_b,'device' FROM call_contact
+              WHERE device_id_b=? AND user_id_b=? AND status=1 AND remark_a=''`, deviceID, userID, deviceID, userID)
+		if err != nil {
+			return false, fmt.Errorf("queue contact name update: %w", err)
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return false, fmt.Errorf("userStore.UpdateDeviceName commit: %w", err)

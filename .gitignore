@@ -69,6 +69,8 @@ __pycache__/
 /thing-connect/device-sim/device-sim-c/libdevice-reference.a
 
 /thing-connect/user-server/static/app/
+/thing-connect/user-server/static/player/
+/thing-connect/user-server/static/console/
 
 # Local homepage prototypes
 /thing-connect/user-server/prototypes/

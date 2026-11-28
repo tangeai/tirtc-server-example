@@ -1,0 +1,186 @@
+.console-nav { position: fixed; inset: 0 0 auto; z-index: 9; display:flex; align-items:center; justify-content:space-between; gap:10PX; min-height:52PX; padding:0 clamp(12PX,4vw,60PX); background:#fff; border-bottom:1PX solid #dde6e1; font:500 14PX/1.4 system-ui,sans-serif }
+.console-nav a,.console-nav .console-language,.console-nav summary { color:#19533f; text-decoration:none; cursor:pointer }
+.console-nav>a,.console-nav nav { display:flex; align-items:center; gap:12PX }
+.console-nav img { width:25PX; height:25PX }
+.console-nav .console-language { border:0; background:transparent }
+.console-nav details div { position:absolute; right:1rem; display:grid; padding:10PX; gap:8PX; background:white; border:1PX solid #ddd }
+.taro_page,.taro_page_show { box-sizing:border-box; padding-top:54PX }
+.knowledge-files {font:14PX/1.6 system-ui,sans-serif; overflow-wrap:anywhere}
+.knowledge-files input { max-width:100% }
+.knowledge-files button { padding:6PX 10PX; margin:4PX; border:1PX solid #dbe5df; border-radius:6PX; background:white }
+@media (min-width:768PX) {
+  .page.devices-page { max-width:1280PX; padding:32PX }
+  .device-list-grid { display:grid; gap:18PX; grid-template-columns:repeat(auto-fit,minmax(min(100%,330PX),1fr)); align-items:stretch }
+  .device-list-grid>.card { margin:0;display:flex;flex-direction:column }
+  .device-list-grid .device-primary-actions { margin-top:auto }
+  .device-list-grid .device-head { margin-bottom:12PX }
+  .page.content-page { max-width:960PX }
+  .page.role-editor-page { max-width:1024PX }
+}
+body,.taro_page { background:#f4f6f5 }
+.console-nav { z-index:8; color:#182b23; box-shadow:0 1PX 4PX #182b230a; padding-inline:max(14PX,calc((100vw - 1220PX)/2)) }
+.console-nav .console-brand { font-weight:700; letter-spacing:.01em; font-size:16PX; white-space:nowrap }
+.console-brand img { width:30PX;height:30PX;object-fit:contain }
+.console-nav nav { gap:2PX }
+.console-nav nav>a,.console-nav summary,.console-nav .console-language,.console-nav details a { display:flex; align-items:center; padding:0 10PX; min-height:42PX; box-sizing:border-box; border:0; border-radius:8PX; background:transparent; font:inherit;white-space:nowrap }
+.console-nav summary { list-style:none }
+.console-nav summary::after { content:'⌄';margin-left:5PX }
+.console-nav summary::-webkit-details-marker {display:none}
+.console-nav details {position:relative}
+.console-nav details div {right:0;z-index:10;min-width:120PX;gap:2PX;padding:5PX;border-radius:10PX;box-shadow:0 8PX 28PX #12352620}
+.console-nav a:hover,.console-nav summary:hover,.console-nav .console-language:hover { background:#edf6f0 }
+.console-nav a:focus-visible,.console-nav .console-language:focus-visible,.console-nav summary:focus-visible,.page :focus-visible { outline:2PX solid #11784d;outline-offset:2PX }
+.page .role-extensions,.page .role-extension-resources { min-width:0 }
+.page .role-resource-group>.row:first-child>.label {font-weight:600;margin:0}
+@media (min-width:800PX) {
+  .page.devices-page,.page.content-page { background:transparent;padding:28PX 24PX 48PX }
+  .page.devices-page { max-width:1250PX }
+  .device-list-grid {grid-template-columns:repeat(auto-fill,minmax(min(100%,330PX),1fr))}
+  .page .card { border:1PX solid #e1e7e3;box-shadow:0 2PX 7PX #1b402608;border-radius:14PX }
+  .page.role-editor-page {max-width:800PX}
+  .page .role-extensions .card {padding:18PX}
+  .page .mask {align-items:center;justify-content:center;padding:24PX;box-sizing:border-box}
+  .page .sheet,.page .device-more-sheet {width:min(100%,600PX);border-radius:16PX;box-shadow:0 18PX 60PX #10241c33}
+}
+@media (max-width:420PX) {
+  .console-nav {padding:0 10PX;font-size:13PX}
+  .console-nav .console-brand {font-size:14PX;gap:4PX}
+  .console-brand img {width:24PX;height:24PX}
+  .console-nav nav>a,.console-nav summary {padding:0 6PX}
+}
+
+.page button {display:block;font-family:inherit;cursor:pointer;border:0}
+.page button:disabled {cursor:default}
+.page button:focus-visible {outline:2PX solid #11784d;outline-offset:2PX}
+.page .role-speech-heading {display:flex;font-size:inherit;align-items:center}
+.page .auth-tab {text-align:center}
+
+/* Web form rows must reserve space for the input beside the code action. */
+.page.auth-page {width:100%;max-width:480PX;padding:clamp(20PX,4vh,44PX) clamp(12PX,3vw,28PX) 28PX;background:transparent}
+.auth-page .auth-brand {margin:0 0 18PX;gap:12PX}
+.auth-page .auth-panel {padding:18PX clamp(14PX,3vw,24PX) 10PX;border:1PX solid #dce5df;border-radius:16PX;box-shadow:0 6PX 24PX #152c2010}
+.auth-page .auth-tabs {display:grid;grid-template-columns:1fr 1fr;gap:4PX;margin:0 0 16PX;background:#eff3f0;padding:4PX;border-radius:10PX}
+.page.auth-page .auth-tab {width:100%;margin:0;padding:8PX;text-align:center;font-size:16PX;line-height:24PX;color:#57675e;border-radius:7PX}
+.page.auth-page .auth-tab.is-active {background:white;color:#164b33;font-weight:600;box-shadow:0 1PX 3PX #13302020}
+.auth-page .auth-tab-line {display:none}
+.auth-page .auth-field {display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4PX 8PX;height:auto;border:0;margin:12PX 0;align-items:center}
+.auth-page .auth-label {grid-column:1/-1;width:auto;font-size:14PX;line-height:20PX;font-weight:500}
+.auth-page .auth-input {grid-column:1/-1;width:100%;height:42PX;box-sizing:border-box;border:1PX solid #cad7ce;border-radius:8PX;background:#fff;padding:0 10PX;display:flex;align-items:center;font-size:16PX}
+.auth-page .auth-field:has(.auth-inline-button) .auth-input {grid-column:1}
+.auth-page .auth-input:focus-within {border-color:#178653;box-shadow:0 0 0 2PX #17865322}
+.auth-page .auth-input [name] {width:100%;min-width:0;font:inherit;margin:0}
+.page.auth-page .auth-inline-button {width:auto;margin:0;padding:0 8PX;line-height:42PX;font-size:14PX}
+.page.auth-page .auth-visibility {width:42PX;height:42PX;padding:0}
+.auth-page .auth-feedback:empty {min-height:0}
+.auth-page .auth-consent {align-items:center;gap:5PX;margin:12PX 0 16PX}
+.auth-page .auth-consent-copy .auth-link {white-space:nowrap}
+.page.auth-page .auth-submit {line-height:44PX;font-size:16PX;letter-spacing:normal}
+/* The field owns the focus ring, including when its native input has keyboard focus. */
+.auth-page .auth-input [name]:focus {outline:none;box-shadow:none}
+.auth-page .auth-field:has(.auth-visibility) {position:relative}
+.auth-page .auth-field:has(.auth-visibility) .auth-input {grid-column:1/-1;padding-right:44PX}
+.page.auth-page .auth-field .auth-visibility {position:absolute;right:1PX;bottom:1PX;width:40PX;height:40PX;border-radius:7PX}
+@media (forced-colors: active) {
+  .auth-page .auth-input:focus-within {outline:2PX solid Highlight;outline-offset:1PX}
+}
+
+.console-nav .console-language {width:100%;appearance:none;text-align:left;justify-content:flex-start}
+.console-nav details div {min-width:148PX}
+.console-nav details a {justify-content:space-between;gap:12PX}
+.console-nav details a span {color:#718079}
+.taro_page:has(.auth-page) {background:#f5f7f6}
+.auth-page .web-auth-title {display:block;margin:0 0 16PX;font-size:21PX;font-weight:600;line-height:1.35}
+
+/* Keep device workspaces aligned below the fixed browser header. */
+.taro_page:has(.page) {background:#f4f6f5}
+.page:not(.auth-page) {min-height:calc(100dvh - 54PX);background:transparent}
+.device-page-heading {flex:1;min-width:0}
+.device-page-heading .title {font-size:22PX;line-height:1.35}
+.device-page-context {display:block;margin-top:4PX;color:#58675f;font-size:14PX;overflow-wrap:anywhere}
+.page.bind-page .tabs .action,.page.room-page .tabs .action,.device-info-scroll .tabs .action {background:transparent;color:#526159}
+.page.bind-page .tabs .primary,.page.room-page .tabs .primary,.device-info-scroll .tabs .primary {background:white;color:#174b34;box-shadow:0 1PX 4PX #23392a20}
+.page .code-input {max-width:326PX}
+.page.history-page .empty {padding:34PX 16PX;color:#617169}
+.page .device-info-json {display:block;white-space:pre-wrap;overflow-wrap:anywhere}
+@media (min-width:768PX) {
+  .page.content-page {max-width:800PX}
+  .page.role-editor-page {max-width:800PX}
+  .page.bind-page,.page.room-page,.page.account-page {max-width:560PX;margin-inline:auto;padding:28PX 24PX 48PX}
+  .page.legal {max-width:820PX;padding:28PX 24PX 48PX}
+  .page.legal .card {padding:24PX}
+}
+
+.page .reminder-seconds-input { display:flex;align-items:center }
+.page .reminder-seconds-input .weui-input { width:100%;min-width:0;height:100%;box-sizing:border-box;text-align:right;font:inherit }
+.device-info-scroll { min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:12PX }
+.device-info-scroll>* { flex-shrink:0 }
+
+
+.devices-page .device-list-grid>.card {padding:16PX;border:1PX solid #dde5df;border-radius:14PX;background:white}
+.devices-page .device-head {min-height:50PX}
+.devices-page .device-title-row,.devices-page .device-name-setup {min-height:30PX}
+.devices-page .device-list-heading .title {margin:0}
+
+@media (hover:hover) {
+  .device-name-setup:hover .device-placeholder-name {text-decoration:underline}
+  .devices-page .device-feature-links .action:hover {background:#edf5f0;color:#116341}
+}
+
+.wechat-call-guide {width:min(360PX,calc(100vw - 32PX));max-height:90vh;box-sizing:border-box;margin:auto;padding:0;border:0;border-radius:16PX;color:#1b3025;background:white;box-shadow:0 18PX 60PX #10231b30}
+.wechat-call-guide::backdrop {background:#13231b66}
+.wechat-call-guide section {padding:24PX;text-align:center}
+.wechat-call-guide h2 {margin:0;font:600 21PX/1.4 system-ui,sans-serif}
+.wechat-call-guide p {margin:10PX 0;color:#516257;font:14PX/1.65 system-ui,sans-serif}
+.wechat-call-code {width:190PX;max-width:100%;aspect-ratio:1;margin:18PX auto;overflow:hidden;border-radius:12PX}
+.wechat-call-code img {display:block;height:100%;width:auto;max-width:none}
+.wechat-call-close {width:100%;margin-top:12PX;padding:10PX;border:0;border-radius:8PX;background:#edf4ef;color:#205338;font:600 15PX/1.5 system-ui,sans-serif;cursor:pointer}
+
+.taro_router .taro_page.taro_page_show:has(.content-page, .account-page, .legal) {
+  background-color: #f4f6f5;
+}
+.contacts-page .tabs .action {
+  min-height: 36PX;
+  white-space: normal;
+  line-height: 1.25;
+}
+.page .web-search{padding:0;gap:0;align-items:stretch}
+.web-search-label{display:flex;align-items:center;cursor:text;gap:10PX;padding:0 12PX;min-width:0;flex:1}
+.web-search-input{box-sizing:border-box;align-self:stretch;flex:1;width:0;min-width:0;min-height:38PX;padding:0;border:0;outline:none;background:transparent;color:inherit;font:inherit}
+.page .web-search:focus-within{box-shadow:inset 0 0 0 1PX #087a41}
+.page .web-search .search-clear{width:auto;border:0;padding:0 12PX;cursor:pointer}
+.page .web-search-input:focus{outline:none}
+@media (forced-colors: active){
+  .page .web-search:focus-within{outline:2PX solid Highlight;outline-offset:1PX}
+}
+
+/* Taro wraps native text controls. Draw one focus ring around the visible field. */
+.page .field-input:focus-within,
+.page .textarea:focus-within,
+.page .reminder-seconds-input:focus-within {
+  outline: 2PX solid #11784d;
+  outline-offset: -2PX;
+}
+.page .field-input :focus,
+.page .textarea :focus,
+.page .reminder-seconds-input :focus {
+  outline: none;
+}
+.page .field-input {display:flex;align-items:center}
+.page .field-input .weui-input {height:100%;min-width:0}
+@media (forced-colors: active) {
+  .page .field-input:focus-within,
+  .page .textarea:focus-within,
+  .page .reminder-seconds-input:focus-within {outline-color:Highlight}
+}
+@media (max-width:360PX) {
+  .page.devices-page{padding-inline:10PX}
+  .devices-page .device-list-grid>.card{padding-inline:10PX}
+  .devices-page .device-head{gap:5PX}
+  .devices-page .device-title-row .dashboard-role-name{max-width:54%;padding-inline:3PX;font-size:10PX}
+  .devices-page .device-title-row .device-name-setup{font-size:14PX;gap:2PX}
+}
+
+.page .role-editor-toolbar{top:0;background:#f4f6f5}
+.page .textarea > .taro-textarea {resize:none;overflow-y:auto}
+
+.role-nav-save[aria-disabled='true']{cursor:default;pointer-events:none}

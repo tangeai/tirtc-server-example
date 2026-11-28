@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"thing-connect/internal/push"
@@ -50,7 +52,15 @@ func (c Channel) Send(ctx context.Context, d push.Delivery) push.Result {
 			return nil
 		}
 		var channelErr error
-		result, channelErr = c.send(ctx, messageClient, "https://api.weixin.qq.com/cgi-bin/message/subscribe/send", token, d)
+		endpoint := "https://api.weixin.qq.com/cgi-bin/message/subscribe/send"
+		if d.Kind == "alarm" {
+			if d.ModelID == "" {
+				result = push.Failed
+				return nil
+			}
+			endpoint = "https://api.weixin.qq.com/cgi-bin/message/device/subscribe/send"
+		}
+		result, channelErr = c.send(ctx, messageClient, endpoint, token, d)
 		return channelErr
 	})
 	if err != nil {
@@ -78,6 +88,13 @@ func (c Channel) send(ctx context.Context, client *http.Client, endpoint, token 
 		data[t.LabelKey] = field{value}
 	}
 	message := map[string]any{"touser": d.Open, "template_id": d.Template, "data": data}
+	if d.Kind == "alarm" {
+		delete(message, "touser")
+		message["to_openid_list"] = []string{d.Open}
+		message["sn"] = d.Device
+		message["modelId"] = d.ModelID
+		message["lang"] = "zh_CN"
+	}
 	if c.Config.Page != "" {
 		message["page"] = c.Config.Page + "?ref=" + url.QueryEscape(d.Reference)
 	}
@@ -103,7 +120,8 @@ func (c Channel) send(ctx context.Context, client *http.Client, endpoint, token 
 	}
 	defer resp.Body.Close()
 	var reply struct {
-		Code *int `json:"errcode"`
+		Code    *int   `json:"errcode"`
+		Message string `json:"errmsg"`
 	}
 	if resp.StatusCode != 200 || json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&reply) != nil || reply.Code == nil {
 		return push.Unknown, nil
@@ -120,6 +138,17 @@ func (c Channel) send(ctx context.Context, client *http.Client, endpoint, token 
 	case 40001, 40014, 42001:
 		return push.Retry, &wechat.APIError{Errcode: *reply.Code}
 	default:
+		// WeChat may append recipient IDs or request data to its error text.
+		// Log only recognized phrases and discard all upstream-supplied detail.
+		reason := "redacted"
+		for _, phrase := range []string{"invalid template_id", "invalid openid", "argument invalid", "invalid parameter", "invalid page"} {
+			if strings.HasPrefix(reply.Message, phrase) {
+				reason = phrase
+				break
+			}
+		}
+		slog.WarnContext(ctx, "微信提醒发送失败", "errcode", *reply.Code, "errmsg", reason,
+			"kind", d.Kind, "delivery_id", d.ID, "template_id", d.Template)
 		return push.Failed, nil
 	}
 }

@@ -50,3 +50,44 @@ func TestUserPagesRequireBuildArtifact(t *testing.T) {
 		t.Fatal("missing frontend build must be detected")
 	}
 }
+
+func TestIndependentUserPageEntries(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"app", "player", "console"} {
+		path := filepath.Join(dir, name)
+		if err := os.Mkdir(path, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(path, "index.html"), []byte(name), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, player := range []string{"new", "legacy"} {
+		for _, console := range []string{"new", "legacy"} {
+			t.Setenv("USER_PLAYER_ENTRY", player)
+			t.Setenv("USER_CONSOLE_ENTRY", console)
+			r := gin.New()
+			if err := registerUserPages(r, dir); err != nil {
+				t.Fatal(err)
+			}
+			for _, page := range []struct{ url, selection, entry string }{{"/player?device_id=old", player, "player"}, {"/devices", console, "console"}} {
+				want := page.entry
+				if page.selection == "legacy" {
+					want = "app"
+				}
+				w := httptest.NewRecorder()
+				r.ServeHTTP(w, httptest.NewRequest("GET", page.url, nil))
+				if w.Code != 200 || w.Body.String() != want {
+					t.Fatalf("%s/%s %s: got %d %q, want %q", player, console, page.url, w.Code, w.Body.String(), want)
+				}
+			}
+		}
+	}
+	for _, key := range []string{"USER_PLAYER_ENTRY", "USER_CONSOLE_ENTRY"} {
+		t.Setenv(key, "invalid")
+		if err := registerUserPages(gin.New(), dir); err == nil {
+			t.Fatalf("accepted invalid %s", key)
+		}
+		t.Setenv(key, "legacy")
+	}
+}

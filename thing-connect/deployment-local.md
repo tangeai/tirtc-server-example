@@ -9,6 +9,17 @@ Git 索引，也不拉取远程代码。它使用现有 Web 安装器创建数�
 使用统一 H5 入口时还需要 Nginx。完整依赖版本要求见 [部署指南](deployment.md)。
 本地 HTTP 联调在安装页关闭 HTTPS Cookie；开机自启、证书和日志轮转不属于本地脚本。
 
+## 在已有安装测试独立播放器
+
+首次从旧部署脚本升级，在仓库根目录执行以下命令。安装目录的 `local-player-entry` 只影响本地 user-server 的所有实例，每次启动都会读取；显式环境变量 `USER_PLAYER_ENTRY` 优先。使用 `legacy` 可在下次启动时恢复旧播放器。
+
+```bash
+printf '%s\n' new | sudo tee /opt/thing-connect/local-player-entry >/dev/null
+sudo bash thing-connect/scripts/deploy-local.sh update
+```
+
+更新成功后，使用 `/opt/thing-connect/deploy-local.sh` 执行后续更新。通过本地同源网关打开 `/devices`，登录并点击在线设备的「实时」。新版 `/player` 的 JS、CSS 地址以 `/static/player/assets/` 开头，其他控制台页面仍可使用 `/static/app/`。多实例本地网关需要一个内网入口；已有系统 Nginx 接管内网入口时，可用现有网关，或运行 `sudo env GATEWAY_PUBLIC_ONLY=1 /opt/thing-connect/deploy-local.sh gateway` 单独启动本机 `http://localhost:18080` 用户入口。
+
 ## 首次部署
 
 从当前源码仓库执行：
@@ -155,7 +166,9 @@ sudo /opt/thing-connect/deploy-local.sh gateway-stop
 sudo /opt/thing-connect/deploy-local.sh gateway
 ```
 
-更新先完成源码快照、构建和配置检查，再自动停止受管服务、迁移及发布，最后按 Admin 优先顺序启动并检查 readiness。构建或前置检查失败不停止原服务。
+更新先完成源码快照、构建和配置检查，再自动停止受管服务、迁移及发布，最后按 Admin 优先顺序启动并检查 readiness。报告成功前，脚本使用用户服务的 Redis 配置验证设备列表可读。整组 Device 冷启动且没有 Broker 管理接口时，离线判定通常需要等待约 150 秒；等待超时会返回失败，已启动的服务继续运行。构建或前置检查失败不停止原服务。
+
+使用自行维护的 Nginx 入口时，按 [Nginx 模板](deploy/nginx/thing-connect.nginx.conf) 将 `/v1/push/` 转发至推送服务，并保留 `/v1/push/internal` 及其子路径的公网 404 规则。匿名访问 `/v1/push/user/preferences/route-test/alarm` 应返回 401；若入口返回 404 而直接访问推送服务返回 401，请检查该域名实际使用的代理配置。
 
 本地脚本复用 `deploy-prod.sh` 的迁移失败处理；数据库结构发生变化后迁移失败时，不自动启动旧版本。
 需要保留重要联调数据时，应在更新前自行备份。生产环境的备份和恢复步骤见[部署指南](deployment.md)。

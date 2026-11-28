@@ -3,9 +3,11 @@ const fs=require('fs'),path=require('path'),http=require('http'),assert=require(
 const root=path.resolve(__dirname,'../../..');
 fs.mkdirSync(path.join(root,'../output/playwright'),{recursive:true});
 const requests=[],errors=[];
+let taro=false;
+const h5=path.join(root,'../thing-connect-client/dist/h5');
 const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://localhost');let file;
  if(url.pathname==='/v1/config/language.js'){res.setHeader('Content-Type','text/javascript');res.end('window.WebLanguageConfig={default:"zh-CN",allow_switch:true};'+fs.readFileSync(root+'/internal/webui/runtime.js','utf8')+';WebI18n.addMessages('+fs.readFileSync(root+'/internal/webui/common.json','utf8')+');');return;}
- file=url.pathname.startsWith('/static/')?root+'/user-server'+url.pathname:root+'/user-server/static/app/index.html';
+ file=url.pathname.startsWith('/static/console/')?path.join(h5,url.pathname.slice(16)):taro&&!url.pathname.startsWith('/static/')?path.join(h5,'index.html'):url.pathname.startsWith('/static/')?root+'/user-server'+url.pathname:root+'/user-server/static/app/index.html';
  if(!fs.existsSync(file)){res.writeHead(404);res.end();return;}res.setHeader('Content-Type',file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':'text/html');res.end(fs.readFileSync(file));});
 (async()=>{await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const base='http://127.0.0.1:'+server.address().port;
  const browser=await chromium.launch({headless:true,executablePath:process.env.PLAYWRIGHT_CHROMIUM || undefined,args:['--no-sandbox']});
@@ -25,12 +27,12 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
   ready({verify(){popup.style.display='block';},refresh(){},destroy(){popup.remove();}});
  };
  `}));
- for(const width of [320,390,768,1440]){
+ for(taro of [false,true]) for(const width of [320,390,768,1440]){
   await page.setViewportSize({width,height:800});
   for(const url of ['/login','/register','/forgot-password']){
-   await page.goto(base+url);await page.getByLabel(url==='/forgot-password'?'注册邮箱':'邮箱',{exact:true}).fill('layout@example.test');
-   if(url!=='/forgot-password')await page.getByLabel('我已阅读并同意').check();
-   if(url==='/login')await page.getByLabel('密码',{exact:true}).fill('test123456');
+   await page.goto(base+url);await page.locator('input[name=email]').fill('layout@example.test');
+   if(url!=='/forgot-password'){if(taro) await page.getByText('我已阅读并同意',{exact:true}).click();else await page.getByLabel('我已阅读并同意').check();}
+   if(url==='/login')await page.locator('input[name=password]').fill('test123456');
    const before=await page.evaluate(()=>({height:document.documentElement.scrollHeight,scroll:scrollY}));
    const action=url==='/login'?page.getByRole('button',{name:'登录',exact:true}).last():page.getByRole('button',{name:'获取验证码',exact:true});
    await action.click();await page.getByLabel('关闭安全验证').waitFor();
@@ -38,7 +40,7 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
    assert.equal(position.position,'fixed');assert.equal(position.rect.y,0);assert.equal(position.rect.width,width);assert.equal(position.rect.height,800);assert.equal(position.height,before.height,'captcha must not extend document');
    const panel=await page.locator('.fixture-captcha-panel').boundingBox();assert(panel.x>=0&&panel.y>=0&&panel.x+panel.width<=width&&panel.y+panel.height<=800);
    assert(await page.evaluate(()=>document.elementFromPoint(2,100)?.classList.contains('yidun_popup__mask')),'mask must intercept background');
-   await page.screenshot({path:root+'/../output/playwright/captcha-'+url.slice(1)+'-'+width+'.png'});
+   await page.screenshot({path:root+'/../output/playwright/captcha-'+(taro?'taro-':'')+url.slice(1)+'-'+width+'.png'});
    await page.getByLabel('关闭安全验证').click();await page.waitForTimeout(30);assert.equal(await page.getByText('请完成人机验证',{exact:true}).count(),0);
    await action.click();await page.getByLabel('关闭安全验证').waitFor();await page.getByLabel('关闭安全验证').click();
   }

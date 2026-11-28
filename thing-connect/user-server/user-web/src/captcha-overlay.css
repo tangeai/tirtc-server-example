@@ -1,0 +1,7 @@
+/* The SDK owns visibility and panel layout. Its popup shell must leave normal
+   document flow; otherwise it is appended below the full-height login form. */
+.yidun_popup,.yidun_popup__mask,.yidun_cover-frame{
+  position:fixed!important;inset:0!important;width:100%!important;height:100vh!important;height:100dvh!important
+}
+
+.yidun_popup{z-index:9999!important}

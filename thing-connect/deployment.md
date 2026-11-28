@@ -581,7 +581,12 @@ VoIP 使用微信稳定版接口凭据。微信拒绝缓存的 token 时，实�
 | 其他路径 | User H5 |
 | 所有内部接口 | 明确拒绝，不向公网代理 |
 
-用户控制台使用 React、TypeScript 和 Vite，源码位于 `user-server/user-web`，构建产物位于 `user-server/static/app`，由 user-server 提供。登录、设备、联系人、角色、多人对讲和实时查看使用同一个应用入口；首页和开发板目录由 user-server 服务端渲染，协议政策为静态内容页。AI、通话等业务服务提供 API，用户页面使用同源 `/v1/*` 地址调用；Admin Web 保持独立的管理入口和权限体系。
+用户控制台使用 React、TypeScript 和 Vite，源码位于 `user-server/user-web`，构建产物位于 `user-server/static/app`，由 user-server 提供。默认入口承载登录、设备、联系人、角色、多人对讲和实时查看；首页和开发板目录由 user-server 服务端渲染，协议政策为静态内容页。AI、通话等业务服务提供 API，用户页面使用同源 `/v1/*` 地址调用；Admin Web 保持独立的管理入口和权限体系。
+
+user-server 分别读取启动环境变量 `USER_PLAYER_ENTRY` 和 `USER_CONSOLE_ENTRY`。两者默认 `legacy`，使用 `static/app/index.html`。为独立播放器灰度时，先在各实例发布完整静态目录，再将 `USER_PLAYER_ENTRY=new`、`USER_CONSOLE_ENTRY=legacy` 写入对应进程的启动环境，滚动重启 user-server。`/player` 使用 `static/player/index.html`，控制台继续使用原入口。回退时仅将播放器开关改回 `legacy` 并重启。新控制台开关 `new` 需要已经部署 `static/console/index.html`；入口文件缺失或选择值无效时服务拒绝启动。切换窗口保留新旧入口及其带哈希资源。本地安装运行 `/opt/thing-connect/deploy-local.sh update` 后，可用 `/opt/thing-connect/deploy-local.sh console-new` 切换到新版，或用 `/opt/thing-connect/deploy-local.sh console-legacy` 回退。选择保存在安装目录的 `local-console-entry`，脚本只重启 user-server，播放器继续使用自己的入口配置。
+
+客户端工程的 `npm run build:player` 校验固定 SDK 与两个 WASM 的 SHA-256 并生成独立播放器。预发在部署目录执行 `(cd user-server/static/js && sha256sum -c /绝对路径/sdk.sha256)`，清单位于源码 `thing-connect-client/player/sdk.sha256`。核对外部实际地址 `/static/js/tirtc.es.min.js`、`/librender.wasm` 和 `/plugin.wasm`。用已发布的小程序打开在线测试设备，验证返回、收听、按住说话及令牌失效后跳回登录；浏览器会话独立验证。
+
 
 `./build.sh user-server` 包含用户前端构建。单独开发前端可执行 `npm --prefix user-server/user-web ci`、`npm --prefix user-server/user-web run dev`，浏览器打开 `http://localhost:5174/login`。Vite 开发代理连接本机默认业务端口，生产环境使用上述 Nginx 分发；不能只启动 user-server 就访问其他服务的业务 API。
 
@@ -892,7 +897,9 @@ push-server 为可选服务，默认端口 9007。安装器先执行 core 数据
 
 推送服务按全局配置版本热更新。服务状态中可核对 `push-server/wechat.notifications` 的生效 revision。已配置 Admin 时，启动时读取当前发布版本。推送服务首次取得微信配置前，偏好设置可读写，内部事件 POST 返回 503/50300，微信发送 worker 等待配置；运行中 Admin 暂时不可用时沿用进程内最后有效的版本。尚无发布记录或未配置 Admin 地址时，使用本地 YAML。`push.template_id/alarm_hint/location` 和 `wechat` 凭证仍可作为本地配置。完整本地策略使用 `push.notifications`，结构与 Admin 的公开配置值一致，密钥从 `wechat.apps` 按 AppID 读取。
 
-小程序按当前配置展示订阅入口。每次识别请求的首次成功异常分析生成一条提醒，共用设备的 alarm 间隔。升级时先停止旧推送 worker 与来源发布器，执行至 core 020 迁移，发布 Admin、推送服务并配置 alarm 模板，再启用新版识别生产者。旧 crying、quarrel 配置保留给在途旧事件，新 alarm 间隔单独设置；AppID 和模板相同的已有长期授权继续有效。更换模板或 AppID 后，用户需要为新目标授权；旧目标待发任务在发送前校验时终止。模板和 AppID 相同时，待发任务取发送时的有效字段映射、提示文案和跳转页。已开始调用微信的请求按原调用结果处理。建议间隔默认 60 秒，只影响未保存设置的输入框；同类事件仍按用户实际保存的间隔准入。每次实际微信发送（含令牌刷新后的第二次）各占一次预算，默认最多 3 次（可设 1–10，已有显式值继续生效）；结果未知时停止重发。微信队列积压降级阈值默认 300 秒，可设 1–86400 秒。来源队列和微信队列分别上报待处理数、最老等待时间和采样时间。用户事件记录保留 72 小时，终态微信投递记录保留 7 天。
+设备消息需要在微信公众平台为对应型号开通消息能力，VoIP 服务中的 AppID 和型号须与获批设备消息模板匹配。先执行到 core 22 的迁移并更新服务，再发布小程序。已有账号授权保留，设备报警需要从设备卡片的“AI 识别”页单独授权。上线验收时，使用绑定两台设备的账号，仅授权一台设备，分别触发异常识别，确认微信只收到已授权设备的提醒。体验版验收时核对投递记录与对应的事件引用，用体验版直接打开 `/pages/notifications/index?ref=<id>` 查看详情。外发请求省略 `miniprogram_state`，消息卡片按正式版入口验收；正式版灰度或发布后再点击卡片验证跳转。如果入口提示服务暂不可用，检查小程序实际请求的域名，以及公网代理到 push-server 的 `/v1/push/user/capabilities` 路由。该接口在未携带用户令牌时应返回 HTTP 401 和数值业务码 401。
+
+每次识别请求的首次成功异常分析生成一条提醒，共用设备的 alarm 间隔。升级时先停止旧推送 worker 与来源发布器，执行至 core 020 迁移，发布 Admin、推送服务并配置 alarm 模板，再启用新版识别生产者。旧 crying、quarrel 配置及与 AppID、模板匹配的账号授权供在途旧事件使用。alarm 使用当前设备绑定的授权，提醒间隔单独设置。更换模板或 AppID 后，用户需要为新目标授权；旧目标待发任务在发送前校验时终止。模板和 AppID 相同时，待发任务取发送时的有效字段映射、提示文案和跳转页。已开始调用微信的请求按原调用结果处理。接口建议间隔默认为 60 秒。未设置时，小程序显示 0，推送按每次异常均可提醒处理；设置后按保存的秒数限频。每次实际微信发送（含令牌刷新后的第二次）各占一次预算，默认最多 3 次（可设 1–10，已有显式值继续生效）；结果未知时停止重发。微信队列积压降级阈值默认 300 秒，可设 1–86400 秒。来源队列和微信队列分别上报待处理数、最老等待时间和采样时间。用户事件记录保留 72 小时，终态微信投递记录保留 7 天。
 
 Admin → 服务配置 → 推送服务中的 `event.delivery_policy` 控制来源和微信共用的报警有效期（默认从音频受理起 120 秒）、来源提交上限（含首次，默认 3 次）、两段待发容量和 AppID 每秒速率。默认容量分别为 32000 和 6400，按 32 个分片分配。默认每个 AppID 每秒 50 次是本地限速值，运营应按渠道配额调整。超过容量的事件进入 skipped_overload，失去时效的报警停止发送。识别实例首次取得投递策略前，异常事件登记为 `policy_unavailable`；来源关闭或本实例未配置 `push.server_url` 时登记为 `disabled`。这两种处置均不会在配置恢复后补发。内部密钥错误会暂停同一 push 目标并自动进行只读鉴权探测。按 Admin、push、recognition 顺序发布，确认配置版本再恢复消费。
 

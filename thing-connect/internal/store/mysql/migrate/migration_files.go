@@ -180,6 +180,14 @@ func applyAlterTableShape(tables map[string]TableShape, statement string) error 
 				return fmt.Errorf("%s: %w", name, err)
 			}
 			shape.Indexes[indexName] = index
+		case upper == "DROP PRIMARY KEY":
+			delete(shape.Indexes, "PRIMARY")
+		case strings.HasPrefix(upper, "ADD PRIMARY KEY"):
+			primary, err := parseIndexClause(strings.TrimSpace(clause[len("ADD "):]))
+			if err != nil {
+				return err
+			}
+			shape.Indexes["PRIMARY"] = primary
 		case strings.HasPrefix(upper, "MODIFY COLUMN "):
 			column, columnShape, _, _, err := parseColumnClause(strings.TrimSpace(clause[len("MODIFY COLUMN "):]))
 			if err != nil {

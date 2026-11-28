@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { availableRoleTypes, roleTypePatch, selectedRoleType, type RoleType } from '../src/domain/role-types.ts';
+import { availableRoleTypes, typeVoiceLabel, typeVoicePatch, roleTypePatch, selectedRoleType, type RoleType } from '../src/domain/role-types.ts';
 import { draftOf, rolePayload } from '../src/domain/roles.ts';
 const first: RoleType = { id:'one',name:'类型一',voice_id:'v1',voice_model:'cosyvoice-v3-flash',prompt:'默认设定一',sort_order:1,revision:1 };
 const second: RoleType = {...first,id:'two',name:'类型二',voice_id:'v2',prompt:'默认设定二'};
@@ -57,4 +57,17 @@ test('all documented TTS models keep independently selected LLM and exact voice 
  assert.deepEqual(availableRoleTypes([v3], [{id:'v1', name:'Flash', model:'cosyvoice-v3-flash'}]), []);
  assert.equal(selectedRoleType({...draftOf({}),voice:'v1',prompt:first.prompt},[first,v3]),undefined);
  assert.equal(selectedRoleType({...draftOf({}),voice:'v1',voiceModel:'cosyvoice-v3',prompt:first.prompt},[first,v3]),v3);
+});
+
+test('substitute type previews and saves its catalog voice, and repairing a stale voice preserves the role', () => {
+  const type = { ...first, id: 'catalog-025', name: '龙小白 女 · 星语', voice_id: 'zh_female_linjianvhai_uranus_bigtts', voice_model: 'seed-tts-2.0', match_kind: 'substitute' };
+  const voice = { id: type.voice_id, model: type.voice_model, name: '邻家女孩 2.0' };
+  const draft = { ...draftOf({}), name: '口语评分', prompt: '自定义教练', customPrompt: true };
+  const selected = { ...draft, ...roleTypePatch(draft, type, undefined, true) };
+  const reopened = draftOf(rolePayload({}, selected, [voice]));
+  assert.equal(typeVoiceLabel(type, voice), '替代音色 · 邻家女孩 2.0');
+  assert.equal(reopened.voice, voice.id);
+  assert.equal(reopened.voiceModel, voice.model);
+  const stale = { ...reopened, voice: 'old', voiceModel: first.voice_model, pitch: 1, rate: 1 };
+  assert.deepEqual({ ...stale, ...typeVoicePatch(stale, type) }, reopened);
 });

@@ -46,7 +46,7 @@ func TestPushLongSubscriptionLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	admit(e, "unsubscribed")
-	id, replace, err := s.Prepare(ctx, user, "app", "openid-"+device, push.AlarmTemplate)
+	id, replace, err := s.PrepareDevice(ctx, user, "app", "openid-"+device, push.AlarmTemplate, device, "model")
 	if err != nil || replace {
 		t.Fatal(replace, err)
 	}
@@ -56,6 +56,17 @@ func TestPushLongSubscriptionLifecycle(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		if err = s.Report(ctx, user, id, "accept"); err != nil {
 			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct {
+		app, template string
+		want          bool
+	}{
+		{"app", push.AlarmTemplate, true}, {"other", push.AlarmTemplate, false}, {"app", "other", false},
+	} {
+		got, err := s.HasDeviceGrant(ctx, user, tc.app, tc.template, device)
+		if err != nil || got != tc.want {
+			t.Fatalf("grant %q %q: %v %v", tc.app, tc.template, got, err)
 		}
 	}
 	admit(e, "unsubscribed")
@@ -74,6 +85,16 @@ func TestPushLongSubscriptionLifecycle(t *testing.T) {
 	wg.Wait()
 	e.ID = "three:alarm"
 	admit(e, "interval")
+	legacy, _, err := s.Prepare(ctx, user, "app", "openid-"+device, push.AlarmTemplate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Confirm(ctx, user, legacy, false); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Report(ctx, user, legacy, "accept"); err != nil {
+		t.Fatal(err)
+	}
 	e.Kind = "quarrel"
 	e.ID = "two:quarrel"
 	admit(e, "queued")

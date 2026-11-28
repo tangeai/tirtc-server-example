@@ -27,7 +27,7 @@ type outputConfig struct {
 	Admin struct {
 		URL string `yaml:"server_url"`
 	} `yaml:"admin"`
-	Recognition recognition.Config `yaml:"recognition"`
+	Recognition recognition.Config `yaml:"recognition,omitempty"`
 }
 
 func prepare(source *config.Config) outputConfig {
@@ -42,12 +42,20 @@ func prepare(source *config.Config) outputConfig {
 	out.Recognition = recognition.DefaultConfig()
 	return out
 }
-func run(sourcePath, output string) error {
+func run(sourcePath, output, service string) error {
 	source, err := config.LoadFile(sourcePath)
 	if err != nil {
 		return errors.New("无法读取用户服务配置，请检查配置路径及 YAML 字段")
 	}
 	out := prepare(source)
+	switch service {
+	case "recognition-server":
+	case "push-server":
+		out.Server.HTTPPort = 9007
+		out.Recognition = recognition.Config{}
+	default:
+		return errors.New("未知本地配置目标")
+	}
 	data, err := yaml.Marshal(out)
 	if err != nil {
 		return errors.New("生成识别服务配置失败")
@@ -64,6 +72,7 @@ func run(sourcePath, output string) error {
 	return nil
 }
 func main() {
+	service := flag.String("service", "recognition-server", "target local service")
 	source := flag.String("source", "", "user-server config")
 	check := flag.Bool("check-mqtt", false, "report ready or pending for recognition MQTT")
 	output := flag.String("output", "", "new private output file")
@@ -93,7 +102,7 @@ func main() {
 		fmt.Println("ready")
 		return
 	}
-	if err := run(*source, *output); err != nil {
+	if err := run(*source, *output, *service); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

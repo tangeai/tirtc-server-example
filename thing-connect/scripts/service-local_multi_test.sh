@@ -115,6 +115,9 @@ curl -fsS "http://127.0.0.1:$PORT/health/ready" >/dev/null
     source "$SCRIPTS/deploy-local.sh"
     LOCAL_SOURCE_ROOT="$(cd "$SCRIPTS/../.." && pwd)"
     local_gateway_config 18080 >"$TEST_ROOT/gateway.conf"
+    GATEWAY_PUBLIC_ONLY=1 local_gateway_config 18080 >"$TEST_ROOT/public.conf"
+    grep -q '^    listen 127.0.0.1:18080;' "$TEST_ROOT/public.conf" || fail 'public listener missing'
+    if grep -q '^    listen 127.0.0.1:9100;' "$TEST_ROOT/public.conf"; then fail 'public-only gateway claimed internal port'; fi
     ports="$(local_gateway_backend_ports "$TEST_ROOT/gateway.conf")"
     grep -qx "$PORT" <<<"$ports" || fail 'gateway backend ports missing the instance'
     ! grep -qx 9011 <<<"$ports" || fail 'template comment port counted as a backend'

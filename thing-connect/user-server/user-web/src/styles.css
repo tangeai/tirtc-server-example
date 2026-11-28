@@ -1,3 +1,4 @@
+@import "./captcha-overlay.css";
 :root{font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;font-size:14px;line-height:1.5;color:#172026;background:#f8faf9;font-synthesis:none;-webkit-font-smoothing:antialiased;--accent:#07866f;--line:#dfe4e2;--muted:#687279}
 
 *{box-sizing:border-box}
@@ -229,15 +230,6 @@ a{color:var(--accent);text-decoration:none}
 
 
 }
-
-/* The SDK owns visibility and panel layout. Its popup shell must leave normal
-   document flow; otherwise it is appended below the full-height login form. */
-.yidun_popup,.yidun_popup__mask,.yidun_cover-frame{
-  position:fixed!important;inset:0!important;width:100%!important;height:100vh!important;height:100dvh!important
-}
-
-.yidun_popup{z-index:9999!important}
-
 
 .heading{flex:1;overflow:hidden}.heading>strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.heading>.back{flex-shrink:0}.heading>.divider{flex-shrink:0}
 

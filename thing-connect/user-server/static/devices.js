@@ -58,7 +58,6 @@ async function goAdd() {
 
 async function loadDevices() {
   $("devices-feedback").hidden = true;
-  $("devices-snapshot-notice").hidden = true;
   const generation = ++summaryGeneration;
   let devData;
   try {
@@ -567,7 +566,6 @@ async function startDeviceList() {
             WebI18n.bindText(card.querySelector('[data-'+key+']'),()=>text || WebI18n.t('请点击刷新获取状态'),'textContent');
           }
         }
-        $('devices-snapshot-notice').hidden=false;
         requestAnimationFrame(()=>scrollTo(0,Number(saved.scroll)||0));
         sessionStorage.removeItem(deviceSnapshotKey+':away');
         restored=true;

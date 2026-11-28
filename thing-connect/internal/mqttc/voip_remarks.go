@@ -26,9 +26,13 @@ func (n *remarkNotifier) RemarkChanged(ctx context.Context, event voip.RemarkEve
 	id[6] = (id[6] & 0x0f) | 0x40
 	id[8] = (id[8] & 0x3f) | 0x80
 	msgID := fmt.Sprintf("%x-%x-%x-%x-%x", id[:4], id[4:6], id[6:8], id[8:10], id[10:16])
+	kind := event.ContactType
+	if kind == "" {
+		kind = "voip"
+	}
 	return n.broker.PublishContext(ctx, DeviceNotifyTopic("sn_"+event.DeviceID), 1, map[string]any{
 		"msg_id": msgID, "from": "", "type": "callers_update", "channel": "device",
 		"ts":      time.Now().UTC().Format("2006-01-02T15:04:05.000Z"),
-		"payload": map[string]any{"action": "remark", "contact_type": "voip", "peer_id": event.PeerID},
+		"payload": map[string]any{"action": "remark", "contact_type": kind, "peer_id": event.PeerID},
 	})
 }

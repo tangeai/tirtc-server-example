@@ -33,7 +33,6 @@ func GetSnTicket(ctx context.Context, accessToken, sn, modelID string) (string, 
 	if err != nil {
 		return "", err
 	}
-	slog.DebugContext(ctx, "wechat getsnticket req", "url", urlStr, "body", string(body))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, urlStr, bytes.NewReader(body))
 	if err != nil {
 		return "", err
@@ -42,7 +41,7 @@ func GetSnTicket(ctx context.Context, accessToken, sn, modelID string) (string, 
 	client := &http.Client{Timeout: 10 * time.Second}
 	res, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("微信设备票据服务连接失败")
 	}
 	defer res.Body.Close()
 	respBody, err := io.ReadAll(res.Body)
@@ -60,6 +59,5 @@ func GetSnTicket(ctx context.Context, accessToken, sn, modelID string) (string, 
 	if r.SnTicket == "" {
 		return "", fmt.Errorf("wechat: empty sn_ticket in response")
 	}
-	slog.DebugContext(ctx, "wechat getsnticket resp", "status", res.StatusCode, "body", string(respBody))
 	return r.SnTicket, nil
 }

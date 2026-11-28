@@ -5,6 +5,8 @@ import (
 	"errors"
 )
 
+var ErrDeviceSubscriptionRequired = errors.New("请更新小程序，从设备卡片开启提醒")
+
 var ErrUnavailable = errors.New("订阅模板尚未配置")
 
 type Reference struct {
@@ -13,6 +15,9 @@ type Reference struct {
 }
 
 type Repository interface {
+	PrepareDevice(context.Context, int64, string, string, string, string, string) (string, bool, error)
+	HasDeviceGrant(context.Context, int64, string, string, string) (bool, error)
+	HasGrant(context.Context, int64, string, string) (bool, error)
 	Lookup(context.Context, Event) (string, error)
 	Admit(context.Context, Event, string, string) (string, error)
 	Preference(context.Context, int64, string, string, bool, *int) (*int, error)
@@ -56,6 +61,18 @@ func (s *Service) Receive(ctx context.Context, e Event) (string, error) {
 }
 func (s *Service) Enabled(kind string) bool { return s.wechat != nil && s.wechat.Ready(kind) }
 func (s *Service) Subscribe(ctx context.Context, user int64, app, code, kind string) (string, bool, error) {
+	if kind == "alarm" {
+		return "", false, ErrDeviceSubscriptionRequired
+	}
+	return s.subscribe(ctx, user, app, code, kind, "", "")
+}
+func (s *Service) SubscribeDevice(ctx context.Context, user int64, app, code, kind, device, model string) (string, bool, error) {
+	if device == "" || len(device) > 64 || model == "" || len(model) > 128 || kind != "alarm" {
+		return "", false, ErrInvalid
+	}
+	return s.subscribe(ctx, user, app, code, kind, device, model)
+}
+func (s *Service) subscribe(ctx context.Context, user int64, app, code, kind, device, model string) (string, bool, error) {
 	if !s.Enabled(kind) {
 		return "", false, ErrUnavailable
 	}
@@ -66,7 +83,21 @@ func (s *Service) Subscribe(ctx context.Context, user int64, app, code, kind str
 	if err != nil {
 		return "", false, ErrUnavailable
 	}
+	if device != "" {
+		return s.PrepareDevice(ctx, user, app, open, s.TemplateID(kind), device, model)
+	}
 	return s.Prepare(ctx, user, app, open, s.policy.Template(kind).ID)
 }
 func (s *Service) TemplateID(kind string) string { return s.policy.Template(kind).ID }
 func (s *Service) SuggestedSeconds() int         { return s.policy.SuggestedSeconds }
+
+// AlarmGrant reports the account's current grant for the configured delivery target.
+func (s *Service) AlarmGrant(ctx context.Context, user int64, device string) (bool, error) {
+	if !s.Enabled("alarm") {
+		return false, nil
+	}
+	if device != "" {
+		return s.HasDeviceGrant(ctx, user, s.policy.AppID, s.TemplateID("alarm"), device)
+	}
+	return s.HasGrant(ctx, user, s.policy.AppID, s.TemplateID("alarm"))
+}

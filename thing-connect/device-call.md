@@ -592,7 +592,7 @@ Authorization: Bearer <mqtt_token>
 
 ## 联系人与 VoIP 联系人的区别
 
-[`GET /v1/call/device/contacts`](api-reference.md#get-v1calldevicecontacts) 会同时返回两种联系人：
+[`GET /v1/call/device/contacts`](api-reference.md#get-v1calldevicecontacts) 会同时返回两种联系人。设备联系人使用独立备注，留空时跟随对方的设备名称。对方改名后服务端通知使用默认名称的联系人设备重新拉取；设备重连时也应获取当前列表。
 
 - `type:"device"`：设备联系人，可用于设备互呼
 - `type:"voip"`：微信授权联系人，只能用于 [`POST /v1/voip/device/call`](api-reference.md#post-v1voipdevicecall)

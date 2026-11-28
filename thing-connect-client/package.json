@@ -15,7 +15,8 @@
     "test": "node --experimental-strip-types --test tests/*.test.ts tests/*.test.mjs",
     "check": "npm run typecheck && npm test && npm run build:weapp",
     "postbuild:weapp": "node scripts/check-build.cjs weapp",
-    "postbuild:h5": "node scripts/check-build.cjs h5"
+    "postbuild:h5": "node scripts/check-build.cjs h5",
+    "build:player": "tsc -p player/tsconfig.json && vite build --config player/vite.config.mjs"
   },
   "dependencies": {
     "@tarojs/components": "4.3.2",
@@ -23,6 +24,7 @@
     "@tarojs/runtime": "4.3.2",
     "@tarojs/shared": "4.3.2",
     "@tarojs/taro": "4.3.2",
+    "js-sha256": "0.11.1",
     "react": "18.3.1",
     "react-dom": "18.3.1"
   },

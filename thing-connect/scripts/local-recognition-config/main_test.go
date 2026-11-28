@@ -2,6 +2,8 @@ package main
 
 import (
 	"gopkg.in/yaml.v3"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"thing-connect/internal/config"
@@ -22,5 +24,32 @@ func TestPrepareCopiesRuntimeIdentityAndUses9006(t *testing.T) {
 	}
 	if out.Recognition.APIKey != "" {
 		t.Fatal("model must remain unconfigured")
+	}
+}
+
+func TestLocalPushUsesRuntimeIdentityOnly(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "user.yaml")
+	target := filepath.Join(dir, "push.yaml")
+	input := "server:\n  http_port: 9002\ndatabase:\n  dsn: runtime\njwt_secret: business\ninternal:\n  key: internal\nmqtt:\n  password: excluded\n"
+	if err := os.WriteFile(source, []byte(input), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := run(source, target, "push-server"); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var c config.Config
+	if err := yaml.Unmarshal(b, &c); err != nil {
+		t.Fatal(err)
+	}
+	if c.Server.HTTPPort != 9007 || c.Database.DSN != "runtime" || c.JWTSecret != "business" || c.Internal.Key != "internal" || strings.Contains(string(b), "excluded") || strings.Contains(string(b), "recognition:") {
+		t.Fatal("incorrect local push configuration")
+	}
+	if err := run(source, target, "push-server"); err == nil {
+		t.Fatal("overwrote an existing config")
 	}
 }
