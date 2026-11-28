@@ -37,8 +37,7 @@ body,.taro_page { background:#f4f6f5 }
   .page.devices-page { max-width:1250PX }
   .device-list-grid {grid-template-columns:repeat(auto-fill,minmax(min(100%,330PX),1fr))}
   .page .card { border:1PX solid #e1e7e3;box-shadow:0 2PX 7PX #1b402608;border-radius:14PX }
-  .page.role-editor-page {max-width:1040PX}
-  .page .role-extensions {display:grid;align-items:start;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:20PX}
+  .page.role-editor-page {max-width:800PX}
   .page .role-extensions .card {padding:18PX}
   .role-editor-page .role-editor-actions {align-items:center;justify-content:space-between;flex-direction:row;padding:14PX 0;border-top:1PX solid #d9e3dc}
   .role-editor-actions>.row>.action {min-width:96PX}
@@ -107,7 +106,7 @@ body,.taro_page { background:#f4f6f5 }
 .page .device-info-json {display:block;white-space:pre-wrap;overflow-wrap:anywhere}
 @media (min-width:768PX) {
   .page.content-page {max-width:800PX}
-  .page.role-editor-page {max-width:1040PX}
+  .page.role-editor-page {max-width:800PX}
   .page.bind-page,.page.room-page,.page.account-page {max-width:560PX;margin-inline:auto;padding:28PX 24PX 48PX}
   .page.legal {max-width:820PX;padding:28PX 24PX 48PX}
   .page.legal .card {padding:24PX}
@@ -145,4 +144,33 @@ body,.taro_page { background:#f4f6f5 }
   min-height: 36PX;
   white-space: normal;
   line-height: 1.25;
+}
+.page .web-search{padding:0;gap:0;align-items:stretch}
+.web-search-label{display:flex;align-items:center;cursor:text;gap:10PX;padding:0 12PX;min-width:0;flex:1}
+.web-search-input{box-sizing:border-box;align-self:stretch;flex:1;width:0;min-width:0;min-height:38PX;padding:0;border:0;outline:none;background:transparent;color:inherit;font:inherit}
+.page .web-search:focus-within{box-shadow:inset 0 0 0 1PX #087a41}
+.page .web-search .search-clear{width:auto;border:0;padding:0 12PX;cursor:pointer}
+.page .web-search-input:focus{outline:none}
+@media (forced-colors: active){
+  .page .web-search:focus-within{outline:2PX solid Highlight;outline-offset:1PX}
+}
+
+/* Taro wraps native text controls. Draw one focus ring around the visible field. */
+.page .field-input:focus-within,
+.page .textarea:focus-within,
+.page .reminder-seconds-input:focus-within {
+  outline: 2PX solid #11784d;
+  outline-offset: -2PX;
+}
+.page .field-input :focus,
+.page .textarea :focus,
+.page .reminder-seconds-input :focus {
+  outline: none;
+}
+.page .field-input {display:flex;align-items:center}
+.page .field-input .weui-input {height:100%;min-width:0}
+@media (forced-colors: active) {
+  .page .field-input:focus-within,
+  .page .textarea:focus-within,
+  .page .reminder-seconds-input:focus-within {outline-color:Highlight}
 }

@@ -89,6 +89,9 @@ async function verify(browser, width) {
     await page.locator('.settings-link').filter({ hasText: '测试角色' }).click();
     await page.locator('.tabs taro-button-core').filter({ hasText: '扩展能力' }).click();
     await page.getByText('设备插件', { exact: true }).waitFor();
+    const tools = page.locator('.resource-disclosure').filter({ hasText: 'MCP 工具' });
+    assert.equal(await page.locator('.role-tool-link').count(), 0);
+    await tools.click();
     await page.locator('.role-tool-link').filter({ hasText: '地图' }).click();
     await page.getByText('地图工具详情', { exact: true }).waitFor();
     await page.locator('.sheet taro-button-core').filter({ hasText: '关闭' }).click();
@@ -103,6 +106,34 @@ async function verify(browser, width) {
     for (const route of ['/contacts', '/recognition', '/room', '/history', '/bind', '/account', '/legal?kind=terms']) {
       await page.goto(site + route + (route.includes('?') ? '&' : '?') + 'device_id=fixture');
       await page.locator('.page').waitFor();
+      if (route === '/bind') {
+        const cells = page.locator('.code-cells');
+        const group = await cells.boundingBox(), card = await page.locator('.bind-page .card').boundingBox();
+        assert.ok(group && card && Math.abs(group.x + group.width / 2 - card.x - card.width / 2) <= 1);
+        await page.locator('.code-input').click();
+        await page.keyboard.type('123456');
+        assert.equal((await cells.locator('.code-cell').allTextContents()).join(''), '123456');
+        await page.keyboard.press('Backspace');
+        assert.equal((await cells.locator('.code-cell').allTextContents()).join(''), '12345');
+      }
+      if (route === '/contacts') {
+        const bar = page.locator('.web-search');
+        const input = bar.getByRole('textbox');
+        const bounds = await bar.boundingBox();
+        assert.ok(bounds);
+        const x = bounds.x + bounds.width * 0.75, y = bounds.y + bounds.height / 2;
+        // The native input must fill the field even after Taro transforms the CSS.
+        assert.ok(await input.evaluate((el, point) => el === document.elementFromPoint(...point), [x, y]));
+        await page.mouse.click(x, y);
+        assert.equal(await input.evaluate(el => getComputedStyle(el).outlineStyle), 'none');
+        assert.notEqual(await bar.evaluate(el => getComputedStyle(el).boxShadow), 'none');
+        await page.keyboard.type('abc');
+        await page.mouse.click(x, y);
+        await page.keyboard.type('d');
+        assert.equal(await input.inputValue(), 'abcd');
+        await bar.getByRole('button').click();
+        assert.equal(await input.inputValue(), '');
+      }
       if (route === '/recognition') await page.getByText('请在微信小程序中授权接收此设备的异常提醒。').waitFor();
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, width + ' ' + route);
     }

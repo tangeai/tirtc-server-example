@@ -12,6 +12,7 @@ type Reference = { id: string; name?: string; enabled?: boolean };
 type Props = { kind: Kind; selected: string[]; change(ids: string[]): void; disabled: boolean; readonly: boolean; names?: Reference[] };
 
 export function RoleResources({ kind, selected, change, disabled, readonly, names = [] }: Props) {
+  const [expanded, setExpanded] = useState(false);
   const [owned,setOwned]=useState<Reference[]>([]), [shared,setShared]=useState<Reference[]>([]);
   const [error,setError]=useState(''), [busy,setBusy]=useState(false), [editing,setEditing]=useState<{id?:string}>();
   const [detail, setDetail] = useState<{name?: string; description?: string; id: string}>();
@@ -68,7 +69,11 @@ export function RoleResources({ kind, selected, change, disabled, readonly, name
   const catalog=new Map([...names,...shared,...owned].map(r=>[r.id,r]));
   const ids=readonly ? selected : [...new Set([...selected,...catalog.keys()])];
   return <View className={'card role-resource-group' + (kind === 'mcp' ? ' role-tool-list' : '')}>
-    <View className='row between'><Text className='label'>{title}</Text>{!readonly && <Action disabled={busy || disabled} onClick={()=>setEditing({})}>{tr("新建")}{title}</Action>}</View>
+    <Button className='resource-disclosure' aria-expanded={expanded} onClick={() => setExpanded(open => !open)}>
+      <Text className='resource-title'>{title}</Text><Text className='resource-summary'>{tr("已选")} {selected.length}</Text>
+      <View className={'settings-chevron' + (expanded ? ' disclosure-open' : '')} ariaHidden />
+    </Button>
+    {expanded && <>{!readonly && <View className='row role-resource-heading'><Action ariaLabel={tr("新建") + title} disabled={busy || disabled} onClick={()=>setEditing({})}>＋ {tr("新建")}</Action></View>}
     {ids.map(id=>{
       const item=catalog.get(id), on=selected.includes(id);
       const manageable=!readonly && owned.some(r=>r.id===id);
@@ -88,7 +93,7 @@ export function RoleResources({ kind, selected, change, disabled, readonly, name
     })}
     {!ids.length && !error && <Text className='muted'>{busy?tr("正在加载…"):tr("暂无")+title}</Text>}
     <Notice error>{error}</Notice>{error && <Action disabled={busy} onClick={()=>void load()}>{tr("重新加载")}{title}</Action>}
-    {process.env.TARO_ENV === 'h5' && kind === 'knowledge' && selected[0] && <Documents key={selected[0]} index={selected[0]} readonly={readonly || disabled} />}
+    {process.env.TARO_ENV === 'h5' && kind === 'knowledge' && selected[0] && <Documents key={selected[0]} index={selected[0]} readonly={readonly || disabled} />}</>}
     {detail && <Sheet title={detail.name || detail.id} onClose={() => setDetail(undefined)}>
       <Text>{detail.description || tr("暂无描述")}</Text><Text className='muted'>{tr("工具 ID ·")}{detail.id}</Text>
     </Sheet>}

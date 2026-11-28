@@ -134,6 +134,7 @@
   "请输入名称": "Enter a name",
   "功能标识须为 1 至 64 位字母、数字或下划线": "Use 1–64 letters, digits or underscores for the identifier.",
   "请为每个参数填写字母、数字或下划线组成的名称": "Use letters, digits or underscores for each parameter name.",
+  "已选": "Selected",
   "新建": "New ",
   "正在加载配置…": "Loading configuration…",
   "传输协议": "Transport protocol",

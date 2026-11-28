@@ -22,9 +22,7 @@ export function Sheet({ title, onClose, children, busy }: PropsWithChildren<{ ti
   return <View className='mask' onClick={() => { if (!busy) onClose(); }}><View className='sheet' onClick={e => e.stopPropagation()}><Text className='title'>{title}</Text>{children}<Action disabled={busy} onClick={onClose}>{tr("关闭")}</Action></View></View>;
 }
 
-export function SearchField({ value, onChange, placeholder }: { value: string; onChange(value: string): void; placeholder: string }) {
-  return <View className='search-bar'><View className='search-symbol' ariaHidden /><Input className='search-bar-input' value={value} placeholder={placeholder} ariaLabel={placeholder} confirmType='search' onInput={e => onChange(e.detail.value)} />{value && <Button className='search-clear' ariaLabel={tr("清空搜索")} onClick={() => onChange('')}>{tr("清除")}</Button>}</View>;
-}
+export { SearchField } from '../platform/search-field';
 
 export function RobotIcon() {
   return <View className='device-robot' ariaHidden><View className='robot-antenna' /><View className='robot-ear robot-ear-left' /><View className='robot-face'><View className='robot-eyes'><View className='robot-eye' /><View className='robot-eye' /></View><View className='robot-smile' /></View><View className='robot-ear robot-ear-right' /></View>;

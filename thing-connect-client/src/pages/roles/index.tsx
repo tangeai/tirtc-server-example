@@ -31,8 +31,10 @@ export default function Roles() {
     return { roles, binding, voices: voices.items || [] };
   });
   function url(id: string) { return '/v1/ai/device/' + encodeURIComponent(id) + '/role'; }
-  const filteredRoles = w.value?.roles.filter(r => (r.name || '').toLowerCase().includes(search.trim().toLowerCase())) || [];
   const active = w.value?.binding.role_id || w.value?.binding.default_role_id;
+  const filteredRoles = (w.value?.roles || [])
+    .filter(role => (role.name || '').toLowerCase().includes(search.trim().toLowerCase()))
+    .sort((first, second) => Number(second.id === active) - Number(first.id === active));
   async function edit(role?: Entry) {
     await w.run(async () => {
       if (role) {
@@ -125,11 +127,11 @@ export default function Roles() {
     <SearchField value={search} onChange={setSearch} placeholder={tr("搜索角色名称")} />
     <View className='settings-section'>
       <View className='row between settings-section-title'><Text>{tr("我的角色")}{w.value ? ' · ' + filteredRoles.length : ''}</Text><Action disabled={w.busy || !w.value} onClick={() => void edit()}>{tr("＋ 创建角色")}</Action></View>
-      <View className='card settings-list'>
+      <View className='card settings-list role-list'>
         {w.value && !filteredRoles.length && <View className='empty'>{search.trim() ? tr("没有匹配的角色") : tr("暂无角色")}</View>}
-        {filteredRoles.map(role => <View className='settings-row' key={role.id}>
+        {filteredRoles.map(role => <View className={role.id === active ? 'settings-row role-current' : 'settings-row'} key={role.id}>
           <Button className='settings-link' disabled={w.busy || role.unavailable} onClick={() => void edit(role)}>
-            <View className='settings-copy'><Text>{role.name || tr("未命名角色")}</Text><Text className='settings-detail'>{role.preset ? tr("默认角色 · ") : ''}{tr(roleRegionLabel(role.region))}{role.unavailable ? tr(" · 暂不可用") : ''}</Text></View>
+            <View className='settings-copy'><Text className='role-name'>{role.name || tr("未命名角色")}</Text><Text className='settings-detail'>{role.preset ? tr("默认角色 · ") : ''}{tr(roleRegionLabel(role.region))}{role.unavailable ? tr(" · 暂不可用") : ''}</Text></View>
             <View className='settings-chevron' ariaHidden />
           </Button>
           {role.unavailable && <Action disabled={w.busy} onClick={() => void w.refresh()}>{tr("重试加载")}</Action>}

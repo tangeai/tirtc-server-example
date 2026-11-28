@@ -2,6 +2,7 @@ import { tr, usePageLanguage } from '../../platform/translate';
 import Taro from '@tarojs/taro';
 import { Text, View } from '@tarojs/components';
 import { useState } from 'react';
+import { Button } from '../../platform/button';
 import { Action, DevicePageHeading, Notice } from '../../components/ui';
 import { useDeviceWorkspace } from '../../hooks/device-workspace';
 import { request } from '../../services/api';
@@ -44,6 +45,11 @@ export default function History() {
     });
   }
   return <View className='page content-page history-page'><View className='row between'><DevicePageHeading title='AI 对话记录' device={w.device} />{!entry && <Action disabled={w.busy} onClick={() => { if (w.value) void page(w.value.page); else void w.refresh(); }}>{tr("刷新列表")}</Action>}</View><Notice error>{w.error}</Notice><Notice>{w.busy ? tr("正在加载…") : notice}</Notice>
-    {entry ? <><View className='row between'><Action disabled={w.busy} onClick={() => { setEntry(undefined); setMessages(undefined); w.setError(''); }}>{tr("返回列表")}</Action><Action danger disabled={w.busy || !messages} onClick={() => void remove()}>{tr("删除会话")}</Action></View><Text className='muted'>{stamp(entry.started_at)}</Text>{!w.busy && !messages && <Action onClick={() => void read(entry)}>{tr("重试读取")}</Action>}{messages?.map((m, i) => <View className='card' key={i}><Text className='label'>{({ user: '用户', assistant: 'AI 助手', system: '系统', tool: '工具' } as Record<string,string>)[m.role] || tr("消息")} · {stamp(m.time)}</Text><Text selectable className='conversation-content'>{m.content}</Text></View>)}{messages && !messages.length && <Notice>{tr("这条会话暂无文字内容")}</Notice>}</> : <>{w.value?.items.map(item => <View className='card' key={item.id}><Text className='label'>{stamp(item.started_at)}</Text><Action disabled={w.busy} onClick={() => void read(item)}>{tr("查看对话")}</Action></View>)}{w.value && !w.value.items.length && <View className='card empty'>{tr("暂无 AI 对话记录")}</View>}{w.value && (w.value.page > 1 || w.value.has_more) && <View className='row between'><Action disabled={w.busy || w.value.page <= 1} onClick={() => void page(w.value!.page - 1)}>{tr("上一页")}</Action><Text>{tr("第")}{w.value?.page || 1} {tr("页")}</Text><Action disabled={w.busy || !w.value?.has_more} onClick={() => void page(w.value!.page + 1)}>{tr("下一页")}</Action></View>}</>}
+    {entry ? <><View className='row between'><Action disabled={w.busy} onClick={() => { setEntry(undefined); setMessages(undefined); w.setError(''); }}>{tr("返回列表")}</Action><Action danger disabled={w.busy || !messages} onClick={() => void remove()}>{tr("删除会话")}</Action></View><Text className='muted'>{stamp(entry.started_at)}</Text>{!w.busy && !messages && <Action onClick={() => void read(entry)}>{tr("重试读取")}</Action>}{messages?.map((m, i) => <View className='card' key={i}><Text className='label'>{({ user: '用户', assistant: 'AI 助手', system: '系统', tool: '工具' } as Record<string,string>)[m.role] || tr("消息")} · {stamp(m.time)}</Text><Text selectable className='conversation-content'>{m.content}</Text></View>)}{messages && !messages.length && <Notice>{tr("这条会话暂无文字内容")}</Notice>}</> : <>{!!w.value?.items.length && <View className='card history-list'>{w.value.items.map(item => {
+      const time = stamp(item.started_at);
+      return <Button key={item.id} className='history-entry' disabled={w.busy} ariaLabel={tr("查看对话") + ' · ' + time} onClick={() => void read(item)}>
+        <Text>{time}</Text><View className='settings-chevron' ariaHidden />
+      </Button>;
+    })}</View>}{w.value && !w.value.items.length && <View className='card empty'>{tr("暂无 AI 对话记录")}</View>}{w.value && (w.value.page > 1 || w.value.has_more) && <View className='row between'><Action disabled={w.busy || w.value.page <= 1} onClick={() => void page(w.value!.page - 1)}>{tr("上一页")}</Action><Text>{tr("第")}{w.value?.page || 1} {tr("页")}</Text><Action disabled={w.busy || !w.value?.has_more} onClick={() => void page(w.value!.page + 1)}>{tr("下一页")}</Action></View>}</>}
   </View>;
 }
