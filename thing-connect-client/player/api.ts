@@ -1,3 +1,5 @@
+import { browserToken } from '../src/platform/browser-token';
+
 declare global {
   interface Window {
     MiniProgramPage: { embedded: boolean; token: string | null; goBack(): void; requireLogin(): void };
@@ -14,17 +16,7 @@ declare global {
 
 export function sessionToken(): string | null {
   if (window.MiniProgramPage.embedded) return window.MiniProgramPage.token;
-  const raw = localStorage.getItem('token');
-  if (!raw || !raw.trimStart().startsWith('{')) return raw;
-  try {
-    const value = JSON.parse(raw).data;
-    if (typeof value === 'string' && value.length > 0) {
-      localStorage.setItem('token', value);
-      return value;
-    }
-  } catch { /* Invalid legacy wrapper requires a new browser session. */ }
-  localStorage.removeItem('token');
-  return null;
+  return browserToken();
 }
 
 export async function get<T>(path: string, signal: AbortSignal): Promise<T> {

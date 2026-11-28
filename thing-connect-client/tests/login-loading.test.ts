@@ -9,6 +9,7 @@ test('登录页首次加载配置时显示等待，不显示失败重试入口',
   const code = ts.transpileModule(fs.readFileSync(new URL('../src/pages/login/index.tsx', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
   const jsx = (type: unknown, props: unknown) => ({ type, props });
   vm.runInNewContext(code, { exports, require(name: string) {
+    if (name === '../../platform/translate') return { usePageLanguage() {}, tr: (text: string) => text };
     if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx };
     if (name === 'react') return { useState: (value: unknown) => [value, () => {}], useRef: (value: unknown) => ({ current: value }), useEffect() {} };
     if (name === '@tarojs/taro') return { __esModule: true, default: {}, useLoad() {} };

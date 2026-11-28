@@ -1,5 +1,8 @@
+import { afterBrowserLogin } from '../../platform/console-session';
+import { tr, usePageLanguage } from '../../platform/translate';
 import Taro, { useLoad } from '@tarojs/taro';
-import { Button, Checkbox, Image, Input, Text, View } from '@tarojs/components';
+import { Button } from '../../platform/button';
+import { Checkbox, Image, Input, Text, View } from '@tarojs/components';
 import { useEffect, useRef, useState } from 'react';
 import { Notice } from '../../components/ui';
 import { ApiError, errorText, request, signIn, signOut, rememberedEmail, token } from '../../services/api';
@@ -10,6 +13,7 @@ import brandRobot from '../../generated/auth-logo.json';
 
 type Mode = 'login' | 'register' | 'reset';
 export default function Login() {
+  usePageLanguage();
   const notification = useRef('');
   const [mode, setMode] = useState<Mode>('login');
   const [email, setEmail] = useState(''), [password, setPassword] = useState(''), [confirm, setConfirm] = useState(''), [code, setCode] = useState('');
@@ -32,56 +36,69 @@ export default function Login() {
   }
   useLoad(options => {
     if (options.notification && /^[0-9a-f-]{36}$/.test(options.notification)) notification.current = options.notification;
+    const browserPath = process.env.TARO_ENV === 'h5' ? location.pathname : '';
     if (options.mode === 'reset') setMode('reset');
-    else if (token()) { void Taro.switchTab({ url: '/pages/devices/index' }); return; }
+    else if (token()) { if (process.env.TARO_ENV === 'h5') location.replace('/devices'); else void Taro.switchTab({ url: '/pages/devices/index' }); return; }
+    if (browserPath === '/forgot-password') setMode('reset');
+    else if (browserPath === '/register' || options.tab === 'register') setMode('register');
     setEmail(rememberedEmail());
-    if (options.expired) setNotice('登录状态已过期，请重新登录');
+    if (options.expired) setNotice(tr("登录状态已过期，请重新登录"));
     void loadConfig();
   });
-  function switchMode(next: Mode) { if (lock.current) return; setMode(next); setError(''); setNotice(''); setCode(''); setPassword(''); setConfirm(''); }
+  function switchMode(next: Mode) { if (lock.current) return;
+    if (process.env.TARO_ENV === 'h5') { location.assign(next === 'reset' ? '/forgot-password' : '/' + next); return; }
+    setMode(next); setError(''); setNotice(''); setCode(''); setPassword(''); setConfirm(''); }
   async function submit(sendCode = false) {
     if (lock.current || (sendCode && cooldown)) return;
+    const submitted = { email, password, confirm, code };
+    if (process.env.TARO_ENV === 'h5') {
+      // Password managers can update native input values without firing an input event.
+      for (const key of ['email', 'password', 'confirm', 'code'] as const) {
+        const input = document.querySelector<HTMLInputElement>('.auth-page input[name="' + key + '"]');
+        if (input) submitted[key] = input.value;
+      }
+    }
     setError(''); setNotice('');
-    if (mode !== 'reset' && !consent) { setError('请先阅读并同意用户协议和隐私政策'); return; }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) { setError('请输入有效的邮箱地址'); return; }
-    if (!sendCode && !password) { setError('请输入密码'); return; }
-    if (!sendCode && mode !== 'login' && (!/^\d{6}$/.test(code) || password.length < 6 || password !== confirm)) {
-      setError(!/^\d{6}$/.test(code) ? '请输入 6 位邮箱验证码' : password.length < 6 ? '密码至少 6 位' : '两次密码不一致'); return;
+    if (mode !== 'reset' && !consent) { setError(tr("请先阅读并同意用户协议和隐私政策")); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(submitted.email.trim())) { setError(tr("请输入有效的邮箱地址")); return; }
+    if (!sendCode && !submitted.password) { setError(tr("请输入密码")); return; }
+    if (!sendCode && mode !== 'login' && (!/^\d{6}$/.test(submitted.code) || submitted.password.length < 6 || submitted.password !== submitted.confirm)) {
+      setError(!/^\d{6}$/.test(submitted.code) ? '请输入 6 位邮箱验证码' : submitted.password.length < 6 ? '密码至少 6 位' : '两次密码不一致'); return;
     }
     lock.current = true; setBusy(true);
     try {
       if ((sendCode || mode === 'login') && (!config || !captcha.current)) throw new ApiError(-1, '验证配置尚未就绪，请重新加载');
       const proof = sendCode || mode === 'login' ? await captcha.current!.verify() : undefined;
       if (!alive.current) return;
-      const payload = { email: email.trim(), ...(proof ? { captcha: proof } : {}) };
+      const payload = { email: submitted.email.trim(), ...(proof ? { captcha: proof } : {}) };
       if (sendCode) {
         await request(mode === 'reset' ? '/v1/user/password-reset/send-code' : '/v1/user/send-code', 'POST', payload);
         if (alive.current) { setCooldown(60); setNotice(mode === 'reset' ? '如该邮箱已注册，验证码将发送至该邮箱' : '验证码已发送，请查看邮箱'); }
       } else {
         const path = mode === 'login' ? '/v1/user/login' : mode === 'reset' ? '/v1/user/password-reset' : '/v1/user/register';
-        const result = await request<{ token: string }>(path, 'POST', { ...payload, password, ...(mode !== 'login' ? { code } : {}) });
+        const result = await request<{ token: string }>(path, 'POST', { ...payload, password: submitted.password, ...(mode !== 'login' ? { code: submitted.code } : {}) });
         if (!alive.current) return;
-        if (mode === 'reset') { signOut(); setMode('login'); setPassword(''); setConfirm(''); setCode(''); setNotice('密码已重置，请使用新密码登录'); }
-        else { if (!result?.token) throw new ApiError(-1, '登录响应异常，请重试'); signIn(result.token, email); await Taro.reLaunch({ url: notification.current ? '/pages/notifications/index?ref=' + encodeURIComponent(notification.current) : '/pages/devices/index' }); }
+        if (mode === 'reset') { signOut(); setMode('login'); setPassword(''); setConfirm(''); setCode(''); setNotice(tr("密码已重置，请使用新密码登录")); }
+        else { if (!result?.token) throw new ApiError(-1, '登录响应异常，请重试'); signIn(result.token, submitted.email); if (process.env.TARO_ENV === 'h5') { location.replace(notification.current ? '/notifications?ref=' + encodeURIComponent(notification.current) : afterBrowserLogin()); return; } await Taro.reLaunch({ url: notification.current ? '/pages/notifications/index?ref=' + encodeURIComponent(notification.current) : '/pages/devices/index' }); }
       }
     } catch (e) { if (alive.current) setError(errorText(e)); }
     finally { lock.current = false; if (alive.current) setBusy(false); }
   }
   return <View className={'page auth-page auth-' + mode}>
-    <View className='auth-brand'><Image className='auth-brand-robot' src={brandRobot} mode='aspectFit' ariaLabel='小钛机器人' /><View><Text className='auth-brand-name'>小钛</Text><Text className='auth-tagline'>连接设备，随时相伴</Text></View></View>
+    <View className='auth-brand'><Image className='auth-brand-robot' src={brandRobot} mode='aspectFit' ariaLabel={tr("小钛机器人")} /><View><Text className='auth-brand-name'>{tr("小钛")}</Text><Text className='auth-tagline'>{tr("连接设备，随时相伴")}</Text></View></View>
     <View className='auth-panel'>
-      {mode === 'reset' ? <View className='auth-heading'><Text>找回密码</Text><Text className='auth-heading-note'>通过邮箱验证身份</Text></View> : <View className='auth-tabs'>{(['login', 'register'] as const).map(value => <View id={'auth-' + value} key={value} className={'auth-tab ' + (mode === value ? 'is-active' : '')} onClick={() => switchMode(value)}><Text>{value === 'login' ? '登录' : '注册'}</Text><View className='auth-tab-line' /></View>)}</View>}
+      {mode === 'reset' ? <View className='auth-heading'><Text>{tr("找回密码")}</Text><Text className='auth-heading-note'>{tr("通过邮箱验证身份")}</Text></View> : <View className='auth-tabs'>{(['login', 'register'] as const).map(value => <Button id={'auth-' + value} key={value} className={'auth-tab ' + (mode === value ? 'is-active' : '')} onClick={() => switchMode(value)}><Text>{value === 'login' ? tr("登录") : tr("注册")}</Text><View className='auth-tab-line' /></Button>)}</View>}
       <View className='auth-fields'>
-        <View className='auth-field'><Text className='auth-label'>邮箱</Text><Input className='auth-input' value={email} disabled={busy} maxlength={254} placeholder='请输入邮箱地址' placeholderClass='auth-placeholder' onInput={e => setEmail(e.detail.value)} /></View>
-        {mode !== 'login' && <View className='auth-field'><Text className='auth-label'>验证码</Text><Input className='auth-input' value={code} type='number' maxlength={6} disabled={busy} placeholder='6 位验证码' placeholderClass='auth-placeholder' onInput={e => setCode(e.detail.value.normalize('NFKC').replace(/\D/g, '').slice(0, 6))} /><Button className='auth-inline-button' disabled={busy || cooldown > 0 || !config} onClick={() => void submit(true)}>{cooldown ? `${cooldown}s 后重发` : '获取验证码'}</Button></View>}
-        <View className='auth-field'><Text className='auth-label'>密码</Text><Input className='auth-input' value={password} password={!visible} maxlength={-1} disabled={busy} placeholder={mode === 'login' ? '请输入密码' : '至少 6 位密码'} placeholderClass='auth-placeholder' onInput={e => setPassword(e.detail.value)} /><Button className='auth-inline-button auth-visibility' ariaLabel={visible ? '隐藏密码' : '显示密码'} disabled={busy} onClick={() => setVisible(value => !value)}><Image className='auth-eye' src={visible ? eye : eyeOff} mode='aspectFit' /></Button></View>
-        {mode !== 'login' && <View className='auth-field'><Text className='auth-label'>确认密码</Text><Input className='auth-input' value={confirm} password={!visible} maxlength={-1} disabled={busy} placeholder='再次输入密码' placeholderClass='auth-placeholder' onInput={e => setConfirm(e.detail.value)} /></View>}
+        <View className='auth-field'><Text className='auth-label'>{tr("邮箱")}</Text><Input className='auth-input' name='email' nativeProps={{ autoComplete: 'username' }} value={email} disabled={busy} maxlength={254} placeholder={tr("请输入邮箱地址")} placeholderClass='auth-placeholder' onInput={e => setEmail(e.detail.value)} /></View>
+        {mode !== 'login' && <View className='auth-field'><Text className='auth-label'>{tr("验证码")}</Text><Input className='auth-input' name='code' nativeProps={{ autoComplete: 'one-time-code' }} value={code} type='number' maxlength={6} disabled={busy} placeholder={tr("6 位验证码")} placeholderClass='auth-placeholder' onInput={e => setCode(e.detail.value.normalize('NFKC').replace(/\D/g, '').slice(0, 6))} /><Button className='auth-inline-button' disabled={busy || cooldown > 0 || !config} onClick={() => void submit(true)}>{cooldown ? `${cooldown}s 后重发` : tr("获取验证码")}</Button></View>}
+        <View className='auth-field'><Text className='auth-label'>{tr("密码")}</Text><Input className='auth-input' name='password' nativeProps={{ autoComplete: mode === 'login' ? 'current-password' : 'new-password' }} value={password} password={!visible} maxlength={-1} disabled={busy} placeholder={mode === 'login' ? tr("请输入密码") : tr("至少 6 位密码")} placeholderClass='auth-placeholder' onInput={e => setPassword(e.detail.value)} /><Button className='auth-inline-button auth-visibility' ariaLabel={visible ? tr("隐藏密码") : tr("显示密码")} disabled={busy} onClick={() => setVisible(value => !value)}><Image className='auth-eye' src={visible ? eye : eyeOff} mode='aspectFit' /></Button></View>
+        {mode !== 'login' && <View className='auth-field'><Text className='auth-label'>{tr("确认密码")}</Text><Input className='auth-input' name='confirm' nativeProps={{ autoComplete: 'new-password' }} value={confirm} password={!visible} maxlength={-1} disabled={busy} placeholder={tr("再次输入密码")} placeholderClass='auth-placeholder' onInput={e => setConfirm(e.detail.value)} /></View>}
       </View>
       {config && <Captcha ref={captcha} config={config} />}
-      <View className='auth-feedback'><Notice error>{configError || error}</Notice><Notice>{notice}</Notice>{!config && !configLoading && configError && <Button className='auth-retry' disabled={busy} onClick={() => void loadConfig()}>重新加载验证配置</Button>}</View>
-      {mode !== 'reset' && <View className='auth-consent'><Checkbox className='auth-checkbox' value='agree' checked={consent} disabled={busy} color='#07c160' onClick={() => { if (!busy) setConsent(!consent); }} /><Text className='auth-consent-copy'>我已阅读并同意<Text className='auth-link' onClick={() => void Taro.navigateTo({ url: '/pages/legal/index?kind=terms' })}>《用户协议》</Text>和<Text className='auth-link' onClick={() => void Taro.navigateTo({ url: '/pages/legal/index?kind=privacy' })}>《隐私政策》</Text></Text></View>}
-      <Button className='auth-submit' loading={busy || configLoading} disabled={busy || !config || configLoading} onClick={() => void submit()}>{configLoading ? '正在加载验证…' : busy ? '处理中' : !config ? '验证配置未就绪' : mode === 'login' ? '登录' : mode === 'reset' ? '重置密码' : '注册并登录'}</Button>
-      <View className='auth-footer'>{mode === 'register' && <Text className='auth-footer-copy'>已有账号？</Text>}<Button key={mode} className='auth-link auth-footer-button' disabled={busy} onClick={() => switchMode(mode === 'login' ? 'reset' : 'login')}>{mode === 'login' ? '忘记密码？' : mode === 'register' ? '去登录' : '返回登录'}</Button></View>
+      <View className='auth-feedback'><Notice error>{configError || error}</Notice><Notice>{notice}</Notice>{!config && !configLoading && configError && <Button className='auth-retry' disabled={busy} onClick={() => void loadConfig()}>{tr("重新加载验证配置")}</Button>}</View>
+      {mode !== 'reset' && <View className='auth-consent'><Checkbox className='auth-checkbox' value='agree' checked={consent} disabled={busy} color='#07c160' onClick={() => { if (!busy) setConsent(!consent); }} /><Text className='auth-consent-copy'>{tr("我已阅读并同意")}<Text className='auth-link' onClick={() => void Taro.navigateTo({ url: '/pages/legal/index?kind=terms' })}>{tr("《用户协议》")}</Text>{tr("和")}<Text className='auth-link' onClick={() => void Taro.navigateTo({ url: '/pages/legal/index?kind=privacy' })}>{tr("《隐私政策》")}</Text></Text></View>}
+      <Button className='auth-submit' loading={busy || configLoading} disabled={busy || !config || configLoading} onClick={() => void submit()}>{configLoading ? tr("正在加载验证…") : busy ? tr("处理中") : !config ? tr("验证配置未就绪") : mode === 'login' ? tr("登录") : mode === 'reset' ? tr("重置密码") : tr("注册并登录")}</Button>
+      <View className='auth-footer'>{mode === 'register' && <Text className='auth-footer-copy'>{tr("已有账号？")}</Text>}<Button key={mode} className='auth-link auth-footer-button' disabled={busy} onClick={() => switchMode(mode === 'login' ? 'reset' : 'login')}>{mode === 'login' ? tr("忘记密码？") : mode === 'register' ? tr("去登录") : tr("返回登录")}</Button></View>
     </View>
   </View>;
 }

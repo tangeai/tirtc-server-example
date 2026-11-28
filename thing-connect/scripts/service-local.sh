@@ -222,6 +222,10 @@ run_service() {
     if [ "$base" != "$service" ] && [ "${service##*-}" -gt "${LOCAL_INSTANCE_COUNT[$base]:-1}" ]; then
         err "$service 未配置，请先设置 $base 的实例数"; return 1
     fi
+    if [ "$base" = user-server ] && [ -z "${USER_CONSOLE_ENTRY:-}" ] && [ -f "$DEPLOY_ROOT/local-console-entry" ]; then
+        IFS= read -r USER_CONSOLE_ENTRY <"$DEPLOY_ROOT/local-console-entry" || return 1
+        case "$USER_CONSOLE_ENTRY" in new|legacy) export USER_CONSOLE_ENTRY ;; *) err 'local-console-entry 必须为 new 或 legacy'; return 1 ;; esac
+    fi
     # Local entry preference survives start, update and multi-instance restarts.
     if [ "$base" = user-server ] && [ -z "${USER_PLAYER_ENTRY:-}" ] && [ -f "$DEPLOY_ROOT/local-player-entry" ]; then
         IFS= read -r USER_PLAYER_ENTRY <"$DEPLOY_ROOT/local-player-entry" || return 1

@@ -2,6 +2,7 @@ const fs=require('node:fs'),path=require('node:path'),{spawnSync}=require('node:
 const root=path.resolve(__dirname,'../../../..'),out=path.join(root,'output/playwright');
 fs.mkdirSync(out,{recursive:true});
 const coverage={
+ 'taro-console':'新版控制台五种宽度、设备读取失败与重试、角色深链接、导航、登录返回、语言切换及键盘操作',
  'standalone-player':'独立播放器的浏览器及内嵌入口、会话隔离、401 桥接竞态、返回与按住说话',
  'device-dialogs':'设备弹窗、失败恢复、移动端与桌面交互',
  'role-types':'角色类型目录、预览与选择流程',

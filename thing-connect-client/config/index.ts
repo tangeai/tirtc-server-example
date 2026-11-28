@@ -17,5 +17,19 @@ export default defineConfig({
   // UTF-8 keeps Chinese strings compact without changing their runtime value.
   terser: { config: { output: { ascii_only: false } } },
   mini: {},
-  h5: { publicPath: '/', router: { mode: 'hash' } },
+  h5: { publicPath: '/static/console/', router: { mode: 'browser', basename: '', customRoutes: {
+    '/pages/login/index': '/login',
+    '/pages/register/index': '/register',
+    '/pages/forgot-password/index': '/forgot-password',
+    '/pages/devices/index': '/devices',
+    '/pages/bind/index': '/bind',
+    '/pages/contacts/index': '/contacts',
+    '/pages/roles/index': '/agent',
+    '/pages/room/index': '/room',
+    '/pages/recognition/index': '/recognition',
+    '/pages/history/index': '/history',
+    '/pages/account/index': '/account',
+    '/pages/legal/index': '/legal',
+    '/pages/notifications/index': '/notifications',
+  } } },
 });

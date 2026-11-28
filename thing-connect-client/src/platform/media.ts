@@ -4,8 +4,12 @@ export interface DeviceAuthorization { state: AuthorizationState; serverSynced: 
 export function initializeMedia() {}
 export function refreshIncomingMedia() {}
 export function cacheDeviceMedia(_devices: Device[]) {}
-export function mediaCapabilities(): PlatformCapabilities { return { platform: 'h5', playback: false, authorization: false, wechatCall: false }; }
+export function mediaCapabilities(): PlatformCapabilities { return { platform: 'h5', playback: true, authorization: false, wechatCall: false }; }
 export async function refreshAuthorizations(_devices: Device[]): Promise<Record<string, DeviceAuthorization>> { return {}; }
-export async function performMedia(_intent: MediaIntent, _device: Device, _authorization: DeviceAuthorization): Promise<void> {
+export async function performMedia(intent: MediaIntent, device: Device, _authorization: DeviceAuthorization): Promise<void> {
+  if (intent === 'playback') {
+    location.assign('/player?device_id=' + encodeURIComponent(device.device_id));
+    return;
+  }
   throw new ApiError(-1, '此功能请在微信小程序中使用');
 }

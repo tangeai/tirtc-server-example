@@ -1,4 +1,6 @@
-import { Button, Input, Text, View } from '@tarojs/components';
+import { tr } from '../platform/translate';
+import { Button } from '../platform/button';
+import { Input, Text, View } from '@tarojs/components';
 import { useEffect, useRef, useState } from 'react';
 import { DeviceAlarm } from './alarm-subscription';
 import { Action, Notice } from './ui';
@@ -32,18 +34,18 @@ export function RecognitionReminders({ device, enabled }: { device: string; enab
     if (writing.current || token() !== owner) return;
     const text = draft.current;
     if (!/^\d{1,5}$/.test(text) || Number(text) > 86400) {
-      if (mounted.current) setError('请输入 0 至 86400 的整数秒');
+      if (mounted.current) setError(tr("请输入 0 至 86400 的整数秒"));
       return;
     }
     if (Number(text) === saved.current) return;
     writing.current = true;
-    if (mounted.current) { setError(''); setStatus('保存中…'); }
+    if (mounted.current) { setError(''); setStatus(tr("保存中…")); }
     try {
       const p = await request<Preference>(path, 'PUT', { interval_seconds: Number(text) });
       saved.current = p.interval_seconds ?? 0;
       if (mounted.current && draft.current === text) {
         draft.current = String(saved.current);
-        setValue(draft.current); setStatus('已保存');
+        setValue(draft.current); setStatus(tr("已保存"));
       }
     } catch (e) {
       saved.current = undefined; // A lost acknowledgement leaves the server value unknown.
@@ -72,23 +74,23 @@ export function RecognitionReminders({ device, enabled }: { device: string; enab
   }
 
   return <View className='reminder-page'><View className='card reminder-settings'>
-    <DeviceAlarm device={device} enabled={enabled} />
+    {process.env.TARO_ENV === 'weapp' ? <DeviceAlarm device={device} enabled={enabled} /> : <Text className='muted'>{tr("请在微信小程序中授权接收此设备的异常提醒。")}</Text>}
     {value !== undefined && <View className='reminder-interval-row reminder-line'>
-      <View className='reminder-copy'><Text className='reminder-heading'>提醒间隔 <Text className='interval-status'>{status}</Text></Text>
-        <Text className='reminder-caption'>填 0 表示每次异常都提醒。{!enabled && '开启 AI 识别后生效。'}</Text></View>
-      <Input className='reminder-seconds-input' ariaLabel='提醒间隔（秒）' type='number' maxlength={5}
+      <View className='reminder-copy'><Text className='reminder-heading'>{tr("提醒间隔")}<Text className='interval-status'>{status}</Text></Text>
+        <Text className='reminder-caption'>{tr("填 0 表示每次异常都提醒。")}{!enabled && tr("开启 AI 识别后生效。")}</Text></View>
+      <Input className='reminder-seconds-input' ariaLabel={tr("提醒间隔（秒）")} type='number' maxlength={5}
         value={value} onInput={e => edit(e.detail.value)} onBlur={() => void flush()} onConfirm={() => void flush()} />
-      <Text>秒</Text>
+      <Text>{tr("秒")}</Text>
     </View>}
     {value !== undefined && <View className='interval-presets'>
       {([['每次', 0], ['1 分钟', 60], ['5 分钟', 300], ['30 分钟', 1800]] as const).map(([label, seconds]) =>
         <Button key={seconds} className={'interval-preset' + (value !== '' && Number(value) === seconds ? ' active' : '')}
-          onClick={() => edit(String(seconds), true)}>{label}</Button>)}
+          onClick={() => edit(String(seconds), true)}>{tr(label)}</Button>)}
     </View>}
-    {value === undefined && !error && <Notice>正在加载提醒间隔…</Notice>}
+    {value === undefined && !error && <Notice>{tr("正在加载提醒间隔…")}</Notice>}
     <Notice error>{error}</Notice>
-    {error && value === undefined && <Action onClick={() => void load()}>重新加载提醒间隔</Action>}
+    {error && value === undefined && <Action onClick={() => void load()}>{tr("重新加载提醒间隔")}</Action>}
     {error && value !== undefined && /^\d{1,5}$/.test(value) && Number(value) <= 86400 &&
-      <Action onClick={() => void flush()}>重试保存间隔</Action>}
+      <Action onClick={() => void flush()}>{tr("重试保存间隔")}</Action>}
   </View></View>;
 }

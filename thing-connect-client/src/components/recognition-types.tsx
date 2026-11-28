@@ -1,5 +1,7 @@
+import { tr } from '../platform/translate';
 import Taro from '@tarojs/taro';
-import { Button, Switch, Text, View } from '@tarojs/components';
+import { Button } from '../platform/button';
+import { Switch, Text, View } from '@tarojs/components';
 import { useRef, useState } from 'react';
 import { moveScheme, type Scheme } from '../domain/recognition';
 
@@ -77,21 +79,21 @@ export function RecognitionTypes({ selected, catalog, locked, change }: Props) {
   }
 
   return <View className='card scheme-list'>
-    <View className='scheme-header'><Text className='reminder-heading'>识别类型</Text>
-      <Text className='scheme-count'>已开 {selected.length} / 8</Text>
+    <View className='scheme-header'><Text className='reminder-heading'>{tr("识别类型")}</Text>
+      <Text className='scheme-count'>{tr("已开")}{selected.length} / 8</Text>
       {selected.length > 1 && <Button className='scheme-edit' disabled={locked}
-        onClick={() => { cancel(); setEditingOrder(!sorting); }}>{sorting ? '完成' : '排序'}</Button>}
+        onClick={() => { cancel(); setEditingOrder(!sorting); }}>{sorting ? tr("完成") : tr("排序")}</Button>}
     </View>
-    {sorting && <Text className='reminder-caption'>拖动右侧图标或点击调整顺序</Text>}
-    {!sorting && selected.length >= 8 && <Text className='reminder-caption'>已达上限 8 项，关闭其他类型后可继续开启</Text>}
-    {!selected.length && !others.length && <Text className='muted'>暂无可用类型</Text>}
+    {sorting && <Text className='reminder-caption'>{tr("拖动右侧图标或点击调整顺序")}</Text>}
+    {!sorting && selected.length >= 8 && <Text className='reminder-caption'>{tr("已达上限 8 项，关闭其他类型后可继续开启")}</Text>}
+    {!selected.length && !others.length && <Text className='muted'>{tr("暂无可用类型")}</Text>}
     {(sorting ? selected : [...selected, ...others]).map((item, index) => {
       const on = index < selected.length;
       const output = ({ text: '文字', audio: '语音', text_audio: '文字＋语音' } as Record<string,string>)[item.output_mode];
       return <View key={item.scheme_id} className={'scheme-row' + (on ? ' scheme-selected' : '') + (target === index ? ' scheme-target' : '')}>
         <View className='grow'><Text>{item.name}</Text>
           <Text className='reminder-caption'>{[output, item.description].filter(Boolean).join(' · ')}</Text></View>
-        {sorting ? <View catchMove><Button className='scheme-grip' ariaLabel={'调整' + item.name + '顺序'} disabled={locked}
+        {sorting ? <View catchMove><Button className='scheme-grip' ariaLabel={tr("调整") + item.name + tr("顺序")} disabled={locked}
           onTouchStart={e => begin(index, e.touches[0].clientY)}
           onTouchMove={e => void move(e.touches[0].clientY)} onTouchEnd={e => void finish(e.changedTouches[0]?.clientY)}
           onTouchCancel={cancel}

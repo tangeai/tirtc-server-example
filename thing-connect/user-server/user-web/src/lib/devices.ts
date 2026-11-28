@@ -1,4 +1,4 @@
-import { t } from './i18n';
+import { t } from './messages';
 export interface Device {
   device_id: string; device_name?: string; online?: boolean; status?: number;
   mac?: string; hardware?: { chip_model?: string; board_model?: string }; firmware_version?: string; bind_time?: string;

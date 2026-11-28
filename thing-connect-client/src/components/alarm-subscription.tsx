@@ -1,3 +1,4 @@
+import { tr } from '../platform/translate';
 import Taro from '@tarojs/taro';
 import { useEffect, useRef, useState } from 'react';
 import { Text, View } from '@tarojs/components';
@@ -116,7 +117,7 @@ export function useAlarmSubscription(device: string, enabled = true) {
       if (!work || work.owner !== owner) {
         const attempt = prepared.current;
         if (!attempt || attempt.owner !== owner || attempt.until <= Date.now()) {
-          if (await refresh(true) && prepared.current) setNotice('请再次点击右侧按钮确认微信授权');
+          if (await refresh(true) && prepared.current) setNotice(tr("请再次点击右侧按钮确认微信授权"));
           return;
         }
         // No awaits before the native prompt. Retries may only report this
@@ -134,10 +135,10 @@ export function useAlarmSubscription(device: string, enabled = true) {
       const session = work.session;
       if (session.replace && !work.replaceApproved) {
         if (work.decision !== 'accept') {
-          pending.current = undefined; setNotice('保留原接收微信'); return;
+          pending.current = undefined; setNotice(tr("保留原接收微信")); return;
         }
-        const choice = await Taro.showModal({ title: '替换接收微信', content: '当前微信将用于接收本账号的提醒。它与其他账号的接收关联、本账号原有的接收关联都将解除。本账号下其他已授权设备需要重新授权。原关联中等待发送的提醒将停止。' });
-        if (!choice.confirm) { pending.current = undefined; setNotice('已保留原接收微信'); return; }
+        const choice = await Taro.showModal({ title: tr("替换接收微信"), content: tr("当前微信将用于接收本账号的提醒。它与其他账号的接收关联、本账号原有的接收关联都将解除。本账号下其他已授权设备需要重新授权。原关联中等待发送的提醒将停止。") });
+        if (!choice.confirm) { pending.current = undefined; setNotice(tr("已保留原接收微信")); return; }
         work.replaceApproved = true;
       }
       checkOwner();
@@ -182,15 +183,15 @@ export function DeviceAlarm({ device, enabled }: { device: string; enabled: bool
   const action = alarm.unavailable ? '重新检查' : alarm.pending ? '重试保存订阅结果' :
     subscribed ? alarm.prepared ? '确认微信授权' : '重新授权' : '开启提醒';
   return <View className='reminder-channel'><View className='reminder-line'><View className='reminder-copy'>
-    <Text className='reminder-heading'>微信提醒</Text>
-    <Text className={'reminder-caption' + (subscribed ? ' reminder-active' : '')}>{alarm.unavailable ? '暂时无法读取设备订阅状态' : ready ? subscribed ? '微信已授权' : '微信尚未授权' : alarm.channel ? '服务端尚未启用此提醒' : '正在读取提醒状态…'}</Text>
+    <Text className='reminder-heading'>{tr("微信提醒")}</Text>
+    <Text className={'reminder-caption' + (subscribed ? ' reminder-active' : '')}>{alarm.unavailable ? tr("暂时无法读取设备订阅状态") : ready ? subscribed ? tr("微信已授权") : tr("微信尚未授权") : alarm.channel ? tr("服务端尚未启用此提醒") : tr("正在读取提醒状态…")}</Text>
     </View>
     {(alarm.unavailable || enabled && ready) && <Action primary={!subscribed} disabled={alarm.busy}
       onClick={() => alarm.unavailable ? void alarm.refresh() : void alarm.activate()}>
       {action}
     </Action>}</View>
-    <Text className='reminder-caption'>识别到异常时，通过微信提醒我。{!enabled && '当前 AI 识别已关闭。'}</Text>
-    {subscribed && <Text className='reminder-caption'>更换接收微信可重新授权，取消接收可在微信设置中管理。</Text>}
+    <Text className='reminder-caption'>{tr("识别到异常时，通过微信提醒我。")}{!enabled && tr("当前 AI 识别已关闭。")}</Text>
+    {subscribed && <Text className='reminder-caption'>{tr("更换接收微信可重新授权，取消接收可在微信设置中管理。")}</Text>}
     <Notice error={alarm.failed}>{alarm.notice}</Notice>
   </View>;
 }

@@ -1,3 +1,4 @@
+import { tr, usePageLanguage } from '../../platform/translate';
 import Taro, { useLoad } from '@tarojs/taro';
 import { WebView, View } from '@tarojs/components';
 import { useEffect, useRef, useState } from 'react';
@@ -5,6 +6,7 @@ import { Notice } from '../../components/ui';
 import { request, token, ApiError, errorText } from '../../services/api';
 import type { Device } from '../../domain/devices';
 export default function Playback() {
+  usePageLanguage();
   const [src, setSrc] = useState(''), [error, setError] = useState('');
   const alive = useRef(true);
   useEffect(() => () => { alive.current = false; }, []);
@@ -22,5 +24,5 @@ export default function Playback() {
       } catch (e) { if (alive.current) setError(errorText(e)); }
     })();
   });
-  return error ? <View className='page'><Notice error>{error}</Notice></View> : src ? <WebView src={src} onError={() => { setSrc(''); setError('播放器加载失败，请检查网络后重试'); }} /> : <View className='page'>正在连接设备…</View>;
+  return error ? <View className='page'><Notice error>{error}</Notice></View> : src ? <WebView src={src} onError={() => { setSrc(''); setError(tr("播放器加载失败，请检查网络后重试")); }} /> : <View className='page'>{tr("正在连接设备…")}</View>;
 }

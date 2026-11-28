@@ -1,5 +1,7 @@
+import { tr, usePageLanguage } from '../../platform/translate';
 import Taro, { useLoad, usePullDownRefresh } from '@tarojs/taro';
-import { Button, Text, View } from '@tarojs/components';
+import { Button } from '../../platform/button';
+import { Text, View } from '@tarojs/components';
 import { useEffect, useRef, useState } from 'react';
 import { Action, Field, Notice, SearchField, Sheet } from '../../components/ui';
 import { ApiError, errorText, request } from '../../services/api';
@@ -8,6 +10,7 @@ import type { Device } from '../../domain/devices';
 import { canRemove, contactKey, contactName, defaultContactName, filterContacts, validateContactTarget, type Contact, type PendingContact } from '../../domain/contacts';
 
 export default function Contacts() {
+  usePageLanguage();
   const [deviceId, setDeviceId] = useState(''), [devices, setDevices] = useState<Device[]>([]);
   const [rows, setRows] = useState<Contact[]>([]), [pending, setPending] = useState<PendingContact[]>([]);
   const [loading, setLoading] = useState(true), [error, setError] = useState(''), [pendingError, setPendingError] = useState('');
@@ -74,7 +77,7 @@ export default function Contacts() {
   }
   async function remove(contact: Contact) {
     if (busy || !canRemove(contact)) return;
-    const { confirm } = await Taro.showModal({ title: '删除联系人？', content: '删除后双方都不再是好友，需要重新申请并同意后才能恢复联系。', confirmText: '删除', confirmColor: '#fa5151' });
+    const { confirm } = await Taro.showModal({ title: tr("删除联系人？"), content: tr("删除后双方都不再是好友，需要重新申请并同意后才能恢复联系。"), confirmText: tr("删除"), confirmColor: '#fa5151' });
     if (!confirm || !alive.current) return;
     await mutate(async () => { await request('/v1/call/user/contacts/' + contact.id, 'DELETE'); if (alive.current) { setRows(items => items.filter(c => contactKey(c) !== contactKey(contact))); setEditor(undefined); } }, true);
   }
@@ -88,24 +91,24 @@ export default function Contacts() {
   }
   const device = devices.find(d => d.device_id === deviceId), filtered = filterContacts(rows, search, filter);
   return <View className='page content-page settings-page'>
-    <View className='row'><Text className='title device-page-name'>{device?.device_name || '当前设备'}</Text></View>
+    <View className='row'><Text className='title device-page-name'>{device?.device_name || tr("当前设备")}</Text></View>
     <Notice error>{error}</Notice>
-    {error && <Action disabled={busy || loading} onClick={() => void load()}>重新加载联系人</Action>}
-    <SearchField placeholder='搜索名称或设备 ID' value={search} onChange={setSearch} />
+    {error && <Action disabled={busy || loading} onClick={() => void load()}>{tr("重新加载联系人")}</Action>}
+    <SearchField placeholder={tr("搜索名称或设备 ID")} value={search} onChange={setSearch} />
     <View className='tabs'>{Object.entries({ all: '全部', mine: '我的设备', manual: '手动添加', voip: '微信授权' }).map(([key, label]) => <Action key={key} primary={filter === key} onClick={() => setFilter(key)}>{label}</Action>)}</View>
     <View className='settings-section'>
-      <View className='row between settings-section-title'><Text>联系人{!loading && !error ? ' · ' + filtered.length : ''}</Text><Action disabled={busy || !device} onClick={() => openEditor('add')}>＋ 添加联系人</Action></View>
+      <View className='row between settings-section-title'><Text>{tr("联系人")}{!loading && !error ? ' · ' + filtered.length : ''}</Text><Action disabled={busy || !device} onClick={() => openEditor('add')}>{tr("＋ 添加联系人")}</Action></View>
       <View className='card settings-list'>
-      {loading && <Notice>联系人加载中…</Notice>}
-      {!loading && !error && !filtered.length && <View className='empty'>{rows.length ? '没有匹配的联系人' : '暂无联系人'}</View>}
+      {loading && <Notice>{tr("联系人加载中…")}</Notice>}
+      {!loading && !error && !filtered.length && <View className='empty'>{rows.length ? tr("没有匹配的联系人") : tr("暂无联系人")}</View>}
       {filtered.map(contact => <Button className='settings-link settings-row' key={contactKey(contact)} disabled={busy} onClick={() => openEditor(contact)}>
-        <View className='settings-copy'><Text>{contactName(contact)}</Text>{contact.type === 'device' && <Text className='settings-detail'>{contact.device_id} · {contact.online ? '在线' : '离线'}</Text>}</View>
-        <Text className='settings-detail'>{contact.type === 'voip' ? '微信授权' : contact.source === 'auto' ? '我的设备' : '手动添加'}</Text><View className='settings-chevron' ariaHidden />
+        <View className='settings-copy'><Text>{contactName(contact)}</Text>{contact.type === 'device' && <Text className='settings-detail'>{contact.device_id} · {contact.online ? tr("在线") : tr("离线")}</Text>}</View>
+        <Text className='settings-detail'>{contact.type === 'voip' ? tr("微信授权") : contact.source === 'auto' ? tr("我的设备") : tr("手动添加")}</Text><View className='settings-chevron' ariaHidden />
       </Button>)}
       </View>
-      <Text className='settings-footnote'>同账号设备自动关联。添加其他设备需对方同意。</Text>
+      <Text className='settings-footnote'>{tr("同账号设备自动关联。添加其他设备需对方同意。")}</Text>
     </View>
-    {(pending.length > 0 || pendingError) && <View className='card'><Text className='title'>待审批（{pending.length}）</Text><Notice error>{pendingError}</Notice>{pendingError && <Action disabled={busy || loading} onClick={() => void load()}>重新加载申请</Action>}{pending.map(item => <View className='pending' key={item.id}><Text className='muted'>{item.initiator_device} → {devices.find(d => d.device_id === item.target_device)?.device_name || item.target_device}</Text><View className='row'><Action disabled={busy} onClick={() => void respond(item, 'reject')}>拒绝</Action><Action primary disabled={busy} onClick={() => void respond(item, 'accept')}>同意</Action></View></View>)}</View>}
-    {editor && <Sheet title={editor === 'add' ? '添加联系人' : contactName(editor)} busy={busy} onClose={() => setEditor(undefined)}>{sent ? <Notice>{sent}</Notice> : <><Field label={editor === 'add' ? '对方设备 ID' : '联系人备注'} placeholder={editor === 'add' ? undefined : defaultContactName(editor)} value={value} disabled={busy} onChange={setValue} /><Text className='muted'>{editor === 'add' ? '同账号设备自动关联，无需申请。' : editor.type === 'device' ? '留空使用设备名称，设备未命名时显示设备 ID。' : '留空显示“微信用户”。'}{editor !== 'add' && '备注仅对当前设备生效，最多 64 个字符。'}</Text><Notice error>{editorError}</Notice><View className='wide'><Action primary disabled={busy} onClick={() => void save()}>{busy ? '提交中…' : editor === 'add' ? '发起申请' : '保存'}</Action></View>{editor !== 'add' && canRemove(editor) && <Action danger disabled={busy} onClick={() => void remove(editor)}>删除联系人</Action>}</>}</Sheet>}
+    {(pending.length > 0 || pendingError) && <View className='card'><Text className='title'>{tr("待审批（")}{pending.length}）</Text><Notice error>{pendingError}</Notice>{pendingError && <Action disabled={busy || loading} onClick={() => void load()}>{tr("重新加载申请")}</Action>}{pending.map(item => <View className='pending' key={item.id}><Text className='muted'>{item.initiator_device} → {devices.find(d => d.device_id === item.target_device)?.device_name || item.target_device}</Text><View className='row'><Action disabled={busy} onClick={() => void respond(item, 'reject')}>{tr("拒绝")}</Action><Action primary disabled={busy} onClick={() => void respond(item, 'accept')}>{tr("同意")}</Action></View></View>)}</View>}
+    {editor && <Sheet title={editor === 'add' ? tr("添加联系人") : contactName(editor)} busy={busy} onClose={() => setEditor(undefined)}>{sent ? <Notice>{sent}</Notice> : <><Field label={editor === 'add' ? tr("对方设备 ID") : tr("联系人备注")} placeholder={editor === 'add' ? undefined : defaultContactName(editor)} value={value} disabled={busy} onChange={setValue} /><Text className='muted'>{editor === 'add' ? tr("同账号设备自动关联，无需申请。") : editor.type === 'device' ? tr("留空使用设备名称，设备未命名时显示设备 ID。") : tr("留空显示“微信用户”。")}{editor !== 'add' && tr("备注仅对当前设备生效，最多 64 个字符。")}</Text><Notice error>{editorError}</Notice><View className='wide'><Action primary disabled={busy} onClick={() => void save()}>{busy ? tr("提交中…") : editor === 'add' ? tr("发起申请") : tr("保存")}</Action></View>{editor !== 'add' && canRemove(editor) && <Action danger disabled={busy} onClick={() => void remove(editor)}>{tr("删除联系人")}</Action>}</>}</Sheet>}
   </View>;
 }

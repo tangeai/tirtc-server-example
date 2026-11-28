@@ -10,11 +10,11 @@ export function loadSource(file: string, mocks: Record<string, unknown>, globals
     if (cache.has(filename)) return cache.get(filename)!.exports;
     const module = { exports: {} }; cache.set(filename, module);
     const code = ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
-    vm.runInNewContext(code, { module, exports: module.exports, setTimeout, clearTimeout, ...globals, require(name: string) {
+    vm.runInNewContext(code, { module, exports: module.exports, setTimeout, clearTimeout, process: { env: { TARO_ENV: 'weapp' } }, ...globals, require(name: string) {
       if (name in mocks) return mocks[name];
       if (name.startsWith('.')) {
         const base = path.resolve(path.dirname(filename), name);
-        const target = [base, base + '.ts', base + '.tsx', base + '.js'].find(p => fs.existsSync(p) && fs.statSync(p).isFile());
+        const target = [base, base + '.weapp.ts', base + '.weapp.tsx', base + '.ts', base + '.tsx', base + '.js'].find(p => fs.existsSync(p) && fs.statSync(p).isFile());
         if (target) return load(target);
       }
       throw new Error('Unexpected dependency: ' + name);

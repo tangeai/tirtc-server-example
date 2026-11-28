@@ -50,6 +50,9 @@ if contains_service user-server; then
     npm --prefix user-server/user-web run build
     npm --prefix ../thing-connect-client ci
     npm --prefix ../thing-connect-client run build:player
+    npm --prefix ../thing-connect-client run build:h5
+    mkdir -p user-server/static/console
+    cp -a ../thing-connect-client/dist/h5/. user-server/static/console/
 fi
 
 if contains_service admin-server; then

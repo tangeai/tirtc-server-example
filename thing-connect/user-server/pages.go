@@ -70,6 +70,11 @@ func registerUserPages(r *gin.Engine, staticDir string) error {
 	for _, path := range []string{"/login", "/register", "/forgot-password", "/devices", "/bind", "/contacts", "/agent", "/room"} {
 		r.GET(path, serve(console))
 	}
+	if os.Getenv("USER_CONSOLE_ENTRY") == "new" {
+		for _, path := range []string{"/account", "/legal", "/history", "/recognition", "/notifications"} {
+			r.GET(path, serve(console))
+		}
+	}
 	// TiRTC loads these assets from fixed root paths.
 	r.StaticFile("/librender.wasm", filepath.Join(staticDir, "js", "librender.wasm"))
 	r.StaticFile("/plugin.wasm", filepath.Join(staticDir, "js", "plugin.wasm"))

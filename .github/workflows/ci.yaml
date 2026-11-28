@@ -91,6 +91,7 @@ jobs:
           npm --prefix user-server/user-web run check
           npm --prefix ../thing-connect-client ci
           npm --prefix ../thing-connect-client run build:player
+          npm --prefix ../thing-connect-client run build:h5
           npm --prefix admin/admin-web ci
           npm --prefix admin/admin-web run check
       - name: Install user browser test engine

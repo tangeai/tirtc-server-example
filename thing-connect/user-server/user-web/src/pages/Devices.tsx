@@ -1,3 +1,4 @@
+import { readSummaries } from '../lib/device-summaries';
 import Bind from './Bind';
 import { Collapse, Descriptions, Dropdown, Input, Segmented } from 'antd';
 import { Button } from '../components/Button';
@@ -10,8 +11,8 @@ import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { Dialog } from '../components/Dialog';
 import { Conversations } from '../components/Conversations';
 import { Recognition } from '../components/Recognition';
-import { ApiError, errorText, request } from '../lib/api';
-import { deviceRows, mediaRows, roleSummary, roomSummary, type Device, type RoleBinding, type RoomState, type Summary } from '../lib/devices';
+import { errorText, request } from '../lib/api';
+import { deviceRows, mediaRows, roleSummary, roomSummary, type Device, type Summary } from '../lib/devices';
 import { useLanguage } from '../lib/i18n';
 import { markAway, restoreSnapshot, saveSnapshot, snapshotKey } from '../lib/snapshot';
 
@@ -33,29 +34,7 @@ export default function Devices() {
       // Keep only presentation fields; API credentials never enter tab storage.
       const devices = result.map(({ device_id, device_name, online, status, mac, hardware, firmware_version, bind_time, profiles }) => ({ device_id, device_name, online, status, mac, hardware, firmware_version, bind_time, profiles }));
       update(() => ({ devices, summaries: {} }));
-      let cursor = 0;
-      const roles = new Map<string, Promise<{ name: string }>>();
-      async function worker() {
-        while (cursor < devices.length && rev === sequence.current) {
-          const device = devices[cursor++], id = encodeURIComponent(device.device_id);
-          const summary: Summary = {};
-          await Promise.allSettled([
-            request<RoomState>('/v1/call/group/web/device/' + id).then(room => { summary.room = room; }),
-            request<{ policy: { enabled: boolean }; schemes: unknown[] }>('/v1/recognition/devices/' + id + '/config').then(value => { summary.recognition = { enabled: value.policy.enabled, count: value.schemes.length }; }),
-            (async () => {
-              const binding = await request<RoleBinding>('/v1/ai/device/' + id + '/role');
-              summary.role = { binding };
-              if (!binding.role_id && !binding.default_role_id) return;
-              const path = binding.role_id ? '/v1/ai/roles/' + encodeURIComponent(binding.role_id) : '/v1/ai/roles/default';
-              if (!roles.has(path)) roles.set(path, request<{ name: string }>(path));
-              try { summary.role.name = (await roles.get(path))?.name; }
-              catch (e) { if (!(e instanceof ApiError) || ![403, 404, 40300, 40400].includes(e.code)) summary.role = undefined; }
-            })(),
-          ]);
-          if (rev === sequence.current) update(state => ({ ...state, summaries: { ...state.summaries, [device.device_id]: summary }, devices: state.devices.map(d => d.device_id === device.device_id && typeof summary.room?.online === 'boolean' ? { ...d, online: summary.room.online } : d) }));
-        }
-      }
-      await Promise.all(Array.from({ length: Math.min(4, devices.length) }, worker));
+      await readSummaries(devices, () => rev === sequence.current, (id, summary) => update(state => ({ ...state, summaries: { ...state.summaries, [id]: summary }, devices: state.devices.map(d => d.device_id === id && typeof summary.room?.online === 'boolean' ? { ...d, online: summary.room.online } : d) })));
     } catch (e) { if (rev === sequence.current) setError(errorText(e)); }
     finally { if (rev === sequence.current) setLoading(false); }
   }

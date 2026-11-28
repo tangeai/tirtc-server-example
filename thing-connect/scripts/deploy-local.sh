@@ -19,6 +19,8 @@ local_usage() {
   start     启动已安装服务并检查 readiness
   stop      停止本地脚本管理的服务
   status    显示本地服务状态
+  console-new     启用新版 H5 控制台并重启 user-server
+  console-legacy  回退到旧版 Web 控制台并重启 user-server
   gateway   启动独立 Nginx 本机入口（默认 127.0.0.1:18080）
   gateway-stop  停止这个脚本启动的独立 Nginx
 
@@ -82,7 +84,7 @@ local_prepare() {
     LOCAL_SNAPSHOT="$(mktemp -d "$archive_root/$(date +%Y%m%d-%H%M%S).XXXXXX")"
     local_log "打包本地源码到 $LOCAL_SNAPSHOT"
     git -C "$LOCAL_SOURCE_ROOT" rev-parse HEAD >"$LOCAL_SNAPSHOT/source-commit"
-    local -a source_paths=(thing-connect thing-connect-client/player thing-connect-client/package.json thing-connect-client/package-lock.json thing-connect-client/tsconfig.json)
+    local -a source_paths=(thing-connect thing-connect-client/.gitignore thing-connect-client/config thing-connect-client/src thing-connect-client/scripts thing-connect-client/player thing-connect-client/package.json thing-connect-client/package-lock.json thing-connect-client/tsconfig.json)
     git -C "$LOCAL_SOURCE_ROOT" status --porcelain=v1 --untracked-files=all -- "${source_paths[@]}" >"$LOCAL_SNAPSHOT/source-status"
     # Git supplies the allowlist: ignored credentials, node_modules and build outputs are excluded.
     git -C "$LOCAL_SOURCE_ROOT" ls-files -z --cached --others --exclude-standard -- .gitignore "${source_paths[@]}" >"$LOCAL_SNAPSHOT/files.all"
@@ -435,6 +437,26 @@ local_gateway() {
     local_log "用户 H5: http://127.0.0.1:$port/；Admin: http://127.0.0.1:$port/admin/"
 }
 
+local_switch_console() {
+    local target="$1" entry=app previous=legacy
+    local setting="$LOCAL_DEPLOY_ROOT/local-console-entry"
+    local controller="$LOCAL_DEPLOY_ROOT/service-local.sh"
+    [ "$target" != new ] || entry=console
+    [ -s "$LOCAL_DEPLOY_ROOT/user-server/static/$entry/index.html" ] && [ -x "$controller" ] || {
+        local_error '控制台产物或本地服务脚本缺失，请先执行 update'; return 1;
+    }
+    if [ -f "$setting" ]; then IFS= read -r previous <"$setting" || return 1; fi
+    case "$previous" in new|legacy) ;; *) local_error 'local-console-entry 配置无效'; return 1 ;; esac
+    printf '%s\n' "$target" >"$setting.new" && mv -f "$setting.new" "$setting" || return 1
+    if USER_CONSOLE_ENTRY="$target" DEPLOY_ROOT="$LOCAL_DEPLOY_ROOT" "$controller" restart user-server 9>&-; then
+        local_log "Web 控制台入口: $target"; return 0
+    fi
+    printf '%s\n' "$previous" >"$setting.new" && mv -f "$setting.new" "$setting" || return 1
+    local_error "切换失败，恢复入口 $previous"
+    USER_CONSOLE_ENTRY="$previous" DEPLOY_ROOT="$LOCAL_DEPLOY_ROOT" "$controller" restart user-server 9>&- || local_error '服务恢复失败，请检查 user-server 日志'
+    return 1
+}
+
 local_main() {
     local action="${1:-help}"
     shift "$(( $# > 0 ? 1 : 0 ))"
@@ -444,7 +466,7 @@ local_main() {
     elif [ "$#" != 0 ]; then
         local_usage; return 2
     fi
-    case "$action" in prepare|install|update|start|stop|status|gateway|gateway-stop) ;; *) local_usage; return 2 ;; esac
+    case "$action" in prepare|install|update|start|stop|status|gateway|gateway-stop|console-new|console-legacy) ;; *) local_usage; return 2 ;; esac
     local_validate
     mkdir -p -- "$LOCAL_DEPLOY_ROOT"
     # Serialize all operations with the same lock used by install.sh/deploy-prod.sh.
@@ -454,6 +476,7 @@ local_main() {
         prepare) local_prepare ;;
         install) local_install ;;
         update) local_update ;;
+        console-new|console-legacy) local_switch_console "${action#console-}" ;;
         gateway|gateway-stop) local_gateway "$action" ;;
         start|stop|status)
             [ -x "$LOCAL_DEPLOY_ROOT/service-local.sh" ] || { local_error '尚未安装服务控制脚本'; return 1; }

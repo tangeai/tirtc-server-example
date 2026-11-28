@@ -16,6 +16,9 @@ export interface Device {
   device_name: string;
   status: number;
   online: boolean;
+  mac?: string;
+  hardware?: { chip_model?: string; board_model?: string };
+  firmware_version?: string;
   bind_time?: string;
   profiles?: { stream?: MediaProfile; voip?: MediaProfile; call?: MediaProfile };
 }

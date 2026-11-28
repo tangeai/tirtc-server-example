@@ -1,0 +1,58 @@
+.console-nav { position: fixed; inset: 0 0 auto; z-index: 9; display:flex; align-items:center; justify-content:space-between; gap:10PX; min-height:52PX; padding:0 clamp(12PX,4vw,60PX); background:#fff; border-bottom:1PX solid #dde6e1; font:500 14PX/1.4 system-ui,sans-serif }
+.console-nav a,.console-nav button,.console-nav summary { color:#19533f; text-decoration:none; cursor:pointer }
+.console-nav>a,.console-nav nav { display:flex; align-items:center; gap:12PX }
+.console-nav img { width:25PX; height:25PX }
+.console-nav button { border:0; background:transparent }
+.console-nav details div { position:absolute; right:1rem; display:grid; padding:10PX; gap:8PX; background:white; border:1PX solid #ddd }
+.taro_page,.taro_page_show { box-sizing:border-box; padding-top:54PX }
+.dashboard-summary {display:block; color:#53675d; margin:8PX 0; font-size:13PX}
+.knowledge-files {font:14PX/1.6 system-ui,sans-serif; overflow-wrap:anywhere}
+.knowledge-files input { max-width:100% }
+.knowledge-files button { padding:6PX 10PX; margin:4PX; border:1PX solid #dbe5df; border-radius:6PX; background:white }
+@media (min-width:768PX) {
+  .page.devices-page { max-width:1280PX; padding:32PX }
+  .device-list-grid { display:grid; gap:18PX; grid-template-columns:repeat(auto-fit,minmax(min(100%,330PX),1fr)); align-items:start }
+  .device-list-grid>.card { margin:0 }
+  .page.content-page { max-width:960PX }
+  .page.role-editor-page { max-width:1024PX }
+}
+body,.taro_page { background:#f4f6f5 }
+.console-nav { z-index:8; color:#182b23; box-shadow:0 1PX 4PX #182b230a; padding-inline:max(14PX,calc((100vw - 1220PX)/2)) }
+.console-nav .console-brand { font-weight:700; letter-spacing:.01em; font-size:16PX; white-space:nowrap }
+.console-brand img { width:30PX;height:30PX;object-fit:contain }
+.console-nav nav { gap:2PX }
+.console-nav nav>a,.console-nav summary,.console-nav button,.console-nav details a { display:flex; align-items:center; padding:0 10PX; min-height:42PX; box-sizing:border-box; border:0; border-radius:8PX; background:transparent; font:inherit;white-space:nowrap }
+.console-nav summary { list-style:none }
+.console-nav summary::after { content:'⌄';margin-left:5PX }
+.console-nav summary::-webkit-details-marker {display:none}
+.console-nav details {position:relative}
+.console-nav details div {right:0;z-index:10;min-width:120PX;gap:2PX;padding:5PX;border-radius:10PX;box-shadow:0 8PX 28PX #12352620}
+.console-nav a:hover,.console-nav summary:hover,.console-nav button:hover { background:#edf6f0 }
+.console-nav a:focus-visible,.console-nav button:focus-visible,.console-nav summary:focus-visible,.page :focus-visible { outline:2PX solid #11784d;outline-offset:2PX }
+.page .role-extensions,.page .role-extension-resources { min-width:0 }
+.page .role-resource-group>.row:first-child>.label {font-weight:600;margin:0}
+@media (min-width:800PX) {
+  .page.devices-page,.page.content-page { background:transparent;padding:28PX 24PX 48PX }
+  .page.devices-page { max-width:1250PX }
+  .device-list-grid {grid-template-columns:repeat(auto-fill,minmax(min(100%,330PX),1fr))}
+  .page .card { border:1PX solid #e1e7e3;box-shadow:0 2PX 7PX #1b402608;border-radius:14PX }
+  .page.role-editor-page {max-width:1040PX}
+  .page .role-extensions {display:grid;align-items:start;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:20PX}
+  .page .role-extensions .card {padding:18PX}
+  .role-editor-page .role-editor-actions {align-items:center;justify-content:space-between;flex-direction:row;padding:14PX 0;border-top:1PX solid #d9e3dc}
+  .role-editor-actions>.row>.action {min-width:96PX}
+  .page .mask {align-items:center;justify-content:center;padding:24PX;box-sizing:border-box}
+  .page .sheet,.page .device-more-sheet {width:min(100%,600PX);border-radius:16PX;box-shadow:0 18PX 60PX #10241c33}
+}
+@media (max-width:420PX) {
+  .console-nav {padding:0 10PX;font-size:13PX}
+  .console-nav .console-brand {font-size:14PX;gap:4PX}
+  .console-brand img {width:24PX;height:24PX}
+  .console-nav nav>a,.console-nav summary {padding:0 6PX}
+}
+
+.page button {display:block;font-family:inherit;cursor:pointer;border:0}
+.page button:disabled {cursor:default}
+.page button:focus-visible {outline:2PX solid #11784d;outline-offset:2PX}
+.page .role-speech-heading {display:flex;font-size:inherit;align-items:center}
+.page .auth-tab {text-align:center}
