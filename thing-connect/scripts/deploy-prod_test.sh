@@ -768,9 +768,15 @@ test_build_marks_artifacts_from_modified_worktree() (
     cp "$scripts_dir/../build.sh" "$root/thing-connect/"
     cp "$scripts_dir/service-catalog.sh" "$root/thing-connect/scripts/"
     cp "$scripts_dir/../internal/installer/service_catalog.tsv" "$root/thing-connect/internal/installer/"
-    printf 'bin/\nnode_modules/\n' >"$root/.gitignore"
+    printf 'bin/\nnode_modules/\nthing-connect-client/dist/\nthing-connect/user-server/static/console/\n' >"$root/.gitignore"
     # Stubs replace the toolchain: only the marker behavior is under test.
-    printf '#!/usr/bin/env bash\nexit 0\n' >"$root/stub-bin/npm"
+    cat >"$root/stub-bin/npm" <<'BASH'
+#!/usr/bin/env bash
+if [[ "${*: -2}" == "run build:h5" ]]; then
+    mkdir -p ../thing-connect-client/dist/h5
+    printf 'fixture' >../thing-connect-client/dist/h5/index.html
+fi
+BASH
     cat >"$root/stub-bin/go" <<'BASH'
 #!/usr/bin/env bash
 while [ "$#" -gt 0 ]; do [ "$1" = -o ] && { out="$2"; break; }; shift; done
