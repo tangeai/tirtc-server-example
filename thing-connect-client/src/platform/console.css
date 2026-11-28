@@ -127,6 +127,7 @@ body,.taro_page { background:#f4f6f5 }
 .devices-page .device-list-heading .title {margin:0}
 
 @media (hover:hover) {
+  .device-name-setup:hover .device-placeholder-name {text-decoration:underline}
   .devices-page .device-feature-links .action:hover {background:#edf5f0;color:#116341}
 }
 

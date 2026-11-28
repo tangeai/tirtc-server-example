@@ -345,9 +345,9 @@ page,.h5-body,body{margin:0;background:#f7f7f7;color:#191919;font-family:-apple-
 
 .page .auth-tab,.page .role-speech-heading{margin:0;border:0;background:transparent;text-align:left;font-weight:inherit}.page .auth-tab:after,.page .role-speech-heading:after{border:0}
 
-.device-title-row .device-name-setup{width:auto;min-width:0;gap:4px;color:inherit;font-size:30px}
+.device-title-row .device-name-setup{width:auto;min-width:0;gap:4px;color:#078544;font-size:30px}
 .device-placeholder-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.device-name-edit-icon{color:#078544}
+.device-title-row .device-name-setup:active .device-placeholder-name{text-decoration:underline}
 .device-title-row .dashboard-role-name{box-sizing:border-box;flex:0 0 auto;min-width:0;max-width:46%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:2px 10px;border-radius:8px;background:#edf4ef;color:#46634e;font-size:22px;font-weight:500;line-height:1.5}
 .device-status-dot{display:inline-block;box-sizing:border-box;width:14px;height:14px;flex-shrink:0;border-radius:50%}
 .device-status-dot.on{background:#078544}
