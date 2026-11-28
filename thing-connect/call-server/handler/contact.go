@@ -333,35 +333,6 @@ func (s *Server) respondRequest(ctx context.Context, responder, peer string, acc
 	return &row, nil
 }
 
-func (s *Server) setRemark(ctx context.Context, self, peer, remark string) error {
-	idA, _ := normalizePair(self, peer)
-	col := "remark_b"
-	if idA == self {
-		col = "remark_a"
-	}
-	res, err := s.db.ExecContext(ctx,
-		fmt.Sprintf(`UPDATE call_contact SET %s=? WHERE device_id_a=? AND device_id_b=? AND status=?`, col),
-		remark, minStr(self, peer), maxStr(self, peer), contactStatusAccepted)
-	if err != nil {
-		return fmt.Errorf("setRemark: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		var exists bool
-		if err := s.db.GetContext(ctx, &exists,
-			`SELECT EXISTS(
-			   SELECT 1 FROM call_contact
-			   WHERE device_id_a=? AND device_id_b=? AND status=?
-			 )`, minStr(self, peer), maxStr(self, peer), contactStatusAccepted); err != nil {
-			return fmt.Errorf("setRemark verify: %w", err)
-		}
-		if !exists {
-			return errContactNotExist
-		}
-	}
-	return nil
-}
-
 func (s *Server) deleteContact(ctx context.Context, self, peer string) error {
 	row, err := s.getContactRow(ctx, self, peer)
 	if err != nil {
@@ -409,14 +380,4 @@ func (s *Server) listVoipContacts(ctx context.Context, deviceID string) ([]voipC
 		return nil, fmt.Errorf("listVoipContacts: %w", err)
 	}
 	return rows, nil
-}
-
-func minStr(a, b string) string {
-	x, _ := normalizePair(a, b)
-	return x
-}
-
-func maxStr(a, b string) string {
-	_, y := normalizePair(a, b)
-	return y
 }

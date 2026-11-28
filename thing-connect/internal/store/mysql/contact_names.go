@@ -14,7 +14,7 @@ func (s *ContactNamesStore) VisibleContactNames(ctx context.Context, user int64,
 		ID   string `db:"device_id"`
 		Name string `db:"device_name"`
 	}
-	err := s.db.SelectContext(ctx, &rows, `SELECT peer.device_id,peer.device_name FROM device_bind self JOIN call_contact c ON (c.device_id_a=self.device_id OR c.device_id_b=self.device_id) AND c.status=1 JOIN device_bind peer ON peer.device_id=IF(c.device_id_a=self.device_id,c.device_id_b,c.device_id_a) WHERE self.device_id=? AND self.user_id=?`, device, user)
+	err := s.db.SelectContext(ctx, &rows, `SELECT peer.device_id,peer.device_name FROM device_bind self JOIN call_contact c ON (c.device_id_a=self.device_id OR c.device_id_b=self.device_id) AND c.status=1 JOIN device_bind peer ON peer.device_id=IF(c.device_id_a=self.device_id,c.device_id_b,c.device_id_a) WHERE self.device_id=? AND self.user_id=? AND self.user_id=IF(c.device_id_a=self.device_id,c.user_id_a,c.user_id_b) AND peer.user_id=IF(c.device_id_a=self.device_id,c.user_id_b,c.user_id_a) AND peer.user_id<>0`, device, user)
 	if err != nil {
 		return nil, err
 	}

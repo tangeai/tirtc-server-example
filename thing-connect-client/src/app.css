@@ -320,3 +320,12 @@ page,.h5-body,body{margin:0;background:#f7f7f7;color:#191919;font-family:-apple-
 .interval-preset:after{border:0}
 .reminder-settings .interval-preset.active{color:#087a41;background:#e4f5ea}
 .interval-status{color:#656872;font-size:22px;font-weight:400}
+
+.role-resource-group,.role-param-card,.role-resource-item{display:flex;flex-direction:column;gap:18px}
+.role-resource-item{padding:18px 0;border-top:1px solid #e6e6ea}
+.role-param-card{padding:20px;background:#f4f5f7;border-radius:16px}
+.role-resource-group .textarea{min-height:112px;height:144px}
+
+.page .role-type-name{height:auto;padding-block:12px;line-height:1.45}
+.role-option-voice{display:block;font-size:24px;font-weight:400;color:#606761}
+.role-config-values{display:block;margin-top:16px;white-space:pre-wrap;overflow-wrap:anywhere;font-family:monospace;font-size:24px}

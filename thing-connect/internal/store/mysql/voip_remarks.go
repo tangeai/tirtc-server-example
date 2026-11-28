@@ -32,18 +32,34 @@ func (s *voipRemarkStore) Save(ctx context.Context, deviceID, peerID, remark str
 	if owner == 0 || (userID != 0 && owner != userID) {
 		return event, voip.ErrContactMissing
 	}
-	var id int64
-	// Keep the deployed peer_id-only selection rule (most recent active AppID).
-	if err = tx.GetContext(ctx, &id, `SELECT id FROM voip_device_auth WHERE device_id=? AND wx_open_id=? AND auth_status='active' ORDER BY created_at DESC,id DESC LIMIT 1 FOR UPDATE`, deviceID, peerID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			err = voip.ErrContactMissing
+	// Device contacts take precedence over WeChat peers with the same identifier.
+	first, second := min(deviceID, peerID), max(deviceID, peerID)
+	var contactID int64
+	err = tx.GetContext(ctx, &contactID, `SELECT id FROM call_contact WHERE device_id_a=? AND device_id_b=? AND status=1 AND IF(device_id_a=?,user_id_a,user_id_b)=? FOR UPDATE`, first, second, deviceID, owner)
+	switch {
+	case err == nil:
+		event.ContactType = "device"
+		_, err = tx.ExecContext(ctx, `UPDATE call_contact SET remark_a=IF(device_id_a=?, ?,remark_a), remark_b=IF(device_id_b=?, ?,remark_b) WHERE id=?`, deviceID, remark, deviceID, remark, contactID)
+		if err != nil {
+			return event, err
 		}
+	case errors.Is(err, sql.ErrNoRows):
+		event.ContactType = "voip"
+		var id int64
+		// Keep the deployed peer_id-only selection rule (most recent active AppID).
+		if err = tx.GetContext(ctx, &id, `SELECT id FROM voip_device_auth WHERE device_id=? AND wx_open_id=? AND auth_status='active' ORDER BY created_at DESC,id DESC LIMIT 1 FOR UPDATE`, deviceID, peerID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				err = voip.ErrContactMissing
+			}
+			return event, err
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE voip_device_auth SET device_remark=? WHERE id=?`, remark, id); err != nil {
+			return event, err
+		}
+	default:
 		return event, err
 	}
-	if _, err = tx.ExecContext(ctx, `UPDATE voip_device_auth SET device_remark=? WHERE id=?`, remark, id); err != nil {
-		return event, err
-	}
-	result, err := tx.ExecContext(ctx, `INSERT INTO voip_remark_outbox (device_id,peer_id,next_attempt_at) VALUES (?,?,DATE_ADD(NOW(),INTERVAL ? SECOND))`, deviceID, peerID, int(lease/time.Second))
+	result, err := tx.ExecContext(ctx, `INSERT INTO voip_remark_outbox (device_id,peer_id,contact_type,next_attempt_at) VALUES (?,?,?,DATE_ADD(NOW(),INTERVAL ? SECOND))`, deviceID, peerID, event.ContactType, int(lease/time.Second))
 	if err != nil {
 		return event, err
 	}
@@ -77,7 +93,7 @@ func (s *voipRemarkStore) Claim(ctx context.Context, limit int, lease time.Durat
 	if _, err := tx.ExecContext(ctx, tx.Rebind(query), args...); err != nil {
 		return nil, err
 	}
-	query, args, err = sqlx.In(`SELECT id,device_id,peer_id,attempts,DATE_FORMAT(next_attempt_at,'`+leaseFormat+`') AS lease FROM voip_remark_outbox WHERE id IN (?) ORDER BY id`, ids)
+	query, args, err = sqlx.In(`SELECT id,device_id,peer_id,contact_type,attempts,DATE_FORMAT(next_attempt_at,'`+leaseFormat+`') AS lease FROM voip_remark_outbox WHERE id IN (?) ORDER BY id`, ids)
 	if err != nil {
 		return nil, err
 	}

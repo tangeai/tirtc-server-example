@@ -5858,7 +5858,7 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
       {
         "device_id": "TIRZ00000002", // device 联系人为对方设备 ID；voip 联系人为 wx_open_id（无独立设备身份）
         "type": "device", // 联系人类型：device（设备联系人）或 voip（微信授权联系人）；设备必须按此字段选择呼叫接口
-        "remark": "门铃", // device 为本设备对该联系人的备注；voip 为当前设备对该 wx_open_id + wx_app_id 的独立备注；未设置时为空字符串
+        "remark": "门铃", // device 优先返回独立备注，为空时使用联系人设备名称；voip 为当前设备对该 wx_open_id + wx_app_id 的独立备注；未设置时为空字符串
         "source": "manual", // 联系人来源：manual（跨账号申请）、auto（同账号自动关联）或 voip（小程序授权）
         "online": true // 对方设备当前是否在线
       },
@@ -5867,7 +5867,7 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
         "device_id": "<实际返回的 device_id>", // device 联系人为对方设备 ID；voip 联系人为 wx_open_id（无独立设备身份）
         "type": "voip", // 联系人类型：device（设备联系人）或 voip（微信授权联系人）；设备必须按此字段选择呼叫接口
         "source": "voip", // 联系人来源：manual（跨账号申请）、auto（同账号自动关联）或 voip（小程序授权）
-        "remark": "妈妈", // device 为本设备对该联系人的备注；voip 为当前设备对该 wx_open_id + wx_app_id 的独立备注；未设置时为空字符串
+        "remark": "妈妈", // device 优先返回独立备注，为空时使用联系人设备名称；voip 为当前设备对该 wx_open_id + wx_app_id 的独立备注；未设置时为空字符串
         "wx_open_id": "<实际返回的 wx_open_id>", // 微信用户 OpenID；与该项的 device_id 相同
         "wx_app_id": "<实际返回的 wx_app_id>", // 授权所属的微信小程序 AppID
         "wx_model_id": "<实际返回的 wx_model_id>" // 授权对应的微信设备型号 ID；发起 VoIP 外呼时由 voip-server 从授权记录读取
@@ -5886,7 +5886,7 @@ curl -X POST "$AI_SERVER/v1/ai/knowledge/files" \
 | data.contacts[].device_id | 全部 | device 联系人为对方设备 ID；voip 联系人为 `wx_open_id`（无独立设备身份） |
 | data.contacts[].type | 全部 | 联系人类型：`device`（设备联系人）或 `voip`（微信授权联系人）；设备必须按此字段选择呼叫接口 |
 | data.contacts[].id | 仅 voip | `voip_device_auth` 表主键；`PUT /v1/call/device/contacts/remark` 不使用它，而是使用 `peer_id` |
-| data.contacts[].remark | 全部 | device 为本设备对该联系人的备注；voip 为当前设备对该 `wx_open_id + wx_app_id` 的独立备注；未设置时为空字符串 |
+| data.contacts[].remark | 全部 | device 优先返回独立备注，为空时使用联系人设备名称；voip 为当前设备对该 `wx_open_id + wx_app_id` 的独立备注；未设置时为空字符串 |
 | data.contacts[].source | 全部 | 联系人来源：`manual`（跨账号申请）、`auto`（同账号自动关联）或 `voip`（小程序授权） |
 | data.contacts[].online | 仅 device | 对方设备当前是否在线 |
 | data.contacts[].wx_open_id | 仅 voip | 微信用户 OpenID；与该项的 `device_id` 相同 |
@@ -6240,7 +6240,7 @@ DELETE /v1/call/device/contacts?peer_id=TIRZ00000002
 
 **错误码**：`40000`（缺少 `device_id`）、`40300`（设备不属于当前用户）。
 
-用户端设备联系人条目还包含 `device_name`（string，可为空）。名称只来自当前用户所拥有设备的有效联系人关系；界面按备注、设备名称、设备 ID 回退。设备端响应不增加此字段。
+用户端设备联系人条目还包含 `device_name`（string，可为空）。名称只来自当前用户所拥有设备的有效联系人关系；界面按备注、设备名称、设备 ID 回退。设备端沿用 `remark` 显示自定义备注或对方当前设备名称，两者均为空时由设备显示 ID。用户端 `remark` 仍为独立备注，可清空以恢复跟随设备名称。
 
 <a id="get-v1callusercontactspending"></a>
 

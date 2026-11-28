@@ -1276,6 +1276,9 @@ func TestContacts_UserRemarkUsesDeviceAndPeerID(t *testing.T) {
 				if entry.web && name != "门口设备" {
 					t.Fatalf("visible contact name: %v", item)
 				}
+				if !entry.web && item["remark"] != "门口设备" {
+					t.Fatalf("device contact did not inherit name: %v", item)
+				}
 				if !entry.web && present {
 					t.Fatalf("device response gained a web-only field: %v", item)
 				}
@@ -1363,6 +1366,60 @@ func TestContacts_UserRemarkUsesDeviceAndPeerID(t *testing.T) {
 	}
 	if got != "设备联系人" {
 		t.Fatalf("device remark=%q", got)
+	}
+
+	names := mysqlstore.NewUserStore(cs.sqlDB)
+	rename := func(name string) {
+		t.Helper()
+		if ok, err := names.UpdateDeviceName(context.Background(), user2, d2, name); err != nil || !ok {
+			t.Fatalf("rename: ok=%t err=%v", ok, err)
+		}
+	}
+	checkName := func(want string) {
+		t.Helper()
+		r := cs.GET(t, "/v1/call/device/contacts", deviceJWT(t, cs.cfg.JWTSecret, d1))
+		var data struct {
+			Contacts []struct {
+				ID     string `json:"device_id"`
+				Remark string `json:"remark"`
+			}
+		}
+		if err := json.Unmarshal(r.Data, &data); err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range data.Contacts {
+			if c.ID == d2 && c.Remark == want {
+				return
+			}
+		}
+		t.Fatalf("device contact missing effective name %q", want)
+	}
+	queued := func() int {
+		t.Helper()
+		var count int
+		if err := cs.sqlDB.Get(&count, "SELECT COUNT(*) FROM voip_remark_outbox WHERE device_id=? AND peer_id=? AND contact_type='device'", d1, d2); err != nil {
+			t.Fatal(err)
+		}
+		return count
+	}
+	t.Cleanup(func() { _, _ = cs.sqlDB.Exec("DELETE FROM voip_remark_outbox WHERE device_id=? AND peer_id=?", d1, d2) })
+	before := queued()
+	rename("客厅")
+	checkName("设备联系人")
+	if queued() != before {
+		t.Fatal("explicit remark should suppress rename notification")
+	}
+	clear := cs.PUT(t, "/v1/call/user/contacts/remark", jwt, map[string]any{"device_id": d1, "peer_id": d2, "remark": ""})
+	if clear.Code != 200 {
+		t.Fatal(clear)
+	}
+	checkName("客厅")
+	before = queued()
+	rename("书房")
+	rename("书房")
+	checkName("书房")
+	if queued() != before+1 {
+		t.Fatal("inherited name change should enqueue once")
 	}
 
 	deleted := cs.DELETE(t, fmt.Sprintf("/v1/call/user/contacts/%d", deviceContactID), jwt)

@@ -320,21 +320,6 @@ func (s *Server) putUserContactRemark(c *gin.Context) {
 		return
 	}
 
-	row, err := s.getContactRow(ctx, body.DeviceID, body.PeerID)
-	if err != nil {
-		apiresp.Fail(c, apiresp.ErrInternal, err.Error())
-		return
-	}
-	if row != nil && row.Status == contactStatusAccepted {
-		if err := s.setRemark(ctx, body.DeviceID, body.PeerID, body.Remark); err != nil {
-			apiresp.Fail(c, contactErrCode(err), err.Error())
-			return
-		}
-		s.publishCallersUpdate(body.DeviceID, "remark", "device", body.PeerID)
-		apiresp.OK(c, nil)
-		return
-	}
-
 	if s.remarks == nil {
 		apiresp.Fail(c, apiresp.ErrInternal, "联系人备注服务不可用")
 		return

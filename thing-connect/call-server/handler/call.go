@@ -74,6 +74,11 @@ func (s *Server) postCallRequest(c *gin.Context) {
 		return
 	}
 
+	callerBind, err := s.dev.GetBindByDeviceID(ctx, caller)
+	if err != nil {
+		apiresp.Fail(c, apiresp.ErrInternal, "加载主叫设备名称失败")
+		return
+	}
 	callerNames := make(map[string]string)
 	for _, target := range body.Targets {
 		callerName := caller
@@ -81,6 +86,13 @@ func (s *Server) postCallRequest(c *gin.Context) {
 			continue
 		}
 		if row, err := s.getContactRow(ctx, caller, target); err == nil && row != nil {
+			owner := row.UserIDA
+			if row.DeviceIDB == caller {
+				owner = row.UserIDB
+			}
+			if callerBind != nil && owner != 0 && owner == callerBind.UserID && callerBind.DeviceName != "" {
+				callerName = callerBind.DeviceName
+			}
 			if remark := row.remarkFor(target); remark != "" {
 				callerName = remark
 			}

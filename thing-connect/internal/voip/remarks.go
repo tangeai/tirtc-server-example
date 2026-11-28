@@ -29,11 +29,12 @@ const (
 // RemarkEvent is one durable cache invalidation for a device contact. Lease
 // is the claim snapshot; acknowledging with a stale one leaves the row alone.
 type RemarkEvent struct {
-	ID       int64  `db:"id"`
-	DeviceID string `db:"device_id"`
-	PeerID   string `db:"peer_id"`
-	Attempts int    `db:"attempts"`
-	Lease    string `db:"lease"`
+	ContactType string `db:"contact_type"`
+	ID          int64  `db:"id"`
+	DeviceID    string `db:"device_id"`
+	PeerID      string `db:"peer_id"`
+	Attempts    int    `db:"attempts"`
+	Lease       string `db:"lease"`
 }
 
 // RemarkStore persists remarks and their notification outbox. Several

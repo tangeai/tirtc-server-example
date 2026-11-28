@@ -4,8 +4,11 @@ import { useEffect, useRef, useState } from 'react';
 import { Action, Field, Notice, SearchField, Sheet } from '../../components/ui';
 import { request, errorText } from '../../services/api';
 import { resetWelcomeMode, editableProviders, findVoice, llmModels, roleRegionLabel, type Role, type RoleDraft, type Voice } from '../../domain/roles';
-import { availableRoleTypes, roleTypePatch, selectedRoleType, type RoleType } from '../../domain/role-types';
+import { availableRoleTypes, typeVoiceLabel, typeVoicePatch, roleTypePatch, selectedRoleType, type RoleType } from '../../domain/role-types';
 import { speechLevelIndex, speechLevelValues } from '../../domain/tts-config';
+
+import { ConfigDetails } from './config-details';
+import { RoleResources } from './resources';
 
 export function RoleEditor({ role, draft, voices, busy, patch }: {
   role: Role & { preset?: boolean }; draft: RoleDraft; voices: Voice[]; busy: boolean;
@@ -16,6 +19,8 @@ export function RoleEditor({ role, draft, voices, busy, patch }: {
   const alive = useRef(true), choosing = useRef(false), reading = useRef(false), player = useRef<ReturnType<typeof Taro.createInnerAudioContext>>();
   const providers = editableProviders(role), readonly = !!role.preset, disabled = busy || readonly;
   const chosen = selectedRoleType(draft, types), voice = findVoice(voices, draft.voice, draft.voiceModel);
+  const typeVoice = chosen && findVoice(voices, chosen.voice_id, chosen.voice_model);
+  const differentVoice = chosen && (chosen.voice_id !== draft.voice || chosen.voice_model !== (draft.voiceModel || voice?.model));
   const custom = draft.customPrompt || !chosen || draft.prompt !== chosen.prompt;
   const available = availableRoleTypes(types, voices).filter(item => [item.name, findVoice(voices, item.voice_id, item.voice_model)?.name || ''].some(s => s.toLowerCase().includes(query.trim().toLowerCase())));
   function stop() { const audio = player.current; player.current = undefined; audio?.destroy(); if (alive.current) setPlaying(''); }
@@ -74,7 +79,8 @@ export function RoleEditor({ role, draft, voices, busy, patch }: {
     {section === 'basic' && <View className='card role-form'>
       <View className='role-identity'><Field label='智能体名称' value={draft.name} disabled={disabled} onChange={name => patch({ name })} />
       <View className='field role-region'><Text className='label'>地域</Text><Picker range={['国内', '海外']} value={draft.region === 'sg01' ? 1 : 0} disabled={disabled || !!role.id} onChange={e => patch({ region: Number(e.detail.value) ? 'sg01' : 'cn01' })}><View className='input role-select'><Text className='role-select-value'>{roleRegionLabel(draft.region)}</Text>{!role.id && <View className='role-select-arrow' />}</View></Picker></View></View>{role.id && <Text className='muted'>地域不可更改，跨地域请新建角色。</Text>}
-      {!readonly && <View className='field'><Text className='label'>角色类型</Text><Button className='action role-select' disabled={disabled || loading || !providers.tts} onClick={() => { stop(); setPreviewError(''); setQuery(''); setPicker(true); }}><Text className='role-select-value'>{loading ? '正在加载类型…' : chosen?.name || '选择角色类型'}</Text><View className='role-select-arrow' /></Button>{error && <Action onClick={() => void loadTypes()}>重新加载类型</Action>}</View>}
+      <Field label='角色描述' value={draft.description} disabled={disabled} onChange={description=>patch({description})}/>
+      {!readonly && <View className='field'><Text className='label'>角色类型</Text><Button className='action role-select' disabled={disabled || loading || !providers.tts} onClick={() => { stop(); setPreviewError(''); setQuery(''); setPicker(true); }}><Text className='role-select-value'>{loading ? '正在加载类型…' : chosen?.name || '选择角色类型'}</Text><View className='role-select-arrow' /></Button>{chosen && <Text className='muted'>{typeVoiceLabel(chosen, typeVoice)}</Text>}{differentVoice && <View className='row between'><Text>当前使用 · {voice?.name || draft.voice || '基础配置'}</Text>{typeVoice && <Action disabled={disabled || !providers.tts} onClick={() => patch(typeVoicePatch(draft, chosen!))}>使用类型音色</Action>}</View>}{error && <Action onClick={() => void loadTypes()}>重新加载类型</Action>}</View>}
       <View className='row between role-prompt-heading'><Text className='label'>角色设定</Text>{readonly && <Text className='badge'>只读</Text>}{chosen && custom && !readonly && <Button className='action role-restore' disabled={busy} onClick={() => void restore()}>恢复默认</Button>}{chosen && !readonly && <View className='row role-toggle'><Text className='label'>自定义</Text><Switch color={readonly ? '#b8bfbb' : '#07c160'} checked={!!custom} disabled={disabled} onChange={e => { if (e.detail.value) patch({ customPrompt: true }); else void restore(); }} /></View>}</View>
       <Textarea className='textarea' maxlength={-1} value={draft.prompt} disabled={disabled || !custom} placeholder='选择角色类型带入默认设定，或填写自定义角色设定' onInput={e => patch({ prompt: e.detail.value, customPrompt: true })} />
       <View className='role-speech-heading' hoverClass='role-speech-hover' ariaRole='button' ariaLabel={speech ? '收起语音设置' : '展开语音设置'} onClick={() => { stop(); setSpeech(!speech); }}><View className={'role-speech-chevron' + (speech ? ' is-open' : '')} /><Text>语音设置</Text></View>
@@ -86,10 +92,16 @@ export function RoleEditor({ role, draft, voices, busy, patch }: {
     {section === 'model' && <View className='card role-form'><View className='field'><Text className='label'>模型</Text><Picker range={['沿用基础配置', ...llmModels.map(m => m.id)]} value={Math.max(0, llmModels.findIndex(m => m.id === draft.model) + 1)} disabled={disabled || !providers.llm} onChange={e => patch({ model: Number(e.detail.value) ? llmModels[Number(e.detail.value) - 1].id : '' })}><View className='input role-select'><Text className='role-select-value'>{draft.model || '沿用基础配置'}</Text>{!disabled && providers.llm && <View className='role-select-arrow' />}</View></Picker></View><View className='row between role-toggle'><Text className='label'>长期记忆</Text><Switch color={readonly ? '#b8bfbb' : '#07c160'} checked={draft.memory} disabled={disabled} onChange={e => patch({ memory: e.detail.value })} /></View></View>}
     {section === 'advanced' && <View className='card role-form'><View className='row between role-toggle'><Text className='label'>视频识别</Text><Switch color={readonly ? '#b8bfbb' : '#07c160'} checked={draft.video === true} disabled={disabled || !providers.custom} onChange={e => patch({ video: e.detail.value })} /></View><Text className='muted'>允许 AI 理解设备上传的视频画面。{draft.video === undefined ? '未单独设置，沿用基础配置。' : ''}</Text><View className='field role-welcome-field'><Text className='label'>{draft.welcomeMode === 'ai' ? 'AI 欢迎语提示词' : '开场白'}</Text><Textarea className='textarea role-welcome-input' maxlength={-1} value={draft.welcomeMode === 'ai' ? draft.welcomePrompt : draft.welcome} disabled={disabled} onInput={e => patch(draft.welcomeMode === 'ai' ? { welcomePrompt: e.detail.value } : { welcome: e.detail.value })} />
       <CheckboxGroup className='role-welcome-choice' onChange={e => patch(resetWelcomeMode(e.detail.value.includes('ai')))}><Checkbox value='ai' checked={draft.welcomeMode === 'ai'} disabled={disabled} color='#07c160'>AI 随机欢迎语</Checkbox></CheckboxGroup>
-      <Text className='muted'>勾选后，输入内容作为 AI 提示词；不勾选时，直接使用输入的文字。勾选或取消勾选都会重置为默认内容。</Text><Text className='muted'>{draft.welcomeMode === 'ai' ? '提示词必填，每次新会话由 AI 生成欢迎语，内容可能重复。' : '留空并保存会清除本角色的欢迎语设置。'}</Text></View><Text className='muted'>知识库、MCP 和设备插件的管理入口暂在 Web；已有配置会保留。</Text></View>}
+      <Text className='muted'>勾选后，输入内容作为 AI 提示词；不勾选时，直接使用输入的文字。勾选或取消勾选都会重置为默认内容。</Text><Text className='muted'>{draft.welcomeMode === 'ai' ? '提示词必填，每次新会话由 AI 生成欢迎语，内容可能重复。' : '留空并保存会清除本角色的欢迎语设置。'}</Text></View></View>}
+    {section === 'advanced' && <>
+      <RoleResources kind='knowledge' selected={draft.knowledge ? [draft.knowledge] : []} change={ids=>patch({knowledge:ids[0] || ''})} disabled={disabled} readonly={readonly}/>
+      <RoleResources kind='mcp' selected={draft.mcp} change={mcp=>patch({mcp})} disabled={disabled} readonly={readonly}/>
+      <RoleResources kind='plugins' selected={draft.plugins} names={role.device_plugin_refs} change={plugins=>patch({plugins})} disabled={disabled} readonly={readonly}/>
+      {role.id && <ConfigDetails title='已保存的角色配置' value={{id: role.id, name: role.name, region: role.region, avatar: role.avatar, parent_role_id: role.parent_role_id, agent_config: role.agent_config, service_config: role.service_config, user_params: role.user_params}}/>}
+    </>}
     {picker && <Sheet title='选择角色类型' busy={busy} onClose={() => { stop(); setPreviewError(''); setPicker(false); }}><SearchField placeholder='搜索角色类型或声音' value={query} onChange={value => { stop(); setQuery(value); }} /><Notice error>{previewError}</Notice>{available.map(item => {
       const sample = findVoice(voices, item.voice_id, item.voice_model);
-      return <View className='role-type-option' key={item.id}><Button className={'action role-type-name' + (chosen?.id === item.id ? ' role-type-selected' : '')} disabled={disabled} onClick={() => void choose(item)}>{item.name}</Button><Button className='action role-type-preview' disabled={busy || !sample?.sample_url} onClick={() => preview(sample, item.id)}>{!sample?.sample_url ? '暂无试听' : playing === item.id ? '停止' : '试听'}</Button></View>;
+      return <View className='role-type-option' key={item.id}><Button className={'action role-type-name' + (chosen?.id === item.id ? ' role-type-selected' : '')} disabled={disabled} onClick={() => void choose(item)}><Text>{item.name}</Text><Text className='role-option-voice'>{typeVoiceLabel(item, sample)}</Text></Button><Button className='action role-type-preview' disabled={busy || !sample?.sample_url} onClick={() => preview(sample, item.id)}>{!sample?.sample_url ? '暂无试听' : playing === item.id ? '停止' : '试听'}</Button></View>;
     })}{!available.length && <Notice>暂无匹配的可用角色类型，可直接编辑角色设定。</Notice>}</Sheet>}
   </>;
 }
