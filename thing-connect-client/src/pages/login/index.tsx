@@ -96,8 +96,9 @@ export default function Login() {
     return () => document.removeEventListener('keydown', onEnter, true);
   });
   return <View className={'page auth-page auth-' + mode}>
-    <View className='auth-brand'><Image className='auth-brand-robot' src={brandRobot} mode='aspectFit' ariaLabel={tr("小钛机器人")} /><View><Text className='auth-brand-name'>{tr("小钛")}</Text><Text className='auth-tagline'>{tr("连接设备，随时相伴")}</Text></View></View>
+    {process.env.TARO_ENV !== 'h5' && <View className='auth-brand'><Image className='auth-brand-robot' src={brandRobot} mode='aspectFit' ariaLabel={tr("小钛机器人")} /><View><Text className='auth-brand-name'>{tr("小钛")}</Text><Text className='auth-tagline'>{tr("连接设备，随时相伴")}</Text></View></View>}
     <View className='auth-panel'>
+      {process.env.TARO_ENV === 'h5' && mode !== 'reset' && <Text className='web-auth-title'>{tr(mode === 'login' ? '登录账号' : '注册账号')}</Text>}
       {mode === 'reset' ? <View className='auth-heading'><Text>{tr("找回密码")}</Text><Text className='auth-heading-note'>{tr("通过邮箱验证身份")}</Text></View> : <View className='auth-tabs'>{(['login', 'register'] as const).map(value => <Button id={'auth-' + value} key={value} className={'auth-tab ' + (mode === value ? 'is-active' : '')} onClick={() => switchMode(value)}><Text>{value === 'login' ? tr("登录") : tr("注册")}</Text><View className='auth-tab-line' /></Button>)}</View>}
       <View className='auth-fields'>
         <View className='auth-field'><Text className='auth-label'>{tr("邮箱")}</Text><Input className='auth-input' name='email' nativeProps={{ autoComplete: 'username', inputMode: 'email', 'aria-label': tr('邮箱') }} value={email} disabled={busy} maxlength={254} placeholder={tr("请输入邮箱地址")} placeholderClass='auth-placeholder' onInput={e => setEmail(e.detail.value)} /></View>
