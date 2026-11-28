@@ -10,7 +10,7 @@ export function RecognitionReminders({ device, enabled }: { device: string; enab
   const path = '/v1/push/user/preferences/' + encodeURIComponent(device) + '/alarm';
   const owner = token();
   const [value, setValue] = useState<string>();
-  const [message, setMessage] = useState(''), [error, setError] = useState('');
+  const [error, setError] = useState('');
   const draft = useRef(''), saved = useRef<number>(), writing = useRef(false);
   const timer = useRef<ReturnType<typeof setTimeout>>();
   const mounted = useRef(false);
@@ -36,17 +36,17 @@ export function RecognitionReminders({ device, enabled }: { device: string; enab
     }
     if (Number(text) === saved.current) return;
     writing.current = true;
-    if (mounted.current) { setMessage('正在保存…'); setError(''); }
+    if (mounted.current) setError('');
     try {
       const p = await request<Preference>(path, 'PUT', { interval_seconds: Number(text) });
       saved.current = p.interval_seconds ?? 0;
       if (mounted.current && draft.current === text) {
         draft.current = String(saved.current);
-        setValue(draft.current); setMessage('间隔已保存');
+        setValue(draft.current);
       }
     } catch (e) {
       saved.current = undefined; // A lost acknowledgement leaves the server value unknown.
-      if (mounted.current && draft.current === text) { setMessage(''); setError(errorText(e)); }
+      if (mounted.current && draft.current === text) setError(errorText(e));
     } finally {
       writing.current = false;
       if (draft.current !== text) void flush();
@@ -64,7 +64,7 @@ export function RecognitionReminders({ device, enabled }: { device: string; enab
 
   function edit(text: string) {
     draft.current = text;
-    setValue(text); setMessage(''); setError('');
+    setValue(text); setError('');
     clearTimeout(timer.current);
     timer.current = setTimeout(() => void flush(), 700);
   }
@@ -79,7 +79,7 @@ export function RecognitionReminders({ device, enabled }: { device: string; enab
       <Text>秒</Text>
     </View>}
     {value === undefined && !error && <Notice>正在加载提醒间隔…</Notice>}
-    <Notice error>{error}</Notice><Notice>{message}</Notice>
+    <Notice error>{error}</Notice>
     {error && value === undefined && <Action onClick={() => void load()}>重新加载提醒间隔</Action>}
     {error && value !== undefined && /^\d{1,5}$/.test(value) && Number(value) <= 86400 &&
       <Action onClick={() => void flush()}>重试保存间隔</Action>}
