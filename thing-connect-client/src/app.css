@@ -339,6 +339,6 @@ page,.h5-body,body{margin:0;background:#f7f7f7;color:#191919;font-family:-apple-
 .role-tool-list switch{flex-shrink:0}
 
 .role-extensions,.role-extension-resources{display:flex;flex-direction:column;gap:22px;min-width:0}
-.device-count{margin-left:12px;color:#758078;font-size:26px}
+.device-list-heading{display:flex;align-items:baseline;min-width:0}.device-count{margin-left:12px;color:#758078;font-size:26px}
 
 .page .auth-tab,.page .role-speech-heading{margin:0;border:0;background:transparent;text-align:left;font-weight:inherit}.page .auth-tab:after,.page .role-speech-heading:after{border:0}

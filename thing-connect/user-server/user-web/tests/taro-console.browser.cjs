@@ -64,7 +64,7 @@ async function verify(browser, width) {
     await page.getByText('客厅', { exact: true }).waitFor();
     assert.equal(await page.locator('.device-count').innerText(), '（1 台）');
     assert.equal(await page.evaluate(() => localStorage.getItem('token')), 'fixture');
-    const states = page.locator('.dashboard-states');
+    const states = page.locator('.device-list-grid>.card').first();
     await states.waitFor();
     assert.doesNotMatch(await states.innerText(), /123456|未加入|已解散/);
     room.state = 'joined';
