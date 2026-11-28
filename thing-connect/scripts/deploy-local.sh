@@ -81,9 +81,10 @@ local_prepare() {
     LOCAL_SNAPSHOT="$(mktemp -d "$archive_root/$(date +%Y%m%d-%H%M%S).XXXXXX")"
     local_log "打包本地源码到 $LOCAL_SNAPSHOT"
     git -C "$LOCAL_SOURCE_ROOT" rev-parse HEAD >"$LOCAL_SNAPSHOT/source-commit"
-    git -C "$LOCAL_SOURCE_ROOT" status --porcelain=v1 --untracked-files=all -- thing-connect >"$LOCAL_SNAPSHOT/source-status"
+    local -a source_paths=(thing-connect thing-connect-client/player thing-connect-client/package.json thing-connect-client/package-lock.json thing-connect-client/tsconfig.json)
+    git -C "$LOCAL_SOURCE_ROOT" status --porcelain=v1 --untracked-files=all -- "${source_paths[@]}" >"$LOCAL_SNAPSHOT/source-status"
     # Git supplies the allowlist: ignored credentials, node_modules and build outputs are excluded.
-    git -C "$LOCAL_SOURCE_ROOT" ls-files -z --cached --others --exclude-standard -- .gitignore thing-connect >"$LOCAL_SNAPSHOT/files.all"
+    git -C "$LOCAL_SOURCE_ROOT" ls-files -z --cached --others --exclude-standard -- .gitignore "${source_paths[@]}" >"$LOCAL_SNAPSHOT/files.all"
     : >"$LOCAL_SNAPSHOT/files.list"
     while IFS= read -r -d '' file; do
         [ -e "$LOCAL_SOURCE_ROOT/$file" ] || [ -L "$LOCAL_SOURCE_ROOT/$file" ] || continue

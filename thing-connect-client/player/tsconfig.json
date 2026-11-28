@@ -1,0 +1,1 @@
+{"extends":"../tsconfig.json","compilerOptions":{"types":["react","react-dom"]},"include":["*.ts","*.tsx"]}

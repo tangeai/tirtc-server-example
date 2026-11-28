@@ -581,7 +581,12 @@ VoIP 使用微信稳定版接口凭据。微信拒绝缓存的 token 时，实�
 | 其他路径 | User H5 |
 | 所有内部接口 | 明确拒绝，不向公网代理 |
 
-用户控制台使用 React、TypeScript 和 Vite，源码位于 `user-server/user-web`，构建产物位于 `user-server/static/app`，由 user-server 提供。登录、设备、联系人、角色、多人对讲和实时查看使用同一个应用入口；首页和开发板目录由 user-server 服务端渲染，协议政策为静态内容页。AI、通话等业务服务提供 API，用户页面使用同源 `/v1/*` 地址调用；Admin Web 保持独立的管理入口和权限体系。
+用户控制台使用 React、TypeScript 和 Vite，源码位于 `user-server/user-web`，构建产物位于 `user-server/static/app`，由 user-server 提供。默认入口承载登录、设备、联系人、角色、多人对讲和实时查看；首页和开发板目录由 user-server 服务端渲染，协议政策为静态内容页。AI、通话等业务服务提供 API，用户页面使用同源 `/v1/*` 地址调用；Admin Web 保持独立的管理入口和权限体系。
+
+user-server 分别读取启动环境变量 `USER_PLAYER_ENTRY` 和 `USER_CONSOLE_ENTRY`。两者默认 `legacy`，使用 `static/app/index.html`。为独立播放器灰度时，先在各实例发布完整静态目录，再将 `USER_PLAYER_ENTRY=new`、`USER_CONSOLE_ENTRY=legacy` 写入对应进程的启动环境，滚动重启 user-server。`/player` 使用 `static/player/index.html`，控制台继续使用原入口。回退时仅将播放器开关改回 `legacy` 并重启。新控制台开关 `new` 需要已经部署 `static/console/index.html`；入口文件缺失或选择值无效时服务拒绝启动。切换窗口保留新旧入口及其带哈希资源。
+
+客户端工程的 `npm run build:player` 校验固定 SDK 与两个 WASM 的 SHA-256 并生成独立播放器。预发在部署目录执行 `(cd user-server/static/js && sha256sum -c /绝对路径/sdk.sha256)`，清单位于源码 `thing-connect-client/player/sdk.sha256`。核对外部实际地址 `/static/js/tirtc.es.min.js`、`/librender.wasm` 和 `/plugin.wasm`。用已发布的小程序打开在线测试设备，验证返回、收听、按住说话及令牌失效后跳回登录；浏览器会话独立验证。
+
 
 `./build.sh user-server` 包含用户前端构建。单独开发前端可执行 `npm --prefix user-server/user-web ci`、`npm --prefix user-server/user-web run dev`，浏览器打开 `http://localhost:5174/login`。Vite 开发代理连接本机默认业务端口，生产环境使用上述 Nginx 分发；不能只启动 user-server 就访问其他服务的业务 API。
 

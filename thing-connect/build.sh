@@ -48,6 +48,8 @@ if contains_service user-server; then
     npm run build:css
     npm --prefix user-server/user-web ci
     npm --prefix user-server/user-web run build
+    npm --prefix ../thing-connect-client ci
+    npm --prefix ../thing-connect-client run build:player
 fi
 
 if contains_service admin-server; then

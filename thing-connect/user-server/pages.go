@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -8,12 +9,33 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// registerUserPages serves one application entry for user-facing workflows.
-// Business APIs retain their own routers; this is deliberately not an SPA
-// catch-all, so unknown API paths continue to return 404.
+// Page groups select independently so a player rollback preserves console sessions.
+func userPageEntry(staticDir, setting, directory string) (string, error) {
+	switch os.Getenv(setting) {
+	case "", "legacy":
+		directory = "app"
+	case "new":
+	default:
+		return "", fmt.Errorf("%s must be legacy or new", setting)
+	}
+	entry := filepath.Join(staticDir, directory, "index.html")
+	info, err := os.Stat(entry)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", setting, err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("%s: expected regular file at %s", setting, entry)
+	}
+	return entry, nil
+}
+
 func registerUserPages(r *gin.Engine, staticDir string) error {
-	entry := filepath.Join(staticDir, "app", "index.html")
-	if _, err := os.Stat(entry); err != nil {
+	console, err := userPageEntry(staticDir, "USER_CONSOLE_ENTRY", "console")
+	if err != nil {
+		return err
+	}
+	player, err := userPageEntry(staticDir, "USER_PLAYER_ENTRY", "player")
+	if err != nil {
 		return err
 	}
 	legacy := map[string]string{
@@ -37,12 +59,16 @@ func registerUserPages(r *gin.Engine, staticDir string) error {
 		c.Next()
 	})
 	r.Static("/static", staticDir)
-	for _, path := range []string{"/login", "/register", "/forgot-password", "/devices", "/bind", "/player", "/contacts", "/agent", "/room"} {
-		r.GET(path, func(c *gin.Context) {
+	serve := func(entry string) gin.HandlerFunc {
+		return func(c *gin.Context) {
 			c.Header("Cache-Control", "no-cache")
 			c.Header("X-Robots-Tag", "noindex, nofollow")
 			c.File(entry)
-		})
+		}
+	}
+	r.GET("/player", serve(player))
+	for _, path := range []string{"/login", "/register", "/forgot-password", "/devices", "/bind", "/contacts", "/agent", "/room"} {
+		r.GET(path, serve(console))
 	}
 	// TiRTC loads these assets from fixed root paths.
 	r.StaticFile("/librender.wasm", filepath.Join(staticDir, "js", "librender.wasm"))

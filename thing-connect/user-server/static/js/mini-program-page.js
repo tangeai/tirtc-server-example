@@ -44,18 +44,28 @@
     const button = document.createElement('button');
     WebI18n.bindText(button, () => (WebI18n.t("重新登录")), "textContent");
     button.style.cssText = 'border:0;border-radius:12px;padding:14px 28px;background:#07C160;color:white;font:inherit;margin-top:20px';
-    button.onclick = returnToLogin;
+    button.onclick = function () {
+      if (window.wx?.miniProgram) returnToLogin();
+      else loadBridge();
+    };
     panel.append(title, description, button);
     document.body.appendChild(panel);
   }
 
   window.MiniProgramPage = { embedded, token, goBack, requireLogin };
-  if (embedded) {
-    document.documentElement.classList.add('mini-program');
+  let bridgePending = false;
+  function loadBridge() {
+    if (bridgePending) return;
+    bridgePending = true;
     const sdk = document.createElement('script');
     sdk.src = 'https://res.wx.qq.com/open/js/jweixin-1.6.0.js';
     sdk.async = true;
-    sdk.onload = function () { if (sessionExpired) returnToLogin(); };
+    sdk.onload = function () { bridgePending = false; if (sessionExpired) returnToLogin(); };
+    sdk.onerror = function () { bridgePending = false; sdk.remove(); };
     document.head.appendChild(sdk);
+  }
+  if (embedded) {
+    document.documentElement.classList.add('mini-program');
+    loadBridge();
   }
 })();
