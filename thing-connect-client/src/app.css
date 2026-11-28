@@ -279,8 +279,9 @@ page,.h5-body,body{margin:0;background:#f7f7f7;color:#191919;font-family:-apple-
 .scheme-row{display:flex;align-items:center;gap:16px;padding:20px 0;border-top:1px solid #edf0ed}
 .scheme-row:last-child{padding-bottom:0}
 .scheme-list .scheme-header{display:flex;align-items:center;gap:16px;min-height:64px;padding-bottom:12px}
+.scheme-header .reminder-heading,.scheme-count{white-space:nowrap}
 .scheme-count{flex:1;color:#657168;font-size:24px}
-.page .scheme-edit{margin:0;padding:0 8px;background:transparent;color:#087a41;font-size:28px;font-weight:500;line-height:64px}
+.page .scheme-edit{width:auto;flex:0 0 auto;margin:0;padding:0 8px;background:transparent;color:#087a41;font-size:28px;font-weight:500;line-height:64px}
 .scheme-edit:after{border:0}
 .scheme-row switch{flex-shrink:0}
 .scheme-handle-lines{box-sizing:border-box;width:34px;height:22px;border-top:3px solid currentColor;border-bottom:3px solid currentColor;position:relative}
