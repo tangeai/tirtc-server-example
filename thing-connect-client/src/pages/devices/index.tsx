@@ -21,7 +21,7 @@ export default function Devices() {
   const authRevision = useRef(0), authActions = useRef<Record<string, number>>({});
   const alive = useRef(true), reading = useRef(false), writing = useRef(false), revision = useRef(0), loadedRevision = useRef(-1);
   const capabilities = mediaCapabilities();
-  const reminderSettings = (device: Device) => void Taro.navigateTo({ url: '/pages/notifications/index?device_id=' + encodeURIComponent(device.device_id) });
+  const reminderSettings = (device: Device) => void Taro.navigateTo({ url: '/pages/notifications/index?device_id=' + encodeURIComponent(device.device_id) + (device.device_name ? '&name=' + encodeURIComponent(device.device_name) : '') });
   const overlayOpen = !!(menu || editing || info);
   useEffect(() => {
     if (!overlayOpen) return;

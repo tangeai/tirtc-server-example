@@ -2,7 +2,7 @@ import Taro, { useLoad } from '@tarojs/taro';
 import { Input, Text, View } from '@tarojs/components';
 import { useRef, useState } from 'react';
 import { DeviceAlarm } from '../../components/alarm-subscription';
-import { Action, Notice } from '../../components/ui';
+import { Action, Notice, RobotIcon } from '../../components/ui';
 import { ApiError, request, errorText, token } from '../../services/api';
 
 type Preference = { interval_seconds: number | null; enabled: boolean; suggested_seconds?: number };
@@ -26,9 +26,13 @@ export default function Notifications() {
     finally { lock.current = false; setBusy(false); }
   }
 
-  const entry = useRef<{ ref?: string; device_id?: string }>({});
+  const entry = useRef<{ ref?: string; device_id?: string; name?: string }>({});
   useLoad(options => {
-    entry.current = options;
+    entry.current = { ...options };
+    if (options.name) {
+      try { entry.current.name = decodeURIComponent(options.name); }
+      catch { entry.current.name = undefined; }
+    }
     void run(loadPreferences);
   });
 
@@ -68,30 +72,39 @@ export default function Notifications() {
     setValue(String(p.interval_seconds ?? p.suggested_seconds ?? 60));
     setEditing(false); setMessage('提醒频率已保存');
   }
-  return <View className='page'>
+  const deviceName = entry.current.ref ? '' : entry.current.name;
+  return <View className='page reminder-page'>
     <Notice error>{error}</Notice><Notice>{message}</Notice>
-    {device && <Text className='alarm-device-id'>设备 {device}</Text>}
+    {device && <View className='reminder-device'>
+      <View className='reminder-avatar' ariaHidden><RobotIcon /></View>
+      <View className='grow'><Text className='reminder-device-name'>{deviceName || device}</Text>
+        <Text className='reminder-caption'>{deviceName ? '设备 ID · ' + device : '设备 ID'}</Text>
+      </View>
+    </View>}
     {labelText !== undefined && <View className='card'><Text>AI 异常提醒 · 识别标签：{labelText}</Text></View>}
     {!pref && busy && <Notice>正在加载设备提醒…</Notice>}
     {!pref && error && <Action disabled={busy} onClick={() => void run(loadPreferences)}>重新加载设备提醒</Action>}
-    {pref && <>
+    {pref && <View className='card reminder-settings'>
       <DeviceAlarm key={device} device={device} />
-      <View className='card reminder-section'>
-        <View className='row between'>
-          <Text className='reminder-heading'>提醒间隔</Text>
-          <Text className='reminder-interval-value'>{(pref.interval_seconds ?? 0) + ' 秒'}</Text>
-        </View>
-        <Text className='muted'>{pref.interval_seconds ? '间隔内的重复异常只提醒一次' : '每次异常都提醒'}</Text>
-        {editing ? <>
-          <Text>最短间隔（秒）</Text>
+      <View className='reminder-section'>
+        <Action ariaLabel={'设置提醒间隔，当前 ' + (pref.interval_seconds ?? 0) + ' 秒'} disabled={busy} onClick={() => {
+          if (editing) setEditing(false);
+          else { setValue(String(pref.interval_seconds ?? pref.suggested_seconds ?? 60)); setEditing(true); }
+        }}>
+          <View className='reminder-line'><View className='reminder-copy'><Text className='reminder-heading'>提醒间隔</Text>
+            <Text className='reminder-caption'>{pref.interval_seconds ? '间隔内的异常只提醒一次' : '每次异常都提醒'}</Text></View>
+            <Text className='reminder-interval-value'>{(pref.interval_seconds ?? 0) + ' 秒'}</Text><Text className='reminder-chevron' ariaHidden>›</Text>
+          </View>
+        </Action>
+        {editing && <View className='reminder-editor'>
+          <Text className='label'>最短间隔（秒）</Text>
           <Input className='input' type='number' maxlength={5} value={value} onInput={e => setValue(e.detail.value)} />
-          <Action primary disabled={busy} onClick={() => void run(() => save(false))}>保存间隔</Action>
-          <Action disabled={busy} onClick={() => setEditing(false)}>取消</Action>
-        </> : <>
-          <Action disabled={busy} onClick={() => { setValue(String(pref.interval_seconds ?? pref.suggested_seconds ?? 60)); setEditing(true); }}>设置提醒间隔</Action>
+          <View className='reminder-editor-actions'><Action primary disabled={busy} onClick={() => void run(() => save(false))}>保存间隔</Action>
+          <Action disabled={busy} onClick={() => setEditing(false)}>取消</Action></View>
+
           {!!pref.interval_seconds && <Action disabled={busy} onClick={() => void run(() => save(true))}>恢复每次提醒</Action>}
-        </>}
+        </View>}
       </View>
-    </>}
+    </View>}
   </View>;
 }

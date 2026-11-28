@@ -40,7 +40,7 @@ test('设备入口顺序和更多菜单保留当前设备', () => {
   assert.equal(buttons.length, 4);
   assert.equal(buttons[0].props.children[0], '消息提醒');
   for (const button of buttons) button.props.onClick();
-  assert.deepEqual(navigation, ['notifications', 'roles', 'recognition', 'contacts'].map(page => '/pages/' + page + '/index?device_id=device%2Fa'));
+  assert.deepEqual(navigation, ['notifications', 'roles', 'recognition', 'contacts'].map(page => '/pages/' + page + '/index?device_id=device%2Fa' + (page === 'notifications' ? '&name=' + encodeURIComponent('测试设备') : '')));
   const room = nodes(tree).find(n => n.props?.title === '多人对讲')!;
   room.props.onClick();
   assert.equal(navigation.at(-1), '/pages/room/index?device_id=device%2Fa');

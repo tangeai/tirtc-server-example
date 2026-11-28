@@ -265,3 +265,21 @@ page,.h5-body,body{margin:0;background:#f7f7f7;color:#191919;font-family:-apple-
 .device-add-icon:before,.device-add-icon:after{content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:currentColor;border-radius:3px}
 .device-add-icon:before{width:24px;height:3px}
 .device-add-icon:after{width:3px;height:24px}
+
+.reminder-page .reminder-device{display:flex;gap:20px;align-items:center;padding:12px 4px 32px}
+.reminder-avatar{display:flex;align-items:center;justify-content:center;width:82px;height:82px;flex-shrink:0;background:#e6f4ec;color:#107647;border-radius:22px}
+.reminder-device-name{display:block;font-size:36px;font-weight:600;overflow-wrap:anywhere}
+.reminder-settings{padding:0 26px}
+.reminder-line{display:flex;align-items:center;gap:16px;width:100%;text-align:left}
+.reminder-copy{flex:1;min-width:0}
+.reminder-heading,.reminder-caption{display:block}
+.reminder-caption{margin-top:4px;color:#657168;font-size:24px;line-height:1.5;font-weight:400;overflow-wrap:anywhere}
+.reminder-active{color:#087a41}
+.reminder-channel{padding:28px 0}
+.reminder-page .reminder-channel .action{line-height:64px;font-size:26px;padding:0 18px}
+.reminder-section{border-top:1px solid #e8ece9;gap:0}
+.reminder-page .reminder-section>.action{padding:25px 0;background:transparent;width:100%;line-height:1.5;white-space:normal}
+.reminder-chevron{color:#89948c;font-size:32px}
+.reminder-editor{padding:0 0 24px}
+.reminder-editor-actions{display:flex;gap:16px;margin:16px 0}
+.reminder-page .reminder-editor-actions .action{flex:1}

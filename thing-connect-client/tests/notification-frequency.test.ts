@@ -39,7 +39,7 @@ for (const [saved, suggested] of [[0, 60], [null, 0], [null, 60], [90, 60]] as c
     function render() { cursor = 0; return nodes(page.default()); }
     render(); onLoad({ device_id: 'fixture' }); await new Promise(r => setImmediate(r));
     assert.equal(render().find(n => n.props.className === 'reminder-interval-value').props.children, (saved ?? 0) + ' 秒');
-    render().find(n => n.props.children === '设置提醒间隔').props.onClick();
+    render().find(n => n.props.ariaLabel?.startsWith('设置提醒间隔')).props.onClick();
     const editing = render();
     assert.equal(editing.find(n => n.type === 'input').props.value, String(saved ?? suggested));
     editing.find(n => n.props.children === '保存间隔').props.onClick();

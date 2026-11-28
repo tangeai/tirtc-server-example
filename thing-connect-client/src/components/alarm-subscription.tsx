@@ -165,13 +165,14 @@ export function DeviceAlarm({ device }: { device: string }) {
   const ready = alarm.channel?.alarm;
   const action = alarm.unavailable ? '重新检查' : alarm.pending ? '重试保存订阅结果' :
     subscribed ? alarm.prepared ? '确认微信授权' : '重新授权' : '开启微信提醒';
-  return <View className='card reminder-section'>
+  return <View className='reminder-channel'><View className='reminder-line'><View className='reminder-copy'>
     <Text className='reminder-heading'>微信异常提醒</Text>
-    <Text>{alarm.unavailable ? '暂时无法读取设备订阅状态' : ready ? subscribed ? '这台设备已开启提醒' : '这台设备尚未开启提醒' : alarm.channel ? '微信异常提醒尚未启用' : '正在读取提醒状态…'}</Text>
-    <Notice error={alarm.failed}>{alarm.notice}</Notice>
+    <Text className={'reminder-caption' + (subscribed ? ' reminder-active' : '')}>{alarm.unavailable ? '暂时无法读取设备订阅状态' : ready ? subscribed ? '这台设备已开启提醒' : '这台设备尚未开启提醒' : alarm.channel ? '微信异常提醒尚未启用' : '正在读取提醒状态…'}</Text>
+    </View>
     {(alarm.unavailable || ready) && <Action primary={!subscribed} disabled={alarm.busy}
       onClick={() => alarm.unavailable ? void alarm.refresh() : void alarm.activate()}>
       {action}
-    </Action>}
+    </Action>}</View>
+    <Notice error={alarm.failed}>{alarm.notice}</Notice>
   </View>;
 }
