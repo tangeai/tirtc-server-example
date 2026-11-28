@@ -8,6 +8,10 @@ import { request, errorText, token } from '../services/api';
 
 type Preference = { interval_seconds: number | null };
 
+function validInterval(value: string) {
+  return /^\d{1,5}$/.test(value) && Number(value) >= 60 && Number(value) <= 86400;
+}
+
 export function RecognitionReminders({ device, enabled }: { device: string; enabled: boolean }) {
   const path = '/v1/push/user/preferences/' + encodeURIComponent(device) + '/alarm';
   const owner = token();
@@ -23,7 +27,7 @@ export function RecognitionReminders({ device, enabled }: { device: string; enab
     try {
       const p = await request<Preference>(path);
       if (!mounted.current) return;
-      saved.current = p.interval_seconds ?? 0;
+      saved.current = Math.max(60, p.interval_seconds ?? 60);
       draft.current = String(saved.current);
       setValue(draft.current);
     } catch (e) { if (mounted.current) setError(errorText(e)); }
@@ -33,8 +37,8 @@ export function RecognitionReminders({ device, enabled }: { device: string; enab
     clearTimeout(timer.current);
     if (writing.current || token() !== owner) return;
     const text = draft.current;
-    if (!/^\d{1,5}$/.test(text) || Number(text) > 86400) {
-      if (mounted.current) setError(tr("请输入 0 至 86400 的整数秒"));
+    if (!validInterval(text)) {
+      if (mounted.current) setError(tr("请输入 60 至 86400 的整数秒"));
       return;
     }
     if (Number(text) === saved.current) return;
@@ -42,7 +46,7 @@ export function RecognitionReminders({ device, enabled }: { device: string; enab
     if (mounted.current) { setError(''); setStatus(tr("保存中…")); }
     try {
       const p = await request<Preference>(path, 'PUT', { interval_seconds: Number(text) });
-      saved.current = p.interval_seconds ?? 0;
+      saved.current = Math.max(60, p.interval_seconds ?? 60);
       if (mounted.current && draft.current === text) {
         draft.current = String(saved.current);
         setValue(draft.current); setStatus(tr("已保存"));
@@ -77,20 +81,20 @@ export function RecognitionReminders({ device, enabled }: { device: string; enab
     {process.env.TARO_ENV === 'weapp' ? <DeviceAlarm device={device} enabled={enabled} /> : <Text className='muted'>{tr("请在微信小程序中授权接收此设备的异常提醒。")}</Text>}
     {value !== undefined && <View className='reminder-interval-row reminder-line'>
       <View className='reminder-copy'><Text className='reminder-heading'>{tr("提醒间隔")}<Text className='interval-status'>{status}</Text></Text>
-        <Text className='reminder-caption'>{tr("填 0 表示每次异常都提醒。")}{!enabled && tr("开启 AI 识别后生效。")}</Text></View>
-      <Input className='reminder-seconds-input' ariaLabel={tr("提醒间隔（秒）")} type='number' maxlength={5}
+        <Text className='reminder-caption'>{tr("同类提醒至少间隔 60 秒，最长 24 小时。")}{!enabled && tr("开启 AI 识别后生效。")}</Text></View>
+      <Input className='reminder-seconds-input' ariaLabel={tr("提醒间隔（秒）")} type='number'
         value={value} onInput={e => edit(e.detail.value)} onBlur={() => void flush()} onConfirm={() => void flush()} />
       <Text>{tr("秒")}</Text>
     </View>}
     {value !== undefined && <View className='interval-presets'>
-      {([['每次', 0], ['1 分钟', 60], ['5 分钟', 300], ['30 分钟', 1800]] as const).map(([label, seconds]) =>
+      {([['1 分钟', 60], ['5 分钟', 300], ['10 分钟', 600]] as const).map(([label, seconds]) =>
         <Button key={seconds} className={'interval-preset' + (value !== '' && Number(value) === seconds ? ' active' : '')}
           onClick={() => edit(String(seconds), true)}>{tr(label)}</Button>)}
     </View>}
     {value === undefined && !error && <Notice>{tr("正在加载提醒间隔…")}</Notice>}
     <Notice error>{error}</Notice>
     {error && value === undefined && <Action onClick={() => void load()}>{tr("重新加载提醒间隔")}</Action>}
-    {error && value !== undefined && /^\d{1,5}$/.test(value) && Number(value) <= 86400 &&
+    {error && value !== undefined && validInterval(value) &&
       <Action onClick={() => void flush()}>{tr("重试保存间隔")}</Action>}
   </View></View>;
 }

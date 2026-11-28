@@ -89,7 +89,7 @@ func (s *Service) subscribe(ctx context.Context, user int64, app, code, kind, de
 	return s.Prepare(ctx, user, app, open, s.policy.Template(kind).ID)
 }
 func (s *Service) TemplateID(kind string) string { return s.policy.Template(kind).ID }
-func (s *Service) SuggestedSeconds() int         { return s.policy.SuggestedSeconds }
+func (s *Service) SuggestedSeconds() int         { return max(MinIntervalSeconds, s.policy.SuggestedSeconds) }
 
 // AlarmGrant reports the account's current grant for the configured delivery target.
 func (s *Service) AlarmGrant(ctx context.Context, user int64, device string) (bool, error) {

@@ -739,21 +739,44 @@ validate_configs() {
 }
 
 # ================== 拉代码 ==================
-pull_code() {
-    local worktree_status
-    log "拉取代码..."
+prepare_main_source() {
+    local mode="$1" branch upstream worktree_status target head
+
     [ -d "$REPO_PATH/.git" ] || {
         err "日常发布源码不存在: $REPO_PATH"
         err "请先按 deployment.md 运行 install.sh 完成首次安装"
         return 1
     }
+    if [ ! "$BUILD_DIR" -ef "$REPO_PATH/thing-connect" ]; then
+        err "生产构建目录必须属于发布仓库: $REPO_PATH/thing-connect"
+        return 1
+    fi
+    branch="$(git -C "$REPO_PATH" symbolic-ref -q HEAD)" || branch=""
+    upstream="$(git -C "$REPO_PATH" rev-parse --symbolic-full-name '@{upstream}' 2>/dev/null)" || upstream=""
+    if [ "$branch" != refs/heads/main ] || [ "$upstream" != refs/remotes/origin/main ]; then
+        err "生产发布只允许本地 main 跟踪 origin/main，请核对 $REPO_PATH"
+        return 1
+    fi
     worktree_status="$(git -C "$REPO_PATH" status --porcelain --untracked-files=normal)" || return 1
     if [ -n "$worktree_status" ]; then
         err "源码目录存在未提交修改，拒绝覆盖: $REPO_PATH"
         return 1
     fi
-    git -C "$REPO_PATH" pull --ff-only || return 1
-    log "待发布版本: $(git -C "$REPO_PATH" rev-parse HEAD)"
+    git -C "$REPO_PATH" fetch origin refs/heads/main:refs/remotes/origin/main || return 1
+    target="$(git -C "$REPO_PATH" rev-parse refs/remotes/origin/main)" || return 1
+    if [ "$mode" = update ]; then
+        git -C "$REPO_PATH" merge --ff-only "$target" || return 1
+    fi
+    head="$(git -C "$REPO_PATH" rev-parse HEAD)" || return 1
+    if [ "$head" != "$target" ]; then
+        err "本地 HEAD 与 origin/main 不一致，拒绝使用该提交发布"
+        return 1
+    fi
+    log "待发布版本: $head (origin/main)"
+}
+
+pull_code() {
+    prepare_main_source update
 }
 
 # ================== 编译 ==================
@@ -1783,6 +1806,7 @@ pull_action() {
 }
 
 build_action() {
+    prepare_main_source verify || return 1
     validate_paths || return 1
     run_batch build "${ALL_SERVICES[@]}" || return 1
     validate_build_release "${ALL_SERVICES[@]}" || return 1
@@ -1790,7 +1814,9 @@ build_action() {
 }
 
 deploy_files_action() {
+    prepare_main_source verify || return 1
     validate_paths || return 1
+    validate_build_release "${ALL_SERVICES[@]}" || return 1
     validate_configs || return 1
     run_batch deploy "${ACTIVE_SERVICES[@]}" || return 1
     publish_service_catalog || return 1
@@ -1816,6 +1842,8 @@ restart_action() {
 
 migrate_action() {
 	local status
+    prepare_main_source verify || return 1
+    validate_build_release admin-server || return 1
     validate_paths || return 1
     validate_release_options || return 1
 	if run_migrations; then

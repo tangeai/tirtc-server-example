@@ -9,9 +9,9 @@ export function CodeInput({ value, onChange, disabled, focus = false, label = '6
   const [focused, setFocused] = useState(false);
   return <View className={'code-input' + (disabled ? ' is-disabled' : '')}>
     <View className='code-cells' ariaHidden>
-      {Array.from({ length: 6 }, (_, index) => <View key={index} className={'code-cell' + (focused && index === Math.min(value.length, 5) ? ' is-active' : '')}><Text>{value[index] || ''}</Text></View>)}
+      {Array.from({ length: 6 }, (_, index) => <View key={index} className={'code-cell' + (focused && index === Math.min(value.length, 5) ? ' is-active' : '')}>{focused && index === value.length ? <View className='code-cell-caret' /> : <Text>{value[index] || ''}</Text>}</View>)}
     </View>
-    <Input className='code-native-input' ariaLabel={label} type='number' maxlength={6} value={value} disabled={disabled} focus={focus}
+    <Input className='code-native-input' ariaLabel={label} cursorColor='transparent' type='number' maxlength={6} value={value} disabled={disabled} focus={focus}
       onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
       onInput={event => onChange(event.detail.value.normalize('NFKC').replace(/\D/g, '').slice(0, 6))} />
   </View>;

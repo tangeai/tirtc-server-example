@@ -625,6 +625,8 @@ test_running_admin_is_restarted_after_init() (
 )
 
 test_initialize_admin_is_noninteractive_and_refreshes_running_service() (
+    prepare_main_source() { :; }
+    validate_build_release() { :; }
     local capture="$TEST_ROOT/admin-init.capture"
     mkdir -p "$TEST_ROOT/admin-server"
     cat >"$TEST_ROOT/admin-server/admin-server" <<'BASH'
@@ -846,6 +848,46 @@ test_first_install_is_not_a_deploy_command() {
         exit 1
     }
 }
+
+test_production_only_releases_origin_main() (
+    set -e
+    local root="$TEST_ROOT/main-only" remote seed
+    mkdir -p "$root"
+    remote="$root/remote.git"
+    seed="$root/seed"
+    REPO_PATH="$root/checkout"
+    BUILD_DIR="$REPO_PATH/thing-connect"
+    git init -q --bare -b main "$remote"
+    git clone -q "$remote" "$seed"
+    git -C "$seed" config user.name test
+    git -C "$seed" config user.email test@localhost
+    mkdir -p "$seed/thing-connect"
+    touch "$seed/thing-connect/go.mod"
+    git -C "$seed" add .
+    git -C "$seed" -c commit.gpgSign=false commit -qm initial
+    git -C "$seed" push -q origin main main:feature
+    git clone -q "$remote" "$REPO_PATH"
+    git -C "$seed" -c commit.gpgSign=false commit --allow-empty -qm next
+    git -C "$seed" push -q origin main
+    if prepare_main_source verify; then exit 1; fi
+    pull_code
+    assert_eq "$(git -C "$seed" rev-parse HEAD)" "$(git -C "$REPO_PATH" rev-parse HEAD)" "must fast-forward to origin/main"
+    prepare_main_source verify
+    git -C "$REPO_PATH" switch -qc feature --track origin/feature
+    validate_paths() { echo reached-build >> "$root/unexpected"; }
+    for cmd in pull_code build_action deploy_files_action migrate_action; do
+        if "$cmd"; then exit 1; fi
+    done
+    [ ! -e "$root/unexpected" ]
+    git -C "$REPO_PATH" switch -q --detach
+    if pull_code; then exit 1; fi
+    git -C "$REPO_PATH" switch -q main
+    git -C "$REPO_PATH" branch --set-upstream-to=origin/feature main
+    if pull_code; then exit 1; fi
+    git -C "$REPO_PATH" branch --set-upstream-to=origin/main main
+    git -C "$REPO_PATH" -c user.name=test -c user.email=test@localhost -c commit.gpgSign=false commit --allow-empty -qm unpublished
+    if pull_code; then exit 1; fi
+)
 
 test_pull_never_clones_missing_daily_source() (
     local result=0 output
@@ -1196,6 +1238,8 @@ BASH
 )
 
 test_standalone_migration_failure_quiesces_services() (
+    prepare_main_source() { :; }
+    validate_build_release() { :; }
     local capture="$TEST_ROOT/migrate-quiesce.capture" result=0
     validate_paths() { return 0; }
     validate_release_options() { return 0; }
@@ -1403,6 +1447,7 @@ test_deploy_lock_is_scoped_to_one_mutating_command
 test_menu_starts_with_maintenance_update
 test_first_install_is_not_a_deploy_command
 test_pull_never_clones_missing_daily_source
+test_production_only_releases_origin_main
 test_optional_services_are_not_treated_as_installed_without_config
 test_status_reports_every_service_even_when_one_is_missing
 test_migration_requires_runtime_target_match_and_reports_schema_change

@@ -3,6 +3,7 @@ package mysql_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -85,6 +86,17 @@ func TestPushLongSubscriptionLifecycle(t *testing.T) {
 	wg.Wait()
 	e.ID = "three:alarm"
 	admit(e, "interval")
+	for i, old := range []any{nil, 0, 59} {
+		if _, err := db.Exec("UPDATE push_window SET interval_seconds=? WHERE device_id=?", old, device); err != nil {
+			t.Fatal(err)
+		}
+		value, err := s.Preference(ctx, user, device, "alarm", false, nil)
+		if err != nil || (old == nil && value != nil) || (old != nil && (value == nil || *value != 60)) {
+			t.Fatalf("legacy interval %v: got %v, %v", old, value, err)
+		}
+		e.ID = fmt.Sprintf("legacy-%d:alarm", i)
+		admit(e, "interval")
+	}
 	legacy, _, err := s.Prepare(ctx, user, "app", "openid-"+device, push.AlarmTemplate)
 	if err != nil {
 		t.Fatal(err)

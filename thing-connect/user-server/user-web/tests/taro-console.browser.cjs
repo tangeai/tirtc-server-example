@@ -15,6 +15,7 @@ async function verify(browser, width) {
   let submitted;
   let registration;
   let recognitionEnabled = false;
+  const savedIntervals = [];
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   try {
@@ -42,9 +43,13 @@ async function verify(browser, width) {
         if (pathname === '/v1/config/captcha') data = { enabled: false, provider: 'yidun' };
         if (pathname === '/v1/user/login') { submitted = route.request().postDataJSON(); data = { token: 'fixture' }; }
         if (pathname === '/v1/user/register') { registration = route.request().postDataJSON(); data = { token: 'fixture' }; }
+        if (pathname === '/v1/user/quota') data = { quota: 1 };
         if (pathname === '/v1/user/me') data = { email: 'fixture@example.test' };
         if (pathname === '/v1/recognition/types') data = [];
-        if (pathname.endsWith('/alarm')) data = { interval_seconds: 60 };
+        if (pathname.endsWith('/alarm')) {
+          if (route.request().method() === 'PUT') savedIntervals.push(route.request().postDataJSON().interval_seconds);
+          data = { interval_seconds: savedIntervals.at(-1) ?? null };
+        }
         if (pathname.includes('/conversations')) data = { items: [], page: 1, has_more: false };
         if (pathname === '/v1/ai/roles') data = { items: [{ id: 'test-role', name: '测试角色' }, { id: 'spare', name: '备用角色' }] };
         if (pathname === '/v1/ai/roles/spare' && route.request().method() === 'DELETE') deletedRoles++;
@@ -83,6 +88,32 @@ async function verify(browser, width) {
     await page.keyboard.press('Escape');
     await guide.waitFor({state:'hidden'});
     const readsBeforeLeaving = deviceReads;
+    for (const [route, label, menu] of [
+      ['/bind', '添加设备'], ['/agent', 'AI 角色'], ['/recognition', 'AI 识别'],
+      ['/contacts', '联系人'], ['/room', '多人对讲', true], ['/history', 'AI 对话记录', true],
+    ]) {
+      if (menu) await states.locator('.device-head .action').click();
+      await page.evaluate(() => {
+        const previous = new Set(document.querySelectorAll('.taro_page'));
+        window.nextPageFrame = new Promise(resolve => {
+          const observer = new MutationObserver(() => {
+            const container = [...document.querySelectorAll('.taro_page')].find(el => !previous.has(el) && el.querySelector('.page'));
+            if (!container) return;
+            observer.disconnect();
+            requestAnimationFrame(() => resolve(container.getBoundingClientRect().left));
+          });
+          observer.observe(document.body, {childList:true, subtree:true});
+        });
+      });
+      const link = route === '/bind' ? page.getByRole('button', {name:label, exact:true})
+        : page.locator(menu ? '.device-menu-item' : '.device-feature-links .action').filter({hasText:label});
+      await link.click();
+      await page.waitForURL(url => url.pathname === route);
+      await page.waitForFunction(() => window.nextPageFrame.then(x => Math.abs(x) < 1), null, {timeout:3000});
+      await page.goBack();
+      await page.getByText('客厅', { exact:true }).waitFor();
+      assert.equal(deviceReads, readsBeforeLeaving, route + ' back should restore the device list');
+    }
     await page.goto(site + '/account');
     await page.goBack();
     await page.getByText('客厅', { exact: true }).waitFor();
@@ -121,6 +152,27 @@ async function verify(browser, width) {
     await page.locator('.sheet taro-button-core').filter({ hasText: '关闭' }).click();
     await page.getByText('地图工具详情', { exact: true }).waitFor({ state: 'hidden' });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await page.locator('.resource-disclosure').filter({ hasText: '设备插件' }).click();
+    await page.getByRole('button', {name:'新建设备插件'}).click();
+    for (const add of await page.locator('.sheet').getByText('添加参数', {exact:true}).all()) await add.click();
+    const params = page.locator('.sheet .role-param-card');
+    assert.equal(await params.count(), 2);
+    for (const card of await params.all()) {
+      const controls = card.locator('.input,.textarea');
+      assert.equal(await controls.count(), 5);
+      for (const field of await controls.all()) {
+        assert.ok(await field.evaluate(el => {
+          const css = getComputedStyle(el);
+          return css.borderStyle === 'solid' && parseFloat(css.borderWidth) >= 1 &&
+            css.backgroundColor !== getComputedStyle(el.closest('.role-param-card')).backgroundColor;
+        }), 'Empty parameter controls need a visible boundary');
+      }
+      const input = card.locator('input').first();
+      await input.fill('sample');
+      assert.equal(await input.inputValue(), 'sample');
+    }
+    await page.locator('.sheet').getByText('关闭', {exact:true}).click();
+    await page.locator('.taro-model__confirm').click();
     const brand = await page.locator('.console-brand').boundingBox();
     const menu = await page.locator('.console-nav summary').boundingBox();
     assert.ok(brand && menu && brand.x + brand.width <= menu.x && menu.x + menu.width <= width);
@@ -135,10 +187,17 @@ async function verify(browser, width) {
         const group = await cells.boundingBox(), card = await page.locator('.bind-page .card').boundingBox();
         assert.ok(group && card && Math.abs(group.x + group.width / 2 - card.x - card.width / 2) <= 1);
         await page.locator('.code-input').click();
+        await cells.locator('.code-cell').first().locator('.code-cell-caret').waitFor();
+        const bind = page.getByRole('button', { name:'绑定设备', exact:true });
+        assert.equal(await bind.isDisabled(), true);
         await page.keyboard.type('123456');
+        assert.equal(await bind.isDisabled(), false);
         assert.equal((await cells.locator('.code-cell').allTextContents()).join(''), '123456');
         await page.keyboard.press('Backspace');
         assert.equal((await cells.locator('.code-cell').allTextContents()).join(''), '12345');
+        await cells.locator('.code-cell').last().locator('.code-cell-caret').waitFor();
+        await page.getByText(/如何获取绑定码/).click();
+        await page.getByText('给已安装小钛固件的设备通电。').waitFor();
       }
       if (route === '/contacts') {
         const bar = page.locator('.web-search');
@@ -158,7 +217,25 @@ async function verify(browser, width) {
         await bar.getByRole('button').click();
         assert.equal(await input.inputValue(), '');
       }
-      if (route === '/recognition') await page.getByText('请在微信小程序中授权接收此设备的异常提醒。').waitFor();
+      if (route === '/recognition') {
+        await page.getByText('请在微信小程序中授权接收此设备的异常提醒。').waitFor();
+        const input = page.locator('.reminder-seconds-input input');
+        assert.equal(await input.inputValue(), '60');
+        for (const value of ['59', '86401']) {
+          await input.fill(value);
+          await input.blur();
+          await page.getByText('请输入 60 至 86400 的整数秒').waitFor();
+        }
+        assert.deepEqual(savedIntervals, []);
+        for (const label of ['5 分钟', '10 分钟', '1 分钟']) {
+          await page.getByText(label, { exact: true }).click();
+          await page.getByText('已保存', {exact:true}).waitFor();
+        }
+        await input.fill('86400');
+        await input.blur();
+        await page.getByText('已保存', {exact:true}).waitFor();
+        assert.deepEqual(savedIntervals, [300, 600, 60, 86400]);
+      }
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, width + ' ' + route);
     }
     await page.goto(site + '/forgot-password');

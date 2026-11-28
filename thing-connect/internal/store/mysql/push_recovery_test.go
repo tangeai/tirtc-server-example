@@ -174,6 +174,7 @@ func TestWechatCooldownUsesOneProbeAndRamps(t *testing.T) {
 	})
 	var tasks []push.Delivery
 	for _, id := range []string{"first", "probe", "peer", "last"} {
+		exec("UPDATE push_window SET last_admitted=UTC_TIMESTAMP()-INTERVAL 2 MINUTE WHERE device_id=?", dev)
 		now := time.Now().UTC()
 		e := push.Event{ID: id + ":alarm", Kind: "alarm", Device: dev, Bind: bind, Registered: now, Occurred: now, Expires: now.Add(time.Minute)}
 		if got, err := s.Admit(ctx, e, app, "template"); err != nil || got != "queued" {
