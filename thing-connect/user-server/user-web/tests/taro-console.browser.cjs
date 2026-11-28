@@ -65,11 +65,11 @@ async function verify(browser, width) {
     assert.equal(await page.locator('.device-count').innerText(), '（1 台）');
     assert.equal(await page.evaluate(() => localStorage.getItem('token')), 'fixture');
     const states = page.locator('.device-list-grid>.card').first();
-    await states.locator('.device-link-status').filter({hasText:'已关闭'}).waitFor();
-    await states.getByText('0 位', { exact: true }).waitFor();
+    await states.locator('.action').filter({hasText:'AI 识别'}).locator('.device-status-dot.off').waitFor();
+    await states.getByText('(0)', { exact: true }).waitFor();
     recognitionEnabled = true;
     await page.locator('.devices-page .action').filter({ hasText: /^刷新$/ }).click();
-    await states.locator('.device-link-status.active').filter({hasText:'已开启'}).waitFor();
+    await states.locator('.action').filter({hasText:'AI 识别'}).locator('.device-status-dot.on').waitFor();
     const readsBeforeLeaving = deviceReads;
     await page.goto(site + '/account');
     await page.goBack();

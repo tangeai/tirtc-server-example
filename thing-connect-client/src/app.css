@@ -345,6 +345,9 @@ page,.h5-body,body{margin:0;background:#f7f7f7;color:#191919;font-family:-apple-
 
 .device-role-line{display:flex;flex-wrap:wrap;align-items:baseline;margin-top:18px;font-size:26px;color:#68766e}
 .dashboard-role-name{font-weight:600;color:#233a2c;overflow-wrap:anywhere}
-.devices-page .device-feature-links .action{padding:12px 0;line-height:1.5}
-.device-link-status{display:block;font-size:23px;font-weight:400;color:#66736b}
-.device-link-status.active{color:#087944}
+.devices-page .device-feature-links .action{display:flex;align-items:center;justify-content:center;gap:8px;min-height:76px;padding:8px 0;line-height:1.4;white-space:nowrap}
+.device-status-dot{display:inline-block;box-sizing:border-box;width:14px;height:14px;flex-shrink:0;border-radius:50%}
+.device-status-dot.on{background:#078544}
+.device-status-dot.off{background:#909992}
+.device-status-dot.unknown{border:2px solid #909992}
+.device-contact-count{font-variant-numeric:tabular-nums;color:#56635a}

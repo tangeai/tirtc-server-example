@@ -158,13 +158,18 @@ export default function Devices() {
         const links = [
           { page: 'roles', title: 'AI 角色', active: summary?.hasRole, status: summary?.hasRole == null ? unknown : tr(summary.hasRole ? '使用中' : '未设置') },
           { page: 'recognition', title: 'AI 识别', active: summary?.recognition, status: summary?.recognition == null ? unknown : tr(summary.recognition ? '已开启' : '已关闭') },
-          { page: 'contacts', title: '联系人', active: !!summary?.contacts, status: summary?.contacts == null ? unknown : summary.contacts === 1 ? tr('1 位') : summary.contacts + tr(' 位') },
+          { page: 'contacts', title: '联系人', status: summary?.contacts == null ? unknown : summary.contacts === 1 ? tr('1 位') : summary.contacts + tr(' 位') },
         ];
         return <View className='card' key={device.device_id}><View className='device-head'><View className={'device-symbol ' + (device.online ? 'device-symbol-online' : 'device-symbol-offline')}><RobotIcon /><Text className='device-symbol-status'>{device.online ? tr("在线") : tr("离线")}</Text></View><View className='grow device-summary'><View className='device-title-row'>{device.device_name?.trim() ? <Text className='device-name'>{device.device_name}</Text> : <Button className='device-name-setup' disabled={busy} ariaLabel={tr("设置设备名称：") + device.device_id} onClick={() => openRename(device)}><Text>{tr("设置名称")}</Text><View className='device-name-edit-icon' ariaHidden /></Button>}</View><Text className='device-id'>ID: {device.device_id}</Text></View><Action disabled={busy} onClick={() => setMenu(device)}>⋯</Action></View>
         <View className='device-role-line'><Text>{tr('AI 角色：')}</Text><Text className='dashboard-role-name'>{summary?.roleName || (summary?.hasRole === false ? tr('未设置') : unknown)}</Text></View>
         <View className='device-actions device-primary-actions'>{capabilities.platform === 'weapp' && <Action primary muted={!device.online && !needsAuthorization(device)} disabled={busy || loading} onClick={() => void media(needsAuthorization(device) ? 'authorize' : 'wechat-call', device)}><View className='device-primary-label'><View className={'device-action-icon ' + (needsAuthorization(device) ? 'device-action-shield' : 'device-action-phone')} ariaHidden />{callLabel(device)}</View></Action>}<Action muted={!device.online} disabled={busy || !capabilities.playback} onClick={() => void media('playback', device)}><View className='device-primary-label'><View className='device-action-icon device-action-play' ariaHidden />{tr("实时查看")}</View></Action></View>
         <View className='device-feature-links'>
-          {links.map(({ page, title, status, active }) => <Action key={page} onClick={() => void Taro.navigateTo({ url: '/pages/' + page + '/index?device_id=' + encodeURIComponent(device.device_id) })}>{tr(title)}<Text className='device-link-arrow'>›</Text><Text className={'device-link-status' + (active ? ' active' : '')}>{status}</Text></Action>)}</View>
+          {links.map(({ page, title, status, active }) => <Action key={page} ariaLabel={tr(title) + ' ' + status}
+            onClick={() => void Taro.navigateTo({ url: '/pages/' + page + '/index?device_id=' + encodeURIComponent(device.device_id) })}>
+            {tr(title)}{page === 'contacts'
+              ? <Text className='device-contact-count'>({summary?.contacts ?? '…'})</Text>
+              : <Text ariaHidden className={'device-status-dot ' + (active == null ? 'unknown' : active ? 'on' : 'off')} />}
+          </Action>)}</View>
       </View>; })}</View>
     {menu && <View className='mask device-more-mask' onClick={() => setMenu(undefined)}><View className='device-more-sheet' onClick={e => e.stopPropagation()}><View className='device-more-header'><Text className='device-more-title'>{tr("更多操作")}</Text><Text className='device-more-subtitle'>{menu.device_name || tr("未命名设备")}</Text></View><View className='device-more-scroll'>
       <View className='device-menu-list'>
