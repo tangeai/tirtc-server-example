@@ -1,5 +1,5 @@
 import Taro from '@tarojs/taro';
-import { Switch, Text, View } from '@tarojs/components';
+import { Button, Switch, Text, View } from '@tarojs/components';
 import { useEffect, useRef, useState } from 'react';
 import { Action, Notice, Sheet } from '../../components/ui';
 import { errorText, request } from '../../services/api';
@@ -55,19 +55,31 @@ export function RoleResources({ kind, selected, change, disabled, readonly, name
     } catch(e){if(alive.current)setError(errorText(e));}
     finally {locked.current=false;if(alive.current)setBusy(false);}
   }
+  async function manageTool(item: Reference) {
+    if (disabled || locked.current) return;
+    const choice = await Taro.showActionSheet({ itemList: ['编辑工具', '删除工具'] }).catch(() => undefined);
+    if (!choice || !alive.current) return;
+    if (choice.tapIndex === 0) setEditing({ id: item.id });
+    else if (choice.tapIndex === 1) await remove(item);
+  }
   const catalog=new Map([...names,...shared,...owned].map(r=>[r.id,r]));
   const ids=readonly ? selected : [...new Set([...selected,...catalog.keys()])];
-  return <View className='card role-resource-group'>
+  return <View className={'card role-resource-group' + (kind === 'mcp' ? ' role-tool-list' : '')}>
     <View className='row between'><Text className='label'>{title}</Text>{!readonly && <Action disabled={busy || disabled} onClick={()=>setEditing({})}>新建{title}</Action>}</View>
     {ids.map(id=>{
       const item=catalog.get(id), on=selected.includes(id);
       const manageable=!readonly && owned.some(r=>r.id===id);
+      const toolLink = kind === 'mcp' && item && (manageable || shared.some(tool => tool.id === id));
       return <View className='role-resource-item' key={id}>
-        <View className='row between'><Text className='device-page-name'>{item?.name || id}</Text>
+        <View className='row between'>
+          {toolLink ? <Button className='settings-link role-tool-link' disabled={busy || (disabled && !readonly)}
+            ariaLabel={(manageable ? '管理工具 ' : '查看工具 ') + (item.name || id)}
+            onClick={() => manageable ? void manageTool(item) : void showGlobalTool(id)}>
+            <Text className='role-tool-name'>{item.name || id}</Text><View className='settings-chevron' ariaHidden />
+          </Button> : <Text className='device-page-name'>{item?.name || id}</Text>}
           <Switch ariaLabel={item?.name || id} color='#07c160' checked={on} disabled={disabled || busy || (!on && item?.enabled===false)}
             onChange={e=>change(e.detail.value ? kind==='knowledge' ? [id] : [...new Set([...selected,id])] : selected.filter(v=>v!==id))}/></View>
-        {!manageable && kind === 'mcp' && shared.some(r => r.id === id) && <Action disabled={busy} onClick={() => void showGlobalTool(id)}>查看工具</Action>}
-        {manageable && <View className='row'><Action disabled={disabled || busy} onClick={()=>setEditing({id})}>编辑</Action>
+        {manageable && kind !== 'mcp' && <View className='row'><Action disabled={disabled || busy} onClick={()=>setEditing({id})}>编辑</Action>
           <Action danger disabled={disabled || busy} onClick={()=>void remove(item!)}>删除</Action></View>}
       </View>;
     })}
