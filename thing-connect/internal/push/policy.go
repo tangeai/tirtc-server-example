@@ -22,6 +22,9 @@ type Template struct {
 	DeviceKey   string `json:"device_key" yaml:"device_key"`
 }
 
+const MinIntervalSeconds = 60
+const MaxIntervalSeconds = 86400
+
 type Policy struct {
 	Alarm            Template `json:"alarm" yaml:"alarm"`
 	AppID            string   `json:"app_id" yaml:"app_id"`

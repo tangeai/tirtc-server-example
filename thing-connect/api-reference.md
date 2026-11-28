@@ -7710,7 +7710,7 @@ speech.url 为识别服务相对路径，相对 recognition-srv 解析，并携�
 | `device` | 设备编号 |
 | `kind` | 提醒类型，AI 异常提醒使用 alarm |
 
-提交整数 interval_seconds，范围 0 至 86400。0 表示每个新事件均通过间隔检查，发送仍需有效订阅、剩余时效和队列容量。
+提交整数 `interval_seconds`，允许 60 至 86400 秒，包含两端。未设置或历史设置低于 60 秒时按 60 秒限频。发送仍需有效订阅、剩余时效和队列容量。
 
 <a id="push-delete-user-preferences-device-kind"></a>
 
@@ -7725,7 +7725,7 @@ speech.url 为识别服务相对路径，相对 recognition-srv 解析，并携�
 | `device` | 设备编号 |
 | `kind` | 提醒类型，AI 异常提醒使用 alarm |
 
-删除成功后 `interval_seconds` 为 null，后续新事件立即按每次提醒判断。客户端按 `suggested_seconds` 预填（默认 60 秒），用户另行保存才启用该间隔。
+删除成功后 `interval_seconds` 为 null，后续同类事件按默认 60 秒间隔判断。
 
 <a id="push-post-user-subscriptions"></a>
 

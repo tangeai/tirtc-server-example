@@ -9,12 +9,13 @@ import { devicesChanged } from '../../services/device-events';
 export default function Bind() {
   usePageLanguage();
   const [mode, setMode] = useState('code'), [value, setValue] = useState(''), [busy, setBusy] = useState(false), [error, setError] = useState('');
+  const [helpOpen, setHelpOpen] = useState(false);
   const lock = useRef(false), alive = useRef(true);
   useEffect(() => () => { alive.current = false; }, []);
   async function submit() {
     if (lock.current) return;
     const input = value.trim().toUpperCase();
-    if (mode === 'code' ? !/^\d{6}$/.test(input) : !input) { setError(mode === 'code' ? '请输入 6 位数字验证码' : '请输入设备 ID'); return; }
+    if (mode === 'code' ? !/^\d{6}$/.test(input) : !input) { setError(mode === 'code' ? '请输入 6 位设备绑定码' : '请输入设备 ID'); return; }
     lock.current = true; setBusy(true); setError('');
     try {
       await request(mode === 'code' ? '/v1/user/device/bind' : '/v1/user/device/bind-by-id', 'POST', mode === 'code' ? { code: input } : { device_id: input });
@@ -33,7 +34,13 @@ export default function Bind() {
       if (alive.current) setValue(id.toUpperCase());
     } catch { /* User cancellation leaves the input unchanged. */ }
   }
-  return <View className='page content-page bind-page'><View className='tabs'>{[['code', '验证码绑定'], ['id', '设备 ID 绑定']].map(([key, label]) => <Action key={key} primary={mode === key} disabled={busy} onClick={() => { setMode(key); setValue(''); setError(''); }}>{tr(label)}</Action>)}</View>
-    <View className='card'><Text className='title'>{tr("绑定你的设备")}</Text><Text className='muted'>{mode === 'code' ? tr("设备开机联网后，输入屏幕显示或语音播报的 6 位验证码。") : process.env.TARO_ENV === 'weapp' ? tr("输入设备 ID，或扫描设备二维码。") : tr("输入设备 ID。")}</Text>{mode === 'code' ? <View className='field bind-code-field'><Text className='label'>{tr("6 位验证码")}</Text><CodeInput focus value={value} disabled={busy} onChange={setValue} label={tr("6 位设备绑定码")} /></View> : <Field focus label={tr("设备 ID")} value={value} disabled={busy} onChange={v => setValue(v.toUpperCase())} />}
-    {mode === 'id' && process.env.TARO_ENV === 'weapp' && <Action disabled={busy} onClick={() => void scan()}>{tr("扫码识别")}</Action>}<Notice error>{error}</Notice><View className='wide'><Action primary disabled={busy} onClick={() => void submit()}>{busy ? tr("绑定中…") : tr("绑定设备")}</Action></View></View></View>;
+  return <View className='page content-page bind-page'><View className='tabs'>{[['code', '使用绑定码'], ['id', '设备 ID 绑定']].map(([key, label]) => <Action key={key} primary={mode === key} disabled={busy} onClick={() => { setMode(key); setValue(''); setError(''); }}>{tr(label)}</Action>)}</View>
+    <View className='card'><Text className='title'>{tr("绑定设备")}</Text><Text className='muted'>{mode === 'code' ? tr("设备联网后，输入屏幕显示或语音播报的绑定码。") : process.env.TARO_ENV === 'weapp' ? tr("输入设备 ID，或扫描设备二维码。") : tr("输入设备 ID。")}</Text>{mode === 'code' ? <View className='field bind-code-field'><Text className='label'>{tr("设备绑定码（6 位数字）")}</Text><CodeInput focus value={value} disabled={busy} onChange={setValue} label={tr("6 位设备绑定码")} /><Text className='muted'>{tr("绑定码默认 3 分钟内有效，过期后请获取新码。")}</Text></View> : <Field focus label={tr("设备 ID")} value={value} disabled={busy} onChange={v => setValue(v.toUpperCase())} />}
+    {mode === 'id' && process.env.TARO_ENV === 'weapp' && <Action disabled={busy} onClick={() => void scan()}>{tr("扫码识别")}</Action>}<Notice error>{error}</Notice><View className='wide'><Action primary disabled={busy || (mode === 'code' ? value.length !== 6 : !value.trim())} onClick={() => void submit()}>{busy ? tr("绑定中…") : tr("绑定设备")}</Action></View>
+      {mode === 'code' && <View className='bind-help'>
+        <Action onClick={() => setHelpOpen(open => !open)}>{(helpOpen ? '▾ ' : '▸ ') + tr("如何获取绑定码？")}</Action>
+        {helpOpen && <View className='bind-help-copy'><Text className='muted'>{tr("给已安装小钛固件的设备通电。")}</Text>
+          <Text className='muted'>{tr("Wi-Fi 设备先配网，4G 设备插入可用的 SIM 卡，等待联网。")}</Text></View>}
+      </View>}
+    </View></View>;
 }

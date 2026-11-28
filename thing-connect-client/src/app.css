@@ -131,7 +131,8 @@ page,.h5-body,body{margin:0;background:#f7f7f7;color:#191919;font-family:-apple-
 .code-cells{display:flex;gap:12px;height:100%;pointer-events:none}
 .code-cell{box-sizing:border-box;flex:1;min-width:0;display:flex;align-items:center;justify-content:center;border:2px solid #e2e8e4;border-radius:12px;background:#f8faf9;color:#202823;font-size:34px;font-weight:600;font-variant-numeric:tabular-nums}
 .code-cell.is-active{border-color:#07c160;background:#fff;box-shadow:0 0 0 2px #07c16014}
-.code-native-input{position:absolute;inset:0;width:100%;height:100%;opacity:.01;color:transparent;caret-color:transparent;z-index:1}
+.code-native-input{position:absolute;inset:0;width:100%;height:100%;opacity:0;color:transparent;caret-color:transparent;z-index:1}
+.code-cell-caret{width:3px;height:36px;background:#098652;border-radius:2px}
 .code-input.is-disabled{opacity:.55}
 .content-page{display:flex;flex-direction:column;gap:24px}
 .content-page>.notice,.content-page>.tabs{margin:0}
@@ -328,6 +329,7 @@ page,.h5-body,body{margin:0;background:#f7f7f7;color:#191919;font-family:-apple-
 .role-resource-group,.role-param-card,.role-resource-item{display:flex;flex-direction:column;gap:18px}
 .role-resource-item{padding:18px 0;border-top:1px solid #e6e6ea}
 .role-param-card{padding:20px;background:#f4f5f7;border-radius:16px}
+.sheet .role-resource-group .input,.sheet .role-resource-group .textarea{box-sizing:border-box;background:#fff;border:2px solid #a4afa9}
 .role-resource-group .textarea{min-height:112px;height:144px}
 
 .page .role-type-name{height:auto;padding-block:12px;line-height:1.45}
@@ -378,7 +380,12 @@ page,.h5-body,body{margin:0;background:#f7f7f7;color:#191919;font-family:-apple-
 .role-resource-group .role-resource-heading{justify-content:flex-end}
 .page .role-extensions .role-resource-group{padding-top:6px;padding-bottom:6px}
 
-.bind-code-field{align-items:center;text-align:center}
+.bind-code-field{align-items:stretch;text-align:left}
+.bind-page .bind-help{margin-top:8px;border-top:1px solid #e1e6e2;padding-top:12px}
+.bind-page .bind-help .action{background:transparent;color:#46564e;text-align:left;font-weight:500;padding:0}
+.bind-help-copy{display:flex;flex-direction:column;gap:12px;padding:8px 0}
+.page.bind-page .tabs .action{color:#526159;background:transparent}
+.page.bind-page .tabs .primary{color:#174b34;background:#fff;box-shadow:0 2px 6px #23392a20}
 .bind-code-field .code-input{margin:0 auto}
 
 .role-editor-toolbar{position:sticky;top:0;z-index:2;display:flex;align-items:center;min-height:88px;background:#f3f4f6;border-bottom:1px solid #dde4df}

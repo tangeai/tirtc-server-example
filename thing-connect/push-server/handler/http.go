@@ -112,7 +112,7 @@ func Register(engine *gin.Engine, current func() *push.Service, key, secret stri
 		var input struct {
 			Seconds *int `json:"interval_seconds"`
 		}
-		if c.Request.Method == "PUT" && (c.ShouldBindJSON(&input) != nil || input.Seconds == nil || *input.Seconds < 0 || *input.Seconds > 86400) {
+		if c.Request.Method == "PUT" && (c.ShouldBindJSON(&input) != nil || input.Seconds == nil || *input.Seconds < push.MinIntervalSeconds || *input.Seconds > push.MaxIntervalSeconds) {
 			write(c, nil, push.ErrInvalid)
 			return
 		}

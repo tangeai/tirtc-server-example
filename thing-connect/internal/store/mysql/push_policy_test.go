@@ -174,6 +174,7 @@ func TestDeliveryRecoveryDropsStaleAndBoundsRealCalls(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	event := push.Event{Device: dev, Bind: bind, Kind: "alarm", Occurred: now, Registered: now, Expires: now.Add(120 * time.Second), MaxAttempts: 2}
 	for _, id := range []string{"stale:alarm", "unknown:alarm", "fresh:alarm"} {
+		exec("UPDATE push_window SET last_admitted=UTC_TIMESTAMP()-INTERVAL 2 MINUTE WHERE device_id=?", dev)
 		event.ID = id
 		if got, err := store.Admit(ctx, event, app, "template"); err != nil || got != "queued" {
 			t.Fatal(got, err)
@@ -258,7 +259,10 @@ func TestDeliveryOverloadDoesNotSpendWindow(t *testing.T) {
 		switch out {
 		case "queued":
 			admitted++
-			last = stamp
+			exec("UPDATE push_window SET last_admitted=last_admitted-INTERVAL 2 MINUTE WHERE device_id=?", dev)
+			if err := db.Get(&last, "SELECT DATE_FORMAT(last_admitted,'%Y-%m-%dT%H:%i:%s.%f') FROM push_window WHERE device_id=?", dev); err != nil {
+				t.Fatal(err)
+			}
 		case "skipped_overload":
 			rejected++
 			if stamp != last {

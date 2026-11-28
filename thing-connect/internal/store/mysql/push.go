@@ -54,7 +54,7 @@ func lockPushWindow(ctx context.Context, tx *sqlx.Tx, user int64, device, bind, 
 	if err != nil {
 		return w, err
 	}
-	err = tx.GetContext(ctx, &w, `SELECT interval_seconds AS seconds,(last_admitted IS NULL OR UTC_TIMESTAMP(6)>=TIMESTAMPADD(SECOND,COALESCE(interval_seconds,0),last_admitted)) AS allowed FROM push_window WHERE user_id=? AND device_id=? AND bind_id=? AND event_type=? FOR UPDATE`, user, device, bind, kind)
+	err = tx.GetContext(ctx, &w, `SELECT interval_seconds AS seconds,(last_admitted IS NULL OR UTC_TIMESTAMP(6)>=TIMESTAMPADD(SECOND,GREATEST(COALESCE(interval_seconds,0),?),last_admitted)) AS allowed FROM push_window WHERE user_id=? AND device_id=? AND bind_id=? AND event_type=? FOR UPDATE`, push.MinIntervalSeconds, user, device, bind, kind)
 	return w, err
 }
 
@@ -82,7 +82,7 @@ func (s *PushStore) Preference(ctx context.Context, user int64, device, kind str
 			return nil, err
 		}
 	} else if w.Seconds.Valid {
-		n := int(w.Seconds.Int64)
+		n := max(push.MinIntervalSeconds, int(w.Seconds.Int64))
 		seconds = &n
 	}
 	return seconds, tx.Commit()
