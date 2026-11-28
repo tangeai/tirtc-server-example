@@ -625,6 +625,8 @@ test_running_admin_is_restarted_after_init() (
 )
 
 test_initialize_admin_is_noninteractive_and_refreshes_running_service() (
+    prepare_main_source() { :; }
+    validate_build_release() { :; }
     local capture="$TEST_ROOT/admin-init.capture"
     mkdir -p "$TEST_ROOT/admin-server"
     cat >"$TEST_ROOT/admin-server/admin-server" <<'BASH'
@@ -873,7 +875,7 @@ test_production_only_releases_origin_main() (
     prepare_main_source verify
     git -C "$REPO_PATH" switch -qc feature --track origin/feature
     validate_paths() { echo reached-build >> "$root/unexpected"; }
-    for cmd in pull_code build_action deploy_files_action; do
+    for cmd in pull_code build_action deploy_files_action migrate_action; do
         if "$cmd"; then exit 1; fi
     done
     [ ! -e "$root/unexpected" ]
@@ -1236,6 +1238,8 @@ BASH
 )
 
 test_standalone_migration_failure_quiesces_services() (
+    prepare_main_source() { :; }
+    validate_build_release() { :; }
     local capture="$TEST_ROOT/migrate-quiesce.capture" result=0
     validate_paths() { return 0; }
     validate_release_options() { return 0; }

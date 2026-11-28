@@ -1842,6 +1842,8 @@ restart_action() {
 
 migrate_action() {
 	local status
+    prepare_main_source verify || return 1
+    validate_build_release admin-server || return 1
     validate_paths || return 1
     validate_release_options || return 1
 	if run_migrations; then
