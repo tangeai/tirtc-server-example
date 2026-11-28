@@ -21,13 +21,13 @@ type Modal = { kind: 'rename' | 'info' | 'unbind' | 'recognition' | 'history' | 
 export default function Devices() {
   const { t } = useLanguage();
   const [binding, setBinding] = useState(false);
-  const [data, setData] = useState<Snapshot>({ devices: [], summaries: {} }), [loading, setLoading] = useState(true), [error, setError] = useState(''), [restored, setRestored] = useState(false);
+  const [data, setData] = useState<Snapshot>({ devices: [], summaries: {} }), [loading, setLoading] = useState(true), [error, setError] = useState('');
   const [modal, setModal] = useState<Modal>(), [adding, setAdding] = useState(false);
   const cache = useRef(''), sequence = useRef(0), current = useRef(data), addingRef = useRef(false);
   current.current = data;
   function update(fn: (state: Snapshot) => Snapshot) { setData(previous => { const next = fn(previous); current.current = next; if (cache.current) saveSnapshot(cache.current, next); return next; }); }
   async function refresh() {
-    const rev = ++sequence.current; setLoading(true); setError(''); setRestored(false);
+    const rev = ++sequence.current; setLoading(true); setError('');
     try {
       const result = await request<Device[]>('/v1/user/device/list');
       if (rev !== sequence.current) return;
@@ -47,7 +47,7 @@ export default function Devices() {
         cache.current = await snapshotKey('devices');
         const saved = restoreSnapshot<Snapshot>(cache.current);
         if (!alive) return;
-        if (saved && Array.isArray(saved.devices) && saved.devices.every(d => typeof d.device_id === 'string') && saved.summaries) { setData(saved); setLoading(false); setRestored(true); return; }
+        if (saved && Array.isArray(saved.devices) && saved.devices.every(d => typeof d.device_id === 'string') && saved.summaries) { setData(saved); setLoading(false); return; }
       } catch { /* Storage availability does not affect loading. */ }
       if (alive) await refresh();
     })();
@@ -64,7 +64,7 @@ export default function Devices() {
   const href = (page: string, device: Device) => page + '?device_id=' + encodeURIComponent(device.device_id);
   return <><header className="topbar"><span className="brand"><img className="console-brand-icon" src="/static/xiaotai-logo-transparent.png" alt="" width="32" height="32"/>{t('小钛控制台')}</span><div className="header-actions"><NavigationLinks/><LanguageSwitcher/><Account/></div></header>
     <main className="device-layout"><div className="device-toolbar"><h1>{t('我的设备')} <small>({data.devices.length})</small></h1><Button className="device-refresh" disabled={loading} onClick={() => void refresh()}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-1l2 3M4 15l2 3a7 7 0 0 0 12-1"/></svg>{t('刷新')}</Button><Button className="primary add-device" disabled={adding} onClick={() => void add()}>＋ {t('添加设备')}</Button></div>
-      {loading && <p role="status" className="muted">{t('正在加载设备…')}</p>}{error && <p className="error" role="alert">{t(error)}</p>}{restored && <p className="muted">{t('显示上次查看的设备状态，点击刷新获取最新状态。')}</p>}
+      {loading && <p role="status" className="muted">{t('正在加载设备…')}</p>}{error && <p className="error" role="alert">{t(error)}</p>}
       <div className="device-grid">{data.devices.map(device => { const summary = data.summaries[device.device_id]; return <article className="card device-card" key={device.device_id} data-device-id={device.device_id}>
         <div className="row"><div className="device-title"><span className={'device-symbol' + (device.online ? ' device-symbol-online' : '')}><DeviceIcon name="monitor"/></span><h2>{device.device_name || t('未命名设备')}</h2></div><Dropdown trigger={['click']} placement="bottomRight" menu={{items:[{key:'rename',label:t('修改名称')},{key:'info',label:t('设备信息')},{key:'history',label:t('会话记录')},{type:'divider'},{key:'unbind',label:t('解绑设备'),danger:true}],onClick:({key})=>{if(key==='rename'||key==='info'||key==='history'||key==='unbind')setModal({kind:key,device});}}}><Button type="button">{t('更多 ▾')}</Button></Dropdown></div>
         <div className="row device-meta"><p className="muted">ID: {device.device_id}</p><span className={device.online ? 'success' : 'muted'}>{t(device.online ? '● 在线' : '○ 离线')}</span></div>

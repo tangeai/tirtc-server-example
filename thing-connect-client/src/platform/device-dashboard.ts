@@ -9,7 +9,6 @@ import { restoreSnapshot, markAway, saveSnapshot } from '../../../thing-connect/
 type Snapshot = { devices: Device[]; summaries: Record<string, CardState> };
 export function useDeviceDashboard() {
   const [summaries, setSummaries] = useState<Record<string, CardState>>({});
-  const [restored, setRestored] = useState(false);
   const snapshot = useRef<Snapshot>({ devices: [], summaries: {} });
   const key = useRef(''), generation = useRef(0), owner = useRef(''), changed = useRef(-1);
   useEffect(() => {
@@ -31,7 +30,7 @@ export function useDeviceDashboard() {
       const saved = restoreSnapshot<Snapshot>(name);
       if (saved && Array.isArray(saved.devices) && saved.summaries) {
         owner.current = account; changed.current = deviceRevision(); snapshot.current = saved;
-        setSummaries(saved.summaries); setRestored(true); return saved.devices;
+        setSummaries(saved.summaries); return saved.devices;
       }
     } catch { /* Browser tab storage is optional. */ }
   }
@@ -40,11 +39,11 @@ export function useDeviceDashboard() {
     owner.current = account; changed.current = deviceRevision();
     const devices = rows.map(({ device_id, device_name, status, online, profiles, hardware, mac, firmware_version, bind_time }) =>
       ({ device_id, device_name, status, online, profiles, hardware, mac, firmware_version, bind_time }));
-    snapshot.current = { devices, summaries: {} }; setSummaries({}); setRestored(false);
+    snapshot.current = { devices, summaries: {} }; setSummaries({});
     void readCardStates(devices, () => revision === generation.current && account === token(), (id, value) => {
       snapshot.current.summaries = { ...snapshot.current.summaries, [id]: value };
       setSummaries(snapshot.current.summaries);
     });
   }
-  return { recover, update, summary: (id: string) => summaries[id], restored };
+  return { recover, update, summary: (id: string) => summaries[id] };
 }

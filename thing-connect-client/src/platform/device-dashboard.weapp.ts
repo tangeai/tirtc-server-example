@@ -14,5 +14,5 @@ export function useDeviceDashboard() {
       setStates(previous => ({ ...previous, [id]: value }));
     });
   }
-  return { recover: async (): Promise<Device[] | undefined> => undefined, update, summary: (id: string) => states[id], restored: false };
+  return { recover: async (): Promise<Device[] | undefined> => undefined, update, summary: (id: string) => states[id] };
 }

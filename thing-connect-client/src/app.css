@@ -181,6 +181,8 @@ page,.h5-body,body{margin:0;background:#f7f7f7;color:#191919;font-family:-apple-
 .device-symbol-status{display:block;font-size:20px;line-height:26px;white-space:nowrap}
 .page .field-input{padding:0 22px;height:88px;line-height:88px}
 .device-primary-actions{margin-top:22px}
+.page .action.secondary:not(.is-unavailable):not([disabled]),.page .action.secondary:not(.is-unavailable)[disabled="false"]{background:#ebf5ef;color:#216342}
+.page .action.secondary:not(.is-unavailable):active{background:#dceee3}
 .device-feature-links{display:flex;align-items:center;margin-top:14px;padding-top:6px;border-top:1px solid #e6ebe8}
 .devices-page .device-feature-links .action{display:flex;flex:1;min-width:0;align-items:center;justify-content:center;gap:9px;box-sizing:border-box;min-height:64px;margin:0;padding:6px 0;border:0;border-radius:8px;background:transparent;color:#2c594a;font-size:27px;font-weight:500;line-height:1.4;white-space:nowrap}
 .devices-page .device-feature-links .action:active{background:#eaf2ed}

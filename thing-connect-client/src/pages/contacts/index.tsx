@@ -96,13 +96,8 @@ export default function Contacts() {
     });
   }
   const device = devices.find(d => d.device_id === deviceId), filtered = filterContacts(rows, search, filter);
-  return <View className='page content-page settings-page'>
+  return <View className='page content-page settings-page contacts-page'>
     <View className='row'><DevicePageHeading title='联系人' device={device} /></View>
-    {process.env.TARO_ENV === 'h5' && devices.length > 1 && <label className='contact-device-picker'>{tr("当前管理设备")}
-      <select value={deviceId} disabled={busy || loading || !!editor} onChange={event => {
-        const url = new URL(location.href); url.searchParams.set('device_id', event.currentTarget.value); location.assign(url.href);
-      }}>{devices.map(row => <option key={row.device_id} value={row.device_id}>{row.device_name || row.device_id}</option>)}</select>
-    </label>}
     <Notice error>{error}</Notice>
     {error && <Action disabled={busy || loading} onClick={() => void load()}>{tr("重新加载联系人")}</Action>}
     <SearchField placeholder={tr("搜索名称或设备 ID")} value={search} onChange={setSearch} />

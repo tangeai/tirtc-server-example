@@ -82,6 +82,7 @@ async function verify(browser, width) {
     await page.goBack();
     await page.getByText('客厅', { exact: true }).waitFor();
     assert.equal(deviceReads, readsBeforeLeaving, 'Back should restore the device list');
+    assert.equal(await page.locator('.devices-page .notice').count(), 0, 'Restoring the list should be silent');
     await page.locator('.device-feature-links taro-button-core').filter({ hasText: 'AI 角色' }).click();
     await page.waitForURL(url => url.pathname === '/agent' && url.searchParams.get('device_id') === 'fixture');
     await page.reload();

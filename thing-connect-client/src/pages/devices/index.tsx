@@ -150,7 +150,7 @@ export default function Devices() {
           </Action>
         </View>
       </View>
-      {dashboard.restored && <Notice>{tr("显示上次查看的设备状态，点击刷新获取最新状态。")}</Notice>}<Notice error>{error}</Notice>{loading && <Notice>{tr("正在更新设备…")}</Notice>}
+      <Notice error>{error}</Notice>{loading && <Notice>{tr("正在更新设备…")}</Notice>}
       {initialized && !loading && !devices.length && (error
         ? <View className='card empty'><Action onClick={() => void load()}>{tr('重新加载设备')}</Action></View>
         : <View className='card empty'>{tr("添加第一台设备，开始使用小钛")}</View>)}
@@ -165,9 +165,9 @@ export default function Devices() {
         return <View className='card' key={device.device_id}><View className='device-head'><View className={'device-symbol ' + (device.online ? 'device-symbol-online' : 'device-symbol-offline')}><RobotIcon /><Text className='device-symbol-status'>{device.online ? tr("在线") : tr("离线")}</Text></View><View className='grow device-summary'><View className='device-title-row'>{device.device_name?.trim() ? <Text className='device-name'>{device.device_name}</Text> : <Button className='device-name-setup' disabled={busy} ariaLabel={tr("设置设备名称：") + device.device_id} onClick={() => openRename(device)}><Text className="device-placeholder-name">{tr("未命名设备")}</Text><View className='device-name-edit-icon' ariaHidden /></Button>}
           {summary?.roleName && <Text className='dashboard-role-name' ariaLabel={tr('AI 角色：') + summary.roleName}>{summary.roleName}</Text>}
         </View><Text className='device-id'>ID: {device.device_id}</Text></View><Action disabled={busy} onClick={() => setMenu(device)}>⋯</Action></View>
-        <View className='device-actions device-primary-actions'>{capabilities.platform === 'h5' ? <Action primary onClick={() => setShowCallGuide(true)}>
+        <View className='device-actions device-primary-actions'>{capabilities.platform === 'h5' ? <Action secondary onClick={() => setShowCallGuide(true)}>
           <View className='device-primary-label'><View className='device-action-icon device-action-phone' ariaHidden />{tr('微信通话')}</View>
-        </Action> : <Action primary muted={!device.online && !needsAuthorization(device)} disabled={busy || loading} onClick={() => void media(needsAuthorization(device) ? 'authorize' : 'wechat-call', device)}><View className='device-primary-label'><View className={'device-action-icon ' + (needsAuthorization(device) ? 'device-action-shield' : 'device-action-phone')} ariaHidden />{callLabel(device)}</View></Action>}<Action muted={!device.online} disabled={busy || !capabilities.playback} onClick={() => void media('playback', device)}><View className='device-primary-label'><View className='device-action-icon device-action-play' ariaHidden />{tr("实时查看")}</View></Action></View>
+        </Action> : <Action secondary muted={!device.online && !needsAuthorization(device)} disabled={busy || loading} onClick={() => void media(needsAuthorization(device) ? 'authorize' : 'wechat-call', device)}><View className='device-primary-label'><View className={'device-action-icon ' + (needsAuthorization(device) ? 'device-action-shield' : 'device-action-phone')} ariaHidden />{callLabel(device)}</View></Action>}<Action muted={!device.online} disabled={busy || !capabilities.playback} onClick={() => void media('playback', device)}><View className='device-primary-label'><View className='device-action-icon device-action-play' ariaHidden />{tr("实时查看")}</View></Action></View>
         <View className='device-feature-links'>
           {links.map(({ page, title, status, active }) => <Action key={page} ariaLabel={tr(title) + ' ' + status}
             onClick={() => void Taro.navigateTo({ url: '/pages/' + page + '/index?device_id=' + encodeURIComponent(device.device_id) })}>

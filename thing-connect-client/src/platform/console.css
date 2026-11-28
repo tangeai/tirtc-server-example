@@ -118,8 +118,6 @@ body,.taro_page { background:#f4f6f5 }
 .device-info-scroll { min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:12PX }
 .device-info-scroll>* { flex-shrink:0 }
 
-.contact-device-picker {display:flex;align-items:center;gap:10PX;margin-block:12PX;color:#53675d;font-size:14PX}
-.contact-device-picker select {min-width:0;max-width:70%;padding:6PX;border:1PX solid #ced9d2;border-radius:6PX;background:white;color:#203a2c;font:inherit}
 
 .devices-page .device-list-grid>.card {padding:16PX;border:1PX solid #dde5df;border-radius:14PX;background:white}
 .devices-page .device-head {min-height:50PX}
@@ -139,3 +137,12 @@ body,.taro_page { background:#f4f6f5 }
 .wechat-call-code {width:190PX;max-width:100%;aspect-ratio:1;margin:18PX auto;overflow:hidden;border-radius:12PX}
 .wechat-call-code img {display:block;height:100%;width:auto;max-width:none}
 .wechat-call-close {width:100%;margin-top:12PX;padding:10PX;border:0;border-radius:8PX;background:#edf4ef;color:#205338;font:600 15PX/1.5 system-ui,sans-serif;cursor:pointer}
+
+.taro_router .taro_page.taro_page_show:has(.content-page, .account-page, .legal) {
+  background-color: #f4f6f5;
+}
+.contacts-page .tabs .action {
+  min-height: 36PX;
+  white-space: normal;
+  line-height: 1.25;
+}

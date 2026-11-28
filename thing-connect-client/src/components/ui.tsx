@@ -3,8 +3,8 @@ import { Button } from '../platform/button';
 import { Input, Text, View } from '@tarojs/components';
 import type { PropsWithChildren } from 'react';
 
-export function Action({ children, onClick, disabled, primary, danger, muted, ariaLabel }: PropsWithChildren<{ onClick(): void; disabled?: boolean; primary?: boolean; danger?: boolean; muted?: boolean; ariaLabel?: string }>) {
-  return <Button className={`action ${primary ? 'primary' : ''} ${danger ? 'danger' : ''} ${muted ? 'is-unavailable' : ''}`} ariaLabel={ariaLabel} disabled={disabled} onClick={onClick}>{children}</Button>;
+export function Action({ children, onClick, disabled, primary, secondary, danger, muted, ariaLabel }: PropsWithChildren<{ onClick(): void; disabled?: boolean; primary?: boolean; secondary?: boolean; danger?: boolean; muted?: boolean; ariaLabel?: string }>) {
+  return <Button className={`action ${primary ? 'primary' : secondary ? 'secondary' : ''} ${danger ? 'danger' : ''} ${muted ? 'is-unavailable' : ''}`} ariaLabel={ariaLabel} disabled={disabled} onClick={onClick}>{children}</Button>;
 }
 export function DevicePageHeading({ title, device }: { title: string; device?: { device_name?: string; device_id: string } }) {
   const name = device?.device_name?.trim() || device?.device_id;
