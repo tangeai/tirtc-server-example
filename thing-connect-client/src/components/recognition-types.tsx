@@ -20,7 +20,12 @@ export function RecognitionTypes({ selected, catalog, locked, change }: Props) {
   const [target, setTarget] = useState<number>();
   const [editingOrder, setEditingOrder] = useState(false);
   const sorting = editingOrder && selected.length > 1;
-  const others = catalog.filter(item => !selected.some(s => s.scheme_id === item.scheme_id));
+  const enabledById = new Map(selected.map(item => [item.scheme_id, item]));
+  const catalogIds = new Set(catalog.map(item => item.scheme_id));
+  const rows = sorting ? selected : [
+    ...catalog.map(item => enabledById.get(item.scheme_id) || item),
+    ...selected.filter(item => !catalogIds.has(item.scheme_id)),
+  ];
 
   function begin(from: number, y: number) {
     if (locked) return;
@@ -86,9 +91,9 @@ export function RecognitionTypes({ selected, catalog, locked, change }: Props) {
     </View>
     {sorting && <Text className='reminder-caption'>{tr("拖动右侧图标或点击调整顺序")}</Text>}
     {!sorting && selected.length >= 8 && <Text className='reminder-caption'>{tr("已达上限 8 项，关闭其他类型后可继续开启")}</Text>}
-    {!selected.length && !others.length && <Text className='muted'>{tr("暂无可用类型")}</Text>}
-    {(sorting ? selected : [...selected, ...others]).map((item, index) => {
-      const on = index < selected.length;
+    {!rows.length && <Text className='muted'>{tr("暂无可用类型")}</Text>}
+    {rows.map((item, index) => {
+      const on = enabledById.has(item.scheme_id);
       const output = ({ text: '文字', audio: '语音', text_audio: '文字＋语音' } as Record<string,string>)[item.output_mode];
       return <View key={item.scheme_id} className={'scheme-row' + (on ? ' scheme-selected' : '') + (target === index ? ' scheme-target' : '')}>
         <View className='grow'><Text>{item.name}</Text>

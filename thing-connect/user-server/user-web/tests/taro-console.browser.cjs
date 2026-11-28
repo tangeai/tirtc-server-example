@@ -15,6 +15,11 @@ async function verify(browser, width) {
   let submitted;
   let registration;
   let recognitionEnabled = false;
+  const schemes = ['婴儿哭声检测', '吵架异常声音检测'].map((name, index) => ({
+    name, scheme_id: String(index + 1), scheme_version: 1, output_mode: 'text_audio'
+  }));
+  let enabledSchemes = [...schemes];
+  let roleConfig = {};
   const savedIntervals = [];
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -45,7 +50,7 @@ async function verify(browser, width) {
         if (pathname === '/v1/user/register') { registration = route.request().postDataJSON(); data = { token: 'fixture' }; }
         if (pathname === '/v1/user/quota') data = { quota: 1 };
         if (pathname === '/v1/user/me') data = { email: 'fixture@example.test' };
-        if (pathname === '/v1/recognition/types') data = [];
+        if (pathname === '/v1/recognition/types') data = schemes;
         if (pathname.endsWith('/alarm')) {
           if (route.request().method() === 'PUT') savedIntervals.push(route.request().postDataJSON().interval_seconds);
           data = { interval_seconds: savedIntervals.at(-1) ?? null };
@@ -54,11 +59,21 @@ async function verify(browser, width) {
         if (pathname === '/v1/ai/roles') data = { items: [{ id: 'test-role', name: '测试角色' }, { id: 'spare', name: '备用角色' }] };
         if (pathname === '/v1/ai/roles/spare' && route.request().method() === 'DELETE') deletedRoles++;
         if (pathname === '/v1/ai/roles/test-role') {
-          if (route.request().method() === 'PUT') savedRoles++;
-          data = { id: 'test-role', name: '测试角色' };
+          if (route.request().method() === 'PUT') {
+            savedRoles++;
+            roleConfig = route.request().postDataJSON();
+          }
+          data = { ...roleConfig, id: 'test-role', name: '测试角色' };
         }
-        if (pathname.endsWith('/config')) data = { policy: { enabled: recognitionEnabled, monthly_limit: 100 }, usage: { used: 8 }, schemes: [] };
-        if (pathname.endsWith('/mcp/tools')) data = { items: [{ id: 'map', name: '地图' }] };
+        if (pathname.endsWith('/config')) {
+          if (route.request().method() === 'PUT') {
+            const payload = route.request().postDataJSON();
+            recognitionEnabled = payload.enabled;
+            enabledSchemes = payload.schemes.map(ref => schemes.find(item => item.scheme_id === ref.scheme_id));
+          }
+          data = { policy: { enabled: recognitionEnabled, revision: 1, monthly_limit: 100 }, usage: { used: 8 }, schemes: recognitionEnabled ? enabledSchemes : [] };
+        }
+        if (pathname.endsWith('/mcp/tools')) data = { items: [{ id: 'map', name: '地图' }, { id: 'music', name: '音乐' }, { id: 'news', name: '新闻' }] };
         if (pathname.endsWith('/mcp/tools/map')) data = { id: 'map', name: '地图', description: '地图工具详情' };
         if (pathname === '/v1/config/navigation') data = { links: [{ enabled: true, name: '帮助', url: 'https://example.test/help' }] };
         return route.fulfill({ json: { code: 200, data } });
@@ -147,6 +162,21 @@ async function verify(browser, width) {
     const tools = page.locator('.resource-disclosure').filter({ hasText: 'MCP 工具' });
     assert.equal(await page.locator('.role-tool-link').count(), 0);
     await tools.click();
+    const rows = page.locator('.role-tool-list .role-resource-item');
+    const toolNames = ['地图', '音乐', '新闻'];
+    for (const [index, checked] of [[2, true], [1, true], [2, false]]) {
+      await rows.filter({ hasText: toolNames[index] }).getByRole('checkbox').click();
+      assert.deepEqual(await rows.locator('.role-tool-name').allTextContents(), toolNames);
+      assert.equal(await rows.nth(index).getByRole('checkbox').isChecked(), checked);
+    }
+    const savedTools = page.waitForRequest(req => req.method() === 'PUT' && req.url().endsWith('/v1/ai/roles/test-role'));
+    await saveRole.click();
+    assert.deepEqual((await savedTools).postDataJSON().agent_config.mcp_tools, ['music']);
+    await page.reload();
+    await page.locator('.settings-link').filter({ hasText: '测试角色' }).click();
+    await page.locator('.tabs taro-button-core').filter({ hasText: '扩展能力' }).click();
+    await tools.click();
+    assert.deepEqual(await rows.locator('input').evaluateAll(items => items.map(item => item.checked)), [false, true, false]);
     await page.locator('.role-tool-link').filter({ hasText: '地图' }).click();
     await page.getByText('地图工具详情', { exact: true }).waitFor();
     await page.locator('.sheet taro-button-core').filter({ hasText: '关闭' }).click();
@@ -219,6 +249,33 @@ async function verify(browser, width) {
       }
       if (route === '/recognition') {
         await page.getByText('请在微信小程序中授权接收此设备的异常提醒。').waitFor();
+        const header = page.locator('.scheme-header');
+        const sort = header.getByRole('button', { name: '排序' });
+        await sort.waitFor();
+        for (const label of ['.reminder-heading', '.scheme-count']) {
+          const lines = await header.locator(label).evaluate(el => {
+            const range = document.createRange();
+            range.selectNodeContents(el);
+            return new Set(Array.from(range.getClientRects(), rect => Math.round(rect.top))).size;
+          });
+          assert.equal(lines, 1, width + ' wrapped ' + label);
+        }
+        assert.ok((await sort.boundingBox()).width < (await header.boundingBox()).width / 3);
+        await sort.click();
+        await header.getByRole('button', { name: '完成' }).click();
+        const switches = page.locator('.scheme-row').getByRole('checkbox');
+        for (const enable of [false, true]) {
+          const response = page.waitForResponse(r => r.request().method() === 'PUT' && r.url().endsWith('/config'));
+          await switches.first().click();
+          await response;
+          await sort.waitFor({ state: enable ? 'visible' : 'hidden' });
+          assert.deepEqual(await switches.evaluateAll(items => items.map(item => item.checked)), [enable, true]);
+          assert.match(await page.locator('.scheme-row').first().innerText(), /婴儿哭声检测/);
+        }
+        assert.deepEqual(enabledSchemes.map(item => item.scheme_id), ['2', '1']);
+        await sort.click();
+        assert.match(await page.locator('.scheme-row').first().innerText(), /吵架异常声音检测/);
+        await header.getByRole('button', { name: '完成' }).click();
         const input = page.locator('.reminder-seconds-input input');
         assert.equal(await input.inputValue(), '60');
         for (const value of ['59', '86401']) {

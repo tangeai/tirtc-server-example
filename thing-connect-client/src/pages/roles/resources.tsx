@@ -67,7 +67,7 @@ export function RoleResources({ kind, selected, change, disabled, readonly, name
     else if (choice.tapIndex === 1) await remove(item);
   }
   const catalog=new Map([...names,...shared,...owned].map(r=>[r.id,r]));
-  const ids=readonly ? selected : [...new Set([...selected,...catalog.keys()])];
+  const ids=readonly ? selected : [...new Set([...catalog.keys(),...selected])];
   return <View className={'card role-resource-group' + (kind === 'mcp' ? ' role-tool-list' : '')}>
     <Button className='resource-disclosure' aria-expanded={expanded} onClick={() => setExpanded(open => !open)}>
       <Text className='resource-title'>{title}</Text><Text className='resource-summary'>{tr("已选")} {selected.length}</Text>
