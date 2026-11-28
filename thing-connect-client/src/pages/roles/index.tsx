@@ -49,16 +49,18 @@ export default function Roles() {
       }
     });
   }
+  const dirty = !!selected && !!draft && !selected.preset && JSON.stringify(draft) !== JSON.stringify(draftOf(selected));
+  const canSave = dirty && !w.busy;
   async function closeEditor() {
     if (w.busy) return;
-    if (selected && draft && !selected.preset && JSON.stringify(draft) !== JSON.stringify(draftOf(selected))) {
+    if (dirty) {
       const answer = await Taro.showModal({ title: tr("修改尚未保存"), content: tr("放弃当前修改并返回角色列表？"), confirmText: tr("放弃修改") });
       if (!answer.confirm || !w.alive.current) return;
     }
     setSelected(undefined); setDraft(undefined); w.setError('');
   }
   async function save() {
-    if (!selected || !draft || !w.value || selected.preset) return;
+    if (!canSave || !selected || !draft || !w.value) return;
     let payload: Role;
     try { payload = rolePayload(selected, draft, w.value.voices); }
     catch (e) { w.setError(e instanceof Error ? e.message : '请检查角色设置'); return; }
@@ -90,7 +92,6 @@ export default function Roles() {
       if (w.alive.current) { setSelected(undefined); setDraft(undefined); void Taro.showToast({ title: tr("角色已删除"), icon: 'success' }); }
     });
   }
-  const dirty = !!selected && !!draft && !selected.preset && JSON.stringify(draft) !== JSON.stringify(draftOf(selected));
   useEffect(() => {
     if (process.env.TARO_ENV === 'h5') {
       if (!dirty) return;
@@ -118,7 +119,7 @@ export default function Roles() {
       </Button></View>
       <Text className='role-toolbar-title'>{selected.preset ? tr("默认角色") : selected.id ? tr("编辑角色") : tr("创建角色")}</Text>
       <View className='role-toolbar-buttons'>{!selected.preset &&
-        <Button className='role-nav-button role-nav-save' ariaLabel={tr("保存角色")} disabled={w.busy || !dirty} onClick={() => void save()}>{w.busy ? tr("保存中…") : tr("保存")}</Button>
+        <Button className='role-nav-button role-nav-save' ariaLabel={tr("保存角色")} disabled={!canSave} hoverClass={canSave ? 'button-hover' : 'none'} onClick={canSave ? save : undefined}>{w.busy ? tr("保存中…") : tr("保存")}</Button>
       }</View>
     </View>
     <View className='role-device-context'><Text className='device-context-label'>{tr("当前设备")}</Text><Text className='device-context-name'>{w.device?.device_name || w.device?.device_id || tr("设备信息待加载")}</Text></View>

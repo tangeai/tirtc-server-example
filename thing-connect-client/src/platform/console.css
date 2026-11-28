@@ -181,3 +181,6 @@ body,.taro_page { background:#f4f6f5 }
 }
 
 .page .role-editor-toolbar{top:0;background:#f4f6f5}
+.page .textarea > .taro-textarea {resize:none;overflow-y:auto}
+
+.role-nav-save[aria-disabled='true']{cursor:default;pointer-events:none}
