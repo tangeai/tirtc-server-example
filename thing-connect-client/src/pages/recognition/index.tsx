@@ -31,16 +31,17 @@ export default function Recognition() {
       } catch (e) { if (w.alive.current && e instanceof ApiError && e.code === 40901) setConflict(true); throw e; }
     });
   }
-  return <View className='page content-page'><View className='row between'><Text className='title device-page-name'>{w.device?.device_name || '当前设备'}</Text><Action disabled={w.busy} onClick={() => void w.refresh()}>重新加载</Action></View><Text className='device-page-description'>打开任一类型即可开启 AI 识别，全部关闭即停止。修改后自动保存。</Text><Notice error>{w.error}</Notice>{w.busy && !w.value && <Notice>正在加载识别设置…</Notice>}
-    {w.value && <><View className='card'><View className='row between'>
-        <Text>本月识别用量</Text>
-        <Text className='recognition-usage-value'>{w.value.config.usage.used} / {w.value.config.policy.monthly_limit} 次</Text>
-      </View>
-      <Text className='muted'>每执行一个识别类型计一次，按 UTC 自然月统计。</Text></View>
+  return <View className='page content-page settings-page'><View className='row between settings-header'><Text className='title device-page-name'>{w.device?.device_name || '当前设备'}</Text><Action disabled={w.busy} onClick={() => void w.refresh()}>刷新</Action></View><Notice error>{w.error}</Notice>{w.busy && !w.value && <Notice>正在加载识别设置…</Notice>}
+    {w.value && <><View className='settings-section'>
       <RecognitionTypes selected={selected} catalog={w.value.catalog} locked={locked}
         change={schemes => void save(schemes)} />
+      <Text className='settings-footnote'>开启任一类型即可识别，全部关闭即停止。修改后自动保存。</Text>
+    </View>
       {conflict && <Notice error>设备配置已更新，请重新加载后再修改。</Notice>}
       {process.env.TARO_ENV === 'weapp' && w.device && <RecognitionReminders key={w.device.device_id} device={w.device.device_id} enabled={w.value.config.policy.enabled} />}
+      <View className='settings-section'><View className='card'><View className='row between'>
+        <Text>本月识别用量</Text><Text className='recognition-usage-value'>{w.value.config.usage.used} / {w.value.config.policy.monthly_limit} 次</Text>
+      </View></View><Text className='settings-footnote'>每执行一个识别类型计一次，按 UTC 自然月统计。</Text></View>
     </>}
   </View>;
 }

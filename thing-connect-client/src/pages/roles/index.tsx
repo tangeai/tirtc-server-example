@@ -1,6 +1,6 @@
 import { RoleEditor } from './editor';
 import Taro from '@tarojs/taro';
-import { Text, View } from '@tarojs/components';
+import { Button, Text, View } from '@tarojs/components';
 import { useEffect, useState } from 'react';
 import { Action, SearchField, Notice } from '../../components/ui';
 import { useDeviceWorkspace } from '../../hooks/device-workspace';
@@ -75,7 +75,7 @@ export default function Roles() {
       if (!answer.confirm || !w.alive.current) return;
       await request('/v1/ai/roles/' + encodeURIComponent(role.id), 'DELETE');
       w.commit({ ...w.value!, roles: w.value!.roles.filter(r => r.id !== role.id) }); devicesChanged();
-      if (w.alive.current) setNotice('角色已删除');
+      if (w.alive.current) { setSelected(undefined); setDraft(undefined); setNotice('角色已删除'); }
     });
   }
   const dirty = !!selected && !!draft && !selected.preset && JSON.stringify(draft) !== JSON.stringify(draftOf(selected));
@@ -85,17 +85,31 @@ export default function Roles() {
     else void Taro.disableAlertBeforeUnload();
     return () => { void Taro.disableAlertBeforeUnload(); };
   }, [dirty]);
-  if (selected && draft) return <View className={'page content-page role-editor-page' + (selected.preset ? ' role-readonly' : '')}>
+  if (selected && draft) return <View className={'page content-page settings-page role-editor-page' + (selected.preset ? ' role-readonly' : '')}>
     <View className='row between'><Action disabled={w.busy} onClick={() => void closeEditor()}>‹ 返回角色列表</Action><Text className='title'>{selected.preset ? '默认角色' : selected.id ? '编辑角色' : '创建角色'}</Text></View>
     <View className='role-device-context'><Text className='device-context-label'>当前设备</Text><Text className='device-context-name'>{w.device?.device_name || '设备信息待加载'}</Text></View>
     <Notice error>{w.error}</Notice><Notice>{notice}</Notice>
     <RoleEditor key={selected.id || 'new'} role={selected} draft={draft} voices={w.value?.voices || []} busy={w.busy} patch={value => { if (!w.busy && !selected.preset) { setDraft(current => current ? { ...current, ...value } : current); setNotice(''); } }} />
     {!selected.preset && <View className='role-editor-actions'><Text className='muted'>保存影响共用设备；切换角色请返回列表。</Text><View className='row'><Action disabled={w.busy || !dirty} onClick={async () => { const answer = await Taro.showModal({ title: '放弃修改', content: '恢复到上次保存的角色设置？', confirmText: '放弃修改' }); if (answer.confirm && w.alive.current) setDraft(draftOf(selected)); }}>放弃修改</Action><Action primary disabled={w.busy || !dirty} onClick={() => void save()}>{w.busy ? '保存中…' : '保存角色'}</Action></View></View>}
+    {selected.id && !selected.preset && selected.id !== active && <Action danger disabled={w.busy} onClick={() => void remove(selected)}>删除角色</Action>}
   </View>;
-  return <View className='page content-page'><View className='row between'><Text className='title device-page-name'>{w.device?.device_name || '当前设备'}</Text><Action disabled={w.busy} onClick={() => void w.refresh()}>刷新</Action></View><Text className='device-page-description'>为这台设备选择 AI 的性格、声音和回复方式。点击“使用角色”后，当前设备才会切换角色。</Text><Notice error>{w.error}</Notice><Notice>{w.busy ? '正在处理…' : notice}</Notice>
-    <View className='role-list-tools'><View className='row between'><Text className='role-list-label'>我的角色</Text><Action primary disabled={w.busy || !w.value} onClick={() => void edit()}>＋ 创建角色</Action></View><SearchField value={search} onChange={setSearch} placeholder='搜索角色名称' />{w.value && <Text className='muted'>{search.trim() ? '找到 ' : '共 '}{filteredRoles.length} 个角色</Text>}</View>
-    {w.value && !filteredRoles.length && <View className='empty'>{search.trim() ? '没有匹配的角色，换个关键词试试' : '暂无角色，点击上方创建角色'}</View>}
-    {filteredRoles.map(role => <View className='card' key={role.id}><View className='row between'><Text className='label'>{role.name || '未命名角色'}</Text>{role.id === active && <Text className='badge'>当前使用</Text>}</View><Text className='muted'>{role.preset ? '默认角色 · ' : ''}{roleRegionLabel(role.region)}{role.unavailable ? ' · 暂不可用，请刷新重试' : ''}</Text><View className='row'><Action disabled={w.busy || role.unavailable} onClick={() => void edit(role)}>{role.preset ? '查看' : '编辑'}</Action><Action primary disabled={w.busy || role.unavailable || role.id === active} onClick={() => void useRole(role)}>使用角色</Action>{!role.preset && <Action danger disabled={w.busy || role.id === active} onClick={() => void remove(role)}>删除</Action>}</View></View>)}
-
+  return <View className='page content-page settings-page'>
+    <View className='row between settings-header'><Text className='title device-page-name'>{w.device?.device_name || '当前设备'}</Text><Action disabled={w.busy} onClick={() => void w.refresh()}>刷新</Action></View>
+    <Notice error>{w.error}</Notice><Notice>{w.busy && !w.value ? '正在加载角色…' : notice}</Notice>
+    <SearchField value={search} onChange={setSearch} placeholder='搜索角色名称' />
+    <View className='settings-section'>
+      <View className='row between settings-section-title'><Text>我的角色{w.value ? ' · ' + filteredRoles.length : ''}</Text><Action disabled={w.busy || !w.value} onClick={() => void edit()}>＋ 创建角色</Action></View>
+      <View className='card settings-list'>
+        {w.value && !filteredRoles.length && <View className='empty'>{search.trim() ? '没有匹配的角色' : '暂无角色'}</View>}
+        {filteredRoles.map(role => <View className='settings-row' key={role.id}>
+          <Button className='settings-link' disabled={w.busy || role.unavailable} onClick={() => void edit(role)}>
+            <View className='settings-copy'><Text>{role.name || '未命名角色'}</Text><Text className='settings-detail'>{role.preset ? '默认角色 · ' : ''}{roleRegionLabel(role.region)}{role.unavailable ? ' · 暂不可用，请刷新重试' : ''}</Text></View>
+            <View className='settings-chevron' ariaHidden />
+          </Button>
+          {role.id === active ? <Text className='settings-current'>✓ 当前使用</Text> : <Action disabled={w.busy || role.unavailable} onClick={() => void useRole(role)}>使用角色</Action>}
+        </View>)}
+      </View>
+      <Text className='settings-footnote'>点角色名称查看设置。切换角色仅对当前设备生效。</Text>
+    </View>
   </View>;
 }

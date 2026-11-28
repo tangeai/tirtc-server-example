@@ -287,3 +287,28 @@ page,.h5-body,body{margin:0;background:#f7f7f7;color:#191919;font-family:-apple-
 .scheme-target{background:#edf8f1;box-shadow:inset 4px 0 #07a458}
 .page .scheme-grip{display:flex;align-items:center;justify-content:center;height:80px;flex-shrink:0;width:70px;padding:0;margin:0;background:transparent;color:#657168;font-size:32px;line-height:80px;touch-action:none}
 .scheme-grip:after{border:0}
+
+/* Device settings share inset lists, section captions and quiet secondary actions. */
+.settings-page{background:#f2f2f6;gap:22px}
+.settings-page .card{background:#fff;border:0;border-radius:22px}
+.settings-page .settings-header .action,.settings-page .settings-section-title .action,.settings-row>.action{background:transparent;color:#087a41;line-height:76px;padding:0 10px}
+.settings-page .search-bar{min-height:72px;border:0;background:#e6e7ec}
+.settings-page .search-bar-input{height:72px;line-height:72px}
+.settings-page .tabs{display:flex;flex-wrap:nowrap;gap:2px;padding:5px;border-radius:16px;background:#e3e4e9}
+.settings-page .tabs .action{flex:1 1 0;padding:0 3px;background:transparent;line-height:64px;font-size:25px}
+.settings-page .tabs .primary{background:#fff;color:#202124;box-shadow:0 1px 5px rgba(0,0,0,.1)}
+.settings-section{display:flex;flex-direction:column;gap:8px}
+.settings-section-title,.settings-footnote{padding:0 14px;font-size:25px;color:#656872}
+.settings-footnote{display:block;margin-top:4px;line-height:1.55}
+.settings-page .settings-list{padding:0 24px;gap:0}
+.settings-row,.settings-page .settings-link{display:flex;align-items:center;gap:18px;min-width:0}
+.settings-row+.settings-row{border-top:1px solid #e6e6ea}
+.settings-page .settings-link{box-sizing:border-box;flex:1;margin:0;padding:22px 0;width:100%;text-align:left;line-height:1.4;font-size:30px;font-weight:400;color:#202124;background:transparent;border-radius:0;white-space:normal}
+.settings-link:after{border:0}
+.settings-copy{flex:1;min-width:0;overflow-wrap:anywhere}
+.settings-copy>text,.settings-detail{display:block}
+.settings-detail{font-size:24px;color:#686b74}
+.settings-current{color:#087a41;font-size:24px;flex-shrink:0}
+.settings-chevron{flex-shrink:0;width:11px;height:11px;border-top:3px solid #a5a6ad;border-right:3px solid #a5a6ad;transform:rotate(45deg)}
+.settings-page .reminder-page{margin:0}
+.settings-page .scheme-list,.settings-page .reminder-settings{gap:0}
