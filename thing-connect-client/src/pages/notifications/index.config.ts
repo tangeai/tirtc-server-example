@@ -1,1 +1,1 @@
-export default definePageConfig({ navigationBarTitleText: '设备提醒' });
+export default definePageConfig({ navigationBarTitleText: '异常提醒详情' });

@@ -37,10 +37,10 @@ test('设备入口顺序和更多菜单保留当前设备', () => {
   assert.deepEqual(nodes(header).filter(n => n.type === 'action').map(n => n.props.ariaLabel), ['添加设备']);
   assert.equal(nodes(header).some(n => n.type === 'account-alarm'), false);
   const buttons = nodes(links).filter(n => n.type === 'action');
-  assert.equal(buttons.length, 4);
-  assert.equal(buttons[0].props.children[0], '消息提醒');
+  assert.equal(buttons.length, 3);
+  assert.equal(buttons[0].props.children[0], 'AI 角色');
   for (const button of buttons) button.props.onClick();
-  assert.deepEqual(navigation, ['notifications', 'roles', 'recognition', 'contacts'].map(page => '/pages/' + page + '/index?device_id=device%2Fa' + (page === 'notifications' ? '&name=' + encodeURIComponent('测试设备') : '')));
+  assert.deepEqual(navigation, ['roles', 'recognition', 'contacts'].map(page => '/pages/' + page + '/index?device_id=device%2Fa'));
   const room = nodes(tree).find(n => n.props?.title === '多人对讲')!;
   room.props.onClick();
   assert.equal(navigation.at(-1), '/pages/room/index?device_id=device%2Fa');
@@ -90,5 +90,5 @@ test('离线呼叫和播放显示轻提示但不启动媒体；授权和功能�
   assert.deepEqual(h.toasts, ['设备已离线，请检查电源和网络', '设备已离线，请检查电源和网络']);
   const links = nodes(h.tree).find(n => n.props?.className === 'device-feature-links')!;
   for (const button of nodes(links).filter(n => n.type === 'action')) button.props.onClick();
-  assert.equal(h.navigation.length, 4);
+  assert.equal(h.navigation.length, 3);
 });

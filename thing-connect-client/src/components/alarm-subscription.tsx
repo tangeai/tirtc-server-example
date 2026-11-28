@@ -40,7 +40,7 @@ function prompt(template: string, device: string, ticket: Ticket): Promise<Decis
   }));
 }
 
-export function useAlarmSubscription(device: string) {
+export function useAlarmSubscription(device: string, enabled = true) {
   const [channel, setChannel] = useState<Capability>();
   const [notice, setNotice] = useState('');
   const [failed, setFailed] = useState(false);
@@ -68,7 +68,7 @@ export function useAlarmSubscription(device: string) {
     try {
       const cap = await request<Capability>(base + '/capabilities?device_id=' + encodeURIComponent(device));
       if (cap.device_id !== device) throw new ApiError(50300, '请升级设备提醒服务');
-      if (cap.alarm && (forAuthorization || !cap.alarm_subscribed || !cap.alarm_template_id)) {
+      if (enabled && cap.alarm && (forAuthorization || !cap.alarm_subscribed || !cap.alarm_template_id)) {
         // The session must exist before WeChat accepts the gesture. Otherwise
         // a slow login could assign an older decision a newer sequence number.
         const start = Date.now();
@@ -101,7 +101,7 @@ export function useAlarmSubscription(device: string) {
 
     if (owner && device) void refresh();
     return () => { revision.current++; };
-  }, [owner, device]);
+  }, [owner, device, enabled]);
 
   async function activate() {
     if (locked.current) return;
@@ -159,20 +159,21 @@ export function useAlarmSubscription(device: string) {
   return { channel, busy: busy || checking, notice, failed, unavailable, pending: !!pending.current, prepared: !!prepared.current, activate, refresh };
 }
 
-export function DeviceAlarm({ device }: { device: string }) {
-  const alarm = useAlarmSubscription(device);
+export function DeviceAlarm({ device, enabled }: { device: string; enabled: boolean }) {
+  const alarm = useAlarmSubscription(device, enabled);
   const subscribed = alarm.channel?.alarm_subscribed;
   const ready = alarm.channel?.alarm;
   const action = alarm.unavailable ? '重新检查' : alarm.pending ? '重试保存订阅结果' :
     subscribed ? alarm.prepared ? '确认微信授权' : '重新授权' : '开启微信提醒';
   return <View className='reminder-channel'><View className='reminder-line'><View className='reminder-copy'>
     <Text className='reminder-heading'>微信异常提醒</Text>
-    <Text className={'reminder-caption' + (subscribed ? ' reminder-active' : '')}>{alarm.unavailable ? '暂时无法读取设备订阅状态' : ready ? subscribed ? '这台设备已开启提醒' : '这台设备尚未开启提醒' : alarm.channel ? '微信异常提醒尚未启用' : '正在读取提醒状态…'}</Text>
+    <Text className={'reminder-caption' + (subscribed ? ' reminder-active' : '')}>{alarm.unavailable ? '暂时无法读取设备订阅状态' : ready ? subscribed ? '微信已授权' : '微信尚未授权' : alarm.channel ? '微信异常提醒尚未启用' : '正在读取提醒状态…'}</Text>
     </View>
-    {(alarm.unavailable || ready) && <Action primary={!subscribed} disabled={alarm.busy}
+    {(alarm.unavailable || enabled && ready) && <Action primary={!subscribed} disabled={alarm.busy}
       onClick={() => alarm.unavailable ? void alarm.refresh() : void alarm.activate()}>
       {action}
     </Action>}</View>
+    {!enabled && <Text className='reminder-caption'>AI 识别已关闭，当前不会发送异常提醒。</Text>}
     <Notice error={alarm.failed}>{alarm.notice}</Notice>
   </View>;
 }

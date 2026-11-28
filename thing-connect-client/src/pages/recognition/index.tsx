@@ -1,5 +1,6 @@
 import { Switch, Text, View } from '@tarojs/components';
 import { useState } from 'react';
+import { RecognitionReminders } from '../../components/recognition-reminders';
 import { Action, Notice } from '../../components/ui';
 import { useDeviceWorkspace } from '../../hooks/device-workspace';
 import { ApiError, request } from '../../services/api';
@@ -38,6 +39,8 @@ export default function Recognition() {
       {selected.map((item, index) => <View className='card' key={item.scheme_id}><Text className='label'>{index + 1}. {item.name}</Text><Text className='muted'>{({ text: '文字', audio: '语音', text_audio: '文字＋语音' } as Record<string,string>)[item.output_mode] || item.output_mode}{item.description ? ' · ' + item.description : ''}</Text><View className='row'><Action disabled={w.busy || index === 0} onClick={() => setSelected(moveScheme(selected, index, -1))}>上移</Action><Action disabled={w.busy || index === selected.length - 1} onClick={() => setSelected(moveScheme(selected, index, 1))}>下移</Action><Action danger disabled={w.busy} onClick={() => setSelected(selected.filter(s => s.scheme_id !== item.scheme_id))}>移除</Action></View></View>)}
       <View className='card'><Text className='label'>添加识别类型</Text>{w.value.catalog.filter(item => !selected.some(s => s.scheme_id === item.scheme_id)).map(item => <View className='contact row between' key={item.scheme_id}><Text className='grow'>{item.name}</Text><Action disabled={w.busy || selected.length >= 8} onClick={() => setSelected([...selected, item])}>添加</Action></View>)}{!w.value.catalog.length && <Text className='muted'>暂无可用类型</Text>}<Text className='muted'>已选 {selected.length} / 8 个类型</Text></View>
       {conflict && <Notice error>配置已变化，草稿已保留。请核对后重新加载，再保存；不会自动覆盖其他端的修改。</Notice>}
-      <View className='wide'><Action primary disabled={w.busy || conflict} onClick={() => void save()}>保存设置</Action></View></>}
+      <View className='wide'><Action primary disabled={w.busy || conflict} onClick={() => void save()}>保存识别设置</Action></View>
+      {process.env.TARO_ENV === 'weapp' && w.device && <RecognitionReminders key={w.device.device_id} device={w.device.device_id} enabled={w.value.config.policy.enabled} />}
+    </>}
   </View>;
 }
