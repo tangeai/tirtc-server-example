@@ -58,6 +58,17 @@ func TestPushLongSubscriptionLifecycle(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	for _, tc := range []struct {
+		app, template string
+		want          bool
+	}{
+		{"app", push.AlarmTemplate, true}, {"other", push.AlarmTemplate, false}, {"app", "other", false},
+	} {
+		got, err := s.HasGrant(ctx, user, tc.app, tc.template)
+		if err != nil || got != tc.want {
+			t.Fatalf("grant %q %q: %v %v", tc.app, tc.template, got, err)
+		}
+	}
 	admit(e, "unsubscribed")
 	e.ID = "two:alarm"
 	var wg sync.WaitGroup

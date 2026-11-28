@@ -17,6 +17,7 @@ function render(state: string, online: boolean, menu = false) {
   const cleanups: (() => void)[] = [];
   const jsx = (type: unknown, props: any) => ({ type, props });
   const source = loadSource(fileURLToPath(new URL('../src/pages/devices/index.tsx', import.meta.url)), {
+    '../../components/alarm-subscription': { AccountAlarm: 'account-alarm' },
     'react/jsx-runtime': { jsx, jsxs: jsx },
     react: { useState: (initial: unknown) => [cursor < values.length ? values[cursor++] : (cursor++, initial), () => {}], useRef: (current: unknown) => ({ current }), useEffect: (fn: () => void | (() => void)) => { const cleanup = fn(); if (cleanup) cleanups.push(cleanup); } },
     '@tarojs/taro': { __esModule: true, default: { showToast: ({ title }: { title: string }) => { toasts.push(title); }, hideTabBar: async () => { tabActions.push('hide'); }, showTabBar: async () => { tabActions.push('show'); }, navigateTo: ({ url }: { url: string }) => { navigation.push(url); } }, useDidShow() {}, usePullDownRefresh() {} },
@@ -32,10 +33,12 @@ function render(state: string, online: boolean, menu = false) {
 test('设备入口顺序和更多菜单保留当前设备', () => {
   const { tree, navigation } = render('authorized', true, true);
   const links = nodes(tree).find(n => n.props?.className === 'device-feature-links')!;
+  assert.equal(nodes(tree).filter(n => n.type === 'account-alarm').length, 1);
+  assert.equal(nodes(links).filter(n => n.type === 'account-alarm').length, 0);
   const buttons = nodes(links).filter(n => n.type === 'action');
-  assert.equal(buttons.length, 3);
+  assert.equal(buttons.length, 4);
   for (const button of buttons) button.props.onClick();
-  assert.deepEqual(navigation, ['roles', 'recognition', 'contacts'].map(page => '/pages/' + page + '/index?device_id=device%2Fa'));
+  assert.deepEqual(navigation, ['notifications', 'roles', 'recognition', 'contacts'].map(page => '/pages/' + page + '/index?device_id=device%2Fa'));
   const room = nodes(tree).find(n => n.props?.title === '多人对讲')!;
   room.props.onClick();
   assert.equal(navigation.at(-1), '/pages/room/index?device_id=device%2Fa');
@@ -85,5 +88,5 @@ test('离线呼叫和播放显示轻提示但不启动媒体；授权和功能�
   assert.deepEqual(h.toasts, ['设备已离线，请检查电源和网络', '设备已离线，请检查电源和网络']);
   const links = nodes(h.tree).find(n => n.props?.className === 'device-feature-links')!;
   for (const button of nodes(links).filter(n => n.type === 'action')) button.props.onClick();
-  assert.equal(h.navigation.length, 3);
+  assert.equal(h.navigation.length, 4);
 });

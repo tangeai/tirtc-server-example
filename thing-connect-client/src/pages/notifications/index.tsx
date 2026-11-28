@@ -4,22 +4,7 @@ import { useRef, useState } from 'react';
 import { Action, Notice } from '../../components/ui';
 import { ApiError, request, errorText, token } from '../../services/api';
 
-declare const wx: {
-  requestSubscribeMessage(options: {
-    tmplIds: string[];
-    success(result: Record<string, string>): void;
-    fail(error: { errMsg: string }): void;
-  }): void;
-};
-
-type Preference = { interval_seconds: number | null; enabled: boolean; template_id?: string; suggested_seconds?: number };
-const decisionMessages = {
-  accept: '设备提醒已订阅',
-  reject: '已拒绝设备提醒',
-  cancel: '已取消本次订阅操作，原有提醒状态不变',
-};
-type Decision = keyof typeof decisionMessages;
-type Session = { session_id: string; replace: boolean; template_id: string };
+type Preference = { interval_seconds: number | null; enabled: boolean; suggested_seconds?: number };
 const base = '/v1/push/user';
 const path = (device: string) => base + '/preferences/' + encodeURIComponent(device) + '/alarm';
 
@@ -28,8 +13,7 @@ export default function Notifications() {
   const [pref, setPref] = useState<Preference>();
   const [labelText,setLabelText]=useState<string>();
   const [value,setValue]=useState('60');
-  const [session, setSession] = useState<Session>();
-  const [report, setReport] = useState<{ session: Session; decision: Decision }>();
+  const [editing, setEditing] = useState(false);
   const [message, setMessage] = useState(''), [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const lock = useRef(false);
@@ -41,7 +25,14 @@ export default function Notifications() {
     finally { lock.current = false; setBusy(false); }
   }
 
-  useLoad(options => { void run(async () => {
+  const entry = useRef<{ ref?: string; device_id?: string }>({});
+  useLoad(options => {
+    entry.current = options;
+    void run(loadPreferences);
+  });
+
+  async function loadPreferences() {
+    const options = entry.current;
     const ref = options.ref;
     if (!token()) {
       await Taro.reLaunch({ url: '/pages/login/index' + (ref ? '?notification=' + encodeURIComponent(ref) : '') });
@@ -63,10 +54,10 @@ export default function Notifications() {
     }
     if (!id) throw new ApiError(40000, '缺少设备编号');
     setDevice(id);
-    const p=await request<Preference>(path(id));
+    const p = await request<Preference>(path(id));
     setPref(p);
     setValue(String(p.interval_seconds ?? p.suggested_seconds ?? 60));
-  }); });
+  }
 
   async function save(reset: boolean) {
     const seconds = Number(value);
@@ -74,68 +65,28 @@ export default function Notifications() {
     const p = await request<Preference>(path(device), reset ? 'DELETE' : 'PUT', reset ? undefined : { interval_seconds: seconds });
     setPref(p);
     setValue(String(p.interval_seconds ?? p.suggested_seconds ?? 60));
-    setMessage('提醒间隔已保存');
-  }
-  async function prepare() {
-    const login = await Taro.login({ timeout: 10000 });
-    const prepared = await request<Session>(base + '/subscriptions', 'POST', {
-      app_id: Taro.getAccountInfoSync().miniProgram.appId, code: login.code,
-      event_type: "alarm",
-    });
-    if (prepared.replace) {
-      const choice = await Taro.showModal({ title: '替换接收微信', content: '此微信或本账号已有接收关联。替换后，旧关联中等待发送的提醒将终止。' });
-      if (!choice.confirm) return;
-    }
-    await request(base + '/subscriptions/' + prepared.session_id + '/confirm', 'POST', { replace: prepared.replace });
-    setSession(prepared);
-  }
-  async function finish(s: Session, decision: Decision) {
-    try {
-      await request(base + '/subscriptions/' + s.session_id + '/result', 'POST', { decision });
-    } catch (e) {
-      if (e instanceof ApiError && (e.code === 41000 || e.code === 40901)) {
-        setReport(undefined);
-        setSession(undefined);
-        throw new ApiError(e.code, '订阅会话已失效，请重新订阅');
-      }
-      throw e;
-    }
-    setReport(undefined);
-    setMessage(decisionMessages[decision]);
-  }
-  async function authorize(s: Session) {
-    const decision = await new Promise<Decision>((resolve, reject) =>
-      wx.requestSubscribeMessage({
-        tmplIds: [s.template_id],
-        success(result) {
-          const value = result[s.template_id];
-          if (value === 'accept') resolve('accept');
-          else if (value === 'reject' || value === 'ban') resolve('reject');
-          else resolve('cancel');
-        },
-        fail(error) {
-          if (/^requestSubscribeMessage:fail (?:user )?cancel$/i.test(error.errMsg.trim())) resolve('cancel');
-          else reject(new ApiError(-1, '微信订阅未完成，请重试'));
-        },
-      })
-    );
-    setSession(undefined); setReport({ session: s, decision });
-    await finish(s, decision);
+    setEditing(false); setMessage('提醒频率已保存');
   }
   return <View className='page'>
     <Notice error>{error}</Notice><Notice>{message}</Notice>
-    {device && <Text>设备 {device}</Text>}
+    {device && <Text className='alarm-device-id'>设备 {device}</Text>}
     {labelText !== undefined && <View className='card'><Text>AI 异常提醒 · 识别标签：{labelText}</Text></View>}
-    {pref && <View className='card'>
-      <Text>AI 异常提醒 · {pref.interval_seconds ? '每 ' + pref.interval_seconds + ' 秒最多提醒一次' : '每次提醒'}</Text>
-      <Input type='number' maxlength={5} value={value} onInput={e => setValue(e.detail.value)} />
-      <Action disabled={busy} onClick={() => void run(() => save(false))}>保存间隔（秒）</Action>
-      <Action disabled={busy} onClick={() => void run(() => save(true))}>恢复每次提醒</Action>
-    </View>}
-    {session || report ? <Action primary disabled={busy} onClick={() => void run(() => report ? finish(report.session, report.decision) : authorize(session!))}>
-      {report ? '重试保存订阅结果' : '确认订阅微信提醒'}
-    </Action> : pref?.enabled && <Action primary disabled={busy} onClick={() => void run(() => prepare())}>
-      订阅 AI 异常提醒
-    </Action>}
+    {!pref && busy && <Notice>正在加载设备提醒…</Notice>}
+    {!pref && error && <Action disabled={busy} onClick={() => void run(loadPreferences)}>重新加载设备提醒</Action>}
+    {pref && <>
+      <View className='card reminder-section'>
+        <Text className='reminder-heading'>提醒频率</Text>
+        <Text>当前：{pref.interval_seconds ? '每 ' + pref.interval_seconds + ' 秒最多一次' : '每次异常都提醒'}</Text>
+        {editing ? <>
+          <Text>最短间隔（秒）</Text>
+          <Input className='input' type='number' maxlength={5} value={value} onInput={e => setValue(e.detail.value)} />
+          <Action primary disabled={busy} onClick={() => void run(() => save(false))}>保存间隔</Action>
+          <Action disabled={busy} onClick={() => setEditing(false)}>取消</Action>
+        </> : <>
+          <Action disabled={busy} onClick={() => { setValue(String(pref.interval_seconds ?? pref.suggested_seconds ?? 60)); setEditing(true); }}>设置提醒间隔</Action>
+          {!!pref.interval_seconds && <Action disabled={busy} onClick={() => void run(() => save(true))}>恢复每次提醒</Action>}
+        </>}
+      </View>
+    </>}
   </View>;
 }

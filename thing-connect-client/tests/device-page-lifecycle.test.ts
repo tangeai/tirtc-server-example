@@ -8,6 +8,7 @@ test('设备页失败后返回不自动重试；手动刷新和绑定事件可�
   let resolve: (value: unknown) => void = () => {};
   const jsx = (type: unknown, props: any) => ({ type, props });
   const source = loadSource(fileURLToPath(new URL('../src/pages/devices/index.tsx', import.meta.url)), {
+    '../../components/alarm-subscription': { AccountAlarm: 'account-alarm' },
     'react/jsx-runtime': { jsx, jsxs: jsx },
     react: { useState: (value: unknown) => [value, () => {}], useRef: (value: unknown) => ({ current: value }), useEffect: (fn: () => void) => fn() },
     '@tarojs/taro': { __esModule: true, default: { stopPullDownRefresh: async () => { stopped++; } }, useDidShow: (fn: typeof show) => { show = fn; }, usePullDownRefresh: (fn: typeof pull) => { pull = fn; } },

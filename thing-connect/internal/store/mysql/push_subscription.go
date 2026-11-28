@@ -169,3 +169,12 @@ func (s *PushStore) Report(ctx context.Context, user int64, id, decision string)
 	}
 	return tx.Commit()
 }
+
+func (s *PushStore) HasGrant(ctx context.Context, user int64, app, template string) (bool, error) {
+	var granted bool
+	err := s.db.GetContext(ctx, &granted, `SELECT EXISTS(
+		SELECT 1 FROM push_recipient r JOIN push_subscription s ON s.generation=r.generation
+		WHERE r.user_id=? AND r.app_id=? AND s.template_id=? AND s.granted
+	)`, user, app, template)
+	return granted, err
+}

@@ -13,6 +13,7 @@ type Reference struct {
 }
 
 type Repository interface {
+	HasGrant(context.Context, int64, string, string) (bool, error)
 	Lookup(context.Context, Event) (string, error)
 	Admit(context.Context, Event, string, string) (string, error)
 	Preference(context.Context, int64, string, string, bool, *int) (*int, error)
@@ -70,3 +71,11 @@ func (s *Service) Subscribe(ctx context.Context, user int64, app, code, kind str
 }
 func (s *Service) TemplateID(kind string) string { return s.policy.Template(kind).ID }
 func (s *Service) SuggestedSeconds() int         { return s.policy.SuggestedSeconds }
+
+// AlarmGrant reports the account's current grant for the configured delivery target.
+func (s *Service) AlarmGrant(ctx context.Context, user int64) (bool, error) {
+	if !s.Enabled("alarm") {
+		return false, nil
+	}
+	return s.HasGrant(ctx, user, s.policy.AppID, s.TemplateID("alarm"))
+}

@@ -97,7 +97,8 @@ func Register(engine *gin.Engine, current func() *push.Service, key, secret stri
 	})
 	u.GET("/capabilities", func(c *gin.Context) {
 		s := current()
-		apiresp.OK(c, gin.H{"alarm": s.Enabled("alarm"), "crying": s.Enabled("crying"), "quarrel": s.Enabled("quarrel")})
+		granted, err := s.AlarmGrant(c.Request.Context(), c.GetInt64("user"))
+		write(c, gin.H{"alarm": s.Enabled("alarm"), "alarm_subscribed": granted, "alarm_template_id": s.TemplateID("alarm"), "crying": s.Enabled("crying"), "quarrel": s.Enabled("quarrel")}, err)
 	})
 	preference := func(c *gin.Context) {
 		kind := c.Param("kind")

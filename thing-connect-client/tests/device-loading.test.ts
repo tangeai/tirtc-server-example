@@ -19,6 +19,7 @@ function harness(deviceName = '测试') {
   const writes: { path: string; method: string; body: any }[] = [];
   let resolveWrite = () => {}, changed = 0;
   const source = loadSource(fileURLToPath(new URL('../src/pages/devices/index.tsx', import.meta.url)), {
+    '../../components/alarm-subscription': { AccountAlarm: 'account-alarm' },
     'react/jsx-runtime': { jsx, jsxs: jsx },
     react: {
       useState(initial: unknown) { const i = cursor++; if (!mounted) state[i] = initial; return [state[i], (value: any) => { state[i] = typeof value === 'function' ? value(state[i]) : value; }]; },

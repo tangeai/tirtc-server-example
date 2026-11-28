@@ -7652,7 +7652,7 @@ speech.url 为识别服务相对路径，相对 recognition-srv 解析，并携�
 
 仅使用小程序提醒的设备通过现有识别接口提交音频即可。识别服务在分析完成事务中直接读取内部结果并登记异常事件，随后异步投递。设备查询任务或接收 MQTT 结果均为独立流程。用户从微信通知打开小程序时，页面凭 ref 请求提醒详情。
 
-小程序通过同源 `/v1/push/user` 调用通知服务。用户接口使用当前用户 JWT，成功响应沿用 code=200 的标准信封。识别服务使用共享的 `X-Internal-Key` 访问内网接口。首次订阅依次执行身份识别、确认关联、微信订阅弹窗和结果登记。
+小程序通过同源 `/v1/push/user` 调用通知服务。用户接口使用当前用户 JWT，成功响应沿用 code=200 的标准信封。识别服务使用共享的 `X-Internal-Key` 访问内网接口。小程序在用户点击时对当前模板请求微信授权，使用订阅会话确认接收身份后登记微信决定。结果对应的模板必须与会话返回的模板一致。
 
 同一接收身份和模板以较新会话提交的同意或拒绝为准。取消只登记本次会话，保留当前长期授权及其决定序号。较旧会话首次回报取消时，若较新会话已有同意或拒绝决定，返回 409/40901。在会话有效期内重报已经保存的相同决定返回成功。回报遇到 409/40901（身份或决定已变化）或 410/41000（会话已过期）时，重新发起订阅。临时网络错误可重试原会话回报。其他错误包括 400/40000 参数无效、401/401 登录无效、403/40300 无权访问设备、503/50300 微信订阅暂不可用。
 
@@ -7678,7 +7678,7 @@ speech.url 为识别服务相对路径，相对 recognition-srv 解析，并携�
 
 **调用方**：小程序。
 
-`alarm` 为布尔值，表示当前渠道配置支持 AI 异常提醒。个人授权通过订阅会话登记。`crying`、`quarrel` 供旧客户端使用。
+`alarm` 为布尔值，表示当前渠道配置支持 AI 异常提醒。`alarm_template_id` 是当前报警模板 ID。`alarm_subscribed` 表示渠道启用且当前账号对该 AppID 和模板有有效订阅，同账号设备共用该授权。`crying`、`quarrel` 供旧客户端使用。
 
 <a id="push-get-user-preferences-device-kind"></a>
 
@@ -7693,7 +7693,7 @@ speech.url 为识别服务相对路径，相对 recognition-srv 解析，并携�
 | `device` | 设备编号 |
 | `kind` | 提醒类型，AI 异常提醒使用 alarm |
 
-返回 interval_seconds（未设置为 null）、enabled、template_id 和 suggested_seconds。AI 异常提醒的 kind 为 alarm，已启用时展示授权入口。
+读取 AI 异常提醒时，`kind` 取 `alarm`。响应中的 `interval_seconds` 是这台设备已保存的提醒间隔，未设置时为 `null`。`suggested_seconds` 是编辑间隔时的建议值，`enabled` 和 `template_id` 分别给出渠道的可用状态和模板 ID。账号的订阅状态见[查询提醒能力](#push-get-user-capabilities)。
 
 <a id="push-put-user-preferences-device-kind"></a>
 
@@ -7747,7 +7747,7 @@ speech.url 为识别服务相对路径，相对 recognition-srv 解析，并携�
 |---|---|
 | `id` | 创建订阅会话时返回的 session_id |
 
-提交 replace 布尔值。发生关联冲突须先让用户确认；取消时结束交互。确认成功后由用户点击打开微信订阅弹窗。
+提交布尔字段 `replace`。创建会话返回 `replace=true` 时，须取得用户对替换接收微信的确认。用户取消替换时保留原关联并结束操作。接收身份确认成功后，通过同一会话的 `/result` 登记微信返回的订阅决定。
 
 <a id="push-post-user-subscriptions-id-result"></a>
 
@@ -7761,7 +7761,7 @@ speech.url 为识别服务相对路径，相对 recognition-srv 解析，并携�
 |---|---|
 | `id` | 创建订阅会话时返回的 session_id |
 
-提交 decision（accept、reject、cancel）。同一会话重复回报复用结果。长期订阅按微信身份和模板生效。
+提交 `decision`（`accept`、`reject` 或 `cancel`）。同一会话重复回报同一决定时返回成功。展示当前账号的授权状态时，读取[查询提醒能力](#push-get-user-capabilities)返回的 `alarm_subscribed`，以便反映其他会话或接收微信变更后的结果。
 
 <a id="push-get-user-references-id"></a>
 
