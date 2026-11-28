@@ -38,13 +38,20 @@ export default function Recognition() {
       }
     });
   }
-  return <View className='page content-page settings-page'><View className='row between settings-header'><Text className='title device-page-name'>{w.device?.device_name || '当前设备'}</Text><Action disabled={w.busy} onClick={() => void w.refresh()}>刷新</Action></View><Notice error>{w.error}</Notice>{w.busy && !w.value && <Notice>正在加载识别设置…</Notice>}
+  return <View className='page content-page settings-page'>
+    <View className='row'><Text className='title device-page-name'>{w.device?.device_name || '当前设备'}</Text></View>
+    <Notice error>{w.error}</Notice>
+    {!w.value && w.error && <Action disabled={w.busy} onClick={() => void w.refresh()}>重新加载识别设置</Action>}
+    {w.busy && !w.value && <Notice>正在加载识别设置…</Notice>}
     {w.value && <><View className='settings-section'>
       <RecognitionTypes selected={selected} catalog={w.value.catalog} locked={locked}
         change={schemes => void save(schemes)} />
       <Text className='settings-footnote'>开启任一类型即可识别，全部关闭即停止。修改后自动保存。</Text>
     </View>
-      {conflict && <Notice error>设备配置已更新，点「刷新」后再修改。</Notice>}
+      {conflict && <View className='card'>
+        <Notice error>设备配置已更新，载入最新设置后可继续修改。</Notice>
+        <Action disabled={w.busy} onClick={() => void w.refresh()}>载入最新设置</Action>
+      </View>}
       {process.env.TARO_ENV === 'weapp' && w.device && <RecognitionReminders key={w.device.device_id} device={w.device.device_id} enabled={w.value.config.policy.enabled} />}
       <View className='settings-section'><View className='card'><View className='row between'>
         <Text>本月识别用量</Text><Text className='recognition-usage-value'>{w.value.config.usage.used} / {w.value.config.policy.monthly_limit} 次</Text>

@@ -111,8 +111,9 @@ export default function Roles() {
     {selected.id && !selected.preset && selected.id !== active && <Action danger disabled={w.busy} onClick={() => void remove(selected)}>删除角色</Action>}
   </View>;
   return <View className='page content-page settings-page'>
-    <View className='row between settings-header'><Text className='title device-page-name'>{w.device?.device_name || '当前设备'}</Text><Action disabled={w.busy} onClick={() => void w.refresh()}>刷新</Action></View>
+    <View className='row'><Text className='title device-page-name'>{w.device?.device_name || '当前设备'}</Text></View>
     <Notice error>{w.error}</Notice><Notice>{w.busy && !w.value ? '正在加载角色…' : ''}</Notice>
+    {w.error && <Action disabled={w.busy} onClick={() => void w.refresh()}>重新加载角色列表</Action>}
     <SearchField value={search} onChange={setSearch} placeholder='搜索角色名称' />
     <View className='settings-section'>
       <View className='row between settings-section-title'><Text>我的角色{w.value ? ' · ' + filteredRoles.length : ''}</Text><Action disabled={w.busy || !w.value} onClick={() => void edit()}>＋ 创建角色</Action></View>
@@ -120,10 +121,11 @@ export default function Roles() {
         {w.value && !filteredRoles.length && <View className='empty'>{search.trim() ? '没有匹配的角色' : '暂无角色'}</View>}
         {filteredRoles.map(role => <View className='settings-row' key={role.id}>
           <Button className='settings-link' disabled={w.busy || role.unavailable} onClick={() => void edit(role)}>
-            <View className='settings-copy'><Text>{role.name || '未命名角色'}</Text><Text className='settings-detail'>{role.preset ? '默认角色 · ' : ''}{roleRegionLabel(role.region)}{role.unavailable ? ' · 暂不可用，请刷新重试' : ''}</Text></View>
+            <View className='settings-copy'><Text>{role.name || '未命名角色'}</Text><Text className='settings-detail'>{role.preset ? '默认角色 · ' : ''}{roleRegionLabel(role.region)}{role.unavailable ? ' · 暂不可用' : ''}</Text></View>
             <View className='settings-chevron' ariaHidden />
           </Button>
-          {role.id === active ? <Text className='settings-current'>✓ 当前使用</Text> : <Action disabled={w.busy || role.unavailable} onClick={() => void useRole(role)}>使用角色</Action>}
+          {role.unavailable && <Action disabled={w.busy} onClick={() => void w.refresh()}>重试加载</Action>}
+          {role.id === active ? <Text className='settings-current'>✓ 当前使用</Text> : !role.unavailable && <Action disabled={w.busy} onClick={() => void useRole(role)}>使用角色</Action>}
         </View>)}
       </View>
       <Text className='settings-footnote'>点角色名称查看设置。切换角色仅对当前设备生效。</Text>
