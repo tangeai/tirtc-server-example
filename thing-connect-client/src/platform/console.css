@@ -12,7 +12,8 @@
   .page.devices-page { max-width:1280PX; padding:32PX }
   .device-list-grid { display:grid; gap:18PX; grid-template-columns:repeat(auto-fit,minmax(min(100%,330PX),1fr)); align-items:stretch }
   .device-list-grid>.card { margin:0;display:flex;flex-direction:column }
-  .device-list-grid .device-feature-links { margin-top:auto }
+  .device-list-grid .device-primary-actions { margin-top:auto }
+  .device-list-grid .device-head { margin-bottom:12PX }
   .page.content-page { max-width:960PX }
   .page.role-editor-page { max-width:1024PX }
 }
@@ -124,3 +125,7 @@ body,.taro_page { background:#f4f6f5 }
 .devices-page .device-head {min-height:50PX}
 .devices-page .device-title-row,.devices-page .device-name-setup {min-height:30PX}
 .devices-page .device-list-heading .title {margin:0}
+
+@media (hover:hover) {
+  .devices-page .device-feature-links .action:hover {background:#edf5f0;color:#116341}
+}
