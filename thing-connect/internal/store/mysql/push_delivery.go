@@ -43,7 +43,7 @@ func (s *PushStore) ClaimPush(ctx context.Context) (*push.Delivery, error) {
 	d.Occurred = claimed.Add(-time.Duration(row.Age) * time.Microsecond)
 
 	d.Expires = claimed.Add(time.Duration(row.Remaining) * time.Microsecond)
-	err = tx.QueryRowxContext(ctx, `SELECT r.open_id,r.app_id,e.label_text FROM push_delivery d JOIN push_event e ON e.id=d.event_id JOIN device_bind b ON d.device_id=b.device_id AND b.user_id=d.user_id AND CONCAT(b.id,':',b.binding_revision)=d.bind_id JOIN push_recipient r ON r.user_id=d.user_id AND r.generation=d.generation JOIN push_subscription s ON s.granted AND s.generation=d.generation AND s.template_id=d.template_id WHERE d.id=? FOR SHARE`, d.ID).Scan(&d.Open, &d.AppID, &d.LabelText)
+	err = tx.QueryRowxContext(ctx, `SELECT r.open_id,r.app_id,e.label_text,s.model_id FROM push_delivery d JOIN push_event e ON e.id=d.event_id JOIN device_bind b ON d.device_id=b.device_id AND b.user_id=d.user_id AND CONCAT(b.id,':',b.binding_revision)=d.bind_id JOIN push_recipient r ON r.user_id=d.user_id AND r.generation=d.generation JOIN push_subscription s ON s.granted AND s.grant_id=d.grant_id AND s.generation=d.generation AND s.template_id=d.template_id AND s.bind_id=IF(d.event_type='alarm',d.bind_id,'') WHERE d.id=? FOR SHARE`, d.ID).Scan(&d.Open, &d.AppID, &d.LabelText, &d.ModelID)
 	if errors.Is(err, sql.ErrNoRows) {
 		_, err = tx.ExecContext(ctx, `UPDATE push_delivery SET status='cancelled',finished_at=UTC_TIMESTAMP(6) WHERE id=?`, d.ID)
 		if err != nil {
@@ -213,7 +213,7 @@ func (s *PushStore) ReserveSend(ctx context.Context, d push.Delivery) (bool, err
 	if err != nil || n == 0 {
 		return false, err
 	}
-	res, err = tx.ExecContext(ctx, `UPDATE push_delivery SET attempts=attempts+1,status='sending' WHERE id=? AND lease=? AND status IN ('leased','sending') AND expires_at>UTC_TIMESTAMP(6) AND next_at>UTC_TIMESTAMP(6) AND attempts<max_attempts AND EXISTS(SELECT 1 FROM device_bind b WHERE b.device_id=push_delivery.device_id AND b.user_id=push_delivery.user_id AND CONCAT(b.id,':',b.binding_revision)=push_delivery.bind_id) AND EXISTS(SELECT 1 FROM push_recipient r JOIN push_subscription s ON s.granted AND s.generation=r.generation WHERE r.generation=push_delivery.generation AND r.user_id=push_delivery.user_id AND s.template_id=push_delivery.template_id)`, d.ID, d.Lease)
+	res, err = tx.ExecContext(ctx, `UPDATE push_delivery SET attempts=attempts+1,status='sending' WHERE id=? AND lease=? AND status IN ('leased','sending') AND expires_at>UTC_TIMESTAMP(6) AND next_at>UTC_TIMESTAMP(6) AND attempts<max_attempts AND EXISTS(SELECT 1 FROM device_bind b WHERE b.device_id=push_delivery.device_id AND b.user_id=push_delivery.user_id AND CONCAT(b.id,':',b.binding_revision)=push_delivery.bind_id) AND EXISTS(SELECT 1 FROM push_recipient r JOIN push_subscription s ON s.granted AND s.generation=r.generation WHERE r.generation=push_delivery.generation AND r.user_id=push_delivery.user_id AND s.template_id=push_delivery.template_id AND s.bind_id=IF(push_delivery.event_type='alarm',push_delivery.bind_id,'') AND s.grant_id=push_delivery.grant_id)`, d.ID, d.Lease)
 	if err != nil {
 		return false, err
 	}

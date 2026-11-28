@@ -1,6 +1,7 @@
 import Taro, { useLoad } from '@tarojs/taro';
 import { Input, Text, View } from '@tarojs/components';
 import { useRef, useState } from 'react';
+import { DeviceAlarm } from '../../components/alarm-subscription';
 import { Action, Notice } from '../../components/ui';
 import { ApiError, request, errorText, token } from '../../services/api';
 
@@ -74,6 +75,7 @@ export default function Notifications() {
     {!pref && busy && <Notice>正在加载设备提醒…</Notice>}
     {!pref && error && <Action disabled={busy} onClick={() => void run(loadPreferences)}>重新加载设备提醒</Action>}
     {pref && <>
+      <DeviceAlarm key={device} device={device} />
       <View className='card reminder-section'>
         <Text className='reminder-heading'>提醒频率</Text>
         <Text>当前：{pref.interval_seconds ? '每 ' + pref.interval_seconds + ' 秒最多一次' : '每次异常都提醒'}</Text>

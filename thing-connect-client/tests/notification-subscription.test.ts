@@ -27,9 +27,11 @@ function harness(o: Options = {}) {
         assert.match(dialog.content, /其他账号/); assert.match(dialog.content, /本账号原有/); assert.match(dialog.content, /等待发送/);
         modal++; return { confirm: o.approve };
       } } },
-    '../services/api': { token: () => 'account', ApiError, errorText: (e: Error) => e.message, request: async (path: string, method: string, body?: {decision: string}) => {
-      if (path.endsWith('/capabilities')) return o.legacy ? { alarm: true } : { alarm: true, alarm_template_id: 'template', alarm_subscribed: granted };
-      if (path.endsWith('/subscriptions')) {
+    '../services/api': { token: () => 'account', ApiError, errorText: (e: Error) => e.message, request: async (path: string, method: string, body?: {decision: string; device_id?: string; model_id?: string}) => {
+      if (path.endsWith('/sn-ticket')) return { sn_ticket: 'ticket', model_id: 'model' };
+      if (path.endsWith('/capabilities?device_id=device-A')) return o.legacy ? { alarm: true } : { device_id: 'device-A', alarm: true, alarm_template_id: 'template', alarm_subscribed: granted };
+      if (path.endsWith('/device-subscriptions')) {
+        assert.equal(body?.device_id, 'device-A'); assert.equal(body?.model_id, 'model');
         sessions++;
         if (o.prepareFailure && sessions === 1) throw new ApiError(50300, '创建会话失败');
         return { session_id: String(++sequence), replace: o.replace, template_id: o.mismatch ? 'new' : 'template' };
@@ -45,15 +47,15 @@ function harness(o: Options = {}) {
       }
       if (o.loseAcknowledgement && decisions.length === 1) throw new ApiError(-1, '回执丢失');
     } },
-  }, { Date: { now: () => now }, wx: { requestSubscribeMessage(a: any) {
-    prompts++; assert.deepEqual(Array.from(a.tmplIds), ['template']);
+  }, { Date: { now: () => now }, wx: { requestSubscribeDeviceMessage(a: any) {
+    prompts++; assert.deepEqual(Array.from(a.tmplIds), ['template']); assert.equal(a.sn, 'device-A'); assert.equal(a.snTicket, 'ticket'); assert.equal(a.modelId, 'model');
     finishPrompt = () => {
       if (o.failure) a.fail({ errMsg: o.failure, errCode: o.errCode }); else a.success({ template: o.choice || 'accept' });
     };
     if (!o.holdPrompt) finishPrompt();
   } } });
   function render() {
-    cursor = 0; const alarm = source.useAlarmSubscription(); mounted = true;
+    cursor = 0; const alarm = source.useAlarmSubscription('device-A'); mounted = true;
     for (const effect of effects) effect(); effects = [];
     return alarm;
   }
@@ -64,7 +66,7 @@ function harness(o: Options = {}) {
 }
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
 
-for (const [value, decision] of [['accept','accept'], ['reject','reject'], ['ban','reject'], ['cancel','cancel']]) {
+for (const [value, decision] of [['acceptWithAudio','accept'], ['accept','accept'], ['reject','reject'], ['ban','reject'], ['cancel','cancel']]) {
   test('点击一次按微信结果保存 ' + value, async () => {
     const h = harness({ choice: value }); await flush();
     const done = h.render().activate(); assert.equal(h.counts().prompts, 1); await done;
@@ -129,10 +131,9 @@ test('旧会话回执丢失后重试成功，仍显示服务端当前的较新�
   assert.deepEqual(h.decisions, ['accept', 'accept']); assert.equal(h.acceptedReports.size, 1);
   assert.equal(h.counts().prompts, 1); assert.equal(h.render().channel.alarm_subscribed, false);
 });
-test('旧推送服务兼容：同一会话提供模板并保存用户决定', async () => {
+test('旧推送服务未返回设备范围时拒绝发起授权', async () => {
   const h = harness({ legacy: true }); await flush();
-  assert.equal(h.counts().sessions, 1); assert.equal(h.counts().prompts, 0);
   await h.render().activate();
-  assert.deepEqual([...h.acceptedReports.keys()], ['/v1/push/user/subscriptions/1/result']);
-  assert.equal(h.counts().prompts, 1); assert.equal(h.render().channel.alarm_subscribed, true);
+  assert.equal(h.counts().prompts, 0);
+  assert.equal(h.counts().sessions, 0);
 });

@@ -508,7 +508,7 @@ INSERT IGNORE INTO schema_migrations (component, version) VALUES
     ('core', 7),
     ('core', 8),
     ('core', 9),
-    ('core', 10), ('core', 11), ('core', 12), ('core', 13), ('core', 14), ('core', 15), ('core', 16), ('core', 17), ('core', 18), ('core', 19), ('core', 20);
+    ('core', 10), ('core', 11), ('core', 12), ('core', 13), ('core', 14), ('core', 15), ('core', 16), ('core', 17), ('core', 18), ('core', 19), ('core', 20), ('core', 21);
 CREATE TABLE IF NOT EXISTS ai_recognition_policy (
  device_id VARCHAR(64) NOT NULL COMMENT '设备标识',
  enabled BOOLEAN NOT NULL DEFAULT FALSE COMMENT '是否启用媒体识别',
@@ -1616,15 +1616,20 @@ CREATE TABLE IF NOT EXISTS push_recipient (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户当前接收微信身份';
 
 CREATE TABLE IF NOT EXISTS push_subscription (
+ model_id VARCHAR(128) NOT NULL DEFAULT '' COMMENT '微信设备型号',
+ bind_id VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT '' COMMENT '授权绑定代次',
  decision_seq BIGINT NOT NULL DEFAULT 0 COMMENT '最后生效会话序号',
  granted BOOLEAN NOT NULL DEFAULT TRUE COMMENT '当前同意订阅',
  generation VARCHAR(36) NOT NULL COMMENT '接收身份关联代次',
  template_id VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '订阅模板标识',
  grant_id VARCHAR(36) NOT NULL COMMENT '本次授权会话编号',
- PRIMARY KEY (generation,template_id)
+ PRIMARY KEY (generation,template_id,bind_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='当前身份已同意的长期订阅';
 
 CREATE TABLE IF NOT EXISTS push_session (
+ model_id VARCHAR(128) NOT NULL DEFAULT '' COMMENT '微信设备型号',
+ bind_id VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT '' COMMENT '授权绑定代次',
+ device_id VARCHAR(64) NOT NULL DEFAULT '' COMMENT '授权设备编号',
  session_seq BIGINT NOT NULL AUTO_INCREMENT COMMENT '订阅会话创建顺序',
  id VARCHAR(36) NOT NULL PRIMARY KEY COMMENT '记录编号',
  user_id BIGINT NOT NULL COMMENT '当前账号',

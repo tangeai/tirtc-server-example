@@ -50,7 +50,15 @@ func (c Channel) Send(ctx context.Context, d push.Delivery) push.Result {
 			return nil
 		}
 		var channelErr error
-		result, channelErr = c.send(ctx, messageClient, "https://api.weixin.qq.com/cgi-bin/message/subscribe/send", token, d)
+		endpoint := "https://api.weixin.qq.com/cgi-bin/message/subscribe/send"
+		if d.Kind == "alarm" {
+			if d.ModelID == "" {
+				result = push.Failed
+				return nil
+			}
+			endpoint = "https://api.weixin.qq.com/cgi-bin/message/device/subscribe/send"
+		}
+		result, channelErr = c.send(ctx, messageClient, endpoint, token, d)
 		return channelErr
 	})
 	if err != nil {
@@ -78,6 +86,13 @@ func (c Channel) send(ctx context.Context, client *http.Client, endpoint, token 
 		data[t.LabelKey] = field{value}
 	}
 	message := map[string]any{"touser": d.Open, "template_id": d.Template, "data": data}
+	if d.Kind == "alarm" {
+		delete(message, "touser")
+		message["to_openid_list"] = []string{d.Open}
+		message["sn"] = d.Device
+		message["modelId"] = d.ModelID
+		message["lang"] = "zh_CN"
+	}
 	if c.Config.Page != "" {
 		message["page"] = c.Config.Page + "?ref=" + url.QueryEscape(d.Reference)
 	}

@@ -162,7 +162,7 @@ func TestWechatCooldownUsesOneProbeAndRamps(t *testing.T) {
 		t.Fatal(err)
 	}
 	exec("INSERT INTO push_recipient(user_id,app_id,open_id,generation) VALUES(?,?,?,?)", user, app, app, app)
-	exec("INSERT INTO push_subscription(generation,grant_id,template_id) VALUES(?,'grant','template')", app)
+	exec("INSERT INTO push_subscription(generation,grant_id,template_id,bind_id,model_id) VALUES(?,'grant','template',?,'model')", app, bind)
 	t.Cleanup(func() {
 		for _, q := range []string{"DELETE FROM push_delivery WHERE device_id=?", "DELETE FROM push_event WHERE device_id=?", "DELETE FROM push_window WHERE device_id=?"} {
 			db.Exec(q, dev)

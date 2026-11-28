@@ -1,7 +1,6 @@
 import Taro, { useDidShow, usePullDownRefresh } from '@tarojs/taro';
 import { Button, Text, View } from '@tarojs/components';
 import { useEffect, useRef, useState } from 'react';
-import { AccountAlarm } from '../../components/alarm-subscription';
 import { DeviceInfo } from '../../components/device-info';
 import { Action, Field, Notice, RobotIcon, Sheet } from '../../components/ui';
 import { request, token, errorText } from '../../services/api';
@@ -23,8 +22,7 @@ export default function Devices() {
   const alive = useRef(true), reading = useRef(false), writing = useRef(false), revision = useRef(0), loadedRevision = useRef(-1);
   const capabilities = mediaCapabilities();
   const reminderSettings = (device: Device) => void Taro.navigateTo({ url: '/pages/notifications/index?device_id=' + encodeURIComponent(device.device_id) });
-  const [alarmOpen, setAlarmOpen] = useState(false);
-  const overlayOpen = !!(menu || editing || info || alarmOpen);
+  const overlayOpen = !!(menu || editing || info);
   useEffect(() => {
     if (!overlayOpen) return;
     let closed = false;
@@ -129,7 +127,6 @@ export default function Devices() {
           <Action primary ariaLabel='添加设备' onClick={() => void Taro.navigateTo({ url: '/pages/bind/index' })}>
             <View className='device-add-icon' ariaHidden /><Text>添加设备</Text>
           </Action>
-          {capabilities.platform === 'weapp' && <AccountAlarm open={alarmOpen} onOpenChange={setAlarmOpen} />}
         </View>
       </View>
       <Notice error>{error}</Notice>{loading && <Notice>正在更新设备…</Notice>}
@@ -137,7 +134,7 @@ export default function Devices() {
       {devices.map(device => <View className='card' key={device.device_id}><View className='device-head'><View className={'device-symbol ' + (device.online ? 'device-symbol-online' : 'device-symbol-offline')}><RobotIcon /><Text className='device-symbol-status'>{device.online ? '在线' : '离线'}</Text></View><View className='grow device-summary'><View className='device-title-row'>{device.device_name?.trim() ? <Text className='device-name'>{device.device_name}</Text> : <Button className='device-name-setup' disabled={busy} ariaLabel={'设置设备名称：' + device.device_id} onClick={() => openRename(device)}><Text>设置名称</Text><View className='device-name-edit-icon' ariaHidden /></Button>}</View><Text className='device-id'>ID: {device.device_id}</Text></View><Action disabled={busy} onClick={() => setMenu(device)}>⋯</Action></View>
         <View className='device-actions device-primary-actions'>{capabilities.platform === 'weapp' && <Action primary muted={!device.online && !needsAuthorization(device)} disabled={busy || loading} onClick={() => void media(needsAuthorization(device) ? 'authorize' : 'wechat-call', device)}><View className='device-primary-label'><View className={'device-action-icon ' + (needsAuthorization(device) ? 'device-action-shield' : 'device-action-phone')} ariaHidden />{callLabel(device)}</View></Action>}<Action muted={!device.online} disabled={busy || !capabilities.playback} onClick={() => void media('playback', device)}><View className='device-primary-label'><View className='device-action-icon device-action-play' ariaHidden />实时查看</View></Action></View>
         <View className='device-feature-links'>
-          {capabilities.platform === 'weapp' && <Action onClick={() => reminderSettings(device)}>提醒频率<Text className='device-link-arrow'>›</Text></Action>}
+          {capabilities.platform === 'weapp' && <Action onClick={() => reminderSettings(device)}>消息提醒<Text className='device-link-arrow'>›</Text></Action>}
           {([['roles', 'AI 角色'], ['recognition', 'AI 识别'], ['contacts', '联系人']] as const).map(([page, title]) => <Action key={page} onClick={() => void Taro.navigateTo({ url: '/pages/' + page + '/index?device_id=' + encodeURIComponent(device.device_id) })}>{title}<Text className='device-link-arrow'>›</Text></Action>)}</View>
       </View>)}
     {menu && <View className='mask device-more-mask' onClick={() => setMenu(undefined)}><View className='device-more-sheet' onClick={e => e.stopPropagation()}><View className='device-more-header'><Text className='device-more-title'>更多操作</Text><Text className='device-more-subtitle'>{menu.device_name || '未命名设备'}</Text></View><View className='device-more-scroll'>

@@ -165,7 +165,7 @@ func (s *PushStore) Admit(ctx context.Context, e push.Event, app, template strin
 	case template == "":
 		outcome = "unconfigured"
 	default:
-		err = tx.GetContext(ctx, &target, `SELECT r.generation,s.grant_id AS grantid FROM push_recipient r JOIN push_subscription s ON s.granted AND s.generation=r.generation AND s.template_id=? WHERE r.user_id=? AND r.app_id=? FOR UPDATE`, template, b.Owner, app)
+		err = tx.GetContext(ctx, &target, `SELECT r.generation,s.grant_id AS grantid FROM push_recipient r JOIN push_subscription s ON s.granted AND s.generation=r.generation AND s.template_id=? AND s.bind_id=IF(?='alarm',?,'') WHERE r.user_id=? AND r.app_id=? FOR UPDATE`, template, e.Kind, b.Bind, b.Owner, app)
 		if errors.Is(err, sql.ErrNoRows) {
 			outcome = "unsubscribed"
 		} else if err != nil {

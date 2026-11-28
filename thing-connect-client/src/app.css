@@ -263,7 +263,3 @@ page,.h5-body,body{margin:0;background:#f7f7f7;color:#191919;font-family:-apple-
 .device-add-icon:before,.device-add-icon:after{content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:currentColor;border-radius:3px}
 .device-add-icon:before{width:24px;height:3px}
 .device-add-icon:after{width:3px;height:24px}
-.subscription-bell{position:relative;box-sizing:border-box;width:24px;height:23px;border:3px solid currentColor;border-radius:14px 14px 4px 4px}
-.subscription-bell:before,.subscription-bell:after{content:'';position:absolute;background:currentColor;left:50%;transform:translateX(-50%);border-radius:4px}
-.subscription-bell:before{width:4px;height:4px;top:-6px}
-.subscription-bell:after{width:9px;height:4px;bottom:-8px}

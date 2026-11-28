@@ -2936,7 +2936,8 @@ JWT 无效返回 HTTP 401、`code=401`。本接口不影响授权关系、设备
   "code": 0, // 业务码：本接口成功为 0
   "msg": "ok", // 结果说明，业务判断使用 code
   "data": { // 业务数据
-    "sn_ticket": "<实际返回的 sn_ticket>", // 用于小程序设备 VoIP 授权的票据
+    "sn_ticket": "<实际返回的 sn_ticket>", // 用于小程序微信设备授权的票据
+    "model_id": "<微信设备型号>", // 申请该票据时使用的型号
     "device_name": "客厅学习机" // 当前设备名称，用于微信授权展示
   }
 }
@@ -2961,7 +2962,7 @@ JWT 无效返回 HTTP 401、`code=401`。本接口不影响授权关系、设备
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `data.sn_ticket` | string | 用于小程序设备 VoIP 授权的票据 |
+| `data.sn_ticket` | string | 用于小程序微信设备授权的票据 |
 | `data.device_name` | string | 当前设备名称，用于微信授权展示 |
 
 ---
@@ -7662,6 +7663,7 @@ speech.url 为识别服务相对路径，相对 recognition-srv 解析，并携�
 | [读取提醒间隔](#push-get-user-preferences-device-kind) | 小程序 | GET | `/v1/push/user/preferences/:device/:kind` | 用户 JWT |
 | [保存提醒间隔](#push-put-user-preferences-device-kind) | 小程序 | PUT | `/v1/push/user/preferences/:device/:kind` | 用户 JWT |
 | [重置提醒间隔](#push-delete-user-preferences-device-kind) | 小程序 | DELETE | `/v1/push/user/preferences/:device/:kind` | 用户 JWT |
+| [创建设备订阅会话](#push-post-user-device-subscriptions) | 小程序 | POST | `/v1/push/user/device-subscriptions` | 用户 JWT |
 | [创建订阅会话](#push-post-user-subscriptions) | 小程序 | POST | `/v1/push/user/subscriptions` | 用户 JWT |
 | [确认接收身份](#push-post-user-subscriptions-id-confirm) | 小程序 | POST | `/v1/push/user/subscriptions/:id/confirm` | 用户 JWT |
 | [登记订阅决定](#push-post-user-subscriptions-id-result) | 小程序 | POST | `/v1/push/user/subscriptions/:id/result` | 用户 JWT |
@@ -7678,7 +7680,7 @@ speech.url 为识别服务相对路径，相对 recognition-srv 解析，并携�
 
 **调用方**：小程序。
 
-`alarm` 为布尔值，表示当前渠道配置支持 AI 异常提醒。`alarm_template_id` 是当前报警模板 ID。`alarm_subscribed` 表示渠道启用且当前账号对该 AppID 和模板有有效订阅，同账号设备共用该授权。`crying`、`quarrel` 供旧客户端使用。
+`alarm` 为布尔值，表示当前渠道配置支持 AI 异常提醒。`alarm_template_id` 是当前报警模板 ID。`alarm_subscribed` 在传入查询参数 device_id 时表示当前用户、设备绑定代次、AppID 和模板的授权状态，响应同时返回设备编号。未指定设备时仅返回历史账号授权状态。`crying`、`quarrel` 供旧客户端使用。
 
 <a id="push-get-user-preferences-device-kind"></a>
 
@@ -7693,7 +7695,7 @@ speech.url 为识别服务相对路径，相对 recognition-srv 解析，并携�
 | `device` | 设备编号 |
 | `kind` | 提醒类型，AI 异常提醒使用 alarm |
 
-读取 AI 异常提醒时，`kind` 取 `alarm`。响应中的 `interval_seconds` 是这台设备已保存的提醒间隔，未设置时为 `null`。`suggested_seconds` 是编辑间隔时的建议值，`enabled` 和 `template_id` 分别给出渠道的可用状态和模板 ID。账号的订阅状态见[查询提醒能力](#push-get-user-capabilities)。
+读取 AI 异常提醒时，`kind` 取 `alarm`。响应中的 `interval_seconds` 是这台设备已保存的提醒间隔，未设置时为 `null`。`suggested_seconds` 是编辑间隔时的建议值，`enabled` 和 `template_id` 分别给出渠道的可用状态和模板 ID。设备的订阅状态见[查询提醒能力](#push-get-user-capabilities)。
 
 <a id="push-put-user-preferences-device-kind"></a>
 
@@ -7733,7 +7735,17 @@ speech.url 为识别服务相对路径，相对 recognition-srv 解析，并携�
 
 **调用方**：小程序。
 
-提交 app_id、wx.login 取得的 code 和 event_type，返回 session_id、replace、template_id。会话有效 5 分钟。
+适用于旧版 crying 和 quarrel 提醒。提交 app_id、登录 code 和 event_type 获取订阅会话。
+
+<a id="push-post-user-device-subscriptions"></a>
+
+### 创建设备订阅会话
+
+**接口**：`POST /v1/push/user/device-subscriptions`
+
+**调用方**：小程序。
+
+提交 device_id、票据接口返回的 model_id、app_id、wx.login 取得的 code 和 event_type（alarm）。服务端按当前归属和绑定代次创建有效期 5 分钟的会话，返回 session_id、replace 和 template_id。在用户点击时，向 wx.requestSubscribeDeviceMessage 传入相同的设备 SN、型号、SN 票据和模板。确认身份及回报结果沿用下方接口。
 
 <a id="push-post-user-subscriptions-id-confirm"></a>
 
@@ -7761,7 +7773,7 @@ speech.url 为识别服务相对路径，相对 recognition-srv 解析，并携�
 |---|---|
 | `id` | 创建订阅会话时返回的 session_id |
 
-提交 `decision`（`accept`、`reject` 或 `cancel`）。同一会话重复回报同一决定时返回成功。展示当前账号的授权状态时，读取[查询提醒能力](#push-get-user-capabilities)返回的 `alarm_subscribed`，以便反映其他会话或接收微信变更后的结果。
+提交 `decision`（`accept`、`reject` 或 `cancel`）。同一会话重复回报同一决定时返回成功。展示当前设备的授权状态时，带上设备编号读取[查询提醒能力](#push-get-user-capabilities)返回的 `alarm_subscribed`，以便反映其他会话或接收微信变更后的结果。
 
 <a id="push-get-user-references-id"></a>
 

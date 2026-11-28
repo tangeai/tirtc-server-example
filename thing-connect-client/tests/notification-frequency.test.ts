@@ -21,6 +21,7 @@ for (const [saved, suggested] of [[0, 60], [null, 0]] as const) {
       },
       '@tarojs/taro': { useLoad: (cb: typeof onLoad) => { onLoad = cb; } },
       '@tarojs/components': { Input: 'input', Text: 'text', View: 'view' },
+      '../../components/alarm-subscription': { DeviceAlarm: 'device-alarm' },
       '../../components/ui': { Action: 'button', Notice: 'notice' },
       '../../services/api': {
         token: () => 'fixture',

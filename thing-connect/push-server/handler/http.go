@@ -20,6 +20,8 @@ func write(c *gin.Context, data any, err error) {
 	}
 	status, code, msg := 500, 50000, "通知服务暂不可用"
 	switch {
+	case errors.Is(err, push.ErrDeviceSubscriptionRequired):
+		status, code, msg = 400, 40000, push.ErrDeviceSubscriptionRequired.Error()
 	case errors.Is(err, push.ErrInvalid):
 		status, code, msg = 400, 40000, "请检查通知参数"
 	case errors.Is(err, push.ErrExpired):
@@ -97,8 +99,9 @@ func Register(engine *gin.Engine, current func() *push.Service, key, secret stri
 	})
 	u.GET("/capabilities", func(c *gin.Context) {
 		s := current()
-		granted, err := s.AlarmGrant(c.Request.Context(), c.GetInt64("user"))
-		write(c, gin.H{"alarm": s.Enabled("alarm"), "alarm_subscribed": granted, "alarm_template_id": s.TemplateID("alarm"), "crying": s.Enabled("crying"), "quarrel": s.Enabled("quarrel")}, err)
+		device := c.Query("device_id")
+		granted, err := s.AlarmGrant(c.Request.Context(), c.GetInt64("user"), device)
+		write(c, gin.H{"device_id": device, "alarm": s.Enabled("alarm"), "alarm_subscribed": granted, "alarm_template_id": s.TemplateID("alarm"), "crying": s.Enabled("crying"), "quarrel": s.Enabled("quarrel")}, err)
 	})
 	preference := func(c *gin.Context) {
 		kind := c.Param("kind")
@@ -120,20 +123,33 @@ func Register(engine *gin.Engine, current func() *push.Service, key, secret stri
 	u.GET("/preferences/:device/:kind", preference)
 	u.PUT("/preferences/:device/:kind", preference)
 	u.DELETE("/preferences/:device/:kind", preference)
-	u.POST("/subscriptions", func(c *gin.Context) {
-		var b struct {
-			App  string `json:"app_id"`
-			Code string `json:"code"`
-			Kind string `json:"event_type"`
+	subscribe := func(deviceScoped bool) gin.HandlerFunc {
+		return func(c *gin.Context) {
+			var b struct {
+				Device string `json:"device_id"`
+				Model  string `json:"model_id"`
+				App    string `json:"app_id"`
+				Code   string `json:"code"`
+				Kind   string `json:"event_type"`
+			}
+			if c.ShouldBindJSON(&b) != nil {
+				write(c, nil, push.ErrInvalid)
+				return
+			}
+			s := current()
+			var id string
+			var replace bool
+			var err error
+			if deviceScoped {
+				id, replace, err = s.SubscribeDevice(c.Request.Context(), c.GetInt64("user"), b.App, b.Code, b.Kind, b.Device, b.Model)
+			} else {
+				id, replace, err = s.Subscribe(c.Request.Context(), c.GetInt64("user"), b.App, b.Code, b.Kind)
+			}
+			write(c, gin.H{"session_id": id, "replace": replace, "template_id": s.TemplateID(b.Kind)}, err)
 		}
-		if c.ShouldBindJSON(&b) != nil {
-			write(c, nil, push.ErrInvalid)
-			return
-		}
-		s := current()
-		id, replace, err := s.Subscribe(c.Request.Context(), c.GetInt64("user"), b.App, b.Code, b.Kind)
-		write(c, gin.H{"session_id": id, "replace": replace, "template_id": s.TemplateID(b.Kind)}, err)
-	})
+	}
+	u.POST("/subscriptions", subscribe(false))
+	u.POST("/device-subscriptions", subscribe(true))
 	u.POST("/subscriptions/:id/confirm", func(c *gin.Context) {
 		var b struct {
 			Replace bool `json:"replace"`
