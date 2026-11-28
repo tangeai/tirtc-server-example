@@ -28,12 +28,18 @@ export default function Contacts() {
     }
   });
   async function load(fresh = true) {
-    const rev = ++revision.current, id = currentId.current;
+    const rev = ++revision.current;
+    let id = currentId.current;
     const current = () => alive.current && rev === revision.current;
     setLoading(true); setError(''); setPendingError('');
     try {
-      const list = await readDevices(fresh);
+      const list = (await readDevices(fresh)).filter(row => row.status === 1);
       if (!current()) return;
+      if (process.env.TARO_ENV === 'h5' && !id) {
+        if (!list.length) { setDevices([]); setRows([]); setPending([]); return; }
+        id = list[0].device_id;
+        currentId.current = id; setDeviceId(id);
+      }
       if (!id || !list.some(d => d.device_id === id)) throw new ApiError(40300, '设备不属于当前账号，请返回设备列表');
       setDevices(list);
       await Promise.all([
@@ -92,10 +98,15 @@ export default function Contacts() {
   const device = devices.find(d => d.device_id === deviceId), filtered = filterContacts(rows, search, filter);
   return <View className='page content-page settings-page'>
     <View className='row'><DevicePageHeading title='联系人' device={device} /></View>
+    {process.env.TARO_ENV === 'h5' && devices.length > 1 && <label className='contact-device-picker'>{tr("当前管理设备")}
+      <select value={deviceId} disabled={busy || loading || !!editor} onChange={event => {
+        const url = new URL(location.href); url.searchParams.set('device_id', event.currentTarget.value); location.assign(url.href);
+      }}>{devices.map(row => <option key={row.device_id} value={row.device_id}>{row.device_name || row.device_id}</option>)}</select>
+    </label>}
     <Notice error>{error}</Notice>
     {error && <Action disabled={busy || loading} onClick={() => void load()}>{tr("重新加载联系人")}</Action>}
     <SearchField placeholder={tr("搜索名称或设备 ID")} value={search} onChange={setSearch} />
-    <View className='tabs'>{Object.entries({ all: '全部', mine: '我的设备', manual: '手动添加', voip: '微信授权' }).map(([key, label]) => <Action key={key} primary={filter === key} onClick={() => setFilter(key)}>{label}</Action>)}</View>
+    <View className='tabs'>{Object.entries({ all: '全部', mine: '我的设备', manual: '手动添加', voip: '微信授权' }).map(([key, label]) => <Action key={key} primary={filter === key} onClick={() => setFilter(key)}>{tr(label)}</Action>)}</View>
     <View className='settings-section'>
       <View className='row between settings-section-title'><Text>{tr("联系人")}{!loading && !error ? ' · ' + filtered.length : ''}</Text><Action disabled={busy || !device} onClick={() => openEditor('add')}>{tr("＋ 添加联系人")}</Action></View>
       <View className='card settings-list'>

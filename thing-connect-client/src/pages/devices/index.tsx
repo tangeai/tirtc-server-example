@@ -140,7 +140,7 @@ export default function Devices() {
   const callLabel = (device: Device) => authorizations[device.device_id]?.state === 'missing' ? '授权微信通话' : authorizations[device.device_id]?.state === 'disabled' ? '开启通话提醒' : (authorizations[device.device_id]?.state === 'authorized' ? '微信通话' : '确认通话授权');
   return <View className='page devices-page'>
       <View className='row between device-list-header'>
-        <Text className='title'>{tr("我的设备")}{(devices.length > 0 || initialized && !loading && !error) && <Text className='device-count'>{devices.length}</Text>}</Text>
+        <Text className='title'>{tr("我的设备")}{(devices.length > 0 || initialized && !loading && !error) && <Text className='device-count'>{tr('（')}{devices.length}{tr(' 台）')}</Text>}</Text>
         <View className='row device-list-tools'>
           {capabilities.platform === 'h5' && <Action disabled={busy || loading} onClick={() => void load()}>{tr("刷新")}</Action>}
           <Action primary disabled={busy} ariaLabel={tr("添加设备")} onClick={() => void addDevice()}>
@@ -152,12 +152,17 @@ export default function Devices() {
       {initialized && !loading && !devices.length && (error
         ? <View className='card empty'><Action onClick={() => void load()}>{tr('重新加载设备')}</Action></View>
         : <View className='card empty'>{tr("添加第一台设备，开始使用小钛")}</View>)}
-      <View className='device-list-grid'>{devices.map(device => <View className='card' key={device.device_id}><View className='device-head'><View className={'device-symbol ' + (device.online ? 'device-symbol-online' : 'device-symbol-offline')}><RobotIcon /><Text className='device-symbol-status'>{device.online ? tr("在线") : tr("离线")}</Text></View><View className='grow device-summary'><View className='device-title-row'>{device.device_name?.trim() ? <Text className='device-name'>{device.device_name}</Text> : <Button className='device-name-setup' disabled={busy} ariaLabel={tr("设置设备名称：") + device.device_id} onClick={() => openRename(device)}><Text>{tr("设置名称")}</Text><View className='device-name-edit-icon' ariaHidden /></Button>}</View><Text className='device-id'>ID: {device.device_id}</Text></View><Action disabled={busy} onClick={() => setMenu(device)}>⋯</Action></View>
-        {capabilities.platform === 'h5' && <Text className='dashboard-summary'>{dashboard.summary(device.device_id)}</Text>}
+      <View className='device-list-grid'>{devices.map(device => {
+        const summary = dashboard.summary(device.device_id);
+        return <View className='card' key={device.device_id}><View className='device-head'><View className={'device-symbol ' + (device.online ? 'device-symbol-online' : 'device-symbol-offline')}><RobotIcon /><Text className='device-symbol-status'>{device.online ? tr("在线") : tr("离线")}</Text></View><View className='grow device-summary'><View className='device-title-row'>{device.device_name?.trim() ? <Text className='device-name'>{device.device_name}</Text> : <Button className='device-name-setup' disabled={busy} ariaLabel={tr("设置设备名称：") + device.device_id} onClick={() => openRename(device)}><Text>{tr("设置名称")}</Text><View className='device-name-edit-icon' ariaHidden /></Button>}</View><Text className='device-id'>ID: {device.device_id}</Text></View><Action disabled={busy} onClick={() => setMenu(device)}>⋯</Action></View>
+        {summary && <View className='dashboard-summary'>
+          <View className='dashboard-role'><Text>{tr('AI 角色')}</Text><Text className='dashboard-role-name'>{summary.role}</Text></View>
+          <View className='dashboard-states'><Text>{summary.recognition}</Text>{summary.room && <Text>{summary.room}</Text>}</View>
+        </View>}
         <View className='device-actions device-primary-actions'>{capabilities.platform === 'weapp' && <Action primary muted={!device.online && !needsAuthorization(device)} disabled={busy || loading} onClick={() => void media(needsAuthorization(device) ? 'authorize' : 'wechat-call', device)}><View className='device-primary-label'><View className={'device-action-icon ' + (needsAuthorization(device) ? 'device-action-shield' : 'device-action-phone')} ariaHidden />{callLabel(device)}</View></Action>}<Action muted={!device.online} disabled={busy || !capabilities.playback} onClick={() => void media('playback', device)}><View className='device-primary-label'><View className='device-action-icon device-action-play' ariaHidden />{tr("实时查看")}</View></Action></View>
         <View className='device-feature-links'>
           {([['roles', 'AI 角色'], ['recognition', 'AI 识别'], ['contacts', '联系人']] as const).map(([page, title]) => <Action key={page} onClick={() => void Taro.navigateTo({ url: '/pages/' + page + '/index?device_id=' + encodeURIComponent(device.device_id) })}>{tr(title)}<Text className='device-link-arrow'>›</Text></Action>)}</View>
-      </View>)}</View>
+      </View>; })}</View>
     {menu && <View className='mask device-more-mask' onClick={() => setMenu(undefined)}><View className='device-more-sheet' onClick={e => e.stopPropagation()}><View className='device-more-header'><Text className='device-more-title'>{tr("更多操作")}</Text><Text className='device-more-subtitle'>{menu.device_name || tr("未命名设备")}</Text></View><View className='device-more-scroll'>
       <View className='device-menu-list'>
         {capabilities.platform === 'weapp' && <DeviceMenuItem icon='auth' title={tr("微信通话授权")} badge={authLabel(menu)} description={tr("管理微信与设备的音视频通话授权")} onClick={() => { const device = menu; setMenu(undefined); void media('authorize', device); }} />}

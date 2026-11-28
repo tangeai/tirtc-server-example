@@ -5,14 +5,19 @@
 .console-nav .console-language { border:0; background:transparent }
 .console-nav details div { position:absolute; right:1rem; display:grid; padding:10PX; gap:8PX; background:white; border:1PX solid #ddd }
 .taro_page,.taro_page_show { box-sizing:border-box; padding-top:54PX }
-.dashboard-summary {display:block; color:#53675d; margin:8PX 0; font-size:13PX}
+.dashboard-summary {display:grid;gap:4PX;color:#53675d;margin:8PX 0;font-size:13PX}
+.dashboard-role,.dashboard-states {display:flex;align-items:baseline;flex-wrap:wrap;gap:3PX 10PX}
+.dashboard-role-name {color:#203a2c;font-weight:600;overflow-wrap:anywhere}
+.dashboard-states {font-size:12PX}
+.dashboard-states> :nth-child(2) {border-inline-start:1PX solid #cdd8d1;padding-inline-start:10PX}
 .knowledge-files {font:14PX/1.6 system-ui,sans-serif; overflow-wrap:anywhere}
 .knowledge-files input { max-width:100% }
 .knowledge-files button { padding:6PX 10PX; margin:4PX; border:1PX solid #dbe5df; border-radius:6PX; background:white }
 @media (min-width:768PX) {
   .page.devices-page { max-width:1280PX; padding:32PX }
-  .device-list-grid { display:grid; gap:18PX; grid-template-columns:repeat(auto-fit,minmax(min(100%,330PX),1fr)); align-items:start }
-  .device-list-grid>.card { margin:0 }
+  .device-list-grid { display:grid; gap:18PX; grid-template-columns:repeat(auto-fit,minmax(min(100%,330PX),1fr)); align-items:stretch }
+  .device-list-grid>.card { margin:0;display:flex;flex-direction:column }
+  .device-list-grid .device-feature-links { margin-top:auto }
   .page.content-page { max-width:960PX }
   .page.role-editor-page { max-width:1024PX }
 }
@@ -99,8 +104,8 @@ body,.taro_page { background:#f4f6f5 }
 .device-page-heading {flex:1;min-width:0}
 .device-page-heading .title {font-size:22PX;line-height:1.35}
 .device-page-context {display:block;margin-top:4PX;color:#58675f;font-size:14PX;overflow-wrap:anywhere}
-.page.bind-page .tabs .action,.page.room-page .tabs .action {background:transparent;color:#526159}
-.page.bind-page .tabs .primary,.page.room-page .tabs .primary {background:white;color:#174b34;box-shadow:0 1PX 4PX #23392a20}
+.page.bind-page .tabs .action,.page.room-page .tabs .action,.device-info-scroll .tabs .action {background:transparent;color:#526159}
+.page.bind-page .tabs .primary,.page.room-page .tabs .primary,.device-info-scroll .tabs .primary {background:white;color:#174b34;box-shadow:0 1PX 4PX #23392a20}
 .page .code-input {max-width:326PX}
 .page.history-page .empty {padding:34PX 16PX;color:#617169}
 .page .device-info-json {display:block;white-space:pre-wrap;overflow-wrap:anywhere}
@@ -111,3 +116,11 @@ body,.taro_page { background:#f4f6f5 }
   .page.legal {max-width:820PX;padding:28PX 24PX 48PX}
   .page.legal .card {padding:24PX}
 }
+
+.page .reminder-seconds-input { display:flex;align-items:center }
+.page .reminder-seconds-input .weui-input { width:100%;min-width:0;height:100%;box-sizing:border-box;text-align:right;font:inherit }
+.device-info-scroll { min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:12PX }
+.device-info-scroll>* { flex-shrink:0 }
+
+.contact-device-picker {display:flex;align-items:center;gap:10PX;margin-block:12PX;color:#53675d;font-size:14PX}
+.contact-device-picker select {min-width:0;max-width:70%;padding:6PX;border:1PX solid #ced9d2;border-radius:6PX;background:white;color:#203a2c;font:inherit}

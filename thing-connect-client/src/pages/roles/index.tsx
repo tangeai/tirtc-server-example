@@ -129,7 +129,7 @@ export default function Roles() {
         {w.value && !filteredRoles.length && <View className='empty'>{search.trim() ? tr("没有匹配的角色") : tr("暂无角色")}</View>}
         {filteredRoles.map(role => <View className='settings-row' key={role.id}>
           <Button className='settings-link' disabled={w.busy || role.unavailable} onClick={() => void edit(role)}>
-            <View className='settings-copy'><Text>{role.name || tr("未命名角色")}</Text><Text className='settings-detail'>{role.preset ? tr("默认角色 · ") : ''}{roleRegionLabel(role.region)}{role.unavailable ? tr(" · 暂不可用") : ''}</Text></View>
+            <View className='settings-copy'><Text>{role.name || tr("未命名角色")}</Text><Text className='settings-detail'>{role.preset ? tr("默认角色 · ") : ''}{tr(roleRegionLabel(role.region))}{role.unavailable ? tr(" · 暂不可用") : ''}</Text></View>
             <View className='settings-chevron' ariaHidden />
           </Button>
           {role.unavailable && <Action disabled={w.busy} onClick={() => void w.refresh()}>{tr("重试加载")}</Action>}

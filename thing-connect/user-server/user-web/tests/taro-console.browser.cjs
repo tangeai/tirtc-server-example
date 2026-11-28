@@ -13,6 +13,7 @@ async function verify(browser, width) {
   let deviceReads = 0;
   let submitted;
   let registration;
+  const room = { desired_state: 'joined', state: 'room_closed', room_code: '123456' };
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   try {
@@ -36,6 +37,7 @@ async function verify(browser, width) {
           return route.fulfill({ json: { code: 200, data: [device] } });
         }
         let data = { items: [] };
+        if (pathname === '/v1/call/group/web/device/fixture') data = room;
         if (pathname === '/v1/config/captcha') data = { enabled: false, provider: 'yidun' };
         if (pathname === '/v1/user/login') { submitted = route.request().postDataJSON(); data = { token: 'fixture' }; }
         if (pathname === '/v1/user/register') { registration = route.request().postDataJSON(); data = { token: 'fixture' }; }
@@ -60,8 +62,14 @@ async function verify(browser, width) {
     unavailable = false;
     await page.locator('taro-button-core').filter({ hasText: '重新加载设备' }).click();
     await page.getByText('客厅', { exact: true }).waitFor();
-    assert.equal(await page.locator('.device-count').innerText(), '1');
+    assert.equal(await page.locator('.device-count').innerText(), '（1 台）');
     assert.equal(await page.evaluate(() => localStorage.getItem('token')), 'fixture');
+    const states = page.locator('.dashboard-states');
+    await states.waitFor();
+    assert.doesNotMatch(await states.innerText(), /123456|未加入|已解散/);
+    room.state = 'joined';
+    await page.locator('.devices-page .action').filter({ hasText: /^刷新$/ }).click();
+    await states.getByText('房间号 123456').waitFor();
     const readsBeforeLeaving = deviceReads;
     await page.goto(site + '/account');
     await page.goBack();
@@ -90,7 +98,13 @@ async function verify(browser, width) {
       if (route === '/recognition') await page.getByText('请在微信小程序中授权接收此设备的异常提醒。').waitFor();
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, width + ' ' + route);
     }
+    await page.goto(site + '/forgot-password');
+    await page.getByText('返回设备列表', { exact: true }).click();
+    await page.waitForURL('**/devices');
     await page.evaluate(() => localStorage.removeItem('token'));
+    await page.goto(site + '/forgot-password');
+    await page.getByText('返回登录', { exact: true }).click();
+    await page.waitForURL('**/login');
     await page.goto(site + '/register');
     const code = page.locator('input[name="code"]');
     await code.fill('012345');

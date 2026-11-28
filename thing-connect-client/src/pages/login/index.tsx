@@ -37,9 +37,8 @@ export default function Login() {
   useLoad(options => {
     if (options.notification && /^[0-9a-f-]{36}$/.test(options.notification)) notification.current = options.notification;
     const browserPath = process.env.TARO_ENV === 'h5' ? location.pathname : '';
-    if (options.mode === 'reset') setMode('reset');
+    if (options.mode === 'reset' || browserPath === '/forgot-password') setMode('reset');
     else if (token()) { if (process.env.TARO_ENV === 'h5') location.replace('/devices'); else void Taro.switchTab({ url: '/pages/devices/index' }); return; }
-    if (browserPath === '/forgot-password') setMode('reset');
     else if (browserPath === '/register' || options.tab === 'register') setMode('register');
     setEmail(rememberedEmail());
     if (options.expired) setNotice(tr("登录状态已过期，请重新登录"));
@@ -110,7 +109,12 @@ export default function Login() {
       <View className='auth-feedback'><Notice error>{configError || error}</Notice><Notice>{notice}</Notice>{!config && !configLoading && configError && <Button className='auth-retry' disabled={busy} onClick={() => void loadConfig()}>{tr("重新加载验证配置")}</Button>}</View>
       {mode !== 'reset' && <View className='auth-consent'><Checkbox className='auth-checkbox' value='agree' checked={consent} disabled={busy} color='#07c160' onClick={() => { if (!busy) setConsent(!consent); }} /><Text className='auth-consent-copy'><Text onClick={() => { if (!busy) setConsent(value => !value); }}>{tr("我已阅读并同意")}</Text><Text className='auth-link' onClick={() => void Taro.navigateTo({ url: '/pages/legal/index?kind=terms' })}>{tr("《用户协议》")}</Text>{tr("和")}<Text className='auth-link' onClick={() => void Taro.navigateTo({ url: '/pages/legal/index?kind=privacy' })}>{tr("《隐私政策》")}</Text></Text></View>}
       <Button className='auth-submit' loading={busy || configLoading} disabled={busy || !config || configLoading} onClick={() => void submit()}>{configLoading ? tr("正在加载验证…") : busy ? tr("处理中") : !config ? tr("验证配置未就绪") : mode === 'login' ? tr("登录") : mode === 'reset' ? tr("重置密码") : tr("注册并登录")}</Button>
-      <View className='auth-footer'>{mode === 'register' && <Text className='auth-footer-copy'>{tr("已有账号？")}</Text>}<Button key={mode} className='auth-link auth-footer-button' disabled={busy} onClick={() => switchMode(mode === 'login' ? 'reset' : 'login')}>{mode === 'login' ? tr("忘记密码？") : mode === 'register' ? tr("去登录") : tr("返回登录")}</Button></View>
+      <View className='auth-footer'>{mode === 'register' && <Text className='auth-footer-copy'>{tr("已有账号？")}</Text>}<Button key={mode} className='auth-link auth-footer-button' disabled={busy} onClick={() => {
+        if (mode === 'reset' && token()) {
+          if (process.env.TARO_ENV === 'h5') location.replace('/devices');
+          else void Taro.switchTab({ url: '/pages/devices/index' });
+        } else switchMode(mode === 'login' ? 'reset' : 'login');
+      }}>{mode === 'login' ? tr("忘记密码？") : mode === 'register' ? tr("去登录") : token() ? tr("返回设备列表") : tr("返回登录")}</Button></View>
     </View>
   </View>;
 }

@@ -111,7 +111,7 @@ page,.h5-body,body{margin:0;background:#f7f7f7;color:#191919;font-family:-apple-
 .account-avatar{width:88px;height:88px;line-height:88px;flex-shrink:0;text-align:center;border-radius:28px;color:#079b50;background:#e5f7ed;font-size:32px}
 .account-email{display:block;overflow-wrap:anywhere;word-break:normal;color:#758078;font-size:26px;margin-top:8px}
 .account-links{padding:8px 28px}
-.account-links .action{width:100%;text-align:left;background:#fff;border-radius:0;line-height:104px}
+.account-links .action{display:flex;align-items:center;justify-content:space-between;width:100%;text-align:left;background:#fff;border-radius:0;line-height:104px}
 .account-links .action+.action{border-top:1px solid #edf0ee}
 .sheet{padding-bottom:calc(28px + env(safe-area-inset-bottom));max-height:80vh}
 @media (max-width:350px){.page{padding-left:20px;padding-right:20px}

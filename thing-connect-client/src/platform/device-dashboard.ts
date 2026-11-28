@@ -3,7 +3,8 @@ import type { Device } from '../domain/devices';
 import { token } from '../services/api';
 import { deviceRevision } from '../services/device-events';
 import { readSummaries } from '../../../thing-connect/user-server/user-web/src/lib/device-summaries';
-import { roleSummary, roomSummary, type Summary } from '../../../thing-connect/user-server/user-web/src/lib/devices';
+import { roleSummary, type Summary } from '../../../thing-connect/user-server/user-web/src/lib/devices';
+import { t } from '../../../thing-connect/user-server/user-web/src/lib/messages';
 import { sha256 } from 'js-sha256';
 import { restoreSnapshot, markAway, saveSnapshot } from '../../../thing-connect/user-server/user-web/src/lib/snapshot';
 
@@ -49,7 +50,14 @@ export function useDeviceDashboard() {
   }
   function summary(id: string) {
     const item = summaries[id];
-    return item ? [roleSummary(item.role), item.recognition ? item.recognition.enabled ? '识别已开启 · ' + item.recognition.count + ' 项' : '识别已关闭' : '识别状态待更新', roomSummary(item.room)].join(' · ') : '';
+    if (!item) return undefined;
+    const recognition = !item.recognition ? t('识别状态待更新') : item.recognition.enabled
+      ? t('识别已开启 · {p0} 项', { p0: item.recognition.count }) : t('识别已关闭');
+    const role = item.role?.binding.role_id && item.role.name ? item.role.name : roleSummary(item.role);
+    const room = item.room;
+    const roomLabel = room?.desired_state === 'joined' && room.state === 'joined' && room.room_code
+      ? t('房间号 {p0}', { p0: room.room_code }) : undefined;
+    return { role, recognition, room: roomLabel };
   }
   return { recover, update, summary, restored };
 }

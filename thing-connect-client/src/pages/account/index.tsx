@@ -30,7 +30,7 @@ export default function Account() {
   return <View className='page account-page'>
     <View className='card account-profile'><View className='account-avatar' ariaLabel={tr("小钛机器人")}><RobotIcon /></View><View className='grow'><Text className='title'>{tr("我的账号")}</Text><Text className='account-email'>{loading ? tr("正在加载…") : email || tr("账号信息暂不可用")}</Text></View></View>
     <Notice error>{error}</Notice>{error && <Action disabled={loading} onClick={() => void load()}>{tr("重试")}</Action>}
-    <View className='card account-links'><Action onClick={() => void Taro.navigateTo({ url: '/pages/login/index?mode=reset' })}>{tr("修改密码　›")}</Action><Action onClick={() => void Taro.navigateTo({ url: '/pages/legal/index?kind=terms' })}>{tr("用户协议　›")}</Action><Action onClick={() => void Taro.navigateTo({ url: '/pages/legal/index?kind=privacy' })}>{tr("隐私政策　›")}</Action></View>
+    <View className='card account-links'><Action onClick={() => void Taro.navigateTo({ url: '/pages/login/index?mode=reset' })}><Text>{tr("修改密码")}</Text><View className="settings-chevron" ariaHidden /></Action><Action onClick={() => void Taro.navigateTo({ url: '/pages/legal/index?kind=terms' })}><Text>{tr("用户协议")}</Text><View className="settings-chevron" ariaHidden /></Action><Action onClick={() => void Taro.navigateTo({ url: '/pages/legal/index?kind=privacy' })}><Text>{tr("隐私政策")}</Text><View className="settings-chevron" ariaHidden /></Action></View>
     <View className='wide'><Action danger onClick={() => void logout()}>{tr("退出登录")}</Action></View>
   </View>;
 }
