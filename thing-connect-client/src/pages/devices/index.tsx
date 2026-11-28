@@ -163,7 +163,7 @@ export default function Devices() {
           { page: 'contacts', title: '联系人', active: true, status: tr('可用') },
         ];
         return <View className='card' key={device.device_id}><View className='device-head'><View className={'device-symbol ' + (device.online ? 'device-symbol-online' : 'device-symbol-offline')}><RobotIcon /><Text className='device-symbol-status'>{device.online ? tr("在线") : tr("离线")}</Text></View><View className='grow device-summary'><View className='device-title-row'>{device.device_name?.trim() ? <Text className='device-name'>{device.device_name}</Text> : <Button className='device-name-setup' disabled={busy} ariaLabel={tr("设置设备名称：") + device.device_id} onClick={() => openRename(device)}><Text className="device-placeholder-name">{tr("未命名设备")}</Text><View className='device-name-edit-icon' ariaHidden /></Button>}
-          {summary?.roleName && <Text className='dashboard-role-name' ariaLabel={tr('AI 角色：') + summary.roleName}>{summary.roleName}</Text>}
+          {summary?.roleName && <Text className='dashboard-role-name' ariaLabel={tr('当前 AI 角色：') + summary.roleName}>{tr('角色：')}{summary.roleName}</Text>}
         </View><Text className='device-id'>ID: {device.device_id}</Text></View><Action disabled={busy} onClick={() => setMenu(device)}>⋯</Action></View>
         <View className='device-actions device-primary-actions'>{capabilities.platform === 'h5' ? <Action secondary onClick={() => setShowCallGuide(true)}>
           <View className='device-primary-label'><View className='device-action-icon device-action-phone' ariaHidden />{tr('微信通话')}</View>

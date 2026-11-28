@@ -39,8 +39,6 @@ body,.taro_page { background:#f4f6f5 }
   .page .card { border:1PX solid #e1e7e3;box-shadow:0 2PX 7PX #1b402608;border-radius:14PX }
   .page.role-editor-page {max-width:800PX}
   .page .role-extensions .card {padding:18PX}
-  .role-editor-page .role-editor-actions {align-items:center;justify-content:space-between;flex-direction:row;padding:14PX 0;border-top:1PX solid #d9e3dc}
-  .role-editor-actions>.row>.action {min-width:96PX}
   .page .mask {align-items:center;justify-content:center;padding:24PX;box-sizing:border-box}
   .page .sheet,.page .device-more-sheet {width:min(100%,600PX);border-radius:16PX;box-shadow:0 18PX 60PX #10241c33}
 }
@@ -174,3 +172,12 @@ body,.taro_page { background:#f4f6f5 }
   .page .textarea:focus-within,
   .page .reminder-seconds-input:focus-within {outline-color:Highlight}
 }
+@media (max-width:360PX) {
+  .page.devices-page{padding-inline:10PX}
+  .devices-page .device-list-grid>.card{padding-inline:10PX}
+  .devices-page .device-head{gap:5PX}
+  .devices-page .device-title-row .dashboard-role-name{max-width:54%;padding-inline:3PX;font-size:10PX}
+  .devices-page .device-title-row .device-name-setup{font-size:14PX;gap:2PX}
+}
+
+.page .role-editor-toolbar{top:52PX;background:#f4f6f5}

@@ -11,6 +11,7 @@ async function verify(browser, width) {
   const page = await browser.newPage({ viewport: { width, height: 860 }, locale: 'zh-CN' });
   let unavailable = true;
   let deviceReads = 0, contactReads = 0;
+  let deletedRoles = 0;
   let submitted;
   let registration;
   let recognitionEnabled = false;
@@ -45,7 +46,8 @@ async function verify(browser, width) {
         if (pathname === '/v1/recognition/types') data = [];
         if (pathname.endsWith('/alarm')) data = { interval_seconds: 60 };
         if (pathname.includes('/conversations')) data = { items: [], page: 1, has_more: false };
-        if (pathname === '/v1/ai/roles') data = { items: [{ id: 'test-role', name: '测试角色' }] };
+        if (pathname === '/v1/ai/roles') data = { items: [{ id: 'test-role', name: '测试角色' }, { id: 'spare', name: '备用角色' }] };
+        if (pathname === '/v1/ai/roles/spare' && route.request().method() === 'DELETE') deletedRoles++;
         if (pathname === '/v1/ai/roles/test-role') data = { id: 'test-role', name: '测试角色' };
         if (pathname.endsWith('/config')) data = { policy: { enabled: recognitionEnabled, monthly_limit: 100 }, usage: { used: 8 }, schemes: [] };
         if (pathname.endsWith('/mcp/tools')) data = { items: [{ id: 'map', name: '地图' }] };
@@ -86,7 +88,18 @@ async function verify(browser, width) {
     await page.locator('.device-feature-links taro-button-core').filter({ hasText: 'AI 角色' }).click();
     await page.waitForURL(url => url.pathname === '/agent' && url.searchParams.get('device_id') === 'fixture');
     await page.reload();
+    const deleteSpare = page.getByRole('button', { name: '删除角色 · 备用角色' });
+    await deleteSpare.click();
+    await page.getByText('确定删除“备用角色”？', { exact: true }).waitFor();
+    await page.locator('.taro-model__cancel').click();
+    assert.equal(deletedRoles, 0);
+    await deleteSpare.click();
+    await page.locator('.taro-model__confirm').click();
+    await deleteSpare.waitFor({ state: 'hidden' });
+    assert.equal(deletedRoles, 1);
     await page.locator('.settings-link').filter({ hasText: '测试角色' }).click();
+    await page.getByRole('button', { name: '保存角色' }).waitFor();
+    assert.equal(await page.locator('.role-toolbar-buttons button,.role-toolbar-buttons taro-button-core').count(), 1);
     await page.locator('.tabs taro-button-core').filter({ hasText: '扩展能力' }).click();
     await page.getByText('设备插件', { exact: true }).waitFor();
     const tools = page.locator('.resource-disclosure').filter({ hasText: 'MCP 工具' });
