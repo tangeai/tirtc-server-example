@@ -1,4 +1,6 @@
 import './console.css';
+import '../../../thing-connect/user-server/user-web/src/captcha-overlay.css';
+import brandRobot from '../assets/auth/xiaotai-green-small.png';
 import { useEffect, useState } from 'react';
 import { request, token } from '../services/api';
 import { t } from '../../../thing-connect/user-server/user-web/src/lib/messages';
@@ -44,7 +46,7 @@ export function ConsoleHeader() {
     }).catch(() => {});
     return () => { alive = false; };
   }, []);
-  return <header className='console-nav'><a className='console-brand' href='/devices'><img src='/static/xiaotai-logo-transparent.png' alt='' />{t('小钛控制台')}</a>
+  return <header className='console-nav'><a className='console-brand' href='/devices'><img src={brandRobot} alt='' />{t('小钛控制台')}</a>
     <nav>{token() && <><a href='/devices'>{t('我的设备')}</a><a href='/account'>{t('我的账号')}</a></>}
     {(!!links.length || canSwitch) && <details><summary>{t('更多')}</summary><div>{links.map(link => <a key={link.name + ':' + link.url} href={link.url} target='_blank' rel='noopener noreferrer'>{link.name}<span aria-hidden="true">↗</span></a>)}
       {canSwitch && <button className="console-language" type="button" onClick={toggle}>{language === 'en' ? '中文' : 'English'}</button>}</div></details>}</nav>
