@@ -12,6 +12,7 @@ async function verify(browser, width) {
   let unavailable = true;
   let deviceReads = 0;
   let submitted;
+  let registration;
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   try {
@@ -37,6 +38,7 @@ async function verify(browser, width) {
         let data = { items: [] };
         if (pathname === '/v1/config/captcha') data = { enabled: false, provider: 'yidun' };
         if (pathname === '/v1/user/login') { submitted = route.request().postDataJSON(); data = { token: 'fixture' }; }
+        if (pathname === '/v1/user/register') { registration = route.request().postDataJSON(); data = { token: 'fixture' }; }
         if (pathname === '/v1/user/me') data = { email: 'fixture@example.test' };
         if (pathname === '/v1/recognition/types') data = [];
         if (pathname.endsWith('/alarm')) data = { interval_seconds: 60 };
@@ -89,6 +91,21 @@ async function verify(browser, width) {
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, width + ' ' + route);
     }
     await page.evaluate(() => localStorage.removeItem('token'));
+    await page.goto(site + '/register');
+    const code = page.locator('input[name="code"]');
+    await code.fill('012345');
+    assert.equal(await code.inputValue(), '012345');
+    const codeBox = await code.boundingBox();
+    const sendBox = await page.locator('.auth-field .auth-inline-button').first().boundingBox();
+    assert.ok(codeBox && sendBox && codeBox.width >= 80 && codeBox.x + codeBox.width <= sendBox.x + 1);
+    await page.locator('input[name="email"]').fill('registration@example.test');
+    await page.locator('input[name="password"]').fill('browser-fixture');
+    await page.locator('input[name="confirm"]').fill('browser-fixture');
+    await page.locator('.auth-checkbox').click();
+    await page.locator('.auth-submit').filter({ hasText: '注册并登录' }).click();
+    await page.waitForURL('**/devices');
+    assert.equal(registration.code, '012345');
+    await page.evaluate(() => localStorage.removeItem('token'));
     await page.goto(site + '/agent?device_id=fixture');
     await page.waitForURL('**/login');
     await page.locator('input[name="email"]').fill('fixture@example.test');
@@ -99,7 +116,8 @@ async function verify(browser, width) {
     await page.locator('.console-nav summary').click();
     await page.locator('.auth-checkbox').click();
     const login = page.locator('.auth-submit');
-    await login.focus();
+    if (width < 768) await login.focus();
+    else await page.locator('input[name="password"]').focus();
     await page.keyboard.press('Enter');
     await page.waitForURL(url => url.pathname === '/agent' && url.searchParams.get('device_id') === 'fixture');
     assert.equal(submitted.email, 'fixture@example.test');

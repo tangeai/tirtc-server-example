@@ -45,7 +45,7 @@ export default function Login() {
     if (options.expired) setNotice(tr("登录状态已过期，请重新登录"));
     void loadConfig();
   });
-  function switchMode(next: Mode) { if (lock.current) return;
+  function switchMode(next: Mode) { if (lock.current || mode === next) return;
     if (process.env.TARO_ENV === 'h5') { location.assign(next === 'reset' ? '/forgot-password' : '/' + next); return; }
     setMode(next); setError(''); setNotice(''); setCode(''); setPassword(''); setConfirm(''); }
   async function submit(sendCode = false) {
@@ -84,15 +84,26 @@ export default function Login() {
     } catch (e) { if (alive.current) setError(errorText(e)); }
     finally { lock.current = false; if (alive.current) setBusy(false); }
   }
+  useEffect(() => {
+    if (process.env.TARO_ENV !== 'h5') return;
+    const onEnter = (event: KeyboardEvent) => {
+      if (event.key !== 'Enter' || event.repeat || event.isComposing || !config || busy) return;
+      if (!(event.target instanceof HTMLInputElement) || !event.target.closest('.auth-fields')) return;
+      event.preventDefault();
+      void submit();
+    };
+    document.addEventListener('keydown', onEnter, true);
+    return () => document.removeEventListener('keydown', onEnter, true);
+  });
   return <View className={'page auth-page auth-' + mode}>
     <View className='auth-brand'><Image className='auth-brand-robot' src={brandRobot} mode='aspectFit' ariaLabel={tr("小钛机器人")} /><View><Text className='auth-brand-name'>{tr("小钛")}</Text><Text className='auth-tagline'>{tr("连接设备，随时相伴")}</Text></View></View>
     <View className='auth-panel'>
       {mode === 'reset' ? <View className='auth-heading'><Text>{tr("找回密码")}</Text><Text className='auth-heading-note'>{tr("通过邮箱验证身份")}</Text></View> : <View className='auth-tabs'>{(['login', 'register'] as const).map(value => <Button id={'auth-' + value} key={value} className={'auth-tab ' + (mode === value ? 'is-active' : '')} onClick={() => switchMode(value)}><Text>{value === 'login' ? tr("登录") : tr("注册")}</Text><View className='auth-tab-line' /></Button>)}</View>}
       <View className='auth-fields'>
-        <View className='auth-field'><Text className='auth-label'>{tr("邮箱")}</Text><Input className='auth-input' name='email' nativeProps={{ autoComplete: 'username' }} value={email} disabled={busy} maxlength={254} placeholder={tr("请输入邮箱地址")} placeholderClass='auth-placeholder' onInput={e => setEmail(e.detail.value)} /></View>
-        {mode !== 'login' && <View className='auth-field'><Text className='auth-label'>{tr("验证码")}</Text><Input className='auth-input' name='code' nativeProps={{ autoComplete: 'one-time-code' }} value={code} type='number' maxlength={6} disabled={busy} placeholder={tr("6 位验证码")} placeholderClass='auth-placeholder' onInput={e => setCode(e.detail.value.normalize('NFKC').replace(/\D/g, '').slice(0, 6))} /><Button className='auth-inline-button' disabled={busy || cooldown > 0 || !config} onClick={() => void submit(true)}>{cooldown ? `${cooldown}s 后重发` : tr("获取验证码")}</Button></View>}
-        <View className='auth-field'><Text className='auth-label'>{tr("密码")}</Text><Input className='auth-input' name='password' nativeProps={{ autoComplete: mode === 'login' ? 'current-password' : 'new-password' }} value={password} password={!visible} maxlength={-1} disabled={busy} placeholder={mode === 'login' ? tr("请输入密码") : tr("至少 6 位密码")} placeholderClass='auth-placeholder' onInput={e => setPassword(e.detail.value)} /><Button className='auth-inline-button auth-visibility' ariaLabel={visible ? tr("隐藏密码") : tr("显示密码")} disabled={busy} onClick={() => setVisible(value => !value)}><Image className='auth-eye' src={visible ? eye : eyeOff} mode='aspectFit' /></Button></View>
-        {mode !== 'login' && <View className='auth-field'><Text className='auth-label'>{tr("确认密码")}</Text><Input className='auth-input' name='confirm' nativeProps={{ autoComplete: 'new-password' }} value={confirm} password={!visible} maxlength={-1} disabled={busy} placeholder={tr("再次输入密码")} placeholderClass='auth-placeholder' onInput={e => setConfirm(e.detail.value)} /></View>}
+        <View className='auth-field'><Text className='auth-label'>{tr("邮箱")}</Text><Input className='auth-input' name='email' nativeProps={{ autoComplete: 'username', inputMode: 'email', 'aria-label': tr('邮箱') }} value={email} disabled={busy} maxlength={254} placeholder={tr("请输入邮箱地址")} placeholderClass='auth-placeholder' onInput={e => setEmail(e.detail.value)} /></View>
+        {mode !== 'login' && <View className='auth-field'><Text className='auth-label'>{tr("验证码")}</Text><Input className='auth-input' name='code' nativeProps={{ autoComplete: 'one-time-code', inputMode: 'numeric', 'aria-label': tr('验证码') }} value={code} type={process.env.TARO_ENV === 'h5' ? 'text' : 'number'} maxlength={6} disabled={busy} placeholder={tr("6 位验证码")} placeholderClass='auth-placeholder' onInput={e => setCode(e.detail.value.normalize('NFKC').replace(/\D/g, '').slice(0, 6))} /><Button className='auth-inline-button' disabled={busy || cooldown > 0 || !config} onClick={() => void submit(true)}>{cooldown ? `${cooldown}s 后重发` : tr("获取验证码")}</Button></View>}
+        <View className='auth-field'><Text className='auth-label'>{tr("密码")}</Text><Input className='auth-input' name='password' nativeProps={{ autoComplete: mode === 'login' ? 'current-password' : 'new-password', 'aria-label': tr('密码') }} value={password} password={!visible} maxlength={-1} disabled={busy} placeholder={mode === 'login' ? tr("请输入密码") : tr("至少 6 位密码")} placeholderClass='auth-placeholder' onInput={e => setPassword(e.detail.value)} /><Button className='auth-inline-button auth-visibility' ariaLabel={visible ? tr("隐藏密码") : tr("显示密码")} disabled={busy} onClick={() => setVisible(value => !value)}><Image className='auth-eye' src={visible ? eye : eyeOff} mode='aspectFit' /></Button></View>
+        {mode !== 'login' && <View className='auth-field'><Text className='auth-label'>{tr("确认密码")}</Text><Input className='auth-input' name='confirm' nativeProps={{ autoComplete: 'new-password', 'aria-label': tr('确认密码') }} value={confirm} password={!visible} maxlength={-1} disabled={busy} placeholder={tr("再次输入密码")} placeholderClass='auth-placeholder' onInput={e => setConfirm(e.detail.value)} /></View>}
       </View>
       {config && <Captcha ref={captcha} config={config} />}
       <View className='auth-feedback'><Notice error>{configError || error}</Notice><Notice>{notice}</Notice>{!config && !configLoading && configError && <Button className='auth-retry' disabled={busy} onClick={() => void loadConfig()}>{tr("重新加载验证配置")}</Button>}</View>

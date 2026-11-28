@@ -56,3 +56,24 @@ body,.taro_page { background:#f4f6f5 }
 .page button:focus-visible {outline:2PX solid #11784d;outline-offset:2PX}
 .page .role-speech-heading {display:flex;font-size:inherit;align-items:center}
 .page .auth-tab {text-align:center}
+
+/* Web form rows must reserve space for the input beside the code action. */
+.page.auth-page {width:100%;max-width:480PX;padding:clamp(20PX,4vh,44PX) clamp(12PX,3vw,28PX) 28PX;background:transparent}
+.auth-page .auth-brand {margin:0 0 18PX;gap:12PX}
+.auth-page .auth-panel {padding:18PX clamp(14PX,3vw,24PX) 10PX;border:1PX solid #dce5df;border-radius:16PX;box-shadow:0 6PX 24PX #152c2010}
+.auth-page .auth-tabs {display:grid;grid-template-columns:1fr 1fr;gap:4PX;margin:0 0 16PX;background:#eff3f0;padding:4PX;border-radius:10PX}
+.page.auth-page .auth-tab {width:100%;margin:0;padding:8PX;text-align:center;font-size:16PX;line-height:24PX;color:#57675e;border-radius:7PX}
+.page.auth-page .auth-tab.is-active {background:white;color:#164b33;font-weight:600;box-shadow:0 1PX 3PX #13302020}
+.auth-page .auth-tab-line {display:none}
+.auth-page .auth-field {display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4PX 8PX;height:auto;border:0;margin:12PX 0;align-items:center}
+.auth-page .auth-label {grid-column:1/-1;width:auto;font-size:14PX;line-height:20PX;font-weight:500}
+.auth-page .auth-input {grid-column:1/-1;width:100%;height:42PX;box-sizing:border-box;border:1PX solid #cad7ce;border-radius:8PX;background:#fff;padding:0 10PX;display:flex;align-items:center;font-size:16PX}
+.auth-page .auth-field:has(.auth-inline-button) .auth-input {grid-column:1}
+.auth-page .auth-input:focus-within {border-color:#178653;box-shadow:0 0 0 2PX #17865322}
+.auth-page .auth-input input {width:100%;min-width:0;font:inherit;margin:0}
+.page.auth-page .auth-inline-button {width:auto;margin:0;padding:0 8PX;line-height:42PX;font-size:14PX}
+.page.auth-page .auth-visibility {width:42PX;height:42PX;padding:0}
+.auth-page .auth-feedback:empty {min-height:0}
+.auth-page .auth-consent {align-items:center;gap:5PX;margin:12PX 0 16PX}
+.auth-page .auth-consent-copy .auth-link {white-space:nowrap}
+.page.auth-page .auth-submit {line-height:44PX;font-size:16PX;letter-spacing:normal}
