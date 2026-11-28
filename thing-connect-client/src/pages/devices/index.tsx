@@ -166,9 +166,9 @@ export default function Devices() {
         <View className='device-feature-links'>
           {links.map(({ page, title, status, active }) => <Action key={page} ariaLabel={tr(title) + ' ' + status}
             onClick={() => void Taro.navigateTo({ url: '/pages/' + page + '/index?device_id=' + encodeURIComponent(device.device_id) })}>
-            {tr(title)}{page === 'contacts'
-              ? <Text className='device-contact-count'>({summary?.contacts ?? '…'})</Text>
-              : <Text ariaHidden className={'device-status-dot ' + (active == null ? 'unknown' : active ? 'on' : 'off')} />}
+            {page !== 'contacts' && <Text ariaHidden className={'device-status-dot ' + (active == null ? 'unknown' : active ? 'on' : 'off')} />}
+            {tr(title)}{page === 'contacts' && <Text className='device-contact-count'>({summary?.contacts ?? '…'})</Text>}
+            <Text ariaHidden className='device-link-arrow'>›</Text>
           </Action>)}</View>
       </View>; })}</View>
     {menu && <View className='mask device-more-mask' onClick={() => setMenu(undefined)}><View className='device-more-sheet' onClick={e => e.stopPropagation()}><View className='device-more-header'><Text className='device-more-title'>{tr("更多操作")}</Text><Text className='device-more-subtitle'>{menu.device_name || tr("未命名设备")}</Text></View><View className='device-more-scroll'>

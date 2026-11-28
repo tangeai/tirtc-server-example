@@ -183,7 +183,7 @@ page,.h5-body,body{margin:0;background:#f7f7f7;color:#191919;font-family:-apple-
 .device-primary-actions{margin-top:22px}
 .device-feature-links{display:flex;align-items:center;margin-top:14px;border-top:1px solid #f0f2f1;padding-top:8px;gap:0}
 .page .device-feature-links .action{flex:1;min-width:0;padding:0 4px;background:transparent;border-radius:8px;font-size:26px;font-weight:400;color:#555;line-height:68px}
-.device-link-arrow{margin-left:8px;color:#a3aaa6;font-size:26px}
+.device-link-arrow{flex-shrink:0;color:#a3aaa6;font-size:26px}
 .role-readonly .field-input,.role-readonly .textarea,.role-readonly .role-select{color:#858e89;background:#f0f2f1}
 .role-readonly .role-speech-slider{opacity:.65}
 .role-readonly .card .badge{background:#edf0ee;color:#737d77}
