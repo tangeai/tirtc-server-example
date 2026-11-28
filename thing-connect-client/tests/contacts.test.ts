@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { canRemove, contactKey, contactName, filterContacts, validateContactTarget, type Contact } from '../src/domain/contacts.ts';
+import { canRemove, contactKey, contactName, defaultContactName, filterContacts, validateContactTarget, type Contact } from '../src/domain/contacts.ts';
 const rows: Contact[] = [
   { id: 1, type: 'device', source: 'auto', device_id: 'TIR-A', device_name: '客厅' },
   { id: 2, type: 'device', source: 'manual', device_id: 'TIR-B', remark: '朋友' },
@@ -20,4 +20,13 @@ test('申请阻止自己、重复联系人和同账号自动关联设备', () =>
   assert.ok(validateContactTarget('TIR-B', 'SELF', [], rows));
   assert.ok(validateContactTarget('OWN', 'SELF', ['OWN'], rows));
   assert.equal(validateContactTarget('OTHER', 'SELF', [], rows), '');
+});
+
+test('设备名称随改名更新，备注可覆盖或清空', () => {
+  const renamed = { ...rows[0], device_name: '书房' };
+  assert.equal(defaultContactName({ ...renamed, remark: '家里' }), '书房');
+  assert.equal(contactName({ ...renamed, remark: '家里' }), '家里');
+  assert.equal(contactName({ ...renamed, remark: '' }), '书房');
+  assert.equal(defaultContactName({ ...renamed, device_name: ' ' }), renamed.device_id);
+  assert.equal(defaultContactName(rows[2]), '微信用户');
 });

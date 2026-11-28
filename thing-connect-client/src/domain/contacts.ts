@@ -4,7 +4,8 @@ export interface Contact {
 }
 export interface PendingContact { id: number; initiator_device: string; target_device: string }
 export const contactKey = (c: Contact) => JSON.stringify([c.type, c.id, c.device_id, c.wx_app_id]);
-export const contactName = (c: Contact) => c.remark?.trim() || (c.type === 'voip' ? '微信用户' : c.device_name?.trim() || c.device_id);
+export const defaultContactName = (c: Contact) => c.type === 'voip' ? '微信用户' : c.device_name?.trim() || c.device_id;
+export const contactName = (c: Contact) => c.remark?.trim() || defaultContactName(c);
 export const canRemove = (c: Contact) => c.type === 'device' && c.source === 'manual';
 export function filterContacts(rows: Contact[], search: string, filter: string) {
   const text = search.trim().toLowerCase();
