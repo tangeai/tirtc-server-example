@@ -789,11 +789,11 @@ BASH
     commit="$(git -C "$root" rev-parse HEAD)"
     marker="$root/thing-connect/bin/.release-commit"
 
-    (cd "$root/thing-connect" && PATH="$root/stub-bin:$PATH" ./build.sh >/dev/null 2>&1)
+    (cd "$root/thing-connect" && PATH="$root/stub-bin:$PATH" ./build.sh >/dev/null)
     assert_eq "$commit" "$(tr -d '[:space:]' <"$marker")" "a clean build records the exact commit"
 
     printf 'uncommitted\n' >"$root/thing-connect/feature.go"
-    (cd "$root/thing-connect" && PATH="$root/stub-bin:$PATH" ./build.sh >/dev/null 2>&1)
+    (cd "$root/thing-connect" && PATH="$root/stub-bin:$PATH" ./build.sh >/dev/null)
     assert_eq "$commit-dirty" "$(tr -d '[:space:]' <"$marker")" "a build from a modified work tree must not match the commit"
     rm -f "$root/thing-connect/feature.go"
     [ "$(tr -d '[:space:]' <"$marker")" != "$commit" ] || {

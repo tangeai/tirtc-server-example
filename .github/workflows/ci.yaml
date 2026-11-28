@@ -2,13 +2,21 @@ name: CI
 
 on:
   push:
+    branches: [main]
+    tags: ['**']
+  workflow_dispatch:
   pull_request:
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
 
 jobs:
   test:
+    timeout-minutes: 45
     runs-on: ubuntu-latest
     services:
       mysql:
@@ -44,6 +52,7 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: |
+            thing-connect-client/package-lock.json
             thing-connect/package-lock.json
             thing-connect/admin/admin-web/package-lock.json
             thing-connect/user-server/user-web/package-lock.json
@@ -87,6 +96,7 @@ jobs:
           npm ci
           node --test ai-server/tests/*.test.js call-server/tests/*.test.js user-server/tests/*.test.js tests/recognition-ui.test.cjs
           npm run build:css
+          git diff --exit-code -- user-server/static/css/tailwind.css
           npm --prefix user-server/user-web ci
           npm --prefix user-server/user-web run check
           npm --prefix ../thing-connect-client ci
