@@ -13,7 +13,7 @@ function harness(o: Options = {}) {
   const cells: any[] = [], decisions: string[] = [];
   const acceptedReports = new Map<string, string>();
   let granted = !!o.granted, sequence = 0, currentDecision = 0, finishPrompt = () => {};
-  let now = Date.now();
+  let now = Date.now(), ticketCount = 0;
   class ApiError extends Error { code: number; constructor(code: number, msg: string) { super(msg); this.code = code; } }
   const jsx = (type: any, props: any) => ({ type, props });
   const source = loadSource(fileURLToPath(new URL('../src/components/alarm-subscription.tsx', import.meta.url)), {
@@ -28,7 +28,7 @@ function harness(o: Options = {}) {
         modal++; return { confirm: o.approve };
       } } },
     '../services/api': { token: () => 'account', ApiError, errorText: (e: Error) => e.message, request: async (path: string, method: string, body?: {decision: string; device_id?: string; model_id?: string}) => {
-      if (path.endsWith('/sn-ticket')) return { sn_ticket: 'ticket', model_id: 'model' };
+      if (path.endsWith('/sn-ticket')) return { sn_ticket: 'ticket-' + ++ticketCount, model_id: 'model' };
       if (path.endsWith('/capabilities?device_id=device-A')) return o.legacy ? { alarm: true } : { device_id: 'device-A', alarm: true, alarm_template_id: 'template', alarm_subscribed: granted };
       if (path.endsWith('/device-subscriptions')) {
         assert.equal(body?.device_id, 'device-A'); assert.equal(body?.model_id, 'model');
@@ -48,7 +48,7 @@ function harness(o: Options = {}) {
       if (o.loseAcknowledgement && decisions.length === 1) throw new ApiError(-1, '回执丢失');
     } },
   }, { Date: { now: () => now }, wx: { requestSubscribeDeviceMessage(a: any) {
-    prompts++; assert.deepEqual(Array.from(a.tmplIds), ['template']); assert.equal(a.sn, 'device-A'); assert.equal(a.snTicket, 'ticket'); assert.equal(a.modelId, 'model');
+    prompts++; assert.deepEqual(Array.from(a.tmplIds), ['template']); assert.equal(a.sn, 'device-A'); assert.equal(a.snTicket, 'ticket-' + ticketCount); assert.equal(a.modelId, 'model');
     finishPrompt = () => {
       if (o.failure) a.fail({ errMsg: o.failure, errCode: o.errCode }); else a.success({ template: o.choice || 'accept' });
     };
@@ -136,4 +136,22 @@ test('旧推送服务未返回设备范围时拒绝发起授权', async () => {
   await h.render().activate();
   assert.equal(h.counts().prompts, 0);
   assert.equal(h.counts().sessions, 0);
+});
+
+for (const errCode of [19720726, 19720727]) {
+  test('微信拒绝设备票据后下次点击使用新会话和新票据 ' + errCode, async () => {
+    const options = { failure: 'requestSubscribeDeviceMessage:fail', errCode };
+    const h = harness(options); await flush(); await h.render().activate();
+    assert.equal(h.counts().sessions, 2); assert.equal(h.counts().prompts, 1);
+    assert.equal(h.counts().confirms, 0); assert.deepEqual(h.decisions, []);
+    options.failure = '';
+    await h.render().activate();
+    assert.deepEqual([...h.acceptedReports.keys()], ['/v1/push/user/subscriptions/2/result']);
+  });
+}
+test('新票据仍未通过校验时显示配置排查提示', async () => {
+  const h = harness({ failure: 'requestSubscribeDeviceMessage:fail', errCode: 19720726 });
+  await flush(); await h.render().activate(); await h.render().activate();
+  assert.equal(h.counts().sessions, 2); assert.equal(h.counts().confirms, 0);
+  assert.equal(h.render().unavailable, true); assert.match(h.render().notice, /AppID/);
 });

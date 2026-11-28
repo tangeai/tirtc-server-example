@@ -32,9 +32,11 @@ function prompt(template: string, device: string, ticket: Ticket): Promise<Decis
       if (/^requestSubscribe(?:Device)?Message:fail (?:user )?cancel$/i.test(error.errMsg.trim())) resolve('cancel');
       else {
         const code = error.errCode;
-        const hint = code === 20004 ? '请在小程序设置中打开订阅消息，再重新授权' :
+        const hint = code === 19720726 ? '微信未通过设备票据校验，请核对小程序 AppID、设备型号和设备编号' :
+          code === 19720727 ? '设备票据已过期' :
+          code === 20004 ? '请在小程序设置中打开订阅消息，再重新授权' :
           code === 20001 ? '请联系管理员核对本小程序的订阅模板' : '微信未能打开订阅，请重新点击授权';
-        reject(new ApiError(-1, typeof code === 'number' ? hint + '（微信错误码 ' + code + '）' : hint));
+        reject(new ApiError(code === 19720726 || code === 19720727 ? code : -1, typeof code === 'number' ? hint + '（微信错误码 ' + code + '）' : hint));
       }
     },
   }));
@@ -49,6 +51,7 @@ export function useAlarmSubscription(device: string, enabled = true) {
   const [unavailable, setUnavailable] = useState(false);
   const pending = useRef<Pending>();
   const prepared = useRef<{ owner: string; session: Session; ticket: Ticket; until: number }>();
+  const renewedTicket = useRef(false);
   const locked = useRef(false);
   const revision = useRef(0);
   const owner = token();
@@ -96,6 +99,7 @@ export function useAlarmSubscription(device: string, enabled = true) {
     }
   }
   useEffect(() => {
+    renewedTicket.current = false;
     setChannel(undefined); setUnavailable(false); setNotice('');
     if (pending.current?.owner !== owner) pending.current = undefined;
 
@@ -118,6 +122,7 @@ export function useAlarmSubscription(device: string, enabled = true) {
         // No awaits before the native prompt. Retries may only report this
         // decision to the session that preceded the gesture.
         const decision = await prompt(attempt.session.template_id, device, attempt.ticket);
+        renewedTicket.current = false;
         prepared.current = undefined;
         work = { owner, decision, session: attempt.session };
         pending.current = work;
@@ -149,6 +154,17 @@ export function useAlarmSubscription(device: string, enabled = true) {
       await refresh();
       if (work.decision !== 'accept') setNotice(work.decision === 'reject' ? '已拒绝设备提醒' : '已取消，保留原订阅状态');
     } catch (error) {
+      if (error instanceof ApiError && (error.code === 19720726 || error.code === 19720727)) {
+        prepared.current = undefined;
+        if (renewedTicket.current && error.code === 19720726) {
+          setUnavailable(true); setFailed(true); setNotice(errorText(error));
+          return;
+        }
+        renewedTicket.current = true;
+        await refresh(true);
+        if (prepared.current) setNotice('设备票据已更新，请再次点击授权（微信错误码 ' + error.code + '）');
+        return;
+      }
       if (error instanceof ApiError && (error.code === 41000 || error.code === 40901 || error.code === 6006)) {
         pending.current = undefined;
         await refresh();
