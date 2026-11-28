@@ -18,7 +18,7 @@ printf '%s\n' new | sudo tee /opt/thing-connect/local-player-entry >/dev/null
 sudo bash thing-connect/scripts/deploy-local.sh update
 ```
 
-更新成功后，使用 `/opt/thing-connect/deploy-local.sh` 执行后续更新。通过本地同源网关打开 `/devices`，登录并点击在线设备的「实时」。新版 `/player` 的 JS、CSS 地址以 `/static/player/assets/` 开头，其他控制台页面仍可使用 `/static/app/`。多实例本地网关需要一个内网入口；已有系统 Nginx 接管该端口时使用现有网关。
+更新成功后，使用 `/opt/thing-connect/deploy-local.sh` 执行后续更新。通过本地同源网关打开 `/devices`，登录并点击在线设备的「实时」。新版 `/player` 的 JS、CSS 地址以 `/static/player/assets/` 开头，其他控制台页面仍可使用 `/static/app/`。多实例本地网关需要一个内网入口；已有系统 Nginx 接管内网入口时，可用现有网关，或运行 `sudo env GATEWAY_PUBLIC_ONLY=1 /opt/thing-connect/deploy-local.sh gateway` 单独启动本机 `http://localhost:18080` 用户入口。
 
 ## 首次部署
 

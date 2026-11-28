@@ -26,6 +26,7 @@ local_usage() {
   SOURCE_ROOT       本地仓库根目录，默认脚本所在仓库（包含未提交文件）
   DEPLOY_ROOT       安装目录，默认 /opt/thing-connect
   GATEWAY_PORT      独立 Nginx 端口，默认 18080
+  GATEWAY_PUBLIC_ONLY  设为 1 仅启动用户与 Admin 入口，沿用已有内网网关
   MIGRATION_CONFIG  独立 DDL 账号配置；未指定时先用 Admin 运行配置只读检查
 
 install --archive-existing 仅用于全新安装：要求旧服务全部停止，将旧目录
@@ -253,6 +254,19 @@ local_publish_recognition() {
     local_log '已补入 recognition-server 配置，端口 9006；后续更新保留此配置'
 }
 
+# Bootstrap the optional local notification service with the existing runtime
+# identity. WeChat channel credentials remain managed by Admin.
+local_prepare_push() {
+    local target="$LOCAL_DEPLOY_ROOT/push-server" bundled="$LOCAL_DEPLOY_ROOT/config-current/push-server/config.yaml"
+    local user_config="$LOCAL_DEPLOY_ROOT/user-server/config.yaml"
+    if [ -e "$target/config.yaml" ] || [ -L "$target/config.yaml" ] || [ -e "$bundled" ] || [ -L "$bundled" ]; then return 0; fi
+    [ ! -L "$target" ] || { local_error '推送服务目录不能是符号链接'; return 1; }
+    [ -r "$user_config" ] || user_config="$LOCAL_DEPLOY_ROOT/config-current/user-server/config.yaml"
+    (cd "$BUILD_DIR" && go run ./scripts/local-recognition-config -service push-server -source "$user_config" -output "$LOCAL_SNAPSHOT/push-config.yaml") || return 1
+    mkdir -p "$target" && ln "$LOCAL_SNAPSHOT/push-config.yaml" "$target/config.yaml" || return 1
+    local_log '推送服务复用本地运行身份；微信渠道配置由 Admin 管理'
+}
+
 local_start_updated() {
     local controller="$LOCAL_DEPLOY_ROOT/service-local.sh" state attempt
     DEPLOY_ROOT="$LOCAL_DEPLOY_ROOT" "$controller" start admin-server || return 1
@@ -303,6 +317,7 @@ local_update() (
         local_error "已有 Supervisor 托管，请使用 deploy-prod.sh update"; return 1
     fi
     local_publish_recognition
+    local_prepare_push
     source "$BUILD_DIR/scripts/deploy-prod.sh"
     pull_code() { [ -f "$BUILD_DIR/bin/.release-commit" ]; }
     build_services() { validate_build_release "$@"; }
@@ -316,6 +331,10 @@ local_update() (
     # Recognition readiness requires the new Admin. Publish it while stopped,
     # then resolve its optional MQTT configuration in local_start_updated.
     export DEFER_RECOGNITION_START=1
+    # The installed controller must recognize newly introduced services before
+    # full_deploy issues its first stop, start, or rollback command.
+    publish_service_catalog || return 1
+    publish_local_service_script || return 1
     full_deploy || return $?
     if ! local_start_updated; then
         DEPLOY_ROOT="$LOCAL_DEPLOY_ROOT" "$LOCAL_DEPLOY_ROOT/service-local.sh" stop-all || true
@@ -353,7 +372,7 @@ local_gateway_config() {
             for backend in $ports; do printf ' server 127.0.0.1:%s max_fails=0;' "$backend"; done
             printf ' }\n'
         else
-            if [ "$multi" = 1 ]; then
+            if [ "$multi" = 1 ] && [ "${GATEWAY_PUBLIC_ONLY:-0}" != 1 ]; then
                 [ "$line" != '#server {' ] || internal_block=1
                 if [ "$internal_block" = 1 ]; then line="${line#\#}"; fi
             fi
@@ -373,6 +392,7 @@ local_gateway_backend_ports() {
 
 local_gateway() {
     local action="$1" port="${GATEWAY_PORT:-18080}" prefix="$LOCAL_DEPLOY_ROOT/nginx-local" pid args
+    case "${GATEWAY_PUBLIC_ONLY:-0}" in 0|1) ;; *) local_error 'GATEWAY_PUBLIC_ONLY 必须是 0 或 1'; return 1 ;; esac
     command -v nginx >/dev/null || { local_error '请先安装 nginx'; return 1; }
     [[ "$port" =~ ^[1-9][0-9]*$ ]] && [ "$port" -le 65535 ] || {
         local_error 'GATEWAY_PORT 必须在 1-65535 范围'; return 1;
